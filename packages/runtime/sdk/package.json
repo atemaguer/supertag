@@ -1,6 +1,6 @@
 {
   "name": "@supertag/worker-sdk",
-  "version": "0.2.0-alpha.9",
+  "version": "0.3.0-alpha.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -9,15 +9,20 @@
       "development": "./src/redaction.ts",
       "default": "./dist/redaction.js"
     },
-    "./installed-cli": {
-      "types": "./dist/installed-cli.d.ts",
-      "development": "./src/installed-cli.ts",
-      "default": "./dist/installed-cli.js"
-    },
     "./internal/process-inventory": {
       "types": "./dist/process-inventory.d.ts",
       "development": "./src/process-inventory.ts",
       "default": "./dist/process-inventory.js"
+    },
+    "./internal/rust-harness": {
+      "types": "./dist/rust-harness/index.d.ts",
+      "development": "./src/rust-harness/index.ts",
+      "default": "./dist/rust-harness/index.js"
+    },
+    "./internal/rust-workspace-provider": {
+      "types": "./dist/rust-workspace-provider/index.d.ts",
+      "development": "./src/rust-workspace-provider/index.ts",
+      "default": "./dist/rust-workspace-provider/index.js"
     },
     ".": {
       "types": "./dist/index.d.ts",
@@ -33,12 +38,11 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1131.0",
+    "@bufbuild/protobuf": "2.15.0",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-node": "2.2.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@supertag/core": "workspace:*",
-    "better-sqlite3": "12.11.1"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "7.6.13"
+    "zod": "4.4.3"
   }
 }

@@ -32,8 +32,8 @@ Use a message when one Tag needs another Tag to know or do something. Post to th
 ## 1. Create two Tags
 
 ```sh
-supertag create tag support
-supertag create tag backend
+supertag tag put support --instructions "Answer customer questions."
+supertag tag put backend --instructions "Own the backend services."
 ```
 
 Every Tag has a Mailbox. You do not create or configure it.
@@ -46,14 +46,14 @@ Two Tags in the same Team may message each other with no further configuration. 
 Team when they work together:
 
 ```sh
-supertag create team billing --member support --member backend
+supertag team create billing --member support --member backend
 ```
 
 For a route between Tags that share no Team, grant it explicitly:
 
 ```sh
-supertag grant mailbox backend --sender support
-supertag list mailbox-grant --mailbox backend
+supertag mailbox-grant allow support backend
+supertag get mailbox-grant --tag backend
 ```
 
 ```text
@@ -61,7 +61,7 @@ backend accepts messages from support.
 ```
 
 Grants are directional, so a reply back to `support` needs its own grant. Remove one with
-`supertag revoke mailbox backend --sender support`. A Tag manifest declares the same routes:
+`supertag mailbox-grant revoke support`. backend A Tag manifest declares the same routes:
 
 ```yaml
 apiVersion: supertag/v1
@@ -110,21 +110,20 @@ commit needs its own request. The operator still decides whether to accept the r
 ## Check that it worked
 
 ```sh
-supertag list message --mailbox backend --limit 50
+supertag get message --mailbox backend --limit 50
 ```
 
 Each message shows its sender, its text, and its status: `pending` until the inbox takes it, then
 `handled` with the turn that took it, or `failed`. The same command with
 `--mailbox support` shows the reply.
 
-A Tag reads its own inbox history with `read_session`, the same tool it uses for any other
-Session of its Tag.
+A Tag reads its own Mailbox with the `read_mailbox` tool.
 
 ## If something goes wrong
 
 - **The send is refused as not permitted.** The two Tags share no Team and there is no grant.
-  Add one with `supertag grant mailbox RECIPIENT --sender SENDER`, or put both in a Team. See
-  [A Tag cannot send a message to another Tag](troubleshooting.md#a-tag-cannot-send-a-message-to-another-tag).
+  Add one with `supertag mailbox-grant allow SENDER`, RECIPIENT or put both in a Team. See
+  [A Tag cannot send a message to another Tag](troubleshooting.md).
 - **The send is refused for too many messages.** A turn sends at most 3. Say what the recipient
   needs in one message.
 - **The send is refused for too many hops.** The message answers a chain that is already 4

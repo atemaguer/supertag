@@ -23,8 +23,8 @@ Terms used on this page (see the [glossary](../reference/glossary.md)):
 - A Team's **Workstream** is its shared record of posts, and a Tag's **Mailbox** is its inbox for
   messages from other Tags. Teams use these resources to coordinate without merging the private
   conversations of their execution systems.
-- A **Worker Host** is a machine or sandbox that runs Tasks; a **Worker** is the code there that
-  completes a Task.
+- A **Worker Host** is a machine or sandbox that runs Tasks through a harness, an agent system
+  such as Codex.
 
 ## Teammates can ask directly
 
@@ -65,55 +65,36 @@ or after a failed turn, the new Task receives bounded history entries derived fr
 completed Tasks in that Session instead. Stored Task results remain the source for that replay. See
 [Session](tasks.md#session).
 
-## Across Sessions: one Tag, one memory
+## Across Sessions: one Tag, many conversations
 
-A Tag talks to people in many conversations: Slack threads, GitHub issues, Lark chats, and CLI
-conversations. Each conversation is its own Session, and every Session belongs to the one Tag. The
-Tag shares what it knows across them, the way a teammate remembers a conversation from another
-channel:
+A Tag talks to people in many conversations: Slack threads, GitHub issues, Lark chats, and
+conversations in the terminal UI. Each conversation is its own Session, and every Session belongs
+to the one Tag. Its configuration, Roles, Mailbox, and Objectives are the same in all of them.
 
-- **Portfolio.** Every conversation turn sees the Tag's open Objectives, one line each, with
-  status, deadline, and where each started. It also sees that conversation's work Sessions that
-  are running, queued, or waiting on you. Ask "what are you working on?" in any thread and the
-  Objectives are the same.
-- **Other conversations, on request.** The Tag can list its other Sessions, search their completed
-  requests and results, and read one Session's history. It does this only when a question needs
-  it; other transcripts never load automatically.
+A Session's harness session holds only that conversation. A Tag does not read its other Sessions'
+transcripts, so what it learned in Alice's Slack thread does not appear in Bob's GitHub issue on
+its own. Work crosses Sessions in three explicit ways:
 
-Example:
-
-1. Alice asks the Tag in Slack `#engineering` to investigate a slow query in `acme/api`. It replies
-   with its findings.
-2. Bob asks the same Tag in a GitHub issue, "Did anyone look into the slow query?"
-3. The Tag searches its other Sessions, finds Alice's thread, and answers Bob with what it found
-   there.
-
-What the Tag reads from another Session is historical data. It carries no instructions and grants
-no permissions: Bob's Task still has only the permissions of Bob's location.
-
-A conversation, or an Objective's conversation, can also start work Sessions for longer work.
-Each one has the starting Session's audience and permissions, and its result comes back there as
-a report from the Tag.
-A work Session is the exception to one memory: it sees only its own work. It gets no portfolio
-and can't list, search, or read other Sessions. What one work Session learns reaches another only
-through the conversation. See [Session](tasks.md#session).
+- **Work Sessions.** A conversation, or an Objective's conversation, can start work Sessions for
+  longer work. Each one has the starting Session's audience and permissions, sees only its own
+  work, and its result comes back to the starting Session as a report from the Tag. See
+  [Session](tasks.md#session).
+- **Captured artifacts.** A Context Set can select artifacts captured in another Session, as the
+  next section describes.
+- **The Mailbox and Workstream.** Another Tag can send a message, and a Team's Workstream holds
+  posts its members share.
 
 ### Shared and private Sessions
 
 Every Session has an audience, decided by the conversation it comes from. Nobody configures it.
 
-| Audience | Conversations | Who can see it from another Session |
-| --- | --- | --- |
-| shared | channels, threads, issues, pull requests, group chats | any Session of the same Tag |
-| private | a Lark direct chat, a person's conversation in the terminal UI | only Sessions where that same person is asking |
+| Audience | Conversations |
+| --- | --- |
+| shared | channels, threads, issues, pull requests, group chats |
+| private | a Lark direct chat, a person's conversation in the terminal UI |
 
-An Objective started in a private conversation is private too. It doesn't appear in other people's
-portfolios, and they can't read it. Its reports still go to the conversation it started in.
-
-Shared Sessions can see each other across collaboration surfaces. If the Tag works in a private
-Slack channel and a public GitHub repository, it could repeat something from the channel in a
-public issue, as a teammate on both could. Choose a Tag's locations with that in mind, and use
-separate Tags for audiences that must stay apart.
+A work Session inherits its starting Session's audience. An Objective started in a private
+conversation reports only to the conversation it started in.
 
 ### Captured artifacts
 
@@ -132,7 +113,7 @@ The originating thread is also the shared place where people observe the work:
 3. completion returns the useful outcome in the original conversation;
 4. a final failure returns a concise error in the same thread.
 
-SuperTag stores outgoing updates separately from the Worker run, so a long-running Task does not
+SuperTag stores outgoing updates separately from the Task Attempt, so a long-running Task does not
 block delivery. On tools that support message updates, SuperTag can replace the acknowledgement
 with the result instead of adding another reply. Routine retries, tool events, and internal IDs stay
 in the audit history instead of filling the conversation.
@@ -148,5 +129,5 @@ in the audit history instead of filling the conversation.
   source.
 - Failed executions do not advance automatic same-Session continuity.
 
-For retrieval limits and Runtime Input resolution details, see the [context resolution reference](../reference/context-resolution.md).
+For retrieval limits and resolution details, see the [context resolution reference](../reference/context-resolution.md).
 For the underlying lifecycle vocabulary, see [Tasks and Sessions](tasks.md).

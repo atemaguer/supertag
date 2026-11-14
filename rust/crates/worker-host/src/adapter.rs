@@ -1,0 +1,926 @@
+pub(crate) mod artifact_acquisition;
+mod artifact_capture;
+mod effects;
+mod inputs;
+mod limits;
+mod mcp;
+mod questions;
+mod review_artifacts;
+mod work_sessions;
+mod workspace;
+pub(crate) use artifact_capture::upload_records;
+pub(crate) use workspace::RemoteWorkspace;
+mod workstreams;
+
+use std::{
+    collections::HashSet,
+    ffi::OsStr,
+    io,
+    path::{Path, PathBuf},
+    process::{ExitStatus, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+
+use anyhow::{Context, Result, anyhow, ensure};
+use prost::Message;
+use supertag_protocol::redaction::{
+    SensitiveValue, redact_text, sensitive_environment_values, unique_sensitive_values,
+};
+use supertag_protocol::{
+    MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, authenticated_request, matches_bearer,
+    v2::{
+        AdapterBootstrap, AppendEventRequest, AppliedExecutionLimits, Assignment,
+        ConfirmExecutionLimitsResponse, ExecutionLimits, HarnessAttachRequest,
+        HarnessCompleteRequest, HarnessCompleteResponse, HarnessKind, HarnessPublishRequest,
+        HarnessRun, HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest,
+        HarnessUsageRequest, InspectAttemptRequest, LiveInput, ObjectiveSignal,
+        ReportAppliedLimitsRequest, ReportAttemptUsageRequest, ReportAttemptUsageResponse,
+        ReportedCostLimit, ResolvedSkill, SessionCheckpoint, TakeInputResponse, TaskEvent,
+        TaskState,
+        harness_server::{Harness, HarnessServer},
+    },
+    validate_checkpoint_reference,
+};
+use tokio::{
+    io::AsyncWriteExt,
+    net::TcpListener,
+    process::{Child, Command},
+    sync::{Mutex, Semaphore},
+    time::{self, Instant},
+};
+use tokio_stream::wrappers::TcpListenerStream;
+use tokio_util::sync::CancellationToken;
+use tonic::{Request, Response, Status, transport::Server};
+use uuid::Uuid;
+
+use crate::{
+    CoordinationClients, HostOptions, RegisteredHost, RegisteredInputs,
+    artifact_snapshots::Snapshots,
+    guardian::{MAX_BOOTSTRAP_BYTES, monotonic_now_ns},
+};
+
+#[derive(Clone)]
+struct Bridge {
+    token: String,
+    assignment: Assignment,
+    checkpoint: Option<SessionCheckpoint>,
+    resolved_skills: Vec<ResolvedSkill>,
+    host_token: String,
+    host: RegisteredHost,
+    harness: HarnessKind,
+    coordination: CoordinationClients,
+    state: Arc<Mutex<RunState>>,
+    attached: Arc<AtomicBool>,
+    inputs: inputs::InputLane,
+    workspace: Option<workspace::RemoteWorkspace>,
+    mcp: Option<Arc<crate::mcp::AttemptMcp>>,
+    mcp_lane: Arc<Mutex<()>>,
+    artifact_checkout: Option<(PathBuf, Snapshots)>,
+    artifact_inputs: Option<crate::artifact_inputs::Inputs>,
+    artifact_capacity: Arc<Semaphore>,
+    /// Secrets this host knows, hidden from every text the harness sends upstream.
+    secrets: Arc<Vec<SensitiveValue>>,
+}
+
+#[derive(Default)]
+struct RunState {
+    outcome: Option<HarnessCompleteRequest>,
+    observed_approvals: HashSet<String>,
+    applied_limits: Option<AppliedExecutionLimits>,
+    native_usage_sequence: u64,
+    reported_tokens: Option<u64>,
+    measured_cost: Option<ReportedCostLimit>,
+}
+
+impl Bridge {
+    /// Hides credentials in harness text before it leaves the Worker Host: explicit URL and
+    /// authorization credentials, and the values of this host's credential variables, its own
+    /// credential, and the adapter's bootstrap token, in any of their encodings.
+    fn redact(&self, text: &str) -> String {
+        redact_text(text, &self.secrets, false)
+    }
+
+    /// Redacts `text` that the Control Plane accepts up to `limit` bytes. `[REDACTED]` can be
+    /// longer than a short secret it replaces, so text within the limit stays within it; text
+    /// already over the limit is left for the Control Plane to refuse.
+    fn redact_within(&self, text: &str, limit: usize) -> String {
+        let redacted = self.redact(text);
+        if text.len() > limit {
+            redacted
+        } else {
+            bounded(redacted, limit)
+        }
+    }
+
+    /// Repeats an idempotent upstream call across a transient Control Plane partition
+    /// until execution authority ends, so the harness does not fail for a
+    /// disconnect its Worker Host is still allowed to ride out.
+    async fn retry_upstream<M, R, F, Fut>(&self, message: M, mut call: F) -> Result<R, Status>
+    where
+        M: Clone,
+        F: FnMut(RegisteredHost, Request<M>) -> Fut,
+        Fut: std::future::Future<Output = Result<Response<R>, Status>>,
+    {
+        self.retry(message, |request| call(self.host.clone(), request))
+            .await
+            .map(Response::into_inner)
+    }
+
+    /// Repeats one idempotent upstream call within execution authority; see
+    /// `InputLane::retry`, which every adapter-facing retry goes through.
+    async fn retry<M, R, F, Fut>(&self, message: M, call: F) -> Result<Response<R>, Status>
+    where
+        M: Clone,
+        F: FnMut(Request<M>) -> Fut,
+        Fut: std::future::Future<Output = Result<Response<R>, Status>>,
+    {
+        self.inputs.retry(message, &self.host_token, call).await
+    }
+
+    fn authenticate<T>(&self, request: &Request<T>) -> Result<(), Status> {
+        if !matches_bearer(request, &self.token) {
+            return Err(Status::unauthenticated("execution credential required"));
+        }
+        Ok(())
+    }
+
+    fn task_id(&self) -> &str {
+        &self
+            .assignment
+            .task
+            .as_ref()
+            .expect("validated assignment")
+            .task_id
+    }
+
+    fn attempt(&self) -> InspectAttemptRequest {
+        InspectAttemptRequest {
+            task_id: self.task_id().into(),
+            attempt_id: self.assignment.attempt_id.clone(),
+            lease_token: self.assignment.lease_token.clone(),
+        }
+    }
+
+    fn require_attached(&self) -> Result<(), Status> {
+        if !self.attached.load(Ordering::Acquire) {
+            return Err(Status::failed_precondition("adapter must attach first"));
+        }
+        Ok(())
+    }
+
+    fn execution_limits(&self) -> Option<&ExecutionLimits> {
+        self.assignment.task.as_ref()?.execution_limits.as_ref()
+    }
+}
+
+#[tonic::async_trait]
+impl Harness for Bridge {
+    async fn attach(
+        &self,
+        request: Request<HarnessAttachRequest>,
+    ) -> Result<Response<HarnessRun>, Status> {
+        self.authenticate(&request)?;
+        let capabilities = self
+            .retry_upstream(self.attempt(), |mut host, request| async move {
+                host.get_attempt_capabilities(request).await
+            })
+            .await?;
+        let history = if matches!(self.harness, HarnessKind::Opencode | HarnessKind::Cursor) {
+            self.retry_upstream(self.attempt(), |mut host, request| async move {
+                host.get_attempt_history(request).await
+            })
+            .await?
+            .entries
+        } else {
+            vec![]
+        };
+        self.attached.store(true, Ordering::Release);
+        Ok(Response::new(HarnessRun {
+            task: self.assignment.task.clone(),
+            attempt_id: self.assignment.attempt_id.clone(),
+            checkpoint: self.checkpoint.clone(),
+            may_ask_objective_question: capabilities.may_ask_objective_question,
+            coordination: Some(capabilities),
+            resolved_skills: self.resolved_skills.clone(),
+            history,
+            remote_workspace: self.workspace.is_some(),
+            may_capture_artifacts: self.artifact_checkout.is_some(),
+            may_acquire_artifacts: true,
+            may_materialize_artifacts: self.artifact_inputs.is_some(),
+            shared_execution: self
+                .workspace
+                .as_ref()
+                .and_then(workspace::RemoteWorkspace::shared_summary),
+        }))
+    }
+
+    async fn confirm_execution_limits(
+        &self,
+        request: Request<AppliedExecutionLimits>,
+    ) -> Result<Response<ConfirmExecutionLimitsResponse>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        let applied = request.into_inner();
+        // The check runs again after the report, which runs without the bridge lock so other
+        // bridge calls never wait on the Control Plane.
+        let check = |state: &RunState| -> Result<bool, Status> {
+            if let Some(previous) = &state.applied_limits {
+                if previous != &applied {
+                    return Err(Status::already_exists(
+                        "adapter already confirmed different execution limits",
+                    ));
+                }
+                return Ok(true);
+            }
+            if state.outcome.is_some() {
+                return Err(Status::failed_precondition("execution is complete"));
+            }
+            Ok(false)
+        };
+        if check(&*self.state.lock().await)? {
+            return Ok(Response::new(ConfirmExecutionLimitsResponse {}));
+        }
+        limits::verify_confirmation(self.harness, self.execution_limits(), &applied)?;
+        // The Task execution report shows what the adapter applied. The Control Plane accepts
+        // a repeated report of the same limits and refuses different ones.
+        let report = ReportAppliedLimitsRequest {
+            attempt: Some(InspectAttemptRequest {
+                task_id: self.task_id().into(),
+                attempt_id: self.assignment.attempt_id.clone(),
+                lease_token: self.assignment.lease_token.clone(),
+            }),
+            applied: Some(applied.clone()),
+        };
+        self.retry_upstream(report, |mut host, request| async move {
+            host.report_applied_limits(request).await
+        })
+        .await?;
+        let mut state = self.state.lock().await;
+        if !check(&state)? {
+            state.applied_limits = Some(applied);
+        }
+        Ok(Response::new(ConfirmExecutionLimitsResponse {}))
+    }
+
+    async fn publish(
+        &self,
+        request: Request<HarnessPublishRequest>,
+    ) -> Result<Response<TaskEvent>, Status> {
+        self.authenticate(&request)?;
+        let state = self.state.lock().await;
+        if !self.attached.load(Ordering::Acquire) || state.outcome.is_some() {
+            return Err(Status::failed_precondition(
+                "execution is not accepting events",
+            ));
+        }
+        let event = request.into_inner();
+        let append = AppendEventRequest {
+            task_id: self.task_id().into(),
+            attempt_id: self.assignment.attempt_id.clone(),
+            lease_token: self.assignment.lease_token.clone(),
+            sequence: event.sequence,
+            text: self.redact_within(&event.text, MAX_EVENT_TEXT_BYTES),
+        };
+        // The Control Plane deduplicates an event by sequence and content, so an
+        // append whose outcome the transport lost is safely repeated.
+        let event = self
+            .retry_upstream(append, |mut host, request| async move {
+                host.append_event(request).await
+            })
+            .await?;
+        supertag_protocol::crash_point("worker-host.append-event", "answered");
+        drop(state);
+        Ok(Response::new(event))
+    }
+
+    async fn report_usage(
+        &self,
+        request: Request<HarnessUsageRequest>,
+    ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
+        self.authenticate(&request)?;
+        let mut state = self.state.lock().await;
+        if !self.attached.load(Ordering::Acquire) || state.outcome.is_some() {
+            return Err(Status::failed_precondition(
+                "execution is not accepting usage",
+            ));
+        }
+        let usage = request.into_inner();
+        if usage.amount_minor.is_some() != usage.currency.is_some()
+            || (usage.native_usage.is_none() && usage.amount_minor.is_none())
+        {
+            return Err(Status::invalid_argument(
+                "native token usage or a reported cost is required",
+            ));
+        }
+        let native_receipt = usage
+            .native_usage
+            .as_ref()
+            .map(|native| (usage.sequence, native.total_tokens));
+        let measured_cost = if usage.estimated {
+            None
+        } else {
+            usage
+                .amount_minor
+                .zip(usage.currency.clone())
+                .map(|(amount_minor, currency)| ReportedCostLimit {
+                    currency,
+                    amount_minor,
+                })
+        };
+        // The Control Plane accepts an exact repeat of a usage sequence, so a
+        // report whose answer the transport lost is safely sent again.
+        let report = ReportAttemptUsageRequest {
+            attempt: Some(self.attempt()),
+            sequence: usage.sequence,
+            amount_minor: usage.amount_minor,
+            currency: usage.currency,
+            estimated: usage.estimated,
+            native_usage: usage.native_usage,
+        };
+        let response = self
+            .retry(report, |request| {
+                let mut host = self.host.clone();
+                async move { host.report_attempt_usage(request).await }
+            })
+            .await?;
+        if let Some((sequence, tokens)) = native_receipt
+            && sequence >= state.native_usage_sequence
+        {
+            state.native_usage_sequence = sequence;
+            state.reported_tokens = tokens;
+        }
+        if let Some(cost) = measured_cost
+            && state
+                .measured_cost
+                .as_ref()
+                .is_none_or(|prior| cost.amount_minor >= prior.amount_minor)
+        {
+            state.measured_cost = Some(cost);
+        }
+        Ok(response)
+    }
+
+    async fn complete(
+        &self,
+        request: Request<HarnessCompleteRequest>,
+    ) -> Result<Response<HarnessCompleteResponse>, Status> {
+        self.authenticate(&request)?;
+        let _mcp_call = if self.mcp.is_some() {
+            Some(self.mcp_lane.lock().await)
+        } else {
+            None
+        };
+        let mut state = self.state.lock().await;
+        if !self.attached.load(Ordering::Acquire) {
+            return Err(Status::failed_precondition(
+                "adapter must attach before proposing a result",
+            ));
+        }
+        let mut outcome = request.into_inner();
+        outcome.result = self.redact_within(&outcome.result, MAX_RESULT_BYTES);
+        if outcome.result.len() > MAX_RESULT_BYTES
+            || outcome.result.contains('\0')
+            || ObjectiveSignal::try_from(outcome.objective_signal).is_err()
+            || (!outcome.succeeded && outcome.objective_signal != ObjectiveSignal::Progress as i32)
+            || (!outcome.waiting_approval_ids.is_empty()
+                && (!outcome.succeeded
+                    || outcome.objective_signal != ObjectiveSignal::Progress as i32
+                    || outcome.waiting_approval_ids.len() > 32
+                    || outcome
+                        .waiting_approval_ids
+                        .iter()
+                        .any(|id| !state.observed_approvals.contains(id))))
+        {
+            return Err(Status::invalid_argument("invalid harness outcome"));
+        }
+        if let Some(checkpoint) = &outcome.checkpoint {
+            if !outcome.succeeded {
+                return Err(Status::invalid_argument(
+                    "failed execution cannot propose a checkpoint",
+                ));
+            }
+            validate_checkpoint_reference(&checkpoint.reference())?;
+        }
+        if let Some(previous) = &state.outcome {
+            if previous != &outcome {
+                return Err(Status::already_exists(
+                    "adapter already proposed a different result",
+                ));
+            }
+        } else {
+            if outcome.succeeded {
+                limits::verify_success(
+                    self.execution_limits(),
+                    state.applied_limits.as_ref(),
+                    state.reported_tokens,
+                    state.measured_cost.as_ref(),
+                )?;
+            }
+            state.outcome = Some(outcome);
+            self.inputs.close();
+        }
+        Ok(Response::new(HarnessCompleteResponse {}))
+    }
+
+    async fn take_live_input(
+        &self,
+        request: Request<HarnessTakeLiveInputRequest>,
+    ) -> Result<Response<TakeInputResponse>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        self.inputs.take(self.attempt(), &self.host_token).await
+    }
+
+    async fn settle_live_input(
+        &self,
+        request: Request<HarnessSettleLiveInputRequest>,
+    ) -> Result<Response<LiveInput>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        self.inputs
+            .settle(self.attempt(), request.into_inner(), &self.host_token)
+            .await
+    }
+}
+
+pub(crate) struct ExecutionInputs<'a> {
+    pub checkpoint: Option<SessionCheckpoint>,
+    pub workspace: Option<&'a Path>,
+    pub output_directory: Option<&'a Path>,
+    pub resolved_skills: Vec<ResolvedSkill>,
+    pub remote_workspace: Option<workspace::RemoteWorkspace>,
+    pub mcp: Option<Arc<crate::mcp::AttemptMcp>>,
+    /// Where the adapter's process group is recorded before it starts.
+    pub processes: crate::journal::Processes,
+    /// When a remote sandbox's harness must stop to leave its cleanup margin.
+    pub sandbox_execution_ends: Option<Instant>,
+}
+
+/// Runs the Attempt's adapter. Every error leaves the Attempt's cleanup unconfirmed, and carries
+/// the values its reasons must redact: this run's redaction set and the Attempt's resolved MCP
+/// credentials.
+pub(crate) async fn execute(
+    options: &HostOptions,
+    assignment: Assignment,
+    inputs: ExecutionInputs<'_>,
+    clients: (RegisteredHost, RegisteredInputs, CoordinationClients),
+    host_token: &str,
+    valid_until: Instant,
+    shutdown: &CancellationToken,
+) -> Result<HarnessCompleteRequest> {
+    let bootstrap_token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let secrets = Arc::new(host_secrets(&[host_token, &bootstrap_token]));
+    let mcp_secrets = inputs
+        .mcp
+        .as_ref()
+        .map(|mcp| mcp.secrets().to_vec())
+        .unwrap_or_default();
+    run(
+        options,
+        assignment,
+        inputs,
+        clients,
+        (host_token, bootstrap_token, secrets.clone()),
+        valid_until,
+        shutdown,
+    )
+    .await
+    .map_err(|error| {
+        let mut redacting = secrets.as_ref().clone();
+        redacting.extend(mcp_secrets.into_iter().map(SensitiveValue::High));
+        error.context(crate::cleanup_failure::CleanupUnconfirmed::redacting(
+            unique_sensitive_values(redacting),
+        ))
+    })
+}
+
+async fn run(
+    options: &HostOptions,
+    assignment: Assignment,
+    ExecutionInputs {
+        checkpoint,
+        workspace,
+        output_directory,
+        resolved_skills,
+        remote_workspace,
+        mcp,
+        processes,
+        sandbox_execution_ends,
+    }: ExecutionInputs<'_>,
+    (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
+    (host_token, bootstrap_token, secrets): (&str, String, Arc<Vec<SensitiveValue>>),
+    valid_until: Instant,
+    shutdown: &CancellationToken,
+) -> Result<HarnessCompleteRequest> {
+    ensure!(assignment.task.is_some(), "assignment is missing its Task");
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let bootstrap = AdapterBootstrap {
+        endpoint: format!("http://{}", listener.local_addr()?),
+        token: bootstrap_token,
+    };
+    let artifact_checkout = workspace
+        .filter(|_| {
+            assignment.task.as_ref().is_some_and(|task| {
+                task.allowed_actions
+                    .iter()
+                    .any(|action| action == "files:read")
+            })
+        })
+        .map(|path| {
+            Ok::<_, anyhow::Error>((
+                path.to_owned(),
+                Snapshots::open(&options.state_directory, &assignment.attempt_id)?,
+            ))
+        })
+        .transpose()?;
+    let artifact_inputs = artifact_checkout
+        .as_ref()
+        .filter(|_| remote_workspace.is_none())
+        .map(|(path, _)| {
+            crate::artifact_inputs::Inputs::prepare_optional(
+                &options.state_directory,
+                &assignment.attempt_id,
+                path,
+            )
+        })
+        .transpose()?
+        .flatten();
+    let bridge = Bridge {
+        token: bootstrap.token.clone(),
+        assignment,
+        checkpoint,
+        resolved_skills,
+        host_token: host_token.to_owned(),
+        host,
+        harness: options.harness,
+        coordination,
+        state: Arc::default(),
+        attached: Arc::default(),
+        inputs: inputs::InputLane::new(inputs, valid_until, shutdown),
+        workspace: remote_workspace,
+        mcp,
+        mcp_lane: Arc::default(),
+        artifact_checkout,
+        artifact_inputs,
+        artifact_capacity: Arc::new(Semaphore::new(1)),
+        secrets,
+    };
+    let stop_server = CancellationToken::new();
+    let mut server = tokio::spawn(
+        Server::builder()
+            .add_service(
+                HarnessServer::new(bridge.clone())
+                    .max_decoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES)
+                    .max_encoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES),
+            )
+            .add_service(bridge.questions_service())
+            .add_service(bridge.workstreams_service())
+            .add_service(bridge.mailbox_service())
+            .add_service(bridge.work_sessions_service())
+            .add_service(bridge.workspace_service())
+            .add_service(bridge.mcp_service())
+            .add_service(bridge.artifact_capture_service())
+            .add_service(bridge.effects_service())
+            .serve_with_incoming_shutdown(
+                TcpListenerStream::new(listener),
+                stop_server.clone().cancelled_owned(),
+            ),
+    );
+    // A remote sandbox's harness also stops in time to leave the sandbox's cleanup margin.
+    let attempt_ends = Instant::now() + options.attempt_timeout;
+    let execution_ends = sandbox_execution_ends.map_or(attempt_ends, |ends| ends.min(attempt_ends));
+    let result = supervise(
+        options,
+        &bridge,
+        bootstrap,
+        (valid_until, execution_ends),
+        shutdown,
+        (workspace, output_directory),
+        &processes,
+    )
+    .await;
+    bridge.inputs.close();
+    stop_server.cancel();
+    if time::timeout(Duration::from_secs(2), &mut server)
+        .await
+        .is_err()
+    {
+        server.abort();
+        let _ = server.await;
+    }
+    // A cancelled RPC can leave a blocking filesystem operation finishing in the
+    // Host. Never finalize or discard its checkout until that operation stopped.
+    let _artifact_idle = time::timeout(Duration::from_secs(5), bridge.artifact_capacity.acquire())
+        .await
+        .context("artifact filesystem operation did not stop")?
+        .context("artifact filesystem lane is closed")?;
+    result
+}
+
+async fn supervise(
+    options: &HostOptions,
+    bridge: &Bridge,
+    bootstrap: AdapterBootstrap,
+    (valid_until, execution_ends): (Instant, Instant),
+    shutdown: &CancellationToken,
+    (workspace, output_directory): (Option<&Path>, Option<&Path>),
+    processes: &crate::journal::Processes,
+) -> Result<HarnessCompleteRequest> {
+    if shutdown.is_cancelled() {
+        return Ok(failed("Worker Host is shutting down"));
+    }
+    if Instant::now() >= valid_until {
+        return Ok(failed("Execution authority expired before adapter launch"));
+    }
+    // Sample the shared clock first so the deadline sent to the guardian is
+    // no later than the remaining lifetime observed by this process.
+    let now_ns = monotonic_now_ns()?;
+    let remaining_ns = u64::try_from(
+        valid_until
+            .saturating_duration_since(Instant::now())
+            .as_nanos(),
+    )?;
+    let launch_deadline = now_ns
+        .checked_add(remaining_ns)
+        .context("adapter launch deadline overflow")?;
+    let mut command = Command::new(&options.adapter_guardian);
+    command
+        .args(["__adapter-guardian", "--adapter"])
+        .arg(&options.adapter)
+        .arg("--")
+        .args(&options.adapter_args)
+        .env_clear()
+        .envs(
+            ["PATH", "TMPDIR", "LANG"]
+                .into_iter()
+                .filter_map(|name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .kill_on_drop(true);
+    if let Some(workspace) = workspace {
+        command
+            .current_dir(workspace)
+            .env(crate::WORKSPACE_DIRECTORY, workspace);
+    }
+    if let Some(directory) = output_directory {
+        command.env(crate::task_outputs::OUTPUT_DIRECTORY, directory);
+    }
+    command.env(
+        crate::guardian::ADAPTER_SCRATCH_PARENT,
+        options
+            .state_directory
+            .canonicalize()
+            .context("resolve private Worker Host state")?,
+    );
+    command.envs(
+        crate::provider_environment_for(options.harness, options.provider_model.as_deref())?
+            .iter()
+            .filter_map(|&name| std::env::var_os(name).map(|value| (OsStr::new(name), value))),
+    );
+    // Record the spawn before it happens, so a host killed at any point leaves either no
+    // adapter or a record a restart can check.
+    let pending = processes.prepare()?;
+    let spawned = command.spawn();
+    pending.record(spawned.as_ref().ok().and_then(Child::id))?;
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(_) => return Ok(failed("Harness adapter could not start")),
+    };
+    let group = child.id().context("adapter process has no PID")?;
+    let outcome = time::timeout_at(execution_ends, async {
+        let mut input = child
+            .stdin
+            .take()
+            .context("adapter bootstrap pipe is missing")?;
+        let payload = bootstrap.encode_to_vec();
+        ensure!(
+            payload.len() <= MAX_BOOTSTRAP_BYTES,
+            "adapter bootstrap exceeds size limit"
+        );
+        let write_bootstrap = async {
+            input.write_all(&(payload.len() as u32).to_le_bytes()).await?;
+            input.write_all(&launch_deadline.to_le_bytes()).await?;
+            input.write_all(&payload).await
+        };
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return Err(anyhow!("Worker Host is shutting down")),
+            _ = time::sleep_until(valid_until) => return Err(anyhow!("execution authority expired during bootstrap")),
+            written = write_bootstrap => written?,
+        }
+        // Keep the pipe open while monitoring. It closes on cancellation,
+        // deadline, or Worker Host death and wakes the guardian.
+        let outcome = monitor(&mut child, bridge, valid_until, shutdown).await;
+        drop(input);
+        outcome
+    })
+    .await;
+    bridge.inputs.close();
+    if child.try_wait()?.is_none() {
+        // Give the guardian time to reap the adapter before forcing down the group.
+        let _ = time::timeout(
+            crate::guardian::ADAPTER_STOP_GRACE + Duration::from_millis(250),
+            child.wait(),
+        )
+        .await;
+    }
+    let survivors = signal_group(group, libc::SIGKILL).await?;
+    time::timeout(Duration::from_secs(2), async {
+        if child.try_wait()?.is_none() {
+            child.kill().await?;
+        }
+        child.wait().await?;
+        while signal_group(group, 0).await? {
+            time::sleep(Duration::from_millis(10)).await;
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    .context("adapter process group did not stop")??;
+    let status = match outcome {
+        Ok(Ok(status)) => status,
+        Ok(Err(_)) => return Ok(failed("Harness execution was interrupted")),
+        Err(_) => return Ok(failed("Harness execution timed out")),
+    };
+    if survivors || !status.success() {
+        return Ok(failed(
+            "Harness adapter exited unsuccessfully or left running descendants",
+        ));
+    }
+    Ok(bridge
+        .state
+        .lock()
+        .await
+        .outcome
+        .clone()
+        .unwrap_or_else(|| failed("Harness adapter exited without an outcome")))
+}
+
+/// The secrets of this Worker Host's environment, plus `credentials` it holds itself.
+pub(crate) fn host_secrets(credentials: &[&str]) -> Vec<SensitiveValue> {
+    let environment = std::env::vars_os()
+        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+        .collect::<Vec<_>>();
+    let mut secrets = sensitive_environment_values(
+        environment
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    );
+    secrets.extend(
+        credentials
+            .iter()
+            .map(|credential| SensitiveValue::High((*credential).to_owned())),
+    );
+    unique_sensitive_values(secrets)
+}
+
+pub(crate) fn failed(message: &str) -> HarnessCompleteRequest {
+    HarnessCompleteRequest {
+        result: message.into(),
+        succeeded: false,
+        objective_signal: 0,
+        checkpoint: None,
+        waiting_approval_ids: vec![],
+    }
+}
+
+async fn monitor(
+    child: &mut Child,
+    bridge: &Bridge,
+    mut valid_until: Instant,
+    shutdown: &CancellationToken,
+) -> Result<ExitStatus> {
+    let status = tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => return Err(anyhow!("Worker Host is shutting down")),
+        result = monitor_authority(bridge, &mut valid_until) => {
+            result?;
+            unreachable!("authority monitoring ends only on rejection")
+        },
+        status = child.wait() => status?,
+    };
+    ensure!(!shutdown.is_cancelled(), "Worker Host is shutting down");
+    ensure!(
+        Instant::now() < valid_until,
+        "execution authority expired before adapter exit was observed"
+    );
+    Ok(status)
+}
+
+async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result<()> {
+    const POLL: Duration = Duration::from_millis(250);
+    let mut host = bridge.host.clone();
+    let mut poll_at = Instant::now();
+    let mut renew_at = renewal_time(*valid_until);
+    loop {
+        time::sleep_until(poll_at.min(renew_at).min(*valid_until)).await;
+        let sent = Instant::now();
+        ensure!(sent < *valid_until, "execution authority expired");
+        let mut request = authenticated_request(bridge.attempt(), &bridge.host_token, None)?;
+        request.set_timeout(Duration::from_secs(2));
+        let observed = if sent >= renew_at {
+            let renewed = time::timeout_at(*valid_until, host.renew_attempt(request))
+                .await
+                .context("execution authority expired during renewal")?;
+            ensure!(
+                Instant::now() < *valid_until,
+                "execution authority expired during renewal"
+            );
+            match renewed {
+                Ok(response) => {
+                    let authority = response.into_inner();
+                    let deadline = sent
+                        .checked_add(Duration::from_millis(authority.valid_for_ms))
+                        .context("invalid execution authority duration")?;
+                    ensure!(
+                        deadline > Instant::now(),
+                        "Control Plane ended execution authority"
+                    );
+                    *valid_until = deadline;
+                    renew_at = renewal_time(deadline);
+                    Ok(authority.task.context("execution authority has no Task")?)
+                }
+                Err(error) => {
+                    renew_at = Instant::now() + POLL;
+                    Err(error)
+                }
+            }
+        } else {
+            time::timeout_at(*valid_until, host.inspect_attempt(request))
+                .await
+                .context("execution authority expired during inspection")?
+                .map(Response::into_inner)
+        };
+        match observed {
+            Ok(task) => {
+                ensure!(
+                    task.task_id == bridge.task_id()
+                        && task.attempt_id.as_deref()
+                            == Some(bridge.assignment.attempt_id.as_str())
+                        && task.state() == TaskState::Running,
+                    "Control Plane ended the Task Attempt"
+                );
+                bridge.inputs.set_deadline(*valid_until);
+            }
+            Err(error) if crate::retryable(&error) => {}
+            Err(error) => return Err(error.into()),
+        }
+        poll_at = Instant::now() + POLL;
+    }
+}
+
+fn renewal_time(valid_until: Instant) -> Instant {
+    let now = Instant::now();
+    now + (valid_until.saturating_duration_since(now) / 3).min(Duration::from_secs(5))
+}
+
+async fn signal_group(group: u32, signal: i32) -> Result<bool> {
+    let group = i32::try_from(group).context("adapter process group is out of range")?;
+    ensure!(group > 0, "invalid adapter process group");
+    // Darwin answers EPERM instead of ESRCH while a group holds only zombies that their
+    // reaper has not collected yet, as when a harness process was killed with its guardian.
+    let mut zombie_retries = if cfg!(target_os = "macos") { 100 } else { 0 };
+    loop {
+        // The child was launched as leader of a dedicated Unix process group.
+        let result = unsafe { libc::kill(-group, signal) };
+        if result == 0 {
+            return Ok(true);
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::ESRCH) => return Ok(false),
+            Some(libc::EPERM) if zombie_retries > 0 => {
+                zombie_retries -= 1;
+                time::sleep(Duration::from_millis(10)).await;
+            }
+            _ => {
+                return Err(error)
+                    .with_context(|| format!("signal {signal} to adapter process group {group}"));
+            }
+        }
+    }
+}
+
+/// The largest event text the Control Plane accepts.
+const MAX_EVENT_TEXT_BYTES: usize = 16_384;
+/// The largest result a harness may propose.
+const MAX_RESULT_BYTES: usize = 262_144;
+
+/// `text` cut at a character boundary to at most `limit` bytes.
+fn bounded(mut text: String, limit: usize) -> String {
+    if text.len() > limit {
+        let mut end = limit;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    text
+}

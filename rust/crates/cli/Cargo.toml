@@ -1,0 +1,244 @@
+[package]
+name = "supertag-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[features]
+test-fixtures = ["supertag-api/test-fixtures", "supertag-gateway/test-fixtures", "supertag-github/test-fixtures", "supertag-protocol/crash-points", "supertag-worker-host/test-fixtures"]
+
+[[bin]]
+name = "supertag"
+path = "src/main.rs"
+
+[[bin]]
+name = "supertag-fixture-adapter"
+path = "fixtures/adapter.rs"
+required-features = ["test-fixtures"]
+
+[[bin]]
+name = "supertag-example-connector"
+path = "fixtures/example_connector.rs"
+required-features = ["test-fixtures"]
+
+[dependencies]
+anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+clap.workspace = true
+futures-util = { version = "0.3", features = ["sink"] }
+libc.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde-saphyr = { version = "2.1.1", default-features = false, features = ["deserialize"] }
+sha2.workspace = true
+supertag-control-plane.workspace = true
+supertag-codex-adapter.workspace = true
+supertag-api.workspace = true
+supertag-credential-vault.workspace = true
+supertag-gateway.workspace = true
+supertag-github.workspace = true
+supertag-protocol.workspace = true
+supertag-transport.workspace = true
+supertag-worker-host.workspace = true
+supertag-workspaces.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+tonic-health.workspace = true
+url = "2"
+unicode-normalization = "0.1"
+uuid.workspace = true
+
+[dev-dependencies]
+axum = "0.8"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+hmac.workspace = true
+http-body = "1"
+http-body-util = "0.1"
+reqwest.workspace = true
+sqlx.workspace = true
+supertag-shared-execution = { path = "../shared-execution" }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+tokio-tungstenite = "0.28"
+url = "2"
+
+[[test]]
+name = "crash_durability"
+path = "tests/crash_durability.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "split_runtime"
+path = "tests/split_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "replicas_runtime"
+path = "tests/replicas_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "redaction_runtime"
+path = "tests/redaction_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "audit_runtime"
+path = "tests/audit_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "metrics_runtime"
+path = "tests/metrics_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "enrolled_runtime"
+path = "tests/enrolled_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "placement_runtime"
+path = "tests/placement_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "host_workspaces_runtime"
+path = "tests/host_workspaces_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "slack_threads"
+path = "tests/slack_threads.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "slack_socket_runtime"
+path = "tests/slack_socket_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "github_runtime"
+path = "tests/github_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "session_branch_runtime"
+path = "tests/session_branch_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "workspace_runtime"
+path = "tests/workspace_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "live_input_runtime"
+path = "tests/live_input_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "language_runtime"
+path = "tests/language_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "linear_runtime"
+path = "tests/linear_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "lark_runtime"
+path = "tests/lark_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "microsoft_teams_runtime"
+path = "tests/microsoft_teams_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "operator_runtime"
+path = "tests/operator_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "host_readiness_runtime"
+path = "tests/host_readiness_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "work_sessions_runtime"
+path = "tests/work_sessions_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "opencode_runtime"
+path = "tests/opencode_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "cursor_runtime"
+path = "tests/cursor_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "github_workspace_runtime"
+path = "tests/github_workspace_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "artifact_volume_runtime"
+path = "tests/artifact_volume_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "artifact_publication_runtime"
+path = "tests/artifact_publication_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "local_services"
+path = "tests/local_services.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "transport_runtime"
+path = "tests/transport_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "tunnel_runtime"
+path = "tests/tunnel_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "surface_setup_runtime"
+path = "tests/surface_setup_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "lifecycle_runtime"
+path = "tests/lifecycle_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "coordination_runtime"
+path = "tests/coordination_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "external_connector_runtime"
+path = "tests/external_connector_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "deployment_runtime"
+path = "tests/deployment_runtime.rs"
+required-features = ["test-fixtures"]

@@ -1,0 +1,38 @@
+[package]
+name = "supertag-desktop"
+version = "0.3.0-alpha.1"
+edition = "2024"
+rust-version = "1.93.1"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[lib]
+name = "supertag_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+supertag-protocol = { path = "../../../rust/crates/protocol" }
+supertag-transport = { path = "../../../rust/crates/transport" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tempfile = "3"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "sync", "time"] }
+tonic = { version = "0.14", features = ["tls-ring", "tls-native-roots"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+supertag-control-plane = { path = "../../../rust/crates/control-plane" }
+supertag-api = { path = "../../../rust/crates/api" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+tokio-stream = { version = "0.1", features = ["net"] }

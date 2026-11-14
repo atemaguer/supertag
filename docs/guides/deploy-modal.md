@@ -1,180 +1,228 @@
 # Deploy the Control Plane on Modal
 
-A **Tag** is a persistent AI actor with its own responsibilities and permissions, and Tags work
-in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
-may pursue different goals but share one set of rules and one record of the work. Run the **Control
-Plane** (the service that stores and coordinates a SuperTag organization) as one always-on Modal
-Server built from its standard Node.js image. A **Worker Host** provides execution capacity, and its
-**Worklet** connects outbound over HTTPS/WebSocket. Hosting the Control Plane on Modal is
-independent of using Modal sandboxes as Worker Hosts; you can use either without the other. See the
-[glossary](../reference/glossary.md) for other terms.
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. The **Control
+Plane** is the service that stores a SuperTag organization and schedules its work; it is the one
+public endpoint for operators, **Worker Hosts** (the machines that run the work), and the
+optional **Gateway**, which connects **collaboration surfaces** such as Slack. This guide runs the
+Control Plane in one always-on Modal container behind a web endpoint, with external
+PostgreSQL. See the [glossary](../reference/glossary.md) for other terms.
 
-For a hosted setup, keep the Control Plane on Modal and connect a Worker Host on a server or
-laptop. Configure that host to create a Modal sandbox for each assignment. A **Workspace** names
-the git repository it uses, and a **Volume** names storage it can mount beside the checkout. Follow
-the Worker guide to configure both. [Run a Worker in Modal sandboxes](modal-workers.md)
+Modal's web endpoint terminates TLS and forwards HTTP/1.1 and WebSocket upgrades. The Control
+Plane therefore carries its gRPC API inside a WebSocket, the **tunnel**, and runs SuperTag's own
+TLS end to end inside it. Clients use the endpoint's stable URL with `wss://`. Modal sees only
+ciphertext. Modal's raw TCP tunnels would carry native gRPC, but their addresses change with
+each container, so this deployment does not use them.
+
+```text
+operators, Worker Hosts ── wss://WORKSPACE--supertag.modal.run ──> web endpoint, port 8080
+                                                                    Control Plane
+                                                                    Gateway (optional)
+                                                                      │
+                                    external PostgreSQL, Modal Volume, HashiCorp Vault
+```
+
+[`app.py`](../../deploy/modal/app.py) runs one container (`min_containers=1`,
+`max_containers=1`, non-preemptible) from the hosted image. A Modal Volume at
+`/var/lib/supertag` holds transfer files. With the Gateway on, it runs in the same container and
+reaches the Control Plane on `https://127.0.0.1:3434`. The Gateway is not given the database URL,
+the operator token, or the Control Plane's TLS settings, and the Control Plane is not given the
+surface settings. Both run as one user in one container, though, so either could read the other's
+files, including the TLS key: they share one trust boundary.
+
+The function supervises the service: if the Control Plane, or the Gateway beside it, exits, the
+container exits too and Modal starts a replacement.
+
+Modal can also run Cursor Tasks' Workspaces for a Worker Host; that is independent of where the
+Control Plane runs. See [Run Cursor in a sandbox](workers.md#run-cursor-in-a-sandbox).
 
 ## Before you start
 
-- The installed `supertag` CLI, matching the release you deploy (`supertag --version`).
-- A checkout of the repository; run the commands below from its root.
-- A Python environment for the Modal deployment SDK.
-- Externally reachable PostgreSQL and HashiCorp Vault KV v2, with database and Vault network access
-  configured for the Modal deployment. See [Limits](#limits) for why external storage is required.
-- Familiarity with the shared [deployment setup workflow](deployment-setup.md); step 3 runs it.
+- The `supertag` CLI, from the release you deploy (`supertag --version`). See
+  [Install SuperTag](../operations/install.md).
+- The Modal CLI, authenticated, at the version in
+  [`requirements.txt`](../../deploy/modal/requirements.txt).
+- The `hosted` service image for `linux/amd64` in a registry Modal can pull, with its digest. See
+  [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image).
+- A PostgreSQL database reachable from Modal with TLS, and HashiCorp Vault (KV v2) for the
+  Gateway's connector credentials. Setup requires Vault, because a Modal Volume does not give the
+  file credential vault's atomic, durable writes.
+- `openssl`, to issue certificates from your own CA.
 
-## 1. Install the Modal SDK
+## 1. Issue certificates
 
-Install the pinned deployment SDK and authenticate:
+The URL is `https://WORKSPACE--LABEL.modal.run`: your Modal workspace name and the endpoint label,
+`supertag` unless you set `SUPERTAG_MODAL_LABEL`. Deployed to a Modal environment other than your
+default one, the host also carries the environment's name (`WORKSPACE-ENVIRONMENT--LABEL`); the
+deploy prints the URL. That hostname cannot carry a publicly trusted
+certificate for SuperTag's inner TLS. Issue the Control Plane's certificate from your own CA for
+it and `IP:127.0.0.1`, as shown in
+[Issue certificates from your own CA](../../deploy/native/README.md#issue-certificates-from-your-own-ca).
+Every client then trusts that CA through `SUPERTAG_SERVER_CA_FILE`.
 
-```sh
-python -m pip install -r deploy/modal/requirements.txt
-modal setup
-```
+The Gateway signs in as `gateway:local` with the credential setup put in `gateway.env`; the
+Control Plane accepts it because `control-plane.env` holds the same value as
+`SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL`. Client certificates are optional. To require them from
+every caller, add `SUPERTAG_TLS_CLIENT_CA_PEM` (your CA) to the Control Plane and give the
+Gateway, each operator, and each Worker Host a client certificate.
 
-By default, Modal builds `deploy/docker/Dockerfile` from your checkout, then adds Python for its
-supervisor. No registry is required. To deploy a prebuilt image instead, see
-[Optional: deploy a prebuilt image](#optional-deploy-a-prebuilt-image).
-
-## 2. Choose App and Secret names
-
-Choose unique App and Secret names, especially for a disposable test:
-
-```sh
-export SUPERTAG_MODAL_APP=supertag-control-plane
-export SUPERTAG_MODAL_SECRET=supertag-control-plane
-```
-
-## 3. Prepare the environment and Secret
-
-```sh
-supertag setup deployment --platform modal
-supertag check deployment --platform modal --env-file .env.deployment
-modal secret create "$SUPERTAG_MODAL_SECRET" --from-dotenv .env.deployment
-```
-
-Setup prompts for the PostgreSQL URL, administrative token, public coordination URL, Vault address
-and token. All values are uploaded from the private
-file, never as secret command arguments.
-
-Use the HTTPS URL printed by Modal as `SUPERTAG_COORDINATION_URL`. On first deployment, if the URL
-is not known yet, use `https://pending.invalid` during setup. Before connecting any Worklets or
-accepting work, update that value in the private file to the actual URL, stop the App, replace the
-Secret with `modal secret create "$SUPERTAG_MODAL_SECRET" --from-dotenv .env.deployment --force`,
-and deploy again. To look up the URL later:
+## 2. Prepare the configuration
 
 ```sh
-python -c 'import os, modal; print(modal.Server.from_name(os.environ["SUPERTAG_MODAL_APP"], "control-plane").get_url())'
+export SUPERTAG_DATABASE_URL='postgresql://...?sslmode=require'
+export VAULT_ADDR=https://vault.example.com VAULT_TOKEN=...
+supertag setup deployment modal --output supertag-deployment
+supertag check deployment modal --directory supertag-deployment
 ```
 
-## 4. Migrate and deploy
+Setup writes `control-plane.env`, `gateway.env`, and `operator.env`, each readable only by you,
+and generates the Gateway's credential and the operator token.
+
+## 3. Create the secrets and deploy
 
 ```sh
-modal run deploy/modal/app.py::migrate
-modal deploy deploy/modal/app.py::app
+modal secret create supertag-control-plane --from-dotenv supertag-deployment/control-plane.env
+modal secret create supertag-control-plane-tls \
+  SUPERTAG_TLS_CERT_PEM="$(cat server.pem)" SUPERTAG_TLS_KEY_PEM="$(cat server.key)"
+SUPERTAG_MODAL_IMAGE=REGISTRY/supertag-hosted@sha256:DIGEST modal deploy deploy/modal/app.py
 ```
 
-Migrations run in a separate temporary App, so invoking them does not start the Control Plane.
-A migration failure stops the command; do not continue to deployment. The startup path checks
-schema readiness and never silently runs migrations.
+With the Gateway on, create `supertag-gateway` from `gateway.env` plus your connector settings,
+and `supertag-gateway-tls` with `SUPERTAG_SERVER_CA_PEM` (your CA). To require client
+certificates, add `SUPERTAG_TLS_CLIENT_CA_PEM` to `supertag-control-plane-tls`
+(`modal secret create --force` replaces a secret's values) and the Gateway's
+`SUPERTAG_CLIENT_CERT_PEM` and `SUPERTAG_CLIENT_KEY_PEM` to `supertag-gateway-tls`.
+Deploy with `SUPERTAG_MODAL_GATEWAY=on` and `SUPERTAG_MODAL_GATEWAY_FLAGS` naming the Gateway's
+connectors (see [Collaboration surfaces](#collaboration-surfaces)). For a private registry, also set
+`SUPERTAG_MODAL_REGISTRY_SECRET` to a Modal secret with `REGISTRY_USERNAME` and
+`REGISTRY_PASSWORD`. The image entrypoint writes each PEM value to a file and runs the services as
+an unprivileged user.
 
-For updates, stop the serving App first (`modal app stop "$SUPERTAG_MODAL_APP"`), back up durable
-storage, run the migration command, then deploy.
+The deploy refuses an image reference without a digest. Modal's web endpoint checks that port 8080
+is listening; `GET /healthz` on it answers `200 ok` for your own checks.
 
-## 5. Connect your CLI and a Worklet
+## 4. Verify
 
 ```sh
-supertag verify deployment https://YOUR-MODAL-URL --env-file .env.deployment
-supertag connect control-plane https://YOUR-MODAL-URL
-supertag create auth-key build-host --tag engineering
+curl --fail https://WORKSPACE--supertag.modal.run/healthz
+export SUPERTAG_SERVER_CA_FILE=$PWD/ca.pem
+supertag verify deployment wss://WORKSPACE--supertag.modal.run \
+  --env-file supertag-deployment/operator.env
 ```
 
-Connect reads the administrative token from your environment or a masked prompt. The
-[Auth Key](../reference/resource-model.md#auth-keys) prints a `stak_` secret once. On the Worker Host, set
-it in `SUPERTAG_AUTH_KEY`, then follow [Run a Worker](workers.md). The host joins on its first
-connection and is bound to the Tag. A **Worker** is the code on that host that completes the Tag's work. A Tag with no
-bound Worker Host rejects every mention. This template uses WebSocket; see
-[Choose the Worker connection](deployment-setup.md#choose-the-worker-connection).
+If the Control Plane requires client certificates, also set `SUPERTAG_CLIENT_CERT_FILE` and
+`SUPERTAG_CLIENT_KEY_FILE` to an operator's client certificate. Readiness reads `not ready` until a
+Worker Host connects.
+
+## 5. Connect a Worker Host
+
+Create an **Auth Key** (a one-time enrollment secret) for the host, then enroll and run it on the
+machine that owns the **harness** (the coding agent that does the work, such as Codex):
+
+```sh
+supertag auth-key create build-1 --role host --tag engineering \
+  --control-plane wss://WORKSPACE--supertag.modal.run
+# Save the printed key as build-1.key (mode 0600) on the Worker Host, then, with the same
+# SUPERTAG_SERVER_CA_FILE (and, if the Control Plane requires client certificates, the host's own
+# SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE):
+supertag host enroll build-1 --control-plane wss://WORKSPACE--supertag.modal.run \
+  --state-directory ~/.supertag-host --auth-key file:build-1.key
+supertag worker-host --control-plane wss://WORKSPACE--supertag.modal.run \
+  --state-directory ~/.supertag-host --harness codex
+```
+
+Operator commands read the operator token from `SUPERTAG_OPERATOR_TOKEN`. The Worker Host
+connects outbound and needs no inbound port.
+
+## Collaboration surfaces
+
+The web endpoint reaches only the Control Plane's tunnel, so the Gateway can serve only connectors
+that connect outbound:
+
+- **Lark or Feishu**, over its outbound long connection:
+  `--lark-state-directory /var/lib/supertag/lark`, with `SUPERTAG_LARK_ACCOUNT_ID`,
+  `SUPERTAG_LARK_DOMAIN` (`lark` or `feishu`), `SUPERTAG_LARK_APP_ID`, `SUPERTAG_LARK_TENANT_KEY`,
+  `SUPERTAG_LARK_BOT_OPEN_ID`, `SUPERTAG_LARK_CHAT_ID`, `SUPERTAG_LARK_TAG_ID`, and
+  `SUPERTAG_LARK_ALLOWED_USERS` (comma-separated) in the `supertag-gateway` secret. The app secret comes from the
+  credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it, or from
+  `SUPERTAG_LARK_APP_SECRET`.
+- **Slack**, over Socket Mode: `--slack-socket-mode --slack-state-directory
+  /var/lib/supertag/slack`, with `SUPERTAG_SLACK_ACCOUNT_ID`, `SUPERTAG_SLACK_TEAM_ID`,
+  `SUPERTAG_SLACK_CHANNEL_ID`, `SUPERTAG_SLACK_TAG_ID`, and `SUPERTAG_SLACK_ALLOWED_USERS`
+  (comma-separated) in the `supertag-gateway` secret. The bot token and app-level token come from the credential vault,
+  where [`supertag setup surface slack`](../surfaces/slack.md) stores them, or from
+  `SUPERTAG_SLACK_BOT_TOKEN` and `SUPERTAG_SLACK_APP_TOKEN`.
+- **Operator notifications to a webhook**: `--notify webhook:HTTPS_URL#NAME`, with the bearer
+  secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
+
+GitHub, Linear, Microsoft Teams, and Slack HTTP events need inbound webhooks, which this
+deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see [service deployment definitions](../../deploy/native/README.md)), enrolled
+with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
+URL with its own credential.
+
+```sh
+SUPERTAG_MODAL_IMAGE=REGISTRY/supertag-hosted@sha256:DIGEST SUPERTAG_MODAL_GATEWAY=on \
+  SUPERTAG_MODAL_GATEWAY_FLAGS='--lark-state-directory /var/lib/supertag/lark' \
+  modal deploy deploy/modal/app.py
+```
+
+The deploy refuses `SUPERTAG_MODAL_GATEWAY=on` without connector flags.
 
 ## Check that it worked
 
 ```sh
-supertag verify deployment https://YOUR-MODAL-URL --env-file .env.deployment --require-ready
+supertag verify deployment wss://WORKSPACE--supertag.modal.run \
+  --env-file supertag-deployment/operator.env --require-ready
 ```
 
-After setting up a **collaboration surface** (an external work tool such as Slack where SuperTag
-meets people) and Tag with the [collaboration surface guides](../surfaces/README.md), mention
-the Tag in a connected Slack channel and confirm that a Worker replies. Test reconnection after
-replacing the Server.
+With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm that it replies.
 
-## Optional: add a supertag.yaml
+## Cold starts and restarts
 
-The Control Plane starts with `supertag up --foreground control-plane`, so it also reads a
-[`supertag.yaml`](../reference/supertag-yaml.md). The Modal Secret and the template's environment remain the main configuration and override
-the file. Keep `SUPERTAG_DATABASE_URL`, `SUPERTAG_ADMIN_TOKEN`, and `SUPERTAG_COORDINATION_URL` there,
-because the platform check reads them from the environment. A file suits settings such as `notify`,
-`logging`, `operators.file`, or a `provision` list, which creates missing resources each time the
-Control Plane starts; leave `ports` out.
-
-Modal has no volume at `/var/lib/supertag`, so bake the file into the image there. In your
-copy of the repository, add this line to `deploy/docker/Dockerfile` after
-`COPY deploy/docker/entrypoint.sh`, then migrate and deploy as usual, or publish it as a [prebuilt image](#optional-deploy-a-prebuilt-image):
-
-```dockerfile
-COPY supertag.yaml /var/lib/supertag/supertag.yaml
-```
-
-See [In containers and hosting platforms](../reference/supertag-yaml.md#in-containers-and-hosting-platforms)
-for the keys that behave differently in a container.
+- The container is always running. A deploy or a host failure replaces it; the replacement pulls
+  the image and starts within the two-minute startup timeout. Requests during that time get `503`,
+  opening a tunnel waits up to 30 seconds, and Worker Hosts and the Gateway retry.
+- Each open tunnel is one function call, closed after the 24-hour function timeout; clients
+  reconnect at once.
+- Both ends of a tunnel ping every 20 seconds, which keeps idle tunnels open.
 
 ## Limits
 
-- The template requires external credential storage because its local filesystem is temporary.
-  It does not treat a Modal Volume as a directly attached POSIX disk for the credential vault.
-  Artifact bytes (captured output files) stay on the Worker Hosts that capture them; the Control Plane stores none.
-- The Server keeps one container warm even without incoming requests; it incurs ongoing usage.
-  Do not increase its replica count.
-- Stop-before-deploy updates avoid overlapping Control Planes and cause downtime.
-- Modal's proxy accepts public requests so SuperTag's own authentication works; management and
-  Worklet routes still require their SuperTag credentials.
-- The supervisor checks `/healthz` during startup and forwards termination to the Node process.
-  Modal subsequently checks the listening port; use external HTTP monitoring for ongoing `/healthz`
-  and `/readyz` checks. See [Modal Servers](https://modal.com/docs/guide/servers) for lifecycle and
-  routing behavior.
+- One container. Every Control Plane runs the controllers, so do not raise `max_containers`.
+- Modal commits Volume writes in the background; transfer files written just before a container
+  replacement may be lost, and work whose transfer was in progress must be retried. - Native gRPC
+  (`https://`) does not reach this deployment; clients use the `wss://` URL. The terminal UI uses
+  your CA when you save the Control Plane with `supertag connect --server-ca-file`; the desktop app
+  trusts only the system roots, so it cannot connect to a certificate from your own CA.
+- The web endpoint forwards only the tunnel port, so the Gateway here serves Lark, Slack Socket
+  Mode, and webhook notifications only. GitHub, Linear, Microsoft Teams, and Slack HTTP events
+  need a Gateway on another host.
 
-## Optional: deploy a prebuilt image
-
-Publish the shared image to a registry you control:
+## Remove the deployment
 
 ```sh
-docker buildx build --platform linux/amd64 -f deploy/docker/Dockerfile \
-  -t YOUR-REGISTRY/supertag:YOUR-RELEASE --push .
-export SUPERTAG_MODAL_IMAGE=YOUR-REGISTRY/supertag@sha256:YOUR-DIGEST
+modal app stop supertag
+modal volume delete supertag-state
+modal secret delete supertag-control-plane
+modal secret delete supertag-control-plane-tls
 ```
 
-Use the digest reported by the registry. When `SUPERTAG_MODAL_IMAGE` is set, Modal pulls that image
-instead of building the checkout. Both paths use the same Docker entrypoint. For a private registry,
-create a Modal Secret containing `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` through the dashboard or
-a private file, then set `SUPERTAG_MODAL_REGISTRY_SECRET` to that Secret's name.
-
-## Optional: remove a test deployment
-
-For a disposable test, stop its App and verify no containers remain. Delete its dedicated Secret
-with `modal secret delete YOUR-TEST-SECRET`, and separately remove any test database, Vault namespace,
-or registry image you created. Never delete shared services used by other deployments.
+Delete `supertag-gateway` and `supertag-gateway-tls` too if you created them, then the database
+and Vault path if they were dedicated to this deployment. `modal app list` and
+`modal volume list` confirm the removal.
 
 ## If something goes wrong
 
-- **Verification fails right after deployment.** Modal may return from deployment before the Server
-  finishes starting. Wait for startup, then retry verification if liveness is not available yet.
-- **`/readyz` returns unavailable.** This is expected until a compatible Worklet connects. See
-  [Health and readiness](../operations/control-plane.md#health-and-readiness).
-- **The Worklet cannot connect.** HTTPS Worklet addresses select gRPC unless you pass
-  `--transport websocket`. See [Choose the Worker connection](deployment-setup.md#choose-the-worker-connection)
-  and [Troubleshooting](troubleshooting.md).
+- **The deploy stops with a message about the digest.** Set `SUPERTAG_MODAL_IMAGE` to
+  `IMAGE@sha256:DIGEST`.
+- **Verification cannot reach the Control Plane over TLS.** Check `SUPERTAG_SERVER_CA_FILE` and
+  that the certificate names the `modal.run` host.
+- **The container restarts repeatedly.** The container exits whenever its service does. Check the
+  logs with `modal app logs supertag`: an unreachable database stops the Control Plane, and with
+  the Gateway on, check its credential (`SUPERTAG_GATEWAY_CREDENTIAL` must match
+  `SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL`), its connector settings, and that the certificate names
+  `IP:127.0.0.1`.
 
 ## Next
 
+- [Service deployment definitions](../../deploy/native/README.md) for the role contract and TLS files
 - [Control Plane operations](../operations/control-plane.md)
-- [Run a Worker](workers.md)
-- [Run a Worker in Modal sandboxes](modal-workers.md)

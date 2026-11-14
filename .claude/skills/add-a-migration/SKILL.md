@@ -1,79 +1,41 @@
 ---
 name: add-a-migration
-description: Change the database schema across both SQLite and PostgreSQL and generate matching migrations. Read before editing anything under packages/store.
+description: Change the database schema across both SQLite and PostgreSQL with matching migrations. Read before editing rust/crates/control-plane/migrations or the store.
 ---
 
 # Add a migration
 
-SuperTag supports two databases: SQLite for local development, PostgreSQL for production.
-**Both are first-class.** Every schema change touches both, or `pnpm check` fails.
+The Control Plane supports two databases: SQLite for local and single-process use, PostgreSQL for
+production and replicas. **Both are first-class.** Every schema change touches both.
 
 ## Files that must stay in sync
 
 | File | Purpose |
 | --- | --- |
-| `packages/store/src/schema/sqlite.ts` | SQLite table definitions |
-| `packages/store/src/schema/postgresql.ts` | PostgreSQL table definitions |
-| `packages/store/src/schema/index.ts` | Re-exports |
-| `packages/store/drizzle/sqlite/` | Generated SQLite migrations + `meta/_journal.json` |
-| `packages/store/drizzle/postgresql/` | Generated PostgreSQL migrations + `meta/_journal.json` |
+| `rust/crates/control-plane/migrations/sqlite/NNNN_name.sql` | SQLite migration |
+| `rust/crates/control-plane/migrations/postgresql/NNNN_name.sql` | PostgreSQL migration with the same number and name |
+| `rust/crates/control-plane/src/store.rs` | The ordered `include_str!` lists, one per dialect |
 
 ## Procedure
 
-1. Edit **both** schema files. Keep column names, nullability, and defaults semantically
-   equivalent; the types differ per dialect by design.
-
-2. Generate migrations for both dialects:
-
-   ```sh
-   pnpm db:generate
-   ```
-
-   This runs `drizzle-kit generate` twice, once per config
-   (`drizzle.sqlite.config.ts`, `drizzle.postgresql.config.ts`). It writes a new `.sql` file
-   and a `meta/NNNN_snapshot.json` per dialect, and appends to each `meta/_journal.json`.
-
-3. Verify the generated state matches the schema:
+1. Add the next-numbered migration to **both** directories. Keep column names, nullability, and
+   defaults semantically equivalent; the types and locking differ per dialect by design.
+2. Append both files to the matching `include_str!` lists in `store.rs`, in order.
+3. Update the store code for both dialects where queries differ.
+4. Run the store contracts on both databases:
 
    ```sh
-   pnpm db:check
+   export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE=/path/to/private-url-file
+   SUPERTAG_RUST_TEST_REQUIRE=postgres cargo test --manifest-path rust/Cargo.toml --locked \
+     -p supertag-control-plane -- --include-ignored
    ```
 
-4. Apply locally:
-
-   ```sh
-   pnpm db:migrate                    # both, via scripts/migrate.mjs
-   pnpm db:migrate:sqlite             # one dialect
-   pnpm db:migrate:postgresql
-   ```
-
-5. Run the full gates, with PostgreSQL available:
-
-   ```sh
-   export SUPERTAG_POSTGRES_URL=postgresql://supertag:supertag@localhost:5432/supertag_test
-   pnpm check && pnpm test
-   ```
-
-   PostgreSQL test suites use `describe.runIf(SUPERTAG_POSTGRES_URL)` and skip silently
-   without it. Do not trust a green run that skipped them.
+   PostgreSQL cases are ignored without the URL file. With `SUPERTAG_RUST_TEST_REQUIRE=postgres`
+   a missing database fails the run instead of skipping. Do not trust a run that skipped them.
 
 ## Footguns
 
-**`postinstall` runs `db:generate`.** A fresh `pnpm install` can produce diffs under
-`packages/store/drizzle/`. Inspect them; do not blindly commit or discard.
+**Never edit a migration that has merged.** Add a new one.
 
-**Commit both dialects together, including journals.** A migration present for one dialect and
-absent for the other breaks `db:check` for everyone.
-
-**Migrations ship to npm.** `packages/supertag-ai/scripts/copy-migrations.mjs` copies
-`packages/store/drizzle` into `packages/supertag-ai/drizzle`, which is listed in that
-package's `files`. `packages/supertag-ai/drizzle/` is gitignored because it is generated. A
-migration that is not committed to `packages/store/drizzle` will not reach users, and
-`supertag migrate` will not apply it.
-
-**Never edit a generated `.sql` file or snapshot by hand.** Change the schema and regenerate.
-
-**No persistence-schema compatibility promise.** Per `docs/reference/api-stability.md`, the
-database and store APIs are Experimental. Tables are Internal — you may restructure them, but
-you may not break the documented resource shapes in
-`docs/reference/resource-model.md`, which are Beta.
+**No persistence-schema compatibility promise before release.** Tables are internal; you may
+restructure them, but not break documented resource shapes.

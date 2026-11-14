@@ -1,0 +1,2809 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/policy.proto";
+import "supertag/runtime/v2/github_workspaces.proto";
+import "supertag/runtime/v2/mcp.proto";
+
+// The Control Plane's public endpoint serves these services to operators,
+// clients and enrolled hosts. Its API tier authenticates every caller and calls
+// the state owner with the same messages.
+service Operator {
+  rpc CreateAuthKey(CreateAuthKeyRequest) returns (AuthKey);
+  rpc ListHosts(ListHostsRequest) returns (ListHostsResponse);
+  rpc GetHost(GetHostRequest) returns (WorkerHostStatus);
+  rpc SetHostDraining(SetHostDrainingRequest) returns (WorkerHostStatus);
+  rpc PutTag(PutTagRequest) returns (Tag);
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+  rpc SubmitTask(SubmitTaskRequest) returns (Task);
+  rpc GetTask(GetTaskRequest) returns (Task);
+  rpc GetSessionDelivery(GetSessionDeliveryRequest) returns (SessionDelivery);
+  rpc ListNativeUsage(ListNativeUsageRequest) returns (ListNativeUsageResponse);
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+  rpc CancelTask(CancelTaskRequest) returns (Task);
+  rpc ResolveAttempt(ResolveAttemptRequest) returns (AttemptResolution);
+  rpc GetTag(GetTagRequest) returns (Tag);
+  rpc RetireTag(RetireTagRequest) returns (RetireTagResponse);
+  rpc GetReplyDelivery(GetReplyDeliveryRequest) returns (ReplyDelivery);
+  rpc ListReplyDeliveries(ListReplyDeliveriesRequest) returns (ListReplyDeliveriesResponse);
+  rpc ResolveReply(ResolveReplyRequest) returns (ReplyDelivery);
+}
+
+// An operator reads and sends messages in their personal conversations.
+service Conversations {
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+  rpc SendMessage(SendMessageRequest) returns (ConversationMessage);
+  rpc GetMessage(GetMessageRequest) returns (ConversationMessage);
+  rpc ListMessageEvents(ListMessageEventsRequest) returns (ListEventsResponse);
+}
+
+// Operator-visible invalidation notices. Task event replay has its own cursor.
+service OperatorEvents {
+  rpc Watch(WatchRequest) returns (stream WatchEvent);
+}
+
+// Applies owned Tag relationships under one serialized Control Plane write.
+service ManifestRelationships {
+  rpc ReconcileTag(ReconcileTagRelationshipsRequest) returns (ReconcileTagRelationshipsResponse);
+  rpc ProvisionTags(ProvisionTagsRequest) returns (ProvisionTagsResponse);
+  // Records an apply set's members and, with prune, removes the members its
+  // input no longer declares, all in one serialized Control Plane write.
+  rpc ReconcileApplySet(ReconcileApplySetRequest) returns (ReconcileApplySetResponse);
+  // Checks and records which manager (an apply set, default apply) owns each
+  // field a manifest sets. Changing a field another manager owns, or one
+  // changed outside apply since, is a conflict unless forced.
+  rpc ReconcileManifestFields(ReconcileManifestFieldsRequest) returns (ReconcileManifestFieldsResponse);
+}
+
+// One field a manifest sets, by its manifest path, with SHA-256 hex digests
+// of its stored and declared values. An empty digest is an unset field.
+message ManifestField {
+  string path = 1;
+  string current_digest = 2;
+  string desired_digest = 3;
+}
+
+message ManifestFieldResource {
+  // SurfaceAccount, Volume, Workspace, ContextSet, PermissionSet, Role, Tag,
+  // Team or SurfaceLocation.
+  string kind = 1;
+  // The manifest's metadata.name.
+  string name = 2;
+  repeated ManifestField fields = 3;
+}
+
+message ReconcileManifestFieldsRequest {
+  // An apply set name; empty is the default manager, apply.
+  string manager = 1;
+  repeated ManifestFieldResource resources = 2;
+  // Takes ownership of conflicting fields instead of reporting them.
+  bool force_conflicts = 3;
+  // Reports conflicts and records nothing.
+  bool preview = 4;
+}
+
+message ManifestFieldConflict {
+  string kind = 1;
+  string name = 2;
+  string path = 3;
+  // The owning manager; cli for a value set outside apply.
+  string manager = 4;
+}
+
+message ReconcileManifestFieldsResponse {
+  // Without force: when any field conflicts, nothing is recorded.
+  repeated ManifestFieldConflict conflicts = 1;
+}
+
+// One resource an apply set's input declares. Kinds are SurfaceLocation,
+// Team, Tag, Role, PermissionSet, ContextSet, Workspace and Volume.
+message ApplySetDeclaration {
+  string kind = 1;
+  // The manifest's metadata.name.
+  string name = 2;
+  // The resource's revision as this apply left it: the revision its write
+  // returned, or the revision it planned against when it did not write.
+  uint64 revision = 3;
+  // True when this apply is about to create the resource. Declaring a missing
+  // resource as created claims it for the set before the write, and the next
+  // reconcile that finds it records it as a member. Only a resource an apply
+  // set claimed joins it; an existing resource is never adopted.
+  bool created = 4;
+}
+
+message ReconcileApplySetRequest {
+  // 1 to 63 lowercase letters, digits, hyphens or underscores.
+  string apply_set = 1;
+  // Every resource of a prunable kind the input declares.
+  repeated ApplySetDeclaration declared = 2;
+  // Removes the set's members the input no longer declares.
+  bool prune = 3;
+  // Reports what reconciling would do and changes nothing.
+  bool preview = 4;
+}
+
+enum ApplySetPruneAction {
+  APPLY_SET_PRUNE_ACTION_UNSPECIFIED = 0;
+  // The member is deleted, or retired for a Tag or Role.
+  APPLY_SET_PRUNE_ACTION_DELETE = 1;
+  // The member is still in use. It stays in the set for the next prune.
+  APPLY_SET_PRUNE_ACTION_KEEP = 2;
+  // Another writer changed the member after this apply set last applied it,
+  // or the set claimed it but never recorded creating it. It is left in place
+  // and leaves the set.
+  APPLY_SET_PRUNE_ACTION_RELEASE = 3;
+  // The member no longer exists. It leaves the set.
+  APPLY_SET_PRUNE_ACTION_FORGET = 4;
+}
+
+message ApplySetPrune {
+  string kind = 1;
+  string name = 2;
+  ApplySetPruneAction action = 3;
+  // For KEEP and RELEASE: why.
+  string reason = 4;
+}
+
+message ReconcileApplySetResponse {
+  // In removal order: dependents before what they use.
+  repeated ApplySetPrune pruned = 1;
+}
+
+// Creates the declared Tags and their policy relationships atomically. A Tag
+// that already exists is left as-is.
+message ProvisionTagsRequest {
+  repeated ProvisionTag tags = 1;
+}
+
+message ProvisionTag {
+  PutTagRequest tag = 1;
+  repeated string role_ids = 2;
+  repeated string mailbox_senders = 3;
+}
+
+message ProvisionTagsResponse {}
+
+message ReconcileTagRelationshipsRequest {
+  string tag_id = 1;
+  // An empty manager denotes the default apply manager.
+  string manager = 2;
+  repeated string role_ids = 3;
+  repeated string mailbox_senders = 4;
+  bool preview = 5;
+  // The Tag's runsOn labels this manager declares, merged by value: a label another manager or
+  // the CLI added stays. Unset leaves every label alone.
+  optional TagRunsOnLabels runs_on = 5500;
+}
+
+message TagRunsOnLabels {
+  repeated string labels = 1;
+}
+
+message ManifestRelationshipChange {
+  string path = 1;
+  bool present = 2;
+  // True if the relationship already matches and only ownership changes.
+  bool ownership_only = 3;
+}
+
+message ReconcileTagRelationshipsResponse {
+  repeated ManifestRelationshipChange changes = 1;
+}
+
+enum WatchKind {
+  WATCH_KIND_UNSPECIFIED = 0;
+  WATCH_KIND_TAG = 1;
+  WATCH_KIND_TASK = 2;
+  WATCH_KIND_CONVERSATION_MESSAGE = 3;
+  WATCH_KIND_OBJECTIVE = 4;
+  WATCH_KIND_TEAM = 5;
+  WATCH_KIND_WORKSTREAM_POST = 6;
+}
+
+enum WatchReason {
+  WATCH_REASON_UNSPECIFIED = 0;
+  WATCH_REASON_CREATED = 1;
+  WATCH_REASON_CHANGED = 2;
+  WATCH_REASON_DELETED = 3;
+}
+
+message WatchRequest {
+  string resume_token = 1;
+  repeated WatchKind kinds = 2;
+}
+
+message WatchEvent {
+  string resume_token = 1;
+  oneof update {
+    WatchHeartbeat heartbeat = 2;
+    WatchResync resync = 3;
+    WatchChange change = 4;
+  }
+}
+
+message WatchHeartbeat {}
+message WatchResync {}
+
+message WatchChange {
+  WatchKind kind = 1;
+  string id = 2;
+  string tag_id = 3;
+  string session_id = 4;
+  string objective_id = 5;
+  string team_id = 6;
+  string conversation = 7;
+  int64 changed_at_ms = 8;
+  WatchReason reason = 9;
+}
+
+service Objectives {
+  rpc CreateObjective(CreateObjectiveRequest) returns (Objective);
+  rpc GetObjective(GetObjectiveRequest) returns (Objective);
+  rpc ListObjectives(ListObjectivesRequest) returns (ListObjectivesResponse);
+  rpc ListCommitReviews(ListObjectiveCommitReviewsRequest) returns (ListObjectiveCommitReviewsResponse);
+  rpc SetLimits(SetObjectiveLimitsRequest) returns (Objective);
+  rpc SetRuntimeActions(SetObjectiveRuntimeActionsRequest) returns (Objective);
+  rpc PauseObjective(ObjectiveActionRequest) returns (Objective);
+  rpc ResumeObjective(ObjectiveActionRequest) returns (Objective);
+  rpc CancelObjective(ObjectiveActionRequest) returns (Objective);
+  rpc ReviewObjective(ReviewObjectiveRequest) returns (Objective);
+  // An operator completes an Objective with an assessment of its outcome.
+  rpc CompleteObjective(CompleteObjectiveRequest) returns (Objective);
+}
+
+service Inbox {
+  rpc ListItems(ListInboxItemsRequest) returns (ListInboxItemsResponse);
+  rpc GetQuestion(GetQuestionRequest) returns (ObjectiveQuestion);
+  rpc AnswerQuestion(AnswerQuestionRequest) returns (Task);
+  rpc GetApproval(GetApprovalRequest) returns (Approval);
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
+  rpc DecideApproval(DecideApprovalRequest) returns (Approval);
+}
+
+enum InboxItemKind {
+  INBOX_ITEM_KIND_UNSPECIFIED = 0;
+  INBOX_ITEM_KIND_QUESTION = 1;
+  INBOX_ITEM_KIND_OBJECTIVE_BUDGET = 2;
+  INBOX_ITEM_KIND_OBJECTIVE_LIMIT = 3;
+  INBOX_ITEM_KIND_TASK_ATTENTION = 4;
+  INBOX_ITEM_KIND_APPROVAL = 5;
+  // A queued Task needs an OAuth MCP server whose login lapsed on every Worker Host serving it.
+  INBOX_ITEM_KIND_MCP_LOGIN = 1800;
+}
+
+message ListInboxItemsRequest {
+  string objective_id = 1;
+  InboxItemKind kind = 2;
+  uint32 page_size = 3;
+  string cursor = 4;
+}
+
+message ListInboxItemsResponse {
+  int64 as_of_ms = 1;
+  repeated InboxItem items = 2;
+  string next_cursor = 3;
+  repeated InboxItemKind truncated_kinds = 4;
+}
+
+message InboxItem {
+  string key = 1;
+  string occurrence = 2;
+  InboxItemKind kind = 3;
+  string objective_id = 4;
+  string task_id = 5;
+  optional string attempt_id = 6;
+  bool operator_eligible = 7;
+  int64 actionable_since_ms = 8;
+  string reason = 9;
+  InboxQuestion question = 10;
+  InboxApproval approval = 11;
+  // Whether the operator heard about this item: through this operator's notify
+  // destinations or, for a budget or limit item, the Objective's notice thread.
+  InboxNotification notification = 5300;
+}
+
+enum InboxNotificationStatus {
+  INBOX_NOTIFICATION_STATUS_UNSPECIFIED = 0;
+  // No destination is configured for this item.
+  INBOX_NOTIFICATION_STATUS_NOT_CONFIGURED = 1;
+  INBOX_NOTIFICATION_STATUS_PENDING = 2;
+  INBOX_NOTIFICATION_STATUS_DELIVERED = 3;
+  INBOX_NOTIFICATION_STATUS_FAILED = 4;
+  // The desktop notifier could not run.
+  INBOX_NOTIFICATION_STATUS_UNAVAILABLE = 5;
+}
+
+message InboxNotification {
+  InboxNotificationStatus status = 1;
+  // Where it was delivered, the next retry, or why it failed.
+  string reason = 2;
+}
+
+message InboxApproval {
+  string approval_id = 1;
+  string tag_id = 2;
+  string action = 3;
+  string resource = 4;
+  string summary = 5;
+}
+
+message ApprovalRule {
+  string action = 1;
+  repeated string operator_ids = 2;
+}
+
+enum ApprovalState {
+  APPROVAL_STATE_UNSPECIFIED = 0;
+  APPROVAL_STATE_PENDING = 1;
+  APPROVAL_STATE_APPROVED = 2;
+  APPROVAL_STATE_DENIED = 3;
+  APPROVAL_STATE_EXPIRED = 4;
+}
+
+enum ApprovalScope {
+  APPROVAL_SCOPE_UNSPECIFIED = 0;
+  APPROVAL_SCOPE_ONCE = 1;
+  APPROVAL_SCOPE_OBJECTIVE = 2;
+}
+
+message Approval {
+  string approval_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string tag_id = 4;
+  string session_id = 5;
+  optional string objective_id = 6;
+  string action = 7;
+  string arguments_digest = 8;
+  string summary = 9;
+  // Who may decide: operators by operator ID, such as `local`, and clients by `client:NAME`.
+  // Empty means any operator and no client.
+  repeated string operator_ids = 10;
+  ApprovalState state = 11;
+  ApprovalScope scope = 12;
+  int64 requested_at_ms = 13;
+  optional int64 decided_at_ms = 14;
+  // The principal that decided it, such as `operator:local` or `client:alice-laptop`.
+  optional string decided_by = 15;
+  optional string reason = 16;
+  optional int64 valid_until_ms = 17;
+  optional int64 consumed_at_ms = 18;
+  optional string continuation_task_id = 19;
+  string resource = 20;
+  string canonical_arguments_json = 21;
+  optional string grant_approval_id = 22;
+  optional int64 covered_at_ms = 23;
+}
+
+message GetApprovalRequest { string approval_id = 1; }
+
+message ListApprovalsRequest {
+  string objective_id = 1;
+  string task_id = 2;
+  ApprovalState state = 3;
+  uint32 limit = 4;
+  string cursor = 5;
+}
+
+message ListApprovalsResponse {
+  repeated Approval approvals = 1;
+  string next_cursor = 2;
+}
+
+message DecideApprovalRequest {
+  string approval_id = 1;
+  string operation_id = 2;
+  bool approve = 3;
+  ApprovalScope scope = 4;
+  optional int64 valid_until_ms = 5;
+  string reason = 6;
+}
+
+message RequestApprovalRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string action = 3;
+  string arguments_json = 4;
+  string summary = 5;
+  string resource = 6;
+}
+
+message RequestApprovalResponse {
+  Approval approval = 1;
+  bool granted = 2;
+}
+
+message InboxQuestion {
+  string text = 1;
+  int64 asked_at_ms = 2;
+  bool truncated = 3;
+}
+
+message GetQuestionRequest { string task_id = 1; }
+
+message AnswerQuestionRequest {
+  string task_id = 1;
+  string operation_id = 2;
+  string text = 3;
+}
+
+message ObjectiveQuestion {
+  string task_id = 1;
+  string attempt_id = 2;
+  string objective_id = 3;
+  string text = 4;
+  int64 asked_at_ms = 5;
+  optional int64 published_at_ms = 6;
+  optional string answer_task_id = 7;
+}
+
+message AskQuestionRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string text = 3;
+}
+
+message AttemptCapabilities {
+  bool may_ask_objective_question = 1;
+  bool may_use_workstream = 2;
+  bool may_read_mailbox = 3;
+  bool may_send_tag_message = 4;
+  bool may_start_work_session = 5;
+  bool may_continue_work_session = 6;
+  bool may_ask_work_session_question = 7;
+  // An Objective owner report may request review of its own child delivery.
+  bool may_request_commit_review = 8;
+}
+
+// Operators see the work started in Sessions they can access.
+service WorkSessions {
+  rpc Get(GetWorkSessionRequest) returns (WorkSession);
+  rpc List(ListWorkSessionsRequest) returns (ListWorkSessionsResponse);
+}
+
+service AttemptWorkSessions {
+  rpc Start(StartWorkSessionRequest) returns (WorkSession);
+  rpc Continue(ContinueWorkSessionRequest) returns (WorkSession);
+  rpc Ask(AskWorkSessionQuestionRequest) returns (WorkSessionQuestion);
+}
+
+message WorkSession {
+  string work_session_id = 1;
+  string title = 2;
+  string parent_tag_id = 3;
+  string parent_session_id = 4;
+  string starter_task_id = 5;
+  string tag_id = 6;
+  string latest_task_id = 7;
+  TaskState latest_task_state = 8;
+  optional string report_task_id = 9;
+  TaskState report_task_state = 10;
+  optional string objective_id = 11;
+  WorkspaceDeliveryReference workspace_delivery = 12;
+  uint64 created_order = 13;
+  WorkSessionQuestion question = 14;
+}
+
+message WorkSessionQuestion {
+  string work_session_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string text = 4;
+  int64 asked_at_ms = 5;
+  optional int64 published_at_ms = 6;
+  optional string answer_task_id = 7;
+}
+
+message StartWorkSessionRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string title = 3;
+  string instruction = 4;
+  optional string workspace_id = 5;
+  optional string target_tag_id = 6;
+}
+
+message GetWorkSessionRequest {
+  string work_session_id = 1;
+  // Select the child Task and report from this turn of the Work Session.
+  optional string report_task_id = 2;
+}
+
+message ContinueWorkSessionRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string work_session_id = 3;
+  string message = 4;
+}
+
+message AskWorkSessionQuestionRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string text = 3;
+}
+
+message ListWorkSessionsRequest {
+  string parent_tag_id = 1;
+  string parent_session_id = 2;
+  optional string starter_task_id = 3;
+  uint32 limit = 4;
+  string cursor = 5;
+}
+
+message ListWorkSessionsResponse {
+  repeated WorkSession work_sessions = 1;
+  string next_cursor = 2;
+}
+
+service Teams {
+  rpc CreateTeam(CreateTeamRequest) returns (Team);
+  rpc GetTeam(GetTeamRequest) returns (Team);
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse);
+  rpc UpdateTeam(UpdateTeamRequest) returns (Team);
+  rpc DeleteTeam(DeleteTeamRequest) returns (Team);
+  rpc ListWorkstreamPosts(ListWorkstreamPostsRequest) returns (ListWorkstreamPostsResponse);
+}
+
+service AttemptWorkstreams {
+  rpc ReadAttemptWorkstream(ReadAttemptWorkstreamRequest) returns (ReadAttemptWorkstreamResponse);
+  rpc PostAttemptWorkstream(PostAttemptWorkstreamRequest) returns (PostAttemptWorkstreamResponse);
+}
+
+service Mailbox {
+  rpc ListMessages(ListMailboxMessagesRequest) returns (ListMailboxMessagesResponse);
+  rpc ChangeGrant(ChangeMailboxGrantRequest) returns (ChangeMailboxGrantResponse);
+  rpc ListGrants(ListMailboxGrantsRequest) returns (ListMailboxGrantsResponse);
+}
+
+service AttemptMailbox {
+  rpc ReadMailbox(ReadMailboxRequest) returns (ListMailboxMessagesResponse);
+  rpc SendMessage(SendAttemptTagMessageRequest) returns (SendTagMessageResponse);
+}
+
+enum TagMessageOrigin {
+  TAG_MESSAGE_ORIGIN_UNSPECIFIED = 0;
+  TAG_MESSAGE_ORIGIN_DIRECT = 1;
+  TAG_MESSAGE_ORIGIN_WORKSTREAM = 2;
+}
+
+enum TagMessageState {
+  TAG_MESSAGE_STATE_UNSPECIFIED = 0;
+  TAG_MESSAGE_STATE_PENDING = 1;
+  TAG_MESSAGE_STATE_HANDLED = 2;
+  TAG_MESSAGE_STATE_FAILED = 3;
+}
+
+message TagMessage {
+  string message_id = 1;
+  string sender_tag_id = 2;
+  string recipient_tag_id = 3;
+  string source_task_id = 4;
+  optional string workstream_post_id = 5;
+  optional string objective_id = 6;
+  string text = 7;
+  uint32 hops = 8;
+  optional string task_id = 9;
+  TagMessageState state = 10;
+  int64 created_at_ms = 11;
+  TagMessageOrigin origin = 12;
+  CommitReview review = 13;
+}
+
+enum CommitReviewDecision {
+  COMMIT_REVIEW_DECISION_UNSPECIFIED = 0;
+  COMMIT_REVIEW_DECISION_APPROVED = 1;
+  COMMIT_REVIEW_DECISION_CHANGES_REQUESTED = 2;
+}
+
+message CommitReviewSubmission {
+  oneof kind {
+    string commit = 1;
+    CommitReviewResponse response = 2;
+  }
+}
+
+message CommitReviewResponse {
+  string request_id = 1;
+  CommitReviewDecision verdict = 2;
+}
+
+message CommitReviewVerdict {
+  CommitReviewDecision decision = 1;
+  string summary = 2;
+  string task_id = 3;
+  int64 recorded_at_ms = 4;
+}
+
+message CommitReview {
+  string request_id = 1;
+  string objective_id = 2;
+  string commit = 3;
+  string workspace_id = 4;
+  string source_task_id = 5; // Successful child Task that published this commit.
+  string requester_tag_id = 6;
+  string reviewer_tag_id = 7;
+  int64 requested_at_ms = 8;
+  CommitReviewVerdict verdict = 9;
+}
+
+message SendAttemptTagMessageRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string recipient_tag_id = 3;
+  string text = 4;
+  CommitReviewSubmission review = 5;
+}
+
+message SendTagMessageResponse {
+  TagMessage message = 1;
+  bool duplicate = 2;
+  Approval approval = 3;
+  // A recorded verdict returns the original review without a new Mailbox message.
+  CommitReview review = 4;
+}
+
+message ChangeMailboxGrantRequest {
+  string operation_id = 1;
+  string sender_tag_id = 2;
+  string recipient_tag_id = 3;
+  bool granted = 4;
+}
+
+message ChangeMailboxGrantResponse { bool changed = 1; }
+
+message ListMailboxGrantsRequest {
+  string tag_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message MailboxGrant {
+  string sender_tag_id = 1;
+  string recipient_tag_id = 2;
+  string granted_by = 3;
+  int64 granted_at_ms = 4;
+}
+
+message ListMailboxGrantsResponse {
+  repeated MailboxGrant grants = 1;
+  string next_cursor = 2;
+}
+
+message ListMailboxMessagesRequest {
+  string tag_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message ListMailboxMessagesResponse {
+  repeated TagMessage messages = 1;
+  string next_cursor = 2;
+}
+
+message ReadMailboxRequest {
+  InspectAttemptRequest attempt = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+service WorkerHost {
+  rpc RegisterHost(RegisterHostRequest) returns (HostRecord);
+  rpc ReportHost(ReportHostRequest) returns (WorkerHostStatus);
+  rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
+  rpc StartTask(StartTaskRequest) returns (Task);
+  rpc InspectAttempt(InspectAttemptRequest) returns (Task);
+  rpc GetAttemptCapabilities(InspectAttemptRequest) returns (AttemptCapabilities);
+  rpc GetAttemptHistory(InspectAttemptRequest) returns (AttemptHistory);
+  rpc GetContextPins(InspectAttemptRequest) returns (ContextResolutionManifest);
+  rpc CommitContextResolution(CommitContextResolutionRequest) returns (ContextResolutionManifest);
+  rpc RenewAttempt(InspectAttemptRequest) returns (AttemptAuthority);
+  rpc GetAttemptResolution(InspectAttemptRequest) returns (GetAttemptResolutionResponse);
+  rpc ReportAttemptUsage(ReportAttemptUsageRequest) returns (ReportAttemptUsageResponse);
+  rpc AppendEvent(AppendEventRequest) returns (TaskEvent);
+  rpc AskQuestion(AskQuestionRequest) returns (ObjectiveQuestion);
+  rpc FinishTask(FinishTaskRequest) returns (Task);
+  // The restarted host of an interrupted Attempt proves every process it recorded for the
+  // Attempt has stopped. Records a failed Attempt whose outcome stays unknown; never a retry.
+  rpc ReclaimAttempt(ReclaimAttemptRequest) returns (AttemptResolution);
+  // Limits the Attempt's adapter confirmed it applies, for the Task execution report.
+  rpc ReportAppliedLimits(ReportAppliedLimitsRequest) returns (ReportAppliedLimitsResponse);
+  // Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
+  // execution report. The Attempt stays uncertain until the host or an operator resolves it.
+  rpc ReportCleanupFailure(ReportCleanupFailureRequest) returns (ReportCleanupFailureResponse);
+  // The commit the running Attempt's host resolved for its Task's Workspace `base_ref`. The first
+  // resolution in a Session wins and is recorded on every unresolved Task of the Session; the
+  // returned Task carries the recorded commit.
+  rpc ResolveWorkspaceRef(ResolveWorkspaceRefRequest) returns (Task);
+}
+
+enum HostPhase {
+  HOST_PHASE_UNSPECIFIED = 0;
+  HOST_PHASE_PENDING = 1;
+  HOST_PHASE_READY = 2;
+  HOST_PHASE_BUSY = 3;
+  HOST_PHASE_SUPPRESSED = 4;
+  HOST_PHASE_OFFLINE = 5;
+  HOST_PHASE_DRAINING = 6;
+  HOST_PHASE_REVOKED = 7;
+}
+
+enum HostReadiness {
+  HOST_READINESS_UNSPECIFIED = 0;
+  HOST_READINESS_PENDING = 1;
+  HOST_READINESS_READY = 2;
+  HOST_READINESS_SUPPRESSED = 3;
+}
+
+enum HostReadinessReason {
+  HOST_READINESS_REASON_UNSPECIFIED = 0;
+  HOST_READINESS_REASON_STARTING = 1;
+  HOST_READINESS_REASON_RECOVERY_REQUIRED = 2;
+  HOST_READINESS_REASON_STOPPING = 3;
+}
+
+message ReportHostRequest {
+  uint64 sequence = 1;
+  uint32 capacity = 2;
+  uint32 available_slots = 3;
+  HostReadiness readiness = 4;
+  HostReadinessReason reason = 5;
+  HarnessKind harness_kind = 6;
+  repeated string workspace_ids = 7;
+  HarnessExecutionProfile execution_profile = 8;
+  // Free space where the host allocates Workspaces and scratch, sampled with each report.
+  HostDiskSpace disk_space = 2000;
+  // Operating system, architecture and operator-declared placement labels.
+  repeated string labels = 1400;
+  // Per-harness execution slots on a Host that serves several harnesses or Attempts at once.
+  // When present, capacity and available_slots above are the sums of these entries.
+  repeated HostHarnessCapacity harnesses = 1500;
+}
+
+message HostDiskSpace {
+  uint64 free_bytes = 1;
+  uint64 total_bytes = 2;
+}
+
+// One harness profile a Worker Host serves, with its own concurrent Attempt slots.
+message HostHarnessCapacity {
+  HarnessKind harness_kind = 1;
+  HarnessExecutionProfile execution_profile = 2;
+  uint32 capacity = 3;
+  uint32 available_slots = 4;
+}
+
+// Stored form of a Host's reported harness slots.
+message HostHarnessCapacities {
+  repeated HostHarnessCapacity harnesses = 1;
+}
+
+message WorkerHostStatus {
+  string host_id = 1;
+  uint64 generation = 2;
+  HostPhase phase = 3;
+  bool draining = 4;
+  uint32 capacity = 5;
+  uint32 available_slots = 6;
+  uint32 active_attempts = 7;
+  HostReadinessReason reason = 8;
+  HarnessKind harness_kind = 9;
+  repeated string workspace_ids = 10;
+  int64 enrolled_at_ms = 11;
+  optional int64 last_seen_at_ms = 12;
+  optional int64 presence_expires_at_ms = 13;
+  optional int64 revoked_at_ms = 14;
+  HarnessExecutionProfile execution_profile = 15;
+  // From the current generation's latest report; absent until the host reports it.
+  HostDiskSpace disk_space = 2000;
+  // Every placement label: reported, derived, and granted by the Auth Key.
+  repeated string labels = 1400;
+  repeated string granted_labels = 1401;
+  bool ephemeral = 1402;
+  // Set when an offline ephemeral host was removed.
+  optional int64 removed_at_ms = 1403;
+  repeated HostHarnessCapacity harnesses = 1500;
+  // Increases with every credential rotation, from 1.
+  uint64 credential_revision = 3300;
+  // Task Attempts of this host that may have executed and need an operator's recovery
+  // decision: uncertain, or cancelled with execution cleanup not confirmed after the lease
+  // lapsed. Each keeps a slot until it is resolved. At most 20 are listed, oldest first.
+  repeated HostUncertainAttempt uncertain_attempts = 5400;
+  uint32 total_uncertain_attempts = 5401;
+}
+
+message HostUncertainAttempt {
+  string task_id = 1;
+  string attempt_id = 2;
+  HarnessKind harness_kind = 3;
+  // Why the Attempt is uncertain, in words.
+  string reason = 4;
+  // When its execution lease lapsed.
+  int64 since_ms = 5;
+  // The host reported that its execution stopped, so `confirmed_stopped` is not needed.
+  bool cleanup_observed = 6;
+  // A cancelled Task can only be marked failed by recovery, never retried.
+  bool cancelled = 7;
+}
+
+message ListHostsRequest {
+  uint32 limit = 1;
+  string cursor = 2;
+}
+
+message ListHostsResponse {
+  repeated WorkerHostStatus hosts = 1;
+  string next_cursor = 2;
+}
+
+message GetHostRequest { string host_id = 1; }
+
+message SetHostDrainingRequest {
+  string host_id = 1;
+  bool draining = 2;
+}
+
+// Operator commands and durable history for input directed into a running Task.
+service LiveInputs {
+  rpc QueueInput(QueueInputRequest) returns (LiveInput);
+  rpc GetInput(GetInputRequest) returns (LiveInput);
+  rpc ResolveInput(ResolveInputRequest) returns (LiveInput);
+}
+
+// A separate lane for Worklets to take input and record native delivery evidence.
+service AttemptInputs {
+  rpc TakeInput(TakeInputRequest) returns (TakeInputResponse);
+  rpc SettleInput(SettleInputRequest) returns (LiveInput);
+}
+
+// Gateway calls to the Control Plane. Each call names the connector account it
+// acts for in the `x-supertag-connector-account` metadata header, and the
+// Control Plane refuses an account that is not bound to the calling Gateway;
+// provider request bodies cannot select it. See
+// docs/reference/connector-contract.md.
+service Connector {
+  rpc AcceptEvent(AcceptEventRequest) returns (Task);
+  rpc AcceptSlackEvent(AcceptSlackEventRequest) returns (AcceptSlackEventResponse);
+  rpc AcceptGithubEvent(AcceptGithubEventRequest) returns (AcceptGithubEventResponse);
+  rpc AcceptLinearEvent(AcceptLinearEventRequest) returns (AcceptLinearEventResponse);
+  rpc AcceptLarkEvent(AcceptLarkEventRequest) returns (AcceptLarkEventResponse);
+  rpc AcceptMicrosoftTeamsActivity(AcceptMicrosoftTeamsActivityRequest) returns (AcceptMicrosoftTeamsActivityResponse);
+  rpc GetMicrosoftTeamsReplyRoute(GetMicrosoftTeamsReplyRouteRequest) returns (MicrosoftTeamsReplyRoute);
+  rpc ClaimReply(ClaimReplyRequest) returns (ClaimReplyResponse);
+  rpc RenewReply(RenewReplyRequest) returns (ReplyLease);
+  rpc SettleReply(SettleReplyRequest) returns (Reply);
+  // One fenced Gateway owns an account's outbound delivery. A draining Gateway
+  // releases ownership so another Gateway takes over without waiting for expiry.
+  rpc ClaimConnector(ClaimConnectorRequest) returns (ConnectorLease);
+  rpc RenewConnector(RenewConnectorRequest) returns (ConnectorLease);
+  rpc ReleaseConnector(ReleaseConnectorRequest) returns (ReleaseConnectorResponse);
+}
+
+// Public, attempt-authorized transfer of native Session checkpoints.
+service Transfers {
+  rpc UploadCheckpoint(stream CheckpointUpload) returns (CheckpointReference);
+  rpc DownloadCheckpoint(InspectAttemptRequest) returns (stream CheckpointDownload);
+  rpc UploadWorkspace(stream WorkspaceUpload) returns (WorkspaceDeliveryReference);
+  rpc DownloadWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
+  rpc DownloadWorkspaceArtifact(GetWorkspaceArtifactRequest) returns (stream WorkspaceDownload);
+  rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
+  rpc DownloadWorkspaceSource(InspectAttemptRequest) returns (stream GithubWorkspaceDownload);
+  rpc VerifyWorkspaceOutputRemote(VerifyWorkspaceOutputRemoteRequest) returns (VerifyWorkspaceOutputRemoteResponse);
+}
+
+// Internal authorization and commit for bytes the API tier stores.
+service CheckpointDirectory {
+  rpc GetCheckpoint(InspectAttemptRequest) returns (GetCheckpointResponse);
+  rpc ReserveCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
+  rpc CommitCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
+}
+
+// Internal authorization and commit for work product the API tier stores.
+service WorkspaceDirectory {
+  rpc GetSource(InspectAttemptRequest) returns (GithubWorkspace);
+  rpc GetContinuation(InspectAttemptRequest) returns (WorkspaceContinuation);
+  rpc ReserveDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
+  rpc CommitDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
+  rpc GetArtifact(GetWorkspaceArtifactRequest) returns (WorkspaceDeliveryReference);
+  rpc GetReviewArtifact(GetReviewArtifactRequest) returns (WorkspaceDeliveryReference);
+}
+
+// An adapter connects only to its supervising Worker Host. The launch pipe
+// provides its endpoint and an execution-scoped credential.
+service Harness {
+  rpc Attach(HarnessAttachRequest) returns (HarnessRun);
+  rpc ConfirmExecutionLimits(AppliedExecutionLimits) returns (ConfirmExecutionLimitsResponse);
+  rpc TakeLiveInput(HarnessTakeLiveInputRequest) returns (TakeInputResponse);
+  rpc SettleLiveInput(HarnessSettleLiveInputRequest) returns (LiveInput);
+  rpc Publish(HarnessPublishRequest) returns (TaskEvent);
+  rpc ReportUsage(HarnessUsageRequest) returns (ReportAttemptUsageResponse);
+  rpc Complete(HarnessCompleteRequest) returns (HarnessCompleteResponse);
+}
+
+// The supervising Worker Host supplies the Attempt and its remote Workspace.
+// An adapter cannot select the sandbox, working directory, or environment.
+service HarnessWorkspace {
+  rpc Execute(HarnessWorkspaceRequest) returns (HarnessWorkspaceResult);
+}
+
+message HarnessWorkspaceRequest {
+  oneof operation {
+    WorkspaceRead read = 1;
+    WorkspaceWrite write = 2;
+    WorkspaceEdit edit = 3;
+    WorkspaceGlob glob = 4;
+    WorkspaceGrep grep = 5;
+    WorkspaceList list = 6;
+    WorkspaceCommand command = 7;
+  }
+}
+
+message WorkspaceRead {
+  string path = 1;
+  optional uint32 offset = 2;
+  optional uint32 limit = 3;
+}
+
+message WorkspaceWrite {
+  string path = 1;
+  string content = 2;
+}
+
+message WorkspaceEdit {
+  string path = 1;
+  string old_text = 2;
+  string new_text = 3;
+  bool replace_all = 4;
+}
+
+message WorkspaceGlob {
+  string pattern = 1;
+  optional string path = 2;
+}
+
+enum WorkspaceGrepMode {
+  WORKSPACE_GREP_MODE_UNSPECIFIED = 0;
+  WORKSPACE_GREP_MODE_CONTENT = 1;
+  WORKSPACE_GREP_MODE_FILES_WITH_MATCHES = 2;
+  WORKSPACE_GREP_MODE_COUNT = 3;
+}
+
+message WorkspaceGrep {
+  string pattern = 1;
+  optional string path = 2;
+  optional string glob = 3;
+  WorkspaceGrepMode mode = 4;
+  optional uint32 head_limit = 5;
+  optional uint32 offset = 6;
+}
+
+message WorkspaceList {
+  optional string path = 1;
+}
+
+message WorkspaceCommand {
+  string command = 1;
+  optional uint32 timeout_ms = 2;
+}
+
+message HarnessWorkspaceResult {
+  string text = 1;
+  bool is_error = 2;
+}
+
+// Private to a Worker Host and its provider helper. The Harness never receives
+// this service's credentials or sandbox allocation identifiers.
+service RemoteWorkspaceProvider {
+  rpc Allocate(RemoteWorkspaceAllocateRequest) returns (RemoteWorkspaceAllocation);
+  rpc Stage(stream RemoteWorkspaceStageChunk) returns (RemoteWorkspaceStageResponse);
+  rpc Capture(RemoteWorkspaceCaptureRequest) returns (stream RemoteWorkspaceCaptureChunk);
+  rpc Stop(RemoteWorkspaceStopRequest) returns (RemoteWorkspaceStopResponse);
+  // One Workspace stdio MCP server, started inside the staged sandbox from its trusted copy.
+  // The first input is the start record; later inputs are its stdin. Outputs are its stdout.
+  // Ending or cancelling the call stops the server process, never the sandbox.
+  rpc RunMcpServer(stream RemoteMcpServerInput) returns (stream RemoteMcpServerOutput);
+  // One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
+  // Harness starts: the header, then for each file its record and exactly its bytes, and each
+  // empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+  // the returned tree.
+  rpc StageCopy(stream RemoteWorkspaceCopyUpload) returns (RemoteWorkspaceCopyStaged);
+  // After a successful Capture, a read-write copy's changed and created regular files: each
+  // record, then the summary, then each recorded file's bytes in record order.
+  rpc CaptureCopy(RemoteWorkspaceCaptureCopyRequest) returns (stream RemoteWorkspaceCopyDownload);
+  // Records the staged preparation sandbox as a prepared artifact, which later allocations start
+  // from. Only a sandbox allocated with `prepare` is snapshotted, never a Task sandbox.
+  rpc Snapshot(RemoteWorkspaceSnapshotRequest) returns (RemoteWorkspaceSnapshot);
+  // Deletes a prepared artifact; deleting one that is already gone succeeds.
+  rpc RemoveArtifact(RemoteWorkspaceRemoveArtifactRequest) returns (RemoteWorkspaceRemoveArtifactResponse);
+}
+
+// A Volume-relative file of a copy and its exact bytes' length and SHA-256.
+message RemoteWorkspaceCopyFile {
+  string key = 1;
+  uint64 size = 2;
+  string sha256 = 3;
+}
+
+message RemoteWorkspaceCopyHeader {
+  // `volumes/<SHA-256 of the Attempt ID>/<name>`, relative to the checkout.
+  string path = 1;
+  bool read_write = 2;
+}
+
+message RemoteWorkspaceCopyUpload {
+  oneof part {
+    RemoteWorkspaceCopyHeader header = 1;
+    RemoteWorkspaceCopyFile file = 2;
+    bytes payload = 3;
+    // An empty directory of the copy, by its Volume-relative path.
+    string directory = 4;
+  }
+}
+
+message RemoteWorkspaceCopyStaged {
+  uint64 files = 1;
+}
+
+message RemoteWorkspaceCaptureCopyRequest {
+  string path = 1;
+  // The copy's byte limit. Listing refuses a change set over it, or a changed file over it or
+  // 5 GiB, before reading that file, so it hashes at most the staged bytes and this limit.
+  uint64 max_bytes = 2;
+}
+
+// What the provider found in a read-write copy, after its changed and created file records.
+message RemoteWorkspaceCopyListed {
+  // Unchanged files, links, and other entries that are never written back.
+  uint64 skipped = 1;
+  // The first entry that refuses the copy: an unwritable name, a hard link, a directory
+  // nested too deeply, too many entries, or a change over the copy's byte limits. No bytes
+  // follow a refusal.
+  string error_key = 2;
+  string error_reason = 3;
+}
+
+message RemoteWorkspaceCopyDownload {
+  oneof part {
+    RemoteWorkspaceCopyFile file = 1;
+    RemoteWorkspaceCopyListed listed = 2;
+    bytes payload = 3;
+  }
+}
+
+message RemoteWorkspaceProviderBootstrap {
+  string token = 1;
+}
+
+message RemoteWorkspaceOwner {
+  string host_id = 1;
+  uint64 host_generation = 2;
+  string task_id = 3;
+  string attempt_id = 4;
+  string allocation_id = 5;
+}
+
+message RemoteWorkspaceAllocateRequest {
+  RemoteWorkspaceOwner owner = 1;
+  uint32 timeout_ms = 2;
+  repeated string allowed_actions = 3;
+  // The trusted commit's devcontainer subset, translated by the Worker Host. Absent when the
+  // commit declares none: the sandbox starts from the operator's template or image.
+  optional RemoteWorkspaceEnvironment environment = 3400;
+  // Start from a prepared artifact this host recorded instead of building `environment`'s
+  // image. Stage then updates the prepared checkout, which keeps its untracked setup output.
+  optional string prepared_artifact = 3500;
+  // A preparation sandbox: Stage takes a bundle of the trusted commit alone and runs the setup
+  // lines, and Snapshot records the result. With `prepared_artifact`, preparation is warm.
+  bool prepare = 3501;
+}
+
+// A sandbox image and setup derived only from the trusted commit's devcontainer subset.
+message RemoteWorkspaceEnvironment {
+  // Registry image the build starts from. Absent: the operator's configured template or image.
+  optional string image = 1;
+  // Dockerfile instructions applied after the base, ending as `user` when one is set. Every
+  // process the provider starts in the sandbox, including staging, runs as the image's user,
+  // so that user owns the checkout and the trusted MCP copy.
+  repeated string dockerfile_commands = 2;
+  // The user the image ends as: remoteUser, containerUser, or the Dockerfile's last literal USER.
+  optional string user = 3;
+  // Shell lines run in order after staging, in the checkout, as the image's user. "$1" is the
+  // checkout path; exports carry the resolved containerEnv and remoteEnv.
+  repeated string setup_commands = 4;
+}
+
+message RemoteWorkspaceAllocation {
+  string sandbox_id = 1;
+}
+
+message RemoteWorkspaceSnapshotRequest {}
+
+message RemoteWorkspaceSnapshot {
+  // The provider's artifact: an E2B snapshot ID or a Modal image ID.
+  string artifact = 1;
+}
+
+message RemoteWorkspaceRemoveArtifactRequest {
+  string artifact = 1;
+}
+
+message RemoteWorkspaceRemoveArtifactResponse {}
+
+message RemoteWorkspaceStageHeader {
+  string start_commit = 1;
+  BlobReference bundle = 2;
+  // Bodies follow the bundle bytes, in this exact manifest order.
+  repeated ArtifactInputFile input_files = 3;
+  // When set, the provider also materializes this commit from the bundle as the trusted copy
+  // its Workspace stdio MCP servers run in, outside the checkout the Harness can change.
+  optional string mcp_commit = 3400;
+}
+
+message RemoteWorkspaceStageChunk {
+  oneof part {
+    RemoteWorkspaceStageHeader header = 1;
+    bytes payload = 2;
+  }
+}
+
+message RemoteWorkspaceStageResponse {
+  // Echoed only after the provider verifies the files in its private checkout.
+  repeated ArtifactInputFile input_files = 1;
+}
+
+message RemoteWorkspaceCaptureRequest {}
+
+message RemoteWorkspaceCaptureChunk {
+  oneof part {
+    BlobReference tree = 1;
+    bytes payload = 2;
+  }
+}
+
+message RemoteWorkspaceStopRequest {
+  RemoteWorkspaceOwner owner = 1;
+  optional string sandbox_id = 2;
+}
+
+// A sandbox ID is present only after a definitive provider absence check.
+message RemoteWorkspaceStopResponse {
+  optional string stopped_sandbox_id = 1;
+}
+
+// The server runs with no Worker Host variable: only a fixed PATH and LANG.
+message RemoteMcpServerStart {
+  string name = 1;
+  string command = 2;
+  repeated string args = 3;
+}
+
+message RemoteMcpServerInput {
+  oneof part {
+    RemoteMcpServerStart start = 1;
+    bytes stdin = 2;
+  }
+}
+
+message RemoteMcpServerOutput {
+  bytes stdout = 1;
+}
+
+// The supervising Worker Host supplies the Attempt identity for this call.
+service HarnessQuestions {
+  rpc AskQuestion(HarnessAskQuestionRequest) returns (ObjectiveQuestion);
+}
+
+message HarnessAskQuestionRequest {
+  string operation_id = 1;
+  string text = 2;
+}
+
+// The supervising Worker Host supplies the Attempt identity.
+service HarnessWorkstreams {
+  rpc Read(HarnessReadWorkstreamRequest) returns (ReadAttemptWorkstreamResponse);
+  rpc Post(HarnessPostWorkstreamRequest) returns (PostAttemptWorkstreamResponse);
+}
+
+message HarnessReadWorkstreamRequest {
+  optional uint64 after_sequence = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message HarnessPostWorkstreamRequest {
+  string operation_id = 1;
+  string body = 2;
+  repeated string to_tag_ids = 3;
+}
+
+service HarnessMailbox {
+  rpc Read(HarnessReadMailboxRequest) returns (ListMailboxMessagesResponse);
+  rpc SendMessage(HarnessSendTagMessageRequest) returns (SendTagMessageResponse);
+  rpc ReadReviewPatch(HarnessReadReviewPatchRequest) returns (HarnessReviewPatch);
+}
+
+// The supervising Worker Host supplies the Attempt identity.
+service HarnessWorkSessions {
+  rpc Start(HarnessStartWorkSessionRequest) returns (WorkSession);
+  rpc Continue(HarnessContinueWorkSessionRequest) returns (WorkSession);
+  rpc Ask(HarnessAskWorkSessionQuestionRequest) returns (WorkSessionQuestion);
+}
+
+message HarnessContinueWorkSessionRequest {
+  string operation_id = 1;
+  string work_session_id = 2;
+  string message = 3;
+}
+
+message HarnessAskWorkSessionQuestionRequest {
+  string operation_id = 1;
+  string text = 2;
+}
+
+message HarnessStartWorkSessionRequest {
+  string operation_id = 1;
+  string title = 2;
+  string instruction = 3;
+  optional string workspace_id = 4;
+  optional string target_tag_id = 5;
+}
+
+message HarnessSendTagMessageRequest {
+  string operation_id = 1;
+  string recipient_tag_id = 2;
+  string text = 3;
+  CommitReviewSubmission review = 4;
+}
+
+message HarnessReadMailboxRequest {
+  uint32 limit = 1;
+  string cursor = 2;
+}
+
+message HarnessReadReviewPatchRequest {
+  string review_id = 1;
+  uint64 offset = 2;
+}
+
+message HarnessReviewPatch {
+  string review_id = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+  optional uint64 next_offset = 4;
+  WorkspaceDeliveryReference delivery = 5;
+}
+
+enum LiveInputState {
+  LIVE_INPUT_STATE_UNSPECIFIED = 0;
+  LIVE_INPUT_STATE_PENDING = 1;
+  LIVE_INPUT_STATE_DISPATCHING = 2;
+  LIVE_INPUT_STATE_ACCEPTED = 3;
+  LIVE_INPUT_STATE_REJECTED = 4;
+  LIVE_INPUT_STATE_UNKNOWN = 5;
+  LIVE_INPUT_STATE_WITHDRAWN = 6;
+  LIVE_INPUT_STATE_FAILED = 7;
+  LIVE_INPUT_STATE_RETRIED = 8;
+}
+
+enum LiveInputDecision {
+  LIVE_INPUT_DECISION_UNSPECIFIED = 0;
+  LIVE_INPUT_DECISION_FAIL = 1;
+  LIVE_INPUT_DECISION_RETRY = 2;
+}
+
+enum LiveInputReceipt {
+  LIVE_INPUT_RECEIPT_UNSPECIFIED = 0;
+  LIVE_INPUT_RECEIPT_ACCEPTED = 1;
+  LIVE_INPUT_RECEIPT_REJECTED = 2;
+  LIVE_INPUT_RECEIPT_UNKNOWN = 3;
+  LIVE_INPUT_RECEIPT_WITHDRAWN = 4;
+}
+
+message QueueInputRequest {
+  string task_id = 1;
+  string operation_id = 2;
+  string text = 3;
+}
+
+message GetInputRequest {
+  string input_id = 1;
+}
+
+message ResolveInputRequest {
+  string input_id = 1;
+  string operation_id = 2;
+  LiveInputDecision decision = 3;
+  string evidence = 4;
+}
+
+message LiveInput {
+  string input_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string follower_task_id = 4;
+  string text = 5;
+  LiveInputState state = 6;
+  uint64 order = 7;
+}
+
+message TakeInputRequest {
+  InspectAttemptRequest attempt = 1;
+}
+
+message TakeInputResponse {
+  LiveInput input = 1;
+  uint64 valid_for_ms = 2;
+}
+
+message HarnessTakeLiveInputRequest {}
+
+message HarnessSettleLiveInputRequest {
+  string input_id = 1;
+  LiveInputReceipt receipt = 2;
+}
+
+message SettleInputRequest {
+  InspectAttemptRequest attempt = 1;
+  string input_id = 2;
+  LiveInputReceipt receipt = 3;
+}
+
+message CreateAuthKeyRequest {
+  reserved 1;
+  string operation_id = 2;
+  bytes key_digest = 3;
+  // Zero means the fixed maximum lifetime: one hour for a one-time key and
+  // 90 days for a reusable key. A shorter positive lifetime is allowed.
+  uint64 expires_in_ms = 4;
+  // For a host key, the Tags its hosts may run; for a client key, the Tags its
+  // clients may talk to. Refused for a gateway key.
+  repeated string allowed_tag_ids = 5;
+  // Every Tag. A gateway key takes this or nothing: it lets the Gateway serve
+  // connector accounts no Surface Account names, which admit work on any Tag,
+  // and deliver the admin operator's notifications.
+  bool all_tags = 6;
+  // A reusable key enrolls any number of principals; a one-time key enrolls one.
+  // Each enrollee chooses its own name.
+  bool reusable = 1400;
+  // Host keys only: hosts that join with an ephemeral key are removed once they
+  // go offline.
+  bool ephemeral = 1401;
+  // Host keys only: labels granted to every host that joins with the key.
+  repeated string labels = 1402;
+  // The operator's name for the key: 1 to 63 lowercase letters, digits,
+  // hyphens or underscores, starting with a letter or digit. Never reused.
+  string name = 3300;
+  // Required: the one role every enrollee of the key takes. HOST, GATEWAY or
+  // CLIENT; it never changes after creation.
+  PrincipalRole role = 4100;
+}
+
+message AuthKey {
+  reserved 1;
+  int64 expires_at_ms = 2;
+  repeated string allowed_tag_ids = 3;
+  bool all_tags = 4;
+  bool reusable = 1400;
+  bool ephemeral = 1401;
+  repeated string labels = 1402;
+  reserved 1403;
+  // A revoked key enrolls no more hosts; hosts that joined keep their enrollment.
+  bool revoked = 1404;
+  string name = 3300;
+  int64 created_at_ms = 3301;
+  // A one-time key enrolled its principal, or a reusable key enrolled at least one.
+  bool used = 3302;
+  PrincipalRole role = 4100;
+}
+
+// Who a caller of the Control Plane is. Operators present the admin operator
+// token or an Operator Token; hosts, Gateways and clients present the
+// credential they enrolled with an Auth Key of their role.
+enum PrincipalRole {
+  PRINCIPAL_ROLE_UNSPECIFIED = 0;
+  PRINCIPAL_ROLE_OPERATOR = 1;
+  PRINCIPAL_ROLE_HOST = 2;
+  PRINCIPAL_ROLE_GATEWAY = 3;
+  PRINCIPAL_ROLE_CLIENT = 4;
+}
+
+message RegisterHostRequest {
+  string incarnation_id = 1;
+}
+
+message HostRecord {
+  string host_id = 1;
+  uint64 generation = 2;
+  bool revoked = 3;
+}
+
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_QUEUED = 1;
+  TASK_STATE_RUNNING = 2;
+  TASK_STATE_SUCCEEDED = 3;
+  TASK_STATE_FAILED = 4;
+  TASK_STATE_CANCELLED = 5;
+  TASK_STATE_CLAIMED = 6;
+  TASK_STATE_UNCERTAIN = 7;
+}
+
+enum HarnessKind {
+  HARNESS_KIND_UNSPECIFIED = 0;
+  HARNESS_KIND_CODEX = 1;
+  HARNESS_KIND_CLAUDE_CODE = 2;
+  HARNESS_KIND_OPENAI_AGENTS = 3;
+  HARNESS_KIND_OPENCODE = 4;
+  HARNESS_KIND_CURSOR = 5;
+}
+
+message PutTagRequest {
+  string tag_id = 1;
+  string instructions = 2;
+  repeated string allowed_actions = 3;
+  WorkspaceSpec workspace = 4;
+  HarnessKind harness_kind = 5;
+  repeated ApprovalRule approval_rules = 6;
+  PolicyExecutionSettings execution = 7;
+  // A display name can be reused after retirement. The Tag ID is permanent.
+  optional string name = 8;
+  // Zero requires a new identity; a positive value fences an existing revision.
+  optional uint64 expected_revision = 9;
+}
+
+message Tag {
+  string tag_id = 1;
+  string instructions = 2;
+  repeated string allowed_actions = 3;
+  uint64 revision = 4;
+  WorkspaceSpec workspace = 5;
+  HarnessKind harness_kind = 6;
+  repeated ApprovalRule approval_rules = 7;
+  PolicyExecutionSettings execution = 8;
+  string name = 9;
+  optional int64 retired_at_ms = 10;
+  // Labels a bound Worker Host must carry to run this Tag's Tasks.
+  repeated string runs_on = 1400;
+}
+
+message ListTagsRequest {
+  uint32 limit = 1;
+  string cursor = 2;
+  bool include_retired = 3;
+}
+
+message ListTagsResponse {
+  repeated Tag tags = 1;
+  string next_cursor = 2;
+}
+
+message GetTagRequest {
+  string tag_id = 1;
+}
+
+message RetireTagRequest {
+  string tag_id = 1;
+  bool dry_run = 2;
+}
+
+message RetireTagResponse {
+  Tag tag = 1;
+  repeated string blockers = 2;
+  uint64 surface_locations = 3;
+  uint64 host_bindings = 4;
+  uint64 mailbox_grants = 5;
+  uint64 role_assignments = 6;
+}
+
+message Conversation {
+  string tag_id = 1;
+  string name = 2;
+  string session_id = 3;
+  Task latest_task = 4;
+}
+
+message ConversationMessage {
+  Task task = 1;
+  string conversation = 2;
+  LiveInput live_input = 3;
+  // Set for a report turn in the conversation, which has no operator message.
+  optional string work_session_report_id = 4;
+}
+
+message ListConversationsRequest {
+  string tag_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message ListConversationsResponse {
+  repeated Conversation conversations = 1;
+  string next_cursor = 2;
+}
+
+message ListMessagesRequest {
+  string tag_id = 1;
+  string conversation = 2;
+  uint32 limit = 3;
+  string cursor = 4;
+}
+
+message ListMessagesResponse {
+  repeated ConversationMessage messages = 1;
+  string next_cursor = 2;
+}
+
+message SendMessageRequest {
+  string tag_id = 1;
+  string conversation = 2;
+  string text = 3;
+  string operation_id = 4;
+  ExecutionLimits execution_limits = 5;
+  TaskOutputPolicy output_policy = 6;
+}
+
+message GetMessageRequest {
+  string tag_id = 1;
+  string task_id = 2;
+}
+
+message ListMessageEventsRequest {
+  string tag_id = 1;
+  string task_id = 2;
+  uint64 after_sequence = 3;
+  uint32 limit = 4;
+}
+
+message SubmitTaskRequest {
+  string tag_id = 1;
+  string session_id = 2;
+  string operation_id = 3;
+  string prompt = 4;
+  ExecutionLimits execution_limits = 5;
+  TaskOutputPolicy output_policy = 6;
+  repeated TaskArtifactInputSelection input_artifacts = 7;
+}
+
+message ReportedCostLimit {
+  string currency = 1;
+  uint64 amount_minor = 2;
+}
+
+message ExecutionLimits {
+  optional uint64 max_reported_tokens = 1;
+  ReportedCostLimit max_reported_cost = 2;
+  optional uint64 max_native_agents = 3;
+}
+
+message Task {
+  string task_id = 1;
+  string tag_id = 2;
+  string session_id = 3;
+  string prompt = 4;
+  string instructions = 5;
+  repeated string allowed_actions = 6;
+  uint64 tag_revision = 7;
+  TaskState state = 8;
+  optional string result = 9;
+  optional string attempt_id = 10;
+  WorkspaceSpec workspace = 11;
+  WorkspaceDeliveryReference workspace_delivery = 12;
+  HarnessKind harness_kind = 13;
+  repeated ApprovalRule approval_rules = 14;
+  TaskPolicySnapshot policy_snapshot = 15;
+  // Accepted once when work is queued. Subsequent usage changes later allocations.
+  ExecutionLimits execution_limits = 16;
+  ExecutionSelection execution_selection = 17;
+  AttemptExecutionSelection attempt_execution = 18;
+  repeated ArtifactSelection artifacts = 19;
+  // Optional output requirements frozen when the Task is accepted.
+  TaskOutputPolicy output_policy = 20;
+  repeated AcceptedTaskArtifactInput input_artifacts = 21;
+  // How a surface message selected this Task's GitHub Workspace: request, origin or default.
+  // Absent when the Tag's configured Workspace (or none) was used.
+  optional string workspace_selection = 3500;
+  // Limits the current Attempt's adapter confirmed it applies, and how; absent until it does.
+  AppliedExecutionLimits applied_execution_limits = 5001;
+  // What each Attempt's read-write Workspace copies wrote back to their Volumes. Set only by
+  // GetTask; the Control Plane records the summary, never the bytes.
+  repeated AttemptWorkspaceMountWrites workspace_mount_writes = 5100;
+  // What the current Attempt's durable records show about its limits and its cleanup. Set only
+  // by GetTask.
+  TaskExecutionReport execution_report = 5200;
+}
+
+// How the current Attempt ended against its execution limits.
+enum ExecutionLimitOutcome {
+  EXECUTION_LIMIT_OUTCOME_UNSPECIFIED = 0;
+  // No limit was requested or applied.
+  EXECUTION_LIMIT_OUTCOME_NOT_REQUESTED = 1;
+  // The Attempt has not ended and no threshold was reached yet.
+  EXECUTION_LIMIT_OUTCOME_PENDING = 2;
+  EXECUTION_LIMIT_OUTCOME_WITHIN_LIMITS = 3;
+  EXECUTION_LIMIT_OUTCOME_THRESHOLD_REACHED = 4;
+  // The Attempt ended, but its records cannot show whether every limit held.
+  EXECUTION_LIMIT_OUTCOME_UNKNOWN = 5;
+}
+
+// One limited dimension of the current Attempt. Unspecified: the dimension has no limit.
+enum ExecutionThreshold {
+  EXECUTION_THRESHOLD_UNSPECIFIED = 0;
+  EXECUTION_THRESHOLD_NOT_REACHED = 1;
+  EXECUTION_THRESHOLD_REACHED = 2;
+  // No applied limit, or no observation that decides it.
+  EXECUTION_THRESHOLD_UNDETERMINED = 3;
+}
+
+// Whether the current Attempt's execution was proven stopped.
+enum AttemptCleanup {
+  ATTEMPT_CLEANUP_UNSPECIFIED = 0;
+  // No Attempt, or one whose execution never started.
+  ATTEMPT_CLEANUP_NOT_STARTED = 1;
+  // The Attempt still holds execution authority.
+  ATTEMPT_CLEANUP_PENDING = 2;
+  // The host confirmed execution stopped, or an operator recorded that it did.
+  ATTEMPT_CLEANUP_CONFIRMED = 3;
+  // Execution may still be running: the host could not confirm cleanup or lost its authority.
+  ATTEMPT_CLEANUP_UNKNOWN = 4;
+}
+
+message TaskExecutionReport {
+  ExecutionLimitOutcome limit_outcome = 1;
+  ExecutionThreshold max_reported_tokens = 2;
+  ExecutionThreshold max_reported_cost = 3;
+  ExecutionThreshold max_native_agents = 4;
+  // Every requested limit has an applied limit at or below it.
+  bool limits_applied = 5;
+  // Whether the Attempt's usage records are final. Absent when no token or cost limit applies.
+  optional bool usage_complete = 6;
+  // The report classifies every limited dimension of an ended Attempt.
+  bool complete = 7;
+  AttemptCleanup cleanup = 8;
+  // The host's redacted reasons when it could not confirm cleanup: at most 8, each at most 160
+  // characters. Cleared when the host later confirms cleanup.
+  repeated string cleanup_failure = 9;
+}
+
+message ReportCleanupFailureRequest {
+  InspectAttemptRequest attempt = 1;
+  repeated string reasons = 2;
+}
+
+message ReportCleanupFailureResponse {}
+
+message ResolveWorkspaceRefRequest {
+  InspectAttemptRequest attempt = 1;
+  string base_commit = 2;
+}
+
+message TaskArtifactInputSelection {
+  string artifact_id = 1;
+  repeated string paths = 2;
+  bool require_accepted = 3;
+  optional string publication_approval_id = 4;
+}
+
+message AcceptedTaskArtifactInput {
+  string artifact_id = 1;
+  string source_task_id = 2;
+  string source_attempt_id = 3;
+  repeated ArtifactInputFile files = 4;
+  ArtifactPublicationPin publication = 5;
+}
+
+// Immutable byte identity for a file selected at admission.
+message ArtifactInputFile {
+  string path = 1;
+  BlobReference blob = 2;
+}
+
+message AcceptedTaskArtifactInputs {
+  repeated AcceptedTaskArtifactInput inputs = 1;
+}
+
+message OutputPathPatterns {
+  repeated string patterns = 1;
+}
+
+enum OutputGitMode {
+  OUTPUT_GIT_MODE_UNSPECIFIED = 0;
+  OUTPUT_GIT_MODE_REFERENCE = 1;
+  OUTPUT_GIT_MODE_CAPTURE = 2;
+  OUTPUT_GIT_MODE_IGNORE = 3;
+}
+
+message TaskOutputPolicy {
+  optional string directory = 1;
+  repeated string required = 2;
+  // An omitted include selects the output directory. An empty include
+  // selects only files matched by the required patterns.
+  OutputPathPatterns include = 3;
+  repeated string exclude = 4;
+  OutputGitMode git = 5;
+  optional uint32 max_files = 6;
+  optional uint64 max_bytes = 7;
+}
+
+// Exact files submitted as part of a successful Task result.
+message ArtifactSelection {
+  string artifact_id = 1;
+  repeated string paths = 2;
+}
+
+// A single choice from the accepted Tag and Role execution policy.
+message ExecutionSelection {
+  optional string model = 1;
+  optional string effort = 2;
+}
+
+message HarnessExecutionProfile {
+  repeated string model_ids = 1;
+  optional string default_model = 2;
+  bool allow_unsandboxed_commands = 3;
+  bool remote_file_workspace = 4;
+  repeated McpServerCapability mcp_servers = 5;
+  SharedExecutionCapability shared_execution = 6;
+  bool declared_task_outputs = 7;
+  bool task_artifact_inputs = 8;
+  repeated WorkspaceMountCapability workspace_mounts = 9;
+  // OAuth MCP servers whose login lapsed on this host. They are advertised here instead of in
+  // `mcp_servers`, so Tasks that need them wait for `supertag mcp login NAME`.
+  repeated string mcp_login_servers = 1800;
+}
+
+enum SharedExecutionTool {
+  SHARED_EXECUTION_TOOL_UNSPECIFIED = 0;
+  SHARED_EXECUTION_TOOL_READ = 1;
+  SHARED_EXECUTION_TOOL_WRITE = 2;
+  SHARED_EXECUTION_TOOL_COMMAND = 3;
+}
+
+message SharedExecutionCapability {
+  string environment_id = 1;
+  repeated SharedExecutionTool tools = 2;
+  string incarnation_id = 3;
+}
+
+message SharedExecutionAccessSummary {
+  string environment_id = 1;
+  string incarnation_id = 2;
+}
+
+enum ModelSource {
+  MODEL_SOURCE_UNSPECIFIED = 0;
+  MODEL_SOURCE_TASK = 1;
+  MODEL_SOURCE_HOST_DEFAULT = 2;
+  MODEL_SOURCE_HARNESS_DEFAULT = 3;
+}
+
+message AttemptExecutionSelection {
+  ExecutionSelection selection = 1;
+  ModelSource model_source = 2;
+  HarnessKind harness_kind = 3;
+  optional bool effort_applied = 4;
+  bool remote_file_workspace = 5;
+  SharedExecutionCapability shared_execution = 6;
+  repeated McpServerCapability mcp_servers = 7;
+  bool task_artifact_inputs = 8;
+}
+
+service AttemptMcpEffects {
+  rpc Reserve(ReserveMcpEffectRequest) returns (ReserveMcpEffectResponse);
+  rpc Settle(SettleMcpEffectRequest) returns (SettleMcpEffectResponse);
+  // Records the Workspace MCP servers an Attempt resolved, before any of them starts. The first
+  // recorded digest of a Task binds every later Attempt of that Task.
+  rpc RecordWorkspaceMcp(RecordWorkspaceMcpRequest) returns (RecordWorkspaceMcpResponse);
+}
+
+// The selected `.mcp.json` entries of a Task's Workspace as one Attempt resolved them.
+message WorkspaceMcpRecord {
+  // `sha256:` and the hex digest of the selected entries as declared, with no value resolved.
+  string digest = 1;
+  // One capability per selected server; its provider binding pins the resolved launch.
+  repeated McpServerCapability servers = 2;
+}
+message RecordWorkspaceMcpRequest {
+  InspectAttemptRequest attempt = 1;
+  WorkspaceMcpRecord record = 2;
+}
+message RecordWorkspaceMcpResponse {}
+
+message ReserveMcpEffectRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string server = 3;
+  string tool = 4;
+  string arguments_json = 5;
+  string provider_binding = 6;
+  string tool_schema_sha256 = 7;
+}
+message ReserveMcpEffectResponse {
+  Approval approval = 1;
+  optional string dispatch_id = 2;
+  optional string result_json = 3;
+  bool unconfirmed = 4;
+  uint64 dispatch_valid_for_ms = 5;
+  optional string canonical_arguments_json = 6;
+  bool ungated = 7;
+}
+message SettleMcpEffectRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string dispatch_id = 3;
+  // A missing result records an effect whose provider receipt is unconfirmed.
+  optional string result_json = 4;
+}
+message SettleMcpEffectResponse {}
+
+message GetTaskRequest {
+  string task_id = 1;
+}
+
+// Names one Session: by its ID, and by its Tag when more than one Tag has a Session with that ID.
+message GetSessionDeliveryRequest {
+  string session_id = 1;
+  string tag_id = 2;
+}
+
+// The Session's latest accepted Workspace delivery and the Task that delivered it.
+message SessionDelivery {
+  string task_id = 1;
+  string tag_id = 2;
+  string session_id = 3;
+  WorkspaceDeliveryReference delivery = 4;
+}
+
+message ListEventsRequest {
+  string task_id = 1;
+  uint64 after_sequence = 2;
+  uint32 limit = 3;
+}
+
+message ListEventsResponse {
+  repeated TaskEvent events = 1;
+}
+
+message CancelTaskRequest {
+  string task_id = 1;
+}
+
+message ClaimTaskRequest {
+  string operation_id = 1;
+  repeated string workspace_ids = 2;
+  HarnessKind harness_kind = 3;
+  repeated ContextContract context_contracts = 4;
+  HarnessExecutionProfile execution_profile = 5;
+  repeated string gateway_workspace_ids = 6;
+}
+
+message ClaimTaskResponse {
+  Assignment assignment = 1;
+}
+
+message Assignment {
+  Task task = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+}
+
+message StartTaskRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+}
+
+message InspectAttemptRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+}
+
+message AttemptAuthority {
+  Task task = 1;
+  uint64 valid_for_ms = 2;
+}
+
+enum AttemptDecision {
+  ATTEMPT_DECISION_UNSPECIFIED = 0;
+  ATTEMPT_DECISION_FAILED = 1;
+  ATTEMPT_DECISION_RETRY = 2;
+}
+
+message ResolveAttemptRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string operation_id = 3;
+  AttemptDecision decision = 4;
+  string evidence = 5;
+  bool confirmed_stopped = 6;
+}
+
+message AttemptResolution {
+  string task_id = 1;
+  string attempt_id = 2;
+  AttemptDecision decision = 3;
+  // Empty when the Attempt's own Worker Host reclaimed it; see worker_host_id.
+  string operator_id = 4;
+  string evidence = 5;
+  int64 resolved_at_ms = 6;
+  // Set when the Attempt's restarted Worker Host proved its execution stopped.
+  string worker_host_id = 5000;
+}
+
+message ReclaimAttemptRequest {
+  InspectAttemptRequest attempt = 1;
+  // What the host checked, such as the recorded process groups it found gone.
+  string evidence = 2;
+}
+
+message ReportAppliedLimitsRequest {
+  InspectAttemptRequest attempt = 1;
+  AppliedExecutionLimits applied = 2;
+}
+
+message ReportAppliedLimitsResponse {}
+
+message GetAttemptResolutionResponse {
+  AttemptResolution resolution = 1;
+}
+
+message ReportAttemptUsageRequest {
+  InspectAttemptRequest attempt = 1;
+  uint64 sequence = 2;
+  optional uint64 amount_minor = 3;
+  optional string currency = 4;
+  bool estimated = 5;
+  NativeTokenUsage native_usage = 6;
+}
+
+message ReportAttemptUsageResponse {}
+
+message NativeTokenUsage {
+  uint64 input_tokens = 1;
+  uint64 cached_input_tokens = 2;
+  uint64 output_tokens = 3;
+  optional string observed_model = 4;
+  optional uint64 total_tokens = 5;
+}
+
+message ListNativeUsageRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  uint64 after_sequence = 3;
+  uint32 limit = 4;
+}
+
+message ListNativeUsageResponse {
+  repeated HarnessUsageRequest reports = 1;
+}
+
+message HarnessUsageRequest {
+  uint64 sequence = 1;
+  NativeTokenUsage native_usage = 2;
+  optional uint64 amount_minor = 3;
+  optional string currency = 4;
+  bool estimated = 5;
+}
+
+message AppendEventRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+  uint64 sequence = 4;
+  string text = 5;
+}
+
+message TaskEvent {
+  uint64 sequence = 1;
+  string text = 2;
+}
+
+message FinishTaskRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+  string result = 4;
+  bool succeeded = 5;
+  ObjectiveSignal objective_signal = 6;
+  optional string checkpoint_sha256 = 7;
+  WorkspaceDeliveryReference workspace_delivery = 8;
+  repeated string waiting_approval_ids = 9;
+  repeated ArtifactSelection artifacts = 10;
+}
+
+message HarnessAttachRequest {}
+
+enum ExecutionLimitEnforcement {
+  EXECUTION_LIMIT_ENFORCEMENT_UNSPECIFIED = 0;
+  EXECUTION_LIMIT_ENFORCEMENT_HARNESS_GUARD = 1;
+  EXECUTION_LIMIT_ENFORCEMENT_INTERRUPT_ON_REPORT = 2;
+  EXECUTION_LIMIT_ENFORCEMENT_PROVIDER_BUDGET = 3;
+}
+
+message AppliedExecutionLimits {
+  ExecutionLimits limits = 1;
+  ExecutionLimitEnforcement native_agents = 2;
+  ExecutionLimitEnforcement reported_tokens = 3;
+  ExecutionLimitEnforcement reported_cost = 4;
+}
+
+message ConfirmExecutionLimitsResponse {}
+
+message AdapterBootstrap {
+  string endpoint = 1;
+  string token = 2;
+}
+
+message AttemptHistoryEntry {
+  string task_id = 1;
+  string prompt = 2;
+  optional string result = 3;
+}
+
+message AttemptHistory {
+  repeated AttemptHistoryEntry entries = 1;
+}
+
+message HarnessRun {
+  Task task = 1;
+  string attempt_id = 2;
+  SessionCheckpoint checkpoint = 3;
+  bool may_ask_objective_question = 4;
+  AttemptCapabilities coordination = 5;
+  repeated ResolvedSkill resolved_skills = 6;
+  // Prior turns from the same Session, supplied as untrusted evidence to fresh native runs.
+  repeated AttemptHistoryEntry history = 7;
+  bool remote_workspace = 8;
+  // The supervising Worker Host can capture selected files from this checkout.
+  bool may_capture_artifacts = 9;
+  SharedExecutionAccessSummary shared_execution = 10;
+  // Artifact visibility follows the accepted Session/Objective, not the byte digest.
+  bool may_acquire_artifacts = 11;
+  bool may_materialize_artifacts = 12;
+}
+
+message ContextContract {
+  string type = 1;
+  uint32 version = 2;
+}
+
+message ContextPin {
+  string set_id = 1;
+  string item_id = 2;
+  string item_key = 3;
+  string reference = 4;
+  string version = 5;
+  string digest = 6;
+}
+
+message OmittedContextItem {
+  string set_id = 1;
+  string item_id = 2;
+  string item_key = 3;
+  string type = 4;
+  uint32 version = 5;
+  string reason = 6;
+}
+
+message ContextResolutionManifest {
+  repeated ContextPin pins = 1;
+  repeated OmittedContextItem omissions = 2;
+}
+
+message ResolvedSkill {
+  ContextPin pin = 1;
+  string local_path = 2;
+}
+
+message CommitContextResolutionRequest {
+  InspectAttemptRequest attempt = 1;
+  ContextResolutionManifest manifest = 2;
+}
+
+message SessionCheckpoint {
+  string harness = 1;
+  string format = 2;
+  bytes payload = 3;
+  string sha256 = 4;
+}
+
+message CheckpointReference {
+  string harness = 1;
+  string format = 2;
+  uint64 byte_length = 3;
+  string sha256 = 4;
+}
+
+message GetCheckpointResponse {
+  CheckpointReference reference = 1;
+}
+
+message CommitCheckpointRequest {
+  InspectAttemptRequest attempt = 1;
+  CheckpointReference reference = 2;
+}
+
+message CheckpointUpload {
+  oneof part {
+    CommitCheckpointRequest begin = 1;
+    bytes chunk = 2;
+  }
+}
+
+message CheckpointDownload {
+  oneof part {
+    CheckpointReference reference = 1;
+    bytes chunk = 2;
+  }
+}
+
+message WorkspaceSpec {
+  string workspace_id = 1;
+  // The full commit Tasks start from. A Tag either pins it or names `base_ref`, never both; a
+  // Task of a Tag that names `base_ref` has it empty until its first Attempt resolves the branch.
+  string base_commit = 2;
+  // Set by admission from the catalog, never accepted from PutTag input.
+  GithubWorkspace github_source = 3;
+  repeated WorkspaceCopyMount mounts = 4;
+  // Servers the Workspace's `.mcp.json` declares that its Tasks may use. Each Attempt reads them
+  // from a Worker-owned snapshot of `base_commit`, never from the Task worktree.
+  repeated string mcp_servers = 1800;
+  // A local Workspace branch the Tag follows instead of a pinned commit. A Session's first
+  // Attempt resolves it on its Worker Host through `ResolveWorkspaceRef`, and every Task of the
+  // Session keeps that commit.
+  string base_ref = 5;
+}
+
+message WorkspaceCopyMount {
+  string volume_id = 1;
+  string destination = 2;
+  uint64 max_bytes = 3;
+  // Resolved and frozen by the Control Plane at Task admission.
+  WorkspaceVolume volume = 4;
+  // The Worker Host writes changed and created files back to the Volume after a successful
+  // Attempt. Requires `files:write`.
+  bool read_write = 5100;
+}
+
+message WorkspaceMountCapability {
+  string volume_id = 1;
+  string source = 2;
+  string destination_root = 3;
+  // The credential name an object-store mapping holds; empty for file Volumes.
+  string credential = 5100;
+}
+
+message WorkspaceVolume {
+  string volume_id = 1;
+  string source = 2;
+  uint64 revision = 3;
+  // The name of the credential each Worker Host maps to reach an object-store source, never its
+  // value. Empty for file Volumes, whose host mapping is the consent.
+  string credential = 5100;
+}
+
+enum WorkspaceMountWriteStatus {
+  WORKSPACE_MOUNT_WRITE_STATUS_UNSPECIFIED = 0;
+  // Every changed and created file was written.
+  WORKSPACE_MOUNT_WRITE_STATUS_COMPLETE = 1;
+  // Writing stopped at the first failure; `files` lists what was written.
+  WORKSPACE_MOUNT_WRITE_STATUS_PARTIAL = 2;
+  // The change set exceeded a bound, so nothing was written.
+  WORKSPACE_MOUNT_WRITE_STATUS_REFUSED = 3;
+}
+
+message WorkspaceMountWrittenFile {
+  // Path relative to the Volume source, with `/` separators.
+  string key = 1;
+  uint64 size = 2;
+  // Lowercase hex SHA-256 of the written bytes.
+  string sha256 = 3;
+}
+
+// One read-write copy's write-back, reported by the Worker Host that ran the Attempt.
+message WorkspaceMountWrite {
+  string volume_id = 1;
+  string destination = 2;
+  WorkspaceMountWriteStatus status = 3;
+  repeated WorkspaceMountWrittenFile files = 4;
+  // Files unchanged since the copy.
+  uint64 skipped = 5;
+  // The failed or refused key and why; empty when complete. A refusal
+  // whose entry has no Volume key names its nearest directory, or none
+  // for the copy root.
+  string error_key = 6;
+  string error_reason = 7;
+  // Changed keys not written, including a non-empty `error_key`.
+  repeated string not_attempted = 8;
+}
+
+message AttemptWorkspaceMountWrites {
+  string attempt_id = 1;
+  repeated WorkspaceMountWrite writes = 2;
+}
+
+message GithubWorkspaceBundle {
+  GithubWorkspace workspace = 1;
+  BlobReference bundle = 2;
+}
+
+message VerifyWorkspaceOutputRemoteRequest {
+  InspectAttemptRequest attempt = 1;
+  string commit = 2;
+}
+
+message VerifyWorkspaceOutputRemoteResponse {
+  optional string remote = 1;
+}
+
+message GithubWorkspaceDownload {
+  oneof part {
+    GithubWorkspaceBundle reference = 1;
+    bytes chunk = 2;
+  }
+}
+
+message BlobReference {
+  string sha256 = 1;
+  uint64 byte_length = 2;
+}
+
+message WorkspaceDeliveryReference {
+  string workspace_id = 1;
+  string delivery_id = 2;
+  string base_commit = 3;
+  string start_commit = 4;
+  string head_commit = 5;
+  bool committed = 6;
+  uint64 changed_files = 7;
+  BlobReference patch = 8;
+  BlobReference bundle = 9;
+}
+
+message WorkspaceDeliveryRequest {
+  InspectAttemptRequest attempt = 1;
+  WorkspaceDeliveryReference delivery = 2;
+}
+
+message WorkspaceContinuation {
+  WorkspaceDeliveryReference delivery = 1;
+}
+
+message WorkspaceUpload {
+  oneof part {
+    WorkspaceDeliveryRequest begin = 1;
+    bytes patch_chunk = 2;
+    bytes bundle_chunk = 3;
+  }
+}
+
+message WorkspaceDownload {
+  oneof part {
+    WorkspaceDeliveryReference reference = 1;
+    bytes chunk = 2;
+  }
+}
+
+enum WorkspaceArtifactKind {
+  WORKSPACE_ARTIFACT_KIND_UNSPECIFIED = 0;
+  WORKSPACE_ARTIFACT_KIND_PATCH = 1;
+  WORKSPACE_ARTIFACT_KIND_BUNDLE = 2;
+}
+
+message GetWorkspaceArtifactRequest {
+  string task_id = 1;
+  WorkspaceArtifactKind kind = 2;
+}
+
+message GetReviewArtifactRequest {
+  InspectAttemptRequest attempt = 1;
+  string review_id = 2;
+}
+
+message HarnessPublishRequest {
+  uint64 sequence = 1;
+  string text = 2;
+}
+
+message HarnessCompleteRequest {
+  string result = 1;
+  bool succeeded = 2;
+  ObjectiveSignal objective_signal = 3;
+  SessionCheckpoint checkpoint = 4;
+  repeated string waiting_approval_ids = 5;
+}
+
+message HarnessCompleteResponse {}
+
+enum ObjectiveStatus {
+  OBJECTIVE_STATUS_UNSPECIFIED = 0;
+  OBJECTIVE_STATUS_WORKING = 1;
+  OBJECTIVE_STATUS_BLOCKED = 2;
+  OBJECTIVE_STATUS_LIMITED = 3;
+  OBJECTIVE_STATUS_READY_FOR_REVIEW = 4;
+  OBJECTIVE_STATUS_COMPLETED = 5;
+  OBJECTIVE_STATUS_CANCELLED = 6;
+}
+
+enum ObjectiveSignal {
+  OBJECTIVE_SIGNAL_PROGRESS = 0;
+  OBJECTIVE_SIGNAL_READY_FOR_REVIEW = 1;
+  OBJECTIVE_SIGNAL_COMPLETED = 2;
+  OBJECTIVE_SIGNAL_BLOCKED = 3;
+}
+
+message CreateObjectiveRequest {
+  string operation_id = 1;
+  string objective_id = 2;
+  string owner_tag_id = 3;
+  string outcome = 4;
+  bool ongoing = 5;
+  optional int64 deadline_ms = 6;
+  optional uint64 budget_limit_minor = 7;
+  optional string budget_currency = 8;
+  optional string team_id = 9;
+  // Omit to capture the owner's current runtime grants. An empty selection grants none.
+  RuntimeActions runtime_actions = 10;
+  // A surface Task whose thread gets the Objective's limit notices and completion
+  // report, in place of the thread it was started in or the deployment default.
+  optional string notification_task_id = 5300;
+}
+
+message RuntimeActions {
+  repeated string actions = 1;
+}
+
+message Objective {
+  string objective_id = 1;
+  string owner_tag_id = 2;
+  string session_id = 3;
+  string outcome = 4;
+  bool ongoing = 5;
+  string starting_task_id = 6;
+  ObjectiveStatus status = 7;
+  uint64 revision = 8;
+  optional int64 deadline_ms = 9;
+  optional uint64 budget_limit_minor = 10;
+  optional string budget_currency = 11;
+  optional int64 paused_at_ms = 12;
+  optional uint64 reported_spend_minor = 13;
+  optional string team_id = 14;
+  RuntimeActions runtime_actions = 15;
+  // The owner's or operator's assessment recorded when the Objective was
+  // submitted for review or completed.
+  optional string completion_summary = 3800;
+  optional int64 cancelled_at_ms = 3801;
+  optional string cancellation_reason = 3802;
+  // The principal that created it, such as `operator:local` or
+  // `client:alice-laptop`. Empty for an Objective a surface thread started.
+  string created_by = 4100;
+  // The surface Task an operator chose for the Objective's notices.
+  optional string notification_task_id = 5300;
+}
+
+message Team {
+  string team_id = 1;
+  string name = 2;
+  repeated string member_tag_ids = 3;
+  optional uint32 max_concurrency = 4;
+  uint64 revision = 5;
+  int64 created_at_ms = 6;
+  int64 updated_at_ms = 7;
+}
+
+message CreateTeamRequest {
+  string operation_id = 1;
+  string team_id = 2;
+  string name = 3;
+  repeated string member_tag_ids = 4;
+  optional uint32 max_concurrency = 5;
+}
+
+message GetTeamRequest {
+  string team = 1;
+}
+
+message ListTeamsRequest {
+  string member_tag_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message ListTeamsResponse {
+  repeated Team teams = 1;
+  string next_cursor = 2;
+}
+
+message TeamMembers {
+  repeated string tag_ids = 1;
+}
+
+message UpdateTeamRequest {
+  string operation_id = 1;
+  string team = 2;
+  uint64 expected_revision = 3;
+  optional string name = 4;
+  TeamMembers members = 5;
+  optional uint32 max_concurrency = 6;
+}
+
+message DeleteTeamRequest {
+  string operation_id = 1;
+  string team = 2;
+}
+
+message WorkstreamPost {
+  string post_id = 1;
+  string team_id = 2;
+  string author_tag_id = 3;
+  repeated string to_tag_ids = 4;
+  string body = 5;
+  string source_task_id = 6;
+  uint64 sequence = 7;
+  int64 created_at_ms = 8;
+}
+
+message ListWorkstreamPostsRequest {
+  string team = 1;
+  optional uint64 after_sequence = 2;
+  uint32 limit = 3;
+  string cursor = 4;
+}
+
+message ListWorkstreamPostsResponse {
+  repeated WorkstreamPost posts = 1;
+  string next_cursor = 2;
+}
+
+message ReadAttemptWorkstreamRequest {
+  InspectAttemptRequest attempt = 1;
+  optional uint64 after_sequence = 2;
+  uint32 limit = 3;
+  string cursor = 4;
+}
+
+message ReadAttemptWorkstreamResponse {
+  Team team = 1;
+  ListWorkstreamPostsResponse page = 2;
+}
+
+message PostAttemptWorkstreamRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string body = 3;
+  repeated string to_tag_ids = 4;
+}
+
+message PostAttemptWorkstreamResponse {
+  WorkstreamPost post = 1;
+  bool duplicate = 2;
+  // A pending or denied approval is returned instead of writing a post.
+  Approval approval = 3;
+}
+
+message GetObjectiveRequest {
+  string objective_id = 1;
+}
+
+message ListObjectivesRequest {
+  uint32 limit = 1;
+  string after_id = 2;
+}
+
+message ListObjectivesResponse {
+  repeated Objective objectives = 1;
+}
+
+message ListObjectiveCommitReviewsRequest {
+  string objective_id = 1;
+  uint32 limit = 2;
+  uint64 before_order = 3;
+}
+
+message ListObjectiveCommitReviewsResponse {
+  repeated CommitReview reviews = 1;
+  uint64 next_before_order = 2;
+}
+
+message SetObjectiveLimitsRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  optional int64 deadline_ms = 3;
+  bool clear_deadline = 4;
+  optional uint64 budget_limit_minor = 5;
+  optional string budget_currency = 6;
+  bool clear_budget = 7;
+  optional uint64 expected_revision = 8;
+}
+
+message SetObjectiveRuntimeActionsRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  uint64 expected_revision = 3;
+  RuntimeActions runtime_actions = 4;
+}
+
+message ObjectiveActionRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  string reason = 3;
+}
+
+message ReviewObjectiveRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  bool approved = 3;
+  string feedback = 4;
+}
+
+// Completes an open Objective, including an ongoing one, with a required
+// assessment. Its open Tasks are cancelled.
+message CompleteObjectiveRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  string summary = 3;
+  // When set, the Objective must still be at this revision.
+  optional uint64 expected_revision = 4;
+}
+
+message ReplyDestination {
+  string conversation_id = 1;
+  optional string thread_id = 2;
+}
+
+message AcceptEventRequest {
+  string account_id = 1;
+  string event_id = 2;
+  string tag_id = 3;
+  string session_id = 4;
+  string prompt = 5;
+  ReplyDestination destination = 6;
+  // Optional programmatic choice, validated against the accepted Tag policy.
+  ExecutionSelection requested_execution = 7;
+}
+
+message AcceptSlackEventRequest {
+  string account_id = 1;
+  string event_id = 2;
+  string team_id = 3;
+  string channel_id = 4;
+  string message_ts = 5;
+  string thread_ts = 6;
+  string prompt = 7;
+  optional string mention_tag_id = 8;
+  // The verified, allowlisted Slack user who wrote the message.
+  string actor_id = 1300;
+}
+
+message AcceptSlackEventResponse {
+  Task task = 1;
+}
+
+enum GithubEventKind {
+  GITHUB_EVENT_KIND_UNSPECIFIED = 0;
+  GITHUB_EVENT_KIND_ISSUE_COMMENT = 1;
+  GITHUB_EVENT_KIND_ISSUE = 2;
+  GITHUB_EVENT_KIND_PULL_REQUEST = 3;
+}
+
+enum GithubEventAction {
+  GITHUB_EVENT_ACTION_UNSPECIFIED = 0;
+  GITHUB_EVENT_ACTION_CREATED = 1;
+  GITHUB_EVENT_ACTION_EDITED = 2;
+  GITHUB_EVENT_ACTION_OPENED = 3;
+}
+
+message AcceptGithubEventRequest {
+  string account_id = 1;
+  string delivery_id = 2;
+  uint64 repository_id = 3;
+  string repository = 4;
+  uint64 number = 5;
+  uint64 source_id = 6;
+  GithubEventKind kind = 7;
+  GithubEventAction action = 8;
+  string prompt = 9;
+  string tag_id = 10;
+  bool is_pull_request = 11;
+}
+
+message AcceptGithubEventResponse {
+  Task task = 1;
+}
+
+enum LinearEventKind {
+  LINEAR_EVENT_KIND_UNSPECIFIED = 0;
+  LINEAR_EVENT_KIND_ISSUE = 1;
+  LINEAR_EVENT_KIND_ISSUE_COMMENT = 2;
+}
+
+enum LinearEventAction {
+  LINEAR_EVENT_ACTION_UNSPECIFIED = 0;
+  LINEAR_EVENT_ACTION_CREATE = 1;
+  LINEAR_EVENT_ACTION_UPDATE = 2;
+}
+
+message AcceptLinearEventRequest {
+  string account_id = 1;
+  string delivery_id = 2;
+  string workspace_id = 3;
+  string team_id = 4;
+  string issue_id = 5;
+  string source_id = 6;
+  LinearEventKind kind = 7;
+  LinearEventAction action = 8;
+  string prompt = 9;
+  string tag_id = 10;
+}
+
+message AcceptLinearEventResponse {
+  Task task = 1;
+}
+
+enum LarkDomain {
+  LARK_DOMAIN_UNSPECIFIED = 0;
+  LARK_DOMAIN_LARK = 1;
+  LARK_DOMAIN_FEISHU = 2;
+}
+
+message AcceptLarkEventRequest {
+  string account_id = 1;
+  LarkDomain domain = 2;
+  string app_id = 3;
+  string tenant_key = 4;
+  string event_id = 5;
+  string chat_id = 6;
+  string message_id = 7;
+  string root_message_id = 8;
+  string actor_id = 9;
+  string prompt = 10;
+  optional string mention_tag_id = 11;
+  bool direct = 12;
+}
+
+message AcceptLarkEventResponse {
+  Task task = 1;
+}
+
+message AcceptMicrosoftTeamsActivityRequest {
+  string account_id = 1;
+  string app_id = 2;
+  string tenant_id = 3;
+  string team_id = 4;
+  string channel_id = 5;
+  string conversation_id = 6;
+  string activity_id = 7;
+  string root_activity_id = 8;
+  string actor_id = 9;
+  string service_url = 10;
+  string prompt = 11;
+  string tag_id = 12;
+}
+
+message AcceptMicrosoftTeamsActivityResponse {
+  Task task = 1;
+}
+
+message GetMicrosoftTeamsReplyRouteRequest {
+  string reply_id = 1;
+  string lease_token = 2;
+}
+
+message MicrosoftTeamsReplyRoute {
+  string service_url = 1;
+  string conversation_id = 2;
+  string root_activity_id = 3;
+  string app_id = 4;
+  string tenant_id = 5;
+  string team_id = 6;
+  string channel_id = 7;
+}
+
+enum ReplyState {
+  REPLY_STATE_UNSPECIFIED = 0;
+  REPLY_STATE_PENDING = 1;
+  REPLY_STATE_CLAIMED = 2;
+  REPLY_STATE_DELIVERED = 3;
+  REPLY_STATE_FAILED = 4;
+  REPLY_STATE_UNCERTAIN = 5;
+}
+
+message Reply {
+  string reply_id = 1;
+  string task_id = 2;
+  string account_id = 3;
+  ReplyDestination destination = 4;
+  string text = 5;
+  ReplyState state = 6;
+  optional string provider_receipt = 7;
+  // Verified delivery data the Surface may show beside the text. Set only on a claim.
+  ReplyResultCard result_card = 1200;
+  // A delivered acknowledgement this final reply replaces in place. Set only on a claim.
+  optional string replace_provider_receipt = 1201;
+}
+
+// A completed Work Session's verified delivery, reported to the Session that started it.
+message ReplyResultCard {
+  optional string branch = 1;
+  optional string pull_request_url = 2;
+}
+
+message ClaimReplyRequest {
+  string operation_id = 1;
+  // The account's current connector ownership lease. Only its owner claims replies.
+  string connector_lease_token = 1300;
+}
+
+message ClaimReplyResponse {
+  Reply reply = 1;
+  string lease_token = 2;
+}
+
+message SettleReplyRequest {
+  string reply_id = 1;
+  string lease_token = 2;
+  ReplyState state = 3;
+  optional string provider_receipt = 4;
+}
+
+// A claim is never automatically reassigned. Expiry exposes an uncertain delivery.
+message RenewReplyRequest { string reply_id = 1; string lease_token = 2; }
+message ReplyLease { uint64 valid_for_ms = 1; }
+message GetReplyDeliveryRequest { string reply_id = 1; }
+message ReplyDeliveryAudit {
+  string kind = 1;
+  string principal = 2;
+  string evidence = 3;
+  int64 recorded_at_ms = 4;
+  ReplyState state = 5;
+  optional string provider_receipt = 6;
+}
+message ReplyDelivery {
+  Reply reply = 1;
+  optional int64 lease_expires_at_ms = 2;
+  repeated ReplyDeliveryAudit audit = 3;
+}
+message ListReplyDeliveriesRequest {
+  string account_id = 1;
+  ReplyState state = 2;
+  uint32 limit = 3;
+  int64 before_order = 4;
+}
+message ListReplyDeliveriesResponse {
+  repeated ReplyDelivery deliveries = 1;
+  int64 next_before_order = 2;
+}
+// Evidence-backed reconciliation only. Pending/Claimed/Uncertain are not decisions.
+message ResolveReplyRequest {
+  string reply_id = 1;
+  string operation_id = 2;
+  ReplyState state = 3;
+  optional string provider_receipt = 4;
+  string evidence = 5;
+}
+
+// Exact, revocable cross-Objective approval provenance on an accepted input.
+message ArtifactPublicationPin {
+  string publication_id = 1;
+  uint64 publication_revision = 2;
+  string consumption_id = 3;
+  uint64 consumption_revision = 4;
+  string source_objective_id = 5;
+  string destination_objective_id = 6;
+}
+
+// A stable owner ID survives a Gateway restart with the same private state, so
+// the restarted process reclaims at once. Any other owner waits for release or expiry.
+message ClaimConnectorRequest { string owner_id = 1; }
+message RenewConnectorRequest { string lease_token = 1; }
+message ReleaseConnectorRequest { string lease_token = 1; }
+message ReleaseConnectorResponse {}
+message ConnectorLease {
+  bool granted = 1;
+  string lease_token = 2;
+  uint64 fence = 3;
+  uint64 valid_for_ms = 4;
+  // Set when another owner holds the account.
+  uint64 retry_after_ms = 5;
+}

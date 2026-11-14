@@ -21,7 +21,7 @@ submitted a result for review.
 The operator inbox is one list of everything waiting on a person, across Objectives:
 
 ```sh
-supertag list inbox --output text
+supertag get inbox-item
 ```
 
 Each item names its kind, its Objective, and the command that acts on it. Filter with `--kind`:
@@ -30,15 +30,15 @@ Each item names its kind, its Objective, and the command that acts on it. Filter
 To see new items as they arrive, keep this running; press Ctrl-C to stop:
 
 ```sh
-supertag watch inbox
+supertag get inbox-item
 ```
 
 ```text
-2026-09-30T14:02:11.000Z  approval  Objective usage-dashboard  Approval 5c1e9a40-2b7d-4f0e-9a51-3d6c8e2f1b07 (work is waiting): Merge pull request 42 (requested by Tag reviewer)  -> supertag approve request 5c1e9a40-2b7d-4f0e-9a51-3d6c8e2f1b07
+2026-09-30T14:02:11.000Z  approval  Objective usage-dashboard  Approval 5c1e9a40-2b7d-4f0e-9a51-3d6c8e2f1b07 (work is waiting): Merge pull request 42 (requested by Tag reviewer)  -> supertag approval approve 5c1e9a40-2b7d-4f0e-9a51-3d6c8e2f1b07
 ```
 
 Add `--output json` for one JSON object per line. To be told without keeping a terminal open,
-configure an [operator channel](../operations/control-plane.md#operator-channel): the Control
+configure an [operator channel](../operations/control-plane.md#operator-notifications): the Control
 Plane posts new items to a Slack channel or sends you a direct message.
 
 ## 1. Answer a question
@@ -48,7 +48,7 @@ and select its question. Type your answer and press Enter. The answer becomes th
 turn. You can also reply in the Objective's home thread.
 
 Make any resource change before answering. For example, if the repair needs more budget, run
-`supertag update objective service-operations --budget-minor 1500`, then answer “Raised the
+`supertag objective set-limits service-operations --budget-minor 1500`, then answer “Raised the
 budget to 1500. Go ahead with the repair.” The answer is recorded as yours.
 
 A question asked inside a Session beneath the Objective reaches the Objective's conversation
@@ -57,17 +57,17 @@ first: the Tag that started that Session decides whether to answer it or to ask 
 ## 2. Decide an approval request
 
 An **approval request** appears when a Tag wants an action that a **Permission Set**, the list of
-actions a turn may perform, marks `approval: required`. The inbox shows it as kind `approval`,
+actions a turn may perform, marks `approval_required: true`. The inbox shows it as kind `approval`,
 with its summary, the requesting Tag, and whether a Task Attempt is waiting on it.
 
 ```sh
-supertag list approval --objective service-operations
-supertag approve request REQUEST_ID
-supertag deny request REQUEST_ID --reason "Use the staging cluster instead."
+supertag get approval --objective service-operations
+supertag approval approve REQUEST_ID
+supertag approval deny REQUEST_ID --reason "Use the staging cluster instead."
 ```
 
 Either decision continues the waiting Session as its next turn. An approval lets it retry the
-same action once; `--scope objective` admits later turns of this Objective that need the same
+same action once; `--objective-scope` admits later turns of this Objective that need the same
 action without asking again. A denial gives the Tag your reason, so it can try another way or
 report back. A chat message saying "approved" approves nothing. See
 [Approval requests](../reference/coordination.md#approval-requests).
@@ -79,8 +79,8 @@ When the pool is spent, no new turn starts, the Objective becomes `limited`, and
 it under `objective-budget` or `objective-limit`.
 
 ```sh
-supertag list inbox --kind objective-budget --output text
-supertag update objective service-operations --budget-minor 1500
+supertag get inbox-item --kind objective-budget
+supertag objective set-limits service-operations --budget-minor 1500
 ```
 
 A budget can only increase. The Objective leaves `limited`, the owner gets a notice with the new
@@ -90,7 +90,7 @@ figure, and work can start again. Only an operator can make this change. See
 ## 4. Respond to a budget or deadline warning
 
 ```sh
-supertag list inbox --kind objective-limit --output text
+supertag get inbox-item --kind objective-limit
 ```
 
 An item appears when a monetary budget reaches 80% or its limit, or when a deadline is 24 hours
@@ -99,8 +99,8 @@ warnings in its conversation, so it can replan. At the limit or the deadline, ne
 stopped. To let work continue, raise the budget or move the deadline:
 
 ```sh
-supertag update objective service-operations --budget-minor 400000
-supertag update objective service-operations --deadline 2027-04-15T23:00:00Z
+supertag objective set-limits service-operations --budget-minor 400000
+supertag objective set-limits service-operations --deadline 2027-04-15T23:00:00Z
 ```
 
 The CLI reads the current revision for you; see
@@ -129,9 +129,8 @@ To request a revision, press `m`, type what should change, and press Enter. For 
 runbook still names the old dashboard. Update it.” The Objective returns to `working` and the
 owner acts on your text.
 
-To accept the result, run `supertag approve objective service-operations`. This completes a
-`ready_for_review` Objective and uses the owner's assessment as the completion summary. If
-the owner recorded none, the summary says who approved it.
+To accept the result, run `supertag objective review service-operations approve`. This completes a
+`ready_for_review` Objective and uses the owner's assessment as the completion summary.
 
 ## Reply from a collaboration thread
 
@@ -142,8 +141,8 @@ that surface, you can direct the Objective from the thread itself:
 - A plain reply goes to the Objective's conversation. It answers a pending question and moves
   a `blocked`, `limited`, or `ready_for_review` Objective back to `working`.
 - `@SuperTag approve` completes a `ready_for_review` Objective.
-- `@SuperTag pause` and `@SuperTag resume` pause and resume it, like `supertag pause objective`
-  and `supertag resume objective`.
+- `@SuperTag pause` and `@SuperTag resume` pause and resume it, like `supertag objective pause`
+  and `supertag objective resume`.
 
 Anyone who may create Objectives in that channel may do this; the message records their user, such
 as `slack:U123`, as the operator. Other mentions keep their usual meaning: the Tag answers them in
@@ -151,7 +150,7 @@ the conversation.
 
 ## Check that it worked
 
-- `supertag list inbox --output text` no longer lists the item you acted on.
+- `supertag get inbox-item` no longer lists the item you acted on.
 - `supertag get objective service-operations` shows status `working` after a message, or
   `completed` with the assessment after `approve`.
 - `supertag get objective service-operations` shows the new `budgetLimitMinor` or `deadline`.
@@ -163,9 +162,9 @@ the conversation.
 - **`approve` is refused.** The Objective is not `ready_for_review`. Message it instead.
 - **A message is refused.** A completed or cancelled Objective takes no more messages. Create a
   new Objective for new direction.
-- **The Objective did not act on a message.** Check `supertag describe objective ID`: a
-  `Runnable: no.` line names what is holding its turns, such as a Tag with no connected Worker
-  Host, or a pause.
+- **The Objective did not act on a message.** Check `supertag describe objective ID` for a pause
+  or a limit, and run `supertag placement explain TASK_ID` on the queued turn to see why no
+  Worker Host takes it.
 - **No external notification arrived.** The inbox shows the notification status, such as
   `unconfigured` or `failed`. See
   [Set up operator notifications](notifications.md).

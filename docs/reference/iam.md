@@ -2,8 +2,8 @@
 
 For a plain-language explanation of Tags and their security model, start with
 [Tags](../concepts/tags.md). For execution terms, start with
-[Workers and harnesses](../concepts/workers.md). This page is for developers implementing routing,
-policy admission, collaboration surface actions, or Worker Tool Providers.
+[Worker Hosts and harnesses](../concepts/workers.md). This page is for developers implementing
+routing, policy admission, collaboration surface actions, or harness adapters.
 
 This page uses these SuperTag terms, each defined in the glossary: [Role](glossary.md#role),
 [Objective](glossary.md#objective), [Team](glossary.md#team), [Workstream](glossary.md#workstream),
@@ -12,8 +12,7 @@ This page uses these SuperTag terms, each defined in the glossary: [Role](glossa
 [Permission Set](glossary.md#permission-set), [Control Plane](glossary.md#control-plane),
 [Gateway](glossary.md#gateway), [Surface Account](glossary.md#surface-account),
 [Worker Host](glossary.md#worker-host), [host service](glossary.md#host-service),
-[Worker Profile](glossary.md#worker-profile), [Workspace](glossary.md#workspace),
-[Runtime Input](glossary.md#runtime-input), and [Tool Provider](glossary.md#tool-provider).
+and [Workspace](glossary.md#workspace).
 
 SuperTag's IAM model treats a Tag as an accountable workload identity rather than equating it
 with a model process, harness session, collaboration surface bot, or credential. Governance policy attaches to
@@ -21,7 +20,7 @@ that identity and is resolved before its work reaches execution.
 
 ## Identity and routing
 
-A Tag is the persistent non-human workload principal. Collaboration surface bots/apps are provider-facing invocation identities; Surface Accounts are credential boundaries; Workers execute Tasks. None is the Tag itself.
+A Tag is the persistent non-human workload principal. Collaboration surface bots/apps are provider-facing invocation identities; Surface Accounts are credential boundaries; Worker Hosts execute Tasks. None is the Tag itself.
 
 An authenticated event resolves in this order:
 
@@ -44,10 +43,10 @@ The Task freezes:
 - active Permission Sets and their approvers;
 - explicit resource/action pairs;
 - MCP server tools granted with `target: mcp`;
-- granted actions marked `approval: required`, with the Permission Sets that require them;
+- granted actions marked `approval_required: true`, with the Permission Sets that require them;
 - capture time.
 
-The Worker receives this same snapshot. Later policy changes do not rewrite accepted work.
+The Worker Host receives this same snapshot. Later policy changes do not rewrite accepted work.
 
 ## Effective authorization
 
@@ -55,7 +54,7 @@ The Worker receives this same snapshot. Later policy changes do not rewrite acce
 origin-activated Permission Sets
   intersected with origin restrictions
   intersected with requester restrictions
-  intersected with Worker Profile and installed-tool policy
+  intersected with the Worker Host's harness and installed-tool policy
   intersected with approvals
   intersected with native provider authorization
 ```
@@ -64,7 +63,7 @@ Everything outside the intersection is denied. Prompt wording, channel membershi
 
 ## Approval
 
-A permission can require a recorded decision before each use. Add `approval: required` to a
+A permission can require a recorded decision before each use. Add `approval_required: true` to a
 collaboration surface, runtime, or MCP permission. A Permission Set can also list `approvers`.
 
 ```yaml
@@ -78,14 +77,14 @@ spec:
     - operator:release-oncall
   permissions:
     - target: surface
-      surfaceAccountId: SURFACE_ACCOUNT_ID
+      surface_account_id: SURFACE_ACCOUNT_ID
       scope: repository:123456
       reference: acme/api
       action: pull-requests:create
     - target: mcp
       action: "github/merge_pull_request"
       resource: "repository:acme/api"
-      approval: required
+      approval_required: true
     - target: runtime
       action: commands:execute
 ```
@@ -96,7 +95,7 @@ Every active Permission Set applies: Permission Sets activated at the Tag's loca
 its Roles. The result follows three rules, in order:
 
 1. A missing grant denies. Permissions stay an allow-list, so an action no set grants is denied.
-2. Any ask wins over allow. If one set grants an action with `approval: required`, the action
+2. Any ask wins over allow. If one set grants an action with `approval_required: true`, the action
    needs approval even when another set grants it plainly.
 3. Otherwise the grant allows the action.
 
@@ -117,12 +116,12 @@ listed operators. A Tag never decides a request its own Task made.
 
 | Action | Check |
 | --- | --- |
-| Collaboration surface action through hosted MCP | The Worker-local policy proxy asks the Control Plane before forwarding each call |
-| MCP server tool (`target: mcp`) | The Worker-local policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
-| Opening a Workspace pull request (`pull-requests:create`) | The Worker asks the Control Plane before pushing the Task branch; see [Workspaces](../guides/workspaces.md#deliver-pull-requests) |
+| Collaboration surface action through hosted MCP | The Worker Host's policy proxy asks the Control Plane before forwarding each call |
+| MCP server tool (`target: mcp`) | The Worker Host's policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
+| Opening a Workspace pull request (`pull-requests:create`) | The Worker Host asks the Control Plane before pushing the Task branch; see [Workspaces](../guides/workspaces.md#use-a-github-repository) |
 | Shell commands and file writes inside a harness | Not checked per action yet; only through Task admission |
 
-The Worker fails closed. A gated call without a reachable Control Plane is not forwarded. The
+The Worker Host fails closed. A gated call without a reachable Control Plane is not forwarded. The
 call returns "approval pending" with the request ID. Every turn except a conversation's own ends
 waiting on that request, and the decision continues the Session as its next Task, unless the
 Tag's permissions changed while it waited. A conversation's turn keeps going and tells the person.
@@ -162,7 +161,7 @@ Runtime permissions use the same Permission Set but have a different target:
 | `web:search` | Search the web |
 | `browser:use` | Use browser or computer-control tools |
 
-Custom Workers may define additional `namespace:action` names. Published actions should describe authority, not a particular harness API.
+Other `namespace:action` names can be stored but enable nothing in the built-in harnesses. Published actions should describe authority, not a particular harness API.
 
 ### Runtime actions in an Objective
 
@@ -171,13 +170,13 @@ the actions its owner Tag's Permission Sets allow, resolved once at creation:
 
 | Objective created | Default runtime actions |
 | --- | --- |
-| By an operator (`supertag create objective`, API) | Union across the owner's active Roles |
+| By an operator (`supertag objective create`, API) | Union across the owner's active Roles |
 | From a collaboration thread (`@SuperTag objective`) | The invoking Task's: the Tag's Roles and the Permission Sets activated at that location |
 
 An operator's explicit list narrows the default and never widens it. A Task in the Objective
 receives the actions within the Objective's list and, for delegated work, within its delegating
 Task's. Approval travels with the action: a Task waits when its own Permission Sets, or those of
-the Task or owner it inherits the action from, mark it `approval: required`. See
+the Task or owner it inherits the action from, mark it `approval_required: true`. See
 [Objective runtime actions](coordination.md#objective-runtime-actions).
 
 When the Objective and the delegating Task include `files:delegate-write`, a different Team
@@ -189,7 +188,7 @@ Prefer narrow operations over `read`, `write`, or `admin` labels.
 ## MCP server tools
 
 A host service can provide MCP servers; see
-[host MCP servers](supertag-yaml.md#host-mcp-servers). A Permission Set grants their tools with
+[host MCP servers](../surfaces/worker-tools.md). A Permission Set grants their tools with
 `target: mcp`:
 
 ```yaml
@@ -200,7 +199,7 @@ metadata:
 spec:
   permissions:
     - { target: mcp, action: "sentry/get_issue_details" }
-    - { target: mcp, action: "sentry/update_issue", approval: required }
+    - { target: mcp, action: "sentry/update_issue", approval_required: true }
     - { target: mcp, action: "notion/*" }
     - { target: mcp, action: "github/create_pull_request", resource: "repository:acme/api" }
 ```
@@ -216,9 +215,9 @@ Matching is exact and case-sensitive. `sentry/get_*` covers `get_issue` and `get
 digits, `_`, `-`, and `.` never match any grant, so a look-alike name cannot stand in for a
 granted tool.
 
-### How the Worker enforces grants
+### How the Worker Host enforces grants
 
-When a Task Attempt starts, the Worker lists the tools of each granted server and keeps the
+When a Task Attempt starts, the Worker Host lists the tools of each granted server and keeps the
 granted ones. The harness reaches the server only through the per-Task policy proxy on the Worker
 Host. The harness's own MCP configuration is never read. For every call, the proxy checks in
 order:
@@ -226,7 +225,7 @@ order:
 1. The tool is granted. Other tools are missing from `tools/list` and refused when called.
 2. The resource. A grant without `resource` covers the tool on any resource. Otherwise the call's
    arguments must name exactly one resource, and a covering grant must name it.
-3. Approval. When an `approval: required` grant covers the call, the proxy asks the Control Plane.
+3. Approval. When an `approval_required: true` grant covers the call, the proxy asks the Control Plane.
    A `once` approval covers only the same arguments, compared by their canonical JSON digest.
 
 A refused call never reaches the server. The proxy fails closed: a call is refused when its
@@ -249,7 +248,7 @@ Which granted servers a Task needs depends on whether it has a Workspace:
 
 | Task | Needs |
 | --- | --- |
-| With a Workspace, such as a work Session Task | Every server its grants name. A server comes from the host, which carries the label `mcp:NAME`, or from the Workspace's [`spec.mcp`](../guides/workspaces.md#select-repository-mcp-servers). |
+| With a Workspace, such as a work Session Task | Every server its grants name. A server comes from the host, which carries the label `mcp:NAME`, or from the Workspace's `.mcp.json` servers the Tag lists in [`workspace.mcp`](../guides/workspaces.md#select-repository-skills-and-mcp-servers). |
 | Without a Workspace, such as a conversation turn | Only the granted servers a bound Worker Host declares. |
 
 A conversation turn stays light. A granted server that no bound host declares, such as one only a
@@ -259,7 +258,7 @@ that Workspace use the server. A host server whose login lapsed still counts as 
 turn waits for `supertag mcp login NAME`.
 
 When no bound host provides a needed server, the Task waits. `supertag describe task` shows
-`Waiting: no bound Worker Host provides MCP server NAME`. A Worker that receives a Task for a
+`Waiting: no bound Worker Host provides MCP server NAME`. A Worker Host that receives a Task for a
 server it cannot provide fails the Task Attempt before the harness starts.
 
 ## Tool resolution and adaptation
@@ -281,7 +280,7 @@ Runtime actions are captured separately from collaboration surface resources in 
 | --- | --- | --- | --- |
 | no write permission | removes `Write` and `Edit` | read-only sandbox | read, grep, glob, ls, and MCP tools only |
 | `files:write` | enables `Write` and `Edit` | workspace-write sandbox | adds edit |
-| `commands:execute` | enables `Bash` | enables shell and unified execution features, and lets commands use loopback sockets | adds shell only with `files:write` and `allow-unsandboxed-commands: [cursor]`; otherwise refused |
+| `commands:execute` | enables `Bash` only with `allow-unsandboxed-commands: [claude-code]`; otherwise a Claude Code host does not run the Task | enables shell and unified execution features, and lets commands use loopback sockets | adds shell only with `files:write` and `allow-unsandboxed-commands: [cursor]`; otherwise refused |
 | `web:fetch` | enables `WebFetch` | with `files:write`, enables sandbox network access | no native web tool |
 | `web:search` | enables `WebSearch` | enables live web search | adds `webSearch` |
 | `browser:use` | available only through an installed compatible tool | enables supported browser/computer-use features | no native browser tool |
@@ -297,7 +296,7 @@ See [Cursor setup and limits](../operations/requirements.md#cursor-setup-and-lim
 
 Many test suites start a local server on `127.0.0.1`. Codex's read-only and workspace-write
 sandboxes deny every socket, so such a command fails with `listen EPERM 127.0.0.1`. When a Task
-may run commands, the Codex Worker therefore allows loopback and nothing more:
+may run commands, the Codex adapter therefore allows loopback and nothing more:
 
 | Admitted runtime actions | Files Codex may write | Network inside the sandbox |
 | --- | --- | --- |
@@ -305,7 +304,7 @@ may run commands, the Codex Worker therefore allows loopback and nothing more:
 | `commands:execute` | the workspace with `files:write`, otherwise none | loopback only |
 | `files:write` and `web:fetch` | the workspace | outbound network, as before |
 
-For loopback, the Worker replaces Codex's `--sandbox` mode with a Worker-owned Codex permission
+For loopback, the adapter replaces Codex's `--sandbox` mode with a SuperTag-owned Codex permission
 profile named `supertag`. The profile extends Codex's `:workspace` or `:read-only` profile, so
 file access does not change. Its network section sets `allow_local_binding = true`. It also turns
 on Codex's managed network proxy in `limited` mode with no allowed domains. Commands can bind,
@@ -318,51 +317,35 @@ The profile also grants write access to the Task Attempt's output directory, so 
 `files:write` can still write its deliverables there.
 
 Codex's `sandbox_workspace_write.network_access` setting is all-or-nothing, so it cannot express
-loopback alone. In `sandboxMode: "external"`, Codex runs without its own sandbox, and the execution
-environment's network policy applies instead.
-
-The Worker records what the sandbox allows in the Task Attempt's Runtime Input Manifest, under
-`harness.provenance.sandbox`. Run `supertag events task TASK_ID` and find the event whose type ends
-in `runtime-inputs.resolved`. For a Task with `commands:execute` and `files:write`, it reads:
-
-```json
-{ "filesystem": "workspace-write", "network": "loopback", "permissionProfile": "supertag" }
-```
-
-`network` is `none`, `loopback`, `enabled`, or `external`. `filesystem` is `read-only`,
-`workspace-write`, or `external`.
+loopback alone.
 
 ### Fail-closed behavior
 
-Unknown runtime actions remain available to custom Workers but do not enable anything in the shipped harnesses. A harness must fail closed when it cannot enforce an admitted policy. Permission checks select tools; execution-environment isolation, filesystem mounts, and network policy provide the hard boundary.
+Unknown runtime actions do not enable anything in the built-in harnesses. A harness must fail closed when it cannot enforce an admitted policy. Permission checks select tools; execution-environment isolation, filesystem mounts, and network policy provide the hard boundary.
 
 ### Failed write calls
 
 If execution fails after a write call starts, the Control Plane marks the Task failed and does not
 replay it automatically. The action may already have completed, so an operator must reconcile the
-provider before manually retrying. Worker-managed adapters can provide stronger idempotency with
-the SDK's durable effect journal.
+provider before manually retrying. A harness adapter can provide stronger idempotency with effect
+receipts; see [Reliable external actions](action-effects.md).
 
 ### Unsandboxed harnesses
 
 Codex enforces the [harness-native tools](#harness-native-tools) runtime actions inside its
-operating-system sandbox. Claude Code, OpenCode, and Cursor on a host service do not provide an
-enforced command boundary: their shell
-tools run commands as the Worker Host's user. SuperTag therefore places a
-Task with `commands:execute` on them only when the host service lists them in
-`allow-unsandboxed-commands`. Otherwise the Task goes to a Worker that may run commands, such as
-Codex, or waits with a reason naming that setting. See
+operating-system sandbox. Claude Code, OpenCode, and Cursor on a local Worker Host do not provide
+an enforced command boundary: their shell tools run commands as the Worker Host's user. SuperTag therefore
+places a Task with `commands:execute` on them only when the host service lists them in
+`allow-unsandboxed-commands`. Otherwise the Task goes to a Worker Host that may run commands, such
+as one serving Codex, or waits with a reason naming that setting. See
 [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).
 
 `files:write` alone needs no opt-in. The harness writes files through its own file tools, inside
 the Task's worktree, and those tools run no program. A file written there can still be run later,
 by a Task with `commands:execute` or by you, so review delivered changes before running them.
 
-Each Worker Profile reports this with two capabilities. `supertag.commands.unsandboxed` means its
-harness runs commands without a sandbox. `supertag.commands.execute` means it may run Tasks with
-`commands:execute`. Placement requires the second on a host whose profiles report either one;
-hosts that report neither, such as custom Workers, are not checked. Like labels, these capabilities
-are self-reported and decide placement, never access.
+Each Worker Host reports this setting in its execution profile when it registers. Like labels,
+the setting is self-reported and decides placement, never access.
 
 ## Credential boundaries
 
@@ -370,7 +353,7 @@ are self-reported and decide placement, never access.
 boundary.
 
 - Gateway credentials receive events and deliver replies.
-- Worker credentials authenticate harness tools and request-selected resources.
+- Worker Host credentials authenticate harness tools and request-selected resources.
 - Authorization snapshots contain identifiers and policy, never credentials.
 - collaboration surface MCP traffic stays outside the collaboration Gateway. Hosted HTTP calls pass through a Task-scoped policy proxy on the Worker Host before reaching the official provider server.
 
@@ -385,8 +368,8 @@ Tool allowlists constrain operations; provider-owned resource policies constrain
 - Context Sets never create provider authority.
 - Permission Sets never add content or Skills.
 - Reading, disclosing, and modifying data are distinct capabilities.
-- Cross-Tag context is denied even when Tags share accounts or Workers.
-- Worker Hosts contain the secret and isolation boundary used by their Workers.
+- Cross-Tag context is denied even when Tags share accounts or Worker Hosts.
+- Worker Hosts contain the secret and isolation boundary used by their harnesses.
 
 ## Explicit internal messaging
 
@@ -394,7 +377,7 @@ Tool allowlists constrain operations; provider-owned resource policies constrain
 bodies to cross Tag boundaries under an explicit directional grant. This does not relax
 Context Set isolation or give a recipient access to another Tag's artifacts. A messaging
 grant authorizes delivery, not the requested action. The recipient application must apply
-its own execution and disclosure policies. The trusted Worker host holds a Tag-scoped
+its own execution and disclosure policies. The trusted Worker Host holds a Tag-scoped
 credential; sender identity is never accepted from model-written message fields. A message is
 plain text and grants no authority. Tags in one Team message each other without a grant. Grant
 rules are in [Mailbox](coordination.md#mailbox).
@@ -403,6 +386,5 @@ Team membership permits reading and posting to the Team's Workstream. This does 
 Context Set access, native provider permissions, or messaging grants, and a post carries no
 authority. See [Workstream](coordination.md#workstream).
 
-Objectives use the experimental [Objective API](../../spec/objectives.md). A Tag reads the
-Objectives it owns and those whose Team it belongs to; only the owner or an operator changes an
-Objective's status. See [Objectives](coordination.md#objectives).
+Only an Objective's owner, through its turns' results, or an operator changes an Objective's
+status. See [Objectives](coordination.md#objectives).

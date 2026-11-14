@@ -1,0 +1,1687 @@
+//! Durable Objective lifecycle. Every mutation and execution hook shares the Store write lock.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use prost::Message;
+use sha2::{Digest, Sha256};
+use sqlx::{Any, Row, Transaction, any::AnyRow};
+use supertag_protocol::v2::*;
+use tonic::{Request, Response, Status};
+use uuid::Uuid;
+
+use crate::store::{Result, insert_task, name, text};
+use crate::{ControlPlane, Store, StoreError, objective_limits as limits};
+
+struct Record {
+    value: Objective,
+    limits: limits::ObjectiveLimits,
+    updated_at_ms: i64,
+    cancelled_at_ms: Option<i64>,
+    cancellation_reason: Option<String>,
+    completion_summary: Option<String>,
+    idle_wake_count: i64,
+}
+
+impl Record {
+    fn closed(&self) -> bool {
+        matches!(self.value.status, value if value == ObjectiveStatus::Completed as i32 || value == ObjectiveStatus::Cancelled as i32)
+    }
+
+    fn change_status(&mut self, status: ObjectiveStatus, now_ms: i64) {
+        if self.value.status != status as i32 {
+            self.value.status = status as i32;
+            self.limits.status = domain_status(status);
+            self.changed(now_ms);
+        }
+    }
+
+    fn changed(&mut self, now_ms: i64) {
+        self.value.revision += 1;
+        self.updated_at_ms = now_ms;
+    }
+
+    fn set_summary(&mut self, summary: &str) {
+        self.completion_summary = Some(summary.into());
+        self.value.completion_summary = Some(summary.into());
+    }
+}
+
+/// The completion report posted once to an Objective's home thread.
+const COMPLETION_REPORT_SUMMARY_CHARS: usize = 1500;
+
+fn completion_report(objective_id: &str, summary: Option<&str>) -> String {
+    let summary = summary.map(str::trim).unwrap_or_default();
+    if summary.is_empty() {
+        return format!("Objective {objective_id} is completed.");
+    }
+    let quoted = if summary.chars().count() > COMPLETION_REPORT_SUMMARY_CHARS {
+        let mut cut: String = summary
+            .chars()
+            .take(COMPLETION_REPORT_SUMMARY_CHARS - 1)
+            .collect();
+        cut.push('…');
+        cut
+    } else {
+        summary.to_owned()
+    };
+    format!("Objective {objective_id} is completed: {quoted}")
+}
+
+/// Posts the completion report once, keyed by the completing revision.
+async fn report_completion_in(
+    tx: &mut Transaction<'_, Any>,
+    record: &Record,
+    now_ms: i64,
+) -> Result<()> {
+    crate::surface_objectives::home_report_in(
+        tx,
+        &record.value.objective_id,
+        &record.value.owner_tag_id,
+        &format!("objective-completed:{}", record.value.revision),
+        None,
+        &completion_report(
+            &record.value.objective_id,
+            record.completion_summary.as_deref(),
+        ),
+        now_ms,
+    )
+    .await
+}
+
+/// The home-thread text of a limit event (TS `budgetNoticeText` over
+/// `inboxLimitReason`): an approaching deadline states the time left when posted.
+fn home_limit_text(record: &Record, notice: &limits::Notice, now_ms: i64) -> String {
+    let reason = match (notice.kind, record.limits.deadline) {
+        (limits::NoticeKind::ObjectiveDeadlineApproaching, Some(deadline)) => {
+            let left = deadline.as_millis() - now_ms;
+            if left > 0 {
+                format!(
+                    "The Objective deadline {deadline} is near: {} left.",
+                    limits::readable_duration(left)
+                )
+            } else {
+                format!("The Objective deadline {deadline} has passed.")
+            }
+        }
+        _ => notice.message.clone(),
+    };
+    let id = &record.value.objective_id;
+    format!(
+        "Objective {id:?}: {reason} Inspect supertag describe objective {id}. An operator can change the budget or deadline with supertag objective set-limits."
+    )
+}
+
+fn invalid(message: &str) -> StoreError {
+    StoreError::InvalidArgument(message.into())
+}
+fn refused(message: &str) -> StoreError {
+    StoreError::FailedPrecondition(message.into())
+}
+
+fn timestamp(value: i64) -> Result<limits::Timestamp> {
+    limits::Timestamp::from_millis(value)
+        .ok_or_else(|| invalid("timestamp is outside the supported range"))
+}
+
+fn domain_status(value: ObjectiveStatus) -> limits::ObjectiveStatus {
+    match value {
+        ObjectiveStatus::Working => limits::ObjectiveStatus::Working,
+        ObjectiveStatus::Blocked => limits::ObjectiveStatus::Blocked,
+        ObjectiveStatus::Limited => limits::ObjectiveStatus::Limited,
+        ObjectiveStatus::ReadyForReview => limits::ObjectiveStatus::ReadyForReview,
+        ObjectiveStatus::Completed => limits::ObjectiveStatus::Completed,
+        ObjectiveStatus::Cancelled => limits::ObjectiveStatus::Cancelled,
+        ObjectiveStatus::Unspecified => limits::ObjectiveStatus::Working,
+    }
+}
+
+fn amount(value: u64) -> Result<i64> {
+    if value > 9_007_199_254_740_991 {
+        return Err(invalid("minor units must be a nonnegative safe integer"));
+    }
+    Ok(value as i64)
+}
+
+fn currency(value: &str) -> Result<()> {
+    if value.len() != 3 || !value.bytes().all(|byte| byte.is_ascii_uppercase()) {
+        return Err(invalid(
+            "currency must contain three uppercase ASCII letters",
+        ));
+    }
+    Ok(())
+}
+
+fn select_runtime_actions(
+    allowed: &[String],
+    requested: Option<&RuntimeActions>,
+) -> Result<Vec<String>> {
+    let allowed: BTreeSet<String> = allowed.iter().cloned().collect();
+    let Some(requested) = requested else {
+        return Ok(allowed.into_iter().collect());
+    };
+    if requested.actions.len() > 256 {
+        return Err(invalid("too many Objective runtime actions"));
+    }
+    let mut selected = BTreeSet::new();
+    for action in &requested.actions {
+        name("runtime action", action)?;
+        if allowed.contains(action) {
+            selected.insert(action.clone());
+        }
+    }
+    Ok(selected.into_iter().collect())
+}
+
+fn operator(principal: &str) -> Result<()> {
+    name("operator principal", principal)?;
+    if principal
+        .strip_prefix("operator:")
+        .is_none_or(str::is_empty)
+    {
+        return Err(StoreError::PermissionDenied);
+    }
+    Ok(())
+}
+
+/// An operator or a client: the principals that create and direct Objectives.
+fn actor(principal: &str) -> Result<()> {
+    name("principal", principal)?;
+    if !["operator:", "client:"].iter().any(|prefix| {
+        principal
+            .strip_prefix(prefix)
+            .is_some_and(|id| !id.is_empty())
+    }) {
+        return Err(StoreError::PermissionDenied);
+    }
+    Ok(())
+}
+
+/// Operators see every Objective; a client sees only the Objectives it created.
+pub(crate) async fn ensure_objective_access_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    objective_id: &str,
+) -> Result<()> {
+    if principal.starts_with("operator:") {
+        return Ok(());
+    }
+    let created_by: Option<String> =
+        sqlx::query_scalar("SELECT created_by FROM supertag_v2_objectives WHERE objective_id=$1")
+            .bind(objective_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if created_by.as_deref() != Some(principal) {
+        return Err(StoreError::NotFound("Objective was not found".into()));
+    }
+    Ok(())
+}
+
+pub(crate) fn digest(kind: &str, request: &impl Message) -> String {
+    let mut hash = Sha256::new();
+    hash.update(kind);
+    hash.update([0]);
+    hash.update(request.encode_to_vec());
+    format!("{:x}", hash.finalize())
+}
+
+fn record_row(row: &AnyRow) -> Result<Record> {
+    let status = ObjectiveStatus::try_from(row.try_get::<i64, _>("status")? as i32)
+        .map_err(|_| refused("stored Objective status is invalid"))?;
+    if status == ObjectiveStatus::Unspecified {
+        return Err(refused("stored Objective status is unspecified"));
+    }
+    let deadline_ms: Option<i64> = row.try_get("deadline_ms")?;
+    let paused_at_ms: Option<i64> = row.try_get("paused_at_ms")?;
+    let created_at_ms: i64 = row.try_get("created_at_ms")?;
+    let state: limits::LimitState =
+        serde_json::from_str(&row.try_get::<String, _>("limit_state")?)?;
+    let budget_limit_minor = row
+        .try_get::<Option<i64>, _>("budget_limit_minor")?
+        .map(|value| value as u64);
+    let budget_currency: Option<String> = row.try_get("budget_currency")?;
+    Ok(Record {
+        value: Objective {
+            objective_id: row.try_get("objective_id")?,
+            owner_tag_id: row.try_get("owner_tag_id")?,
+            session_id: row.try_get("session_id")?,
+            outcome: row.try_get("outcome")?,
+            ongoing: row.try_get::<i64, _>("ongoing")? == 1,
+            starting_task_id: row
+                .try_get::<Option<String>, _>("starting_task_id")?
+                .unwrap_or_default(),
+            status: status as i32,
+            revision: row.try_get::<i64, _>("revision")? as u64,
+            deadline_ms,
+            budget_limit_minor,
+            budget_currency: budget_currency.clone(),
+            paused_at_ms,
+            reported_spend_minor: state
+                .reported_spend
+                .as_ref()
+                .map(|value| value.spend.amount_minor),
+            team_id: row.try_get("team_id")?,
+            runtime_actions: Some(RuntimeActions {
+                actions: serde_json::from_str(&row.try_get::<String, _>("runtime_actions")?)?,
+            }),
+            completion_summary: None,
+            cancelled_at_ms: None,
+            cancellation_reason: None,
+            created_by: row.try_get("created_by")?,
+            notification_task_id: row.try_get("notification_task_id")?,
+        },
+        limits: limits::ObjectiveLimits {
+            status: domain_status(status),
+            created_at: Some(timestamp(created_at_ms)?),
+            deadline: deadline_ms.map(timestamp).transpose()?,
+            budget_limit_minor,
+            budget_currency,
+            paused_at: paused_at_ms.map(timestamp).transpose()?,
+            state,
+        },
+        updated_at_ms: row.try_get("updated_at_ms")?,
+        cancelled_at_ms: row.try_get("cancelled_at_ms")?,
+        cancellation_reason: row.try_get("cancellation_reason")?,
+        completion_summary: row.try_get("completion_summary")?,
+        idle_wake_count: row.try_get("idle_wake_count")?,
+    })
+    .map(|mut record: Record| {
+        record.value.completion_summary = record.completion_summary.clone();
+        record.value.cancelled_at_ms = record.cancelled_at_ms;
+        record.value.cancellation_reason = record.cancellation_reason.clone();
+        record
+    })
+}
+
+pub(crate) fn inbox_limits_row(row: &AnyRow) -> Result<limits::ObjectiveLimits> {
+    Ok(record_row(row)?.limits)
+}
+
+async fn get_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Record> {
+    let row = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE objective_id = $1")
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| StoreError::NotFound("Objective was not found".into()))?;
+    record_row(&row)
+}
+
+async fn save_in(tx: &mut Transaction<'_, Any>, record: &Record) -> Result<()> {
+    sqlx::query("UPDATE supertag_v2_objectives SET status=$1, revision=$2, deadline_ms=$3, budget_limit_minor=$4, budget_currency=$5, paused_at_ms=$6, cancelled_at_ms=$7, cancellation_reason=$8, completion_summary=$9, limit_state=$10, updated_at_ms=$11, starting_task_id=$12, idle_wake_count=$14, runtime_actions=$15 WHERE objective_id=$13")
+        .bind(record.value.status as i64).bind(record.value.revision as i64).bind(record.value.deadline_ms)
+        .bind(record.value.budget_limit_minor.map(|value| value as i64)).bind(&record.value.budget_currency)
+        .bind(record.value.paused_at_ms).bind(record.cancelled_at_ms).bind(&record.cancellation_reason).bind(&record.completion_summary)
+        .bind(serde_json::to_string(&record.limits.state)?).bind(record.updated_at_ms).bind(&record.value.starting_task_id).bind(&record.value.objective_id).bind(record.idle_wake_count)
+        .bind(serde_json::to_string(&record.value.runtime_actions.as_ref().map(|value| value.actions.as_slice()).unwrap_or_default())?)
+        .execute(&mut **tx).await?;
+    Ok(())
+}
+
+async fn replay_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    operation_id: &str,
+    request_digest: &str,
+) -> Result<Option<Objective>> {
+    if let Some(row) = sqlx::query("SELECT objective_id, request_digest FROM supertag_v2_objective_operations WHERE principal=$1 AND operation_id=$2")
+        .bind(principal).bind(operation_id).fetch_optional(&mut **tx).await? {
+        if row.try_get::<String, _>("request_digest")? != request_digest {
+            return Err(StoreError::Conflict("operation ID was used with a different Objective mutation".into()));
+        }
+        return Ok(Some(get_in(tx, &row.try_get::<String, _>("objective_id")?).await?.value));
+    }
+    Ok(None)
+}
+
+async fn receipt_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    operation_id: &str,
+    request_digest: &str,
+    objective: &Objective,
+) -> Result<()> {
+    sqlx::query("INSERT INTO supertag_v2_objective_operations (principal,operation_id,request_digest,objective_id) VALUES ($1,$2,$3,$4)")
+        .bind(principal).bind(operation_id).bind(request_digest).bind(&objective.objective_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+async fn next_order(tx: &mut Transaction<'_, Any>) -> Result<i64> {
+    Ok(sqlx::query_scalar("UPDATE supertag_v2_write_order SET revision=revision+1 WHERE singleton=1 RETURNING revision").fetch_one(&mut **tx).await?)
+}
+
+async fn internal_turn_in(
+    tx: &mut Transaction<'_, Any>,
+    record: &Record,
+    key: &str,
+    prompt: &str,
+    kind: &str,
+    now_ms: i64,
+) -> Result<()> {
+    let prior: Option<String> = sqlx::query_scalar(
+        "SELECT task_id FROM supertag_v2_objective_notices WHERE objective_id=$1 AND notice_key=$2",
+    )
+    .bind(&record.value.objective_id)
+    .bind(key)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if prior.is_some() || record.closed() {
+        return Ok(());
+    }
+    let order = next_order(tx).await?;
+    // Policy composition carries a large future. Keep it off the controller's
+    // stack, which also holds the Objective reconciliation state.
+    let task = if kind == "notice" {
+        Box::pin(crate::store::insert_owed_task(
+            tx,
+            order,
+            &record.value.owner_tag_id,
+            &record.value.session_id,
+            prompt,
+        ))
+        .await?
+    } else {
+        Box::pin(insert_task(
+            tx,
+            order,
+            &record.value.owner_tag_id,
+            &record.value.session_id,
+            prompt,
+        ))
+        .await?
+    };
+    // Limit notices communicate exhausted authority; they never grant a fresh work budget.
+    if kind == "notice" && limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_some() {
+        // Keep frozen approval restrictions even when the notice loses its actions.
+        sqlx::query("UPDATE supertag_v2_tasks SET allowed_actions='[]' WHERE task_id=$1")
+            .bind(&task.task_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    sqlx::query(
+        "INSERT INTO supertag_v2_objective_tasks (task_id,objective_id,kind) VALUES ($1,$2,$3)",
+    )
+    .bind(&task.task_id)
+    .bind(&record.value.objective_id)
+    .bind(kind)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("INSERT INTO supertag_v2_objective_notices (objective_id,notice_key,task_id) VALUES ($1,$2,$3)")
+        .bind(&record.value.objective_id).bind(key).bind(&task.task_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+async fn cancel_open_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    except: Option<&str>,
+) -> Result<()> {
+    // Preserve cleanup_pending: cancellation is not acknowledgement that an adapter stopped.
+    sqlx::query("UPDATE supertag_v2_tasks SET state=$1 WHERE task_id IN (SELECT task_id FROM supertag_v2_objective_tasks WHERE objective_id=$2) AND state IN ($3,$4,$5,$6) AND ($7 IS NULL OR task_id<>$7)")
+        .bind(TaskState::Cancelled as i64).bind(objective_id).bind(TaskState::Queued as i64).bind(TaskState::Claimed as i64)
+        .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).bind(except).execute(&mut **tx).await?;
+    Ok(())
+}
+
+pub fn validate_manifest_objective(input: &CreateObjectiveRequest) -> Result<()> {
+    name("Objective ID", &input.objective_id)?;
+    name("owner Tag ID", &input.owner_tag_id)?;
+    text("outcome", &input.outcome, 65_536)?;
+    if input.outcome.trim().is_empty() {
+        return Err(invalid("outcome is required"));
+    }
+    if let Some(deadline) = input.deadline_ms {
+        timestamp(deadline)?;
+    }
+    if let Some(limit) = input.budget_limit_minor {
+        amount(limit)?;
+    }
+    if let Some(unit) = &input.budget_currency {
+        currency(unit)?;
+        if input.budget_limit_minor.is_none() {
+            return Err(invalid("budget currency requires a limit"));
+        }
+    }
+    if let Some(task) = &input.notification_task_id {
+        name("notification Task ID", task)?;
+    }
+    Ok(())
+}
+
+impl Store {
+    pub async fn create_objective(
+        &self,
+        principal: &str,
+        input: &CreateObjectiveRequest,
+    ) -> Result<Objective> {
+        actor(principal)?;
+        name("operation ID", &input.operation_id)?;
+        validate_manifest_objective(input)?;
+        let fingerprint = digest("create", input);
+        self.ensure_client_tag(principal, &input.owner_tag_id)
+            .await?;
+        let (mut tx, order) = self.write().await?;
+        let now_ms = self.execution_now_ms();
+        if let Some(prior) =
+            replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
+        {
+            tx.commit().await?;
+            return Ok(prior);
+        }
+        let exists: Option<String> = sqlx::query_scalar(
+            "SELECT objective_id FROM supertag_v2_objectives WHERE objective_id=$1",
+        )
+        .bind(&input.objective_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if exists.is_some() {
+            return Err(StoreError::Conflict("Objective ID already exists".into()));
+        }
+        let allowed = Box::pin(crate::store::owner_runtime_actions_in(
+            &mut tx,
+            &input.owner_tag_id,
+        ))
+        .await?;
+        let runtime_actions = select_runtime_actions(&allowed, input.runtime_actions.as_ref())?;
+        let team_id = match &input.team_id {
+            Some(team) => Some(
+                crate::teams::visible_team_in(&mut tx, principal, team)
+                    .await?
+                    .team_id,
+            ),
+            None => None,
+        };
+        // Choosing another conversation's surface thread for notices is an operator's call.
+        if input.notification_task_id.is_some() && !principal.starts_with("operator:") {
+            return Err(StoreError::PermissionDenied);
+        }
+        // TS `createObjective`: the chosen thread must verify when it is chosen.
+        if let Some(task) = &input.notification_task_id
+            && crate::surface_objectives::task_home_in(&mut tx, task)
+                .await?
+                .is_none()
+        {
+            return Err(invalid(
+                "notification Task must be a surface Task whose Tag is active and whose Surface Account is enabled",
+            ));
+        }
+        let session_id = Uuid::new_v4().to_string();
+        let mut state = limits::LimitState::default();
+        if let Some(deadline) = input.deadline_ms {
+            state.deadline_set_at = Some(limits::DeadlineObservation {
+                deadline: timestamp(deadline)?,
+                at: timestamp(now_ms)?,
+            });
+        }
+        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions,created_by,notification_task_id) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13,$14,$15)")
+            .bind(&input.objective_id).bind(&input.owner_tag_id).bind(&session_id).bind(&input.outcome).bind(i64::from(input.ongoing)).bind(ObjectiveStatus::Working as i64)
+            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).bind(principal).bind(&input.notification_task_id).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
+            .bind(&input.owner_tag_id).bind(&session_id).bind(&input.objective_id).execute(&mut *tx).await?;
+        let prompt = format!(
+            "The Objective just started: plan the work, then start it.\n\n{}\n\n{}",
+            input.outcome,
+            if input.ongoing {
+                "This responsibility is ongoing. An operator must end it; completing an assessment does not complete the Objective."
+            } else {
+                "When the outcome is met, report ready_for_review or completed with your result."
+            }
+        );
+        let task = Box::pin(insert_task(
+            &mut tx,
+            order,
+            &input.owner_tag_id,
+            &session_id,
+            &prompt,
+        ))
+        .await?;
+        objective_link_task_in(&mut tx, &task).await?;
+        sqlx::query("UPDATE supertag_v2_objectives SET starting_task_id=$1 WHERE objective_id=$2")
+            .bind(&task.task_id)
+            .bind(&input.objective_id)
+            .execute(&mut *tx)
+            .await?;
+        let record = get_in(&mut tx, &input.objective_id).await?;
+        receipt_in(
+            &mut tx,
+            principal,
+            &input.operation_id,
+            &fingerprint,
+            &record.value,
+        )
+        .await?;
+        // No warning sweep runs inside creation: accepting the starting Task is its own result.
+        tx.commit().await?;
+        Ok(record.value)
+    }
+
+    pub async fn get_objective(&self, principal: &str, objective_id: &str) -> Result<Objective> {
+        actor(principal)?;
+        name("Objective ID", objective_id)?;
+        let row = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE objective_id=$1")
+            .bind(objective_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| StoreError::NotFound("Objective was not found".into()))?;
+        let objective = record_row(&row)?.value;
+        if !principal.starts_with("operator:") && objective.created_by != principal {
+            return Err(StoreError::NotFound("Objective was not found".into()));
+        }
+        Ok(objective)
+    }
+
+    /// Operators list every Objective; a client lists only the Objectives it created.
+    pub async fn list_objectives(
+        &self,
+        principal: &str,
+        input: &ListObjectivesRequest,
+    ) -> Result<Vec<Objective>> {
+        actor(principal)?;
+        let creator = if principal.starts_with("operator:") {
+            ""
+        } else {
+            principal
+        };
+        if !input.after_id.is_empty() {
+            name("Objective cursor", &input.after_id)?;
+        }
+        // Outcomes may be 64 KiB; bound the complete gRPC response below one MiB.
+        let count = if input.limit == 0 {
+            12
+        } else {
+            input.limit.min(12)
+        } as i64;
+        // A completion summary may hold 256 KiB; Get and the overview carry it, a page does not.
+        sqlx::query("SELECT * FROM supertag_v2_objectives WHERE objective_id>$1 AND ($3='' OR created_by=$3) ORDER BY objective_id LIMIT $2")
+            .bind(&input.after_id).bind(count).bind(creator).fetch_all(&self.pool).await?.iter().map(|row| {
+                let mut value = record_row(row)?.value;
+                value.completion_summary = None;
+                Ok(value)
+            }).collect()
+    }
+
+    pub async fn set_objective_runtime_actions(
+        &self,
+        principal: &str,
+        input: &SetObjectiveRuntimeActionsRequest,
+    ) -> Result<Objective> {
+        operator(principal)?;
+        name("operation ID", &input.operation_id)?;
+        name("Objective ID", &input.objective_id)?;
+        if input.expected_revision == 0 || input.expected_revision > i64::MAX as u64 {
+            return Err(invalid("a valid expected Objective revision is required"));
+        }
+        let requested = input
+            .runtime_actions
+            .as_ref()
+            .ok_or_else(|| invalid("runtime actions must be explicitly provided"))?;
+        // Validate even an empty or fully dropped selection before acquiring the
+        // transaction. Presence, unlike an omitted create field, means replace.
+        select_runtime_actions(&[], Some(requested))?;
+        let fingerprint = digest("runtime-actions", input);
+        let (mut tx, _) = self.write().await?;
+        if let Some(prior) =
+            replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
+        {
+            tx.commit().await?;
+            return Ok(prior);
+        }
+        let mut record = get_in(&mut tx, &input.objective_id).await?;
+        if record.closed() {
+            return Err(refused(
+                "a closed Objective's runtime actions cannot change",
+            ));
+        }
+        if record.value.revision != input.expected_revision {
+            return Err(StoreError::Conflict(
+                "Objective revision changed; reload before updating".into(),
+            ));
+        }
+        let allowed = Box::pin(crate::store::owner_runtime_actions_in(
+            &mut tx,
+            &record.value.owner_tag_id,
+        ))
+        .await?;
+        let selected = RuntimeActions {
+            actions: select_runtime_actions(&allowed, Some(requested))?,
+        };
+        if record.value.runtime_actions.as_ref() != Some(&selected) {
+            record.value.runtime_actions = Some(selected);
+            record.changed(self.execution_now_ms());
+            save_in(&mut tx, &record).await?;
+        }
+        receipt_in(
+            &mut tx,
+            principal,
+            &input.operation_id,
+            &fingerprint,
+            &record.value,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(record.value)
+    }
+
+    pub async fn set_objective_limits(
+        &self,
+        principal: &str,
+        input: &SetObjectiveLimitsRequest,
+    ) -> Result<Objective> {
+        operator(principal)?;
+        name("operation ID", &input.operation_id)?;
+        name("Objective ID", &input.objective_id)?;
+        if input.clear_deadline && input.deadline_ms.is_some() {
+            return Err(invalid("set or clear the deadline, not both"));
+        }
+        if input.clear_budget
+            && (input.budget_limit_minor.is_some() || input.budget_currency.is_some())
+        {
+            return Err(invalid("set or clear the budget, not both"));
+        }
+        if let Some(value) = input.deadline_ms {
+            timestamp(value)?;
+        }
+        if let Some(value) = input.budget_limit_minor {
+            amount(value)?;
+        }
+        if let Some(value) = &input.budget_currency {
+            currency(value)?;
+        }
+        let fingerprint = digest("limits", input);
+        let (mut tx, _) = self.write().await?;
+        let now_ms = self.execution_now_ms();
+        if let Some(prior) =
+            replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
+        {
+            tx.commit().await?;
+            return Ok(prior);
+        }
+        let mut record = get_in(&mut tx, &input.objective_id).await?;
+        if record.closed() {
+            return Err(refused("a closed Objective's limits cannot change"));
+        }
+        if input
+            .expected_revision
+            .is_some_and(|value| value != record.value.revision)
+        {
+            return Err(StoreError::Conflict(
+                "Objective revision changed; reload before updating".into(),
+            ));
+        }
+        if let Some(value) = input.budget_limit_minor {
+            if record
+                .value
+                .budget_limit_minor
+                .is_some_and(|prior| value <= prior)
+            {
+                return Err(refused(
+                    "increase the Objective budget above its current limit",
+                ));
+            }
+            record.value.budget_limit_minor = Some(value);
+        }
+        if let Some(value) = &input.budget_currency {
+            if record
+                .value
+                .budget_currency
+                .as_ref()
+                .is_some_and(|prior| prior != value)
+            {
+                return Err(refused(
+                    "an existing monetary budget's currency cannot change",
+                ));
+            }
+            if record.value.budget_limit_minor.is_none() {
+                return Err(invalid("budget currency requires a limit"));
+            }
+            record.value.budget_currency = Some(value.clone());
+        }
+        if input.clear_budget {
+            record.value.budget_limit_minor = None;
+            record.value.budget_currency = None;
+        }
+        let old_deadline = record.value.deadline_ms;
+        if input.clear_deadline {
+            record.value.deadline_ms = None;
+        }
+        if input.deadline_ms.is_some() {
+            record.value.deadline_ms = input.deadline_ms;
+        }
+        record.limits.budget_limit_minor = record.value.budget_limit_minor;
+        record.limits.budget_currency = record.value.budget_currency.clone();
+        record.limits.deadline = record.value.deadline_ms.map(timestamp).transpose()?;
+        if old_deadline != record.value.deadline_ms {
+            record.limits.state.deadline_set_at =
+                record
+                    .limits
+                    .deadline
+                    .map(|deadline| limits::DeadlineObservation {
+                        deadline,
+                        at: timestamp(now_ms).expect("validated current time"),
+                    });
+        }
+        let reported = reported_in(&mut tx, &record).await?;
+        record.limits.state =
+            limits::evaluate_limits(&record.limits, timestamp(now_ms)?, reported.as_ref());
+        if record.value.status == ObjectiveStatus::Limited as i32 {
+            let mut possible = record.limits.clone();
+            possible.status = limits::ObjectiveStatus::Working;
+            // Raising a limit clears Limited independently of the operator pause.
+            // The pause still prevents dispatch until Resume explicitly clears it.
+            possible.paused_at = None;
+            if limits::admission_blocker(&possible, timestamp(now_ms)?).is_none() {
+                record.change_status(ObjectiveStatus::Working, now_ms);
+                record.limits.state.summary = None;
+            }
+        }
+        record.changed(now_ms);
+        save_in(&mut tx, &record).await?;
+        reconcile_in(&mut tx, &input.objective_id, now_ms).await?;
+        let objective = get_in(&mut tx, &input.objective_id).await?.value;
+        receipt_in(
+            &mut tx,
+            principal,
+            &input.operation_id,
+            &fingerprint,
+            &objective,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(objective)
+    }
+
+    pub async fn pause_objective(
+        &self,
+        principal: &str,
+        input: &ObjectiveActionRequest,
+    ) -> Result<Objective> {
+        self.objective_action(principal, input, "pause").await
+    }
+    pub async fn resume_objective(
+        &self,
+        principal: &str,
+        input: &ObjectiveActionRequest,
+    ) -> Result<Objective> {
+        self.objective_action(principal, input, "resume").await
+    }
+    pub async fn cancel_objective(
+        &self,
+        principal: &str,
+        input: &ObjectiveActionRequest,
+    ) -> Result<Objective> {
+        self.objective_action(principal, input, "cancel").await
+    }
+
+    async fn objective_action(
+        &self,
+        principal: &str,
+        input: &ObjectiveActionRequest,
+        action: &str,
+    ) -> Result<Objective> {
+        actor(principal)?;
+        name("operation ID", &input.operation_id)?;
+        name("Objective ID", &input.objective_id)?;
+        text("reason", &input.reason, 16_384)?;
+        let fingerprint = digest(action, input);
+        let (mut tx, _) = self.write().await?;
+        ensure_objective_access_in(&mut tx, principal, &input.objective_id).await?;
+        let now_ms = self.execution_now_ms();
+        if let Some(prior) =
+            replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
+        {
+            tx.commit().await?;
+            return Ok(prior);
+        }
+        let objective =
+            objective_action_in(&mut tx, principal, input, action, &fingerprint, now_ms).await?;
+        tx.commit().await?;
+        Ok(objective)
+    }
+    pub async fn review_objective(
+        &self,
+        principal: &str,
+        input: &ReviewObjectiveRequest,
+    ) -> Result<Objective> {
+        actor(principal)?;
+        name("operation ID", &input.operation_id)?;
+        name("Objective ID", &input.objective_id)?;
+        text("feedback", &input.feedback, 65_536)?;
+        let fingerprint = digest("review", input);
+        let (mut tx, _) = self.write().await?;
+        ensure_objective_access_in(&mut tx, principal, &input.objective_id).await?;
+        let now_ms = self.execution_now_ms();
+        if let Some(prior) =
+            replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
+        {
+            tx.commit().await?;
+            return Ok(prior);
+        }
+        let objective = review_in(&mut tx, principal, input, &fingerprint, now_ms).await?;
+        tx.commit().await?;
+        Ok(objective)
+    }
+
+    /// An operator, or the client that created it, completes an open Objective, ongoing or not, with a required assessment.
+    /// Its open Tasks are cancelled. Unlike approval, it posts no completion report.
+    pub async fn complete_objective(
+        &self,
+        principal: &str,
+        input: &CompleteObjectiveRequest,
+    ) -> Result<Objective> {
+        actor(principal)?;
+        name("operation ID", &input.operation_id)?;
+        name("Objective ID", &input.objective_id)?;
+        text("summary", &input.summary, 65_536)?;
+        let summary = input.summary.trim();
+        if summary.is_empty() {
+            return Err(invalid(
+                "a summary that assesses the outcome is required to complete an Objective",
+            ));
+        }
+        if input
+            .expected_revision
+            .is_some_and(|value| value == 0 || value > i64::MAX as u64)
+        {
+            return Err(invalid("a valid expected Objective revision is required"));
+        }
+        let fingerprint = digest("complete", input);
+        let (mut tx, _) = self.write().await?;
+        ensure_objective_access_in(&mut tx, principal, &input.objective_id).await?;
+        let now_ms = self.execution_now_ms();
+        if let Some(prior) =
+            replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
+        {
+            tx.commit().await?;
+            return Ok(prior);
+        }
+        let mut record = get_in(&mut tx, &input.objective_id).await?;
+        if record.value.status == ObjectiveStatus::Completed as i32 {
+            return Err(refused("the Objective is already completed"));
+        }
+        if record.value.status == ObjectiveStatus::Cancelled as i32 {
+            return Err(refused("a cancelled Objective cannot be completed"));
+        }
+        if input
+            .expected_revision
+            .is_some_and(|value| value != record.value.revision)
+        {
+            return Err(StoreError::Conflict(
+                "Objective revision changed; reload before updating".into(),
+            ));
+        }
+        record.set_summary(summary);
+        record.change_status(ObjectiveStatus::Completed, now_ms);
+        save_in(&mut tx, &record).await?;
+        cancel_open_in(&mut tx, &input.objective_id, None).await?;
+        receipt_in(
+            &mut tx,
+            principal,
+            &input.operation_id,
+            &fingerprint,
+            &record.value,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(record.value)
+    }
+
+    pub async fn sweep_objectives(&self) -> Result<()> {
+        let (mut tx, _) = self.write().await?;
+        let now_ms = self.execution_now_ms();
+        objective_sweep_in(&mut tx, now_ms).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
+/// Pause, resume, or cancel inside the caller's transaction. Callers authorize
+/// `principal` and check the operation receipt first.
+pub(crate) async fn objective_action_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    input: &ObjectiveActionRequest,
+    action: &str,
+    fingerprint: &str,
+    now_ms: i64,
+) -> Result<Objective> {
+    let mut record = get_in(tx, &input.objective_id).await?;
+    match action {
+        "pause" => {
+            if record.closed() {
+                return Err(refused("a closed Objective cannot be paused"));
+            }
+            if record.value.paused_at_ms.is_none() {
+                record.value.paused_at_ms = Some(now_ms);
+                record.limits.paused_at = Some(timestamp(now_ms)?);
+                record.changed(now_ms);
+            }
+        }
+        "resume" => {
+            if record.closed() {
+                return Err(refused("a closed Objective cannot be resumed"));
+            }
+            if let Some(paused_at) = record.value.paused_at_ms.take() {
+                record.limits.paused_at = None;
+                record.changed(now_ms);
+                // Admission must observe the cleared pause. A valid approval
+                // wait owns the next continuation and must not be displaced
+                // by the generic resume turn.
+                save_in(tx, &record).await?;
+                if crate::approvals::resume_wait_in(tx, &input.objective_id, now_ms).await? {
+                    record = get_in(tx, &input.objective_id).await?;
+                } else {
+                    let counts = sqlx::query("SELECT t.state, COUNT(*) AS total FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id WHERE ot.objective_id=$1 GROUP BY t.state").bind(&input.objective_id).fetch_all(&mut **tx).await?;
+                    let mut summary = format!(
+                        "An operator resumed the Objective after its pause at {}. Recorded Task states at resume:",
+                        timestamp(paused_at)?
+                    );
+                    for count in counts {
+                        let state = TaskState::try_from(count.try_get::<i64, _>("state")? as i32)
+                            .map_err(|_| refused("stored Task state is invalid"))?;
+                        summary.push_str(&format!(
+                            " {:?}: {}.",
+                            state,
+                            count.try_get::<i64, _>("total")?
+                        ));
+                    }
+                    internal_turn_in(
+                        tx,
+                        &record,
+                        &format!("resumed:{paused_at}"),
+                        &summary,
+                        "resume",
+                        now_ms,
+                    )
+                    .await?;
+                }
+            }
+        }
+        "cancel" => {
+            if record.value.status == ObjectiveStatus::Completed as i32 {
+                return Err(refused("a completed Objective cannot be cancelled"));
+            }
+            if record.value.status != ObjectiveStatus::Cancelled as i32 {
+                record.cancelled_at_ms = Some(now_ms);
+                record.cancellation_reason =
+                    (!input.reason.is_empty()).then(|| input.reason.clone());
+                record.value.cancelled_at_ms = record.cancelled_at_ms;
+                record.value.cancellation_reason = record.cancellation_reason.clone();
+                record.change_status(ObjectiveStatus::Cancelled, now_ms);
+            }
+            cancel_open_in(tx, &input.objective_id, None).await?;
+        }
+        _ => return Err(invalid("unknown Objective action")),
+    }
+    save_in(tx, &record).await?;
+    receipt_in(
+        tx,
+        principal,
+        &input.operation_id,
+        fingerprint,
+        &record.value,
+    )
+    .await?;
+    Ok(record.value)
+}
+
+/// Approve or request changes inside the caller's transaction. Callers authorize
+/// `principal` and check the operation receipt first.
+pub(crate) async fn review_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    input: &ReviewObjectiveRequest,
+    fingerprint: &str,
+    now_ms: i64,
+) -> Result<Objective> {
+    let mut record = get_in(tx, &input.objective_id).await?;
+    if record.value.status != ObjectiveStatus::ReadyForReview as i32 {
+        return Err(refused("the Objective must be ready for review"));
+    }
+    crate::artifact_publications::review_in(tx, &record.value, principal, input.approved, now_ms)
+        .await?;
+    if input.approved {
+        // Approval accepts the owner's assessment as it stands (TS `approveObjective`);
+        // an operator who wants it changed requests changes instead.
+        if !input.feedback.trim().is_empty() {
+            return Err(invalid(
+                "approval takes no feedback; request changes to revise the owner's assessment",
+            ));
+        }
+        // The ready signal always records a non-empty assessment, so TS's
+        // "Approved by operator" fallback has nothing to fill.
+        record.change_status(ObjectiveStatus::Completed, now_ms);
+        cancel_open_in(tx, &input.objective_id, None).await?;
+        report_completion_in(tx, &record, now_ms).await?;
+    } else {
+        if input.feedback.trim().is_empty() {
+            return Err(invalid("feedback is required to request changes"));
+        }
+        record.change_status(ObjectiveStatus::Working, now_ms);
+        internal_turn_in(
+            tx,
+            &record,
+            &format!("review:{}", record.value.revision),
+            &input.feedback,
+            "work",
+            now_ms,
+        )
+        .await?;
+    }
+    save_in(tx, &record).await?;
+    receipt_in(
+        tx,
+        principal,
+        &input.operation_id,
+        fingerprint,
+        &record.value,
+    )
+    .await?;
+    Ok(record.value)
+}
+
+/// Record a surface-started Objective and its Session. The caller admits its
+/// starting Task through the verified surface and links it with `set_starting_task_in`.
+pub(crate) async fn insert_surface_objective_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    owner_tag_id: &str,
+    session_id: &str,
+    outcome: &str,
+    runtime_actions: &[String],
+    now_ms: i64,
+) -> Result<()> {
+    text("outcome", outcome, 65_536)?;
+    let state = limits::LimitState::default();
+    sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions) VALUES ($1,$2,$3,$4,0,$5,1,NULL,NULL,NULL,$6,$7,$7,NULL,$8)")
+        .bind(objective_id).bind(owner_tag_id).bind(session_id).bind(outcome).bind(ObjectiveStatus::Working as i64)
+        .bind(serde_json::to_string(&state)?).bind(now_ms).bind(serde_json::to_string(runtime_actions)?).execute(&mut **tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
+        .bind(owner_tag_id).bind(session_id).bind(objective_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+pub(crate) async fn set_starting_task_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    task_id: &str,
+) -> Result<()> {
+    sqlx::query("UPDATE supertag_v2_objectives SET starting_task_id=$1 WHERE objective_id=$2")
+        .bind(task_id)
+        .bind(objective_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn objective_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Objective> {
+    Ok(get_in(tx, id).await?.value)
+}
+
+/// The Objective with its limit model, for read-only projections.
+pub(crate) async fn objective_limits_in(
+    tx: &mut Transaction<'_, Any>,
+    id: &str,
+) -> Result<(Objective, limits::ObjectiveLimits)> {
+    let record = get_in(tx, id).await?;
+    Ok((record.value, record.limits))
+}
+
+pub(crate) async fn objective_admission_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    session_id: &str,
+    now_ms: i64,
+) -> Result<()> {
+    let id: Option<String> = sqlx::query_scalar(
+        "SELECT objective_id FROM supertag_v2_objective_sessions WHERE tag_id=$1 AND session_id=$2",
+    )
+    .bind(tag_id)
+    .bind(session_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(id) = id {
+        reconcile_in(tx, &id, now_ms).await?;
+        let mut record = get_in(tx, &id).await?;
+        if let Some(blocker) = limits::admission_blocker(&record.limits, timestamp(now_ms)?) {
+            return Err(refused(&format!(
+                "Objective does not accept new work: {blocker:?}"
+            )));
+        }
+        // A person's new accepted work is a fresh opportunity to make progress.
+        record.idle_wake_count = 0;
+        if record.value.status == ObjectiveStatus::Blocked as i32 {
+            record.change_status(ObjectiveStatus::Working, now_ms);
+        }
+        save_in(tx, &record).await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn objective_link_task_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+) -> Result<()> {
+    sqlx::query("INSERT INTO supertag_v2_objective_tasks (task_id,objective_id,kind) SELECT $1, objective_id, 'work' FROM supertag_v2_objective_sessions WHERE tag_id=$2 AND session_id=$3 ON CONFLICT(task_id) DO NOTHING")
+        .bind(&task.task_id).bind(&task.tag_id).bind(&task.session_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+/// Internal delegation checks the owner's remaining authority without treating
+/// the model's request as a new operator instruction or resetting idle state.
+pub(crate) async fn work_session_admission_in(
+    tx: &mut Transaction<'_, Any>,
+    parent: &Task,
+    now_ms: i64,
+) -> Result<Option<String>> {
+    let id: Option<String> =
+        sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1")
+            .bind(&parent.task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    reconcile_in(tx, &id, now_ms).await?;
+    let record = get_in(tx, &id).await?;
+    if record.value.owner_tag_id != parent.tag_id || record.value.session_id != parent.session_id {
+        return Err(StoreError::PermissionDenied);
+    }
+    let mut admitted = record.limits;
+    // Pause controls the start of native turns. Already-running owner work may
+    // queue a child, which remains paused under objective_task_can_start_in.
+    admitted.paused_at = None;
+    if let Some(blocker) = limits::admission_blocker(&admitted, timestamp(now_ms)?) {
+        return Err(refused(&format!(
+            "Objective does not accept delegated work: {blocker:?}"
+        )));
+    }
+    Ok(Some(id))
+}
+
+pub(crate) async fn objective_task_can_start_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    now_ms: i64,
+) -> Result<bool> {
+    let parent =
+        sqlx::query("SELECT objective_id, kind FROM supertag_v2_objective_tasks WHERE task_id=$1")
+            .bind(&task.task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let Some(parent) = parent else {
+        return Ok(true);
+    };
+    let record = get_in(tx, &parent.try_get::<String, _>("objective_id")?).await?;
+    if record.closed() || record.value.paused_at_ms.is_some() {
+        return Ok(false);
+    }
+    let owed_report = crate::work_sessions::task_kind_in(tx, &task.task_id).await?
+        == Some(crate::work_sessions::REPORT);
+    let eligible = if parent.try_get::<String, _>("kind")? == "notice" || owed_report {
+        !limits::deadline_stops_running(&record.limits, timestamp(now_ms)?, None)
+    } else {
+        limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_none()
+    };
+    if !eligible {
+        return Ok(false);
+    }
+    match record.value.team_id {
+        Some(team_id) => crate::teams::capacity_in(tx, &team_id, task, now_ms).await,
+        None => Ok(true),
+    }
+}
+
+/// Starting native execution is the point at which absent provider cost becomes unknown.
+/// A claim alone may never launch and must not count as an unreported execution.
+pub(crate) async fn objective_started_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<()> {
+    let Some(attempt) = &task.attempt_id else {
+        return Err(refused("started Task has no Attempt"));
+    };
+    sqlx::query("INSERT INTO supertag_v2_attempt_usage (attempt_id,task_id) VALUES ($1,$2) ON CONFLICT(attempt_id) DO NOTHING")
+        .bind(attempt).bind(&task.task_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+/// A host's timed authority cannot outlive a known Objective deadline plus grace.
+/// Monetary budget exhaustion does not shorten an already running Attempt's lease.
+pub(crate) async fn objective_lease_deadline_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    proposed: i64,
+) -> Result<i64> {
+    let id: Option<String> =
+        sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1")
+            .bind(&task.task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let Some(id) = id else {
+        return Ok(proposed);
+    };
+    let record = get_in(tx, &id).await?;
+    Ok(match record.value.deadline_ms {
+        Some(deadline) => {
+            proposed.min(deadline.saturating_add(limits::deadline_grace_ms(&record.limits)))
+        }
+        None => proposed,
+    })
+}
+
+pub(crate) async fn objective_finish_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    signal: i32,
+    now_ms: i64,
+) -> Result<()> {
+    let signal =
+        ObjectiveSignal::try_from(signal).map_err(|_| invalid("Objective signal is invalid"))?;
+    if task.state != TaskState::Succeeded as i32 {
+        return Ok(());
+    }
+    let id: Option<String> =
+        sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1")
+            .bind(&task.task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let Some(id) = id else {
+        return if signal == ObjectiveSignal::Progress {
+            Ok(())
+        } else {
+            Err(refused("Task does not belong to an Objective"))
+        };
+    };
+    let mut record = get_in(tx, &id).await?;
+    if record.value.owner_tag_id != task.tag_id || record.value.session_id != task.session_id {
+        // A child contributes work and usage to the Objective but never decides
+        // its owner's status. Its durable report is the owner's next opportunity.
+        if crate::work_sessions::task_kind_in(tx, &task.task_id).await?
+            == Some(crate::work_sessions::CHILD)
+        {
+            return if signal == ObjectiveSignal::Progress {
+                Ok(())
+            } else {
+                Err(invalid(
+                    "only the Objective's owner Session can signal its status",
+                ))
+            };
+        }
+        return Err(StoreError::PermissionDenied);
+    }
+    if signal == ObjectiveSignal::Progress {
+        if crate::inbox::task_waits_in(tx, &task.task_id).await?
+            || crate::approvals::task_waits_in(tx, &task.task_id).await?
+            || crate::work_sessions::reports::parent_has_pending_in(
+                tx,
+                &task.tag_id,
+                &task.session_id,
+            )
+            .await?
+            || crate::commit_reviews::pending_objective_in(tx, &id).await?
+        {
+            return Ok(());
+        }
+        if !record.value.ongoing
+            && record.value.status == ObjectiveStatus::Working as i32
+            && limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_none()
+        {
+            let open: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id WHERE ot.objective_id=$1 AND t.task_id<>$2 AND (t.state IN ($3,$4,$5,$6) OR t.cleanup_pending=1)")
+                .bind(&id).bind(&task.task_id).bind(TaskState::Queued as i64).bind(TaskState::Claimed as i64).bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).fetch_one(&mut **tx).await?;
+            if open == 0 {
+                match crate::budget_pool::objective_in(tx, &id, None, false).await {
+                    Ok(_) => {}
+                    Err(StoreError::FailedPrecondition(_)) => return Ok(()),
+                    Err(error) => return Err(error),
+                }
+                if record.idle_wake_count == 0 {
+                    record.idle_wake_count = 1;
+                    internal_turn_in(tx, &record, &format!("idle:{}", task.task_id), "Your last turn ended with nothing running and nothing asked, while the Objective is still working. Continue the work, report a blocker, or finish the Objective. If this turn also ends that way, the Objective becomes blocked.", "idle", now_ms).await?;
+                } else {
+                    record.change_status(ObjectiveStatus::Blocked, now_ms);
+                }
+                save_in(tx, &record).await?;
+            }
+        }
+        return Ok(());
+    }
+    if record.closed() {
+        return Err(refused("Objective execution authority is closed"));
+    }
+    if limits::deadline_stops_running(&record.limits, timestamp(now_ms)?, None) {
+        return Err(refused("Objective deadline grace period ended"));
+    }
+    let result = task.result.as_deref().unwrap_or("");
+    if result.trim().is_empty() {
+        return Err(invalid("an Objective signal requires a result summary"));
+    }
+    let status = match signal {
+        ObjectiveSignal::Completed => {
+            if record.value.ongoing {
+                return Err(invalid(
+                    "only an operator can complete an ongoing Objective",
+                ));
+            }
+            ObjectiveStatus::Completed
+        }
+        ObjectiveSignal::ReadyForReview => ObjectiveStatus::ReadyForReview,
+        ObjectiveSignal::Blocked => ObjectiveStatus::Blocked,
+        ObjectiveSignal::Progress => unreachable!(),
+    };
+    if record.value.status == ObjectiveStatus::Limited as i32 {
+        return Err(invalid("only an operator can resume a limited Objective"));
+    }
+    record.set_summary(result);
+    record.change_status(status, now_ms);
+    save_in(tx, &record).await?;
+    if record.closed() {
+        cancel_open_in(tx, &id, Some(&task.task_id)).await?;
+    }
+    if status == ObjectiveStatus::Completed {
+        report_completion_in(tx, &record, now_ms).await?;
+    }
+    Ok(())
+}
+
+/// A recorded review schedules at most one owner turn. Pause and limits defer
+/// execution; closure preserves the review as audit history without reviving work.
+pub(crate) async fn commit_review_notice_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    request_id: &str,
+    prompt: &str,
+    now_ms: i64,
+) -> Result<Option<String>> {
+    reconcile_in(tx, objective_id, now_ms).await?;
+    let record = get_in(tx, objective_id).await?;
+    if record.value.status != ObjectiveStatus::Working as i32
+        || record.value.paused_at_ms.is_some()
+        || limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_some()
+    {
+        return Ok(None);
+    }
+    let key = format!("review:{request_id}");
+    internal_turn_in(tx, &record, &key, prompt, "notice", now_ms).await?;
+    Ok(sqlx::query_scalar(
+        "SELECT task_id FROM supertag_v2_objective_notices WHERE objective_id=$1 AND notice_key=$2",
+    )
+    .bind(objective_id)
+    .bind(key)
+    .fetch_optional(&mut **tx)
+    .await?)
+}
+
+/// Tells a working Objective's owner Session about overlapping Attempts, once per `key`. A paused
+/// or limit-blocked Objective is not told; the overlap stays recorded and is not repeated.
+pub(crate) async fn overlap_notice_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    key: &str,
+    prompt: &str,
+    now_ms: i64,
+) -> Result<()> {
+    reconcile_in(tx, objective_id, now_ms).await?;
+    let record = get_in(tx, objective_id).await?;
+    if record.value.status != ObjectiveStatus::Working as i32
+        || record.value.paused_at_ms.is_some()
+        || limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_some()
+    {
+        return Ok(());
+    }
+    internal_turn_in(tx, &record, key, prompt, "notice", now_ms).await
+}
+
+async fn reported_in(
+    tx: &mut Transaction<'_, Any>,
+    record: &Record,
+) -> Result<Option<limits::ReportedSpend>> {
+    let rows = sqlx::query("SELECT u.attempt_id, u.amount_minor, u.currency, u.estimated FROM supertag_v2_attempt_usage u JOIN supertag_v2_objective_tasks ot ON ot.task_id=u.task_id WHERE ot.objective_id=$1 ORDER BY u.attempt_id").bind(&record.value.objective_id).fetch_all(&mut **tx).await?;
+    let mut amounts = BTreeMap::<String, u64>::new();
+    let mut attempts = vec![];
+    for row in rows {
+        let amount: Option<i64> = row.try_get("amount_minor")?;
+        if let (Some(value), Some(unit)) = (amount, row.try_get::<Option<String>, _>("currency")?) {
+            let total = amounts.entry(unit).or_default();
+            // Exhaustion cannot wrap or reject a valid per-Attempt receipt.
+            *total = total.saturating_add(value as u64);
+        }
+        attempts.push(limits::AttemptCostEvidence {
+            attempt_id: row.try_get("attempt_id")?,
+            coverage: if amount.is_some() {
+                limits::CostCoverage::Complete
+            } else {
+                limits::CostCoverage::Unknown
+            },
+            estimated: row.try_get::<i64, _>("estimated")? == 1,
+        });
+    }
+    Ok(limits::reported_spend(&record.limits, &amounts, &attempts))
+}
+
+pub(crate) async fn reconcile_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    now_ms: i64,
+) -> Result<()> {
+    let mut record = get_in(tx, objective_id).await?;
+    if record.closed() {
+        return Ok(());
+    }
+    let tasks = sqlx::query("SELECT t.task_id,t.state,t.attempt_id,t.cleanup_pending FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id WHERE ot.objective_id=$1 ORDER BY t.accepted_order").bind(objective_id).fetch_all(&mut **tx).await?;
+    let mut observed = vec![];
+    for row in tasks {
+        let task_id: String = row.try_get("task_id")?;
+        let attempt_id: Option<String> = row.try_get("attempt_id")?;
+        let state = row.try_get::<i64, _>("state")? as i32;
+        // Cancellation and Uncertain are not cleanup receipts. Both keep the Objective
+        // running until the exact Attempt is confirmed settled or explicitly resolved.
+        let phase = if state == TaskState::Running as i32
+            || row.try_get::<i64, _>("cleanup_pending")? == 1
+        {
+            limits::TaskPhase::Running {
+                attempt_id: attempt_id
+                    .ok_or_else(|| refused("running Objective Task has no Attempt"))?,
+            }
+        } else if state == TaskState::Queued as i32 || state == TaskState::Claimed as i32 {
+            limits::TaskPhase::Pending
+        } else {
+            limits::TaskPhase::Settled
+        };
+        observed.push(limits::TaskObservation { task_id, phase });
+    }
+    let spend = reported_in(tx, &record).await?;
+    let decision = limits::plan_sweep(
+        &record.limits,
+        timestamp(now_ms)?,
+        spend.as_ref(),
+        &observed,
+        None,
+        None,
+    );
+    record.limits.state = decision.state;
+    if decision.stop_reason.is_some() {
+        cancel_open_in(tx, objective_id, None).await?;
+    }
+    if decision.limit_now {
+        record.change_status(ObjectiveStatus::Limited, now_ms);
+        record.limits.state.summary = None;
+    }
+    record.value.reported_spend_minor = record
+        .limits
+        .state
+        .reported_spend
+        .as_ref()
+        .map(|entry| entry.spend.amount_minor);
+    save_in(tx, &record).await?;
+    for notice in limits::notices_to_deliver(&record.limits) {
+        internal_turn_in(tx, &record, &notice.key, &notice.message, "notice", now_ms).await?;
+        // A person in the Objective's home thread learns of every limit event: the
+        // budget warning, an approaching deadline, and a reached budget or deadline
+        // (TS `objectiveLimitEvents` through `BudgetNotifications`). Setting a
+        // deadline is the operator's own act and reaches only the owner.
+        if notice.kind != limits::NoticeKind::ObjectiveDeadlineSet {
+            crate::surface_objectives::home_report_in(
+                tx,
+                &record.value.objective_id,
+                &record.value.owner_tag_id,
+                &format!("limit:{}", notice.key),
+                Some(&notice.key),
+                &home_limit_text(&record, &notice, now_ms),
+                now_ms,
+            )
+            .await?;
+        }
+    }
+    // Notices discovered after grace remain audit history but cannot gain execution authority.
+    if limits::deadline_stops_running(&record.limits, timestamp(now_ms)?, None) {
+        cancel_open_in(tx, objective_id, None).await?;
+    }
+    Ok(())
+}
+
+/// Whether a limit notice still applies: its Objective is open and its limit event holds.
+pub(crate) async fn limit_notice_applies_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    limit_key: &str,
+) -> Result<bool> {
+    let record = match get_in(tx, objective_id).await {
+        Ok(record) => record,
+        Err(StoreError::NotFound(_)) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    Ok(!record.closed()
+        && limits::limit_events(&record.limits)
+            .iter()
+            .any(|event| event.key == limit_key))
+}
+
+pub(crate) async fn objective_sweep_in(tx: &mut Transaction<'_, Any>, now_ms: i64) -> Result<()> {
+    let ids: Vec<String> = sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objectives WHERE status NOT IN ($1,$2) ORDER BY objective_id")
+        .bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).fetch_all(&mut **tx).await?;
+    for id in ids {
+        reconcile_in(tx, &id, now_ms).await?;
+    }
+    Ok(())
+}
+
+#[tonic::async_trait]
+impl objectives_server::Objectives for ControlPlane {
+    async fn create_objective(
+        &self,
+        request: Request<CreateObjectiveRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .create_objective(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn get_objective(
+        &self,
+        request: Request<GetObjectiveRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .get_objective(&principal, &request.into_inner().objective_id)
+                .await?,
+        ))
+    }
+    async fn list_objectives(
+        &self,
+        request: Request<ListObjectivesRequest>,
+    ) -> std::result::Result<Response<ListObjectivesResponse>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(ListObjectivesResponse {
+            objectives: self
+                .store
+                .list_objectives(&principal, &request.into_inner())
+                .await?,
+        }))
+    }
+    async fn list_commit_reviews(
+        &self,
+        request: Request<ListObjectiveCommitReviewsRequest>,
+    ) -> std::result::Result<Response<ListObjectiveCommitReviewsResponse>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .list_objective_commit_reviews(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn set_limits(
+        &self,
+        request: Request<SetObjectiveLimitsRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .set_objective_limits(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn set_runtime_actions(
+        &self,
+        request: Request<SetObjectiveRuntimeActionsRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .set_objective_runtime_actions(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn pause_objective(
+        &self,
+        request: Request<ObjectiveActionRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .pause_objective(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn resume_objective(
+        &self,
+        request: Request<ObjectiveActionRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .resume_objective(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn cancel_objective(
+        &self,
+        request: Request<ObjectiveActionRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .cancel_objective(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn review_objective(
+        &self,
+        request: Request<ReviewObjectiveRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .review_objective(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn complete_objective(
+        &self,
+        request: Request<CompleteObjectiveRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .complete_objective(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+}

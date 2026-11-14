@@ -4,16 +4,54 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/client"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
+
+type inboxQuestionMsg struct {
+	occurrence string
+	text       string
+}
+
+type inboxApprovalMsg struct {
+	occurrence string
+	details    client.ApprovalDetails
+	err        error
+}
+
+func (m model) readInboxApproval() tea.Cmd {
+	id, occurrence := m.item.GetApproval().GetRequestId(), m.item.GetOccurrence()
+	if id == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		details, err := m.client.ReadApproval(m.ctx, id)
+		return inboxApprovalMsg{occurrence: occurrence, details: details, err: err}
+	}
+}
+
+func (m model) readInboxQuestion() tea.Cmd {
+	if !m.item.GetQuestion().GetTruncated() {
+		return nil
+	}
+	key, occurrence := m.item.GetKey(), m.item.GetOccurrence()
+	return func() tea.Msg {
+		text, err := m.client.ReadObjectiveQuestion(m.ctx, key)
+		if err != nil {
+			return nil
+		}
+		return inboxQuestionMsg{occurrence: occurrence, text: text}
+	}
+}
 
 // inboxRow is how the rail lists an inbox item: "?" for a question, "!" for an approval request,
 // "·" for anything else, then what it is about.
-func (m model) inboxRow(item *operatorv1.InboxItem) string {
+func (m model) inboxRow(item *views.InboxItem) string {
 	switch item.GetKind() {
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
+	case views.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
 		text := item.GetQuestion().GetText()
 		if text == "" {
 			text = item.GetReason()
@@ -22,7 +60,7 @@ func (m model) inboxRow(item *operatorv1.InboxItem) string {
 			text = firstLine(objective.GetOutcome()) + ": " + text
 		}
 		return "? " + terminalText(firstLine(text))
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
+	case views.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
 		return "! " + terminalText(firstLine(item.GetApproval().GetSummary()))
 	}
 	return "· " + terminalText(inboxHeadline(item))
@@ -33,21 +71,21 @@ func (m model) inboxRow(item *operatorv1.InboxItem) string {
 // "blocking" for an approval a running or waiting Task Attempt waits on, "not blocking" for one no
 // Task Attempt waits on, and "turn finished" for a question its owner's Session waits to have
 // answered as its next turn. Other kinds have none.
-func inboxWaitState(item *operatorv1.InboxItem) string {
+func inboxWaitState(item *views.InboxItem) string {
 	switch item.GetKind() {
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
+	case views.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
 		if item.GetApproval().GetBlocking() {
 			return "blocking"
 		}
 		return "not blocking"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
+	case views.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
 		return "turn finished"
 	}
 	return ""
 }
 
-// inboxHeadline says what an inbox item waits on in one line, as `supertag list inbox` does.
-func inboxHeadline(item *operatorv1.InboxItem) string {
+// inboxHeadline says what an inbox item waits on in one line, as `supertag get inbox-items` lists it.
+func inboxHeadline(item *views.InboxItem) string {
 	task := "?"
 	for _, evidence := range item.GetEvidence() {
 		if evidence.GetTask() != nil {
@@ -63,7 +101,7 @@ func inboxHeadline(item *operatorv1.InboxItem) string {
 		return clean
 	}
 	switch item.GetKind() {
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
+	case views.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
 		approval := item.GetApproval()
 		if approval == nil {
 			return "An approval request waits for a decision"
@@ -77,26 +115,26 @@ func inboxHeadline(item *operatorv1.InboxItem) string {
 			requester = "unknown Tag"
 		}
 		return fmt.Sprintf("Approval %s%s: %s (requested by Tag %s)", approval.GetRequestId(), waiting, summary(approval.GetSummary()), requester)
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
+	case views.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
 		return "Objective " + item.GetObjectiveId() + " waits on your answer"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_BUDGET:
+	case views.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_BUDGET:
 		return "The Objective budget is used up"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION:
+	case views.InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION:
 		if attempt := item.GetUncertainAttempt(); attempt != nil {
 			host := attempt.GetWorkerHostId()
 			if host == "" {
-				host = "unknown"
+				return fmt.Sprintf("Task %s is uncertain: Attempt %s may have executed", task, attempt.GetAttemptId())
 			}
 			return fmt.Sprintf("Task %s is uncertain: Attempt %s may have executed, and only an operator on Worker Host %s can recover it",
 				task, attempt.GetAttemptId(), host)
 		}
 		return "Task " + task + " needs attention"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT:
+	case views.InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT:
 		if item.GetReason() != "" {
 			return summary(item.GetReason())
 		}
 		return "A budget or deadline limit was reached"
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN:
+	case views.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN:
 		server := "?"
 		if key := item.GetKey(); strings.HasPrefix(key, "mcp_login:") {
 			server = key[strings.LastIndexByte(key, ':')+1:]
@@ -129,21 +167,29 @@ func (m model) renderItem() string {
 		add("Deadline: " + timestamp(deadline))
 	}
 	switch item.GetKind() {
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
+	case views.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
 		question := item.GetQuestion()
-		if question.GetText() == "" {
+		text := question.GetText()
+		if m.fullQuestion != "" {
+			text = m.fullQuestion
+		}
+		if text == "" {
 			add("", "The question is not shown to this credential.")
 			break
 		}
 		add("", "The owner's Task finished its turn; its Session waits for your answer as its next turn.")
 		add("", "The owner asks:", "")
-		for _, line := range strings.Split(terminalLines(question.GetText()), "\n") {
+		for _, line := range strings.Split(terminalLines(text), "\n") {
 			add("  " + line)
 		}
-		if question.GetTruncated() {
-			add("", "The question was cut short; supertag describe objective "+shellWord(item.GetObjectiveId())+" shows all of it.")
+		if question.GetTruncated() && m.fullQuestion == "" {
+			command := "supertag describe objective " + shellWord(item.GetObjectiveId())
+
+			command = "supertag get question " + shellWord(strings.TrimPrefix(item.GetKey(), "question:"))
+
+			add("", "The question was cut short. "+command+" shows all of it.")
 		}
-	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
+	case views.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
 		approval := item.GetApproval()
 		add("", "Wants to: "+approval.GetSummary())
 		if approval.GetRequestingTag() != "" {
@@ -152,17 +198,32 @@ func (m model) renderItem() string {
 		if approval.GetTaskId() != "" {
 			add("Task: " + approval.GetTaskId())
 		}
-		if approval.GetBlocking() {
-			add("A running Task Attempt waits on the decision.")
-		} else {
-			add("No running Task Attempt waits on the decision.")
+
+		switch {
+		case m.approvalDetails.err != nil:
+			add("", "Could not load approval details: "+m.approvalDetails.err.Error())
+		case m.approvalDetails.occurrence == "":
+			add("", "Loading approval details…")
+		case !m.approvalDetails.details.Pending:
+			add("", "This approval no longer waits for a decision.")
+		default:
+			details := m.approvalDetails.details
+			add("", "Action: "+details.Action)
+			if details.Resource != "" {
+				add("Resource: " + details.Resource)
+			}
+			add("Arguments:")
+			for _, line := range strings.Split(details.Arguments, "\n") {
+				add("  " + line)
+			}
 		}
+
 	default:
 		if item.GetReason() != "" {
 			add("", "Why: "+item.GetReason())
 		}
 	}
-	if commands := item.GetCommands(); item.GetKind() != operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION && len(commands) > 0 {
+	if commands := item.GetCommands(); item.GetKind() != views.InboxItemKind_INBOX_ITEM_KIND_QUESTION && len(commands) > 0 {
 		add("", "Commands:")
 		for _, command := range commands {
 			add("  " + command)

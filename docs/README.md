@@ -43,19 +43,18 @@ Follow this order on your first visit:
 | Choose how to direct your Tags | [The interaction model](concepts/interaction-model.md) |
 | Ask a Tag a question from your terminal | [Talk to a Tag from your terminal](guides/talk-to-a-tag.md) |
 | Give several Tags a shared outcome | [Define and complete an Objective](guides/objectives.md) |
-| See delivery and review across two Teams | [Live Objective walkthrough](../examples/objective-walkthrough/README.md#live-walkthrough-with-two-teams) |
 | Keep a Tag responsible as conditions change | [Maintain an ongoing responsibility](guides/ongoing-responsibilities.md) |
 | Understand progress, blockers, and results | [Check an Objective's progress](guides/objective-overview.md) |
 | Answer a question, decide an approval, or review a result | [Respond to an Objective](guides/objective-decisions.md) |
 | Get alerts for inbox decisions | [Set up operator notifications](guides/notifications.md) |
 | Start from a ready-made team definition | [Example organizations](../examples/organizations/README.md) |
-| Run Claude and Codex against one shared workspace | [Two managers, one shared workspace](../examples/shared-organization/README.md) |
 | Connect Slack, GitHub, Lark/Feishu, Linear, or Teams | [Connection guides](surfaces/README.md) |
-| Run Codex, Claude Code, Cursor, or OpenCode | [Run a Worker](guides/workers.md) |
+| Run Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents | [Run Worker Hosts](guides/workers.md) |
 | Let Tags change a repository on their own branches | [Work in a repository with Workspaces](guides/workspaces.md) |
-| Add another execution system | [Build a custom Worker or harness](guides/custom-workers.md) |
+| Add another agent system | [Write a harness adapter](guides/harness-adapters.md) |
+| Look up a command or flag | [CLI reference](reference/cli.md) |
 | Run an always-on deployment | [Self-host SuperTag](guides/self-hosting.md) |
-| Host the Control Plane and run repository work on Modal | [Deploy on Modal](guides/deploy-modal.md) |
+| Host the Control Plane on Modal | [Deploy on Modal](guides/deploy-modal.md) |
 | Compare SuperTag with other agent systems | [SuperTag and other agent systems](concepts/supertag-and-other-agent-systems.md) |
 | Look up a term | [Glossary](reference/glossary.md) |
 
@@ -83,15 +82,13 @@ Once those ideas are clear, learn where the organization and its work run:
 
 - The [Control Plane](concepts/how-it-works.md) stores the organization, applies policy, and schedules work.
 - A [Worker Host](concepts/workers.md) is a machine or sandbox that provides execution capacity.
-- A **Worklet** connects a Worker Host to the Control Plane. A **Worker** completes a Task. A
-  **harness** connects a Worker to an agent system such as Codex, Claude Code, or Cursor. The
-  [execution overview](concepts/workers.md) explains how they fit together.
+- A **harness adapter** runs each Task Attempt on an agent system such as Codex, Claude Code, or
+  Cursor. The [execution overview](concepts/workers.md) explains how it fits together.
 - [Multiplayer continuity](concepts/multiplayer.md) explains how people share completed work safely.
 - [Persistence](concepts/persistence.md) explains what survives when a sandbox or host dies.
 
-The **Gateway** is the part of the Control Plane that receives and sends collaboration surface
-traffic. The **API Server** is the part that handles management requests and Worker Host
-connections.
+The **Gateway** is a separate, optional service that receives and sends collaboration surface
+traffic. It connects to the Control Plane as a client, like the CLI and Worker Hosts.
 
 Concept pages explain what each part means and when to use it. They link to commands and technical
 reference only when you need to configure or extend that part.
@@ -109,18 +106,18 @@ Choose the tool your team already uses:
 
 ## Operate SuperTag
 
-- [Self-host SuperTag](guides/self-hosting.md) — choose Docker Compose, Railway, Render, Cloudflare, or a native service
-- [Railway](guides/deploy-railway.md) — hosted Control Plane, PostgreSQL, and persistent storage
-- [Render](guides/deploy-render.md) — Blueprint-managed Control Plane, PostgreSQL, and persistent storage
-- [Fly.io](guides/deploy-fly.md) — always-on Machine with PostgreSQL and a persistent volume
-- [Modal](guides/deploy-modal.md) — always-on Server with external PostgreSQL and credentials
-- [Cloudflare](guides/deploy-cloudflare.md) — container-hosted Control Plane with PostgreSQL and Vault
-- [Deployment setup](guides/deployment-setup.md) — shared configuration and verification for Railway, Render, and Cloudflare
+- [Self-host SuperTag](guides/self-hosting.md) — choose Docker Compose, Fly.io, Railway, Render, Cloudflare, or Modal
+- [Configure a deployment](guides/deployment-setup.md) — `setup`, `check`, and `verify deployment` for every platform
+- [Fly.io](guides/deploy-fly.md) — Control Plane and optional Gateway as Machines, with PostgreSQL
+- [Railway](guides/deploy-railway.md) — Control Plane behind a TCP Proxy, with PostgreSQL
+- [Render](guides/deploy-render.md) — Blueprint-managed Control Plane, optional Gateway, and PostgreSQL, over the WebSocket tunnel
+- [Modal](guides/deploy-modal.md) — always-on Control Plane behind a web endpoint, with external PostgreSQL and Vault
+- [Cloudflare](guides/deploy-cloudflare.md) — Control Plane in a Container behind a Worker, with external PostgreSQL and Vault
 - [Control Plane operations](operations/control-plane.md) — health, persistence, deployment, and databases
 - [Operator notifications](guides/notifications.md) — alert the operator about inbox items
 - [Manage resources](operations/resources.md) — get, describe, diff, apply, delete, watch, and cancel
-- [supertag.yaml and local state](reference/supertag-yaml.md) — the services `supertag up` runs (a local Control Plane and this machine as a Worker Host), their settings, and what lives in `~/.supertag/`
-- [Troubleshoot the first reply](guides/troubleshooting.md) — trace a request from its source to its Worker
+- [supertag.yaml and local state](reference/supertag-yaml.md) — the services `supertag up` runs (a local Control Plane, a Gateway, and this machine as a Worker Host), their settings, and what lives in `~/.supertag/`
+- [Troubleshoot the first reply](guides/troubleshooting.md) — trace a request from its source to its Worker Host
 - [Credential storage](reference/credential-storage.md) — where secrets live and which process can read them
 - [MCP tools for GitHub, Slack, Linear, Teams, and Lark](surfaces/worker-tools.md) — preset tools and resource grants
 
@@ -140,14 +137,9 @@ Choose the tool your team already uses:
 
 ## Build and extend SuperTag
 
-- [Build a custom Worker or harness](guides/custom-workers.md)
-- [Build a Python Worker](guides/python-workers.md)
-- [Run a Worker in Modal](guides/modal-workers.md)
-- [Add a custom Context type](guides/custom-context.md)
-- [Extend harness execution](guides/harness-runtime.md)
-- [Route MCP tools to the right client](guides/mcp-tools.md)
-- [Share an execution environment](guides/shared-execution.md)
-- [Output rendering](reference/output-rendering.md)
+- [Write a harness adapter](guides/harness-adapters.md)
+- [Connect your own collaboration surface](reference/connector-contract.md)
+- [Call the Control Plane API](reference/control-plane-api.md)
 
 ## Implementation reference
 
@@ -155,19 +147,19 @@ Use these pages when you are implementing an integration, protocol, or Control P
 
 - [Resource model](reference/resource-model.md) — public resources and their common shape
 - [Identity and policy resolution](reference/iam.md) — identity, admission, permissions, and security rules
-- [Context resolution](reference/context-resolution.md) — how declared knowledge becomes Worker input
+- [Context resolution](reference/context-resolution.md) — how declared knowledge becomes harness input
 - [Objective coordination reference](reference/coordination.md) — Objective, Team, Mailbox, Workstream, budget, and completion rules
-- [Worker reference](reference/worker.md) — execution contracts, events, continuity, and failure behavior
+- [CLI reference](reference/cli.md) — every command and flag, generated from the CLI's help
+- [Worker Host reference](reference/worker.md) — placement, leases, the journal, harnesses, Workspaces, and delivery
+- [Connector contract](reference/connector-contract.md) — how a connector in its own process admits surface events and delivers replies
 - [Devcontainer settings for remote workspaces](reference/devcontainer-subset.md) — supported repository toolchain settings and refusals
 - [Scheduling and interrupted execution](reference/scheduling-and-recovery.md) — Worker Host selection, unknown outcomes, and reclaiming capacity
-- [Artifacts](reference/artifacts.md) — storage, limits, handoff, and custom Worker integration
+- [Artifacts](reference/artifacts.md) — storage, limits, and handoff between Objectives
 - [Control Plane model](reference/control-plane.md) — service responsibilities and controllers
-- [Control Plane API Server](reference/control-plane-api.md) — calling the API: endpoints, authentication, errors, and streams
-- [Operator API reference](reference/operator-api/README.md) — every operator RPC, message, and field, generated from the protos:
-  [`OrganizationService`](reference/operator-api/organization.md), [`ConversationService`](reference/operator-api/conversation.md), [`EventService`](reference/operator-api/event.md), [`InboxService`](reference/operator-api/inbox.md), [`ObjectiveService`](reference/operator-api/objective.md), [`WorkService`](reference/operator-api/work.md), [`TeamService`](reference/operator-api/team.md), [`MailboxService`](reference/operator-api/mailbox.md), [`HostService`](reference/operator-api/host.md), [`AccessService`](reference/operator-api/access.md), [`SurfaceService`](reference/operator-api/surface.md), [`ResourceService`](reference/operator-api/resource.md), and [shared messages and options](reference/operator-api/shared.md)
+- [Control Plane API](reference/control-plane-api.md) — connecting, negotiation, authentication, services, and streams
 - [Reliable external actions](reference/action-effects.md) — retries, receipts, and uncertain outcomes
 - [API stability](reference/api-stability.md) — compatibility levels and change policy
-- [Language-neutral wire specification](../spec/README.md) — schemas and protocol versions
+- [Protocol definitions](../rust/proto/supertag/runtime/v2/runtime.proto) — the `supertag.runtime.v2` protobuf package
 
 The [contribution guide](../CONTRIBUTING.md) and [security policy](../SECURITY.md) live at the
 repository root.

@@ -1,5 +1,5 @@
-// Command supertag-tui is SuperTag's terminal UI. Plain `supertag` in a terminal starts it and hands it
-// the Control Planes to talk to over file descriptor 3.
+// Command supertag-tui is SuperTag's terminal UI. Plain `supertag` in a terminal starts it. When
+// `supertag` resolved a Control Plane, it hands it over on file descriptor 3 and sets SUPERTAG_TUI_HANDOVER=3.
 package main
 
 import (
@@ -20,24 +20,60 @@ var version = "dev"
 
 const launchHint = "Run supertag in a terminal to start the terminal UI."
 
+// handoverVariable names the descriptor `supertag` passed its handover on. It is set only when one
+// was passed.
+const handoverVariable = "SUPERTAG_TUI_HANDOVER"
+
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		fmt.Println(version)
 		return
 	}
-	h, err := readHandover(os.NewFile(3, "supertag-target"))
+	// Adopt descriptor 3 only when the launcher says it passed one. Otherwise the number may
+	// belong to this process (such as the runtime's network poller), and closing it is fatal.
+	var targetFile *os.File
+	if os.Getenv(handoverVariable) == "3" {
+		targetFile = os.NewFile(3, "supertag-target")
+	}
+	os.Unsetenv(handoverVariable)
+	store, storeErr := defaultControlPlaneStore()
+	var profiles controlPlaneProfiles
+	if storeErr == nil {
+		profiles, storeErr = store.load()
+	}
+	noHandover := true
+	if targetFile != nil {
+		if info, err := targetFile.Stat(); err == nil && info.Mode()&(os.ModeNamedPipe|os.ModeSocket) != 0 {
+			noHandover = false
+		}
+	}
+	h, err := startupTargets(targetFile, profiles)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, launchHint)
 		os.Exit(2)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	launchContexts := append([]client.Target(nil), h.Contexts...)
+	h.Contexts = mergeControlPlanes(h.Contexts, profiles.ControlPlanes)
 	a, err := newApp(ctx, dial(version), h.Contexts, h.Current)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer a.stop()
+	a.controlPlaneStore = store
+	a.savedControlPlanes = profiles.ControlPlanes
+	// Only a real handover is a launch-specific connection. Saved-only startup
+	// must not retain a forgotten connection after switching away.
+	a.launchContexts = launchContexts
+	if noHandover {
+		a.launchContexts = nil
+	}
+	if storeErr != nil {
+		a.inner.notice = note{text: "Saved Control Planes could not be read safely. This launch connection is still available.", err: true}
+		a.choiceErr = "Saved Control Planes could not be read safely. Check the private profile file and its permissions."
+	}
 	if _, err := tea.NewProgram(a).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -49,6 +85,7 @@ func main() {
 type handover struct {
 	Contexts []client.Target `json:"contexts"`
 	Current  int             `json:"current"`
+	Protocol string          `json:"protocol"`
 }
 
 // readHandover reads the one JSON line `supertag` writes to the inherited pipe, to EOF. Only a
@@ -76,6 +113,9 @@ func readHandover(f *os.File) (handover, error) {
 	}
 	if len(h.Contexts) == 0 || h.Current < 0 || h.Current >= len(h.Contexts) {
 		return h, errors.New("the handover needs its Control Planes and the index of the current one")
+	}
+	if h.Protocol != "runtime.v2" {
+		return h, errors.New("unsupported TUI handover protocol")
 	}
 	for _, target := range h.Contexts {
 		if target.URL == "" || target.Token == "" {

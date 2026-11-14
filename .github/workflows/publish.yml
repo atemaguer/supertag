@@ -1,5 +1,7 @@
 name: Publish supertag-ai
 
+# supertag-ai is the TypeScript SDK. The supertag CLI installs from the GitHub Release's
+# native archives with install.sh; this package is not a way to install it.
 on:
   release:
     types:
@@ -7,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing release tag whose version should be published
+        description: Existing published release tag whose version should be published
         required: true
         type: string
 
@@ -19,34 +21,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-cli:
-    if: github.repository == 'atemaguer/supertag'
-    permissions:
-      contents: write
-    uses: ./.github/workflows/release-cli.yml
-    with:
-      release_tag: ${{ github.event.release.tag_name || inputs.release_tag }}
-      upload_assets: true
-    secrets:
-      APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
-      APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
-      APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
-      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-
   publish:
     if: github.repository == 'atemaguer/supertag'
-    needs: release-cli
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     env:
       NODE_OPTIONS: --max-old-space-size=6144
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check the tag names the release version
+        run: python rust/scripts/release_version.py "$RELEASE_TAG"
+      - name: Check the release carries its native archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-release-assets.sh "$RELEASE_TAG"
       - uses: pnpm/action-setup@v4
         with:
           version: 11.18.0
@@ -55,40 +52,13 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
-      - uses: actions/download-artifact@v4
-        with:
-          name: supertag-release-tui
-          path: apps/tui/dist
       - run: npm install --global npm@11
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter supertag-ai build
       - run: pnpm --filter supertag-ai typecheck
-      - name: Verify release tag
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-        run: >-
-          node --input-type=module --eval 'import manifest from "./packages/supertag-ai/package.json" with { type: "json" };
-          if (process.env.RELEASE_TAG !== `v${manifest.version}`) throw new Error(`Release ${process.env.RELEASE_TAG}
-          does not match supertag-ai@${manifest.version}`);'
-      - name: Bundle the installer and terminal UI
-        run: |
-          (
-            cd apps/tui/dist
-            sha256sum --check SHA256SUMS
-            chmod +x supertag-tui-*
-          )
-          test "$(apps/tui/dist/supertag-tui-linux-amd64 --version)" = "$(node -p 'require("./packages/supertag-ai/package.json").version')"
-          sh scripts/stage-cli-release.sh
       - name: Publish with npm trusted publishing
         working-directory: packages/supertag-ai
         run: |
           # Until a stable 1.0 exists, each alpha is the release users should get by default.
           # npm adds provenance automatically when the source repository is public.
           npm publish --access public --tag latest
-
-  verify-installer:
-    needs: publish
-    uses: ./.github/workflows/verify-installer.yml
-    with:
-      release_tag: ${{ github.event.release.tag_name || inputs.release_tag }}
-      check_latest: true

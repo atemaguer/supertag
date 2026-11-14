@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // activityShown is how many of a work Session's newest activity lines its expanded line shows.
@@ -17,7 +17,7 @@ const activityShown = 30
 // workDetail is what was read of one work Session: the Session with its delivery, and the
 // activity its latest Task recorded.
 type workDetail struct {
-	session *operatorv1.Session
+	session *views.Session
 	// err is why the last read failed, filtered for the terminal.
 	err string
 	// task is the Task activity was read for, and after its last event read.
@@ -30,7 +30,7 @@ type workDetail struct {
 
 type workMsg struct {
 	id       string
-	session  *operatorv1.Session
+	session  *views.Session
 	task     string
 	from     int64
 	after    int64
@@ -117,7 +117,7 @@ func (m *model) workRead(msg workMsg) tea.Cmd {
 }
 
 // branch is what a work Session delivered on a branch, or nil before it did.
-func (d *workDetail) branch() *operatorv1.WorkspaceDelivery {
+func (d *workDetail) branch() *views.WorkspaceDelivery {
 	if d == nil {
 		return nil
 	}

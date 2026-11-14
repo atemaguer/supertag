@@ -44,6 +44,7 @@ interface StartFrame {
      * runner registers them as custom tools and forwards every call to the Worker.
      */
     readonly splitTools?: readonly CursorSplitToolDefinition[];
+    readonly allowNativeWebSearch?: true;
     readonly localCommandTool?: CursorSplitToolDefinition;
   };
 }
@@ -229,19 +230,27 @@ export async function executeCursorSdk(
       throw error;
     }
   }
+  const allowWebSearch = request.allowNativeWebSearch === true;
   if (
-    request.splitTools &&
-    (request.tools.length !== 1 ||
-      request.tools[0] !== "mcp" ||
-      request.disallowedTools.includes("mcp") ||
-      request.localCommandTool !== undefined ||
-      SPLIT_NATIVE_DENYLIST.some((name) => !request.disallowedTools.includes(name)))
+    (allowWebSearch && !request.splitTools) ||
+    (request.splitTools &&
+      (request.tools.length !== (allowWebSearch ? 2 : 1) ||
+        request.tools[0] !== "mcp" ||
+        (allowWebSearch &&
+          (request.tools[1] !== "webSearch" || request.disallowedTools.includes("webSearch"))) ||
+        request.disallowedTools.includes("mcp") ||
+        request.localCommandTool !== undefined ||
+        SPLIT_NATIVE_DENYLIST.some((name) => !request.disallowedTools.includes(name))))
   ) {
     // Reject malformed allow and deny policy before the SDK sees it. The denylist also
     // blocks subagents, whose curated toolset would bypass the main-loop allowlist.
     // https://cursor.com/docs/sdk/typescript.md#restricting-the-toolset
     // https://cursor.com/docs/release-notes/sdk.md
-    const error = new Error("Cursor split execution requires mcp only and native tools denied");
+    const error = new Error(
+      allowWebSearch
+        ? "Cursor workspace bridge requires MCP, admitted web search, and native workspace tools denied"
+        : "Cursor split execution requires mcp only and native tools denied",
+    );
     error.name = "ConfigurationError";
     throw error;
   }
@@ -409,7 +418,11 @@ async function runCursorSdk(
       untrustedMcpProvider = true;
     // Unknown names and malformed custom calls remain protocol failures.
     if (mcpEvent && !isCustom && !untrustedMcpProvider) nativeMcp = true;
-    if (split && !isCustom) nativeTool = true;
+    const isAdmittedWebSearch =
+      request.allowNativeWebSearch === true &&
+      !mcpEvent &&
+      (tool.name === "webSearch" || tool.name === "web_search");
+    if (split && !isCustom && !isAdmittedWebSearch) nativeTool = true;
     if (isCustom && tool.status === "running") {
       // Without a call_id the call cannot be reconciled against an execute record.
       if (typeof tool.call_id === "string") unfinished.add(tool.call_id);

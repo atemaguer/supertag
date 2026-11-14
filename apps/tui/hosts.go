@@ -7,7 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/client"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // hostRefresh is how often the status bar rereads the Worker Hosts. The watch stream carries no
@@ -16,8 +17,9 @@ var hostRefresh = 15 * time.Second
 
 type (
 	hostsMsg struct {
-		hosts []*operatorv1.WorkerHost
-		err   error
+		hosts       []*views.WorkerHost
+		err         error
+		phaseLabels map[string]string
 	}
 	hostTickMsg struct{}
 )
@@ -25,14 +27,14 @@ type (
 // hostPhases are the phases the status bar counts, in the order it shows them. Revoked hosts
 // never connect again, so they are left out.
 var hostPhases = []struct {
-	phase operatorv1.WorkerHostPhase
+	phase views.WorkerHostPhase
 	label string
 }{
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_READY, "ready"},
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_CONNECTED, "connected"},
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING, "draining"},
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE, "unreachable"},
-	{operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED, "unknown"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_READY, "ready"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_CONNECTED, "connected"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING, "draining"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE, "unreachable"},
+	{views.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED, "unknown"},
 }
 
 func (m model) hostsAfter() tea.Cmd {
@@ -40,7 +42,8 @@ func (m model) hostsAfter() tea.Cmd {
 }
 
 func (m model) reloadHosts() tea.Cmd {
-	if !m.hostReload.start() {
+	// A client device does not see Worker Host status; only operators do.
+	if client.IsClientCredential(m.client.Target().Token) || !m.hostReload.start() {
 		return nil
 	}
 	return m.hostsCmd()
@@ -48,8 +51,8 @@ func (m model) reloadHosts() tea.Cmd {
 
 func (m model) hostsCmd() tea.Cmd {
 	return func() tea.Msg {
-		hosts, err := m.client.ListWorkerHosts(m.ctx)
-		return hostsMsg{hosts: hosts, err: err}
+		hosts, labels, err := m.client.ListWorkerHostReadiness(m.ctx)
+		return hostsMsg{hosts: hosts, phaseLabels: labels, err: err}
 	}
 }
 
@@ -62,9 +65,11 @@ func (m *model) hostsRead(msg hostsMsg) tea.Cmd {
 	}
 	if msg.err != nil {
 		m.hosts, m.hostsKnown = nil, false
+		m.hostPhaseLabels = nil
 		return again
 	}
 	m.hosts, m.hostsKnown = msg.hosts, true
+	m.hostPhaseLabels = msg.phaseLabels
 	return again
 }
 
@@ -74,17 +79,20 @@ func (m model) hostSummary() string {
 	if !m.hostsKnown {
 		return ""
 	}
-	counts := map[operatorv1.WorkerHostPhase]int{}
+	if m.hostPhaseLabels != nil {
+		return runtimeHostSummary(m.hosts, m.hostPhaseLabels)
+	}
+	counts := map[views.WorkerHostPhase]int{}
 	total := 0
 	for _, host := range m.hosts {
 		phase := host.GetPhase()
 		switch phase {
-		case operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_REVOKED:
+		case views.WorkerHostPhase_WORKER_HOST_PHASE_REVOKED:
 			continue
-		case operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_READY, operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_CONNECTED,
-			operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING, operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE:
+		case views.WorkerHostPhase_WORKER_HOST_PHASE_READY, views.WorkerHostPhase_WORKER_HOST_PHASE_CONNECTED,
+			views.WorkerHostPhase_WORKER_HOST_PHASE_DRAINING, views.WorkerHostPhase_WORKER_HOST_PHASE_UNREACHABLE:
 		default:
-			phase = operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED
+			phase = views.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED
 		}
 		counts[phase]++
 		total++
@@ -97,6 +105,30 @@ func (m model) hostSummary() string {
 		if n := counts[p.phase]; n > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", n, p.label))
 		}
+	}
+	return "Worker Hosts: " + strings.Join(parts, ", ")
+}
+
+func runtimeHostSummary(hosts []*views.WorkerHost, labels map[string]string) string {
+	counts := map[string]int{}
+	for _, host := range hosts {
+		label := labels[host.GetMetadata().GetId()]
+		if label == "revoked" {
+			continue
+		}
+		if label == "" {
+			label = "unknown"
+		}
+		counts[label]++
+	}
+	var parts []string
+	for _, label := range []string{"ready", "busy", "pending", "suppressed", "draining", "offline", "unknown"} {
+		if n := counts[label]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+		}
+	}
+	if len(parts) == 0 {
+		return "no Worker Hosts"
 	}
 	return "Worker Hosts: " + strings.Join(parts, ", ")
 }

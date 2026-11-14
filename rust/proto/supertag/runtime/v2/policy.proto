@@ -1,0 +1,325 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+
+// Operator-managed reusable policy. Admission freezes resolved copies on each Task.
+service PolicyCatalog {
+  rpc PutPermissionSet(PutPermissionSetRequest) returns (PermissionSet);
+  rpc GetPermissionSet(GetPolicyResourceRequest) returns (PermissionSet);
+  rpc ListPermissionSets(ListPolicyResourcesRequest) returns (ListPermissionSetsResponse);
+  rpc DeletePermissionSet(DeletePolicyResourceRequest) returns (DeletePolicyResourceResponse);
+  rpc PutContextSet(PutContextSetRequest) returns (ContextSet);
+  rpc GetContextSet(GetPolicyResourceRequest) returns (ContextSet);
+  rpc ListContextSets(ListPolicyResourcesRequest) returns (ListContextSetsResponse);
+  rpc DeleteContextSet(DeletePolicyResourceRequest) returns (DeletePolicyResourceResponse);
+  rpc PutRole(PutRoleRequest) returns (Role);
+  rpc GetRole(GetPolicyResourceRequest) returns (Role);
+  rpc ListRoles(ListPolicyResourcesRequest) returns (ListRolesResponse);
+  rpc AssignRole(AssignRoleRequest) returns (RoleAssignment);
+  rpc ListRoleAssignments(ListRoleAssignmentsRequest) returns (ListRoleAssignmentsResponse);
+  rpc DeactivateRoleAssignment(DeactivateRoleAssignmentRequest) returns (RoleAssignment);
+}
+
+// Operator-managed policy bindings. Surface credentials stay at the Gateway.
+service SurfacePolicyCatalog {
+  rpc PutSurfaceAccount(PutSurfaceAccountRequest) returns (SurfaceAccount);
+  rpc GetSurfaceAccount(GetSurfaceAccountRequest) returns (SurfaceAccount);
+  rpc ListSurfaceAccounts(ListSurfaceAccountsRequest) returns (ListSurfaceAccountsResponse);
+  rpc PutSurfaceLocation(PutSurfaceLocationRequest) returns (SurfaceLocation);
+  rpc GetSurfaceLocation(GetSurfaceLocationRequest) returns (SurfaceLocation);
+  rpc ListSurfaceLocations(ListSurfaceLocationsRequest) returns (ListSurfaceLocationsResponse);
+  rpc DeleteSurfaceLocation(DeleteSurfaceLocationRequest) returns (DeletePolicyResourceResponse);
+}
+
+message SlackSurfaceIdentity { string team_id = 1; }
+message GithubSurfaceIdentity {
+  // The operator's non-secret installation or user identity. The current
+  // connector attests its own authenticated alias and the numeric repository.
+  string external_account_id = 1;
+}
+message LinearSurfaceIdentity { string workspace_id = 1; }
+message LarkSurfaceIdentity {
+  bool feishu = 1;
+  string app_id = 2;
+  string tenant_key = 3;
+}
+message MicrosoftTeamsSurfaceIdentity {
+  string app_id = 1;
+  string tenant_id = 2;
+}
+message SurfaceAccountIdentity {
+  oneof provider {
+    SlackSurfaceIdentity slack = 1;
+    GithubSurfaceIdentity github = 2;
+    LinearSurfaceIdentity linear = 3;
+    LarkSurfaceIdentity lark = 4;
+    MicrosoftTeamsSurfaceIdentity microsoft_teams = 5;
+  }
+}
+message SurfaceAccount {
+  string account_id = 1;
+  SurfaceAccountIdentity identity = 2;
+  bool enabled = 3;
+  uint64 revision = 4;
+  // Required: the enrolled Gateway, `gateway:NAME` by its NAME, that serves the
+  // account. Connector and reply calls for the account's locations are refused
+  // from any other Gateway.
+  string gateway = 4100;
+}
+message SlackSurfaceChannel { string channel_id = 1; }
+message GithubSurfaceRepository { uint64 repository_id = 1; }
+message LinearSurfaceTeam { string team_id = 1; }
+message LarkSurfaceChat { string chat_id = 1; }
+message MicrosoftTeamsSurfaceChannel {
+  string team_id = 1;
+  string channel_id = 2;
+}
+message SurfaceLocationScope {
+  oneof provider {
+    SlackSurfaceChannel slack = 1;
+    GithubSurfaceRepository github = 2;
+    LinearSurfaceTeam linear = 3;
+    LarkSurfaceChat lark = 4;
+    MicrosoftTeamsSurfaceChannel microsoft_teams = 5;
+  }
+}
+message SurfaceLocation {
+  string location_id = 1;
+  string account_id = 2;
+  // This alias has one outbox writer and may bind only one exact location.
+  string connector_account_id = 3;
+  SurfaceLocationScope scope = 4;
+  string tag_id = 5;
+  bool enabled = 6;
+  uint64 revision = 7;
+  repeated string permission_set_ids = 8;
+  repeated string context_set_ids = 9;
+}
+message SurfacePolicyOrigin {
+  string location_id = 1;
+  uint64 location_revision = 2;
+  string account_id = 3;
+  string connector_account_id = 4;
+  SurfaceLocationScope scope = 5;
+  repeated string origin_actions = 6;
+}
+
+message PutSurfaceAccountRequest {
+  string operation_id = 1;
+  SurfaceAccount account = 2;
+  optional uint64 expected_revision = 3;
+}
+message GetSurfaceAccountRequest { string account_id = 1; }
+message ListSurfaceAccountsRequest {
+  uint32 limit = 1;
+  string cursor = 2;
+}
+message ListSurfaceAccountsResponse {
+  repeated SurfaceAccount accounts = 1;
+  string next_cursor = 2;
+}
+message PutSurfaceLocationRequest {
+  string operation_id = 1;
+  SurfaceLocation location = 2;
+  optional uint64 expected_revision = 3;
+}
+message GetSurfaceLocationRequest { string location_id = 1; }
+message ListSurfaceLocationsRequest {
+  string account_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+message ListSurfaceLocationsResponse {
+  repeated SurfaceLocation locations = 1;
+  string next_cursor = 2;
+}
+message DeleteSurfaceLocationRequest {
+  string operation_id = 1;
+  string location_id = 2;
+  uint64 expected_revision = 3;
+}
+
+enum PolicyPermissionTarget {
+  POLICY_PERMISSION_TARGET_UNSPECIFIED = 0;
+  POLICY_PERMISSION_TARGET_RUNTIME = 1;
+  POLICY_PERMISSION_TARGET_SURFACE = 2;
+  POLICY_PERMISSION_TARGET_MCP = 3;
+}
+message PolicyPermission {
+  // Assigned by the catalog; a replacement preserves the identity of the same grant.
+  string permission_id = 1;
+  PolicyPermissionTarget target = 2;
+  string action = 3;
+  string surface_account_id = 4;
+  string scope = 5;
+  string reference = 6;
+  string resource = 7;
+  bool approval_required = 8;
+}
+message PermissionSet {
+  string set_id = 1;
+  string name = 2;
+  uint64 revision = 3;
+  repeated string approvers = 4;
+  repeated PolicyPermission permissions = 5;
+}
+message PolicyContextItem {
+  string item_id = 1;
+  string item_key = 2;
+  string type = 3;
+  uint32 version = 4;
+  bool required = 5;
+  // A JSON object interpreted by the named, versioned context resolver. Never a secret.
+  string config_json = 6;
+  // Assigned only by connector admission after source authority is verified.
+  PolicyArtifactContextSnapshot artifact_snapshot = 7;
+}
+message ContextSet {
+  string set_id = 1;
+  string name = 2;
+  uint64 revision = 3;
+  repeated PolicyContextItem items = 4;
+}
+message PolicyExecutionSettings {
+  optional string harness = 1;
+  // Order matters: the first entry is the default. Empty means unset.
+  repeated string models = 2;
+  repeated string efforts = 3;
+  // A mutable fixed execution root, distinct from a pinned Git Workspace.
+  optional string shared_execution_environment_id = 4;
+}
+enum RoleStatus {
+  ROLE_STATUS_UNSPECIFIED = 0;
+  ROLE_STATUS_ACTIVE = 1;
+  ROLE_STATUS_RETIRED = 2;
+}
+message Role {
+  string role_id = 1;
+  string name = 2;
+  string purpose = 3;
+  string instructions = 4;
+  repeated string permission_set_ids = 5;
+  repeated string context_set_ids = 6;
+  RoleStatus status = 7;
+  uint64 revision = 8;
+  PolicyExecutionSettings execution = 9;
+}
+enum RoleAssignmentStatus {
+  ROLE_ASSIGNMENT_STATUS_UNSPECIFIED = 0;
+  ROLE_ASSIGNMENT_STATUS_ACTIVE = 1;
+  ROLE_ASSIGNMENT_STATUS_INACTIVE = 2;
+}
+message RoleAssignment {
+  string assignment_id = 1;
+  string role_id = 2;
+  string tag_id = 3;
+  RoleAssignmentStatus status = 4;
+  uint64 revision = 5;
+}
+message PolicyRoleSnapshot {
+  RoleAssignment assignment = 1;
+  Role role = 2;
+}
+message TaskPolicySnapshot {
+  uint32 version = 1;
+  repeated PolicyRoleSnapshot roles = 2;
+  repeated PermissionSet permission_sets = 3;
+  repeated ContextSet context_sets = 4;
+  PolicyExecutionSettings execution = 5;
+  SurfacePolicyOrigin origin = 6;
+  TaskRuntimeAuthority runtime_authority = 7;
+}
+
+message RuntimeApprovalRequirement {
+  string action = 1;
+  repeated string permission_set_ids = 2;
+  // Typed operator: or tag: principal IDs.
+  repeated string approvers = 3;
+}
+
+message TaskRuntimeAuthority {
+  // Accepted semantic grants, including gated and coordination-only actions.
+  repeated string actions = 1;
+  repeated RuntimeApprovalRequirement approvals = 2;
+  optional string objective_id = 3;
+  optional uint64 objective_revision = 4;
+  optional string delegating_task_id = 5;
+}
+
+message PutPermissionSetRequest {
+  string operation_id = 1;
+  PermissionSet permission_set = 2;
+  optional uint64 expected_revision = 3;
+}
+message PutContextSetRequest {
+  string operation_id = 1;
+  ContextSet context_set = 2;
+  optional uint64 expected_revision = 3;
+}
+message PutRoleRequest {
+  string operation_id = 1;
+  Role role = 2;
+  optional uint64 expected_revision = 3;
+}
+message GetPolicyResourceRequest { string reference = 1; }
+message ListPolicyResourcesRequest {
+  uint32 limit = 1;
+  string cursor = 2;
+}
+message ListPermissionSetsResponse {
+  repeated PermissionSet permission_sets = 1;
+  string next_cursor = 2;
+}
+message ListContextSetsResponse {
+  repeated ContextSet context_sets = 1;
+  string next_cursor = 2;
+}
+message ListRolesResponse {
+  repeated Role roles = 1;
+  string next_cursor = 2;
+}
+message DeletePolicyResourceRequest {
+  string operation_id = 1;
+  string reference = 2;
+  uint64 expected_revision = 3;
+}
+message DeletePolicyResourceResponse { bool deleted = 1; }
+message AssignRoleRequest {
+  string operation_id = 1;
+  string role = 2;
+  string tag_id = 3;
+}
+message ListRoleAssignmentsRequest {
+  string role = 1;
+  string tag_id = 2;
+  RoleAssignmentStatus status = 3;
+  uint32 limit = 4;
+  string cursor = 5;
+}
+message ListRoleAssignmentsResponse {
+  repeated RoleAssignment assignments = 1;
+  string next_cursor = 2;
+}
+message DeactivateRoleAssignmentRequest {
+  string operation_id = 1;
+  string assignment_id = 2;
+  uint64 expected_revision = 3;
+}
+
+message PolicyArtifactContextSnapshot {
+  SurfacePolicyOrigin source = 1;
+  repeated PolicyArtifactContextEntry artifacts = 2;
+}
+message PolicyArtifactContextEntry {
+  string artifact_id = 1;
+  string title = 2;
+  string kind = 3;
+  optional string summary = 4;
+  string task_id = 5;
+  string attempt_id = 6;
+  string tag_id = 7;
+  string session_id = 8;
+  optional string objective_id = 9;
+  int64 captured_at_ms = 10;
+  uint32 file_count = 11;
+  uint64 byte_length = 12;
+}

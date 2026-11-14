@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+// Execution-local interface. The Worker Host owns the provider session and credentials.
+service HarnessMcp {
+  rpc List(ListHarnessMcpToolsRequest) returns (ListHarnessMcpToolsResponse);
+  rpc Call(CallHarnessMcpToolRequest) returns (CallHarnessMcpToolResponse);
+}
+
+message McpServerCapability {
+  string name = 1;
+  repeated string mapped_tools = 2;
+  optional string provider_binding = 3;
+  repeated McpResourceBinding resource_bindings = 4;
+}
+
+message McpResourceBinding { string tool = 1; repeated McpResourceRule rules = 2; }
+message McpResourceRule {
+  string prefix = 1;
+  string separator = 2;
+  repeated McpResourceComponent components = 3;
+  McpResourceCondition when = 4;
+}
+message McpResourceComponent { repeated string arguments = 1; }
+message McpResourceCondition { string argument = 1; string equals = 2; }
+
+message HarnessMcpTool {
+  string server = 1;
+  string name = 2;
+  string description = 3;
+  string input_schema_json = 4;
+}
+message ListHarnessMcpToolsRequest {}
+message ListHarnessMcpToolsResponse {
+  repeated HarnessMcpTool tools = 1;
+}
+message CallHarnessMcpToolRequest {
+  string server = 1;
+  string tool = 2;
+  string arguments_json = 3;
+  string operation_id = 4;
+}
+enum HarnessMcpApprovalState {
+  HARNESS_MCP_APPROVAL_STATE_UNSPECIFIED = 0;
+  HARNESS_MCP_APPROVAL_STATE_PENDING = 1;
+  HARNESS_MCP_APPROVAL_STATE_DENIED = 2;
+  HARNESS_MCP_APPROVAL_STATE_GRANTED = 3;
+}
+message CallHarnessMcpToolResponse {
+  string result_json = 1;
+  optional string approval_id = 2;
+  HarnessMcpApprovalState approval_state = 3;
+}

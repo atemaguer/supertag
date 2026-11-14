@@ -1,0 +1,202 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+import "supertag/runtime/v2/runtime.proto";
+
+// Worker Host placement. Labels narrow the hosts bound to a Tag; they never
+// grant access, and a Task that no bound host can take waits.
+service Placement {
+  // Replaces a Tag's runsOn labels. An empty list means any bound host.
+  rpc SetTagRunsOn(SetTagRunsOnRequest) returns (Tag);
+  // Explains which bound Worker Hosts can take a Task, and why the others cannot.
+  rpc DiagnoseTask(DiagnoseTaskPlacementRequest) returns (TaskPlacementDiagnosis);
+}
+
+// Auth Key lifecycle beyond creation. Keys are named by the operator, and a
+// name is never reused. Revocation blocks new joins, including replays of
+// earlier joins; principals that already joined keep their enrollment.
+service AuthKeys {
+  rpc RevokeAuthKey(RevokeAuthKeyRequest) returns (AuthKey);
+  // Revoked, expired and used keys included, the earliest created first, then by name.
+  rpc ListAuthKeys(ListAuthKeysRequest) returns (ListAuthKeysResponse);
+  rpc GetAuthKey(GetAuthKeyRequest) returns (AuthKey);
+}
+
+message RevokeAuthKeyRequest { string name = 1; }
+
+message GetAuthKeyRequest { string name = 1; }
+
+message ListAuthKeysRequest {
+  // At most this many keys; 0 means 100. At most 500.
+  uint32 limit = 1;
+  // The name of the last key on the previous page.
+  string cursor = 2;
+}
+
+message ListAuthKeysResponse {
+  repeated AuthKey auth_keys = 1;
+  string next_cursor = 2;
+}
+
+// Joining a deployment, and the credentials joining issues. A host, Gateway or
+// client enrolls once with an Auth Key of its role and from then on presents
+// its own credential, `stcr_` and 64 hex digits, as the bearer. Only the
+// credential's SHA-256 digest is stored; the enrollee generates the secret, so
+// the Control Plane never receives it. Principals are `host:NAME`,
+// `gateway:NAME` and `client:NAME`; names are never reused within a role.
+service Enrollments {
+  // Presented with an Auth Key (`stak_` and 64 hex digits) as the bearer: the
+  // only call that accepts one. The request's role must equal the key's.
+  // Repeating an enrollment with the same operation ID, name and digest returns
+  // the same enrollment, until the key is revoked.
+  rpc Enroll(EnrollRequest) returns (Enrollment);
+  // The caller's own principal.
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
+  // Replaces an enrolled credential. An enrollee rotates its own (empty name);
+  // an operator rotates any. The previous credential stops working at once,
+  // including for open streams.
+  rpc RotateCredential(RotateCredentialRequest) returns (CredentialRotation);
+  rpc GetEnrollment(GetEnrollmentRequest) returns (Enrollment);
+  // By role, then name.
+  rpc ListEnrollments(ListEnrollmentsRequest) returns (ListEnrollmentsResponse);
+  // Idempotent. The credential is refused from then on, including by calls and
+  // streams already in progress. Revoking a host also fences its execution.
+  rpc RevokeEnrollment(RevokeEnrollmentRequest) returns (Enrollment);
+}
+
+// Internal to the Control Plane: its API tier resolves the digest of a
+// presented Operator Token or enrolled credential with the state owner.
+service CredentialDirectory {
+  rpc Resolve(ResolveCredentialRequest) returns (ResolvedCredential);
+}
+
+message EnrollRequest {
+  PrincipalRole role = 1;
+  // 1 to 250 ASCII letters, digits, hyphens, underscores or dots. The
+  // enrollee chooses it; the Auth Key does not fix it.
+  string name = 2;
+  string operation_id = 3;
+  // SHA-256 of the new `stcr_` credential.
+  bytes token_digest = 4;
+}
+
+message Enrollment {
+  PrincipalRole role = 1;
+  string name = 2;
+  // `host:NAME`, `gateway:NAME` or `client:NAME`.
+  string principal = 3;
+  // The Auth Key it enrolled with. Empty for a credential set in the Control
+  // Plane's startup configuration.
+  string auth_key_name = 4;
+  int64 enrolled_at_ms = 5;
+  // Refreshed at most once a minute.
+  optional int64 last_used_at_ms = 6;
+  optional int64 revoked_at_ms = 7;
+  // 1 for the first credential; increases with each rotation.
+  uint64 credential_revision = 8;
+  // Clients: the Tags it may talk to. Hosts: the Tags it may run.
+  repeated string allowed_tag_ids = 9;
+  // Every Tag. A Gateway with it serves connector accounts no Surface Account
+  // names and delivers the admin operator's notifications.
+  bool all_tags = 10;
+}
+
+message WhoAmIRequest {}
+
+message WhoAmIResponse {
+  PrincipalRole role = 1;
+  // Such as `operator:local`, `operator:token:laptop` or `client:alice-laptop`.
+  string principal = 2;
+  // The admin operator, the only one that manages Operator Tokens.
+  bool admin = 3;
+}
+
+message RotateCredentialRequest {
+  // With an empty name, the caller's own credential; the role must then be the
+  // caller's. Only operators name another enrollee.
+  PrincipalRole role = 1;
+  string name = 2;
+  // The current credential_revision. A repeat of a rotation that already
+  // applied, with the same digest, returns the same result.
+  uint64 expected_credential_revision = 3;
+  bytes token_digest = 4;
+}
+
+message CredentialRotation {
+  string principal = 1;
+  uint64 credential_revision = 2;
+}
+
+message GetEnrollmentRequest {
+  PrincipalRole role = 1;
+  string name = 2;
+}
+
+message ListEnrollmentsRequest {
+  // UNSPECIFIED lists every role.
+  PrincipalRole role = 1;
+  // 0 means 100; at most 500.
+  uint32 limit = 2;
+  // The `next_cursor` of the previous page.
+  string cursor = 3;
+}
+
+message ListEnrollmentsResponse {
+  repeated Enrollment enrollments = 1;
+  string next_cursor = 2;
+}
+
+message RevokeEnrollmentRequest {
+  PrincipalRole role = 1;
+  string name = 2;
+}
+
+message ResolveCredentialRequest {
+  // SHA-256 of the presented secret.
+  bytes token_digest = 1;
+  // OPERATOR for an Operator Token; HOST, GATEWAY or CLIENT is never sent:
+  // UNSPECIFIED resolves an enrolled credential of any role.
+  PrincipalRole kind = 2;
+}
+
+message ResolvedCredential {
+  PrincipalRole role = 1;
+  // The name within the role: `token:NAME` for an Operator Token.
+  string name = 2;
+  // Hosts: the current registration generation.
+  uint64 generation = 3;
+}
+
+message SetTagRunsOnRequest {
+  string tag_id = 1;
+  repeated string runs_on = 2;
+}
+
+message DiagnoseTaskPlacementRequest { string task_id = 1; }
+
+message HostPlacement {
+  string host_id = 1;
+  HostPhase phase = 2;
+  repeated string labels = 3;
+  // Required labels this host does not carry.
+  repeated string missing_labels = 4;
+  // Carries every required label. Readiness, capacity and harness still apply.
+  bool eligible = 5;
+}
+
+message TaskPlacementDiagnosis {
+  string task_id = 1;
+  string tag_id = 2;
+  TaskState state = 3;
+  // The Tag's runsOn, plus workspace:NAME for a Task in a Workspace.
+  repeated string required_labels = 4;
+  // Labels no bound host carries; every required label when each exists on
+  // some bound host but none carries them all.
+  repeated string missing_labels = 5;
+  // A scheduling requirement such as labels:macos,gpu. Empty when a bound
+  // host carries every required label.
+  string requirement = 6;
+  // A readable explanation, or empty when a bound host carries every label.
+  string summary = 7;
+  // Bound, unrevoked Worker Hosts in host ID order.
+  repeated HostPlacement hosts = 8;
+}

@@ -4,7 +4,6 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Literal, Mapping, Protocol, runtime_checkable
 
-WORKLET_PROTOCOL_VERSION = 18
 EVENT_STREAM_CAPABILITY = "supertag.task-attempt.events"
 CANCELLATION_CAPABILITY = "supertag.task-attempt.cancellation"
 JsonRecord = dict[str, Any]

@@ -26,9 +26,9 @@ who want to be named.
 
 ## Supported versions
 
-SuperTag is in active pre-1.0 development. Security fixes are made for the
-latest published `supertag-ai` version and the current `main` branch. Older
-versions may require upgrading rather than receiving a backport.
+SuperTag is in active pre-1.0 development and has no published release of the
+current Rust services yet. Security fixes are made on the current `main` branch.
+Older commits may require upgrading rather than receiving a backport.
 
 ## Scope
 

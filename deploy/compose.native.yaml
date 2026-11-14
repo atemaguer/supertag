@@ -1,0 +1,84 @@
+# Native split services, separate from the legacy compose.yaml entry point.
+# Supply per-role env files and TLS directories; no credentials belong in this file.
+# The internal network intentionally publishes no ports. deploy/compose.native.ingress.yaml
+# publishes the Control Plane, the public endpoint for operators, Worker Hosts, and Gateways.
+# The Gateway, for collaboration surfaces, runs only with `--profile gateway`.
+services:
+  postgres:
+    image: ${SUPERTAG_POSTGRES_IMAGE:-postgres:17-alpine}
+    env_file: ${SUPERTAG_POSTGRES_ENV_FILE:?provide the PostgreSQL env file}
+    volumes:
+      - postgres-state:/var/lib/postgresql/data
+    networks: [runtime]
+    restart: unless-stopped
+    # Over TCP: the image's first-start init server listens only on its Unix socket, so a
+    # socket check reports healthy before the Control Plane can connect.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 15s
+
+  control-plane:
+    image: ${SUPERTAG_CONTROL_IMAGE:?provide the verified native Control Plane image}
+    command: ["control-plane", "--listen", "0.0.0.0:3434", "--transfer-directory", "/var/lib/supertag/transfers"]
+    env_file: ${SUPERTAG_CONTROL_ENV_FILE:?provide the private Control Plane env file}
+    volumes:
+      - control-state:/var/lib/supertag
+      - type: bind
+        source: ${SUPERTAG_CONTROL_TLS_DIRECTORY:?provide the Control Plane TLS directory}
+        target: /run/supertag-tls
+        read_only: true
+    read_only: true
+    tmpfs: ["/tmp:uid=10001,gid=10001,mode=0700"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    networks: [runtime]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/supertag", "health", "--endpoint", "https://control-plane:3434"]
+      interval: 2s
+      timeout: 8s
+      retries: 30
+      start_period: 2s
+    stop_grace_period: 15s
+
+  gateway:
+    profiles: [gateway]
+    image: ${SUPERTAG_GATEWAY_IMAGE:?provide the verified native Gateway image}
+    command: ["gateway", "--listen", "127.0.0.1:3436", "--control-plane", "https://control-plane:3434"]
+    env_file: ${SUPERTAG_GATEWAY_ENV_FILE:?provide the private Gateway env file}
+    volumes:
+      - gateway-state:/var/lib/supertag
+      - type: bind
+        source: ${SUPERTAG_GATEWAY_TLS_DIRECTORY:?provide the Gateway TLS directory}
+        target: /run/supertag-tls
+        read_only: true
+    read_only: true
+    tmpfs: ["/tmp:uid=10001,gid=10001,mode=0700"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    networks: [runtime]
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/supertag", "health", "--endpoint", "http://127.0.0.1:3436", "--service", "supertag.runtime.v2.OperatorNotificationTest"]
+      interval: 2s
+      timeout: 8s
+      retries: 30
+      start_period: 2s
+    stop_grace_period: 15s
+
+networks:
+  runtime:
+    internal: true
+volumes:
+  postgres-state:
+  control-state:
+  gateway-state:

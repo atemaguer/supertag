@@ -1,0 +1,449 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/runtime.proto";
+
+// Operator catalog reads are scoped to the producing Task's audience.
+service ArtifactCatalog {
+  rpc Get(GetCapturedArtifactRequest) returns (CapturedArtifact);
+  rpc List(ListCapturedArtifactsRequest) returns (ListCapturedArtifactsResponse);
+}
+
+// Internal to the Control Plane. Only its API tier serves bytes; the state
+// owner verifies authority and records provenance and metadata after the API
+// tier verifies durable storage.
+service ArtifactDirectory {
+  rpc ReserveCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
+  rpc CommitCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
+  rpc Get(GetCapturedArtifactRequest) returns (CapturedArtifact);
+  rpc List(ListCapturedArtifactsRequest) returns (ListCapturedArtifactsResponse);
+  rpc FindForAttempt(FindAttemptArtifactsRequest) returns (ListCapturedArtifactsResponse);
+  rpc GetForAttempt(InspectAttemptArtifactRequest) returns (CapturedArtifact);
+  rpc Acquire(AcquireArtifactRequest) returns (ArtifactAcquisition);
+  rpc Settle(SettleArtifactAcquisitionRequest) returns (ArtifactAcquisition);
+  rpc GetAcquiredFile(GetAcquiredArtifactFileRequest) returns (ArtifactFile);
+  rpc LocateVolumeCopies(LocateArtifactVolumeCopiesRequest) returns (LocateArtifactVolumeCopiesResponse);
+  rpc RegisterArtifactSource(RegisterArtifactSourceRequest) returns (RegisterArtifactSourceResponse);
+  rpc IssueArtifactTransfer(GetAcquiredArtifactFileRequest) returns (ArtifactTransferGrant);
+  rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
+}
+
+// Public Worker Host API. Identity and generation come from the authenticated Worker Host.
+service AttemptArtifacts {
+  rpc Find(FindAttemptArtifactsRequest) returns (ListCapturedArtifactsResponse);
+  rpc Inspect(InspectAttemptArtifactRequest) returns (CapturedArtifact);
+  rpc Acquire(AcquireArtifactRequest) returns (ArtifactAcquisition);
+  rpc Settle(SettleArtifactAcquisitionRequest) returns (ArtifactAcquisition);
+  rpc RegisterArtifactSource(RegisterArtifactSourceRequest) returns (RegisterArtifactSourceResponse);
+  rpc IssueArtifactTransfer(GetAcquiredArtifactFileRequest) returns (ArtifactTransferGrant);
+  rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
+}
+
+service ArtifactTransfers {
+  rpc UploadCapture(stream ArtifactUpload) returns (CapturedArtifact);
+  rpc DownloadFile(DownloadArtifactFileRequest) returns (stream ArtifactDownload);
+  rpc DownloadAcquiredFile(GetAcquiredArtifactFileRequest) returns (stream ArtifactDownload);
+}
+
+// The local Worker Host binds the request to its running Attempt and workspace.
+service HarnessArtifacts {
+  rpc Capture(HarnessCaptureArtifactRequest) returns (CapturedArtifact);
+  rpc Find(HarnessFindArtifactsRequest) returns (ListCapturedArtifactsResponse);
+  rpc Inspect(GetCapturedArtifactRequest) returns (CapturedArtifact);
+  rpc Read(HarnessReadArtifactRequest) returns (HarnessArtifactPage);
+  rpc Attach(HarnessAttachArtifactRequest) returns (HarnessAttachedArtifact);
+}
+
+message ArtifactDescription {
+  string title = 1;
+  string kind = 2;
+  optional string summary = 3;
+}
+
+message ArtifactFile {
+  string path = 1;
+  BlobReference blob = 2;
+  // Present on the generated JSON file for a selected Git output snapshot.
+  GitOutputSnapshot git_output = 3;
+}
+
+message GitOutputSnapshot {
+  string start_commit = 1;
+  string head_commit = 2;
+  optional string remote = 3;
+  repeated string tracked_paths = 4;
+  repeated string deleted_paths = 5;
+  // Clean selected paths whose exact bytes are available at the advertised commit.
+  repeated string referenced_paths = 6;
+}
+
+message ArtifactProducer {
+  string task_id = 1;
+  string attempt_id = 2;
+  string tag_id = 3;
+  string session_id = 4;
+  optional string objective_id = 5;
+  HarnessKind harness_kind = 6;
+  optional string native_session_id = 7;
+}
+
+message ArtifactSummary {
+  string artifact_id = 1;
+  ArtifactDescription description = 2;
+  ArtifactProducer producer = 3;
+  uint32 file_count = 4;
+  uint64 byte_length = 5;
+  int64 captured_at_ms = 6;
+  bool declared_task_output = 7;
+}
+
+message CapturedArtifact {
+  ArtifactSummary summary = 1;
+  repeated ArtifactFile files = 2;
+  // Inputs confirmed delivered to this producing Attempt, frozen at capture reservation.
+  repeated ArtifactSelection inputs = 3;
+}
+
+enum ArtifactDelivery {
+  ARTIFACT_DELIVERY_UNSPECIFIED = 0;
+  ARTIFACT_DELIVERY_READ = 1;
+  ARTIFACT_DELIVERY_MATERIALIZE = 2;
+}
+enum ArtifactAcquisitionState {
+  ARTIFACT_ACQUISITION_STATE_UNSPECIFIED = 0;
+  ARTIFACT_ACQUISITION_STATE_AUTHORIZED = 1;
+  ARTIFACT_ACQUISITION_STATE_DELIVERED = 2;
+  ARTIFACT_ACQUISITION_STATE_FAILED = 3;
+  ARTIFACT_ACQUISITION_STATE_UNCERTAIN = 4;
+}
+message ArtifactAcquisition {
+  string acquisition_id = 1;
+  string operation_id = 2;
+  string task_id = 3;
+  string attempt_id = 4;
+  string artifact_id = 5;
+  repeated ArtifactFile files = 6;
+  ArtifactDelivery delivery = 7;
+  optional string destination = 8;
+  ArtifactAcquisitionState state = 9;
+  int64 created_at_ms = 10;
+  int64 updated_at_ms = 11;
+}
+message FindAttemptArtifactsRequest {
+  InspectAttemptRequest attempt = 1;
+  string query = 2;
+  string kind = 3;
+  string task_id = 4;
+  uint32 limit = 5;
+  uint64 before_order = 6;
+}
+message InspectAttemptArtifactRequest {
+  InspectAttemptRequest attempt = 1;
+  string artifact_id = 2;
+}
+message AcquireArtifactRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string artifact_id = 3;
+  repeated string paths = 4;
+  ArtifactDelivery delivery = 5;
+  // Generated by the Worker Host and checked against the Attempt and operation.
+  optional string destination = 6;
+}
+message SettleArtifactAcquisitionRequest {
+  InspectAttemptRequest attempt = 1;
+  string acquisition_id = 2;
+  ArtifactAcquisitionState state = 3;
+}
+message GetAcquiredArtifactFileRequest {
+  InspectAttemptRequest attempt = 1;
+  string acquisition_id = 2;
+  string path = 3;
+}
+message HarnessFindArtifactsRequest {
+  string query = 1;
+  string kind = 2;
+  string task_id = 3;
+  uint32 limit = 4;
+  uint64 before_order = 5;
+}
+message HarnessReadArtifactRequest {
+  string operation_id = 1;
+  string artifact_id = 2;
+  string path = 3;
+  uint64 offset = 4;
+  uint32 limit = 5;
+}
+message HarnessArtifactPage {
+  ArtifactAcquisition acquisition = 1;
+  string path = 2;
+  string text = 3;
+  uint64 offset = 4;
+  uint64 next_offset = 5;
+  bool truncated = 6;
+}
+message HarnessAttachArtifactRequest {
+  string operation_id = 1;
+  string artifact_id = 2;
+  repeated string paths = 3;
+}
+message HarnessAttachedArtifact {
+  ArtifactAcquisition acquisition = 1;
+  string local_path = 2;
+}
+
+message HarnessCaptureArtifactRequest {
+  string operation_id = 1;
+  ArtifactDescription description = 2;
+  repeated string paths = 3;
+  optional string native_session_id = 4;
+}
+
+message CommitArtifactCaptureRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  ArtifactDescription description = 3;
+  repeated ArtifactFile files = 4;
+  optional string native_session_id = 5;
+  // Worker Host collection from the current Attempt's managed output directory.
+  bool managed_task_output = 6;
+  // Collection under the immutable output policy accepted with the Task.
+  bool declared_task_output = 7;
+  optional string source_storage_id = 8;
+}
+
+message GetCapturedArtifactRequest {
+  string artifact_id = 1;
+}
+
+message ListCapturedArtifactsRequest {
+  string task_id = 1;
+  uint32 limit = 2;
+  uint64 before_order = 3;
+}
+
+message ListCapturedArtifactsResponse {
+  repeated ArtifactSummary artifacts = 1;
+  uint64 next_before_order = 2;
+}
+
+message ArtifactUpload {
+  oneof part {
+    CommitArtifactCaptureRequest begin = 1;
+    ArtifactChunk chunk = 2;
+  }
+}
+
+// Chunks for each file are consecutive, in the order of the opening manifest.
+// Empty files have no chunks. The reference defines the exact terminal length.
+message ArtifactChunk {
+  uint32 file_index = 1;
+  bytes data = 2;
+}
+
+message DownloadArtifactFileRequest {
+  string artifact_id = 1;
+  string path = 2;
+}
+
+message ArtifactDownload {
+  oneof part {
+    ArtifactFile file = 1;
+    bytes chunk = 2;
+  }
+}
+
+// File Volumes are registered storage locations. Registration alone authorizes
+// no write: the Control Plane must explicitly map the exact Volume and source
+// (`--artifact-volume`).
+service ArtifactVolumes {
+  rpc Put(PutArtifactVolumeRequest) returns (ArtifactVolume);
+  rpc Get(GetArtifactVolumeRequest) returns (ArtifactVolume);
+  rpc List(ListArtifactVolumesRequest) returns (ListArtifactVolumesResponse);
+  rpc Delete(DeleteArtifactVolumeRequest) returns (DeleteArtifactVolumeResponse);
+  rpc Copy(CopyArtifactToVolumeRequest) returns (ArtifactVolumeCopy);
+  rpc GetCopy(GetArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
+  rpc DownloadCopy(GetArtifactVolumeCopyRequest) returns (stream ArtifactDownload);
+  rpc ListCopies(ListArtifactVolumeCopiesRequest) returns (ListArtifactVolumeCopiesResponse);
+}
+// Internal metadata authority. Only the Control Plane's API tier verifies and
+// carries copy bytes.
+service ArtifactVolumeDirectory {
+  rpc Put(PutArtifactVolumeRequest) returns (ArtifactVolume);
+  rpc Get(GetArtifactVolumeRequest) returns (ArtifactVolume);
+  rpc List(ListArtifactVolumesRequest) returns (ListArtifactVolumesResponse);
+  rpc Delete(DeleteArtifactVolumeRequest) returns (DeleteArtifactVolumeResponse);
+  rpc ReserveCopy(CopyArtifactToVolumeRequest) returns (ArtifactVolumeCopy);
+  rpc CommitCopy(CommitArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
+  rpc GetCopy(GetArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
+  rpc ListCopies(ListArtifactVolumeCopiesRequest) returns (ListArtifactVolumeCopiesResponse);
+}
+message ArtifactVolume {
+  string volume_id = 1;
+  string source = 2;
+  uint64 revision = 3;
+}
+message PutArtifactVolumeRequest {
+  string operation_id = 1;
+  string volume_id = 2;
+  string source = 3;
+  // Zero creates; existing registrations require the exact current revision.
+  uint64 expected_revision = 4;
+}
+message GetArtifactVolumeRequest { string volume_id = 1; }
+message ListArtifactVolumesRequest { uint32 limit = 1; string after_id = 2; }
+message ListArtifactVolumesResponse { repeated ArtifactVolume volumes = 1; string next_after_id = 2; }
+message DeleteArtifactVolumeRequest { string operation_id = 1; string volume_id = 2; uint64 expected_revision = 3; }
+message DeleteArtifactVolumeResponse { bool deleted = 1; }
+message CopyArtifactToVolumeRequest {
+  string operation_id = 1;
+  string volume_id = 2;
+  uint64 expected_revision = 3;
+  string artifact_id = 4;
+  string path = 5;
+  BlobReference expected_blob = 6;
+}
+enum ArtifactVolumeCopyState {
+  ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED = 0;
+  ARTIFACT_VOLUME_COPY_STATE_RESERVED = 1;
+  ARTIFACT_VOLUME_COPY_STATE_VERIFIED = 2;
+}
+message ArtifactVolumeCopy {
+  string copy_id = 1;
+  string operation_id = 2;
+  ArtifactVolume volume = 3;
+  string artifact_id = 4;
+  ArtifactFile file = 5;
+  string storage_key = 6;
+  ArtifactVolumeCopyState state = 7;
+  int64 created_at_ms = 8;
+  optional int64 verified_at_ms = 9;
+}
+message CommitArtifactVolumeCopyRequest { string copy_id = 1; BlobReference verified_blob = 2; }
+message GetArtifactVolumeCopyRequest { string copy_id = 1; }
+message ListArtifactVolumeCopiesRequest { string volume_id = 1; uint32 limit = 2; uint64 before_order = 3; }
+message ListArtifactVolumeCopiesResponse { repeated ArtifactVolumeCopy copies = 1; uint64 next_before_order = 2; }
+
+// Internal API tier lookup. The target carries the original download authority.
+message LocateArtifactVolumeCopiesRequest {
+  oneof target {
+    DownloadArtifactFileRequest operator = 1;
+    GetAcquiredArtifactFileRequest attempt = 2;
+  }
+  repeated string volume_ids = 3;
+}
+message ArtifactVolumeLocation {
+  ArtifactVolume volume = 1;
+  string storage_key = 2;
+}
+message LocateArtifactVolumeCopiesResponse {
+  repeated ArtifactVolumeLocation locations = 1;
+}
+
+// Private peer listener. A bearer grant from the Control Plane authorizes this read.
+service WorkerArtifactTransfers {
+  rpc Download(WorkerArtifactDownloadRequest) returns (stream ArtifactDownload);
+}
+
+message RegisterArtifactSourceRequest { string storage_id = 1; }
+message RegisterArtifactSourceResponse { string storage_id = 1; }
+message ArtifactTransferGrant {
+  string token = 1;
+  string source_host_id = 2;
+  uint64 valid_for_ms = 3;
+  ArtifactFile file = 4;
+}
+message WorkerArtifactDownloadRequest {
+  string artifact_id = 1;
+  string path = 2;
+  BlobReference blob = 3;
+}
+message AuthorizeArtifactTransferRequest {
+  string token = 1;
+  WorkerArtifactDownloadRequest file = 2;
+}
+message AuthorizedArtifactTransfer {
+  string producer_attempt_id = 1;
+  ArtifactFile file = 2;
+  uint64 valid_for_ms = 3;
+}
+
+// Operator approvals expose only selected immutable entries to named Objectives.
+service ArtifactPublications {
+  rpc Publish(PublishArtifactRequest) returns (ArtifactPublication);
+  rpc Consume(ConsumeArtifactPublicationRequest) returns (ArtifactConsumptionApproval);
+  rpc WithdrawPublication(WithdrawArtifactApprovalRequest) returns (ArtifactPublication);
+  rpc WithdrawConsumption(WithdrawArtifactApprovalRequest) returns (ArtifactConsumptionApproval);
+  rpc GetPublication(GetArtifactApprovalRequest) returns (ArtifactPublication);
+  rpc GetConsumption(GetArtifactApprovalRequest) returns (ArtifactConsumptionApproval);
+  rpc ListPublications(ListObjectiveArtifactApprovalsRequest) returns (ListArtifactPublicationsResponse);
+  rpc ListConsumptions(ListObjectiveArtifactApprovalsRequest) returns (ListArtifactConsumptionsResponse);
+  rpc ListAudit(ListArtifactApprovalAuditRequest) returns (ListArtifactApprovalAuditResponse);
+}
+enum ArtifactApprovalStatus {
+  ARTIFACT_APPROVAL_STATUS_UNSPECIFIED = 0;
+  ARTIFACT_APPROVAL_STATUS_AVAILABLE = 1;
+  ARTIFACT_APPROVAL_STATUS_WITHDRAWN = 2;
+}
+message ArtifactPublication {
+  string publication_id = 1;
+  string source_objective_id = 2;
+  ArtifactProducer producer = 3;
+  string artifact_id = 4;
+  repeated ArtifactFile files = 5;
+  repeated string audience_objective_ids = 6;
+  string source_owner_tag_id = 7;
+  string assessment = 8;
+  string approved_by = 9;
+  int64 approved_at_ms = 10;
+  optional string supersedes_publication_id = 11;
+  ArtifactApprovalStatus status = 12;
+  uint64 revision = 13;
+  optional string withdrawn_by = 14;
+  optional int64 withdrawn_at_ms = 15;
+}
+// Audience projection deliberately excludes source Task, actor and assessment.
+message ArtifactPublicationView {
+  string publication_id = 1;
+  string source_objective_id = 2;
+  string artifact_id = 3;
+  repeated ArtifactFile files = 4;
+  optional string supersedes_publication_id = 5;
+  ArtifactApprovalStatus status = 6;
+  uint64 revision = 7;
+}
+message ArtifactConsumptionApproval {
+  string consumption_id = 1;
+  string publication_id = 2;
+  string objective_id = 3;
+  string approved_by = 4;
+  int64 approved_at_ms = 5;
+  ArtifactApprovalStatus status = 6;
+  uint64 revision = 7;
+  optional string withdrawn_by = 8;
+  optional int64 withdrawn_at_ms = 9;
+}
+message PublishArtifactRequest {
+  string publication_id = 1;
+  string artifact_id = 2;
+  repeated string paths = 3;
+  repeated string audience_objective_ids = 4;
+  optional string supersedes_publication_id = 5;
+}
+message ConsumeArtifactPublicationRequest {
+  string consumption_id = 1;
+  string publication_id = 2;
+  string objective_id = 3;
+}
+message WithdrawArtifactApprovalRequest { string approval_id = 1; uint64 expected_revision = 2; }
+message GetArtifactApprovalRequest { string approval_id = 1; }
+message ListObjectiveArtifactApprovalsRequest { string objective_id = 1; uint32 limit = 2; uint64 before_order = 3; }
+message ListArtifactPublicationsResponse { repeated ArtifactPublicationView publications = 1; uint64 next_before_order = 2; }
+message ListArtifactConsumptionsResponse { repeated ArtifactConsumptionApproval consumptions = 1; uint64 next_before_order = 2; }
+message ArtifactApprovalAuditEvent {
+  string approval_type = 1; string approval_id = 2; string objective_id = 3;
+  uint64 revision = 4; string action = 5; string actor = 6; int64 recorded_at_ms = 7;
+}
+message ListArtifactApprovalAuditRequest { string approval_type = 1; string approval_id = 2; }
+message ListArtifactApprovalAuditResponse { repeated ArtifactApprovalAuditEvent events = 1; }

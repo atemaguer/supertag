@@ -17,6 +17,9 @@ oauth_config:
       - chat:write
 settings:
   event_subscriptions:
+    # Socket Mode delivers these events over the Gateway's outbound connection. For HTTP events
+    # instead, set socket_mode_enabled to false and add
+    # request_url: https://YOUR_PUBLIC_HOST/slack/events
     bot_events:
       - app_mention
       - message.channels

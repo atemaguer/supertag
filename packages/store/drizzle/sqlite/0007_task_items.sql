@@ -1,1 +1,0 @@
-ALTER TABLE `TaskAssignment` ADD `items` text DEFAULT '[]' NOT NULL;

@@ -8,7 +8,9 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
+
+	"github.com/atemaguer/supertag/apps/tui/client"
 )
 
 const railWidth = 24
@@ -110,14 +112,21 @@ func (m model) renderConversation() string {
 			return wrap.Render("Could not check for Tags on this Control Plane.\n\n" + terminalText(m.tagsErr.Error()))
 		default:
 			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
-				"Run supertag init in your repository to set up a local Control Plane and its first Tag. " +
-				"For a shared Control Plane, ask its operator to set up a Tag.")
+				"Run supertag tag put --help for setup. For a shared Control Plane, ask its operator to set up a Tag.")
 		}
 	}
-	name := terminalText(tag)
+	name := terminalText(m.tagLabel(tag))
 	width := m.paneWidth()
 	conversation := m.currentConversation(tag)
 	c := m.conversations[convKey(tag, conversation)]
+
+	if c == nil || !c.loaded {
+		return faint.Render(wrap.Render("Reading the conversation…"))
+	}
+	if text := m.renderRuntimeHistory(c, name, width); text != "" {
+		return text
+	}
+
 	if c == nil || (len(c.entries) == 0 && c.draft == "") {
 		if conversation == defaultConversation {
 			return faint.Render(wrap.Render("Say something to " + name + ". This is your default conversation with it."))
@@ -224,7 +233,8 @@ func (m model) renderRail(height int) string {
 
 	section("Tags", "")
 	for i, tag := range m.tags {
-		open := m.open[convKey(tagName(tag), m.currentConversation(tagName(tag)))]
+		reference := m.tagReference(tag)
+		open := m.open[convKey(reference, m.currentConversation(reference))]
 		add(row{rowTag, i}, terminalText(tagName(tag)), terminalText(railState(tag, open)))
 	}
 	if len(m.objectives) > 0 || m.objectivesErr != "" {
@@ -254,19 +264,19 @@ func (m model) renderRail(height int) string {
 }
 
 // tagName is a Tag's name.
-func tagName(tag *operatorv1.Tag) string { return tag.GetMetadata().GetName() }
+func tagName(tag *views.Tag) string { return tag.GetMetadata().GetName() }
 
 // tagPhases are the words the rail shows for a Tag's phase, as `supertag get tags` prints it.
-var tagPhases = map[operatorv1.TagPhase]string{
-	operatorv1.TagPhase_TAG_PHASE_ACTIVE:  "active",
-	operatorv1.TagPhase_TAG_PHASE_RETIRED: "retired",
+var tagPhases = map[views.TagPhase]string{
+	views.TagPhase_TAG_PHASE_ACTIVE:  "active",
+	views.TagPhase_TAG_PHASE_RETIRED: "retired",
 }
 
 // railState is what the rail shows beside a Tag: its phase, or how many work Sessions of the
 // conversation it shows are still open while the Tag is active.
-func railState(tag *operatorv1.Tag, open int) string {
+func railState(tag *views.Tag, open int) string {
 	phase := tag.GetStatus().GetPhase()
-	if open > 0 && phase == operatorv1.TagPhase_TAG_PHASE_ACTIVE {
+	if open > 0 && phase == views.TagPhase_TAG_PHASE_ACTIVE {
 		return fmt.Sprintf("%d open", open)
 	}
 	return tagPhases[phase]
@@ -276,7 +286,9 @@ func railState(tag *operatorv1.Tag, open int) string {
 // palette and to switch to another Control Plane when there is one, and whether it is reachable.
 func (m model) renderStatus() string {
 	left := " " + contextLabel(m.client.Target()) + "  "
-	if hosts := m.hostSummary(); hosts != "" {
+	if client.IsClientCredential(m.client.Target().Token) {
+		left += "client device  "
+	} else if hosts := m.hostSummary(); hosts != "" {
 		left += hosts + "  "
 	}
 	left += "ctrl+k commands  "
@@ -330,7 +342,8 @@ func (m model) paneTitle() string {
 		return "Objective · " + terminalText(name)
 	case paneInbox:
 		title := "Waiting on you · " + itemKindName(m.item.GetKind())
-		if state := inboxWaitState(m.item); state != "" {
+		if state := inboxWaitState(m.item); state != "" &&
+			(m.item.GetApproval() == nil) {
 			title += " · " + state
 		}
 		return title
@@ -349,7 +362,7 @@ func (m model) paneTitle() string {
 		}
 		return "Team · " + terminalText(name)
 	case paneNewObjective:
-		return "New Objective · owned by " + terminalText(m.form.owner)
+		return "New Objective · owned by " + terminalText(m.tagLabel(m.form.owner))
 	}
 	tag := m.selectedTag()
 	if tag == "" {
@@ -358,7 +371,7 @@ func (m model) paneTitle() string {
 		}
 		return "SuperTag"
 	}
-	return fmt.Sprintf("%s · %s", terminalText(tag), terminalText(m.currentConversation(tag)))
+	return fmt.Sprintf("%s · %s", terminalText(m.tagLabel(tag)), terminalText(m.currentConversation(tag)))
 }
 
 // paneHint ends a pane that has no input line: the keys that act on it.
@@ -368,7 +381,8 @@ func (m model) paneHint() string {
 		if m.canMessageObjective() {
 			return "m message the owner · answer questions under Waiting on you"
 		}
-		return "Live · answer its questions under Waiting on you"
+		return "Answer questions under Waiting on you"
+
 	case paneInbox:
 		switch {
 		case m.decision == decisionConfirm:
@@ -379,6 +393,11 @@ func (m model) paneHint() string {
 			return "This item is settled."
 		case m.approvalShown():
 			return "a approve · d deny"
+		case m.item.GetApproval() != nil:
+			if m.approvalDetails.err != nil {
+				return "r reload approval details"
+			}
+			return ""
 		}
 		return "Run the command above to act on it."
 	case paneDiff:

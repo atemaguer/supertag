@@ -1,0 +1,24 @@
+[package]
+name = "supertag-codex-adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+supertag-protocol.workspace = true
+supertag-workspaces = { path = "../workspaces" }
+tempfile.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+
+[dev-dependencies]
+tokio-stream.workspace = true
+uuid.workspace = true

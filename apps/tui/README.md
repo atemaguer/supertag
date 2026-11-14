@@ -1,7 +1,50 @@
 # supertag-tui
 
 SuperTag's terminal UI, written in Go with Bubble Tea v2, Lip Gloss v2, Bubbles v2
-and Glamour. The status bar shows which Control Plane it talks to, its Worker Hosts by phase
+and Glamour.
+
+## Runtime v2
+
+The Rust CLI launches the Go TUI with a Control Plane URL and an operator credential over file
+descriptor 3 and sets `SUPERTAG_TUI_HANDOVER=3`. The TUI reads descriptor 3 only when that variable
+is set, so a plain launch with no handover never touches a descriptor it does not own. The handover
+identifies the protocol as `runtime.v2` and can include a trusted server certificate authority and
+client certificate and key paths. The TUI uses the generated runtime v2 Go bindings over gRPC and
+HTTP/2. A `wss://` Control Plane URL carries the same connection through a WebSocket tunnel, as the
+Rust CLI does, with the Control Plane's TLS and any client certificate inside it; the server
+certificate authority also checks the tunnel's outer certificate. Cleartext `http://` and `ws://`
+connections require a loopback IP address.
+
+The TUI lists Tags and named conversations, loads conversation history, sends messages, and
+follows replies. Watch keeps the rail and open conversation current across clients. The TUI
+resumes Watch after an interruption and polls while reconnecting. Each reply follows its own
+Task event sequence.
+
+Ctrl-P opens **Control Planes**, including when only one connection exists. Press `a` to add a
+Control Plane, enter a name, its URL, and an operator token in the masked field, then press Ctrl-S
+to verify access and save it. Optional certificate fields support private TLS authorities and
+client identities. `s` saves the current launch connection; `e` edits a selected saved
+connection's credential without moving it to a different Control Plane URL. Enter switches, and
+`d` forgets the selected saved connection. Switching cancels the previous Control Plane's
+requests and subscriptions and loads only the selected Control Plane's Tags and conversations.
+
+Saved connections use a private native file, `supertag/tui-control-planes.json` under the operating
+system's user configuration directory, with owner-only permissions. It is separate from the
+local service credentials and the desktop app's store. A launch handover keeps its selected
+Control Plane and credentials; saved connections add to the chooser. Without a launch handover,
+`supertag-tui` reopens the last selected saved Control Plane or shows the empty chooser for adding
+the first one. The token never appears in command arguments or the terminal display.
+Open Objectives show their status, owner, deadline, and available spend information. Use
+`/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to
+message its owner. You can select a Team in the Objective form and read its members, concurrency
+limit, and recent Workstream posts from the rail. Work uses the Workspace configured on the owner
+Tag. The rail lists questions waiting for an operator. Select a question to answer the owner in
+the same Session, its thread of work. The status bar shows whether Worker Hosts, the machines or
+sandboxes that run Tasks, are ready, busy, draining, or offline.
+
+## Node launcher
+
+The status bar shows which Control Plane it talks to, its Worker Hosts by phase
 (such as `Worker Hosts: 2 ready, 1 unreachable`; revoked hosts are left out), and whether it is
 reachable. The conversation opens after the Control Plane returns a Tag. An empty Tag list
 shows setup instructions. The rail on the left has four sections:
@@ -44,8 +87,11 @@ work and latest entry. Enter switches to one. `n` starts a new conversation: typ
 rail state counts the open work Sessions of the conversation it shows. Esc goes back.
 
 Ctrl-P lists the Control Planes you can switch to, when there is more than one: this machine's,
-when it has a local operator credential, and each one saved with `supertag connect control-plane`.
-Enter switches to the one under the cursor, and esc goes back. Switching ends every stream and call
+when it has a local operator credential, and each one saved with `supertag connect`.
+Enter switches to the one under the cursor, and esc goes back. Adding a Control Plane takes an
+operator token, or a client Auth Key (`stak_…`) from an operator. An Auth Key joins this device as
+`client:HOSTNAME` once; only the device's own credential is saved. A client device sees its own
+conversations and Objectives within the Tags its key allows, and no Worker Host status. Switching ends every stream and call
 to the Control Plane you leave and reads everything anew from the next; unsent input stays behind.
 
 Ctrl-K, or `/` on an empty input line or where the pane has none, opens the command palette.
@@ -73,32 +119,32 @@ and enter opens the row. Esc quits when there is nothing to go back from, and Ct
 Every text from the server, an agent or a diff is filtered for the terminal, so an escape sequence
 shows as text.
 
-It talks to the Control Plane through the operator API's generated Go client in
-`packages/operator-api/go`, using the Connect protocol over HTTP/1.1. `ConversationService` sends
-messages, lists your conversations and their history, and follows each reply, resuming a dropped
-stream where it left off. `ObjectiveService` lists the open Objectives, describes the selected
-one, and creates Objectives. `InboxService` lists the inbox, answers
-questions and decides approval requests. `WorkService.GetSession` reads a work Session's delivery, and `ListTaskEvents` its latest Task's
-commands and tool calls. `TeamService` lists and reads the Teams, and
-`MailboxService.ListWorkstreamPosts` reads the shown Team's Workstream. `EventService.Watch` keeps
-the rail, the Objective view, the Team view and expanded work Sessions current, including how many
-work Sessions of each shown conversation are still open. While that stream is down, the TUI
-rereads what it shows every five seconds. `HostService.ListWorkerHosts` feeds the status bar,
-reread every 15 seconds; when the Control Plane refuses it, the status bar leaves the Worker Hosts
-out. `ResourceService.ListResources` lists the active Tags. See
+It talks to the Control Plane through the generated runtime v2 Go client in
+`rust/bindings/go`. `Conversations` sends messages, lists your conversations and their history,
+and pages each reply's Task events. `Objectives` lists the open Objectives, describes the selected
+one, and creates Objectives. `Inbox` lists the inbox, answers questions and decides approval
+requests. `WorkSessions` reads a work Session's delivery and activity. `Teams` lists and reads the
+Teams and the shown Team's Workstream. `OperatorEvents.Watch` keeps the rail, the Objective view,
+the Team view and expanded work Sessions current. While that stream is down, the TUI rereads what
+it shows every five seconds. `Operator.ListHosts` feeds the status bar, reread every 15 seconds;
+when the Control Plane refuses it, the status bar leaves the Worker Hosts out. `Operator.ListTags`
+lists the Tags. The replies are projected into the TUI's own presentation types in `views/`. See
 `contributing/tui-design.md`.
 
 Build with `./build.sh`, which cross-compiles static binaries for macOS and Linux (arm64 and
-amd64) into `dist/supertag-tui-GOOS-GOARCH`, versioned from `packages/supertag-ai/package.json`.
-Run the tests with `go test ./...`. The end-to-end test runs the built binary through
-`supertag` under tmux, in a throwaway git checkout: `SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .`
+amd64) into `dist/supertag-tui-GOOS-GOARCH`. It uses the Rust workspace version from
+`rust/Cargo.toml` by default. Set `SUPERTAG_TUI_VERSION` when building for a launcher with a
+different version.
+Run the tests with `go test ./...`. The Rust CLI's `operator_runtime.rs` tests drive a built
+binary end to end under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
 
 Plain `supertag`, run in an interactive terminal, launches it. The CLI resolves the current
 Control Plane as every other command does, and the others it can switch to, starts the binary with
-an extra pipe as file descriptor 3, and writes one JSON line to it:
-`{"contexts": [{"url": ..., "token": ..., "name": ...}, ...], "current": N}`, where `current` is the
-index of the selected Control Plane and `name` is left out for this machine's. When
+an extra pipe as file descriptor 3, sets `SUPERTAG_TUI_HANDOVER=3`, and writes one JSON line to it:
+`{"protocol": "runtime.v2", "contexts": [{"url": ..., "token": ..., "name": ...}, ...], "current": N}`,
+where `current` is the index of the selected Control Plane and `name` is left out for this
+machine's. The TUI refuses a handover that names another protocol or none. When
 `SUPERTAG_OPERATOR_TOKEN` or `SUPERTAG_ADMIN_TOKEN` is set, that token goes only to the Control Plane
 it selects, so the list holds that one alone. A saved connection whose credential cannot be read is
-left out. The binary never reads `~/.supertag` and takes no token from its arguments or environment;
-started any other way, it prints `Run supertag in a terminal to start the terminal UI.` and exits 2.
+left out. The binary takes no token from its arguments or environment; the saved-connection flow
+is described above.

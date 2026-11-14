@@ -1,0 +1,305 @@
+use crate::{Connection, connect_operator, request};
+use anyhow::{Context, Result, bail};
+use clap::{Args, Subcommand};
+use serde_json::{Value, json};
+use std::{path::PathBuf, time::Duration};
+use supertag_api::transfers::volumes::ArtifactVolumeMappings;
+use supertag_protocol::negotiation::ProtocolChannel;
+use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
+
+const VOLUME_TRANSFER_TIMEOUT: Duration = Duration::from_secs(110);
+
+#[derive(Subcommand)]
+pub enum VolumeCommand {
+    /// Register a file or S3-compatible Volume. Existing metadata requires its exact revision.
+    Put {
+        volume_id: String,
+        /// Canonical file:///absolute/path or s3://bucket/prefix. The Control Plane supplies storage endpoints and credentials.
+        #[arg(long)]
+        source: String,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
+        #[arg(long)]
+        operation_id: String,
+        /// The revision you last read, or 0 to create. The change is refused when it no longer matches.
+        #[arg(long, default_value_t = 0)]
+        expected_revision: u64,
+    },
+    /// Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage.
+    Copy {
+        volume_id: String,
+        artifact_id: String,
+        /// File in the artifact to copy.
+        #[arg(long)]
+        path: String,
+        /// The revision you last read. The change is refused when the resource has changed since.
+        #[arg(long)]
+        expected_revision: u64,
+        /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
+        #[arg(long)]
+        operation_id: String,
+    },
+    /// Download and re-verify one recorded copy, including after the Control Plane transfer directory is lost.
+    Download {
+        copy_id: String,
+        /// Local file to create with the verified copy. It must not already exist.
+        #[arg(long)]
+        output: PathBuf,
+    },
+}
+
+// Options for `supertag get volumes`.
+#[derive(Args)]
+pub struct ListArgs {
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 30, conflicts_with = "id")]
+    limit: u32,
+    /// Continue after the last ID the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    after_id: String,
+}
+
+// Options for `supertag get volume-copies`.
+#[derive(Args)]
+pub struct CopyListArgs {
+    /// Only copies made into this Volume.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    volume_id: String,
+    /// Most entries to return on one page.
+    #[arg(long, default_value_t = 30, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the next_before_order the previous page returned.
+    #[arg(long, default_value_t = 0, conflicts_with = "id")]
+    before_order: u64,
+}
+
+// Options for `supertag delete volume`. Only metadata is removed, and only when no reserved or
+// verified copies depend on it.
+#[derive(Args)]
+pub struct DeleteArgs {
+    /// Idempotency key: a retry with the same key returns the first result instead of acting twice.
+    #[arg(long)]
+    operation_id: String,
+    /// The revision you last read. The change is refused when the resource has changed since.
+    #[arg(long)]
+    expected_revision: u64,
+}
+
+fn client(
+    channel: ProtocolChannel,
+) -> artifact_volumes_client::ArtifactVolumesClient<ProtocolChannel> {
+    artifact_volumes_client::ArtifactVolumesClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+pub(crate) async fn fetch(
+    channel: ProtocolChannel,
+    token: &str,
+    volume_id: String,
+) -> Result<Value> {
+    Ok(volume(
+        &client(channel)
+            .get(request(GetArtifactVolumeRequest { volume_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn fetch_copy(
+    channel: ProtocolChannel,
+    token: &str,
+    copy_id: String,
+) -> Result<Value> {
+    Ok(copy(
+        &client(channel)
+            .get_copy(request(GetArtifactVolumeCopyRequest { copy_id }, token)?)
+            .await?
+            .into_inner(),
+    ))
+}
+
+pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list(request(
+            ListArtifactVolumesRequest {
+                limit: args.limit,
+                after_id: args.after_id,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"volumes":page.volumes.iter().map(volume).collect::<Vec<_>>(),"next_after_id":page.next_after_id}),
+    )
+}
+
+pub(crate) async fn list_copies(connection: Connection, args: CopyListArgs) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let page = client(channel)
+        .list_copies(request(
+            ListArtifactVolumeCopiesRequest {
+                volume_id: args.volume_id,
+                limit: args.limit,
+                before_order: args.before_order,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(
+        json!({"copies":page.copies.iter().map(copy).collect::<Vec<_>>(),"next_before_order":page.next_before_order}),
+    )
+}
+
+pub(crate) async fn delete(
+    connection: Connection,
+    volume_id: String,
+    args: DeleteArgs,
+) -> Result<Value> {
+    let (channel, token) = connect_operator(connection).await?;
+    let deleted = client(channel)
+        .delete(request(
+            DeleteArtifactVolumeRequest {
+                volume_id,
+                operation_id: args.operation_id,
+                expected_revision: args.expected_revision,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner()
+        .deleted;
+    Ok(json!({ "deleted": deleted }))
+}
+
+pub fn mappings(values: Vec<String>, s3: Option<PathBuf>) -> Result<ArtifactVolumeMappings> {
+    let mut entries = Vec::new();
+    for value in values {
+        let (id, path) = value
+            .split_once('=')
+            .context("artifact Volume mapping requires ID=/absolute/directory")?;
+        let path = PathBuf::from(path);
+        if !path.is_absolute() {
+            bail!("artifact Volume mapping must use an absolute path")
+        };
+        entries.push((id.to_owned(), path));
+    }
+    let mappings = ArtifactVolumeMappings::new(entries)?;
+    match s3 {
+        Some(path) => mappings.with_s3_config(&path),
+        None => Ok(mappings),
+    }
+}
+pub(crate) fn volume(v: &ArtifactVolume) -> Value {
+    json!({"volume_id":v.volume_id,"source":v.source,"revision":v.revision})
+}
+fn copy(v: &ArtifactVolumeCopy) -> Value {
+    json!({"copy_id":v.copy_id,"operation_id":v.operation_id,"volume":v.volume.as_ref().map(volume),"artifact_id":v.artifact_id,"file":v.file.as_ref().map(|f|json!({"path":f.path,"blob":f.blob.as_ref().map(|b|json!({"sha256":b.sha256,"byte_length":b.byte_length}))})),"storage_key":v.storage_key,"state":v.state().as_str_name(),"created_at_ms":v.created_at_ms,"verified_at_ms":v.verified_at_ms})
+}
+pub async fn run(connection: Connection, command: VolumeCommand) -> Result<()> {
+    let (channel, token) = if matches!(
+        command,
+        VolumeCommand::Copy { .. } | VolumeCommand::Download { .. }
+    ) {
+        crate::connect_operator_with_timeout(connection, VOLUME_TRANSFER_TIMEOUT).await?
+    } else {
+        connect_operator(connection).await?
+    };
+    let mut client = client(channel.clone());
+    let value = match command {
+        VolumeCommand::Download { copy_id, output } => {
+            let receipt = client
+                .get_copy(request(
+                    GetArtifactVolumeCopyRequest {
+                        copy_id: copy_id.clone(),
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            let expected = receipt.file.context("copy has no file")?;
+            let blob = expected
+                .blob
+                .as_ref()
+                .filter(|b| {
+                    supertag_protocol::valid_sha256(&b.sha256)
+                        && b.byte_length <= supertag_protocol::artifacts::MAX_ARTIFACT_FILE_BYTES
+                })
+                .context("copy has no valid stored bytes")?;
+            let mut download = request(GetArtifactVolumeCopyRequest { copy_id }, &token)?;
+            download.set_timeout(VOLUME_TRANSFER_TIMEOUT);
+            let mut stream = client.download_copy(download).await?.into_inner();
+            match stream.message().await?.and_then(|v| v.part) {
+                Some(artifact_download::Part::File(file)) if file == expected => {}
+                _ => bail!("Volume download differs from its exact copy receipt"),
+            }
+            return crate::artifacts::publish_download(&output, blob, stream, |v| match v.part {
+                Some(artifact_download::Part::Chunk(bytes)) => Some(bytes),
+                _ => None,
+            })
+            .await;
+        }
+        VolumeCommand::Put {
+            volume_id,
+            source,
+            operation_id,
+            expected_revision,
+        } => volume(
+            &client
+                .put(request(
+                    PutArtifactVolumeRequest {
+                        volume_id,
+                        source,
+                        operation_id,
+                        expected_revision,
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner(),
+        ),
+        VolumeCommand::Copy {
+            volume_id,
+            artifact_id,
+            path,
+            expected_revision,
+            operation_id,
+        } => {
+            let mut catalog = artifact_catalog_client::ArtifactCatalogClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES);
+            let artifact = catalog
+                .get(request(
+                    GetCapturedArtifactRequest {
+                        artifact_id: artifact_id.clone(),
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            let expected_blob = artifact
+                .files
+                .into_iter()
+                .find(|f| f.path == path)
+                .and_then(|f| f.blob)
+                .context("selected artifact file has no stored bytes")?;
+            let mut transfer = request(
+                CopyArtifactToVolumeRequest {
+                    volume_id,
+                    artifact_id,
+                    path,
+                    expected_revision,
+                    operation_id,
+                    expected_blob: Some(expected_blob),
+                },
+                &token,
+            )?;
+            transfer.set_timeout(VOLUME_TRANSFER_TIMEOUT);
+            copy(&client.copy(transfer).await?.into_inner())
+        }
+    };
+    crate::terminal::print_json(&value)?;
+    Ok(())
+}

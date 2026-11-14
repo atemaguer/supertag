@@ -2,27 +2,27 @@ package main
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"connectrpc.com/connect"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // objectiveMessage is the latest follow-up sent from each Objective's pane.
 type objectiveMessage struct {
-	text, status, tag, reply, waiting string
-	sending                           bool
-	cancel                            context.CancelFunc
+	text, status, tag, task, reply, waiting string
+	sending                                 bool
+	cancel                                  context.CancelFunc
+	work                                    []string
+	workShown                               map[string]bool
 }
 
 type objectiveSentMsg struct {
 	id       string
 	message  *objectiveMessage
-	response *operatorv1.MessageObjectiveResponse
+	response *views.MessageObjectiveResponse
 	err      error
 }
 
@@ -87,7 +87,8 @@ func (m *model) objectiveMessageSent(msg objectiveSentMsg) tea.Cmd {
 	}
 	message.status = "Follow-up sent."
 	message.tag = msg.response.GetTag()
-	if previous := msg.response.GetStatusChange(); previous != operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_UNSPECIFIED {
+	message.task = msg.response.GetTaskId()
+	if previous := msg.response.GetStatusChange(); previous != views.ObjectiveStatus_OBJECTIVE_STATUS_UNSPECIFIED {
 		message.status += " The Objective moved from " + statusWords(previous) + " back to working."
 	}
 	m.refreshObjectiveMessage(msg.id)
@@ -101,11 +102,11 @@ func (m *model) objectiveMessageSent(msg objectiveSentMsg) tea.Cmd {
 		message.cancel = cancel
 		c, follower, tag, task := m.client, m.follower, message.tag, msg.response.GetTaskId()
 		follow = func() tea.Msg {
-			reply, err := c.GetMessage(ctx, tag, task)
+			reply, err := c.GetObjectiveMessage(ctx, tag, task)
 			if err != nil {
 				return objectiveReplyMsg{id: msg.id, message: message, err: err}
 			}
-			return waitForObjectiveReply(msg.id, message, follower.Follow(ctx, tag, reply, nil))()
+			return waitForObjectiveReply(msg.id, message, follower.FollowObjective(ctx, tag, reply))()
 		}
 	}
 	return tea.Batch(overview, m.reloadObjectives(), m.reloadInbox(), follow)
@@ -129,12 +130,7 @@ func (m *model) objectiveReplyRead(msg objectiveReplyMsg) tea.Cmd {
 	done := msg.events == nil
 	switch {
 	case msg.err != nil:
-		var rpcErr *client.APIError
-		if errors.As(msg.err, &rpcErr) && (rpcErr.Code == connect.CodeNotFound || rpcErr.Code == connect.CodePermissionDenied) {
-			message.status += "\nThe reply posts to the thread the Objective was created in."
-		} else {
-			message.status += " Could not follow the reply. " + terminalText(msg.err.Error())
-		}
+		message.status += " Could not follow the reply. " + terminalText(msg.err.Error())
 	case msg.events != nil:
 		switch msg.event.Kind {
 		case client.EventWaiting:
@@ -147,18 +143,37 @@ func (m *model) objectiveReplyRead(msg objectiveReplyMsg) tea.Cmd {
 		case client.EventReply:
 			message.waiting = ""
 			message.reply = terminalLines(msg.event.Reply.GetText())
-			done = true
-		case client.EventTurnError, client.EventError:
+		case client.EventTurnError:
 			message.waiting = ""
 			message.status += " Could not show the reply. " + terminalText(msg.event.Text)
+		case client.EventError:
+			message.waiting = ""
+			message.status += " Could not follow the reply. " + terminalText(msg.event.Text)
 			done = true
+		case client.EventWorking, client.EventReport:
+			if message.workShown == nil {
+				message.workShown = map[string]bool{}
+			}
+			key := client.WorkEventKey(msg.event)
+			if key == "" || !message.workShown[key] {
+				message.workShown[key] = true
+				if msg.event.Kind == client.EventWorking {
+					message.work = append(message.work, "Working: "+terminalText(msg.event.Title))
+				} else {
+					message.work = append(message.work, terminalText(msg.event.Title)+" ("+terminalText(msg.event.Status)+")\n"+terminalLines(msg.event.Text))
+				}
+			}
+		case client.EventStillWorking:
+			message.waiting = terminalText(msg.event.Text)
 		default:
 			return waitForObjectiveReply(msg.id, message, msg.events)
 		}
 	}
 	m.refreshObjectiveMessage(msg.id)
 	if done {
-		message.cancel()
+		if message.cancel != nil {
+			message.cancel()
+		}
 		message.cancel = nil
 		return nil
 	}
@@ -182,6 +197,10 @@ func (m model) objectiveMessageText() string {
 	}
 	if message.reply != "" {
 		lines = append(lines, "", terminalText(message.tag)+" replied", message.reply)
+	}
+	if len(message.work) != 0 {
+		lines = append(lines, "", "Work Sessions")
+		lines = append(lines, message.work...)
 	}
 	return strings.Join(lines, "\n")
 }

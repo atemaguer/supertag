@@ -6,8 +6,8 @@ A **Tag** is a persistent AI actor with its own responsibilities and permissions
 reusable description of how that actor should carry out an enduring responsibility. Other terms on
 this page (see the [glossary](../reference/glossary.md)): a **Task** is one accepted assignment; a
 **Mailbox** is the Tag's inbox for messages from other Tags; a **Team** is a flat list of member
-Tags; an **Objective** is an outcome owned by a Tag; a **Worker** is the code that
-completes a Task. Together, your Teams of Tags make up an **autonomous organization**: Teams may
+Tags; an **Objective** is an outcome owned by a Tag; a **Worker Host** is the machine that
+runs a Task. Together, your Teams of Tags make up an **autonomous organization**: Teams may
 pursue different Objectives but share one Control Plane, its rules, and its record of the work.
 
 A Role can include:
@@ -94,7 +94,7 @@ the Tags to change that list.
 Use a direct Context Set or Permission Set activation for knowledge or authority that applies only
 at a particular location or situation. Put a set in a Role when it should follow an enduring
 responsibility. A Role does not bypass normal authorization: the Task's origin, requester, approval
-state, Worker policy, and provider-native access can still narrow what the Tag may do.
+state, the Worker Host's harness sandbox, and provider-native access can still narrow what the Tag may do.
 
 ## Where to go next
 

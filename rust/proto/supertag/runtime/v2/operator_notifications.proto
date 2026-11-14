@@ -1,0 +1,101 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+
+// Operator notifications: Inbox items told to the operator through the destinations a Gateway
+// is configured with (a Slack channel or direct message, an HTTPS webhook, or the desktop).
+//
+// The Control Plane owns the durable outbox, one per operator principal. Each claim reads the
+// calling operator's Inbox and records new item occurrences for the claiming Gateway's
+// destinations, at most one message per Objective per destination per window (a pending
+// approval, which a Session waits on, is sent at once), then leases the next due message of
+// that operator. A message whose items were all resolved before delivery is settled unsent.
+// Destinations stay in Gateway configuration: the Control Plane stores only their keys.
+service OperatorNotifications {
+  rpc Claim(ClaimOperatorNotificationRequest) returns (ClaimOperatorNotificationResponse);
+  rpc Settle(SettleOperatorNotificationRequest) returns (OperatorNotification);
+}
+
+// Public Gateway operator service: send a harmless sample through every destination this
+// Gateway is configured with, outside the outbox. Throttled to one sample per Gateway every few
+// seconds (RESOURCE_EXHAUSTED).
+service OperatorNotificationTest {
+  rpc SendTestNotification(SendTestNotificationRequest) returns (SendTestNotificationResponse);
+}
+
+enum NotificationProvider {
+  NOTIFICATION_PROVIDER_UNSPECIFIED = 0;
+  NOTIFICATION_PROVIDER_SLACK = 1;
+  NOTIFICATION_PROVIDER_WEBHOOK = 2;
+  NOTIFICATION_PROVIDER_DESKTOP = 3;
+}
+
+enum OperatorNotificationStatus {
+  OPERATOR_NOTIFICATION_STATUS_UNSPECIFIED = 0;
+  OPERATOR_NOTIFICATION_STATUS_PENDING = 1;
+  OPERATOR_NOTIFICATION_STATUS_DELIVERING = 2;
+  OPERATOR_NOTIFICATION_STATUS_DELIVERED = 3;
+  OPERATOR_NOTIFICATION_STATUS_FAILED = 4;
+}
+
+message NotificationDestination {
+  // `slack:TARGET`, `slack:WORKSPACE/TARGET`, `desktop`, or `webhook:` and the SHA-256 of the
+  // configured value. Never a webhook URL.
+  string key = 1;
+  NotificationProvider provider = 2;
+}
+
+message ClaimOperatorNotificationRequest {
+  repeated NotificationDestination destinations = 1;
+}
+
+message OperatorNotification {
+  string notification_id = 1;
+  string destination_key = 2;
+  // `*` for a message not batched per Objective: desktop messages and items without one.
+  string objective_id = 3;
+  // Rendered from the items still waiting when the message was claimed.
+  string text = 4;
+  repeated string item_keys = 5;
+  // Inbox item kinds in `item_keys`, without repeats: `question`, `approval`, and so on.
+  repeated string kinds = 6;
+  // The `supertag` command that lists or describes what waits.
+  string command = 7;
+  OperatorNotificationStatus status = 8;
+  uint32 attempt_count = 9;
+  uint32 max_attempts = 10;
+  optional string last_error = 11;
+  optional string external_message_id = 12;
+}
+
+message ClaimOperatorNotificationResponse {
+  // Absent when nothing is due.
+  OperatorNotification notification = 1;
+  string lease_token = 2;
+}
+
+message SettleOperatorNotificationRequest {
+  string notification_id = 1;
+  string lease_token = 2;
+  bool delivered = 3;
+  optional string external_message_id = 4;
+  // Why delivery failed; retried with backoff until the message's last attempt. A lease that
+  // lapses unsettled on the last attempt fails the message.
+  string error = 5;
+}
+
+message SendTestNotificationRequest {
+  // Optional: link the sample to this Objective.
+  string objective_id = 1;
+}
+
+message TestNotificationResult {
+  NotificationProvider provider = 1;
+  bool delivered = 2;
+  // Redacted; empty when delivered.
+  string error = 3;
+}
+
+message SendTestNotificationResponse {
+  // One per configured destination; empty when none is configured.
+  repeated TestNotificationResult results = 1;
+}

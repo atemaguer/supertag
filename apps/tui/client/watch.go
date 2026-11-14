@@ -2,12 +2,13 @@ package client
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // WatchUpdateKind says what a WatchUpdate tells the UI.
@@ -29,7 +30,7 @@ const (
 // WatchUpdate is one thing the watcher tells the UI.
 type WatchUpdate struct {
 	Kind   WatchUpdateKind
-	Change *operatorv1.WatchChange
+	Change *views.WatchChange
 	Err    error
 }
 
@@ -38,7 +39,7 @@ type WatchUpdate struct {
 type Watcher struct {
 	Client *Client
 	// Kinds are the changes to watch; empty watches every kind the caller may see.
-	Kinds []operatorv1.WatchKind
+	Kinds []views.WatchKind
 	// Interval is the first pause before reconnecting; pauses double to MaxBackoff.
 	Interval, MaxBackoff time.Duration
 	// IdleTimeout is how long the stream may go without an event, heartbeats included, before
@@ -47,7 +48,7 @@ type Watcher struct {
 }
 
 // NewWatcher watches kinds with the default timings.
-func NewWatcher(c *Client, kinds ...operatorv1.WatchKind) *Watcher {
+func NewWatcher(c *Client, kinds ...views.WatchKind) *Watcher {
 	return &Watcher{Client: c, Kinds: kinds, Interval: time.Second, MaxBackoff: 30 * time.Second, IdleTimeout: 45 * time.Second}
 }
 
@@ -98,31 +99,41 @@ func (w *Watcher) Run(ctx context.Context) <-chan WatchUpdate {
 // watch reads one stream from token, keeping token current. live says the stream delivered an
 // event; err says why it ended.
 func (w *Watcher) watch(ctx context.Context, token *string, send func(WatchUpdate) bool) (live bool, err error) {
+	return w.watchRuntime(ctx, token, send)
+}
+
+// errStreamEnded is a stream that closed before its end event.
+var errStreamEnded = errors.New("the Control Plane closed the stream early")
+
+// errIdle is a stream that went quiet for longer than heartbeats allow.
+var errIdle = errors.New("the Control Plane stopped sending events")
+
+func watchStream[T any](
+	ctx context.Context, idleTimeout time.Duration, token *string, send func(WatchUpdate) bool,
+	open func(context.Context) (*connect.ServerStreamForClient[T], error),
+	frame func(*T) (string, WatchUpdate, bool),
+) (live bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var idle atomic.Bool
-	timer := time.AfterFunc(w.IdleTimeout, func() {
+	timer := time.AfterFunc(idleTimeout, func() {
 		idle.Store(true)
 		cancel()
 	})
 	defer timer.Stop()
-	stream, err := w.Client.events.Watch(ctx, connect.NewRequest(&operatorv1.WatchRequest{ResumeToken: *token, Kinds: w.Kinds}))
+	stream, err := open(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer stream.Close()
 	for stream.Receive() {
-		timer.Reset(w.IdleTimeout)
-		event := stream.Msg()
-		if next := event.GetResumeToken(); next != "" {
-			*token = next
+		next, update, valid := frame(stream.Msg())
+		if !valid {
+			continue
 		}
-		var update WatchUpdate
-		switch part := event.GetEvent().(type) {
-		case *operatorv1.WatchEvent_Resync:
-			update = WatchUpdate{Kind: WatchResync}
-		case *operatorv1.WatchEvent_Change:
-			update = WatchUpdate{Kind: WatchChanged, Change: part.Change}
+		timer.Reset(idleTimeout)
+		if next != "" {
+			*token = next
 		}
 		if !live {
 			live = true

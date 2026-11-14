@@ -1,15 +1,17 @@
 #!/bin/sh
-# Installs the SuperTag CLI from npm into its own directory, using the system's Node.js and npm,
-# plus the package's checksum-verified terminal UI binary on macOS and Linux.
-# SuperTag runs the Claude Code and Codex CLIs you install yourself, so the copies the vendor SDKs
-# bundle are removed after installing. `supertag init` checks for your harness CLIs.
+# Installs SuperTag's native release for macOS or Linux on arm64 or amd64: the supertag CLI, the
+# supertag-tui terminal UI, the shared execution provider, and the Node.js bridges for Claude Code,
+# Cursor, OpenCode, E2B, and Modal. The archive must match the release's SHA256SUMS before it is
+# unpacked, and the CLI and terminal UI must report the release's version before the command is
+# linked. The installer never starts services or reads SuperTag state.
 set -eu
+umask 022
 
-PACKAGE="${SUPERTAG_PACKAGE:-supertag-ai}"
+REPOSITORY="atemaguer/supertag"
 # Release builds replace "latest" with their own version, so each release installs itself.
 RELEASE_DEFAULT_VERSION="latest"
 REQUESTED_VERSION="${SUPERTAG_VERSION:-$RELEASE_DEFAULT_VERSION}"
-MINIMUM_NODE="22.13.0"
+RECEIPT=".supertag-install.json"
 
 fail() {
   printf 'SuperTag installer: %s\n' "$1" >&2
@@ -27,83 +29,58 @@ sha256_of() {
   elif command_exists sha256sum; then
     sha256sum "$1" | awk '{ print $1 }'
   else
-    return 2
+    fail "shasum or sha256sum is required to verify the download"
   fi
 }
 
-tui_skipped() {
-  printf 'The terminal UI was not installed: %s. The CLI works without it.\n' "$1" >&2
-}
-
-# Verifies the packaged terminal UI binary in package directory $1 for version $2.
-# A failure here leaves the CLI installed without the terminal UI.
-install_tui() {
-  platform=$(node -p 'process.platform + "-" + process.arch')
-  case "$platform" in
-    darwin-arm64 | darwin-x64 | linux-arm64 | linux-x64) ;;
-    *)
-      tui_skipped "no build exists for $platform"
-      return 0
-      ;;
+# Downloads URL $1 to file $2. Only https: and, for testing a local build, file: URLs are allowed.
+download() {
+  case "$1" in
+    https://*) protocols='=https' ;;
+    file://*) protocols='=file' ;;
+    *) fail "unsupported download URL $1" ;;
   esac
-  name="supertag-tui-$(printf '%s' "$platform" | sed 's/x64$/amd64/')"
-  directory="$1/tui"
-  binary="$directory/$name"
-  if [ -n "${SUPERTAG_TUI_SOURCE:-}" ]; then
-    mkdir -p "$directory"
-    if ! cp "$SUPERTAG_TUI_SOURCE/$name" "$SUPERTAG_TUI_SOURCE/SHA256SUMS" "$directory/" 2>/dev/null; then
-      rm -f "$binary"
-      tui_skipped "$SUPERTAG_TUI_SOURCE has no $name and SHA256SUMS"
-      return 0
-    fi
-  fi
-  if [ ! -f "$binary" ] || [ ! -f "$directory/SHA256SUMS" ]; then
-    rm -f "$binary"
-    tui_skipped "package $PACKAGE@$2 has no $name and SHA256SUMS"
-    return 0
-  fi
-  expected=$(awk -v file="$name" '$2 == file || $2 == "*" file { print $1; exit }' "$directory/SHA256SUMS")
-  if ! actual=$(sha256_of "$binary"); then
-    rm -f "$binary"
-    tui_skipped "neither shasum nor sha256sum is available to verify it"
-    return 0
-  fi
-  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
-    rm -f "$binary"
-    tui_skipped "$name did not match its SHA256SUMS checksum"
-    return 0
-  fi
-  chmod 755 "$binary"
-  tui_version=$("$binary" --version 2>/dev/null || true)
-  if [ "$tui_version" != "$2" ]; then
-    rm -f "$binary"
-    tui_skipped "$name reports version ${tui_version:-none}, not $2"
-    return 0
+  if command_exists curl; then
+    curl --proto "$protocols" --proto-redir '=https' --tlsv1.2 -fsSL --retry 3 -o "$2" "$1"
+  elif command_exists wget && [ "$protocols" = '=https' ]; then
+    wget --https-only -q -O "$2" "$1"
+  else
+    fail "curl is required to download SuperTag"
   fi
 }
 
-# Succeeds when version $1 is at least $2, both major.minor.patch.
-version_at_least() {
-  awk -v have="$1" -v need="$2" 'BEGIN {
-    split(have, h, "."); split(need, n, ".");
-    for (i = 1; i <= 3; i++) { if (h[i] + 0 > n[i] + 0) exit 0; if (h[i] + 0 < n[i] + 0) exit 1 }
-    exit 0
-  }'
-}
-
-command_exists node || fail "Node.js $MINIMUM_NODE or newer is required: install it from https://nodejs.org, then run this again"
-command_exists npm || fail "npm is required; it comes with Node.js"
-NODE_VERSION=$(node --version | sed 's/^v//')
-version_at_least "$NODE_VERSION" "$MINIMUM_NODE" ||
-  fail "Node.js $NODE_VERSION is older than $MINIMUM_NODE; upgrade it from https://nodejs.org, then run this again"
+case "$(uname -s)" in
+  Darwin) os=darwin ;;
+  Linux) os=linux ;;
+  *) fail "SuperTag supports macOS and Linux; this is $(uname -s)" ;;
+esac
+case "$(uname -m)" in
+  arm64 | aarch64) arch=arm64 ;;
+  x86_64 | amd64) arch=amd64 ;;
+  *) fail "SuperTag supports arm64 and amd64; this is $(uname -m)" ;;
+esac
+# A shell running under Rosetta reports x86_64 on Apple silicon; install the native build.
+if [ "$os" = darwin ] && [ "$arch" = amd64 ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
+  arch=arm64
+fi
+PLATFORM="$os-$arch"
 
 case "$REQUESTED_VERSION" in
-  latest) SPEC="$PACKAGE@latest" ;;
-  v*) SPEC="$PACKAGE@${REQUESTED_VERSION#v}" ;;
-  *) SPEC="$PACKAGE@$REQUESTED_VERSION" ;;
+  latest) VERSION= ;;
+  v*) VERSION=${REQUESTED_VERSION#v} ;;
+  *) VERSION=$REQUESTED_VERSION ;;
 esac
-# A local tarball or directory, for testing a build before it is published.
-[ -n "${SUPERTAG_PACKAGE_SOURCE:-}" ] && SPEC=$SUPERTAG_PACKAGE_SOURCE
+case "$VERSION" in
+  *[!0-9A-Za-z.+-]*) fail "invalid version $REQUESTED_VERSION" ;;
+esac
+# A directory holding release assets, for testing a build before it is published.
+if [ -n "${SUPERTAG_DOWNLOAD_URL:-}" ]; then
+  BASE_URL=${SUPERTAG_DOWNLOAD_URL%/}
+elif [ -z "$VERSION" ]; then
+  BASE_URL="https://github.com/$REPOSITORY/releases/latest/download"
+else
+  BASE_URL="https://github.com/$REPOSITORY/releases/download/v$VERSION"
+fi
 
 if [ -n "${SUPERTAG_INSTALL_ROOT:-}" ]; then
   INSTALL_ROOT=$SUPERTAG_INSTALL_ROOT
@@ -121,51 +98,104 @@ else
 fi
 
 mkdir -p "$INSTALL_ROOT/versions" "$BIN_DIR"
-INSTALL_ROOT=$(CDPATH= cd -P -- "$INSTALL_ROOT" >/dev/null 2>&1 && pwd)
-BIN_DIR=$(CDPATH= cd -P -- "$BIN_DIR" >/dev/null 2>&1 && pwd)
+INSTALL_ROOT=$(CDPATH='' cd -P -- "$INSTALL_ROOT" >/dev/null 2>&1 && pwd)
+BIN_DIR=$(CDPATH='' cd -P -- "$BIN_DIR" >/dev/null 2>&1 && pwd)
+if [ -e "$BIN_DIR/supertag" ] && [ ! -L "$BIN_DIR/supertag" ]; then
+  fail "$BIN_DIR/supertag was not installed by this script; remove it or set SUPERTAG_BIN_DIR"
+fi
 STAGING="$INSTALL_ROOT/versions/.install.$$"
 cleanup() {
   rm -rf "$STAGING"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+rm -rf "$STAGING"
+mkdir -p "$STAGING/download" "$STAGING/unpacked"
 
-printf 'Installing %s with npm...\n' "$SPEC"
-mkdir -p "$STAGING"
-printf '{"private":true}\n' > "$STAGING/package.json"
-npm install --prefix "$STAGING" --omit=dev --no-audit --no-fund --no-save --loglevel=error "$SPEC" >&2 ||
-  fail "npm could not install $SPEC"
-
-# The SDKs ship platform copies of the Claude Code and Codex CLIs; SuperTag runs yours instead.
-find "$STAGING/node_modules" -type d \( \
-  -path '*/@openai/codex-darwin-*' -o -path '*/@openai/codex-linux-*' -o -path '*/@openai/codex-win32-*' -o \
-  -path '*/@anthropic-ai/claude-agent-sdk-darwin-*' -o -path '*/@anthropic-ai/claude-agent-sdk-linux-*' -o \
-  -path '*/@anthropic-ai/claude-agent-sdk-win32-*' \) -prune -exec rm -rf {} +
-
-MANIFEST="$STAGING/node_modules/$PACKAGE/package.json"
-[ -f "$MANIFEST" ] || fail "npm installed no $PACKAGE package"
-RELEASE_VERSION=$(node -p "require(process.argv[1]).version" "$MANIFEST")
-case "$RELEASE_VERSION" in
-  '' | *[!0-9A-Za-z._+-]*) fail "the installed package has an invalid version" ;;
+printf 'Downloading SuperTag for %s from %s...\n' "$PLATFORM" "$BASE_URL"
+download "$BASE_URL/SHA256SUMS" "$STAGING/download/SHA256SUMS" ||
+  fail "could not download SHA256SUMS from $BASE_URL"
+# Each line is "<sha256>  supertag-<version>-<platform>-complete.tar.gz".
+line=$(awk -v platform="$PLATFORM" -v version="$VERSION" '
+  {
+    name = $2; sub(/^\*/, "", name)
+    suffix = "-" platform "-complete.tar.gz"
+    if (NF != 2 || $1 !~ /^[0-9a-f]+$/ || length($1) != 64 || index(name, "supertag-") != 1) next
+    if (length(name) <= length(suffix) + 9) next
+    if (substr(name, length(name) - length(suffix) + 1) != suffix) next
+    found = substr(name, 10, length(name) - length(suffix) - 9)
+    if (version == "" || found == version) { print $1, found; exit }
+  }' "$STAGING/download/SHA256SUMS")
+[ -n "$line" ] || fail "the release at $BASE_URL has no ${VERSION:+$VERSION }build for $PLATFORM"
+EXPECTED=${line%% *}
+VERSION=${line#* }
+case "$VERSION" in
+  '' | *[!0-9A-Za-z.+-]*) fail "the release lists an invalid version" ;;
 esac
-[ -x "$STAGING/node_modules/.bin/supertag" ] || fail "the installed package has no supertag command"
+ROOT_NAME="supertag-$VERSION-$PLATFORM-complete"
+ARCHIVE="$STAGING/download/$ROOT_NAME.tar.gz"
+download "$BASE_URL/$ROOT_NAME.tar.gz" "$ARCHIVE" || fail "could not download $ROOT_NAME.tar.gz"
+ACTUAL=$(sha256_of "$ARCHIVE")
+[ "$ACTUAL" = "$EXPECTED" ] || fail "$ROOT_NAME.tar.gz did not match its SHA256SUMS checksum"
 
-install_tui "$STAGING/node_modules/$PACKAGE" "$RELEASE_VERSION"
+# Every entry stays inside the release's root directory.
+tar -tzf "$ARCHIVE" > "$STAGING/download/entries" || fail "$ROOT_NAME.tar.gz is not a readable archive"
+awk -v root="$ROOT_NAME" '
+  $0 != root && $0 != root "/" && index($0, root "/") != 1 { bad = 1 }
+  $0 ~ /(^|\/)\.\.(\/|$)/ { bad = 1 }
+  END { exit bad }' "$STAGING/download/entries" || fail "$ROOT_NAME.tar.gz has an entry outside $ROOT_NAME"
+tar -xzf "$ARCHIVE" -C "$STAGING/unpacked" || fail "could not unpack $ROOT_NAME.tar.gz"
+PACKAGE="$STAGING/unpacked/$ROOT_NAME"
+[ -f "$PACKAGE/manifest.json" ] && [ -x "$PACKAGE/supertag" ] && [ -x "$PACKAGE/supertag-tui" ] ||
+  fail "$ROOT_NAME.tar.gz is not a complete SuperTag release"
+# macOS applies the umask to symbolic links; the release records them as 0777, as Linux creates them.
+if [ "$os" = darwin ]; then
+  find "$PACKAGE" -type l -exec chmod -h 777 {} +
+fi
 
-TARGET="$INSTALL_ROOT/versions/$RELEASE_VERSION"
-rm -rf "$TARGET"
-mv "$STAGING" "$TARGET"
+cli_version=$("$PACKAGE/supertag" --version 2>/dev/null || true)
+[ "$cli_version" = "supertag $VERSION" ] || fail "the supertag binary reports ${cli_version:-no version}, not $VERSION"
+tui_version=$("$PACKAGE/supertag-tui" --version 2>/dev/null || true)
+[ "$tui_version" = "$VERSION" ] || fail "the supertag-tui binary reports ${tui_version:-no version}, not $VERSION"
+
+# The layout and receipt of rust/scripts/install_native_release.py, so either can replace the other.
+commit=$(grep -o '"commit"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' "$PACKAGE/manifest.json" |
+  head -n 1 | sed 's/.*"\([0-9a-f]\{40\}\)"$/\1/')
+[ -n "$commit" ] || fail "the release manifest names no source commit"
+printf '{"archive_sha256": "%s", "format": "supertag-native-install-v1", "source_commit": "%s"}\n' \
+  "$ACTUAL" "$commit" > "$PACKAGE/$RECEIPT"
+chmod 600 "$PACKAGE/$RECEIPT"
+
+# The directory name carries the archive digest, so an installed directory with a receipt already
+# holds this exact release; reinstalling it leaves it in place for any running services.
+TARGET="$INSTALL_ROOT/versions/native-$VERSION-$PLATFORM-release-$ACTUAL"
+if [ ! -f "$TARGET/$RECEIPT" ] || [ ! -x "$TARGET/supertag" ]; then
+  # A directory without a receipt is incomplete; move it aside before replacing it.
+  if [ -e "$TARGET" ]; then
+    mv "$TARGET" "$STAGING/replaced"
+  fi
+  mv "$PACKAGE" "$TARGET"
+fi
 
 LINK_STAGING="$BIN_DIR/.supertag.install.$$"
 rm -f "$LINK_STAGING"
-ln -s "$TARGET/node_modules/.bin/supertag" "$LINK_STAGING"
+ln -s "$TARGET/supertag" "$LINK_STAGING"
 mv -f "$LINK_STAGING" "$BIN_DIR/supertag"
 
 INSTALLED_VERSION=$("$BIN_DIR/supertag" --version)
-[ "$INSTALLED_VERSION" = "$RELEASE_VERSION" ] || fail "the installed command failed its version check"
+[ "$INSTALLED_VERSION" = "supertag $VERSION" ] || fail "the installed command failed its version check"
 
-printf 'Installed SuperTag %s at %s\n' "$RELEASE_VERSION" "$BIN_DIR/supertag"
+printf 'Installed SuperTag %s at %s\n' "$VERSION" "$BIN_DIR/supertag"
 case ":${PATH:-}:" in
   *":$BIN_DIR:"*) ;;
   *) printf 'Add %s to PATH to run supertag from a new shell.\n' "$BIN_DIR" ;;
+esac
+node_version=$(node --version 2>/dev/null || true)
+case "$node_version" in
+  v22.1[3-9].* | v22.[2-9][0-9].*) ;;
+  *)
+    printf 'Claude Code, Cursor, OpenCode, E2B, and Modal need Node.js 22.13 or a later 22.x on PATH%s.\n' \
+      "${node_version:+; this is $node_version}"
+    ;;
 esac
 printf 'Next: install Claude Code, Codex, Cursor, or OpenCode, then run supertag init in a repository.\n'

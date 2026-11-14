@@ -14,7 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // The fields of the new Objective form, in order.
@@ -41,12 +41,12 @@ type objectiveForm struct {
 	// request.ID is generated once per logical submission and reused while the content is
 	// unchanged, so a retry after a lost answer reaches the same Objective instead of a second one.
 	request client.NewObjective
-	created *operatorv1.CreateObjectiveResponse
+	created *views.CreateObjectiveResponse
 }
 
 type createdMsg struct {
 	form     *objectiveForm
-	response *operatorv1.CreateObjectiveResponse
+	response *views.CreateObjectiveResponse
 	err      error
 }
 
@@ -75,7 +75,7 @@ func (m *model) openObjectiveForm(outcome string) tea.Cmd {
 	f := &objectiveForm{owner: owner}
 	placeholders := [formFields]string{
 		"The result, how success is verified, what must not change, when to ask a person",
-		"A Team's name, or empty for " + terminalText(owner) + " to work alone",
+		"A Team's name, or empty for " + terminalText(m.tagLabel(owner)) + " to work alone",
 		"Such as 300 USD or $12.50; empty for no budget",
 	}
 	for i := range f.fields {
@@ -222,9 +222,14 @@ func (m *model) showObjective(id string) tea.Cmd {
 func (m model) renderObjectiveForm() string {
 	f := m.form
 	wrap := lipgloss.NewStyle().Width(m.paneWidth())
-	owner := terminalText(f.owner)
+	ownerName := m.tagLabel(f.owner)
+	owner := terminalText(ownerName)
 	if f.created != nil {
-		text := wrap.Render(createdLines(f.owner, f.created))
+		text := wrap.Render(createdLines(ownerName, f.created))
+
+		text = wrap.Render("Created Objective " + terminalText(f.created.GetObjective().GetId()) +
+			".\n" + owner + "'s first Task is " + terminalText(f.created.GetStartedTaskId()) + ".")
+
 		if f.note.text != "" {
 			text += "\n\n" + errorStyle.Render(wrap.Render(f.note.text))
 		}
@@ -263,7 +268,7 @@ func (m model) renderObjectiveForm() string {
 
 // createdLines say what the Control Plane created and whether it started, with each warning.
 // Every field from the server is filtered for the terminal.
-func createdLines(owner string, created *operatorv1.CreateObjectiveResponse) string {
+func createdLines(owner string, created *views.CreateObjectiveResponse) string {
 	id := terminalText(created.GetObjective().GetId())
 	lines := []string{"Created Objective " + id + "."}
 	switch {
@@ -301,7 +306,7 @@ var budgetPattern = regexp.MustCompile(`^(?:\$\s*([0-9][0-9,]*(?:\.[0-9]+)?)|([0
 
 // parseBudget reads a budget such as `300 USD`, `12.50 eur` or `$12.50` into minor units of its
 // currency; empty is no budget.
-func parseBudget(text string) (*operatorv1.Budget, error) {
+func parseBudget(text string) (*views.Budget, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, nil
@@ -333,7 +338,7 @@ func parseBudget(text string) (*operatorv1.Budget, error) {
 	if minor <= 0 {
 		return nil, fmt.Errorf("A budget must be more than zero.")
 	}
-	return &operatorv1.Budget{LimitMinor: minor, Currency: currency}, nil
+	return &views.Budget{LimitMinor: minor, Currency: currency}, nil
 }
 
 // sameSubmission reports whether two form submissions declare the same Objective, ignoring IDs.

@@ -1,1 +1,0 @@
-ALTER TABLE `TaskAttempt` ADD `liveMounts` text;

@@ -1,0 +1,40 @@
+[package]
+name = "supertag-worker-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[features]
+# Accepts loopback HTTP S3 endpoints for Workspace Volume fixtures.
+test-fixtures = []
+
+[dependencies]
+anyhow.workspace = true
+aws-credential-types = "1.2.14"
+aws-sigv4 = { version = "1.4.2", default-features = false, features = ["sign-http", "http1"] }
+hmac.workspace = true
+libc.workspace = true
+prost.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
+ring = "0.17"
+rustls-pki-types = { version = "1", features = ["std"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+supertag-protocol.workspace = true
+supertag-transport.workspace = true
+supertag-shared-execution = { path = "../shared-execution" }
+supertag-workspaces = { path = "../workspaces" }
+tempfile.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+uuid.workspace = true
+base64 = "0.22"
+tracing = "0.1"
+
+[dev-dependencies]
+axum = "0.8"

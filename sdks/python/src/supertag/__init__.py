@@ -12,7 +12,6 @@ from .conformance import (
 )
 from .context import ArtifactContextResolver, ContextResolver, WorkspaceResolver
 from .continuity import FileSessionStateStore, InMemorySessionStateStore
-from .durable import DurableLocalWorklet, FileAttemptJournal
 from .environment import (
     EnvironmentAccess,
     ExecutionCleanupError,
@@ -25,7 +24,6 @@ from .environment import (
 )
 from .harness import HarnessEnvironmentAccesses
 from .models import (
-    WORKLET_PROTOCOL_VERSION,
     ArtifactSelection,
     CancellationToken,
     Capability,
@@ -75,13 +73,10 @@ from .tools import (
     ToolOperation,
     ToolProvider,
 )
-from .transport import WorkletConnection
 
 __all__ = [
     "ArtifactContextResolver",
     "ArtifactSelection",
-    "DurableLocalWorklet",
-    "FileAttemptJournal",
     "CancellationToken",
     "Capability",
     "SessionStateRef",
@@ -139,9 +134,7 @@ __all__ = [
     "WorkerHostDescriptor",
     "WorkerOptions",
     "Worklet",
-    "WorkletConnection",
     "WorkletDescriptor",
-    "WORKLET_PROTOCOL_VERSION",
     "HistoryInput",
     "TaskProgress",
     "TaskProgressItem",

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import suppress
+import os
+import stat
+from contextlib import ExitStack, aclosing, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
-from typing import Any, AsyncIterator, Mapping, Protocol
+from typing import Any, AsyncIterator, Mapping, Protocol, Sequence
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
@@ -50,6 +52,15 @@ MAX_SKILLS_CHARACTERS = 150_000
 class OpenAIAgentsStreamEvent:
     type: str
     text: str | None = None
+    usage: OpenAIAgentsUsage | None = None
+
+
+@dataclass(frozen=True)
+class OpenAIAgentsUsage:
+    input_tokens: int
+    cached_input_tokens: int
+    output_tokens: int
+    observed_model: str | None
 
 
 class OpenAIAgentsRun(Protocol):
@@ -396,6 +407,7 @@ class _OfficialOpenAIAgentsRun:
     def __init__(self, result: Any, session: _MemorySession) -> None:
         self._result = result
         self._session = session
+        self._observed_models: set[str] = set()
 
     @property
     def final_output(self) -> str | None:
@@ -406,21 +418,60 @@ class _OfficialOpenAIAgentsRun:
     def session_items(self) -> list[dict[str, Any]]:
         return list(self._session.items)
 
+    @property
+    def usage(self) -> OpenAIAgentsUsage | None:
+        context = getattr(self._result, "context_wrapper", None)
+        usage = getattr(context, "usage", None)
+        if not getattr(usage, "requests", 0):
+            return None
+        observed = next(iter(self._observed_models)) if len(self._observed_models) == 1 else None
+        return OpenAIAgentsUsage(
+            input_tokens=usage.input_tokens,
+            cached_input_tokens=usage.input_tokens_details.cached_tokens,
+            output_tokens=usage.output_tokens,
+            observed_model=observed,
+        )
+
     async def cancel(self) -> None:
         self._result.cancel()
+        task = getattr(self._result, "run_loop_task", None)
+        if isinstance(task, asyncio.Task):
+            done, _pending = await asyncio.wait({task}, timeout=2)
+            if not done:
+                raise RuntimeError("OpenAI Agents execution did not stop")
+            await asyncio.gather(task, return_exceptions=True)
 
     async def stream(self) -> AsyncIterator[OpenAIAgentsStreamEvent]:
-        async for event in self._result.stream_events():
-            if getattr(event, "type", None) != "raw_response_event":
-                continue
-            data = getattr(event, "data", None)
-            if getattr(data, "type", None) == "response.output_text.delta":
-                delta = getattr(data, "delta", None)
-                if isinstance(delta, str) and delta:
-                    yield OpenAIAgentsStreamEvent("output.delta", delta)
+        async with aclosing(self._result.stream_events()) as events:
+            async for event in events:
+                if getattr(event, "type", None) != "raw_response_event":
+                    continue
+                data = getattr(event, "data", None)
+                match getattr(data, "type", None):
+                    case "response.completed":
+                        model = getattr(getattr(data, "response", None), "model", None)
+                        if isinstance(model, str) and model:
+                            self._observed_models.add(model)
+                        if (usage := self.usage) is not None:
+                            yield OpenAIAgentsStreamEvent("usage", usage=usage)
+                    case "response.output_text.delta":
+                        delta = getattr(data, "delta", None)
+                        if isinstance(delta, str) and delta:
+                            yield OpenAIAgentsStreamEvent("output.delta", delta)
 
 
 class _OfficialOpenAIAgentsRunner:
+    def __init__(
+        self,
+        *,
+        allow_workspace_read: bool = True,
+        model_provider: Any = None,
+        tools: Sequence[Any] = (),
+    ) -> None:
+        self._allow_workspace_read = allow_workspace_read
+        self._model_provider = model_provider
+        self._tools = tools
+
     def start(
         self,
         *,
@@ -442,29 +493,57 @@ class _OfficialOpenAIAgentsRunner:
         @function_tool
         async def read_workspace_file(path: str) -> str:
             """Read a UTF-8 text file below the Task workspace using its relative path."""
-
-            candidate = (workspace / path).resolve()
-            if not candidate.is_relative_to(workspace):
-                raise ValueError("Path escapes the Task workspace")
-            if not candidate.is_file():
-                raise ValueError(f"Workspace file does not exist: {path}")
-            return candidate.read_text(encoding="utf-8", errors="replace")[:100_000]
+            return _read_workspace_file(workspace, path)
 
         session = _MemorySession(session_items)
+        tools = (
+            [read_workspace_file, *self._tools] if self._allow_workspace_read else list(self._tools)
+        )
         agent = Agent(
             name=name,
             instructions=instructions,
             model=model,
-            tools=[read_workspace_file],
+            tools=tools,
         )
+        config = RunConfig(tracing_disabled=True)
+        if self._model_provider is not None:
+            config.model_provider = self._model_provider
         result = Runner.run_streamed(
             agent,
             input=prompt,
             max_turns=max_turns,
             session=session,
-            run_config=RunConfig(tracing_disabled=True),
+            run_config=config,
         )
         return _OfficialOpenAIAgentsRun(result, session)
+
+
+def _read_workspace_file(workspace: Path, path: str) -> str:
+    candidate = (workspace / path).resolve()
+    if not candidate.is_relative_to(workspace):
+        raise ValueError("Path escapes the Task workspace")
+    parts = candidate.relative_to(workspace).parts
+    if not parts:
+        raise ValueError("Workspace file must be a regular file")
+    if os.open not in os.supports_dir_fd or not hasattr(os, "O_NOFOLLOW"):
+        if not candidate.is_file():
+            raise ValueError("Workspace file must be a regular file")
+        with candidate.open(encoding="utf-8", errors="replace") as file:
+            return file.read(100_000)
+    with ExitStack() as stack:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        directory = os.open(workspace, flags)
+        stack.callback(os.close, directory)
+        for name in parts[:-1]:
+            directory = os.open(name, flags, dir_fd=directory)
+            stack.callback(os.close, directory)
+        descriptor = os.open(
+            parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+        )
+        with os.fdopen(descriptor, encoding="utf-8", errors="replace") as file:
+            if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
+                raise ValueError("Workspace file must be a regular file")
+            return file.read(100_000)
 
 
 def _agent_instructions(attempt: dict[str, Any], context: ExecutionContext | None = None) -> str:
