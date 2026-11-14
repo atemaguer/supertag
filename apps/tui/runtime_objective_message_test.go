@@ -47,14 +47,3 @@ func TestRuntimeObjectiveFollowShowsChildReportAfterRootReplyOrFailure(t *testin
 		})
 	}
 }
-
-func TestLegacyObjectiveFollowStillEndsAtRootReply(t *testing.T) {
-	m := testModel(t, coordinationFake())
-	cancelled := false
-	message := &objectiveMessage{cancel: func() { cancelled = true }}
-	m.objectiveMessages["objective"] = message
-	cmd := m.objectiveReplyRead(objectiveReplyMsg{id: "objective", message: message, event: client.FollowEvent{Kind: client.EventReply, Reply: finalReply("Done")}, events: make(chan client.FollowEvent)})
-	if cmd != nil || !cancelled {
-		t.Fatal("legacy Objective follow must still stop at its root reply")
-	}
-}

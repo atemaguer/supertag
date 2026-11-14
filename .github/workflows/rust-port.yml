@@ -6,7 +6,6 @@ on:
       - 'rust/**'
       - 'packages/runtime/**'
       - 'packages/core/**'
-      - 'packages/operator-api/go/**'
       - 'apps/tui/**'
       - 'apps/desktop/**'
       - 'sdks/python/**'
@@ -21,7 +20,6 @@ on:
       - 'rust/**'
       - 'packages/runtime/**'
       - 'packages/core/**'
-      - 'packages/operator-api/go/**'
       - 'apps/tui/**'
       - 'apps/desktop/**'
       - 'sdks/python/**'
@@ -74,7 +72,6 @@ jobs:
           go-version-file: apps/tui/go.mod
           cache-dependency-path: |
             apps/tui/go.sum
-            packages/operator-api/go/go.sum
             rust/bindings/go/go.sum
       - uses: actions/setup-python@v5
         with:

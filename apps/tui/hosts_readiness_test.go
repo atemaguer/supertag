@@ -1,15 +1,16 @@
 package main
 
 import (
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 	"testing"
+
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 func TestRuntimeHostSummaryPreservesPendingSuppressedAndOffline(t *testing.T) {
-	var hosts []*operatorv1.WorkerHost
+	var hosts []*views.WorkerHost
 	labels := map[string]string{}
 	for _, phase := range []string{"ready", "busy", "pending", "suppressed", "offline", "revoked"} {
-		hosts = append(hosts, host(phase, operatorv1.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED))
+		hosts = append(hosts, host(phase, views.WorkerHostPhase_WORKER_HOST_PHASE_UNSPECIFIED))
 		labels[phase] = phase
 	}
 	want := "Worker Hosts: 1 ready, 1 busy, 1 pending, 1 suppressed, 1 offline"

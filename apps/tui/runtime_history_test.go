@@ -16,7 +16,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
 )
@@ -28,7 +28,7 @@ func runtimeModel(t *testing.T) model {
 
 func runtimeModelAt(t *testing.T, endpoint string) model {
 	t.Helper()
-	m, err := dialRuntimeV2("test")(t.Context(), client.Target{URL: endpoint, Token: "test"})
+	m, err := dial("test")(t.Context(), client.Target{URL: endpoint, Token: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,27 +37,27 @@ func runtimeModelAt(t *testing.T, endpoint string) model {
 	return update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 }
 
-func runtimeTestTags() []*operatorv1.Tag {
-	return []*operatorv1.Tag{{
-		Metadata: &operatorv1.Metadata{Id: "lead", Name: "Engineering Lead"},
-		Status:   &operatorv1.TagStatus{Phase: operatorv1.TagPhase_TAG_PHASE_ACTIVE},
+func runtimeTestTags() []*views.Tag {
+	return []*views.Tag{{
+		Metadata: &views.Metadata{Id: "lead", Name: "Engineering Lead"},
+		Status:   &views.TagStatus{Phase: views.TagPhase_TAG_PHASE_ACTIVE},
 	}}
 }
 
-func runtimeHistoryMessage(id, text, reply string) *operatorv1.Message {
-	return &operatorv1.Message{
+func runtimeHistoryMessage(id, text, reply string) *views.Message {
+	return &views.Message{
 		TaskId: id, Tag: "lead", SessionId: "session", Conversation: defaultConversation, Text: text,
-		Status: operatorv1.ReplyStatus_REPLY_STATUS_REPLIED, Reply: finalReply(reply),
+		Status: views.ReplyStatus_REPLY_STATUS_REPLIED, Reply: finalReply(reply),
 	}
 }
 
-func runtimePage(revision uint64, newestFirst ...*operatorv1.Message) historyMsg {
+func runtimePage(revision uint64, newestFirst ...*views.Message) historyMsg {
 	return historyMsg{tag: "lead", conversation: defaultConversation, items: client.History("lead", newestFirst), revision: revision}
 }
 
 func runtimeConversationWatch(tag, name string) watchMsg {
-	return watchMsg{update: client.WatchUpdate{Kind: client.WatchChanged, Change: &operatorv1.WatchChange{
-		Kind: operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE, Tag: tag, Conversation: name,
+	return watchMsg{update: client.WatchUpdate{Kind: client.WatchChanged, Change: &views.WatchChange{
+		Kind: views.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE, Tag: tag, Conversation: name,
 	}}}
 }
 
@@ -232,8 +232,8 @@ func TestRuntimeHistoryReplacesAWithdrawnInputsSourceReply(t *testing.T) {
 func TestRuntimeWorkReportsDeduplicateAcrossFollowHistoryAndLaterContinuation(t *testing.T) {
 	m := runtimeModel(t)
 	root := runtimeHistoryMessage("root", "Check the release", "I started checking")
-	work := &operatorv1.WorkSession{Id: "work/check", Title: "Release checks", TaskId: "child-1", Status: operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_RUNNING, ReportStatus: operatorv1.ReplyStatus_REPLY_STATUS_WAITING}
-	root.WorkSessions = []*operatorv1.WorkSession{work}
+	work := &views.WorkSession{Id: "work/check", Title: "Release checks", TaskId: "child-1", Status: views.WorkSessionStatus_WORK_SESSION_STATUS_RUNNING, ReportStatus: views.ReplyStatus_REPLY_STATUS_WAITING}
+	root.WorkSessions = []*views.WorkSession{work}
 	m = update(t, m, runtimePage(0, root))
 	turn := m.shown().runtime.turns["root"]
 	if !turn.following {
@@ -241,10 +241,10 @@ func TestRuntimeWorkReportsDeduplicateAcrossFollowHistoryAndLaterContinuation(t 
 	}
 	report := client.FollowEvent{Kind: client.EventReport, WorkSession: work.Id, TaskID: "report-1", Title: work.Title, Status: "done", Text: "First child report"}
 	m = update(t, m, followMsg{tag: "lead", conversation: defaultConversation, taskID: "root", event: report})
-	work.Status, work.ReportStatus = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED, operatorv1.ReplyStatus_REPLY_STATUS_REPLIED
+	work.Status, work.ReportStatus = views.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED, views.ReplyStatus_REPLY_STATUS_REPLIED
 	work.ReportTaskId, work.Report = "report-1", finalReply(report.Text)
 	row := runtimeHistoryMessage("report-1", "", "")
-	row.Reply, row.WorkSessions = nil, []*operatorv1.WorkSession{work}
+	row.Reply, row.WorkSessions = nil, []*views.WorkSession{work}
 	// The report arrives as a separate page while the old root is still followed.
 	m = update(t, m, runtimePage(0, row))
 	m = update(t, m, followDoneMsg{tag: "lead", conversation: defaultConversation, taskID: "root"})
@@ -257,10 +257,11 @@ func TestRuntimeWorkReportsDeduplicateAcrossFollowHistoryAndLaterContinuation(t 
 		t.Fatal("rendering a report must preserve its real Task as the pagination head")
 	}
 	// A future continuation of the same Work Session has a distinct report Task.
-	continued := proto.Clone(work).(*operatorv1.WorkSession)
+	clone := *work
+	continued := &clone
 	continued.TaskId, continued.ReportTaskId, continued.Report = "child-2", "report-2", finalReply("Second child report")
 	row2 := runtimeHistoryMessage("report-2", "", "")
-	row2.Reply, row2.WorkSessions = nil, []*operatorv1.WorkSession{continued}
+	row2.Reply, row2.WorkSessions = nil, []*views.WorkSession{continued}
 	m = update(t, m, runtimePage(0, row2, row))
 	got = ansi.Strip(m.renderConversation())
 	if strings.Count(got, "First child report") != 1 || strings.Count(got, "Second child report") != 1 {
@@ -271,11 +272,11 @@ func TestRuntimeWorkReportsDeduplicateAcrossFollowHistoryAndLaterContinuation(t 
 func TestRuntimeWorkHistoryRecoversReportAfterRootFollowEnds(t *testing.T) {
 	m := runtimeModel(t)
 	root := runtimeHistoryMessage("root", "Check it", "Started")
-	root.WorkSessions = []*operatorv1.WorkSession{{Id: "work/check", Title: "Check", TaskId: "child", Status: operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_RUNNING, ReportStatus: operatorv1.ReplyStatus_REPLY_STATUS_WAITING}}
+	root.WorkSessions = []*views.WorkSession{{Id: "work/check", Title: "Check", TaskId: "child", Status: views.WorkSessionStatus_WORK_SESSION_STATUS_RUNNING, ReportStatus: views.ReplyStatus_REPLY_STATUS_WAITING}}
 	m = update(t, m, runtimePage(0, root))
 	m = update(t, m, followDoneMsg{tag: "lead", conversation: defaultConversation, taskID: "root"})
-	root.WorkSessions[0].Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED
-	root.WorkSessions[0].ReportStatus = operatorv1.ReplyStatus_REPLY_STATUS_REPLIED
+	root.WorkSessions[0].Status = views.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED
+	root.WorkSessions[0].ReportStatus = views.ReplyStatus_REPLY_STATUS_REPLIED
 	root.WorkSessions[0].ReportTaskId, root.WorkSessions[0].Report = "report", finalReply("Recovered report")
 	m = update(t, m, runtimePage(0, root))
 	if got := ansi.Strip(m.renderConversation()); strings.Count(got, "Recovered report") != 1 {

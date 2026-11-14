@@ -62,7 +62,7 @@ func taskFilesApp(t *testing.T) *app {
 	server.Config.Protocols.SetUnencryptedHTTP2(true)
 	server.Start()
 	t.Cleanup(server.Close)
-	a, err := newApp(t.Context(), dialRuntimeV2("test"), []client.Target{{URL: server.URL, Token: "fixture-token"}, {URL: server.URL, Token: "fixture-token"}}, 0)
+	a, err := newApp(t.Context(), dial("test"), []client.Target{{URL: server.URL, Token: "fixture-token"}, {URL: server.URL, Token: "fixture-token"}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

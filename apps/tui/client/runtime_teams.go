@@ -8,14 +8,14 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 )
 
-func (c *runtimeClient) listTeams(ctx context.Context) ([]*operatorv1.Team, error) {
+func (c *runtimeClient) listTeams(ctx context.Context) ([]*views.Team, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
-	var teams []*operatorv1.Team
+	var teams []*views.Team
 	cursor := ""
 	seen := map[string]bool{}
 	for {
@@ -60,7 +60,7 @@ func (c *runtimeClient) getTeam(ctx context.Context, name string, posts int32) (
 		for _, tag := range post.GetToTagIds() {
 			view.TagNames[tag] = tag
 		}
-		view.Posts = append(view.Posts, &operatorv1.WorkstreamPost{
+		view.Posts = append(view.Posts, &views.WorkstreamPost{
 			Id: post.GetPostId(), TeamId: post.GetTeamId(), AuthorTagId: post.GetAuthorTagId(),
 			ToTagIds: post.GetToTagIds(), Body: post.GetBody(), SourceTaskId: post.GetSourceTaskId(),
 			Sequence: int64(post.GetSequence()), CreatedAt: timestamppb.New(time.UnixMilli(post.GetCreatedAtMs())),
@@ -69,8 +69,8 @@ func (c *runtimeClient) getTeam(ctx context.Context, name string, posts int32) (
 	return view, nil
 }
 
-func runtimeTeam(team *v2.Team) *operatorv1.Team {
-	view := &operatorv1.Team{
+func runtimeTeam(team *v2.Team) *views.Team {
+	view := &views.Team{
 		Id: team.GetTeamId(), Name: team.GetName(), Revision: int64(team.GetRevision()),
 		CreatedAt: timestamppb.New(time.UnixMilli(team.GetCreatedAtMs())),
 		UpdatedAt: timestamppb.New(time.UnixMilli(team.GetUpdatedAtMs())),
@@ -79,7 +79,7 @@ func runtimeTeam(team *v2.Team) *operatorv1.Team {
 		view.MaxConcurrency = proto.Int32(int32(team.GetMaxConcurrency()))
 	}
 	for _, tag := range team.GetMemberTagIds() {
-		view.Members = append(view.Members, &operatorv1.TeamMember{TagId: tag, Tag: tag})
+		view.Members = append(view.Members, &views.TeamMember{TagId: tag, Tag: tag})
 	}
 	return view
 }

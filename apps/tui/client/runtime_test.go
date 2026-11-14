@@ -18,7 +18,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
 )
@@ -27,7 +27,7 @@ func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 	t.Helper()
 	server, target := testControlPlane(t, handler, secure)
 	target.URL = server.URL
-	c, err := NewRuntimeV2(target, "test-version")
+	c, err := New(target, "test-version")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestRuntimeV2RefusesAControlPlaneFromAnotherProtocolEpoch(t *testing.T) {
 	server.Config.Protocols.SetUnencryptedHTTP2(true)
 	server.Start()
 	t.Cleanup(server.Close)
-	c, err := NewRuntimeV2(Target{URL: server.URL, Token: "test-operator"}, "test-version")
+	c, err := New(Target{URL: server.URL, Token: "test-operator"}, "test-version")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 	conversations, err := c.ListConversations(ctx, "lead")
 	if err != nil || len(conversations) != 2 || conversations[0].GetLastMessageText() != "Ship it" ||
 		conversations[1].GetLastMessageText() != "Check it" ||
-		conversations[1].GetLastMessageAuthor() != operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR {
+		conversations[1].GetLastMessageAuthor() != views.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR {
 		t.Fatalf("ListConversations = %v, %v", conversations, err)
 	}
 	sent, err := c.SendMessage(ctx, "lead", "billing", "Verify SSO")
@@ -311,7 +311,7 @@ func TestRuntimeV2FollowsWithdrawnInputAsItsOwnTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	history := History("lead", []*operatorv1.Message{follower, message("original")})
+	history := History("lead", []*views.Message{follower, message("original")})
 	if len(history) != 2 || !history[1].Follow {
 		t.Fatalf("joined history = %v", history)
 	}
@@ -379,10 +379,10 @@ func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
 	defer cancel()
 	open, err := c.ListOpenObjectives(ctx)
 	if err != nil || len(open) != 1 || open[0].GetId() != "sso" ||
-		open[0].GetStatus() != operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
+		open[0].GetStatus() != views.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
 		t.Fatalf("ListOpenObjectives = %v, %v", open, err)
 	}
-	created, err := c.CreateObjective(ctx, NewObjective{ID: "sso", Owner: "lead", Outcome: "Verify SSO", Team: "Release team", Budget: &operatorv1.Budget{
+	created, err := c.CreateObjective(ctx, NewObjective{ID: "sso", Owner: "lead", Outcome: "Verify SSO", Team: "Release team", Budget: &views.Budget{
 		LimitMinor: int64(limit), Currency: currency,
 	}})
 	if err != nil || created.GetStartedTaskId() != "objective-first" || created.GetObjective().GetTeamId() != "release" {
@@ -499,7 +499,7 @@ func TestRuntimeV2RejectsUnsafeTargets(t *testing.T) {
 		{URL: "wss://example.test", Token: "token", ClientCertFile: "cert.pem"},
 		{URL: "ftp://example.test", Token: "token"},
 	} {
-		if _, err := NewRuntimeV2(target, "test-version"); err == nil {
+		if _, err := New(target, "test-version"); err == nil {
 			t.Errorf("invalid target %q was accepted", target.URL)
 		}
 	}

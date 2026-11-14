@@ -29,16 +29,6 @@ func dial(version string) connector {
 	}
 }
 
-func dialRuntimeV2(version string) connector {
-	return func(ctx context.Context, target client.Target) (model, error) {
-		c, err := client.NewRuntimeV2(target, version)
-		if err != nil {
-			return model{}, err
-		}
-		return newModel(ctx, c, client.NewFollower(c), client.NewWatcher(c, watchKinds...)), nil
-	}
-}
-
 // app is the program's model: the model of the current Control Plane, and the Control Planes the
 // CLI handed over to switch between. Switching ends every stream and call of the one left and
 // starts a fresh model for the next, so no state crosses from one Control Plane to another.
@@ -107,10 +97,8 @@ func (a *app) start(i int) error {
 	a.cancel, a.current, a.inner = cancel, i, inner
 	a.hasTarget = true
 	a.generation++
-	a.inner.switchable = len(a.contexts) > 1 || a.manageControlPlanes()
-	if !inner.client.RuntimeV2() {
-		a.inner.defaultWorkspace = a.contexts[i].Workspace
-	}
+	a.inner.switchable = true
+
 	if a.width > 0 {
 		next, _ := a.inner.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
 		a.inner = next.(model)
@@ -172,7 +160,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.choosing = true
 			return a, a.chooseKey(msg)
 		}
-		if msg.String() == switchKey && (len(a.contexts) > 1 || a.manageControlPlanes()) {
+		if msg.String() == switchKey {
 			a.choosing, a.choice, a.choiceErr = true, a.current, ""
 			return a, nil
 		}
@@ -242,19 +230,15 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "down", "j":
 		a.choice = max(min(a.choice+1, len(a.contexts)-1), 0)
 	case "a":
-		if a.manageControlPlanes() {
-			return a.openControlPlaneDialog(false)
-		}
+		return a.openControlPlaneDialog(false)
 	case "s":
-		if a.manageControlPlanes() {
-			return a.openControlPlaneDialog(a.hasTarget)
-		}
+		return a.openControlPlaneDialog(a.hasTarget)
 	case "e":
-		if a.manageControlPlanes() && len(a.contexts) > 0 {
+		if len(a.contexts) > 0 {
 			return a.editControlPlane(a.contexts[a.choice])
 		}
 	case "d":
-		if a.manageControlPlanes() && len(a.contexts) > 0 {
+		if len(a.contexts) > 0 {
 			a.forgetControlPlane()
 		}
 	case "enter":
@@ -272,9 +256,7 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		a.choosing = false
 		a.rememberControlPlane()
-		if a.manageControlPlanes() {
-			a.refreshControlPlanes(a.contexts[a.current])
-		}
+		a.refreshControlPlanes(a.contexts[a.current])
 		return a.scope(a.inner.Init())
 	}
 	return nil
@@ -358,7 +340,7 @@ func (a *app) renderChoices() string {
 	rows := make([]string, 0, len(a.contexts))
 	for i, target := range a.contexts {
 		label := contextLabel(target)
-		if a.manageControlPlanes() && a.isSavedControlPlane(target) {
+		if a.isSavedControlPlane(target) {
 			label += "  [saved]"
 		}
 		if i == a.current {
@@ -374,11 +356,7 @@ func (a *app) renderChoices() string {
 	if a.choiceErr != "" {
 		footer = append(footer, errorStyle.Render(truncate(strings.Join(strings.Fields(a.choiceErr), " "), width)))
 	}
-	help, title := "enter switches · esc goes back", "Control Planes"
-	if a.manageControlPlanes() {
-		help = "enter switches · a add · e edit · s save current · d forget · esc back"
-		title = "Control Planes"
-	}
+	help, title := "enter switches · a add · e edit · s save current · d forget · esc back", "Control Planes"
 	footer = append(footer, faint.Render(truncate(help, width)))
 	shown := max(height-2-len(footer), 1)
 	first := max(a.choice-shown+1, 0)

@@ -231,7 +231,7 @@ func TestAddingAControlPlaneWithAnAuthKeyEnrollsThisDeviceAndSavesOnlyItsCredent
 func controlPlaneTestApp(t *testing.T, targets []client.Target) *app {
 	t.Helper()
 	connector := func(ctx context.Context, target client.Target) (model, error) {
-		c, err := client.NewRuntimeV2(target, "test")
+		c, err := client.New(target, "test")
 		if err != nil {
 			return model{}, err
 		}

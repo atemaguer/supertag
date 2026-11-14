@@ -7,17 +7,14 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 )
 
 const runtimeEventPage = 32
 
 // GetObjectiveMessage reads an owner Session Task through the operator API.
-func (c *Client) GetObjectiveMessage(ctx context.Context, tag, id string) (*operatorv1.Message, error) {
-	if !c.RuntimeV2() {
-		return c.GetMessage(ctx, tag, id)
-	}
+func (c *Client) GetObjectiveMessage(ctx context.Context, tag, id string) (*views.Message, error) {
 	message, err := c.runtime.getObjectiveTask(ctx, tag, id)
 	if err != nil {
 		return nil, err
@@ -202,7 +199,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 			return false, false, err
 		}
 		emit(state.shown.workSession(view)...)
-		if view.GetReportStatus() != operatorv1.ReplyStatus_REPLY_STATUS_REPLIED {
+		if view.GetReportStatus() != views.ReplyStatus_REPLY_STATUS_REPLIED {
 			settled = false
 		}
 	}

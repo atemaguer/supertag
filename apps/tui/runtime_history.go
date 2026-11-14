@@ -11,7 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // A runtime turn keeps its own output so a refresh or a second follow can add
@@ -38,7 +38,7 @@ type runtimeHistory struct {
 }
 
 func (m model) reloadShownHistory() tea.Cmd {
-	if !m.client.RuntimeV2() || m.pane != paneConversation {
+	if m.pane != paneConversation {
 		return nil
 	}
 	if tag := m.selectedTag(); tag != "" {
@@ -71,7 +71,7 @@ func (m model) loadRuntimeHistory(tag, name string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(m.ctx, 15*time.Second)
 		defer cancel()
 		msg := historyMsg{tag: tag, conversation: name, revision: revision}
-		var messages []*operatorv1.Message
+		var messages []*views.Message
 		cursor, pageSession := "", ""
 		seen := map[string]bool{}
 		for {
@@ -83,7 +83,7 @@ func (m model) loadRuntimeHistory(tag, name string) tea.Cmd {
 			if len(page) != 0 && pageSession == "" {
 				pageSession = page[0].GetSessionId()
 			}
-			if slices.ContainsFunc(page, func(item *operatorv1.Message) bool {
+			if slices.ContainsFunc(page, func(item *views.Message) bool {
 				return item.GetSessionId() != pageSession
 			}) {
 				msg.err = errors.New("Control Plane conversation changed while loading history")
@@ -95,7 +95,7 @@ func (m model) loadRuntimeHistory(tag, name string) tea.Cmd {
 				// A new Session at the same address starts with its own history.
 				displayed = nil
 			}
-			if !read || next == "" || replaced || slices.ContainsFunc(page, func(item *operatorv1.Message) bool {
+			if !read || next == "" || replaced || slices.ContainsFunc(page, func(item *views.Message) bool {
 				return item.GetTaskId() == head
 			}) {
 				msg.items = client.History(tag, messages, displayed...)
@@ -197,7 +197,7 @@ func (m *model) runtimeSent(msg sentMsg) tea.Cmd {
 		if joined := msg.message.GetJoinedTaskId(); c.runtime.turns[joined] != nil {
 			source = append(source, joined)
 		}
-		for _, item := range client.History(msg.tag, []*operatorv1.Message{msg.message}, source...) {
+		for _, item := range client.History(msg.tag, []*views.Message{msg.message}, source...) {
 			cmds = append(cmds, m.runtimeItem(msg.tag, msg.conversation, item))
 		}
 		if m.showsConversation(msg.tag, msg.conversation) {

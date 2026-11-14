@@ -4,9 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"connectrpc.com/connect"
-
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // maxEventPages bounds how many pages of a Task's events TaskActivity reads in one call; the next
@@ -20,17 +18,8 @@ const eventPage = 1000
 const maxTeamPages = 10
 
 // GetSession reads one Session with what its latest delivering Task delivered.
-func (c *Client) GetSession(ctx context.Context, id string) (*operatorv1.Session, error) {
-	if c.RuntimeV2() {
-		return c.runtime.getWorkSessionDetail(ctx, id)
-	}
-	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
-	defer cancel()
-	res, err := c.work.GetSession(ctx, connect.NewRequest(&operatorv1.GetSessionRequest{Id: id}))
-	if err != nil {
-		return nil, apiError(err)
-	}
-	return res.Msg, nil
+func (c *Client) GetSession(ctx context.Context, id string) (*views.Session, error) {
+	return c.runtime.getWorkSessionDetail(ctx, id)
 }
 
 // Activity is one command or tool call a Task ran, as its activity line shows it.
@@ -46,39 +35,12 @@ type Activity struct {
 // after start, in order, and the last sequence read. A command shows once, when it starts
 // running.
 func (c *Client) TaskActivity(ctx context.Context, taskID string, after int64) ([]Activity, int64, error) {
-	if c.RuntimeV2() {
-		return c.runtime.taskActivity(ctx, taskID, after)
-	}
-	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
-	defer cancel()
-	var activity []Activity
-	token := ""
-	for range maxEventPages {
-		res, err := c.work.ListTaskEvents(ctx, connect.NewRequest(&operatorv1.ListTaskEventsRequest{
-			TaskId: taskID, AfterSequence: after, PageSize: eventPage, PageToken: token,
-		}))
-		if err != nil {
-			return nil, 0, apiError(err)
-		}
-		for _, event := range res.Msg.GetEvents() {
-			if a, ok := eventActivity(event); ok {
-				activity = append(activity, a)
-			}
-		}
-		if events := res.Msg.GetEvents(); len(events) > 0 {
-			after = max(after, events[len(events)-1].GetSequence())
-		}
-		token = res.Msg.GetNextPageToken()
-		if token == "" {
-			break
-		}
-	}
-	return activity, after, nil
+	return c.runtime.taskActivity(ctx, taskID, after)
 }
 
 // eventActivity is the activity a recorded event shows: a command that starts running, or a tool
 // call that starts. The Control Plane stores Worker events under an `execution.` prefix.
-func eventActivity(event *operatorv1.TaskEvent) (Activity, bool) {
+func eventActivity(event *views.TaskEvent) (Activity, bool) {
 	payload := event.GetPayload().AsMap()
 	field := func(object any, name string) string {
 		if m, ok := object.(map[string]any); ok {
@@ -108,33 +70,15 @@ func eventActivity(event *operatorv1.TaskEvent) (Activity, bool) {
 }
 
 // ListTeams returns every Team, by name.
-func (c *Client) ListTeams(ctx context.Context) ([]*operatorv1.Team, error) {
-	if c.RuntimeV2() {
-		return c.runtime.listTeams(ctx)
-	}
-	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
-	defer cancel()
-	var all []*operatorv1.Team
-	token := ""
-	for range maxTeamPages {
-		res, err := c.teams.ListTeams(ctx, connect.NewRequest(&operatorv1.ListTeamsRequest{PageSize: 500, PageToken: token}))
-		if err != nil {
-			return nil, apiError(err)
-		}
-		all = append(all, res.Msg.GetTeams()...)
-		token = res.Msg.GetNextPageToken()
-		if token == "" {
-			break
-		}
-	}
-	return all, nil
+func (c *Client) ListTeams(ctx context.Context) ([]*views.Team, error) {
+	return c.runtime.listTeams(ctx)
 }
 
 // TeamView is one Team with the newest posts to its Workstream.
 type TeamView struct {
-	Team *operatorv1.Team
+	Team *views.Team
 	// Posts are the newest posts, oldest first.
-	Posts []*operatorv1.WorkstreamPost
+	Posts []*views.WorkstreamPost
 	// TagNames are the names of the Tags the posts name, by Tag ID.
 	TagNames map[string]string
 }
@@ -142,24 +86,5 @@ type TeamView struct {
 // GetTeam reads a Team, by name or ID, and the newest posts of its Workstream, at most posts of
 // them.
 func (c *Client) GetTeam(ctx context.Context, team string, posts int32) (TeamView, error) {
-	if c.RuntimeV2() {
-		return c.runtime.getTeam(ctx, team, posts)
-	}
-	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
-	defer cancel()
-	got, err := c.teams.GetTeam(ctx, connect.NewRequest(&operatorv1.GetTeamRequest{Team: team}))
-	if err != nil {
-		return TeamView{}, apiError(err)
-	}
-	list, err := c.mailbox.ListWorkstreamPosts(ctx, connect.NewRequest(&operatorv1.ListWorkstreamPostsRequest{
-		Team: got.Msg.GetId(), PageSize: posts,
-	}))
-	if err != nil {
-		return TeamView{}, apiError(err)
-	}
-	names := map[string]string{}
-	for id, name := range list.Msg.GetTagNames() {
-		names[id] = name
-	}
-	return TeamView{Team: got.Msg, Posts: list.Msg.GetPosts(), TagNames: names}, nil
+	return c.runtime.getTeam(ctx, team, posts)
 }

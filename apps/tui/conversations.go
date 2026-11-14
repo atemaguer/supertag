@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 // conversationNamePattern is what ConversationService accepts as a conversation's name.
@@ -18,7 +18,7 @@ var conversationNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,6
 // start a new one.
 type picker struct {
 	tag    string
-	list   []*operatorv1.Conversation
+	list   []*views.Conversation
 	err    string
 	loaded bool
 	// cursor is the row under the cursor; the row after the conversations starts a new one.
@@ -31,14 +31,14 @@ type picker struct {
 
 type pickerMsg struct {
 	tag           string
-	conversations []*operatorv1.Conversation
+	conversations []*views.Conversation
 	err           error
 }
 
 // pickRow is one conversation the list offers, with what the Control Plane said of it.
 type pickRow struct {
 	name string
-	conv *operatorv1.Conversation
+	conv *views.Conversation
 }
 
 // openPicker lists the selected Tag's conversations in the main pane.
@@ -247,7 +247,7 @@ func (m model) renderPicker() string {
 		}
 		if last := firstLine(row.conv.GetLastMessageText()); last != "" {
 			author := terminalText(m.tagLabel(p.tag))
-			if row.conv.GetLastMessageAuthor() == operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR {
+			if row.conv.GetLastMessageAuthor() == views.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR {
 				author = "you"
 			}
 			text += "  " + author + ": " + terminalText(last)

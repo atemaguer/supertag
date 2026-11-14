@@ -217,7 +217,7 @@ func TestRuntimeV2CrossesAWSSTunnelWithInnerTLS(t *testing.T) {
 	server, target := testControlPlane(t, largeTagsHandler(name), true)
 	edge := startTestEdge(t, server.Listener.Addr().String(), &tls.Config{Certificates: server.TLS.Certificates})
 	target.URL = edge.url("wss", "/supertag")
-	c, err := NewRuntimeV2(target, "test-version")
+	c, err := New(target, "test-version")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestRuntimeV2CrossesALoopbackWSTunnel(t *testing.T) {
 	server, target := testControlPlane(t, largeTagsHandler("lead"), false)
 	edge := startTestEdge(t, server.Listener.Addr().String(), nil)
 	target.URL = edge.url("ws", "")
-	c, err := NewRuntimeV2(target, "test-version")
+	c, err := New(target, "test-version")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestRuntimeV2WSSTunnelRequiresInnerTLS(t *testing.T) {
 	secure, target := testControlPlane(t, largeTagsHandler("lead"), true)
 	edge := startTestEdge(t, cleartext.Listener.Addr().String(), &tls.Config{Certificates: secure.TLS.Certificates})
 	target.URL = edge.url("wss", "")
-	c, err := NewRuntimeV2(target, "test-version")
+	c, err := New(target, "test-version")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestRuntimeV2WSSTunnelChecksTheEdgeCertificate(t *testing.T) {
 	_, port, _ := net.SplitHostPort(edge.listener.Addr().String())
 	// The test certificate names 127.0.0.1 and example.com, not localhost.
 	target.URL = "wss://localhost:" + port
-	c, err := NewRuntimeV2(target, "test-version")
+	c, err := New(target, "test-version")
 	if err != nil {
 		t.Fatal(err)
 	}

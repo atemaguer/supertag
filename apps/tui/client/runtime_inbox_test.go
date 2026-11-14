@@ -10,7 +10,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
 )
@@ -75,7 +75,7 @@ func TestRuntimeV2ApprovalInboxAndDecisions(t *testing.T) {
 	}
 	item := inbox.Items[0]
 	approval := item.GetApproval()
-	if item.GetKind() != operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL ||
+	if item.GetKind() != views.InboxItemKind_INBOX_ITEM_KIND_APPROVAL ||
 		!item.GetOperatorEligible() || approval.GetRequestId() != "allowed" ||
 		approval.GetRequestingTag() != "lead" || approval.GetTaskId() != "task" ||
 		!strings.Contains(approval.GetSummary(), "git:push") ||
@@ -88,12 +88,12 @@ func TestRuntimeV2ApprovalInboxAndDecisions(t *testing.T) {
 		t.Fatalf("ReadApproval() = %+v, %v", details, err)
 	}
 	approved, err := c.Approve(ctx, approval.GetRequestId())
-	if err != nil || approved.GetStatus() != operatorv1.ApprovalStatus_APPROVAL_STATUS_APPROVED ||
-		approved.GetScope() != operatorv1.ApprovalScope_APPROVAL_SCOPE_ONCE || calls != 2 {
+	if err != nil || approved.GetStatus() != views.ApprovalStatus_APPROVAL_STATUS_APPROVED ||
+		approved.GetScope() != views.ApprovalScope_APPROVAL_SCOPE_ONCE || calls != 2 {
 		t.Fatalf("Approve() = %v, %v in %d calls", approved, err, calls)
 	}
 	denied, err := c.Deny(ctx, "decline", "Use a release branch")
-	if err != nil || denied.GetStatus() != operatorv1.ApprovalStatus_APPROVAL_STATUS_DENIED ||
+	if err != nil || denied.GetStatus() != views.ApprovalStatus_APPROVAL_STATUS_DENIED ||
 		denied.GetReason() != "Use a release branch" {
 		t.Fatalf("Deny() = %v, %v", denied, err)
 	}
@@ -154,7 +154,7 @@ func TestRuntimeV2InboxPagingAndAnswerRetry(t *testing.T) {
 		t.Fatalf("ListInbox() = %+v, %v", inbox, err)
 	}
 	item := inbox.Items[0]
-	if item.GetKind() != operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION ||
+	if item.GetKind() != views.InboxItemKind_INBOX_ITEM_KIND_QUESTION ||
 		item.GetQuestion().GetText() != "Which branch?" || !item.GetQuestion().GetTruncated() ||
 		item.GetEvidence()[0].GetTask().GetId() != "task" ||
 		item.GetActionableSince().GetSeconds() != 1700000000 {
@@ -177,7 +177,7 @@ func TestRuntimeV2McpLoginInboxItem(t *testing.T) {
 		ObjectiveId: "docs",
 		Reason:      "The Task needs MCP server docs, whose login lapsed on its Worker Host. Run supertag mcp login docs on that host; the Task waits until then.",
 	})
-	if item.GetKind() != operatorv1.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN || item.GetReason() == "" {
+	if item.GetKind() != views.InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN || item.GetReason() == "" {
 		t.Fatalf("MCP login item = %v", item)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
 )
 
@@ -37,7 +37,7 @@ func runtimeWatchFrame(event *v2.WatchEvent) (string, WatchUpdate, bool) {
 		return token, WatchUpdate{Kind: WatchResync}, true
 	case *v2.WatchEvent_Change:
 		change := part.Change
-		kind, ok := operatorv1.WatchKind_value[change.GetKind().String()]
+		kind, ok := views.WatchKind_value[change.GetKind().String()]
 		if !ok || kind == 0 || change.GetId() == "" {
 			return "", WatchUpdate{}, false
 		}
@@ -46,8 +46,8 @@ func runtimeWatchFrame(event *v2.WatchEvent) (string, WatchUpdate, bool) {
 		case v2.WatchReason_WATCH_REASON_CREATED, v2.WatchReason_WATCH_REASON_CHANGED, v2.WatchReason_WATCH_REASON_DELETED:
 			reason = strings.ToLower(strings.TrimPrefix(change.GetReason().String(), "WATCH_REASON_"))
 		}
-		update := &operatorv1.WatchChange{
-			Kind: operatorv1.WatchKind(kind), Id: change.GetId(), Tag: change.GetTagId(),
+		update := &views.WatchChange{
+			Kind: views.WatchKind(kind), Id: change.GetId(), Tag: change.GetTagId(),
 			SessionId: change.GetSessionId(), ObjectiveId: change.GetObjectiveId(), TeamId: change.GetTeamId(),
 			Conversation: change.GetConversation(), Reason: reason,
 			ChangedAt: timestamppb.New(time.UnixMilli(change.GetChangedAtMs())),
