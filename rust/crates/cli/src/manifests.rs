@@ -426,6 +426,12 @@ fn load(sources: Vec<ProvisionSource>, provision: bool) -> Result<Vec<Manifest>>
     Ok(manifests)
 }
 
+/// How many manifests the provisioning sources hold, after the checks provisioning applies.
+#[cfg(test)]
+pub(crate) fn validate_provision(sources: Vec<ProvisionSource>) -> Result<usize> {
+    Ok(load(sources, true)?.len())
+}
+
 pub(crate) async fn provision(
     channel: ProtocolChannel,
     token: &str,

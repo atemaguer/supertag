@@ -79,11 +79,11 @@ thread, and the same Tag keeps the responsibilities you assigned it. [Connect a 
 
 ## Run your first Tag
 
-On macOS or Linux, install Git and set up a [supported coding agent](#works-with). Claude Code,
-Cursor, and OpenCode also need Node.js. [Check requirements and sign-in](docs/operations/requirements.md)
+On macOS or Linux, install Git, Node.js, and a [supported coding agent](#works-with). [Check requirements and sign-in](docs/operations/requirements.md)
 
 [Install SuperTag](docs/operations/install.md), then run this from an existing Git repository with
-at least one commit:
+at least one commit. If this machine ran the earlier TypeScript runtime,
+[retire it](docs/operations/install.md#retire-the-earlier-typescript-runtime) before installing.
 
 ```sh
 supertag init
@@ -91,7 +91,8 @@ supertag
 ```
 
 `supertag init` checks your coding agent's sign-in, asks a few questions, and starts SuperTag in
-the background. Keep the default Tag name, `lead`. Plain `supertag` opens the terminal UI. Select
+the background. Keep the default Tag name, `lead`. It works in this repository, starting from the
+commit you have checked out. Plain `supertag` opens the terminal UI. Select
 `lead` and ask:
 
 > Read this repository and tell me what you would improve first.

@@ -19,6 +19,11 @@ variable in `~/.supertag/.env`.
 
 ## 1. Install
 
+If the machine ran the earlier TypeScript runtime, retire it before installing: stop its services
+with its own CLI, archive and move aside its `~/.supertag`, as
+[Retire the earlier TypeScript runtime](../../docs/operations/install.md#retire-the-earlier-typescript-runtime)
+explains. The new installer replaces its `supertag` link, and there is no importer.
+
 Follow [the installation guide](../../docs/operations/install.md). Until release archives are
 published, it builds one from a checkout and installs it with
 `rust/scripts/install_native_release.py`. Then:
@@ -27,9 +32,6 @@ published, it builds one from a checkout and installs it with
 export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```
-
-If the machine used the earlier TypeScript runtime, move its `~/.supertag` aside first, as the
-installation guide explains. There is no importer.
 
 ## 2. Set up the repository
 
@@ -47,12 +49,14 @@ brackets (`--yes` accepts every default and needs no terminal). It writes
 `~/.supertag/supertag.yaml` and starts, in the background:
 
 - a `control-plane` service, which creates the Permission Set `local-tools`, the Role `Lead`, and
-  the Tag `lead`;
+  the Tag `lead`, bound to this repository's Workspace at the commit checked out when `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as a Workspace named
   after it.
 
-Nothing is written to the repository; state lives in `~/.supertag/`.
+Nothing is written to the repository; state lives in `~/.supertag/`. New Sessions of `lead` start
+from the commit `init` recorded. To start them from a newer commit, apply a Tag manifest with a
+new `workspace.baseCommit`; see [Workspaces](../../docs/guides/workspaces.md#2-bind-a-tag-to-the-workspace).
 
 Operator commands name their Control Plane on each call. For these local services, that is
 `--state-directory ~/.supertag`.

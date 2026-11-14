@@ -67,7 +67,7 @@ supertag approval deny REQUEST_ID --reason "Use the staging cluster instead."
 ```
 
 Either decision continues the waiting Session as its next turn. An approval lets it retry the
-same action once; `--scope objective` admits later turns of this Objective that need the same
+same action once; `--objective-scope` admits later turns of this Objective that need the same
 action without asking again. A denial gives the Tag your reason, so it can try another way or
 report back. A chat message saying "approved" approves nothing. See
 [Approval requests](../reference/coordination.md#approval-requests).
@@ -163,9 +163,9 @@ the conversation.
 - **`approve` is refused.** The Objective is not `ready_for_review`. Message it instead.
 - **A message is refused.** A completed or cancelled Objective takes no more messages. Create a
   new Objective for new direction.
-- **The Objective did not act on a message.** Check `supertag describe objective ID`: a
-  `Runnable: no.` line names what is holding its turns, such as a Tag with no connected Worker
-  Host, or a pause.
+- **The Objective did not act on a message.** Check `supertag describe objective ID` for a pause
+  or a limit, and run `supertag placement explain TASK_ID` on the queued turn to see why no
+  Worker Host takes it.
 - **No external notification arrived.** The inbox shows the notification status, such as
   `unconfigured` or `failed`. See
   [Set up operator notifications](notifications.md).

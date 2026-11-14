@@ -11,8 +11,9 @@ Check this page before [installing SuperTag](install.md).
 
 ## System and tools
 
-- **Node.js 22.13.0 or newer, in the 22 line**, for the Claude Code, Cursor, and OpenCode harness
-  adapters and to build a release archive. Codex needs no Node.js.
+- **Node.js 22.13.0 or newer, in the 22 line**. The installer checks it and tests the bundled
+  harness bridges with it, and the Claude Code, Cursor, and OpenCode adapters run on it. Building a
+  release archive needs it too.
 - **git**, available on `PATH`, and a repository for your first Task.
 - **macOS or Linux**, on arm64 or amd64. Restarting background services uses launchd on macOS and
   systemd user services on Linux. Native Windows is not supported; use a Linux host.
@@ -172,27 +173,20 @@ the Codex sign-in file; `OPENAI_API_KEY` is only a fallback after the file copy 
 
 ## Telemetry and network traffic
 
-SuperTag does not send product analytics or usage telemetry to SuperTag maintainers. Its built-in
-RPC counters stay in process memory and are exposed through its own operator diagnostics.
+SuperTag does not send product analytics or usage telemetry to SuperTag maintainers.
 Configured integrations still contact their services: the Control Plane, collaboration tools,
 MCP servers, storage, execution providers, and model providers. Disabling telemetry does not
-stop the model requests needed to perform Tasks. The default implementation is
-[process-local RPC counters](../../packages/runtime/sdk/src/rpc-telemetry.ts), connected to
-[Control Plane diagnostics](../../apps/cli/src/control-plane-api.ts).
+stop the model requests needed to perform Tasks.
 
 Harnesses have separate policies. SuperTag isolates their configuration for each Task, so their
 standalone opt-out instructions do not necessarily apply to managed Workers.
 
 ### Codex
 
-The default Worker runs `codex exec`, which sends usage analytics by default. SuperTag gives it
-a Task-local `CODEX_HOME` and passes `--ignore-user-config`. Setting `[analytics] enabled = false`
-in your personal `config.toml` therefore does not disable analytics for this Worker. SuperTag
-does not expose an analytics setting for the managed exec path.
-
-SuperTag's Codex adapter uses the app-server. See [Codex](../guides/workers.md#codex). The app-server disables analytics by default, and SuperTag does not pass its opt-in flag.
-App-server also refuses active user or project configuration. OpenTelemetry export is separate
-and off by default; SuperTag does not configure an exporter. See
+The Codex adapter runs `codex app-server` with a Task-local `CODEX_HOME` and sets
+`analytics.enabled=false`, so managed Codex Tasks send no usage analytics. Your personal
+`config.toml` does not apply to them. See [Codex](../guides/workers.md#codex). OpenTelemetry
+export is separate and off by default; SuperTag does not configure an exporter. See
 [Codex metrics](https://developers.openai.com/codex/config-advanced/#metrics) and the
 [configuration reference](https://developers.openai.com/codex/config-reference/).
 

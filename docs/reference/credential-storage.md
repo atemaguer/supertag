@@ -9,7 +9,7 @@ This page uses these SuperTag terms, each defined in the glossary: [Tag](glossar
 [Gateway](glossary.md#gateway), [Surface Account](glossary.md#surface-account),
 [Worker Host](glossary.md#worker-host), [host service](glossary.md#host-service),
 [Auth Key](glossary.md#auth-key), [admin token](glossary.md#admin-token),
-[Operator Token](glossary.md#operator-token), [Worklet API](glossary.md#control-plane),
+[Operator Token](glossary.md#operator-token),
 [harness adapter](glossary.md#harness-adapter), and
 [Workspace](glossary.md#workspace).
 
@@ -70,7 +70,7 @@ collaboration surface credentials use the `surface/...` logical namespace, while
 and Worker Host credential digests use `control-plane/...`; sharing a provider does not merge their
 purposes or identifiers. Gateway
 collaboration surface credentials are never made available to the CLI after enrollment. Operator credentials
-are never resolved through this vault interface. A Worklet presents only its own Worker Host
+are never resolved through this vault interface. A Worker Host presents only its own
 credential. The Control Plane has no interface for resolving MCP or git credentials; they stay on
 the Worker Host.
 

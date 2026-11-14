@@ -135,6 +135,8 @@ fn no_sign_in(harnesses: &[Found]) -> anyhow::Error {
 struct Repository {
     root: PathBuf,
     name: String,
+    /// The commit the lead Tag's Tasks start from.
+    head: String,
 }
 
 fn repository() -> Result<Repository> {
@@ -157,6 +159,7 @@ fn repository() -> Result<Repository> {
         "{} has no commits yet; Tasks start from a commit, so make one and run supertag init again",
         root.display()
     );
+    let head = String::from_utf8(commits.stdout)?.trim().to_owned();
     let base = root
         .file_name()
         .and_then(|name| name.to_str())
@@ -164,6 +167,7 @@ fn repository() -> Result<Repository> {
     Ok(Repository {
         name: sanitize(base).unwrap_or_else(|| "workspace".into()),
         root,
+        head,
     })
 }
 
@@ -463,11 +467,12 @@ pub async fn init(args: InitArgs) -> Result<()> {
         local_config::load(Some(path.clone()), &state)?.context("supertag.yaml missing")?;
     up(&state, config).await?;
     outln!(
-        "\nTag {} runs {} on this machine, in Workspace {} ({}).",
+        "\nTag {} runs {} on this machine, in Workspace {} ({}), starting from commit {}.",
         answers.tag,
         answers.harness.harness(),
         answers.workspace,
-        repository.root.display()
+        repository.root.display(),
+        repository.head
     );
     outln!(
         "Run supertag in your terminal to talk to it. To keep SuperTag running after restarts, add restart: unless-stopped to both services in {} and run supertag up.",
@@ -665,7 +670,11 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
                         "apiVersion": "supertag/v1",
                         "kind": "Tag",
                         "metadata": { "name": answers.tag },
-                        "spec": { "roles": [ROLE], "execution": execution },
+                        "spec": {
+                            "roles": [ROLE],
+                            "execution": execution,
+                            "workspace": { "id": answers.workspace, "baseCommit": repository.head },
+                        },
                     },
                 ],
             },
@@ -684,6 +693,38 @@ mod tests {
         assert_eq!(sanitize("--x--").as_deref(), Some("x"));
         assert_eq!(sanitize("..."), None);
         assert_eq!(sanitize(&"a".repeat(80)).map(|name| name.len()), Some(63));
+    }
+
+    #[test]
+    fn binds_the_lead_tag_to_the_repository_at_its_current_commit() {
+        let answers = Answers {
+            port: DEFAULT_PORT,
+            harness: Found::Codex,
+            model: None,
+            unsandboxed: false,
+            workspace: "app".into(),
+            tag: "lead".into(),
+        };
+        let head = "4f2c0d1e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d";
+        let repository = Repository {
+            root: PathBuf::from("/work/app"),
+            name: "app".into(),
+            head: head.into(),
+        };
+        let document = document(&answers, &repository);
+        let provision = document["services"]["control-plane"]["provision"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            provision[2]["spec"]["workspace"],
+            json!({ "id": "app", "baseCommit": head })
+        );
+        let sources = provision
+            .into_iter()
+            .map(crate::manifests::ProvisionSource::Inline)
+            .collect();
+        assert_eq!(crate::manifests::validate_provision(sources).unwrap(), 3);
     }
 
     #[test]

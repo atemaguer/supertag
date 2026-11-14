@@ -15,7 +15,7 @@ Other terms on this page are defined in the glossary: [Objective](glossary.md#ob
 [Team](glossary.md#team), [Task Attempt](glossary.md#task-attempt),
 [Context Item](glossary.md#context-item), [Context Plan](glossary.md#context-plan),
 [Control Plane](glossary.md#control-plane), [Worker Host](glossary.md#worker-host),
-[host service](glossary.md#host-service), [Worklet](glossary.md#worker-host),
+[host service](glossary.md#host-service),
 [harness adapter](glossary.md#harness-adapter),
 [Workspace](glossary.md#workspace), [Runtime Input Provider](glossary.md#context-set),
 [Runtime Input](glossary.md#context-set), and
@@ -32,9 +32,9 @@ stores two independent snapshots:
 - **Authorization snapshot** — the applicable Role policy, active Permission Sets, and allowed
   resources and actions.
 
-A **Worker Host** is a machine or sandbox that provides execution capacity. A **Worklet** connects
-it to the Control Plane, and a **Worker** is the code that completes the Task. Workers receive these
-fixed inputs through their Worklets without database access. Policy changes affect later Tasks.
+A **Worker Host** is a machine or sandbox that provides execution capacity. It claims the Task
+from the Control Plane and runs a harness adapter for it. The Worker Host receives these fixed
+inputs with the claim, without database access. Policy changes affect later Tasks.
 
 ## Same-Session continuity
 
@@ -45,10 +45,10 @@ requires no Context Set. Each `TaskHistoryEntry` contains `taskId`, `sessionId`,
 stored Task, not a separately published resource.
 
 Each Session maps to one native harness session. The Control Plane offers a Session's latest
-resumable native state when the Tag, the Session, and the reply audience match, and the selected
-Worker Profile runs the harness that produced it. The harness then checks that it can load the
-state where it runs. Authorization, Role instructions, the Context Plan, the Worker Profile
-revision, the workspace plan, and execution settings do not gate a resume. Each Task Attempt
+resumable native state when the Tag, the Session, and the reply audience match, and the Task runs
+on the harness that produced it. The harness then checks that it can load the
+state where it runs. Authorization, Role instructions, the Context Plan, the workspace plan,
+and execution settings do not gate a resume. Each Task Attempt
 receives the tools and permissions admitted for its own Task.
 
 The history entries above are the fallback. A harness that resumes native state omits them from

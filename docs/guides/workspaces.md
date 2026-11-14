@@ -29,7 +29,7 @@ your repository  <──  branch supertag/session/SESSION  <── delivery
 ## Before you start
 
 - SuperTag running from `supertag init`, which maps the repository it ran in as a Workspace of
-  this machine's host.
+  this machine's host and binds the `lead` Tag to it at the commit checked out when `init` ran.
 - A Git repository with at least one commit.
 
 ## 1. Map the repository on a Worker Host

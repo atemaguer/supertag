@@ -189,9 +189,9 @@ Objective overview with the application's own evidence.
 
 ## If something goes wrong
 
-- **The manager never woke after a message.** Check `supertag describe objective support-policy`:
-  a `Runnable: no.` line names what holds its turns, such as a Tag with no connected Worker Host,
-  a pause, or a spent budget pool.
+- **The manager never woke after a message.** Check `supertag describe objective support-policy`
+  for a pause or a spent budget pool, and run `supertag placement explain TASK_ID` on its queued
+  turn to see why no Worker Host takes it.
 - **The Objective is `limited`.** The budget pool is spent. Raise it with
   `supertag objective set-limits support-policy --budget-minor AMOUNT`; a budget can only increase.
 - **Work waits although the budget has room.** The Team's `maxConcurrency` counts turns across

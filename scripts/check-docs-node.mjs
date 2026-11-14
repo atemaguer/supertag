@@ -4,11 +4,7 @@ import { join, relative } from "node:path";
 
 export function checkNodeVersions(name, text, minimum, bridgeMajor) {
   const problems = [];
-  const bridgePages = new Set([
-    "docs/reference/worker.md",
-    "docs/guides/workspaces.md",
-    "docs/guides/mcp-tools.md",
-  ]);
+  const bridgePages = new Set(["docs/reference/worker.md", "docs/guides/workspaces.md"]);
   text.split("\n").forEach((line, index) => {
     for (const match of line.matchAll(/\bNode(?:\.js)?\s+`?(?:v|>=?\s*)?(\d+(?:\.\d+){0,2})/giu)) {
       // The sandbox bridge is a standalone program with its own checked runtime minimum.

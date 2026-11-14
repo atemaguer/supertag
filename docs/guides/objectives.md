@@ -284,9 +284,9 @@ A new deadline can replace one that already passed. A budget can only increase. 
 reaches the owner as a notice in its conversation, and the Objective leaves `limited` so work can
 continue. Warnings restart for the new deadline, measured from when you set it.
 
-The CLI reads the current revision for you. If someone else changes the Objective at the same
-moment, it rereads and retries once, but only when the other change left your fields alone.
-Otherwise it reports the conflict. Pass `--revision N` to fail instead of retrying.
+Without `--expected-revision`, the change applies to the Objective as it is now. Pass
+`--expected-revision N` to refuse the change when the Objective changed since you read revision
+`N`.
 
 **Check:** `supertag describe objective usage-billing` no longer lists the budget or deadline
 limit under **Needs you**.
@@ -345,7 +345,7 @@ Cancellation is final. SuperTag cancels every open Task of the Objective, so run
 stop and their Workspace pull requests close, records why on each one, and posts the reason to the
 Objective's home thread. Waiting messages and reports are failed rather than delivered.
 
-Cancel takes no `--revision`. Repeating it is harmless. A completed Objective cannot be cancelled,
+Cancel takes no revision. Repeating it is harmless. A completed Objective cannot be cancelled,
 and a cancelled one cannot be reopened; create a new Objective to pick the work back up.
 
 **Check:** `supertag describe objective usage-billing` shows status `cancelled`, the time, and the
@@ -357,8 +357,9 @@ reason.
   new ID; see [creation rules](../reference/coordination.md#creating-an-objective).
 - **A status update reports a conflict.** Someone changed the same field while you were updating
   it. Reload the Objective before deciding whether to retry.
-- **Creation printed a warning.** The Objective exists, but its turns wait until you fix the
-  cause. `supertag describe objective ID` shows the same checks on its `Runnable` line.
+- **The first turn stays queued.** No Worker Host can take it yet. Run
+  `supertag placement explain TASK_ID` with the Task that `supertag describe objective ID` lists
+  under **Work**; it names each bound host and why it cannot take the Task.
 - **The Objective is `blocked`.** Its turns ended twice with nothing running and nothing asked.
   Open the Objective in the terminal UI, review its last turn, and press `m` to give it a direction.
 - **The Objective is `limited`.** Its budget pool is spent or its deadline passed. Raise the

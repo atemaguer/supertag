@@ -88,7 +88,10 @@ with the deployment's owner.
   [Control Plane replicas](../../deploy/native/README.md#control-plane-replicas).
 - Persistent volumes for the Control Plane's transfer directory and the Gateway's state, or Vault
   for the Gateway's credentials where the platform has no persistent disk.
-- A fresh database. There is no importer from the earlier TypeScript runtime.
+- A fresh database. There is no importer from the earlier TypeScript runtime; dump and check its
+  database first, as
+  [Retire the earlier TypeScript runtime](../../docs/operations/install.md#retire-the-earlier-typescript-runtime)
+  shows.
 
 ## Health
 

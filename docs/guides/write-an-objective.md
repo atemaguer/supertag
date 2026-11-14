@@ -51,7 +51,7 @@ Workspace when the work needs repository access.
 ## Choose a budget and deadline
 
 Allow for implementation, independent review, and fixing findings. Set monetary limits with
-both `--budget-minor` and `--budget-currency`: `30000` with `USD` means $300. Without a currency,
+both `--budget-minor` and `--currency`: `30000` with `USD` means $300. Without a currency,
 the budget limits Task allocations instead of provider-reported cost. A monetary budget tracks
 provider-reported spend; it is not a quote for completing the outcome.
 

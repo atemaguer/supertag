@@ -30,30 +30,26 @@ Objective usage-billing-7f3k: working
 Outcome: Bill customers for metered usage. Done when the reconciliation suite passes.
 Owner: lead
 Team: Metering (backend, frontend, qa)
-Runnable: yes
 Budget: $12.40 of $2,000.00 spent
+Deadline: 2027-03-31T23:00:00Z (about 138 days left)
 
 Delivered:
   Meter API calls per customer (backend, Task 2f1c…)
-    Branch supertag/session/2f1c8a3e in Workspace app (/Users/you/code/app), 4 changed files
-      Review:   git diff main...supertag/session/2f1c8a3e
-      Check out: git switch supertag/session/2f1c8a3e
+    Commit 0123456789ab in Workspace app, 4 changed files since fedcba987654
 
 Needs you:
-  Approval 3f1c…: Run the database migration (requested by Tag backend)
-    supertag approval approve 3f1c…
+  1 approval request waits for a decision.
+    supertag get inbox-items --objective usage-billing-7f3k
 
 Work: 3 Sessions
-  waiting    lead     Objective conversation        (Task 8d50c417-3e6b-49aa-b2f1-c07d5e9143ab)
-  completed  backend  Meter API calls per customer  (Task 2f1c…)
-  running    backend  Add the usage tables          (Task 9ab3…)
+  waiting    lead     Objective conversation (2 Tasks, latest Task 8d50…)
+  completed  backend  Meter API calls per customer (1 Task, latest Task 2f1c…)
+  running    backend  Add the usage tables (1 Task, latest Task 9ab3…)
 
 Details:
   Revision: 7
-  Deadline: 2027-03-31T23:00:00Z
-  Workspaces: app
-  Approvals: 1 pending; 2 approved and 0 denied in the last day
-  Team Metering: at most 2 turns at once across its Objectives
+  Team Metering: at most 2 turns at once across its Objectives; 1 running now
+  Tasks: 4 Tasks
   Follow it: supertag watch objective usage-billing-7f3k
   Full record: supertag describe objective usage-billing-7f3k --output json
 ```
@@ -61,43 +57,29 @@ Details:
 - **Owner** is the owner Tag. **Team** is the Team the Objective names, with its members; it is
   absent when the owner works alone.
 - **Budget** is unlimited, or how much of the pool is spent. One pool covers the Objective's own
-  conversation and every Session beneath it. Unpriced Task Attempts are called out, because the
-  budget cannot count them.
-- **Delivered** lists what finished work produced: its branch and changed files, a patch with its
-  `supertag artifact download` command, a pull request and its state, and output artifacts. When
-  the Control Plane runs locally, a branch shows its checkout path and the `git diff` and
-  `git switch` commands that review it.
+  conversation and every Session beneath it. Task Attempts with unknown cost are called out,
+  because the budget cannot count them.
+- **Delivered** lists each Session's latest delivery: its commit and changed files in the
+  Workspace, and the `supertag task download` command when it published a patch. A branch
+  delivery is imported into your repository as `supertag/session/SESSION`; see
+  [Workspaces](workspaces.md#3-see-the-branches-appear).
 - **Needs you** lists approval requests, questions, results submitted for review, pauses, and
-  budget or deadline limits. A question appears in full. Answer it under **Waiting on you** in
-  the terminal UI.
-
-  ```text
-  Needs you:
-    lead asks: "Which plans should the first invoice run cover?"
-  ```
-- **High findings** appears above the owner when the latest result of a Session reported one.
+  budget or deadline limits, each with the command that acts on it. A question appears in full.
+  Answer it under **Waiting on you** in the terminal UI.
 - **Work** lists the Objective's conversation first, then each Session started beneath it, with
   the status of its latest turn and the Tag that runs it. A turn shows `waiting` when it asked a
-  question or waits on an approval. Under a held or failed turn, the Control Plane explains why in
-  its own words.
-- **Details** carries the revision, deadline, Workspaces, approval counts, the Team's concurrency
-  limit, and anything else needing attention.
+  question or waits on an approval. Under a failed turn, the Control Plane explains why in its
+  own words, with the next command to run.
+- **Details** carries the revision, the Team's concurrency limit, notices such as budget and
+  deadline warnings, and the commands that follow the Objective.
 
-The `Runnable` line says whether the Objective's turns can run right now:
-
-```text
-Runnable: no. No Worker Host bound to Tag lead is connected (build-01). Its Tasks wait until one connects.
-```
-
-It checks the same conditions creation warns about: the owner Tag has a bound Worker Host, one of
-them is connected, a bound host has checked out each named Workspace, and the budget and deadline
-still allow new work. Each reason names the next step. `Runnable: yes` means none of these holds
-the turns; it does not promise that a Worker has capacity. A closed Objective has no `Runnable`
-line.
+When a turn is queued but nothing runs it, ask why with
+`supertag placement explain TASK_ID`. It names each bound Worker Host and why it cannot take the
+Task, such as a disconnected host, a missing harness, or labels that do not match.
 
 When the owner submits the Objective for review, the overview shows its assessment. Select the
 Objective in the terminal UI and press `m` to request changes, or accept the result with
-`supertag objective review ID`. approve See [reviewing a result](objective-decisions.md#6-review-a-result).
+`supertag objective review ID approve`. See [reviewing a result](objective-decisions.md#6-review-a-result).
 
 ## 2. Follow it as it happens
 

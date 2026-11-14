@@ -105,14 +105,15 @@ mktemp
 
 Write `You asked: "QUESTION_FROM_INBOX". ANSWER_WITHIN_AGREED_SCOPE.` to the returned path with
 your file-writing tool. Answer the exact `TASK_ID` of the current operator-eligible question, with
-the text read from the private file and an operation ID you reuse on retry:
+the text read from the private file on standard input, so it stays out of the process list, and
+an operation ID you reuse on retry:
 
 ```sh
 answer_file='PATH_FROM_MKTEMP'
 (
   trap 'rm -f -- "$answer_file"' EXIT
-  supertag question answer TASK_ID "$(cat "$answer_file")" --operation-id OPERATION_ID \
-    --state-directory ~/.supertag
+  supertag question answer TASK_ID - --operation-id OPERATION_ID \
+    --state-directory ~/.supertag < "$answer_file"
 )
 ```
 

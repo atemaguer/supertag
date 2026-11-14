@@ -171,14 +171,10 @@ conversation is told why.
 
 ### Where a work Session's edits go
 
-A work Session keeps its edits the way an Objective Task does. It works in a Workspace the
-conversation has, and the Worker commits its changes to the work Session's own branch, such as
-`supertag/session/0f3c2a9e`. The conversation's Workspaces are the ones its location attaches, as
-for [an Objective created there](../reference/resource-model.md#objectives-from-a-location). A
-private operator conversation has no location, so it uses the Workspaces that the Tag's Worker
-Hosts declare.
-With one Workspace the work Session uses it. With several, the Tag names one when it starts the
-work Session. With none, the work Session runs without a Workspace, like its conversation.
+A work Session keeps its edits the way an Objective Task does. It works in the Workspace of the
+Tag that runs it, and the Worker Host commits its changes to the work Session's own branch, such
+as `supertag/session/0f3c2a9e`. A Tag with no Workspace runs its work Sessions without one. See
+[Workspaces](../reference/resource-model.md#workspaces).
 
 A work Session has one branch, and every Task of it works there. A continued Task picks up the
 branch at the work Session's latest commit, sees the earlier edits, and commits on top of them. A

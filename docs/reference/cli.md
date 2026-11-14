@@ -1244,7 +1244,7 @@ Usage: supertag question answer [OPTIONS] <TASK_ID> <TEXT>
 
 Arguments:
   <TASK_ID>  The Task that asked
-  <TEXT>     
+  <TEXT>     The answer, or `-` to read it from standard input and keep it out of the process list
 
 Options:
       --control-plane <URL|NAME>

@@ -129,9 +129,12 @@ repository's configuration and send the work again.
 
 ## The local state is from the earlier TypeScript runtime
 
-This SuperTag cannot read the earlier runtime's state. Stop the earlier services, move
-`~/.supertag` aside, and run `supertag init`. See
-[Install SuperTag](../operations/install.md#coming-from-the-typescript-runtime).
+This SuperTag does not import the earlier runtime's state, but it may still load an earlier
+`supertag.yaml` and report its services as not running while the earlier services keep running.
+`supertag down` does not stop them. Run `down --remove-services` with the earlier CLI, which
+stays installed at `~/.local/share/supertag/versions/VERSION/node_modules/.bin/supertag`, then
+archive and move `~/.supertag` aside and run `supertag init`. See
+[Retire the earlier TypeScript runtime](../operations/install.md#retire-the-earlier-typescript-runtime).
 
 ## Next
 

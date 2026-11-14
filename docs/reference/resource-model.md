@@ -14,11 +14,11 @@ the [organization](glossary.md#autonomous-organization) and its work; the
 [Control Plane and Worker Hosts](#runtime-components) are the top-level runtime components that
 manage and execute them.
 
-CLI resource commands use exact lowercase singular names: `tag`, `permission-set`,
-`context-set`, `role`, `surface-account`, `worker-host`, `worker-profile`, `task`,
-`session`, `volume`, `workspace`, `auth-key`, `operator-token`, and `objective`.
-For example, `supertag get permission-set` lists [Permission Sets](#configuration-resources). Plural and
-unhyphenated spellings are rejected with the supported names. Manifest kinds retain
+CLI resource commands name a kind in lowercase and singular, such as `tag`, `permission-set`,
+`context-set`, `role`, `surface-account`, `host`, `task`, `session`, `volume`, `workspace`,
+`auth-key`, `operator-token`, and `objective`; `supertag get` also accepts the plural. For
+example, `supertag get permission-set` lists [Permission Sets](#configuration-resources). The
+[CLI reference](cli.md#supertag-get) lists every kind. Manifest kinds retain
 PascalCase names such as `PermissionSet`.
 
 ## Runtime components
@@ -145,21 +145,13 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | Field | Entry | Meaning |
 | --- | --- | --- |
 | `spec.runsOn` | label | Labels a bound Worker Host must carry to run the Tag's Tasks. See [Worker Host labels](#worker-host-labels). |
-| `spec.locations` | `provider`, provider scope fields, optional `account`, `permissionSets`, `contextSets`, `workspaces` | Where the Tag answers, with the sets activated at each location and the Workspaces its Objectives get |
+| `spec.workspace` | `id`, `baseCommit`, `mcp` | The Workspace the Tag's Tasks work in, the commit new Sessions start from, and the `.mcp.json` servers they may use. See [Workspaces](#workspaces). |
 | `spec.acceptsMessagesFrom` | Tag name | Mailbox grants where this Tag is the recipient |
 
-Location scope fields match the `--add-location` flags in camelCase: `channelId` for Slack,
-`repo` or `repoId` for GitHub, `chatId` for Lark, `team` or `teamId` for Linear, and `teamId`
-with `channelId` for Microsoft Teams. `account` selects a Surface Account by external ID when a
-provider has several. A stored Tag reports each location with its resolved `account` and stable
-IDs; `status.locations` still reports the account display name and whether the route is enabled.
-
-A location's `workspaces` lists Workspace names, at most 16, in order. An Objective created from
-that location, such as with `@SuperTag objective` in its Slack channel, names those Workspaces.
-Apply rejects a name that no Workspace defines. A GitHub location without `workspaces` gives its
-Objectives every Workspace whose `source` is that repository instead. `update tag --add-location`
-does not set `workspaces`; declare them in a manifest. See
-[Objectives from a location](#objectives-from-a-location).
+Where a Tag answers is a separate `SurfaceLocation` resource, a Tag **location**. It names the
+Tag, a channel, repository, chat, or team of a Surface Account, and the Permission Sets and Context Sets
+it activates there. `supertag tag update TAG --add-location PROVIDER` creates one for a local
+Gateway. See [Manage resources](../operations/resources.md).
 
 Each `acceptsMessagesFrom` entry names one sender Tag this Tag accepts messages from. Tags that
 share a Team need no entry. See [Mailbox](coordination.md#mailbox).
@@ -169,60 +161,51 @@ Apply merges each of these lists entry by entry, and records who set each entry.
 
 ## Auth Keys
 
-An Auth Key lets a machine join as a Worker Host without copying a credential file. An operator
-creates it for one or more existing Tags. The machine redeems it once with `supertag connect
-worklet`, becomes a new Worker Host, and is bound to those Tags. Tags have no user accounts behind
-them, so these bindings are what give a Tag its hosts.
+An Auth Key lets a principal join a Control Plane without copying a credential file. An operator
+creates it for one role, and the enrollee redeems it from its own side, choosing its own name:
 
-```yaml
-apiVersion: supertag/v1
-kind: AuthKey
-metadata:
-  name: ci
-spec:
-  tags: [builder]
-  labels: [linux-ci]
-  reusable: true
-  ephemeral: true
-status:
-  phase: active
-  expiresAt: "2026-12-29T00:00:00.000Z"
-  redemptionCount: 3
-  usedAt: "2026-09-30T12:00:00.000Z"
+| Role | Enrolls | Redeemed with |
+| --- | --- | --- |
+| `host` | A Worker Host | `supertag host enroll HOST_ID`, or a host service's `auth-key` in `supertag.yaml` |
+| `gateway` | A Gateway | `supertag gateway enroll` |
+| `client` | A device running the CLI, terminal UI, or desktop app | `supertag connect URL --name NAME` |
+
+```sh
+supertag auth-key create ci --role host --tag builder --label linux-ci --reusable --ephemeral
 ```
+
+The secret starts with `stak_` and is printed once. `supertag get auth-key ci` then shows the key
+without it:
 
 | Field | Meaning |
 | --- | --- |
-| `spec.tags` | Tags bound to every host that joins with the key. They must exist when the key is created. |
-| `spec.labels` | Labels granted to every host that joins with the key. See [Worker Host labels](#worker-host-labels). |
-| `spec.reusable` | `false` (default): the key joins one host. `true`: it joins any number. |
-| `spec.ephemeral` | Hosts that join are removed after they disconnect. See [Ephemeral Worker Hosts](#ephemeral-worker-hosts). |
-| `status.phase` | `active`, `used` (a one-off key after its first join), `expired`, or `revoked`. |
-| `status.expiresAt` | Fixed at creation: one hour for a one-off key, 90 days for a reusable key. |
-| `status.usedAt`, `status.redemptionCount` | The last successful join and the number of joins. |
+| `role` | `host`, `gateway`, or `client`. It never changes. |
+| `allowed_tag_ids`, `all_tags` | Host keys: the Tags every joining host may run. Client keys: the Tags the device may talk to. `--all-tags` names every Tag. |
+| `labels` | Host keys: labels granted to every host that joins. See [Worker Host labels](#worker-host-labels). |
+| `reusable` | `false` (default): the key enrolls one principal. `true`: it enrolls any number. |
+| `ephemeral` | Host keys: hosts that join are removed after they disconnect. See [Ephemeral Worker Hosts](#ephemeral-worker-hosts). |
+| `phase` | `active`, `used` (a one-time key after its first enrollment), `expired`, or `revoked`. |
+| `expires_at_ms` | At most one hour for a one-time key and 90 days for a reusable key; `--expires-in-seconds` shortens it. |
 
 The rules:
 
-- The secret starts with `stak_`. It is shown once, when the key is created. The Control Plane
-  stores only its SHA-256 digest, and `list` and `get` never show it.
+- The Control Plane stores only a digest of the secret, and `get` never shows it.
 - Only operators create, read, and revoke Auth Keys. Tags cannot.
-- Keys have no update. To change Tags, revoke the key and create one under a new name. Names are
-  never reused.
-- Revoking a key blocks new joins. Hosts that already joined keep their enrollment and Tags.
-- A joining machine asks for a Worker Host ID, which defaults to its hostname. When that ID is
-  taken, the Control Plane picks `NAME-2`, `NAME-3`, and so on.
-- Joining is atomic. Under concurrent use, a one-off key still joins exactly one host.
+- Keys have no update. To change one, revoke it with `supertag auth-key revoke NAME` and create
+  one under a new name. Names are never reused.
+- Revoking a key blocks new enrollments. Principals that already joined stay enrolled.
+- An enrolling host chooses its Worker Host ID. With a reusable key, an ID already taken enrolls
+  as `ID-2`, `ID-3`, and so on. IDs are never reused.
+- Enrollment is atomic. Under concurrent use, a one-time key still enrolls exactly one principal.
 - Auth Keys are imperative only. They do not appear in manifests, and `supertag apply` rejects
-  them. A Tag manifest that lists `spec.workerHosts` is authoritative and unbinds hosts that joined
-  with a key but are missing from the list.
+  them.
 
 ### Ephemeral Worker Hosts
 
-An ephemeral Worker Host suits a CI job or a short-lived container. Its `status.ephemeral` is
+An ephemeral Worker Host suits a CI job or a short-lived container. Its `ephemeral` field is
 `true`. After it stays disconnected for 30 seconds, the Control Plane removes it: the host is
-revoked, unbound from its Tags, and hidden from `supertag get host`. `supertag get
-worker-host ID` still shows it. A host that joined but never connected is removed after ten
-minutes.
+revoked and unbound from its Tags, and `supertag get host ID` shows when it was removed in
+`removed_at_ms`. A host that joined but never connected is removed after ten minutes.
 
 Persistent hosts keep the stricter recovery rule: a Task Attempt whose outcome is unknown keeps its
 capacity until the host reports evidence. An ephemeral host cannot come back after removal, so its
@@ -231,29 +214,15 @@ retry limits apply. See [Leases and unknown outcomes](scheduling-and-recovery.md
 
 #### Storage durability
 
-A Worker Host's storage is ephemeral or persistent, and `status.ephemeral` decides it. An ephemeral
-host's Task files and artifact copies go with it when it is removed. Every other host is
-persistent: [host services](glossary.md#host-service) that `supertag up` starts on your machine, and Worklets that joined
-without an ephemeral key. A remote sandbox, such as on Modal or e2b, is always ephemeral: its
-Task files are lost when the sandbox stops, whatever host started it.
-
-`describe worker-host` reads execution placement from recorded Task Attempts, so omitting a
-sandbox capability from a later host advertisement does not remove its warning. It inspects the
-200 most recent Tasks and all running Task Attempts. Missing placement is reported as unknown;
-a host with no inspected execution history is not evidence of persistent Task storage.
-`describe task` uses its own Task Attempt's recorded placement. These records describe reported
-execution, not an independent inspection of the host. `ps` and `up` use the local service settings.
+A Worker Host's storage is ephemeral or persistent, and its `ephemeral` field decides it. An
+ephemeral host's Task files and artifact copies go with it when it is removed. Every other host
+is persistent: [host services](glossary.md#host-service) that `supertag up` starts on your
+machine, and hosts that enrolled without an ephemeral key. A remote sandbox, such as on Modal or
+E2B, is always ephemeral: its Task files are lost when the sandbox stops, whatever host started
+it.
 
 The Control Plane stores no artifact bytes. Each Worker Host keeps the artifacts its Tasks capture
 in its own state directory, so an artifact is only as durable as the hosts that hold it.
-
-SuperTag shows this rather than refusing it:
-
-| Command | What it says |
-| --- | --- |
-| `supertag ps`, `supertag describe host` | "Ephemeral storage: Task files and artifacts on this host are lost if it stops." A host whose Tasks run in remote sandboxes says its Task files there are lost when each sandbox stops. `describe worker-host` says `Storage: persistent` only when its inspected execution records show local storage. |
-| `supertag describe task` | Under `Storage:`, where the Task files, delivered branch, and each output and artifact live, flagging an artifact held only on ephemeral storage. See [artifacts](artifacts.md#where-describe-task-places-a-file) for how it decides. |
-| `supertag up` | A warning for each host service that joined as an ephemeral host or runs Tasks in remote sandboxes. A host service keeps the artifacts its Tasks capture on its own host, and the Control Plane keeps no copy. A sandbox loses only its Task files. |
 
 ## Operator Tokens
 
@@ -408,66 +377,52 @@ whatever harness and model their Worker Hosts offer, starting at low effort.
 
 ## Workspaces
 
-A Workspace names a git repository and can attach data from a Volume. A Volume is a named
-storage source configured separately by an operator. Workspace fields are optional, except that
-`source` is required when `mounts` is present:
+A **Workspace** is a named repository that a Tag's Tasks work in. Each Task Attempt gets its own
+checkout of the Workspace at an exact commit, and its changes come back as a branch, a patch, or a
+GitHub pull request. A Workspace has one of two sources:
+
+- **A local Git repository** that a Worker Host maps by name: a host service's `workspaces` in
+  `supertag.yaml`, or `--workspace-id ID --workspace-source PATH` on `supertag worker-host`.
+  Several hosts may map the same name to their own clones. The Control Plane stores no record of
+  it.
+- **A GitHub repository** that the Control Plane holds, declared as a `Workspace` resource. Hosts
+  that serve it with `--workspace-from-control-plane` need no clone and no GitHub credentials.
 
 ```yaml
 apiVersion: supertag/v1
 kind: Workspace
 metadata:
-  name: app          # 1-63 lowercase letters, digits, hyphens, or underscores
+  name: api            # 1-63 lowercase letters, digits, hyphens, or underscores
 spec:
-  source: https://github.com/acme/app.git   # cloned by hosts without a checkout
-  ref: main                                 # base for Session branches
-  setup: npm ci                             # one shell command
-  mounts:
-    - volume: datasets                     # a separately configured Volume
-      path: /mnt/datasets                  # outside the Task checkout
-      access: read-only                    # default; read-write saves changes to the source
-      strategy: copy                       # copy (default) or mount
-      maxBytes: 1048576                    # optional copy limit in bytes
-  delivery: branch                          # branch (default), patch, or pull-request
+  github:
+    accountId: github          # a GitHub Surface Account
+    repositoryId: 123456789
+    repository: acme/api
+    revision: main             # a moving ref, pinned once per Session; or commitSha for one commit
+  pullRequestBase: main        # optional: publish verified results as a draft pull request
 ```
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `spec.source` | none | Git remote; embedded credentials are rejected. Worker Hosts without a checkout clone it, and `pull-request` delivery pushes to it. |
-| `spec.ref` | The checkout's current branch, or the source's default branch in a clone, else `main` | Base for each new Session branch, and the base of pull requests |
-| `spec.setup` | none | One shell command run once in each new Task worktree |
-| `spec.mcp` | none | Selected server names from the trusted checkout's `.mcp.json` |
-| `spec.skills` | none | Selected Skill names from the host checkout |
-| `spec.mounts` | none | Volumes attached at absolute paths outside the checkout. Paths cannot overlap each other, staged files, or protected system locations. Each entry needs `volume` and `path`; `access` defaults to `read-only`, `strategy` to `copy`, and `maxBytes` is an optional positive byte limit. `mount` requests a native mount; `read-write` saves changes to the Volume source. |
-| `spec.delivery` | `branch` | `branch` keeps the Session's branch; `patch` also attaches a patch artifact; `pull-request` pushes the branch and opens one GitHub pull request per Session. `pull-request` requires a github.com `source`. |
+A Tag names its Workspace in `spec.workspace`:
 
-A field set by an earlier apply that a later manifest omits returns to its default, as the
-[field manager rules](#field-managers-and-apply-sets) describe. `status.workerHosts` lists the
-enrolled Worker Hosts whose latest descriptor declares a checkout, with their connection status.
-Checkout paths stay on each host. Hosts whose Worker Profiles all report `supertag.workspace.clone`
-can also serve a Workspace with a `source`; SuperTag prefers hosts that declare a checkout.
+```yaml
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: builder }
+spec:
+  roles: [Builder]
+  workspace: { id: app, baseCommit: 4f2c0d1e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d, mcp: [docs-search] }
+```
 
-An Objective lists its Workspaces in `workspaces`, an array of names. A Task records its
-Workspace, `source`, base `ref`, its Session's branch `supertag/session/<short session id>`,
-`delivery`, and `setup`
-when SuperTag accepts it; `Task.spec.workspace` reports the name, branch, ref, and delivery. For
-`pull-request` delivery, `Task.status.pullRequest` reports the pull request's `repository`,
-`number`, `url`, and `state`: `draft`, `ready`, or `closed`. `lastError` appears when the Control
-Plane could not mark it ready or close it. See
+A local Workspace needs a full `baseCommit`: new Sessions start from it, and later Tasks of a
+Session continue on the Session's branch, `supertag/session/SESSION`. A GitHub Workspace omits
+it. `mcp` selects servers from the `.mcp.json` at the base commit. The Tag's Tasks run only on
+hosts that serve the Workspace. A message from a collaboration surface can select a GitHub
+Workspace that the Tag's Permission Sets allow. An Objective has no Workspace of its own: its
+turns work in the Workspaces of the Tags that run them.
+
+Volumes attach data outside the checkout with `supertag tag put --workspace-mounts`. See
 [Work in a repository with Workspaces](../guides/workspaces.md) and
 [Workspace staging](worker.md#workspaces).
-
-`strategy: mount` requests live data, such as a dataset too large to copy. Placement requires a
-provider that advertises native mounts and never substitutes `copy`. Local and e2b
-support only `copy`; e2b native mounts would require keys inside the sandbox. Modal supports
-S3, R2, GCS, and Modal Volume mounts with the declared access. Unsupported sources and connection options are
-refused before preparation or any provider call; see [Native source settings](#native-source-settings).
-`maxBytes` bounds copies only. Native mounts attach at Task start, after setup.
-
-`supertag describe task ID` labels each native mount **live**. For each Task Attempt, it shows
-its Volume, source, prefix, destination path, access, and attachment time. An empty prefix means
-the entire source. These records describe what the provider attached; they do not pin the files
-or prove the source is still attached after the Task Attempt ends. Native mounts have no object
-manifest or content digest. Copy mounts retain their manifests and changed-content indicators.
 
 ### Read-write output contract
 
@@ -490,21 +445,6 @@ A Workspace cannot attach a Volume that holds artifacts, even through another Vo
 The [Volume security rules](#volume-security) describe how SuperTag compares source locations.
 Native mounts resolve through a host source guard before checkout or preparation. This guard reads
 catalog metadata without opening host copy credentials. A host without that guard refuses native mounts.
-
-### Objectives from a location
-
-An Objective created from a collaboration surface gets its Workspaces from the Tag location the
-request arrived at:
-
-| Location | Workspaces the Objective gets |
-| --- | --- |
-| Any location with `workspaces` | Those Workspaces, in order |
-| A GitHub location without `workspaces` | Every Workspace whose `source` is the repository. `https://github.com/acme/app`, `https://github.com/acme/app.git`, `git@github.com:acme/app.git`, and `ssh://git@github.com/acme/app` all match `acme/app`; owner and name ignore case. |
-| Any other location | None |
-
-The Tag that creates the Objective, through the `create_objective` tool, may pass `workspaces` to
-name a subset. A name outside that set returns 400. Creation `warnings` then cover those
-Workspaces like any other. Mentions carry no Workspace syntax; the location decides.
 
 ## Volumes
 

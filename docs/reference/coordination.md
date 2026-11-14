@@ -22,7 +22,6 @@ Other terms used here are defined in the glossary: [Role](glossary.md#role),
 [Task Attempt](glossary.md#task-attempt), [Permission Set](glossary.md#permission-set),
 [Control Plane](glossary.md#control-plane), [Gateway](glossary.md#gateway),
 [Surface Account](glossary.md#surface-account), [Worker Host](glossary.md#worker-host),
-[Worker Profile](glossary.md#harness),
 [harness adapter](glossary.md#harness-adapter), and [Workspace](glossary.md#workspace).
 
 ## How coordination works
@@ -72,39 +71,27 @@ turn, in every Session, draws on the Objective's one budget pool.
 - Creation requires an outcome statement: the result, how success is verified, what must not
   change, and when to ask a person. The outcome may be up to 8,000 characters, and is fixed
   afterwards. Changing it takes a new Objective.
-- The ID is caller-chosen. Through the administrative API and the CLI it is optional: without
-  one, the Control Plane generates it from the first three words of the outcome plus four random
-  letters or digits, such as `ship-sso-for-7f3k`.
-- The owner Tag must be active and bound to a Worker Host.
+- The ID is caller-chosen and required: `supertag objective create OBJECTIVE_ID OUTCOME --owner TAG`.
+- The owner Tag must be active.
 - `--team TEAM` names the Team whose members the Objective may start work Sessions of. Without
   one, every work Session runs on the owner Tag.
-- `--deadline` takes an ISO timestamp. See [Deadlines](#deadlines).
-- `--budget-minor` and `--budget-currency` set the [budget pool](#the-budget-pool).
-- `--runtime-action` narrows the Objective's [runtime actions](#objective-runtime-actions).
-- `--workspace`, repeatable, names up to 16 existing Workspaces. Unknown names are rejected.
+- `--deadline` takes an RFC 3339 time with a time zone. See [Deadlines](#deadlines).
+- `--budget-minor` and `--currency` set the [budget pool](#the-budget-pool).
+- `--runtime-action` narrows the Objective's [runtime actions](#objective-runtime-actions);
+  `--no-runtime-actions` grants none.
 - `--ongoing` makes the Objective a continuing responsibility that only an operator ends.
-- `--dry-run` validates exactly as creation does, returns the would-be Objective with its
-  warnings, and stores nothing.
-- Creation returns `warnings`: sentences naming conditions that would hold the Objective's turns,
-  each with its next step. They cover an owner with no bound Worker Host, no bound host connected,
-  a named Workspace no bound host has checked out, a zero budget, a passed deadline, and runtime
-  actions that were dropped. Warnings never stop creation; see [Runnable](#runnable).
-- Creating an Objective starts it: the Control Plane admits the first turn of its conversation.
-  Starting is idempotent, so a retried creation returns the same first Task. When the first turn
-  cannot be admitted, the Objective is still created and `notStarted` gives the reason.
+- The Objective's work runs in the Workspaces of the Tags that do it: the owner's, and those of
+  the Tags its work Sessions run on. See [Workspaces](../guides/workspaces.md).
+- Creating an Objective starts it: the Control Plane queues the first turn of its conversation in
+  the same step. Every refusal is an error, and nothing is stored. A turn that no Worker Host can
+  take waits; `supertag placement explain TASK_ID` says why. See [Waiting turns](#waiting-turns).
+- `--operation-id` makes a retry return the first result instead of creating twice.
 - Retrying the same definition returns the existing record with its current status. A different
   definition with the same ID is refused.
 
 A Tag creates an Objective from a thread with the `create_objective` tool, and only on an
 authenticated human `@SuperTag objective <outcome>` command in the admitted request. That
 Objective's home thread is the thread the command arrived in.
-
-### Objectives from a location
-
-An Objective created from a collaboration surface gets the Workspaces of the Tag location the
-request arrived at; `create_objective` may pass `workspaces` to name a subset, and any other name
-returns 400. The rules are in
-[Objectives from a location](resource-model.md#objectives-from-a-location).
 
 ### Objective runtime actions
 
@@ -236,11 +223,12 @@ Statuses are `working`, `blocked`, `limited`, `ready_for_review`, `completed` an
 - The owner or an operator updates the status. A status update cannot set `cancelled`; see
   [Cancelling an Objective](#cancelling-an-objective).
 - Each update requires the current revision and increments it. Conflicting writes are refused.
-- The CLI commands `update objective`, `complete objective` and `update team` take `--revision`
-  as optional. Without it the CLI reads the current revision, and after a revision conflict
-  caused by another writer it rereads and retries once, only when the other change left the
-  fields it is changing untouched. With `--revision` it never retries. Coordination tools always
-  send `expectedRevision`.
+- The CLI commands `objective set-limits`, `objective set-runtime-actions`, `objective complete`
+  and `team update` take `--expected-revision` as optional. Given, the change is refused when the
+  resource changed since that revision. Without it, `team update` reads the current revision, and
+  after a conflict caused by another writer it rereads and retries once, only when the other
+  change left the fields it is changing untouched. Coordination tools always send
+  `expectedRevision`.
 - `blocked` records that the Objective cannot go on without a person. It is not an execution
   pause.
 - `limited` records a spent budget or a passed deadline. An update that sets it may carry a
@@ -304,7 +292,7 @@ regular sweep.
 
 - `budgetLimitMinor` (CLI `--budget-minor`) is the Objective's limit in minor units chosen by the
   operator: `200000` is $2,000 in US cents.
-- `budgetCurrency` (CLI `--budget-currency`) denominates those units. It must be an uppercase
+- `budgetCurrency` (CLI `--currency`) denominates those units. It must be an uppercase
   three-letter code, such as `USD`, and is valid only with a limit.
 - A budget without a currency stays an internal allocation. It cannot be compared with
   provider-reported money.
@@ -358,7 +346,7 @@ Attempts finish. If they finish at $3,080, the Objective shows an $80 overrun an
 ### Increasing the limit
 
 - Only an operator raises a finite limit, with
-  `supertag objective set-limits ID --budget-minor N [--revision N]`, or `update_objective` with
+  `supertag objective set-limits ID --budget-minor N [--expected-revision N]`, or `update_objective` with
   `budgetLimitMinor` and the current `expectedRevision`. Tags cannot.
 - The new limit must exceed the old one and keep the currency. A stale revision is rejected;
   refresh the inbox before deciding.
@@ -561,8 +549,8 @@ number of Objectives may name one Team.
   [Declared Objectives](resource-model.md#declared-objectives).
 - Every member must be an active Tag, the name must be unused, and a Team holds at most 100
   members.
-- `supertag team update NAME [--member TAG ...] [--max-concurrency N] [--name TEXT] [--revision N]`
-  replaces the fields it names and requires the current revision. `supertag get team` and
+- `supertag team update NAME [--member TAG ...] [--max-concurrency N] [--name TEXT] [--expected-revision N]`
+  replaces the fields it names; see [Statuses](#statuses) for the revision check. `supertag get team` and
   `supertag get team NAME` read them.
 - `supertag delete team NAME` deletes the Team and its Workstream posts. It is refused with 409
   while an Objective that is not completed or cancelled names the Team.
@@ -688,30 +676,27 @@ skipped.
 
 ## Overview fields
 
-`supertag describe objective ID` and `ObjectiveService.DescribeObjective` present one view of an
-Objective; see [Check an Objective's progress](../guides/objective-overview.md).
-`supertag describe objective ID --output json` prints the `ObjectiveOverview` message as proto
-JSON.
+`supertag describe objective ID` presents one view of an Objective; see
+[Check an Objective's progress](../guides/objective-overview.md).
+`supertag describe objective ID --output json` prints the same view as JSON:
 
 | Field | Holds |
 | --- | --- |
 | `objective` | The Objective record, including status, revision, budget and deadline |
-| `conditions` | One `Runnable` condition; see [Runnable](#runnable) |
-| `attention` | Budget, deadline and approval items needing a person |
-| `approvals` | Counts of the Objective's pending and recently decided approval requests |
-| `team` | The Objective's Team with its ID, name, members and `maxConcurrency`; unset when the owner works alone |
-| `limits` | The deadline, the time left, the grace period and the notices already raised |
-| `budget` | The limit, spend and what is left, the cost reported by currency, and the Task Attempts with unknown cost or an unpriced model |
-| `conversation` | The newest 25 turns of the Objective's conversation, each by an operator, SuperTag or the owner |
-| `sessions` | Each of the Objective's Sessions with the Tag running it, its status, its question, the approvals it waits on, and its latest Task's delivery, report and explanations |
-| `highFindings` | High findings in the latest result of each Session |
+| `as_of_ms` | When the Control Plane read the view |
+| `team` | The Objective's Team with its ID, name, members, `max_concurrency` and running turns; null when the owner works alone |
+| `pool` | The budget pool: its measure, currency, limit, spend, what is left, any overrun, and the Task Attempts with unknown or estimated cost |
+| `deadline` | The deadline, the time left or since it passed, and the end of its grace period |
+| `attention` | Approval, question, review, pause, budget and deadline items needing a person, each with its next commands |
+| `sessions` | Each of the Objective's Sessions with the Tag running it, its status, its latest Task's delivery, and the failure of a failed latest turn |
+| `total_sessions` | The number of Sessions, including any the view leaves out |
+| `conversation` | The newest turns of the Objective's conversation |
 | `posts` | The newest Workstream posts of the Objective's Team |
-| `tasks` | One page of Tasks with their Task Attempts |
-| `totalTasks`, `nextPageToken` | The number of Tasks on all pages, and the token for the next page, empty on the last |
-| `writes` | Bytes each Volume received from these Tasks |
-| `tagNames` | Each Tag ID the view mentions, by name |
+| `tasks`, `total_tasks`, `next_offset` | One page of Tasks, the number on all pages, and the offset of the next page |
+| `notices` | Limit and coordination notices raised for the Objective |
+| `pending_approvals` | The number of the Objective's approval requests waiting for a decision |
 
-`supertag watch objective ID` prints the same records as they change.
+`supertag watch objective ID` prints the Objective's progress as a timeline until it closes.
 
 ### Allocation and usage
 
@@ -729,19 +714,11 @@ JSON.
 - Queue age alone does not establish a capacity shortage: Team concurrency, the Tag's other
   running work and Worker Host availability all delay a claim.
 
-### Runnable
+### Waiting turns
 
-`conditions` holds one `Runnable` condition with `status` true or false and a list of `reasons`.
-The CLI prints it as `Runnable: yes` or `Runnable: no.` followed by the reasons, and omits it for
-a completed or cancelled Objective. It is false when:
-
-- the Objective is completed, past its deadline, or out of budget, or its budget is 0;
-- the owner Tag has no bound Worker Host;
-- no bound Worker Host is connected, counting an embedded Worklet's host as connected;
-- no bound Worker Host declares a checkout of a named Workspace.
-
-Creation reports the same reasons as `warnings`. `true` means none of these holds the Objective's
-turns; it does not check Worker capacity, profile compatibility or approvals.
+A turn queued with nothing running it says why through
+`supertag placement explain TASK_ID`: it names each bound Worker Host and why it cannot take the
+Task, such as a disconnected host, a missing harness or Workspace, or labels that do not match.
 
 ### Access
 
@@ -750,84 +727,55 @@ The overview requires the `read_objective` action plus access to the requested O
 
 ## Operator inbox
 
-`supertag get inbox-item` is a redacted projection over pending stored state. It creates no resource
-and grants no authority: the operator acts through the same commands as always. Filter it by
-Objective or kind. `supertag get inbox-item` follows the
-[event stream](control-plane-api.md#operator-services), rereads the inbox whenever an item changes, and
-prints each new item occurrence once. `--output json` prints `InboxService` messages as proto JSON;
-see [Inbox](control-plane-api.md#operator-services).
+`supertag get inbox-items` lists the questions and work waiting for an operator, computed from
+pending state when you ask. It creates no resource and grants no authority: the operator acts
+through the same commands as always. Filter it with `--objective ID` or `--kind KIND`, and page
+with `--limit` and `--cursor`. It prints JSON with `items`, `next_cursor`, and `truncated_kinds`,
+the kinds with more pending items than the page holds.
 
 | Kind | Appears when |
 | --- | --- |
 | `approval` | An approval request waits for a decision |
 | `question` | An Objective's latest turn called `ask` and waits on the answer |
-| `objective-budget` | The Objective's budget pool is used up |
-| `objective-limit` | A budget warning, budget exhaustion, deadline warning or deadline passage |
+| `budget` | The Objective's budget pool is used up |
+| `limit` | A budget warning, budget exhaustion, deadline warning or deadline passage |
 | `task-attention` | A Task needs an operator, such as an uncertain Task Attempt |
-| `mcp-login` | A Task is held until its Worker Host logs in to an MCP server |
+| `mcp-login` | A queued Task needs an MCP server whose login lapsed on every Worker Host serving it |
 
-The CLI spells a kind with hyphens; the API names it `INBOX_ITEM_KIND_APPROVAL` and so on.
-
-- `supertag get inbox-item` shows the decisions an operator can make. `--all` adds items only a Tag
-  can act on. Text output names both decision makers.
-- Items can carry `commands`, which list the CLI actions available for the item. To answer a
-  `question` item, use **Waiting on you** in the terminal UI or call
-  [`InboxService.AnswerQuestion`](control-plane-api.md#operator-services).
-- Item identity for watching and notification is the item's `occurrence`: its `key`, plus the
-  Task's attempt count when the item cites a Task. The same decision after another Task Attempt is
-  a new occurrence.
-- A `question` item carries the question text for an operator who may read the whole Objective.
-  Others receive metadata only.
-- An `approval` item's `approval` field holds `requestId`, `kind`, `summary`, `requestingTagId`,
-  `requestingTag`, `taskId` and `blocking`. `blocking` is true when a running or waiting Task
-  Attempt made the request. Approval items appear only for principals with the `list_approvals`
-  action; others get `permission_denied` for `--kind approval`. An approval requested by an inbox
-  turn has no Objective, so its `objectiveId` is empty.
-- An `objective-limit` item appears once per warning or passage and disappears when the operator
-  raises the budget or moves the deadline, or when the Objective finishes.
-- An `mcp-login` item's key is `mcp_login:TASK_ID:SERVER`, and its commands are
-  `supertag mcp login SERVER`, then `supertag describe objective ID`. See
-  [MCP OAuth login](../surfaces/worker-tools.md#write-the-hosts-catalog).
+- Each item carries `key`, `occurrence`, `kind`, `objective_id`, `task_id`, `reason`, and
+  `operator_eligible`, which is false for an item only a Tag can act on. A `question` item
+  carries the question, an `approval` item the approval's ID, requesting Tag, action, resource
+  and summary.
+- To answer a `question` item, use **Waiting on you** in the terminal UI or
+  `supertag question answer TASK_ID TEXT`. Decide an approval with
+  `supertag approval approve APPROVAL_ID` or `supertag approval deny APPROVAL_ID --reason TEXT`.
+- Item identity for notification is the item's `occurrence`: its `key`, plus the Task Attempt
+  when the item cites a Task. The same decision after another Task Attempt is a new occurrence.
+- `notification.status` says whether the operator heard about the item: `not configured`,
+  `pending`, `delivered`, `failed` or `unavailable`.
+- A `limit` item appears once per warning or passage and disappears when the operator raises the
+  budget or moves the deadline, or when the Objective finishes.
+- An `mcp-login` item names the server; log the Worker Host in with `supertag mcp login SERVER`.
+  See [MCP OAuth login](../surfaces/worker-tools.md#write-the-hosts-catalog).
 
 The inbox remains the stored route in a headless deployment; external delivery is optional. A
 missing or unusable destination never removes an item. `supertag test notification [--objective
-ID]` sends one sample through every configured `notify` destination and reports one line per
-channel: `delivered`, `unavailable` or `failed: REASON`. It creates no item. Destination order is
+ID]` sends one sample through every destination the Gateway notifies and reports the result for
+each. It creates no item. Destination order is
 in [Operator notifications](../operations/control-plane.md#operator-notifications).
 
 ## After a Control Plane restart
 
-### Transport protocols
-
-- Built-in connected Worklets use a private local Task Attempt journal and transport protocol 18.
-- The Control Plane rejects older transports. Upgrade the Control Plane and Worker Hosts together.
-
-### Recovery of admitted work
-
 - Restarting the Control Plane preserves admitted work. Acceptance is recorded before
   acknowledgement, and disconnecting an event observer does not cancel execution.
-- When the original durable Worklet reconnects and its receipt is available, the Control Plane
-  resumes observing the same Task Attempt after its lease expires.
-- Stored event sequences prevent duplicate journal ingestion. Recovery does not execute a Task
-  again or charge its cost again.
-- An absent or unknown receipt stays unresolved and needs operator reconciliation. A restarted
-  Worklet reports unfinished journal entries as `unknown` and does not rerun them.
+- A Worker Host keeps running its Task Attempts while it reconnects, and it records their events,
+  results and deliveries only while it still holds their leases. A Task Attempt whose host lost
+  its lease is never run again on its own: it becomes uncertain and needs an operator decision.
+  See [Leases and unknown outcomes](scheduling-and-recovery.md#leases-and-unknown-outcomes).
 - Inspect results and any external effects before starting the work again. Successful recovery is
   not proof that an external action did not happen.
+- Coordination credentials are bound to one Task Attempt and its lease. They do not broaden the
+  Tag, Objective, Task or tool authority captured at admission, and they stop working when the
+  lease ends.
 
-`supertag describe task TASK_ID` reports the latest Task Attempt's host receipt when available.
-`unavailable` means the Control Plane cannot currently obtain one; it does not establish that
-execution failed. For the field meanings, see
-[`InspectTaskExecution`](control-plane-api.md#operator-services) and
-[Execution evidence](control-plane-api.md#operator-services).
-General recovery rules are in [Scheduling and interrupted
-execution](scheduling-and-recovery.md).
-
-### Coordination credentials
-
-Task Attempt coordination credentials are scoped to the Control Plane instance and lease
-generation that issued them. During recovery, the original Worklet may exchange that exact Task
-Attempt's old credential once for a credential bound to the recovered lease. The exchange does not
-broaden the Tag, Objective, Task or tool authority captured at admission. Credentials for another
-Task Attempt, surface credentials, and credentials presented outside the recovery window remain
-invalid.
+`supertag describe task TASK_ID` shows the Task's state and its Task Attempts.

@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkDocumentationNodeVersions } from "./check-docs-node.mjs";
+import { checkCommand, checkProseFlag, commandsIn, parseReference } from "./docs-commands.mjs";
 import { deprecatedDocProblems } from "./docs-deprecations.mjs";
 import { checkLinks, checkOrphans } from "./docs-links.mjs";
 import { versionProblems } from "./docs-versions.mjs";
@@ -16,7 +17,15 @@ execFileSync(
   process.execPath,
   [
     "--test",
-    ...["check-install-docs", "docs-versions"].map((n) => join(root, `scripts/${n}.test.mjs`)),
+    ...[
+      "check-install-docs",
+      "check-docs-node",
+      "docs-commands",
+      "docs-deprecations",
+      "docs-links",
+      "docs-versions",
+      "docs-vocabulary",
+    ].map((n) => join(root, `scripts/${n}.test.mjs`)),
   ],
   { stdio: "inherit" },
 );
@@ -56,85 +65,7 @@ const files = [
 // docs/reference/cli.md is generated from the help of every visible command, and
 // rust/crates/cli/tests/cli_help.rs fails when the CLI's help no longer matches it.
 const reference = "docs/reference/cli.md";
-const commands = new Map(); // "host enroll" -> Set of flags its help lists; "" is bare supertag
-const aliases = new Map(); // "get tags" -> "get tag"
-for (const section of readFileSync(join(root, reference), "utf8").split(/^## /mu).slice(1)) {
-  const heading = section.match(/^`supertag(?: ([^`]+))?`/u);
-  if (!heading) continue;
-  const path = heading[1] ?? "";
-  commands.set(path, new Set([...section.matchAll(/--[a-z][a-z0-9-]*/gu)].map(([flag]) => flag)));
-  for (const [, name, alias] of section.matchAll(
-    /^ {2}([a-z][a-z0-9-]*) .*\[alias: ([a-z0-9-]+)\]$/gmu,
-  ))
-    aliases.set(`${path} ${alias}`.trim(), `${path} ${name}`.trim());
-}
-const globalFlags = new Set(["--control-plane", "--help", "--version"]);
-
-function checkCommand({ command }) {
-  const words = command
-    .replace(/\s+#.*$/u, "")
-    .replace(/["'][^"']*["']/gu, "VALUE")
-    .split(/\s+/u)
-    .slice(1);
-  // The global Control Plane selector may come before the command.
-  while (words[0]?.startsWith("--")) {
-    if (words[0] === "--control-plane") words.splice(0, 2);
-    else if (globalFlags.has(words[0])) return null;
-    else return `unknown global flag ${words[0]}`;
-  }
-  const path = [];
-  for (const word of words) {
-    if (word.startsWith("-")) break;
-    path.push(word);
-  }
-  // Prose may name a command by placeholder ("`supertag get KIND`") or elide it.
-  if (path[0] === "..." || (path[0] && variable(path[0]))) return null;
-  let key;
-  for (let length = path.length; length >= 0 && key === undefined; length--) {
-    const candidate = path.slice(0, length).join(" ");
-    const resolved = aliases.get(candidate) ?? candidate;
-    if (commands.has(resolved) && (length > 0 || path.length === 0)) key = resolved;
-  }
-  if (key === undefined) return `\`supertag ${path.slice(0, 2).join(" ")}\` is not in ${reference}`;
-  // A placeholder where the reference lists subcommands, such as `supertag get KIND`, is prose.
-  const unknown = words
-    .filter((word) => /^--[a-z]/u.test(word))
-    .map((word) => word.split("=")[0])
-    .filter((flag) => !globalFlags.has(flag) && !commands.get(key).has(flag));
-  return unknown.length
-    ? `flag ${[...new Set(unknown)].join(", ")} not listed for \`supertag ${key}\` in ${reference}`
-    : null;
-}
-const variable = (token) => /^[A-Z][A-Z0-9_]*$/u.test(token) || token.includes("|");
-
-// --- Extraction -----------------------------------------------------------------------------
-function commandsIn(text) {
-  const found = [];
-  let fence = null;
-  const lines = text.split("\n");
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index];
-    const marker = line.match(/^\s*(```+|~~~+)\s*([\w-]*)/u);
-    if (marker) {
-      fence = fence ? null : marker[2] || "text";
-      continue;
-    }
-    if (fence && /^(sh|bash|shell|zsh|console|text)$/u.test(fence)) {
-      let command = line.replace(/^\s*\$\s+/u, "");
-      let end = index;
-      while (command.trimEnd().endsWith("\\") && end + 1 < lines.length)
-        command = `${command.trimEnd().slice(0, -1)} ${lines[++end].trim()}`;
-      // Allow leading environment assignments: FOO=bar supertag ...
-      const match = command.match(/^\s*(?:[A-Z_][A-Z0-9_]*=\S*\s+)*supertag(\s.*)?$/u);
-      if (match) found.push({ line: index + 1, command: `supertag${match[1] ?? ""}` });
-      index = end;
-    } else if (!fence) {
-      for (const span of line.matchAll(/`(supertag(?:\s[^`]+)?)`/gu))
-        found.push({ line: index + 1, command: span[1] });
-    }
-  }
-  return found;
-}
+const cli = parseReference(readFileSync(join(root, reference), "utf8"));
 
 // --- Links and anchors ------------------------------------------------------------------------
 // Long sections are hard to scan. They are reported but do not fail the check.
@@ -234,10 +165,16 @@ for (const file of files) {
         );
     });
   warnings.push(...longSections(name, text));
-  for (const found of commandsIn(text)) {
+  const { commands, flags } = commandsIn(text);
+  for (const found of commands) {
     commandCount++;
-    const problem = checkCommand(found);
-    if (problem) problems.push(`${name}:${found.line}: ${problem}`);
+    const problem = checkCommand(cli, found.command);
+    if (problem) problems.push(`${name}:${found.line}: ${problem} in ${reference}`);
+  }
+  // CONTRIBUTING.md describes flags of repository scripts, not of the CLI.
+  for (const found of name === "CONTRIBUTING.md" ? [] : flags) {
+    const problem = checkProseFlag(cli, found.flag);
+    if (problem) problems.push(`${name}:${found.line}: ${problem} in ${reference}`);
   }
 }
 if (warnings.length) console.warn(`${warnings.join("\n")}\n`);

@@ -55,7 +55,7 @@ The Worker receives this same snapshot. Later policy changes do not rewrite acce
 origin-activated Permission Sets
   intersected with origin restrictions
   intersected with requester restrictions
-  intersected with Worker Profile and installed-tool policy
+  intersected with the Worker Host's harness and installed-tool policy
   intersected with approvals
   intersected with native provider authorization
 ```
@@ -358,11 +358,8 @@ Codex, or waits with a reason naming that setting. See
 the Task's worktree, and those tools run no program. A file written there can still be run later,
 by a Task with `commands:execute` or by you, so review delivered changes before running them.
 
-Each Worker Profile reports this with two capabilities. `supertag.commands.unsandboxed` means its
-harness runs commands without a sandbox. `supertag.commands.execute` means it may run Tasks with
-`commands:execute`. Placement requires the second on a host whose profiles report either one;
-hosts that report neither, such as custom Workers, are not checked. Like labels, these capabilities
-are self-reported and decide placement, never access.
+Each Worker Host reports this setting in its execution profile when it registers. Like labels,
+the setting is self-reported and decides placement, never access.
 
 ## Credential boundaries
 

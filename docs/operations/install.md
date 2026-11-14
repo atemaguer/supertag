@@ -10,12 +10,52 @@ and permissions, on your repositories. One installation holds everything a machi
 | `supertag-shared-execution` | An optional shared execution provider for Cursor Tasks |
 | Node bridges | The harness adapters for Claude Code, Cursor, and OpenCode, run with your Node.js |
 
-Codex runs through an adapter built into `supertag` and needs no Node.js.
+Codex runs through an adapter built into `supertag`. The installer still checks Node.js and
+tests the Node bridges with it, so every installation needs Node.js.
 
 ## Before you start
 
 Check the [requirements](requirements.md) for git, Node.js, supported platforms, and sign-in for
-a **harness**, the connection to an agent system such as Claude Code or Codex.
+a **harness**, the connection to an agent system such as Claude Code or Codex. If this machine
+ran the earlier TypeScript runtime, [retire it first](#retire-the-earlier-typescript-runtime).
+
+## Retire the earlier TypeScript runtime
+
+This SuperTag replaces the earlier TypeScript runtime and starts from fresh state; there is no
+importer. Its installer replaces the earlier `supertag` link in `~/.local/bin`, and its
+`supertag down` does not stop the earlier runtime's services. Do these steps before you install,
+while `supertag` is still the earlier CLI. The earlier CLI stays installed afterwards, at
+`~/.local/share/supertag/versions/VERSION/node_modules/.bin/supertag`.
+
+1. Stop the earlier services and remove their service units:
+
+   ```sh
+   supertag down --remove-services
+   ```
+
+   Check that none remains: `launchctl list | grep ai.supertag` on macOS, or
+   `systemctl --user list-units 'supertag-*'` on Linux, prints nothing.
+2. Archive the earlier state, check the archive, then move the state aside so the new runtime
+   starts empty:
+
+   ```sh
+   tar -czf ~/supertag-typescript-state.tar.gz -C ~ .supertag
+   tar -tzf ~/supertag-typescript-state.tar.gz .supertag/supertag.db
+   mv ~/.supertag ~/.supertag-typescript
+   ```
+
+   The archive holds `supertag.db`, the local database, with the credentials and history. Keep
+   it private.
+3. For a shared deployment on PostgreSQL, stop every earlier service, then dump the earlier
+   database and check that the dump reads back before you point the new Control Plane at a new,
+   empty database:
+
+   ```sh
+   pg_dump --format=custom --file supertag-typescript.dump "$EARLIER_DATABASE_URL"
+   pg_restore --list supertag-typescript.dump > /dev/null
+   ```
+
+Then [install a release archive](#install-a-release-archive) and run `supertag init`.
 
 ## Install a release archive
 
@@ -87,20 +127,6 @@ supertag version
 
 It prints this CLI's version and the versions of the services `supertag up` runs on this machine.
 Upgrade the CLI and the Control Plane together.
-
-## Coming from the TypeScript runtime
-
-This SuperTag replaces the earlier TypeScript runtime and starts from fresh state. It does not
-read, change, or import the earlier runtime's `~/.supertag` contents or database. Before you run
-`supertag init` on a machine that used the earlier runtime:
-
-1. Stop the earlier services with the earlier CLI.
-2. Move the earlier state aside, for example `mv ~/.supertag ~/.supertag-typescript`. Keep it
-   if you may need its history.
-3. Run `supertag init` to create new state.
-
-A shared deployment needs a new, empty database. Keep the earlier database as an archive; there
-is no importer.
 
 ## Next
 
