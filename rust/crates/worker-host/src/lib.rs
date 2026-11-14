@@ -588,7 +588,7 @@ pub async fn run(
             Entry::Executing { attempt, prepared } => {
                 ensure_providers_stopped(&options, &journal, &attempt, &registration)
                     .await
-                    .context(cleanup_failure::CleanupUnconfirmed)?;
+                    .context(cleanup_failure::CleanupUnconfirmed::default())?;
                 match resolved(&mut host, &attempt, &token).await {
                     Ok(true) => journal.save(&Entry::Terminal { attempt, prepared })?,
                     Ok(false) if reclaim(&mut host, &journal, &attempt, &token).await? => {
@@ -614,7 +614,7 @@ pub async fn run(
                             attempt.task_id,
                             attempt.attempt_id
                         )
-                        .context(cleanup_failure::CleanupUnconfirmed));
+                        .context(cleanup_failure::CleanupUnconfirmed::default()));
                     }
                     Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
                     Err(error) => return Err(error.into()),
@@ -1909,13 +1909,13 @@ async fn run_assignment(
         shutdown,
     )
     .await
+    // The adapter run's errors carry its cleanup marker and the Attempt's values to redact.
     .with_context(|| {
         format!(
             "Task {} Attempt {} needs recovery",
             attempt.task_id, attempt.attempt_id
         )
-    })
-    .context(cleanup_failure::CleanupUnconfirmed);
+    });
     stop_reports.cancel();
     if let Some(reports) = reports {
         let _ = reports.await;
@@ -2209,7 +2209,7 @@ async fn with_cleanup_authority(
         result = &mut cleanup => result,
         () = keep_lease => cleanup.await,
     };
-    result.context(cleanup_failure::CleanupUnconfirmed)
+    result.context(cleanup_failure::CleanupUnconfirmed::default())
 }
 
 /// Keep the execution lease alive during repository preparation and transfer.

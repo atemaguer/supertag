@@ -1392,7 +1392,11 @@ async fn cursor_remote_workspace_reuses_and_warms_prepared_artifacts(
 
 /// TypeScript parity (`tests/durable-cleanup-unknown.test.ts`, second case): a sandbox the host
 /// cannot stop leaves the Attempt uncertain, and the host's reasons reach the Task execution
-/// report with the values of its own credential variables redacted.
+/// report with the values of its own credential variables redacted. Two layers are checked: the
+/// provider's failure text, which quotes its credential and a URL password, never crosses the
+/// provider transport; and the host redacts its credential variables from the text that does,
+/// shown by a variable whose value is a word of the transport's own failure. The unit tests of
+/// `cleanup_failure` cover redacting each kind of secret from a cause.
 async fn cursor_remote_cleanup_failure_reaches_the_task_report_redacted(
     database: String,
 ) -> Result<()> {
@@ -1413,7 +1417,8 @@ async fn cursor_remote_cleanup_failure_reaches_the_task_report_redacted(
         )
         .await?;
     let task = runtime.submit(TAG, "remote-first").await?;
-    // A credential only this Worker Host holds; the transport's own failure text names it.
+    // A credential variable only this Worker Host holds, whose value the transport's own failure
+    // text contains, so the reason reaches the report only through the host's redaction.
     let worker = runtime
         .remote_worker_command(
             &fixture,
@@ -1450,15 +1455,16 @@ async fn cursor_remote_cleanup_failure_reaches_the_task_report_redacted(
     let report = task.execution_report.context("execution report")?;
     assert_eq!(report.cleanup(), AttemptCleanup::Unknown, "{report:?}");
     let reasons = report.cleanup_failure.join("\n");
-    // The provider transport never relays provider error text; the host's own variable is hidden.
+    // The host redacted its own variable's value from the transport's failure.
     assert!(
-        reasons.contains("Remote workspace [REDACTED] failed"),
+        reasons.contains("Remote workspace [REDACTED] failed") && !reasons.contains("operation"),
         "{reasons}"
     );
+    // The provider's credential-bearing failure text never crossed the transport.
     assert!(
         !reasons.contains("synthetic-e2b-provider-key")
             && !reasons.contains("url-password-4242")
-            && !reasons.contains("operation"),
+            && !reasons.contains("Stop refused"),
         "{reasons}"
     );
     assert!(

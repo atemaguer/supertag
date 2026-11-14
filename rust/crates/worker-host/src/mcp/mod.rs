@@ -170,6 +170,11 @@ pub(crate) struct AdmittedCall {
 }
 
 impl AttemptMcp {
+    /// The resolved credentials of this Attempt's servers, which no text may carry upstream.
+    pub(crate) fn secrets(&self) -> &[String] {
+        &self.secrets
+    }
+
     /// Opens each granted server: a Workspace server from `workspace`, which this Attempt
     /// already recorded with the Control Plane, and any other from the host catalog.
     pub(crate) async fn prepare(

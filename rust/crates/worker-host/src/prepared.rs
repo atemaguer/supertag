@@ -332,7 +332,9 @@ async fn build(
 }
 
 /// Best effort: deletes artifacts beyond the newest three of this Workspace, and any unused for
-/// seven days, except the one just used and any another lane holds.
+/// seven days, except the one just used and any another lane holds or reused since the listing.
+/// The limit counts this host's provider only, as TypeScript counts only the providers it can
+/// reach: a Worker Host has one.
 async fn evict(
     config: &ProviderConfig,
     journal: &Journal,
@@ -362,10 +364,7 @@ async fn evict(
         return;
     };
     for record in candidates {
-        let Ok(file) = lock_file(records, &record.digest) else {
-            continue;
-        };
-        let Ok(_lock) = ExclusiveLock::try_acquire(file) else {
+        let Some(_lock) = claim_for_eviction(records, &record) else {
             continue;
         };
         if provider
@@ -378,6 +377,15 @@ async fn evict(
         }
     }
     let _ = provider.shutdown().await;
+}
+
+/// The candidate's lock, unless another lane holds it or reused or evicted the artifact since
+/// the listing: a lane that hit the record wrote a newer `last_used_ms` before releasing the
+/// lock, and may be allocating from the artifact now.
+fn claim_for_eviction(records: &Path, candidate: &Record) -> Option<ExclusiveLock> {
+    let lock = ExclusiveLock::try_acquire(lock_file(records, &candidate.digest).ok()?).ok()?;
+    let current = read(&records.join(format!("{}.json", candidate.digest)))?;
+    (current == *candidate).then_some(lock)
 }
 
 #[cfg(test)]
@@ -442,5 +450,41 @@ mod tests {
             .collect();
         assert_eq!(listed, ["two", "one"]);
         assert!(list(&records, "app", "other-scope").is_empty());
+    }
+
+    #[test]
+    fn eviction_skips_an_artifact_reused_or_held_since_the_listing() {
+        let state = tempfile::tempdir().unwrap();
+        let records = directory(state.path()).unwrap();
+        let listed = Record {
+            digest: "old".into(),
+            warm_key: "warm".into(),
+            workspace_id: "app".into(),
+            provider_scope: "scope".into(),
+            artifact: "im-old".into(),
+            trusted_commit: "a".into(),
+            last_used_ms: 1,
+        };
+        write(&records, &listed).unwrap();
+        // Another lane holds the digest's lock.
+        let held = ExclusiveLock::try_acquire(lock_file(&records, "old").unwrap()).unwrap();
+        assert!(claim_for_eviction(&records, &listed).is_none());
+        drop(held);
+        // Another lane hit the record after the listing and may be allocating from it.
+        write(
+            &records,
+            &Record {
+                last_used_ms: 2,
+                ..listed.clone()
+            },
+        )
+        .unwrap();
+        assert!(claim_for_eviction(&records, &listed).is_none());
+        // Another lane already evicted it.
+        fs::remove_file(records.join("old.json")).unwrap();
+        assert!(claim_for_eviction(&records, &listed).is_none());
+        // Unchanged since the listing: eviction may delete it.
+        write(&records, &listed).unwrap();
+        assert!(claim_for_eviction(&records, &listed).is_some());
     }
 }

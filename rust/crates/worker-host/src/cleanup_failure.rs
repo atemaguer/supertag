@@ -2,8 +2,15 @@
 //!
 //! TypeScript parity: the redacted `ExecutionCleanupError` evidence a Worker records with an
 //! uncertain Attempt (`tests/durable-cleanup-unknown.test.ts`): at most eight causes of at most 160
-//! characters, with the values only this host knows redacted before anything leaves it. The Control
-//! Plane stores them for the Task execution report and shows them in `supertag get task`.
+//! characters, with the values only this host knows redacted before anything leaves it: its
+//! credential variables and credential, the Attempt's lease token, and, when the adapter run
+//! failed, the adapter's bootstrap token and the Attempt's resolved MCP credentials (TypeScript's
+//! runtime-input values). The Control Plane stores them for the Task execution report and shows
+//! them in `supertag get task`.
+//!
+//! Difference: TypeScript also keeps the causes of an execution error that preceded the cleanup
+//! failure. A Rust Attempt's execution failure is its harness result, not an error, so the reasons
+//! are the cleanup error's causes alone.
 use std::time::Duration;
 
 use supertag_protocol::{
@@ -17,9 +24,18 @@ use crate::{RegisteredHost, journal::Attempt};
 const MAX_REASONS: usize = 8;
 const MAX_REASON_CHARS: usize = 160;
 
-/// Marks an error after which this host cannot prove the Attempt's execution stopped.
-#[derive(Debug)]
-pub(crate) struct CleanupUnconfirmed;
+/// Marks an error after which this host cannot prove the Attempt's execution stopped, with the
+/// Attempt's own values to redact from its causes. Only the outermost marker counts.
+#[derive(Debug, Default)]
+pub(crate) struct CleanupUnconfirmed {
+    secrets: Vec<SensitiveValue>,
+}
+
+impl CleanupUnconfirmed {
+    pub(crate) fn redacting(secrets: Vec<SensitiveValue>) -> Self {
+        Self { secrets }
+    }
+}
 
 impl std::fmt::Display for CleanupUnconfirmed {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -31,7 +47,7 @@ impl std::fmt::Display for CleanupUnconfirmed {
 /// The error's causes, outermost first, each redacted with `secrets` and then bounded, so a cut
 /// can never leave part of a secret.
 pub(crate) fn reasons(error: &anyhow::Error, secrets: &[SensitiveValue]) -> Vec<String> {
-    let marker = CleanupUnconfirmed.to_string();
+    let marker = CleanupUnconfirmed::default().to_string();
     let mut reasons: Vec<String> = Vec::new();
     for cause in error.chain() {
         if cause.to_string() == marker {
@@ -59,9 +75,19 @@ pub(crate) fn reasons(error: &anyhow::Error, secrets: &[SensitiveValue]) -> Vec<
         }
     }
     if reasons.is_empty() {
-        reasons.push(CleanupUnconfirmed.to_string());
+        reasons.push(CleanupUnconfirmed::default().to_string());
     }
     reasons
+}
+
+/// The values `error`'s reasons must not carry: this host's, the Attempt's lease token, and those
+/// its marker names.
+fn secrets(error: &anyhow::Error, host_token: &str, lease_token: &str) -> Vec<SensitiveValue> {
+    let mut secrets = crate::adapter::host_secrets(&[host_token, lease_token]);
+    if let Some(marker) = error.downcast_ref::<CleanupUnconfirmed>() {
+        secrets.extend(marker.secrets.iter().cloned());
+    }
+    secrets
 }
 
 /// Best effort: the host is about to stop on this error, and the Attempt stays uncertain whether
@@ -72,11 +98,9 @@ pub(crate) async fn report(
     token: &str,
     error: &anyhow::Error,
 ) {
-    let mut secrets = crate::adapter::host_secrets(&[token]);
-    secrets.push(SensitiveValue::High(attempt.lease_token.clone()));
     let message = ReportCleanupFailureRequest {
         attempt: Some(attempt.inspect()),
-        reasons: reasons(error, &secrets),
+        reasons: reasons(error, &secrets(error, token, &attempt.lease_token)),
     };
     let Ok(mut request) = authenticated_request(message, token, None) else {
         return;
@@ -106,7 +130,7 @@ mod tests {
                 "y".repeat(500)
             ))
             .context("adapter process group did not stop\nwith a second line")
-            .context(CleanupUnconfirmed);
+            .context(CleanupUnconfirmed::default());
         let reasons = reasons(&error, &[SensitiveValue::High(secret.into())]);
         assert_eq!(
             reasons[0],
@@ -129,6 +153,24 @@ mod tests {
     }
 
     #[test]
+    fn redacts_the_values_the_adapter_run_marked() {
+        let error = anyhow!("MCP server rejected mcp-credential-1234 and bootstrap-5678")
+            .context(CleanupUnconfirmed::redacting(vec![
+                SensitiveValue::High("mcp-credential-1234".into()),
+                SensitiveValue::High("bootstrap-5678".into()),
+            ]))
+            .context("Task t Attempt a needs recovery with lease-9012");
+        let secrets = secrets(&error, "host-token-3456", "lease-9012");
+        assert_eq!(
+            reasons(&error, &secrets),
+            [
+                "Task t Attempt a needs recovery with [REDACTED]",
+                "MCP server rejected [REDACTED] and [REDACTED]",
+            ]
+        );
+    }
+
+    #[test]
     fn keeps_at_most_eight_causes() {
         let mut error = anyhow!("cause 0");
         for index in 1..20 {
@@ -137,11 +179,12 @@ mod tests {
         let reasons = reasons(&error, &[]);
         assert_eq!(reasons.len(), 8);
         assert_eq!(reasons[0], "cause 19");
-        let only_marker = anyhow!(CleanupUnconfirmed).context(CleanupUnconfirmed);
+        let only_marker =
+            anyhow!(CleanupUnconfirmed::default()).context(CleanupUnconfirmed::default());
         assert!(only_marker.downcast_ref::<CleanupUnconfirmed>().is_some());
         assert_eq!(
             super::reasons(&only_marker, &[]),
-            [CleanupUnconfirmed.to_string()]
+            [CleanupUnconfirmed::default().to_string()]
         );
     }
 }
