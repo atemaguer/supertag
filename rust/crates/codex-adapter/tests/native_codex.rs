@@ -2045,7 +2045,8 @@ async fn incompatible_native_version_is_rejected_before_execution() -> Result<()
 async fn timeout_reaps_the_native_process_and_reports_failure() -> Result<()> {
     let fixture = NativeFixture::new("", "exec /bin/sleep 60")?;
     let mut options = fixture.options();
-    options.timeout = Duration::from_millis(150);
+    // Long enough for the fixture to record its pid under a loaded full-suite run.
+    options.timeout = Duration::from_secs(2);
     let server = HarnessProcess::start(&["files:read"]).await?;
     run(options, server.bootstrap.clone()).await?;
     let pid: i32 = fixture.read("pid")?.parse()?;

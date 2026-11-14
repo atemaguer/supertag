@@ -315,14 +315,17 @@ impl Runtime {
         Process::spawn(host, directory, "host", false)
     }
     async fn task(&mut self, id: &str) -> Result<Task> {
-        Ok(self
+        let mut task = self
             .operator
             .get_task(
                 self.credentials
                     .request(GetTaskRequest { task_id: id.into() })?,
             )
             .await?
-            .into_inner())
+            .into_inner();
+        // Only GetTask computes the execution report; these cases compare Tasks other calls return.
+        task.execution_report = None;
+        Ok(task)
     }
     async fn wait_text(&mut self, id: &str, text: &str) -> Result<Task> {
         let until = Instant::now() + WAIT;

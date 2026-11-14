@@ -460,7 +460,45 @@ pub(crate) struct ExecutionInputs<'a> {
     pub sandbox_execution_ends: Option<Instant>,
 }
 
+/// Runs the Attempt's adapter. Every error leaves the Attempt's cleanup unconfirmed, and carries
+/// the values its reasons must redact: this run's redaction set and the Attempt's resolved MCP
+/// credentials.
 pub(crate) async fn execute(
+    options: &HostOptions,
+    assignment: Assignment,
+    inputs: ExecutionInputs<'_>,
+    clients: (RegisteredHost, RegisteredInputs, CoordinationClients),
+    host_token: &str,
+    valid_until: Instant,
+    shutdown: &CancellationToken,
+) -> Result<HarnessCompleteRequest> {
+    let bootstrap_token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let secrets = Arc::new(host_secrets(&[host_token, &bootstrap_token]));
+    let mcp_secrets = inputs
+        .mcp
+        .as_ref()
+        .map(|mcp| mcp.secrets().to_vec())
+        .unwrap_or_default();
+    run(
+        options,
+        assignment,
+        inputs,
+        clients,
+        (host_token, bootstrap_token, secrets.clone()),
+        valid_until,
+        shutdown,
+    )
+    .await
+    .map_err(|error| {
+        let mut redacting = secrets.as_ref().clone();
+        redacting.extend(mcp_secrets.into_iter().map(SensitiveValue::High));
+        error.context(crate::cleanup_failure::CleanupUnconfirmed::redacting(
+            unique_sensitive_values(redacting),
+        ))
+    })
+}
+
+async fn run(
     options: &HostOptions,
     assignment: Assignment,
     ExecutionInputs {
@@ -474,7 +512,7 @@ pub(crate) async fn execute(
         sandbox_execution_ends,
     }: ExecutionInputs<'_>,
     (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
-    host_token: &str,
+    (host_token, bootstrap_token, secrets): (&str, String, Arc<Vec<SensitiveValue>>),
     valid_until: Instant,
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
@@ -482,7 +520,7 @@ pub(crate) async fn execute(
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let bootstrap = AdapterBootstrap {
         endpoint: format!("http://{}", listener.local_addr()?),
-        token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+        token: bootstrap_token,
     };
     let artifact_checkout = workspace
         .filter(|_| {
@@ -529,7 +567,7 @@ pub(crate) async fn execute(
         artifact_checkout,
         artifact_inputs,
         artifact_capacity: Arc::new(Semaphore::new(1)),
-        secrets: Arc::new(host_secrets(&[host_token, &bootstrap.token])),
+        secrets,
     };
     let stop_server = CancellationToken::new();
     let mut server = tokio::spawn(
@@ -726,7 +764,7 @@ async fn supervise(
 }
 
 /// The secrets of this Worker Host's environment, plus `credentials` it holds itself.
-fn host_secrets(credentials: &[&str]) -> Vec<SensitiveValue> {
+pub(crate) fn host_secrets(credentials: &[&str]) -> Vec<SensitiveValue> {
     let environment = std::env::vars_os()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect::<Vec<_>>();

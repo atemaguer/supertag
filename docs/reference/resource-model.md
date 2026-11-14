@@ -413,9 +413,8 @@ whatever harness and model their Worker Hosts offer, starting at low effort.
 
 ## Workspaces
 
-A Workspace names a git repository and can attach data from a Volume. A Volume is a named
-storage source configured separately by an operator. Workspace fields are optional, except that
-`source` is required when `mounts` is present:
+A Workspace names a git repository. Its Tasks can also receive copies of Volume data; see
+[Workspace Volume copies](#workspace-volume-copies). Workspace fields are optional:
 
 ```yaml
 apiVersion: supertag/v1
@@ -426,12 +425,6 @@ spec:
   source: https://github.com/acme/app.git   # cloned by hosts without a checkout
   ref: main                                 # base for Session branches
   setup: npm ci                             # one shell command
-  mounts:
-    - volume: datasets                     # a separately configured Volume
-      path: /mnt/datasets                  # outside the Task checkout
-      access: read-only                    # default; read-write saves changes to the source
-      strategy: copy                       # copy (default) or mount
-      maxBytes: 1048576                    # optional copy limit in bytes
   delivery: branch                          # branch (default), patch, or pull-request
 ```
 
@@ -442,7 +435,6 @@ spec:
 | `spec.setup` | none | One shell command run once in each new Task worktree |
 | `spec.mcp` | none | Selected server names from the trusted checkout's `.mcp.json` |
 | `spec.skills` | none | Selected Skill names from the host checkout |
-| `spec.mounts` | none | Volumes attached at absolute paths outside the checkout. Paths cannot overlap each other, staged files, or protected system locations. Each entry needs `volume` and `path`; `access` defaults to `read-only`, `strategy` to `copy`, and `maxBytes` is an optional positive byte limit. `mount` requests a native mount; `read-write` saves changes to the Volume source. |
 | `spec.delivery` | `branch` | `branch` keeps the Session's branch; `patch` also attaches a patch artifact; `pull-request` pushes the branch and opens one GitHub pull request per Session. `pull-request` requires a github.com `source`. |
 
 A field set by an earlier apply that a later manifest omits returns to its default, as the
@@ -461,40 +453,54 @@ Plane could not mark it ready or close it. See
 [Work in a repository with Workspaces](../guides/workspaces.md) and
 [Workspace staging](worker.md#workspace-staging).
 
-`strategy: mount` requests live data, such as a dataset too large to copy. Placement requires a
-provider that advertises native mounts and never substitutes `copy`. Local and e2b
-support only `copy`; e2b native mounts would require keys inside the sandbox. Modal supports
-S3, R2, GCS, and Modal Volume mounts with the declared access. Unsupported sources and connection options are
-refused before preparation or any provider call; see [Native source settings](#native-source-settings).
-`maxBytes` bounds copies only. Native mounts attach at Task start, after setup.
+<!-- supertag-cli: native start -->
 
-`supertag describe task ID` labels each native mount **live**. For each Task Attempt, it shows
-its Volume, source, prefix, destination path, access, and attachment time. An empty prefix means
-the entire source. These records describe what the provider attached; they do not pin the files
-or prove the source is still attached after the Task Attempt ends. Native mounts have no object
-manifest or content digest. Copy mounts retain their manifests and changed-content indicators.
+### Workspace Volume copies
 
-### Read-write output contract
+A Tag declares the Volume copies its Tasks receive with `supertag tag put TAG --workspace-mounts
+FILE`. The file is a JSON array; each entry places one Workspace Volume at an absolute path
+outside the checkout:
 
-A read-write Workspace mount lets a Task save files to its Volume's source. With `strategy: copy`, the Worker compares files with the input manifest and uploads created or changed files at finalize to S3, R2, or `file://`. It never propagates deletions or follows symbolic links. Uploads run sequentially without retries. Before the first upload, SuperTag refuses more than 1,000 changed files per mount per Task Attempt, any file over 5 GiB, or a changed total above that mount's `maxBytes`. A refusal uploads nothing.
+```json
+[{ "volumeId": "datasets", "destination": "/srv/supertag-mounts/datasets",
+   "maxBytes": 1073741824, "access": "read-only" }]
+```
 
-Each mount's Task Attempt output manifest records `volume`, `source`, `path`, `status` (`complete`, `partial`, or `refused`), `uploadedAt`, uploaded `objects` with `key`, `size`, and `sha256`, `skipped`, an `error` with `key` and `reason` when present, and `notAttempted`. `supertag describe task ID` displays it under **Writes**; the Objective overview summarizes it. An upload failure fails the Task Attempt with a reason naming the mount and key. Earlier uploads remain in the source and appear in the partial manifest. Git delivery still completes; the owner decides whether to rerun, which uploads again.
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `volumeId` | required | A Workspace Volume registered with `supertag workspace-volume put` |
+| `destination` | required | Normalized absolute path directly inside a `destinationRoot` that serving Worker Hosts map. Not a dot name, not overlapping another copy or a protected system path. |
+| `maxBytes` | 1 GiB | The most bytes the copy holds and its write-back may change: 1 to 20 GiB |
+| `access` | `read-only` | `read-write` writes changed and created files back after a successful Task Attempt, and requires `files:write` |
 
-With `strategy: mount`, Modal CloudBucketMount and Modal Volumes attach writable when access is `read-write`. e2b refuses native mounts that require keys inside the sandbox. Parallel Tasks writing the same key use last-write-wins. An interrupted Task Attempt can leave partial writes, and writes land before review. Object stores are not POSIX: rename, append, and locks are unavailable on native mount paths.
+A Tag has at most eight copies. Its Tasks must allow `files:read`, may not allow
+`commands:execute` or `web:fetch`, and run on Codex, Claude Code, Cursor, or OpenCode. The Control
+Plane freezes each Volume's source, credential name, and revision when it accepts a Task. Only a
+Worker Host whose `--workspace-mount-mappings` maps that exact Volume, credential name, and
+destination root claims the Task; a retargeted Volume leaves queued Tasks unplaceable.
 
-### Workspace mount security
+The Worker Host stages each copy for one Task Attempt and removes it when the Task Attempt ends.
+A copy holds at most 10,000 files and visits at most 40,000 entries, and one Task Attempt copies
+at most 20 GiB across its copies. Links, hard-linked files, files on another filesystem, and the
+names `.git` and `.supertag-*` are refused. A remote E2B or Modal Workspace receives the staged
+files at `volumes/<digest>/<name>` inside its checkout; the returned tree never includes them.
+Read-only provider-native Modal Volume mounts are on the backlog.
 
-Every mount path must stay outside the checkout, staged files, and other mounts. This applies to
-both `copy` and `mount`, including mixtures of the two. For example, `/mnt/data` conflicts with
-`/mnt/data/token`, but not `/mnt/database`. Refusals name both conflicting paths.
-Staged paths include input mounts and credential targets, as well as files such as `.mcp.json`.
-Sandbox start checks declared paths before resolving mount sources. SuperTag checks paths again
-inside the started sandbox before staging the harness plan.
+### Read-write copy contract
 
-A Workspace cannot attach a Volume that holds artifacts, even through another Volume name.
-The [Volume security rules](#volume-security) describe how SuperTag compares source locations.
-Native mounts resolve through a host source guard before checkout or preparation. This guard reads
-catalog metadata without opening host copy credentials. A host without that guard refuses native mounts.
+After a successful Task Attempt, the Worker Host writes each changed and created regular file of a
+read-write copy directly to its Volume: to a `file://` directory without following links, or to
+`s3://` with a streamed, signed `PUT`. It never writes deletions or links, and a failed or
+cancelled Task Attempt writes nothing. Before the first write it refuses more than 1,000 changed
+files, any file over 5 GiB or the copy's `maxBytes`, a changed total above `maxBytes`, and names
+the Volume cannot hold. A refusal writes nothing. Writing in key order stops at the first failure.
+
+Each copy's summary records `volume_id`, `destination`, `status` (`complete`, `partial`, or
+`refused`), written `files` with `key`, `size`, and `sha256`, `skipped`, an `error` with `key` and
+`reason` when present, and `not_attempted`. `supertag describe task ID` shows it as the Task's
+mount writes. A `partial` or `refused` write-back fails the Task.
+
+<!-- supertag-cli: native end -->
 
 ### Objectives from a location
 
@@ -511,147 +517,58 @@ The Tag that creates the Objective, through the `create_objective` tool, may pas
 name a subset. A name outside that set returns 400. Creation `warnings` then cover those
 Workspaces like any other. Mentions carry no Workspace syntax; the location decides.
 
+<!-- supertag-cli: native start -->
+
 ## Volumes
 
-A Volume names a place where data lives outside git, such as a dataset in a bucket or a share
-the operator mounted on the Worker Host. For example, a `datasets` Volume can point at
-`s3://acme-data/datasets/v3/`. Volumes are Experimental.
+A Volume names a place where data lives outside git, such as a dataset in a bucket or a directory
+on the Worker Host. Volumes are Experimental. A Workspace Volume holds data Tasks receive as
+copies; an artifact Volume holds captured Task files (see
+[Artifacts](artifacts.md)).
 
-```yaml
-apiVersion: supertag/v1
-kind: Volume
-metadata:
-  name: datasets     # 1-63 lowercase letters, digits, hyphens, or underscores
-spec:
-  source: s3://acme-data/datasets/v3/   # s3://, r2://, or file:// on the Worker Host
-  credential: acme-data                 # a name; each Worker Host maps it to a secret
+```sh
+supertag workspace-volume put datasets --source s3://acme-data/datasets/v3 --credential acme-data
+supertag workspace-volume put notes --source file:///srv/data/notes
 ```
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `spec.source` | required | `s3://BUCKET/PREFIX` for Amazon S3 or another S3-compatible store, `r2://BUCKET/PREFIX` for Cloudflare R2, or `file:///ABSOLUTE/PATH` for a directory on the Worker Host. Native mounts also accept `gs://BUCKET/PREFIX/` and `modal-volume://NAME/PREFIX/`. S3/R2 URLs accept the connection parameters below. Apply rejects fragments, embedded credentials, unknown parameters, and `.` or `..` segments. `file://`, `gs://`, and `modal-volume://` sources reject all query strings. |
-| `spec.credential` | required | The name each Worker Host maps to a secret, provider-held reference, or explicit consent. For `modal-volume://`, the mapping must be `{ modal-volume: NAME }`, matching the source name exactly. For `file://`, the host never reads with the secret; its mapping is the host's consent to expose that directory. |
+| Setting | Meaning |
+| --- | --- |
+| `--source` | A canonical `file:///ABSOLUTE/PATH` on the Worker Host, or `s3://BUCKET/PREFIX` with a non-empty prefix and no trailing slash. Query settings, `r2://`, `gs://`, and `modal-volume://` are refused. |
+| `--credential` | Required for `s3://` and refused for `file://`: a label of 1-63 lowercase letters, digits, hyphens, or underscores that each serving Worker Host maps to its own keys. The Control Plane stores only the label. |
+| `--expected-revision` | The revision you last read, or 0 to create. A stale revision is refused. |
 
-### Volume connection settings
+A source carries no connection settings. Each Worker Host owner pins them in the host's
+`--workspace-mount-mappings` file: `endpoint` (an HTTPS origin), `region`, and
+`credentialEnvPrefix`, the prefix of the environment variables holding the keys
+(`PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET_ACCESS_KEY`, optional `PREFIX_SESSION_TOKEN`). Requests are
+path-style. So whoever registers a Volume cannot send a host's signed requests, or a read-write
+copy's Task output, to an endpoint the host did not choose. A `file://` mapping takes none of
+these; the mapping itself is the host owner's consent.
 
-S3-compatible connection settings belong in the source URL, for example:
+`supertag get workspace-volume NAME` shows a Workspace Volume's source, credential label, and
+revision. Changing a source is a new revision. For what a Volume keeps when a sandbox or host dies,
+see [Persistence](../concepts/persistence.md).
 
-```yaml
-source: s3://acme-data/datasets/v3/?region=eu-west-2&endpoint=https%3A%2F%2Fstore.example&forcePathStyle=true
-```
-
-| Query parameter | Default | Meaning |
-| --- | --- | --- |
-| `region` | `us-east-1` for S3; `auto` for R2 | Signing region. Lowercase letters and digits, with single hyphens between groups. |
-| `endpoint` | AWS S3 regional endpoint for S3; required for R2 | `https://` URL, optionally with a port and path. HTTPS is required even on loopback. Link-local and metadata IP addresses are refused, including IPv4 embedded in mapped, translated, compatible, and well-known NAT64 addresses. Local-use NAT64 addresses (`64:ff9b:1::/48`) are refused because their IPv4 layout depends on the network. No embedded credentials, query, fragment, whitespace, control characters, or Unicode format characters. Percent-encode it as a query value. |
-| `forcePathStyle` | `false` | Literal `true` or `false`. Use `true` for stores that require bucket names in request paths. |
-
-Each parameter may occur only once. Unknown parameters are refused. For R2, use a source such as
-`r2://acme-data/datasets/?endpoint=https%3A%2F%2FACCOUNT.r2.cloudflarestorage.com`.
-`describe volume` shows the region, endpoint, and path style, including their defaults.
-Whoever can apply Volumes decides where a mapped credential is sent. Only grant that ability to
-people trusted to choose credential destinations. For example, changing `endpoint` sends signed
-requests to the new store. Address checks inspect the URL's literal host; they do not resolve DNS
-or prevent a hostname from resolving to a private address. Use trusted endpoints, DNS, and host
-network rules that block metadata services. Local development stores also need a certificate
-trusted by the Worker Host.
-Source URLs reject secret look-alikes, including percent-encoded keys and adjacent random-key
-fragments. Separators such as `/`, `.`, `~`, `+`, and `,` do not hide these keys.
-Recognized prefixes include `sk-proj`, `sk-ant-api03-`, `sk_live_`, `sk_test_`, `sk-svcacct-`,
-and `sk-or-v1-`. Their payloads can contain lowercase letters or one- and two-letter fragments.
-Ordinary word paths such as `sk-learn/models/training/`, `sk-proj/models/checkpoints/`, and
-`asia/training/checkpoints/` remain valid, including trailing dates and versions such as
-`sk-proj/models/checkpoints/2024` and `asia/training/checkpoints/v1`. Numeric date paths such as
-`sk-proj/2024/10/06/12/` and `asia/2024/10/06/12/30/` also remain valid. This heuristic catches common mistakes; it cannot identify
-every secret. Keep secret values out of source URLs.
-Endpoint checks also refuse the metadata addresses `fd20:ce::254`, `fd00:ec2::23`,
-`192.0.0.192`, and `168.63.129.16`, including the supported embedded IPv4 forms above.
-
-These settings are public catalog data; keep credentials in the host's
-[Volume credential secret](supertag-yaml.md#volume-credential-secrets).
-
-`spec.credential` is a name, never a secret value. The Control Plane stores only the name. Each
-Worker Host that serves the Volume keeps the secret itself. Apply rejects a value that looks like a
-key or token, such as an access key ID, so a secret pasted by mistake is not stored.
-
-`supertag get volume NAME`, `supertag list volume`, and `supertag describe volume NAME` show a
-Volume. `apply` creates or replaces one; a credential a later manifest omits is cleared.
-
-For what a Volume keeps when a sandbox or host dies, see
-[Persistence](../concepts/persistence.md).
-
-Copy mounts have a fixed combined limit of 20 GiB per Task Attempt, in addition to each mount's
-`maxBytes`. SuperTag checks all listings before copying any files. A `file://` source refuses files
-with more than one hard link and rechecks home-directory consent during copying. See
-[copy mount behavior](../guides/workspaces.md#what-a-copy-mount-does) for the source and destination
-restrictions.
-
-### Native source settings
-
-Native mounts expose live data through Modal. For example, a Volume with
-`source: gs://training-data/models/` and `credential: training` can use the host mapping
-`training: { modal-secret: gcs-reader }`. The Workspace selects `strategy: mount`.
-
-| Source | Authentication | Prefix and settings |
-| --- | --- | --- |
-| `s3://BUCKET/PREFIX/` | Host mapping to `modal-secret` or `modal-oidc-role` | Empty prefix or one ending in `/`. A region selects its regional AWS endpoint. |
-| `r2://BUCKET/PREFIX/?endpoint=URL` | Host mapping to `modal-secret` | Requires an HTTPS endpoint. Empty prefix or one ending in `/`. |
-| `gs://BUCKET/PREFIX/` | Host mapping to `modal-secret` | Uses GCS's endpoint. Empty prefix or one ending in `/`; no query parameters. |
-| `modal-volume://NAME/PREFIX/` | Required `credential` maps to `{ modal-volume: NAME }` on the host | Mounts the existing Volume's subdirectory, or the entire Volume for an empty prefix. The mapped name must match exactly, including case. Uses the host's configured Modal environment; no query parameters. |
-
-Modal configures CloudBucketMount and Modal Volumes with the declared `read-only` or `read-write` access.
-Placement excludes hosts without the named credential mapping. The host checks Modal Volume name
-consent before any provider call; missing or mismatched consent refuses the mount with a named reason.
-`gs://` and `modal-volume://` are mount-only: copying and artifact storage refuse them.
-Native prefixes use literal characters, without percent encoding. Modal bucket mounts refuse
-`forcePathStyle=true`, endpoint paths, and an explicit region together with an explicit endpoint;
-Modal cannot represent those settings without changing their meaning. No fallback to copying occurs.
-Modal Volume names contain 1–64 letters, digits, underscores, dots, or hyphens,
-starting with a letter or digit. Volume names cannot contain `..`.
-
-A native source attaches only when the Task sandbox starts. Setup and prepared snapshots cannot
-read it. The source stays live and can change during a Task Attempt; no object manifest pins its
-contents. The provider-held reference is used only for attachment, never as a sandbox secret or
-an environment variable. The catalog records the source and credential name, not the host mapping
-or its secret values.
+<!-- supertag-cli: native end -->
 
 ### Volume security
 
-A host's artifact Volume stores captured Task files governed by artifact grants. Workspace mounts
-cannot expose that Volume, a parent location, or any location beneath it. These restrictions apply
-to `copy` and `mount`. Placement checks advertised artifact Volumes and Volumes with recorded copies;
+A host's artifact Volume stores captured Task files governed by artifact grants. Workspace Volume
+copies cannot expose that Volume, a parent location, or any location beneath it. Placement checks advertised artifact Volumes and Volumes with recorded copies;
 dispatch checks them again. The Worker Host also checks its own current artifact Volume.
 
-SuperTag compares normalized locations, not source URL strings. For S3-compatible stores, it compares
-request hosts and paths, including endpoint paths and bucket subdomains. It checks both path-style
-and virtual-hosted addressing, regardless of `forcePathStyle`. For example, an endpoint ending in
-`/artifacts` can reach the same bucket as `s3://artifacts` through the server's root endpoint.
-`s3://` and `r2://` can identify the same store. The comparison decodes percent encoding and ignores
-repeated or trailing slashes. AWS comparisons also ignore signing region and endpoint region.
-Distinct prefixes such as `artifacts` and `artifacts-other` remain separate. AWS endpoint forms whose
-bucket cannot be identified, such as access points, cannot establish separation from AWS artifact
-Volumes and cause refusal.
+SuperTag compares locations, not source URL strings. File paths compare by component, and on
+macOS also case- and Unicode-insensitively, so `/srv/Data` and `/srv/data` are one location.
+Because no source carries an endpoint, an `s3://` Workspace Volume compares with an S3 artifact
+Volume by bucket name and nested prefix on any endpoint, and SuperTag refuses an overlap in either
+direction. So an endpoint alias, such as a virtual-hosted or path-style spelling of the same store,
+cannot expose artifact storage to a Task. Distinct prefixes such as `artifacts` and
+`artifacts-other` remain separate.
 
-Google Cloud Storage comparisons fold `storage.googleapis.com`, `commondatastorage.googleapis.com`,
-regional `storage.REGION.rep.googleapis.com` endpoints, and their bucket subdomains into one origin.
-The `storage.cloud.google.com` browser endpoint shares that origin too.
-Unrecognized `googleapis.com` endpoint forms cannot establish separation from GCS artifact Volumes
-and cause refusal. Loopback comparisons also fold `0.0.0.0`, `[::]`, and `*.localhost`.
-For other stores, origins are compared by host spelling and port. DNS aliases, IP-versus-name
-aliases, and alternate ports reaching the same store are not detected. Use the same endpoint
-spelling and port for every Volume that reaches that store.
-
-An artifact source that cannot be parsed or read causes refusal instead of an assumption that the
-data is elsewhere. Placement can still compare a stored HTTP artifact endpoint to protect its
-location without blocking unrelated mounts. This exception only creates a deny rule; mounting an
-HTTP source remains forbidden. A refusal names the invalid mount or the artifact Volume that
-prevents the comparison.
-
-Dispatched file artifact locations carry no copy credential and grant no mount consent. The host
-checks real paths against these protected locations, including aliases. Native mounts refuse
-`file://` sources; those sources require the host's explicit consent for copying.
-GCS comparisons use bucket and prefix. Modal Volume comparisons use the Volume name and prefix;
-the environment comes only from host configuration.
+The Worker Host checks its mappings again against its own state, its Workspaces, home
+configuration, and the artifact paths the Control Plane discloses for each Task Attempt. It
+compares real paths and directory identities, so a bind mount or link that reaches protected
+storage under another spelling is refused.
 
 ## Field managers and apply sets
 

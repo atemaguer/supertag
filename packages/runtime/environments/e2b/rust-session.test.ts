@@ -1,6 +1,17 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { create } from "@bufbuild/protobuf";
@@ -9,6 +20,7 @@ import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-no
 import {
   HarnessWorkspace,
   RemoteMcpServerInputSchema,
+  RemoteWorkspaceCopyUploadSchema,
   RemoteWorkspaceProvider,
   RemoteWorkspaceStageChunkSchema,
 } from "@supertag/worker-sdk/internal/rust-harness";
@@ -52,7 +64,7 @@ function wait(child: ChildProcess) {
   });
 }
 
-async function fixture() {
+async function fixture(preparedRoot?: string) {
   const builds: E2BWorkspaceTemplateBuild[] = [];
   const templates = {
     build: vi.fn(async (spec: E2BWorkspaceTemplateBuild) => {
@@ -150,12 +162,14 @@ async function fixture() {
       },
     });
   });
+  const snapshot = vi.fn(async () => "snapshot-prepared");
   const factory = {
     create: vi.fn(async (options: SandboxOpts) => {
       alive = true;
       metadata = options.metadata ?? {};
-      return { client, writeTransfer, readTransfer };
+      return { client, writeTransfer, readTransfer, snapshot };
     }),
+    deleteSnapshot: vi.fn(async (_snapshotId: string) => {}),
   };
   const inventory = {
     find: vi.fn(async () => (alive ? [{ sandboxId: client.sandboxId, metadata }] : [])),
@@ -169,9 +183,11 @@ async function fixture() {
     inventory,
     templates,
     template: "test-template",
+    ...(preparedRoot === undefined ? {} : { preparedRoot }),
   });
   return {
     session,
+    snapshot,
     templates,
     factory,
     inventory,
@@ -920,3 +936,456 @@ it("refuses an inconsistent devcontainer environment before any provider call", 
     expect(factory.create).not.toHaveBeenCalled();
   }
 });
+
+type CopyPart =
+  | { case: "file"; value: { key: string; size: bigint; sha256: string } }
+  | { case: "payload"; value: Uint8Array }
+  | { case: "directory"; value: string };
+
+const GiB = 1024n ** 3n;
+
+function copyParts(
+  files: Record<string, Buffer>,
+  corrupt?: string,
+  directories: string[] = [],
+): AsyncIterable<CopyPart> {
+  return (async function* () {
+    for (const directory of directories) yield { case: "directory", value: directory };
+    for (const [key, body] of Object.entries(files)) {
+      const sha256 = createHash("sha256")
+        .update(key === corrupt ? "other" : body)
+        .digest("hex");
+      yield { case: "file", value: { key, size: BigInt(body.length), sha256 } };
+      for (let offset = 0; offset < body.length; offset += 256 * 1024)
+        yield { case: "payload", value: body.subarray(offset, offset + 256 * 1024) };
+    }
+  })();
+}
+
+it("stages Workspace copies beside the checkout, seals read-only ones, and returns only changed files", async () => {
+  const { session, writeTransfer, client } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await session.stage(header, bytes);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  // A file larger than one transfer part spans several parts.
+  const large = Buffer.alloc(9 * 1024 * 1024 + 3, 7);
+  await expect(
+    session.stageCopy(
+      { path: `${root}/ro`, readWrite: false },
+      copyParts({ "rows.csv": Buffer.from("a,b\n1,2\n") }, "rows.csv"),
+    ),
+  ).rejects.toThrow(/copy transfer failed/i);
+  await expect(
+    session.stageCopy({ path: "volumes/other/ro", readWrite: false }, copyParts({})),
+  ).rejects.toThrow(/copy path is invalid/i);
+  await expect(
+    session.stageCopy(
+      { path: `${root}/ro`, readWrite: false },
+      copyParts({
+        "rows.csv": Buffer.from("a,b\n1,2\n"),
+        "nested/notes.txt": Buffer.from("notes\n"),
+      }),
+    ),
+  ).resolves.toEqual({ files: 2n });
+  await expect(
+    session.stageCopy(
+      { path: `${root}/rw`, readWrite: true },
+      copyParts({
+        "rows.csv": Buffer.from("x\n"),
+        "empty.txt": Buffer.alloc(0),
+        "large.bin": large,
+      }),
+    ),
+  ).resolves.toEqual({ files: 3n });
+  await expect(
+    session.execute({ kind: "read", path: `${root}/ro/nested/notes.txt` }),
+  ).resolves.toMatchObject({ text: expect.stringContaining("notes") });
+  await expect(
+    session.execute({ kind: "write", path: `${root}/ro/denied.txt`, content: "no" }),
+  ).rejects.toThrow(/read-only/i);
+  await session.execute({ kind: "write", path: `${root}/rw/rows.csv`, content: "x\ny\n" });
+  await session.execute({ kind: "write", path: `${root}/rw/new/created.txt`, content: "new\n" });
+  const sandboxRoot = dirname(writeTransfer.mock.calls[0]?.[0] as string);
+  await symlink("/etc/hosts", join(sandboxRoot, "checkout", root, "rw", "link"));
+  // Copies are never part of the returned tree.
+  expect(
+    unpack((await session.capture()).bytes).some(({ path }) => path.startsWith("volumes/")),
+  ).toBe(false);
+  await expect(async () => {
+    for await (const _ of session.captureCopy({ path: `${root}/ro`, maxBytes: GiB })) break;
+  }).rejects.toThrow(/not a staged read-write copy/i);
+  const parts = [];
+  for await (const part of session.captureCopy({ path: `${root}/rw`, maxBytes: 20n * GiB }))
+    parts.push(part);
+  // The listing may hash the staged bytes and the copy's limit: one second per MiB of both.
+  const scan = vi.mocked(client.commands.run).mock.calls.find(([command]) =>
+    // The program text names every mode; the mode argument follows it.
+    command.slice(command.lastIndexOf("sys.exit(1)")).includes("copy-scan"),
+  );
+  expect(scan?.[1]?.timeoutMs).toBe(120_000 + 2 * 20 * 1024 * 1000);
+  expect(parts.filter((part) => part.case !== "payload")).toEqual([
+    {
+      case: "file",
+      value: {
+        key: "new/created.txt",
+        size: 4n,
+        sha256: createHash("sha256").update("new\n").digest("hex"),
+      },
+    },
+    {
+      case: "file",
+      value: {
+        key: "rows.csv",
+        size: 4n,
+        sha256: createHash("sha256").update("x\ny\n").digest("hex"),
+      },
+    },
+    // Two unchanged files and the link.
+    { case: "listed", value: { skipped: 3n, errorKey: "", errorReason: "" } },
+  ]);
+  expect(
+    Buffer.concat(
+      parts.flatMap((part) => (part.case === "payload" ? [Buffer.from(part.value)] : [])),
+    ).toString(),
+  ).toBe("new\nx\ny\n");
+  await session.stop({ owner });
+  // A sealed read-only copy keeps its owner from removing entries; reopen it for cleanup.
+  for (const directory of ["ro", "ro/nested"])
+    await chmod(join(sandboxRoot, "checkout", root, directory), 0o700);
+}, 30_000);
+
+it("refuses a read-write copy holding a hard link or an unwritable name without sending bytes", async () => {
+  const { session, writeTransfer } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await session.stage(header, bytes);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  await session.stageCopy(
+    { path: `${root}/rw`, readWrite: true },
+    copyParts({ "a.txt": Buffer.from("a\n") }),
+  );
+  const copy = join(dirname(writeTransfer.mock.calls[0]?.[0] as string), "checkout", root, "rw");
+  await writeFile(join(copy, "b.txt"), "b\n");
+  await link(join(copy, "b.txt"), join(copy, "c.txt"));
+  await session.capture();
+  const parts = [];
+  for await (const part of session.captureCopy({ path: `${root}/rw`, maxBytes: GiB }))
+    parts.push(part);
+  expect(parts.at(-1)).toEqual({
+    case: "listed",
+    value: { skipped: 1n, errorKey: "b.txt", errorReason: "a file has another link or changed" },
+  });
+  expect(parts.some((part) => part.case === "payload")).toBe(false);
+  await session.stop({ owner });
+}, 30_000);
+
+it("stages any name and empty directory a local read-only copy holds", async () => {
+  const { session, writeTransfer } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await session.stage(header, bytes);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  // Names a Volume key refuses are still files a `file://` Volume can hold.
+  const odd = "back\\slash\tand tab.txt";
+  await expect(
+    session.stageCopy(
+      { path: `${root}/ro`, readWrite: false },
+      copyParts({ [odd]: Buffer.from("odd\n") }, undefined, ["empty", "nested/hollow"]),
+    ),
+  ).resolves.toEqual({ files: 1n });
+  const copy = join(dirname(writeTransfer.mock.calls[0]?.[0] as string), "checkout", root, "ro");
+  expect(await readFile(join(copy, odd), "utf8")).toBe("odd\n");
+  for (const directory of ["empty", "nested/hollow"])
+    expect((await stat(join(copy, directory))).isDirectory()).toBe(true);
+  // A read-write copy's names must be Volume keys, so they can be written back.
+  await expect(
+    session.stageCopy(
+      { path: `${root}/rw`, readWrite: true },
+      copyParts({ [odd]: Buffer.from("odd\n") }),
+    ),
+  ).rejects.toThrow(/copy file record is invalid/u);
+  await session.stop({ owner });
+  for (const directory of ["ro", "ro/nested", "ro/nested/hollow", "ro/empty"])
+    await chmod(join(copy, "..", directory), 0o700);
+}, 30_000);
+
+it("refuses a change over the copy's limits without reading it", async () => {
+  const { session, writeTransfer, readTransfer } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await session.stage(header, bytes);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  await session.stageCopy(
+    { path: `${root}/rw`, readWrite: true },
+    copyParts({ "kept.bin": Buffer.alloc(600, 1) }),
+  );
+  const copy = join(dirname(writeTransfer.mock.calls[0]?.[0] as string), "checkout", root, "rw");
+  await session.capture();
+  const listed = async (maxBytes: bigint) => {
+    const parts = [];
+    for await (const part of session.captureCopy({ path: `${root}/rw`, maxBytes }))
+      parts.push(part);
+    const summary = parts.find((part) => part.case === "listed");
+    if (summary?.value.errorReason)
+      expect(parts.some((part) => part.case === "payload")).toBe(false);
+    return summary;
+  };
+  // A sparse file far over the limit is refused by its size alone.
+  const sparse = await open(join(copy, "huge.bin"), "w");
+  await sparse.truncate(64 * 1024 ** 3);
+  await sparse.close();
+  const reads = readTransfer.mock.calls.length;
+  expect(await listed(1000n)).toEqual({
+    case: "listed",
+    value: {
+      skipped: 0n,
+      errorKey: "huge.bin",
+      errorReason: "a file exceeds the copy byte limit or 5 GiB",
+    },
+  });
+  // Only the listing itself came back.
+  expect(readTransfer.mock.calls.length).toBe(reads + 1);
+  await rm(join(copy, "huge.bin"));
+  // A staged file counts only once it changes; new files may not exceed the limit together.
+  await writeFile(join(copy, "a.bin"), Buffer.alloc(300, 2));
+  await writeFile(join(copy, "b.bin"), Buffer.alloc(300, 3));
+  expect(await listed(1000n)).toEqual({
+    case: "listed",
+    value: { skipped: 1n, errorKey: "", errorReason: "" },
+  });
+  await writeFile(join(copy, "kept.bin"), Buffer.alloc(600, 4));
+  expect(await listed(1000n)).toEqual({
+    case: "listed",
+    value: {
+      skipped: 0n,
+      errorKey: "kept.bin",
+      errorReason: "change set exceeds the copy byte limit",
+    },
+  });
+  await session.stop({ owner });
+}, 30_000);
+
+it("wires Workspace copy staging and capture through generated gRPC and production handlers", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  const token = "workspace-provider-fixture-token";
+  const auth = { headers: { authorization: `Bearer ${token}` } };
+  const server = await startRemoteWorkspaceTransport({
+    ...createWorkspaceHandlers(session),
+    token,
+  });
+  const sessionManager = new Http2SessionManager(server.endpoint);
+  const transport = createGrpcTransport({ baseUrl: server.endpoint, sessionManager });
+  const provider = createClient(RemoteWorkspaceProvider, transport);
+  const root = `volumes/${createHash("sha256").update(owner.attemptId).digest("hex")}`;
+  try {
+    await provider.allocate(
+      { owner, timeoutMs: 60_000, allowedActions: ["files:read", "files:write"] },
+      auth,
+    );
+    await provider.stage(
+      (async function* () {
+        yield create(RemoteWorkspaceStageChunkSchema, { part: { case: "header", value: header } });
+        yield create(RemoteWorkspaceStageChunkSchema, { part: { case: "payload", value: bytes } });
+      })(),
+      auth,
+    );
+    const upload = (path: string, files: Record<string, Buffer>) =>
+      (async function* () {
+        yield create(RemoteWorkspaceCopyUploadSchema, {
+          part: { case: "header", value: { path, readWrite: true } },
+        });
+        for await (const part of copyParts(files))
+          yield create(RemoteWorkspaceCopyUploadSchema, { part });
+      })();
+    // A stream must open with its header.
+    await expect(
+      provider.stageCopy(
+        (async function* () {
+          yield create(RemoteWorkspaceCopyUploadSchema, {
+            part: { case: "payload", value: Buffer.from("x") },
+          });
+        })(),
+        auth,
+      ),
+    ).rejects.toMatchObject({ code: Code.InvalidArgument });
+    await expect(
+      provider.stageCopy(upload(`${root}/rw`, { "rows.csv": Buffer.from("x\n") }), auth),
+    ).resolves.toMatchObject({ files: 1n });
+    await session.execute({ kind: "write", path: `${root}/rw/rows.csv`, content: "x\ny\n" });
+    for await (const _ of provider.capture({}, auth));
+    const parts = [];
+    for await (const { part } of provider.captureCopy({ path: `${root}/rw`, maxBytes: GiB }, auth))
+      parts.push(part);
+    expect(parts.map((part) => part.case)).toEqual(["file", "listed", "payload"]);
+    expect(Buffer.from(parts[2]?.value as Uint8Array).toString()).toBe("x\ny\n");
+    await provider.stop({ owner, sandboxId: "sandbox-one" }, auth);
+  } finally {
+    sessionManager.abort();
+    await server.close();
+  }
+}, 15_000);
+/** Two commits of one repository, each bundled with its full history. */
+async function history() {
+  const root = await mkdtemp(join(tmpdir(), "supertag-e2b-history-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const git = async (...args: string[]) => {
+    const result = await wait(spawn("git", args, { cwd: root }));
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+    return result.stdout.trim();
+  };
+  const commit = async (name: string) => {
+    await git("add", "-A", ".");
+    await git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgSign=false",
+      "commit",
+      "-qm",
+      name,
+    );
+    const head = await git("rev-parse", "HEAD");
+    const ref = `refs/heads/supertag-deliveries/${name}`;
+    await git("update-ref", ref, head);
+    const path = join(root, `${name}.bundle`);
+    await git("bundle", "create", path, ref);
+    const bytes = await readFile(path);
+    await rm(path);
+    return {
+      bytes,
+      header: {
+        startCommit: head,
+        bundle: {
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          byteLength: BigInt(bytes.length),
+        },
+      },
+    };
+  };
+  await git("init", "-q", "--template=");
+  await writeFile(join(root, ".gitignore"), ".setup-*\n");
+  await writeFile(join(root, "a.txt"), "one\n");
+  await writeFile(join(root, "gone.txt"), "removed later\n");
+  const trusted = await commit("trusted");
+  await writeFile(join(root, "a.txt"), "two\n");
+  await rm(join(root, "gone.txt"));
+  const next = await commit("next");
+  return { trusted, next };
+}
+
+it("prepares the trusted commit once, snapshots it, and starts Task sandboxes from the artifact", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "supertag-e2b-prepared-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const preparedRoot = join(directory, "prepared");
+  const { trusted, next } = await history();
+  const setup = ["sh -c 'echo built >> .setup-log'", "sh -c 'echo tracked-edit > a.txt'"];
+
+  // A preparation sandbox takes the trusted commit alone, runs setup, and is snapshotted.
+  const build = await fixture(preparedRoot);
+  await expect(
+    build.session.allocate({
+      owner,
+      timeoutMs: 60_000,
+      allowedActions: ["files:read"],
+      prepare: true,
+      environment: { dockerfileCommands: [], setupCommands: setup },
+    }),
+  ).rejects.toThrow(/no file actions/u);
+  const preparation = await fixture(preparedRoot);
+  await preparation.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: [],
+    prepare: true,
+    environment: { dockerfileCommands: [], setupCommands: setup },
+  });
+  await expect(
+    preparation.session.stage(
+      { ...trusted.header, mcpCommit: trusted.header.startCommit },
+      trusted.bytes,
+    ),
+  ).rejects.toThrow(/trusted commit alone/u);
+  await preparation.session.stage(trusted.header, trusted.bytes);
+  await expect(preparation.session.execute({ kind: "read", path: "a.txt" })).rejects.toThrow(
+    /not staged/u,
+  );
+  await expect(preparation.session.snapshot()).resolves.toBe("snapshot-prepared");
+  await preparation.session.stop({ owner });
+
+  // A Task sandbox from the artifact builds nothing, runs no setup, and checks out its start
+  // commit over the prepared one: tracked files follow the commit, setup output stays.
+  const task = await fixture(preparedRoot);
+  await task.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+    preparedArtifact: "snapshot-prepared",
+    environment: { dockerfileCommands: ["USER node"], user: "node", setupCommands: setup },
+  });
+  expect(task.templates.build).not.toHaveBeenCalled();
+  expect(task.factory.create).toHaveBeenCalledWith(
+    expect.objectContaining({ template: "snapshot-prepared" }),
+  );
+  await task.session.stage(next.header, next.bytes);
+  expect(
+    vi
+      .mocked(task.client.commands.run)
+      .mock.calls.some(([command]) => command.includes("devcontainer-setup")),
+  ).toBe(false);
+  await expect(task.session.snapshot()).rejects.toThrow(/preparation sandbox/u);
+  const captured = await task.session.capture();
+  expect(unpack(captured.bytes)).toEqual([
+    { path: ".gitignore", mode: "100644", body: ".setup-*\n" },
+    { path: ".setup-log", mode: "100644", body: "built\n" },
+    { path: "a.txt", mode: "100644", body: "two\n" },
+  ]);
+  await task.session.stop({ owner });
+
+  // A warm preparation starts from the artifact and runs its own setup lines on the new commit.
+  const warm = await fixture(preparedRoot);
+  await warm.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: [],
+    prepare: true,
+    preparedArtifact: "snapshot-prepared",
+    environment: { dockerfileCommands: [], setupCommands: ["sh -c 'echo warm >> .setup-log'"] },
+  });
+  await warm.session.stage(next.header, next.bytes);
+  expect(await readFile(join(preparedRoot, "checkout", ".setup-log"), "utf8")).toBe(
+    "built\nwarm\n",
+  );
+  await warm.session.snapshot();
+  await warm.session.stop({ owner });
+
+  // Eviction deletes the provider's snapshot; an invalid ID never reaches it.
+  await warm.session.removeArtifact("snapshot-prepared");
+  expect(warm.factory.deleteSnapshot).toHaveBeenCalledWith("snapshot-prepared");
+  await expect(warm.session.removeArtifact("bad artifact")).rejects.toThrow(/invalid/u);
+  const other = await fixture(preparedRoot);
+  await expect(
+    other.session.allocate({
+      owner,
+      timeoutMs: 60_000,
+      allowedActions: [],
+      preparedArtifact: "bad artifact",
+    }),
+  ).rejects.toThrow(/prepared artifact is invalid/u);
+  expect(other.factory.create).not.toHaveBeenCalled();
+}, 30_000);

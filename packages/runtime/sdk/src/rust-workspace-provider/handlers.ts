@@ -75,12 +75,15 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
       async allocate(request, context) {
         if (!request.owner)
           throw new ConnectError("Workspace owner is required", Code.InvalidArgument);
-        const { owner, timeoutMs, allowedActions, environment } = request;
+        const { owner, timeoutMs, allowedActions, environment, preparedArtifact, prepare } =
+          request;
         return session.allocate(
           {
             owner,
             timeoutMs,
             allowedActions,
+            ...(preparedArtifact === undefined ? {} : { preparedArtifact }),
+            prepare,
             ...(environment === undefined
               ? {}
               : {
@@ -152,6 +155,30 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           stageInFlight = false;
         }
       },
+      async stageCopy(stream, context) {
+        const inputs = stream[Symbol.asyncIterator]();
+        const first = await inputs.next();
+        if (first.done || first.value.part.case !== "header")
+          throw new ConnectError("Workspace copy header is required", Code.InvalidArgument);
+        const { path, readWrite } = first.value.part.value;
+        async function* parts() {
+          for (;;) {
+            const next = await inputs.next();
+            if (next.done) return;
+            const { part } = next.value;
+            if (part.case === "file") yield { case: "file" as const, value: part.value };
+            else if (part.case === "directory")
+              yield { case: "directory" as const, value: part.value };
+            else if (part.case === "payload" && part.value.byteLength <= CHUNK_SIZE)
+              yield { case: "payload" as const, value: part.value };
+            else throw new ConnectError("Invalid Workspace copy stream", Code.InvalidArgument);
+          }
+        }
+        return session.stageCopy({ path, readWrite }, parts(), context.signal);
+      },
+      async *captureCopy(request, context) {
+        for await (const part of session.captureCopy(request, context.signal)) yield { part };
+      },
       async *capture(_request, context) {
         const { tree, bytes } = await session.capture(context.signal);
         yield { part: { case: "tree", value: tree } };
@@ -194,6 +221,13 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           // Ends its input, so its supervisor stops its process group, never the sandbox.
           await session.stopMcpServer(server);
         }
+      },
+      async snapshot(_request, context) {
+        return { artifact: await session.snapshot(context.signal) };
+      },
+      async removeArtifact(request, context) {
+        await session.removeArtifact(request.artifact, context.signal);
+        return {};
       },
       async stop(request) {
         if (!request.owner)

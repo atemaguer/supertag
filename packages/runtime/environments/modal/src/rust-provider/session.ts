@@ -42,8 +42,17 @@ export interface ModalWorkspaceScope {
     readonly blockNetwork: true;
     /** A devcontainer image: Dockerfile layers on its registry image or the configured one. */
     readonly image?: Pick<SandboxEnvironment, "image" | "dockerfileCommands">;
-  }): Promise<ModalSandboxClient>;
+    /** A prepared artifact's image ID, which already holds the devcontainer's image and setup. */
+    readonly artifact?: string;
+  }): Promise<ModalWorkspaceSandbox>;
+  /** Deletes a prepared image; one already gone counts as deleted. */
+  deleteImage(imageId: string): Promise<void>;
   close(): void;
+}
+
+/** A Modal sandbox that can snapshot its filesystem into a prepared image. */
+export interface ModalWorkspaceSandbox extends ModalSandboxClient {
+  snapshotFilesystem(): Promise<string>;
 }
 
 function required(name: string): string {
@@ -69,14 +78,24 @@ async function openNativeScope(): Promise<ModalWorkspaceScope> {
     const app = await client.apps.fromName(appName, { createIfMissing: false });
     return {
       inventory: modalSandboxInventory(client, { appId: app.appId, environment }),
-      async create({ image: devcontainer, ...params }) {
-        const name = devcontainer?.image ?? imageName;
+      async create({ image: devcontainer, artifact, ...params }) {
+        const name = artifact ?? devcontainer?.image ?? imageName;
         let image = /^im-(?:[A-Za-z0-9]{22}|[A-Za-z0-9]{26})$/u.test(name)
           ? await client.images.fromId(name)
           : client.images.fromRegistry(name);
-        if (devcontainer && devcontainer.dockerfileCommands.length > 0)
+        if (artifact === undefined && devcontainer && devcontainer.dockerfileCommands.length > 0)
           image = await image.dockerfileCommands([...devcontainer.dockerfileCommands]).build(app);
-        return client.sandboxes.create(app, image, params);
+        const sandbox = await client.sandboxes.create(app, image, params);
+        return Object.assign(sandbox, {
+          snapshotFilesystem: async () =>
+            (await sandbox.snapshotFilesystem({ timeoutMs: 300_000 })).imageId,
+        });
+      },
+      async deleteImage(imageId) {
+        await client.images.delete(imageId).catch((error: unknown) => {
+          if (!/not.?found/iu.test(error instanceof Error ? error.message : String(error)))
+            throw error;
+        });
       },
       close: () => client.close(),
     };
@@ -171,7 +190,10 @@ async function readTransfer(
 }
 
 export function createModalWorkspaceSession(
-  options: { readonly open?: () => Promise<ModalWorkspaceScope> } = {},
+  options: {
+    readonly open?: () => Promise<ModalWorkspaceScope>;
+    readonly preparedRoot?: string;
+  } = {},
 ): SandboxWorkspaceSession {
   let scope: Promise<ModalWorkspaceScope> | undefined;
   const open = () => (scope ??= (options.open ?? openNativeScope)());
@@ -179,65 +201,75 @@ export function createModalWorkspaceSession(
     appName: "workspace-provider",
     maxOutputCharacters: 65_536,
   }).options;
-  const session = createSandboxWorkspaceSession({
-    label: "Modal",
-    validateOwner: sandboxOwnershipMetadata,
-    async allocate(owner, timeoutMs, signal, environment) {
-      const connection = await withSignal(open, signal);
-      const sandbox = await withSignal(
-        () =>
-          connection.create({
-            name: sandboxOwnershipName(owner),
-            tags: { ...sandboxOwnershipMetadata(owner) },
-            timeoutMs: Math.min(Math.ceil(timeoutMs / 1000) * 1000, MAX_LIFETIME_MS),
-            blockNetwork: true,
-            ...(environment && environment.dockerfileCommands.length > 0
-              ? {
-                  image: {
-                    ...(environment.image === undefined ? {} : { image: environment.image }),
-                    dockerfileCommands: environment.dockerfileCommands,
-                  },
-                }
-              : {}),
-          }),
-        signal,
-      );
-      const sandboxId = sandbox.sandboxId;
-      if (!/^[\w-]{1,256}$/u.test(sandboxId)) throw new Error("Invalid Modal sandbox identity");
-      const identity = await withSignal(() => connection.inventory.get(sandboxId), signal);
-      if (identity.sandboxId !== sandboxId || !sandboxOwnershipMatches(owner, identity))
-        throw new Error("Modal sandbox ownership could not be verified");
-      return {
-        sandboxId,
-        environment: (root) =>
-          sandboxExecutionEnvironment(adaptModal(sandbox), root, environmentOptions),
-        async run(argv, timeoutMs, signal) {
-          return withSignal(async () => {
-            const process = await sandbox.exec(argv, {
-              mode: "binary",
-              workdir: "/tmp",
-              timeoutMs,
-            });
-            const result = Promise.all([
-              collect(process.stdout, 8192),
-              collect(process.stderr, 8192),
-              process.wait(),
-            ]);
-            void result.catch(() => undefined);
-            await process.stdin.close();
-            const [stdout, , exitCode] = await result;
-            return { stdout: new TextDecoder().decode(stdout), exitCode };
-          }, signal);
-        },
-        writeTransfer: (path, bytes, signal) => writeTransfer(sandbox, path, bytes, signal),
-        readTransfer: (path, signal) => readTransfer(sandbox, path, signal),
-      };
+  const session = createSandboxWorkspaceSession(
+    {
+      label: "Modal",
+      validateOwner: sandboxOwnershipMetadata,
+      async allocate(owner, timeoutMs, signal, environment, artifact) {
+        const connection = await withSignal(open, signal);
+        const sandbox = await withSignal(
+          () =>
+            connection.create({
+              name: sandboxOwnershipName(owner),
+              tags: { ...sandboxOwnershipMetadata(owner) },
+              timeoutMs: Math.min(Math.ceil(timeoutMs / 1000) * 1000, MAX_LIFETIME_MS),
+              blockNetwork: true,
+              ...(artifact !== undefined
+                ? { artifact }
+                : environment && environment.dockerfileCommands.length > 0
+                  ? {
+                      image: {
+                        ...(environment.image === undefined ? {} : { image: environment.image }),
+                        dockerfileCommands: environment.dockerfileCommands,
+                      },
+                    }
+                  : {}),
+            }),
+          signal,
+        );
+        const sandboxId = sandbox.sandboxId;
+        if (!/^[\w-]{1,256}$/u.test(sandboxId)) throw new Error("Invalid Modal sandbox identity");
+        const identity = await withSignal(() => connection.inventory.get(sandboxId), signal);
+        if (identity.sandboxId !== sandboxId || !sandboxOwnershipMatches(owner, identity))
+          throw new Error("Modal sandbox ownership could not be verified");
+        return {
+          sandboxId,
+          environment: (root) =>
+            sandboxExecutionEnvironment(adaptModal(sandbox), root, environmentOptions),
+          async run(argv, timeoutMs, signal) {
+            return withSignal(async () => {
+              const process = await sandbox.exec(argv, {
+                mode: "binary",
+                workdir: "/tmp",
+                timeoutMs,
+              });
+              const result = Promise.all([
+                collect(process.stdout, 8192),
+                collect(process.stderr, 8192),
+                process.wait(),
+              ]);
+              void result.catch(() => undefined);
+              await process.stdin.close();
+              const [stdout, , exitCode] = await result;
+              return { stdout: new TextDecoder().decode(stdout), exitCode };
+            }, signal);
+          },
+          writeTransfer: (path, bytes, signal) => writeTransfer(sandbox, path, bytes, signal),
+          readTransfer: (path, signal) => readTransfer(sandbox, path, signal),
+          snapshot: (signal) => withSignal(() => sandbox.snapshotFilesystem(), signal),
+        };
+      },
+      async stop(owner, sandboxId) {
+        const connection = await open();
+        return stopOwnedSandbox(connection.inventory, owner, sandboxId);
+      },
+      async removeArtifact(artifact) {
+        const connection = await open();
+        await connection.deleteImage(artifact);
+      },
     },
-    async stop(owner, sandboxId) {
-      const connection = await open();
-      return stopOwnedSandbox(connection.inventory, owner, sandboxId);
-    },
-  });
+    options.preparedRoot === undefined ? {} : { preparedRoot: options.preparedRoot },
+  );
   return {
     ...session,
     async close() {

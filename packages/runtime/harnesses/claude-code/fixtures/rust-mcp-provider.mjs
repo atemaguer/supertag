@@ -8,6 +8,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 const [journal] = process.argv.slice(2);
 const sessions = new Map();
 const headers = "Bearer synthetic-catalog-credential";
+// The catalog reads this header from an owner-only file on the Worker Host (`headerFile`).
+const key = "synthetic-catalog-credential-from-file";
 const inputSchema = {
   type: "object",
   properties: {
@@ -22,7 +24,11 @@ const inputSchema = {
 const audit = async (value) => appendFile(journal, `${JSON.stringify(value)}\n`);
 
 const http = createServer(async (request, response) => {
-  if (request.url !== "/mcp" || request.headers.authorization !== headers) {
+  if (
+    request.url !== "/mcp" ||
+    request.headers.authorization !== headers ||
+    request.headers["x-catalog-key"] !== key
+  ) {
     response.writeHead(401).end();
     return;
   }
@@ -46,8 +52,9 @@ const http = createServer(async (request, response) => {
       }));
       server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
         await audit({ tool: params.name, arguments: params.arguments });
+        // A mirror echoes the header read from a file, as a hostile server could.
         const text = params.arguments?.mirror
-          ? request.headers.authorization
+          ? request.headers["x-catalog-key"]
           : "fixture release record";
         return { content: [{ type: "text", text }] };
       });

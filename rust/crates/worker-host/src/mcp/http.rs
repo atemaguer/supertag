@@ -3,7 +3,11 @@ use std::time::Duration;
 use reqwest::{Client, Method, Response, StatusCode, header};
 use serde_json::{Value, json};
 
-use super::{Failure, catalog::HttpServer, oauth::McpLoginStore};
+use super::{
+    Failure,
+    catalog::{HttpServer, header_secrets, header_value},
+    oauth::McpLoginStore,
+};
 
 pub(super) const PROTOCOL_VERSION: &str = "2025-11-25";
 const SESSION: &str = "mcp-session-id";
@@ -32,6 +36,8 @@ pub(super) struct Session {
     access_token: Option<header::HeaderValue>,
     /// Headers a minted form supplied for this Attempt.
     minted: Box<header::HeaderMap>,
+    /// Headers read from the server's `headerFile` files for this Attempt.
+    files: Box<header::HeaderMap>,
     /// Every access token this session sent; all are withheld from Task-visible output.
     pub(super) tokens: Vec<String>,
 }
@@ -58,17 +64,39 @@ impl Session {
             login,
             access_token: None,
             minted: Box::default(),
+            files: Box::default(),
             tokens: Vec::new(),
         }
     }
 
     /// Whether this server's credentials can be fetched again after a refusal.
     fn renewable(&self) -> bool {
-        self.login.is_some() || self.server.minted.is_some()
+        self.login.is_some() || self.server.minted.is_some() || !self.server.header_files.is_empty()
     }
 
-    /// Mints this server's headers: again when the server refused `rejected`.
+    /// Reads this server's header files again.
+    fn read_files(&mut self) -> Result<(), Failure> {
+        let mut files = header::HeaderMap::new();
+        for (name, file) in &self.server.header_files {
+            let value = file.read().map_err(|_| Failure::Unavailable)?;
+            files.insert(
+                name.clone(),
+                header_value(&value).map_err(|_| Failure::Unavailable)?,
+            );
+            for secret in header_secrets(&value) {
+                if !secret.is_empty() && !self.tokens.contains(&secret) {
+                    self.tokens.push(secret);
+                }
+            }
+        }
+        *self.files = files;
+        Ok(())
+    }
+
+    /// Mints this server's headers and reads its header files again: again when the server
+    /// refused `rejected`.
     async fn mint(&mut self, rejected: Option<&str>) -> Result<(), Failure> {
+        self.read_files()?;
         let Some(minted) = self.server.minted.clone() else {
             return Ok(());
         };
@@ -138,6 +166,7 @@ impl Session {
             .client
             .request(method, self.server.endpoint.clone())
             .headers(self.server.headers.clone())
+            .headers((*self.files).clone())
             .headers((*self.minted).clone())
             .header(header::ACCEPT, "application/json, text/event-stream")
             .header(PROTOCOL, self.version);
@@ -201,6 +230,7 @@ impl Session {
             if self.login.is_some() {
                 let rejected = self.access_token_text();
                 self.authorize(rejected.as_deref()).await?;
+                self.read_files()?;
             } else {
                 let rejected = self.minted_token_text();
                 self.mint(Some(&rejected)).await?;
@@ -423,6 +453,94 @@ mod tests {
         for refused in [401, 403] {
             refresh_once_after(refused).await;
         }
+    }
+
+    #[tokio::test]
+    async fn a_refused_login_reads_its_header_files_again() {
+        use std::os::unix::fs::PermissionsExt;
+
+        use crate::mcp::{
+            oauth::{McpLogin, McpLoginStore, now_ms},
+            test_http::serve,
+        };
+        let initialize = json!({"jsonrpc":"2.0","id":1,"result":{
+            "protocolVersion":"2025-06-18","capabilities":{"tools":{}}
+        }})
+        .to_string();
+        let (address, served) = serve(vec![
+            (200, "application/json", initialize),
+            (202, "application/json", String::new()),
+            (401, "application/json", String::new()),
+            (
+                200,
+                "application/json",
+                json!({"access_token":"access-2","expires_in":3600}).to_string(),
+            ),
+            (
+                200,
+                "application/json",
+                json!({"jsonrpc":"2.0","id":2,"result":{"tools":[]}}).to_string(),
+            ),
+        ])
+        .await;
+        let url = format!("http://127.0.0.1:{}/mcp", address.port());
+        let root = tempfile::tempdir().unwrap();
+        let store = McpLoginStore::new(root.path().join("mcp-logins"));
+        store
+            .store(
+                "docs",
+                &McpLogin {
+                    url: url.clone(),
+                    token_endpoint: format!("http://127.0.0.1:{}/token", address.port()),
+                    client_id: "client".into(),
+                    client_secret: None,
+                    refresh_token: "refresh-1".into(),
+                    access_token: Some("access-1".into()),
+                    access_token_expires_at: Some(now_ms() + 3_600_000),
+                    refresh_token_expires_at: None,
+                    logged_in_at: 1,
+                    lapsed_at: None,
+                },
+            )
+            .unwrap();
+        let key = root.path().join("api-key");
+        let write = |value: &str| {
+            std::fs::write(&key, value).unwrap();
+            std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+        };
+        write("api-key-value-one\n");
+        let config = json!({"version":1,"servers":[{"name":"docs","url":url,"oauth":true,
+            "headerFile":{"X-Api-Key":key}}]});
+        let catalog = McpCatalog::parse(config.to_string().as_bytes(), |_| None).unwrap();
+        let crate::mcp::catalog::Transport::Http(server) =
+            catalog.servers["docs"].transport.clone()
+        else {
+            panic!("HTTP server expected");
+        };
+        let mut session = Session::new(client().unwrap(), server, Some(&store));
+        session.initialize().await.unwrap();
+        // The server refuses the request after the file was replaced: the resend carries the
+        // refreshed login and the file's new value.
+        write("api-key-value-two\n");
+        session.rpc("tools/list", json!({})).await.unwrap();
+        assert!(session.tokens.contains(&"api-key-value-two".to_owned()));
+        let requests = served.await.unwrap();
+        assert!(
+            requests[2]
+                .headers
+                .contains(&"x-api-key: api-key-value-one".into())
+        );
+        assert_eq!(requests[3].line, "POST /token HTTP/1.1");
+        assert!(
+            requests[4]
+                .headers
+                .contains(&"x-api-key: api-key-value-two".into())
+        );
+        assert!(
+            requests[4]
+                .headers
+                .contains(&"authorization: bearer access-2".into())
+        );
     }
 
     /// The server refuses the stored access token with `refused`; the session refreshes once,
