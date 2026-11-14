@@ -4,6 +4,7 @@
 //! caller must stop the adapter before finalization. No method promotes a Session
 //! head: the Control Plane chooses a verified delivery's commit as the next pin.
 
+pub mod base_ref;
 pub mod devcontainer;
 mod git;
 mod lock;

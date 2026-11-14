@@ -246,6 +246,30 @@ pub fn valid_git_commit(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
+/// A short branch name a Tag's Workspace may follow, such as `main` or `release/1.2`: what
+/// `git check-ref-format --branch` accepts, without a `refs/` prefix, at most 200 bytes, and never
+/// a full commit (a commit is pinned with `base_commit` instead).
+pub fn valid_git_branch(value: &str) -> bool {
+    let components_valid = value.split('/').all(|component| {
+        !component.is_empty() && !component.starts_with('.') && !component.ends_with(".lock")
+    });
+    !value.is_empty()
+        && value.len() <= 200
+        && components_valid
+        && !value.starts_with('-')
+        && !value.starts_with("refs/")
+        && !value.ends_with('.')
+        && value != "@"
+        && !value.contains("..")
+        && !value.contains("@{")
+        && !valid_git_commit(value)
+        && value.bytes().all(|byte| {
+            byte > b' '
+                && byte != 0x7f
+                && !matches!(byte, b'~' | b'^' | b':' | b'?' | b'*' | b'[' | b'\\')
+        })
+}
+
 pub fn validate_workspace_delivery(
     reference: &v2::WorkspaceDeliveryReference,
 ) -> Result<(), Status> {
@@ -277,4 +301,43 @@ pub fn validate_workspace_delivery(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod git_branch_tests {
+    use super::valid_git_branch;
+
+    #[test]
+    fn accepts_branch_names_and_refuses_refs_commits_and_invalid_names() {
+        for valid in ["main", "release/1.2", "feature-x", "a_b", "v1.0"] {
+            assert!(valid_git_branch(valid), "{valid}");
+        }
+        for invalid in [
+            "",
+            "-main",
+            "refs/heads/main",
+            "main.",
+            "main.lock",
+            "a//b",
+            "/main",
+            "main/",
+            ".hidden",
+            "a/.b",
+            "a..b",
+            "a@{1}",
+            "@",
+            "a b",
+            "a~1",
+            "a^",
+            "a:b",
+            "a?",
+            "a*",
+            "a[b",
+            "a\\b",
+            "0123456789abcdef0123456789abcdef01234567",
+        ] {
+            assert!(!valid_git_branch(invalid), "{invalid:?}");
+        }
+        assert!(!valid_git_branch(&"a".repeat(201)));
+    }
 }

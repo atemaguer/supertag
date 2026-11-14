@@ -816,13 +816,23 @@ impl<'a> Catalog<'a> {
                 "invalid Workspace ID"
             );
             let base_commit = workspace.base_commit.unwrap_or_default();
-            if base_commit.is_empty() {
-                self.require_workspace(declarations, &workspace.id).await?;
-            } else {
+            let base_ref = workspace.base_ref.unwrap_or_default();
+            ensure!(
+                base_commit.is_empty() || base_ref.is_empty(),
+                "a Tag Workspace sets baseCommit or ref, not both"
+            );
+            if !base_commit.is_empty() {
                 ensure!(
                     supertag_protocol::valid_git_commit(&base_commit),
                     "invalid Workspace commit"
                 );
+            } else if !base_ref.is_empty() {
+                ensure!(
+                    supertag_protocol::valid_git_branch(&base_ref),
+                    "Workspace ref must be a branch name such as main"
+                );
+            } else {
+                self.require_workspace(declarations, &workspace.id).await?;
             }
             let mut mcp_servers = workspace.mcp;
             ensure!(
@@ -834,6 +844,7 @@ impl<'a> Catalog<'a> {
                 mounts: vec![],
                 workspace_id: workspace.id,
                 base_commit,
+                base_ref,
                 github_source: None,
             });
         }

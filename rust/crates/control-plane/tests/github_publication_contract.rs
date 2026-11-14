@@ -69,6 +69,7 @@ async fn setup(store: &Store) {
             instructions: "Change the repository".into(),
             allowed_actions: vec!["files:write".into()],
             workspace: Some(WorkspaceSpec {
+                base_ref: String::new(),
                 mcp_servers: vec![],
                 mounts: vec![],
                 workspace_id: "project".into(),

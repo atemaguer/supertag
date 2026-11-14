@@ -300,6 +300,7 @@ impl<'a> Runtime<'a> {
                 instructions: "Follow the fixture Task with its admitted tools.".into(),
                 allowed_actions: actions.iter().map(|action| (*action).into()).collect(),
                 workspace: Some(WorkspaceSpec {
+                    base_ref: String::new(),
                     mcp_servers: mcp_servers.iter().map(|name| (*name).into()).collect(),
                     mounts: vec![],
                     workspace_id: WORKSPACE.into(),

@@ -474,7 +474,11 @@ async fn status_in(
     }
 }
 
-async fn output(repository: &Path, args: &[&str], cancel: &CancellationToken) -> Result<String> {
+pub(crate) async fn output(
+    repository: &Path,
+    args: &[&str],
+    cancel: &CancellationToken,
+) -> Result<String> {
     output_in(repository, &[], args, cancel).await
 }
 

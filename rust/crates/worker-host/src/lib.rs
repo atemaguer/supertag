@@ -52,8 +52,8 @@ use supertag_protocol::{
         Assignment, AttemptExecutionSelection, ClaimTaskRequest, CommitContextResolutionRequest,
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
         HostRecord, InspectAttemptRequest, ReclaimAttemptRequest, RecordWorkspaceMcpRequest,
-        RecordWorkspaceMountWritesRequest, RegisterHostRequest, ResolvedSkill, ServiceRole,
-        StartTaskRequest, Task, TaskState, WorkspaceMountWriteStatus,
+        RecordWorkspaceMountWritesRequest, RegisterHostRequest, ResolveWorkspaceRefRequest,
+        ResolvedSkill, ServiceRole, StartTaskRequest, Task, TaskState, WorkspaceMountWriteStatus,
         artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
         attempt_changed_paths_client::AttemptChangedPathsClient,
@@ -1295,6 +1295,50 @@ async fn run_assignment(
     ready();
     let mut task = authority.task.context("execution authority has no Task")?;
     ensure_attempt(&task, &attempt)?;
+    if let Some(workspace) = task
+        .workspace
+        .as_ref()
+        .filter(|spec| !spec.base_ref.is_empty() && spec.base_commit.is_empty())
+    {
+        // A Tag that follows a branch: this Session's first Attempt resolves it here, and the
+        // Control Plane records the first resolution for every Task of the Session.
+        let branch = workspace.base_ref.clone();
+        let Ok(commit) = workspaces
+            .resolve_ref(&workspace.workspace_id, &branch, shutdown)
+            .await
+        else {
+            return save_finish(
+                journal,
+                attempt,
+                adapter::failed(&format!(
+                    "Workspace branch {branch} does not name a commit on this Worker Host"
+                )),
+            );
+        };
+        match host
+            .resolve_workspace_ref(request(
+                ResolveWorkspaceRefRequest {
+                    attempt: Some(attempt.inspect()),
+                    base_commit: commit,
+                },
+                token,
+            )?)
+            .await
+        {
+            Ok(response) => {
+                task = response.into_inner();
+                ensure_attempt(&task, &attempt)?;
+            }
+            Err(error) if retryable(&error) => {
+                wait_for_work(shutdown).await;
+                return Ok(());
+            }
+            Err(error) if lost_ownership(&error) => {
+                return discard_prelaunch(options, journal, workspaces, &attempt);
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
     let valid_until = sent
         .checked_add(Duration::from_millis(authority.valid_for_ms))
         .context("invalid execution authority duration")?;

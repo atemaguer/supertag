@@ -183,6 +183,7 @@ async fn contract(url: String) {
         instructions: "Read only".into(),
         allowed_actions: vec!["files:read".into()],
         workspace: Some(WorkspaceSpec {
+            base_ref: String::new(),
             mcp_servers: vec![],
             mounts: vec![],
             workspace_id: "project".into(),
@@ -192,6 +193,16 @@ async fn contract(url: String) {
         ..Default::default()
     };
     store.put_tag_spec(tag.clone()).await.unwrap();
+    // A GitHub Workspace selects its revision itself; a Tag cannot make it follow a branch.
+    let mut following = tag.clone();
+    let spec = following.workspace.as_mut().unwrap();
+    spec.base_commit.clear();
+    spec.base_ref = "main".into();
+    following.expected_revision = None;
+    assert!(matches!(
+        store.put_tag_spec(following).await,
+        Err(StoreError::InvalidArgument(message)) if message.contains("GitHub Workspace")
+    ));
     let mut forged = tag.clone();
     forged.workspace.as_mut().unwrap().github_source = Some(accepted.clone());
     assert!(matches!(

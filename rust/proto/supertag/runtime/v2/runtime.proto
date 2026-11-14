@@ -712,6 +712,10 @@ service WorkerHost {
   // Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
   // execution report. The Attempt stays uncertain until the host or an operator resolves it.
   rpc ReportCleanupFailure(ReportCleanupFailureRequest) returns (ReportCleanupFailureResponse);
+  // The commit the running Attempt's host resolved for its Task's Workspace `base_ref`. The first
+  // resolution in a Session wins and is recorded on every unresolved Task of the Session; the
+  // returned Task carries the recorded commit.
+  rpc ResolveWorkspaceRef(ResolveWorkspaceRefRequest) returns (Task);
 }
 
 enum HostPhase {
@@ -1668,6 +1672,11 @@ message ReportCleanupFailureRequest {
 
 message ReportCleanupFailureResponse {}
 
+message ResolveWorkspaceRefRequest {
+  InspectAttemptRequest attempt = 1;
+  string base_commit = 2;
+}
+
 message TaskArtifactInputSelection {
   string artifact_id = 1;
   repeated string paths = 2;
@@ -2131,6 +2140,8 @@ message CheckpointDownload {
 
 message WorkspaceSpec {
   string workspace_id = 1;
+  // The full commit Tasks start from. A Tag either pins it or names `base_ref`, never both; a
+  // Task of a Tag that names `base_ref` has it empty until its first Attempt resolves the branch.
   string base_commit = 2;
   // Set by admission from the catalog, never accepted from PutTag input.
   GithubWorkspace github_source = 3;
@@ -2138,6 +2149,10 @@ message WorkspaceSpec {
   // Servers the Workspace's `.mcp.json` declares that its Tasks may use. Each Attempt reads them
   // from a Worker-owned snapshot of `base_commit`, never from the Task worktree.
   repeated string mcp_servers = 1800;
+  // A local Workspace branch the Tag follows instead of a pinned commit. A Session's first
+  // Attempt resolves it on its Worker Host through `ResolveWorkspaceRef`, and every Task of the
+  // Session keeps that commit.
+  string base_ref = 5;
 }
 
 message WorkspaceCopyMount {

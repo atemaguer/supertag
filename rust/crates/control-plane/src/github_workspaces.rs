@@ -205,11 +205,19 @@ pub(crate) async fn validate_tag_in(
     tx: &mut Transaction<'_, Any>,
     workspace: Option<&WorkspaceSpec>,
 ) -> Result<()> {
-    if let Some(spec) = workspace
-        && spec.base_commit.is_empty()
-        && catalog_in(tx, &spec.workspace_id).await?.is_none()
-    {
-        return Err(invalid("local Workspace requires a full Git base commit"));
+    let Some(spec) = workspace else {
+        return Ok(());
+    };
+    let configured = catalog_in(tx, &spec.workspace_id).await?.is_some();
+    if configured && !spec.base_ref.is_empty() {
+        return Err(invalid(
+            "a GitHub Workspace selects its revision on the Workspace, not a Tag branch",
+        ));
+    }
+    if !configured && spec.base_commit.is_empty() && spec.base_ref.is_empty() {
+        return Err(invalid(
+            "local Workspace requires a full Git base commit or a branch to follow",
+        ));
     }
     Ok(())
 }
@@ -225,6 +233,11 @@ pub(crate) async fn admission_in(
     let Some(value) = catalog_in(tx, &spec.workspace_id).await? else {
         return Ok(());
     };
+    if !spec.base_ref.is_empty() {
+        return Err(StoreError::FailedPrecondition(
+            "a GitHub Workspace selects its revision on the Workspace, not a Tag branch".into(),
+        ));
+    }
     let source = value
         .source
         .as_ref()

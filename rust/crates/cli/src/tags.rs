@@ -62,12 +62,15 @@ pub struct PutArgs {
     /// Logical local or configured GitHub repository binding.
     #[arg(long)]
     workspace_id: Option<String>,
-    /// Full local Git base commit. Omit for a configured GitHub source.
-    #[arg(long, requires = "workspace_id")]
+    /// Full local Git base commit every Session starts from. Omit for a configured GitHub source.
+    #[arg(long, requires = "workspace_id", conflicts_with = "workspace_ref")]
     workspace_base: Option<String>,
+    /// Local Git branch whose current commit each new Session starts from, such as main.
+    #[arg(long, requires = "workspace_id")]
+    workspace_ref: Option<String>,
     /// JSON array of {volumeId,destination,maxBytes,access} for Workspace Volume copies; maxBytes
     /// defaults to 1 GiB (at most 20 GiB); access is read-only (default) or read-write.
-    #[arg(long, requires = "workspace_base")]
+    #[arg(long, requires = "workspace_id")]
     workspace_mounts: Option<PathBuf>,
     /// A server the Workspace's `.mcp.json` declares that this Tag's Tasks may use, read
     /// from the Task's base commit. May be repeated.
@@ -129,6 +132,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 mailbox_approver,
                 workspace_id,
                 workspace_base,
+                workspace_ref,
                 workspace_mounts,
                 workspace_mcp,
                 harness,
@@ -145,6 +149,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 mcp_servers: workspace_mcp,
                 workspace_id,
                 base_commit: workspace_base.unwrap_or_default(),
+                base_ref: workspace_ref.unwrap_or_default(),
                 github_source: None,
                 mounts,
             });

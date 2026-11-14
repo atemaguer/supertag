@@ -2497,7 +2497,9 @@ Options:
       --workspace-id <WORKSPACE_ID>
           Logical local or configured GitHub repository binding
       --workspace-base <WORKSPACE_BASE>
-          Full local Git base commit. Omit for a configured GitHub source
+          Full local Git base commit every Session starts from. Omit for a configured GitHub source
+      --workspace-ref <WORKSPACE_REF>
+          Local Git branch whose current commit each new Session starts from, such as main
       --workspace-mounts <WORKSPACE_MOUNTS>
           JSON array of {volumeId,destination,maxBytes,access} for Workspace Volume copies; maxBytes defaults to 1 GiB (at most 20 GiB); access is read-only (default) or read-write
       --workspace-mcp <WORKSPACE_MCP>

@@ -507,10 +507,13 @@ pub(super) async fn claim_candidate(
                 && has_workspace
                 && runs_on.admits(transaction, &task.tag_id, &labels).await?
                 && crate::workspace_mounts::current_in(transaction, &task).await?
-                && task
-                    .workspace
-                    .as_ref()
-                    .is_none_or(|spec| supertag_protocol::valid_git_commit(&spec.base_commit))
+                && task.workspace.as_ref().is_none_or(|spec| {
+                    supertag_protocol::valid_git_commit(&spec.base_commit)
+                            // A followed branch is resolved by the host that runs the Attempt.
+                            || (spec.base_commit.is_empty()
+                                && !spec.base_ref.is_empty()
+                                && spec.github_source.is_none())
+                })
                 && supports_execution_limits(harness, &task)
                 && supports_runtime_actions(harness, &task)
                 && crate::context::task_supported(&task, context_contracts)
