@@ -37,8 +37,8 @@ Two intentional exceptions to the CLI form:
 checked by `rust/crates/cli/tests/cli_help.rs`; regenerate it with
 `SUPERTAG_UPDATE_CLI_REFERENCE=1`. Before documenting a command or flag, confirm it there.
 `pnpm docs:check` validates every documented `supertag` command and flag against it. Operator
-commands name their Control Plane on every call: examples use `--state-directory ~/.supertag` for
-local services or `--control-plane NAME` for a saved one. Do not copy commands out of the
+commands find the local services on their own, so examples for a local setup name no Control
+Plane; examples for a shared one add `--control-plane NAME`. Do not copy commands out of the
 internal architecture record — some were never implemented.
 
 ## Capitalized vocabulary

@@ -112,7 +112,7 @@ whole system rather than another first-class resource.
 - <a id="execution-environment"></a>**execution environment** — where a Task's files and commands live: a local checkout, an E2B
   or Modal sandbox, or a shared execution environment.
 - <a id="unsandboxed-harness"></a>**unsandboxed harness** — a harness that runs a Task's commands as the Worker Host's user,
-  without an operating-system sandbox: Cursor or OpenCode on a local host. A host runs their Tasks
+  without an operating-system sandbox: Claude Code, Cursor, or OpenCode on a local host. A host runs their Tasks
   that may run commands only after `allow-unsandboxed-commands` opts in. See
   [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).
 - <a id="task-attempt"></a>**Task Attempt** — one execution of a Task on a Worker Host; a retry is another Task Attempt.

@@ -80,7 +80,7 @@ both. For details, see [Run the Control Plane](../operations/control-plane.md#ar
 Catalog grants control what SuperTag Worker Hosts fetch. They do not isolate a Task from files its
 operating-system account can read. In particular, `~/.supertag/checkpoints`, `file://` artifact
 Volumes, and Volume credential files are readable by Codex read-only and workspace-write sandboxes
-and by unsandboxed Claude Code when running under that account. Those Tasks can read local copies
+and by Claude Code with `allow-unsandboxed-commands` when running under that account. Those Tasks can read local copies
 without catalog grants, and credentials may give access to other artifacts on a shared Volume.
 Keeping credentials outside the workspace does not prevent these reads. Use separate operating-system
 identities or an isolation boundary that denies access to supervisor storage for untrusted Tasks.

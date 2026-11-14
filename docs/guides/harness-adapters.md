@@ -112,9 +112,9 @@ Python, `--harness-runtime` names the interpreter and `--harness-entrypoint` the
 Send a Task to a Tag the host may run, then read its events and result:
 
 ```sh
-supertag task submit --tag lead --session adapter-check "Say hello." --state-directory ~/.supertag
-supertag task events TASK_ID --state-directory ~/.supertag
-supertag describe task TASK_ID --state-directory ~/.supertag
+supertag task submit --tag lead --session adapter-check "Say hello."
+supertag task events TASK_ID
+supertag describe task TASK_ID
 ```
 
 ## Rules

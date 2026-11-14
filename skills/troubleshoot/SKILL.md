@@ -10,8 +10,8 @@ failures are resolved in the first three.
 
 The human-facing version is the
 [first-reply troubleshooting checklist](../../docs/guides/troubleshooting.md); point users there.
-Every operator command names its Control Plane: `--state-directory ~/.supertag` for local
-services, or `--control-plane NAME`. The examples use the local form.
+Operator commands use the local services unless they pass `--control-plane NAME`. The examples
+use the local services.
 
 ## 0. Reproduce precisely
 
@@ -35,15 +35,16 @@ supertag version
 `supertag logs control-plane` or `supertag logs gateway`. For a shared Control Plane,
 `supertag verify deployment URL --env-file operator.env` checks health and the operator token.
 
-- `pass --control-plane URL, --control-plane NAME of a saved Control Plane, or --state-directory`:
-  the command needs a target. Add `--state-directory ~/.supertag` or `--control-plane NAME`.
+- `no local Control Plane is running from DIR; start one with supertag up, or pass
+  --control-plane`: the command looked for local services in `DIR`. Run `supertag up` there, set
+  `SUPERTAG_STATE_DIR` to the directory `up` uses, or pass `--control-plane NAME`.
 - A protocol negotiation error: the CLI and the Control Plane share no protocol version. Upgrade
   them together.
 
 ## 2. Is the collaboration surface enrolled and reachable?
 
 ```sh
-supertag get surface-account --state-directory ~/.supertag
+supertag get surface-account
 supertag logs gateway
 ```
 
@@ -60,8 +61,8 @@ Also confirm the app or bot was **invited to the channel**. Enrollment alone is 
 ## 3. Does the Tag have an enabled location at that exact scope?
 
 ```sh
-supertag get surface-location --state-directory ~/.supertag
-supertag describe tag lead --state-directory ~/.supertag
+supertag get surface-location
+supertag describe tag lead
 ```
 
 The location must name the Tag, the exact channel, repository, chat, or team ID, and be enabled.
@@ -73,8 +74,8 @@ The location must name the Tag, the exact channel, repository, chat, or team ID,
 Mention the Tag again while watching:
 
 ```sh
-supertag watch task --state-directory ~/.supertag
-supertag describe task TASK_ID --state-directory ~/.supertag
+supertag watch task
+supertag describe task TASK_ID
 ```
 
 No Task means steps 2 and 3 failed. A refused Task's description names the missing permission
@@ -83,9 +84,9 @@ or setting.
 ## 5. Can a Worker Host run it?
 
 ```sh
-supertag placement explain TASK_ID --state-directory ~/.supertag
-supertag get host --state-directory ~/.supertag
-supertag metrics --state-directory ~/.supertag
+supertag placement explain TASK_ID
+supertag get host
+supertag metrics
 ```
 
 `placement explain` names why a queued Task waits: no host may run the Tag, the eligible hosts
@@ -99,8 +100,8 @@ Cursor and OpenCode Tasks that may run commands need `allow-unsandboxed-commands
 ## 6. Did it run but fail?
 
 ```sh
-supertag task events TASK_ID --state-directory ~/.supertag
-supertag get reply --state-directory ~/.supertag
+supertag task events TASK_ID
+supertag get reply
 supertag logs HOST_NAME
 ```
 
@@ -114,7 +115,7 @@ A host killed mid-run may leave a Task Attempt uncertain. It appears in the inbo
 
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
-  --evidence "WHAT_YOU_CHECKED" --confirmed-stopped --state-directory ~/.supertag
+  --evidence "WHAT_YOU_CHECKED" --confirmed-stopped
 ```
 
 `--decision retry` runs it again.
@@ -122,8 +123,8 @@ supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
 ## Cancelling
 
 ```sh
-supertag task cancel TASK_ID --state-directory ~/.supertag
-supertag objective cancel OBJECTIVE_ID --reason TEXT --state-directory ~/.supertag
+supertag task cancel TASK_ID
+supertag objective cancel OBJECTIVE_ID --reason TEXT
 ```
 
 ## State and isolation gotchas

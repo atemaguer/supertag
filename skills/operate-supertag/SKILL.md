@@ -18,9 +18,9 @@ Prefer a user-level skill outside the repository the team changes. Tags can edit
 ## Establish the scope
 
 Confirm the Control Plane, owner Tag, Workspace, and the user's requested outcome. Every operator
-command names its Control Plane: `--state-directory ~/.supertag` for this machine's local
-services, or `--control-plane NAME` for one saved with `supertag connect`. The examples use the
-local form; substitute the user's. Verify commands with `supertag COMMAND --help` or the
+command uses this machine's local services unless it passes `--control-plane NAME`, one saved
+with `supertag connect`. The examples use the local services; add the user's Control Plane when
+it is shared. Verify commands with `supertag COMMAND --help` or the
 [CLI reference](https://github.com/atemaguer/supertag/blob/main/docs/reference/cli.md). If setup
 is missing, follow [Install SuperTag](https://github.com/atemaguer/supertag/blob/main/docs/operations/install.md),
 then run `supertag init` in the target repository. Do not start a second Control Plane after init
@@ -57,7 +57,7 @@ outcome_file='PATH_FROM_MKTEMP'
   trap 'rm -f -- "$outcome_file"' EXIT
   supertag objective create OBJECTIVE_ID "$(cat "$outcome_file")" --owner OWNER_TAG \
     --budget-minor MINOR_UNITS --currency USD --deadline RFC3339_TIME \
-    --operation-id OPERATION_ID --state-directory ~/.supertag
+    --operation-id OPERATION_ID
 )
 ```
 
@@ -75,10 +75,10 @@ schedule it. Do not promise a timer without a verified scheduling facility. Othe
 user to request each check-in. There is no notification channel into this operator thread; poll.
 
 ```sh
-supertag get objective --state-directory ~/.supertag
-supertag describe objective OBJECTIVE_ID --state-directory ~/.supertag
-supertag get inbox-item --objective OBJECTIVE_ID --state-directory ~/.supertag
-supertag spend --by objective --output json --state-directory ~/.supertag
+supertag get objective
+supertag describe objective OBJECTIVE_ID
+supertag get inbox-item --objective OBJECTIVE_ID
+supertag spend --by objective --output json
 ```
 
 `describe objective` prints what was delivered, what needs the user, and each Session's state;
@@ -92,8 +92,8 @@ Read pending questions before sending anything, because a general follow-up beco
 next turn. Read the inbox and the full question:
 
 ```sh
-supertag get inbox-item --kind question --objective OBJECTIVE_ID --state-directory ~/.supertag
-supertag get question TASK_ID --state-directory ~/.supertag
+supertag get inbox-item --kind question --objective OBJECTIVE_ID
+supertag get question TASK_ID
 ```
 
 Quote the question you are answering in the reply. If the question changed, reassess whether the
@@ -113,8 +113,7 @@ an operation ID you reuse on retry:
 answer_file='PATH_FROM_MKTEMP'
 (
   trap 'rm -f -- "$answer_file"' EXIT
-  supertag question answer TASK_ID - --operation-id OPERATION_ID \
-    --state-directory ~/.supertag < "$answer_file"
+  supertag question answer TASK_ID - --operation-id OPERATION_ID < "$answer_file"
 )
 ```
 
@@ -126,8 +125,7 @@ For a general follow-up to a working Objective, send the owner a turn in the Obj
 with the text read from a private file in the same way:
 
 ```sh
-supertag task submit --tag OWNER_TAG --session OBJECTIVE_SESSION_ID "$(cat "$message_file")" \
-  --state-directory ~/.supertag
+supertag task submit --tag OWNER_TAG --session OBJECTIVE_SESSION_ID "$(cat "$message_file")"
 ```
 
 To ask a Tag something outside an Objective, use a new Session name. Follow the reply with
@@ -161,8 +159,7 @@ captured file using its exact artifact ID and file path:
 
 ```sh
 review_dir=$(mktemp -d)
-supertag artifact download ARTIFACT_ID --path FILE_PATH --output "$review_dir/FILE_NAME" \
-  --state-directory ~/.supertag
+supertag artifact download ARTIFACT_ID --path FILE_PATH --output "$review_dir/FILE_NAME"
 ```
 
 `mktemp` creates a fresh directory outside the application repository. Download writes one file,

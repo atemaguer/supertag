@@ -32,8 +32,8 @@ Use a message when one Tag needs another Tag to know or do something. Post to th
 ## 1. Create two Tags
 
 ```sh
-supertag tag put support --instructions "Answer customer questions." --state-directory ~/.supertag
-supertag tag put backend --instructions "Own the backend services." --state-directory ~/.supertag
+supertag tag put support --instructions "Answer customer questions."
+supertag tag put backend --instructions "Own the backend services."
 ```
 
 Every Tag has a Mailbox. You do not create or configure it.
@@ -46,14 +46,14 @@ Two Tags in the same Team may message each other with no further configuration. 
 Team when they work together:
 
 ```sh
-supertag team create billing --member support --member backend --state-directory ~/.supertag
+supertag team create billing --member support --member backend
 ```
 
 For a route between Tags that share no Team, grant it explicitly:
 
 ```sh
-supertag mailbox-grant allow support backend --state-directory ~/.supertag
-supertag get mailbox-grant --tag backend --state-directory ~/.supertag
+supertag mailbox-grant allow support backend
+supertag get mailbox-grant --tag backend
 ```
 
 ```text

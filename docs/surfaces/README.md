@@ -13,7 +13,7 @@ every resource in the connected account.
 
 | Collaboration surface | How events arrive | Guide |
 | --- | --- | --- |
-| Slack | HTTPS webhook to the Gateway | [Connect Slack](slack.md) |
+| Slack | An outbound Socket Mode connection, or an HTTPS webhook to the Gateway | [Connect Slack](slack.md) |
 | GitHub | HTTPS webhook to the Gateway | [Connect GitHub](github.md) |
 | Lark / Feishu | Outbound long connection; no public URL needed | [Connect Lark](lark.md) |
 | Linear | HTTPS webhook to the Gateway | [Connect Linear](linear.md) |
@@ -32,7 +32,7 @@ Every surface follows the same pattern. For example, Slack and the `lead` Tag:
 ```sh
 supertag setup surface slack
 supertag tag update lead --add-location slack --channel-id C0123456789
-supertag get surface-location --state-directory ~/.supertag
+supertag get surface-location
 ```
 
 1. `setup surface PROVIDER` checks the credentials with the provider, stores them in the

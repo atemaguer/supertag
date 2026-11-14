@@ -40,8 +40,8 @@ Never print the token or pass it to the agent. The messages are in
 ```sh
 supertag worker-host --control-plane https://supertag.example.com \
   --state-directory ~/.supertag-host --adapter /usr/local/bin/my-adapter
-supertag task submit --tag lead --session adapter-check "Say hello." --state-directory ~/.supertag
-supertag task events TASK_ID --state-directory ~/.supertag
+supertag task submit --tag lead --session adapter-check "Say hello."
+supertag task events TASK_ID
 ```
 
 In `supertag.yaml`, a host service uses `adapter` and `adapter-args` in place of `harnesses`.

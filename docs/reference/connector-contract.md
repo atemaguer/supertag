@@ -39,7 +39,7 @@ enrolls once. `AcceptEvent` serves accounts no Surface Account names, and those 
 Tag, so the key must trust the connector with every Tag:
 
 ```sh
-supertag auth-key create discord-acme --role gateway --all-tags --state-directory ~/.supertag
+supertag auth-key create discord-acme --role gateway --all-tags
 supertag gateway enroll discord-acme --control-plane https://cp.example.com \
   --state-directory /var/lib/discord-acme --auth-key file:/run/secrets/auth-key
 ```

@@ -75,7 +75,7 @@ Use the CLI when scripting creation or setting a Workspace or deadline explicitl
 ```sh
 supertag objective create usage-billing \
   "Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change. Keep the public API unchanged." \
-  --owner lead --deadline 2027-03-31T23:00:00Z --budget-minor 200000 --currency USD --state-directory ~/.supertag
+  --owner lead --deadline 2027-03-31T23:00:00Z --budget-minor 200000 --currency USD
 ```
 
 ```text
@@ -96,8 +96,8 @@ create a Team and name it with `--team`. See [Organize Tags into Teams](teams.md
 Read it back, and list Objectives; filter the JSON with a tool such as `jq`:
 
 ```sh
-supertag get objective usage-billing --state-directory ~/.supertag
-supertag get objective --state-directory ~/.supertag | jq '.objectives[] | select(.owner_tag_id == "lead")'
+supertag get objective usage-billing
+supertag get objective | jq '.objectives[] | select(.owner_tag_id == "lead")'
 ```
 
 Add `--output yaml` for the full record. `update`, `complete`, `approve`, `pause`, `resume`, and
@@ -124,7 +124,7 @@ it may use:
 ```sh
 supertag objective create docs-review \
   "Fix the broken links in the docs. Done when the link checker passes." \
-  --owner lead --runtime-action files:write --state-directory ~/.supertag
+  --owner lead --runtime-action files:write
 ```
 
 A list can only narrow. An action the owner's Permission Sets do not allow is left out, with a
@@ -132,7 +132,7 @@ warning. To change the list later, replace it:
 
 ```sh
 supertag objective set-runtime-actions docs-review --runtime-action files:write \
-  --runtime-action commands:execute --state-directory ~/.supertag
+  --runtime-action commands:execute
 ```
 
 The update applies to turns that start afterwards. An action marked `approval_required: true` still
@@ -258,7 +258,7 @@ Complete an Objective directly with your own assessment:
 
 ```sh
 printf '%s\n' "Reconciliation suite passed in CI run 1482; billing review approved." | \
-  supertag objective complete usage-billing --summary-file - --state-directory ~/.supertag
+  supertag objective complete usage-billing --summary-file -
 ```
 
 Completion records an assessment; it does not verify the claims automatically. Once the Objective

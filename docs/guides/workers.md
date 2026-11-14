@@ -36,15 +36,17 @@ shows the host, and `supertag logs -f studio` shows its log. See
 
 ### Harnesses without a sandbox
 
-Codex and Claude Code run commands inside their own sandbox. OpenCode and Cursor have no
-operating-system sandbox that SuperTag can enforce, so a host refuses their Tasks that may run
-commands until you consent:
+Codex runs commands inside its own sandbox. Claude Code, OpenCode, and Cursor have no
+operating-system sandbox that SuperTag can enforce, so a host does not run their Tasks that may
+run commands until you consent:
 
 ```yaml
-    allow-unsandboxed-commands: [cursor]
+    allow-unsandboxed-commands: [claude-code, cursor]
 ```
 
-Commands then run as your user, with your files and network. Run such a host as a dedicated user
+`supertag worker-host --allow-unsandboxed-commands` consents for a host started without
+supertag.yaml. Commands then run as your user, with your files, network, and the environment the
+harness receives, which may include its provider key. Run such a host as a dedicated user
 or in a disposable machine when the work is untrusted.
 
 ### Run several Tasks at once
@@ -109,8 +111,18 @@ no inbound port. `--once` exits after one Task Attempt, for a disposable runner.
 
 ## Keep a Tag's Tasks on the right hosts
 
-A host carries **labels**, such as `gpu` or `linux`, from `--label` or from the Auth Key it joined
-with. A Tag's `runsOn` names labels a host must carry to run the Tag's Tasks:
+A host carries **labels**, such as `gpu` or `linux`, from the Auth Key it joined with, from
+`--label` on `supertag worker-host`, or from its host service's `labels` in supertag.yaml:
+
+```yaml
+services:
+  mac:
+    type: host
+    harnesses: [codex]
+    labels: [gpu]
+```
+
+A Tag's `runsOn` names labels a host must carry to run the Tag's Tasks:
 
 ```sh
 supertag placement runs-on builder gpu --control-plane team
@@ -264,8 +276,8 @@ confirm a reply.
 
 - **A Task stays queued.** Run `supertag placement explain TASK_ID`.
 - **The host stops with a sign-in error.** Run `supertag sign-in HARNESS` as the host's user.
-- **A Cursor or OpenCode Task fails before running commands.** Add the harness to
-  `allow-unsandboxed-commands`, or run Tasks that do not need commands.
+- **A Claude Code, Cursor, or OpenCode Task that may run commands stays queued.** Add the
+  harness to `allow-unsandboxed-commands`, or run Tasks that do not need commands.
 
 See [Troubleshoot the first reply](troubleshooting.md).
 

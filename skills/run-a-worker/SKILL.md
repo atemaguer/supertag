@@ -102,15 +102,16 @@ supertag placement runs-on builder gpu --control-plane team
 supertag placement explain TASK_ID --control-plane team
 ```
 
-A host carries labels from `--label` or its Auth Key's `--label`. A Tag with `runsOn` labels runs
-only on hosts that carry all of them.
+A host carries labels from `--label`, its host service's `labels: [...]` in supertag.yaml, or its
+Auth Key's `--label`. A Tag with `runsOn` labels runs only on hosts that carry all of them.
+`supertag up` refuses invalid or reserved labels before starting any service.
 
 ## Verify
 
 ```sh
-supertag get host --state-directory ~/.supertag
-supertag task submit --tag lead --session host-check "Reply with hello." --state-directory ~/.supertag
-supertag describe task TASK_ID --state-directory ~/.supertag
+supertag get host
+supertag task submit --tag lead --session host-check "Reply with hello."
+supertag describe task TASK_ID
 ```
 
 The host shows connected and ready with its harnesses. The Task completes with a reply. This uses

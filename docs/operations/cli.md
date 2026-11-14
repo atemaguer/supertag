@@ -11,21 +11,23 @@ met. See the [glossary](../reference/glossary.md) for other terms.
 
 ## How commands find the Control Plane
 
-Commands that read or change your organization talk to one Control Plane. Name it on each
-command:
+Commands that read or change your organization talk to one Control Plane. They pick it in this
+order:
 
 | You pass | Commands use |
 | --- | --- |
-| `--state-directory ~/.supertag` | The Control Plane that `supertag up` runs on this machine, with this machine's local operator credential |
 | `--control-plane NAME` | A Control Plane saved under `NAME` by `supertag connect`, the terminal UI, or the desktop app |
 | `--control-plane https://HOST` or `wss://HOST` | That Control Plane, with the Operator Token in `SUPERTAG_OPERATOR_TOKEN` |
+| `--state-directory DIR` | The Control Plane that `supertag up` runs from `DIR`, with that directory's local operator credential |
+| `SUPERTAG_CONTROL_PLANE_URL` set to a saved name or a URL | That Control Plane, as with `--control-plane` |
+| Nothing | The Control Plane that `supertag up` runs on this machine, from `SUPERTAG_STATE_DIR` or `~/.supertag` |
 
 `--control-plane` may also come before the command, as in `supertag --control-plane team get tag`.
-The examples on this page use your local services. Against a shared Control Plane, replace
-`--state-directory ~/.supertag` with `--control-plane NAME`.
+The examples on this page use your local services, so they name no Control Plane. Against a
+shared Control Plane, add `--control-plane NAME`.
 
-`supertag status`, `supertag tag update`, and `supertag setup surface` default to the local
-services when you name neither.
+When no local Control Plane is running and you name none, a command stops with `no local Control
+Plane is running from DIR; start one with supertag up, or pass --control-plane`.
 
 ## Start in a repository
 
@@ -45,8 +47,14 @@ Worker Host will have, and asks for a Control Plane port, a harness, and the Tag
   ran; and
 - a `host` service named after this machine, which maps the repository as a Workspace.
 
+When you choose Claude Code, Cursor, or OpenCode, `init` explains that it runs commands as you,
+without a sandbox, so its Tags should get only trusted work, and asks whether to allow that,
+defaulting to yes. The answer becomes the host's `allow-unsandboxed-commands`; without it, the
+lead Tag's Tasks that run commands wait. `--yes` allows it and prints how to undo it. See
+[Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
+
 New Sessions of `lead` start from that commit. To move them to a newer one, apply a Tag manifest
-with a new `workspace.baseCommit`; see
+with a new `workspace.baseCommit`, or replace it with `workspace.ref` to follow a branch; see
 [Work in a repository with Workspaces](../guides/workspaces.md#2-bind-a-tag-to-the-workspace).
 
 `supertag init --yes` accepts every default. See [supertag.yaml and local state](../reference/supertag-yaml.md)
@@ -88,17 +96,16 @@ reusing it continues one:
 
 ```sh
 supertag task submit --tag lead --session first-look \
-  "Read this repository and tell me what you would improve first." \
-  --state-directory ~/.supertag
+  "Read this repository and tell me what you would improve first."
 ```
 
 It prints the Task as JSON, including its `task_id`. Follow and steer it:
 
 ```sh
-supertag watch task --state-directory ~/.supertag
-supertag task events TASK_ID --state-directory ~/.supertag
-supertag task input TASK_ID "Focus on the payment module." --state-directory ~/.supertag
-supertag task cancel TASK_ID --state-directory ~/.supertag
+supertag watch task
+supertag task events TASK_ID
+supertag task input TASK_ID "Focus on the payment module."
+supertag task cancel TASK_ID
 ```
 
 `task input` delivers a message to a running Task, or queues it as the Session's next turn when
@@ -111,10 +118,10 @@ with no Worker Host that may run its Tag.
 prints one in readable text:
 
 ```sh
-supertag get tag --state-directory ~/.supertag
-supertag describe objective flaky-tests --state-directory ~/.supertag
-supertag get host --state-directory ~/.supertag
-supertag watch objective flaky-tests --state-directory ~/.supertag
+supertag get tag
+supertag describe objective flaky-tests
+supertag get host
+supertag watch objective flaky-tests
 ```
 
 `watch` streams change notices and reconnects from its last resume token. `watch objective ID`
@@ -127,15 +134,15 @@ Create or change a Tag directly:
 
 ```sh
 supertag tag put reviewer --instructions "Review changes for correctness and tests." \
-  --allow files:read --harness claude-code --state-directory ~/.supertag
+  --allow files:read --harness claude-code
 ```
 
 For anything larger, keep your organization in manifest files and apply them. `diff` previews
 the change:
 
 ```sh
-supertag diff -f organization.yaml --state-directory ~/.supertag
-supertag apply -f organization.yaml --state-directory ~/.supertag
+supertag diff -f organization.yaml
+supertag apply -f organization.yaml
 ```
 
 See [Manage Control Plane resources](resources.md) for manifests and apply sets, and
@@ -147,8 +154,8 @@ See [Manage Control Plane resources](resources.md) for manifests and apply sets,
 supertag objective create flaky-tests \
   "The checkout tests pass ten runs in a row. Evidence: links to the CI runs." \
   --owner lead --team core --deadline 2026-12-01T17:00:00Z \
-  --budget-minor 2000 --currency USD --state-directory ~/.supertag
-supertag watch objective flaky-tests --state-directory ~/.supertag
+  --budget-minor 2000 --currency USD
+supertag watch objective flaky-tests
 ```
 
 The ID comes first and is yours to choose. See [Write an Objective](../guides/write-an-objective.md)
@@ -157,11 +164,11 @@ and [Define and complete an Objective](../guides/objectives.md).
 ## Answer what is waiting on you
 
 ```sh
-supertag get inbox-item --state-directory ~/.supertag
-supertag question answer TASK_ID "Use the staging database." --state-directory ~/.supertag
-supertag approval approve APPROVAL_ID --state-directory ~/.supertag
-supertag approval deny APPROVAL_ID --reason "Not before the release freeze." --state-directory ~/.supertag
-supertag objective review flaky-tests approve --state-directory ~/.supertag
+supertag get inbox-item
+supertag question answer TASK_ID "Use the staging database."
+supertag approval approve APPROVAL_ID
+supertag approval deny APPROVAL_ID --reason "Not before the release freeze."
+supertag objective review flaky-tests approve
 ```
 
 `question answer TASK_ID -` reads the answer from standard input, which keeps a long or sensitive
@@ -175,8 +182,8 @@ A Task that changes a Workspace delivers its commits. For a Workspace that `supe
 one branch per Session. Import a delivery yourself, or into another clone, with `fetch`:
 
 ```sh
-supertag fetch TASK_ID --repository ~/code/app --state-directory ~/.supertag
-supertag task download TASK_ID --kind patch --output change.patch --state-directory ~/.supertag
+supertag fetch TASK_ID --repository ~/code/app
+supertag task download TASK_ID --kind patch --output change.patch
 ```
 
 See [Work in a repository with Workspaces](../guides/workspaces.md).
@@ -184,8 +191,8 @@ See [Work in a repository with Workspaces](../guides/workspaces.md).
 ## Spend and audit
 
 ```sh
-supertag spend --by tag --state-directory ~/.supertag
-supertag audit --since 2026-11-01 --state-directory ~/.supertag
+supertag spend --by tag
+supertag audit --since 2026-11-01
 ```
 
 `spend` reports recorded spend by Objective, Tag, or day. `audit` lists operator changes, newest

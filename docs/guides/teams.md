@@ -34,9 +34,9 @@ staging tools it uses to rehearse cutovers and rollbacks.
 
 ```sh
 supertag team create service-identity --member lead --member identity --member migration \
-  --member verification --member rollout --state-directory ~/.supertag
-supertag get team --state-directory ~/.supertag
-supertag get team service-identity --state-directory ~/.supertag
+  --member verification --member rollout
+supertag get team
+supertag get team service-identity
 ```
 
 ```text
@@ -64,7 +64,7 @@ without a change, when the Team already has the values you set.
 ```sh
 supertag objective create service-identity-migration \
   "Move 12 production services to short-lived credentials issued to each service. Keep requests working through each rollout wave. Done when service checks pass and the old keys are retired. Ask me to approve each production cutover and retirement of the shared keys." \
-  --owner lead --team service-identity --state-directory ~/.supertag
+  --owner lead --team service-identity
 ```
 
 `lead` owns the Objective and starts work Sessions with the other Tags for each wave. Each
@@ -107,7 +107,7 @@ Objective names is fixed once it exists. See
 ## 4. Delete the Team
 
 ```sh
-supertag delete team service-identity --state-directory ~/.supertag
+supertag delete team service-identity
 ```
 
 Deletion is refused while an open Objective names the Team. Cancel or complete those Objectives
@@ -122,14 +122,14 @@ a free slot. Set a limit only when you want fewer turns running at once, for exa
 rate-limited service:
 
 ```sh
-supertag team update service-identity --max-concurrency 2 --state-directory ~/.supertag
+supertag team update service-identity --max-concurrency 2
 ```
 
 The limit counts turns across every open Objective that names the Team; later turns wait, and a
 waiting turn holds no slot. Remove it again, so Worker Host capacity is the only limit:
 
 ```sh
-supertag team update service-identity --clear-concurrency --state-directory ~/.supertag
+supertag team update service-identity --clear-concurrency
 ```
 
 Use `supertag describe objective service-identity-migration` to see the Team's limit or confirm

@@ -16,14 +16,15 @@ provider's app settings.
 | Collaboration surface | Events arrive by | Public URL needed |
 | --- | --- | --- |
 | Lark / Feishu | An outbound long connection | No |
-| Slack | HTTPS webhook to `/slack/events` | Yes |
+| Slack | An outbound Socket Mode connection (default), or an HTTPS webhook to `/slack/events` with `--transport http` | Only for HTTP |
 | GitHub | HTTPS webhook to `/github/events` | Yes |
 | Linear | HTTPS webhook to `/linear/events` | Yes |
 | Microsoft Teams | HTTPS webhook to `/microsoft-teams/messages` | Yes |
 
 Webhook listeners bind to loopback (Slack `127.0.0.1:3480`, GitHub `3481`, Linear `3482`, Teams
 `3483` by default). On a laptop, forward a public HTTPS URL to them with a tunnel; on a server, a
-reverse proxy beside the Gateway. There is no Slack Socket Mode.
+reverse proxy beside the Gateway. Slack Socket Mode needs an app-level token (`SLACK_APP_TOKEN`)
+with `connections:write` instead of the signing secret.
 
 ## Credentials
 
@@ -65,8 +66,8 @@ catalog on the Worker Host and a Permission Set grant. See
 ## Verify
 
 ```sh
-supertag get surface-account --state-directory ~/.supertag
-supertag get surface-location --state-directory ~/.supertag
+supertag get surface-account
+supertag get surface-location
 supertag logs gateway
 ```
 

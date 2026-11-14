@@ -35,7 +35,8 @@ Install the `supertag` CLI first; see [installation](../../docs/operations/insta
 
 Render, Cloudflare, and Modal forward only HTTP/1.1, so the Control Plane carries gRPC in a
 WebSocket and runs its own TLS inside it. Their Gateway receives no inbound traffic, so it serves
-only Lark and webhook notifications; webhook surfaces need a Gateway on another host. Every
+only Lark, Slack Socket Mode, and webhook notifications; webhook surfaces need a Gateway on
+another host. Every
 platform except Compose uses the `hosted` container image, built from a Linux `supertag` binary
 as [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image) shows.
 

@@ -339,12 +339,11 @@ Worker Host. The Control Plane owner consents to each Volume's storage when star
 variables that hold its keys. Register the Volume, then copy one file:
 
 ```sh
-supertag volume put archive --source s3://acme-artifacts/archive --operation-id put-archive \
-  --state-directory ~/.supertag
+supertag volume put archive --source s3://acme-artifacts/archive --operation-id put-archive
 supertag volume copy archive ARTIFACT_ID --path research/findings.md --expected-revision 1 \
-  --operation-id copy-findings --state-directory ~/.supertag
-supertag get volume-copy --state-directory ~/.supertag
-supertag volume download COPY_ID --output findings.md --state-directory ~/.supertag
+  --operation-id copy-findings
+supertag get volume-copy
+supertag volume download COPY_ID --output findings.md
 ```
 
 `volume download` reads the copy back and verifies it, even after the transfer directory is lost.

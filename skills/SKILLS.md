@@ -65,8 +65,9 @@ Local state and credentials live in `~/.supertag`; override with `SUPERTAG_STATE
 file: a `control-plane` service and `host` services (the machine as a Worker Host); `supertag up`
 also runs a local Gateway. Local state uses SQLite; shared deployments use PostgreSQL.
 
-Operator commands name their Control Plane on every call: `--state-directory ~/.supertag` for
-this machine's local services, or `--control-plane NAME` for one saved with `supertag connect`.
+Operator commands use this machine's local services (`SUPERTAG_STATE_DIR` or `~/.supertag`)
+unless they name `--control-plane NAME`, one saved with `supertag connect`, or
+`SUPERTAG_CONTROL_PLANE_URL` names one.
 
 Credentials come from masked prompts, environment variables, or private files, **never**
 command-line flags. Do not construct a command that puts a secret in argv.

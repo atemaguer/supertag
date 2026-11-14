@@ -57,7 +57,7 @@ The file-backed init check verifies credential structure without testing account
 ### Operator and host credentials
 
 The local operator token in `credentials.json` is the local Control Plane's admin token. Commands
-use it with `--state-directory ~/.supertag`. A host service never connects with it. For a host in
+that name no other Control Plane use it. A host service never connects with it. For a host in
 the same file as the local Control Plane, `supertag up` enrolls the host once, then the host uses
 its own Worker Host credential from `hosts/SERVICE/enrollment.json`. A host of a shared Control
 Plane joins with an Auth Key instead. See [supertag.yaml and local state](supertag-yaml.md#credentials).

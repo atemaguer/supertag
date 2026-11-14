@@ -142,7 +142,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | Field | Entry | Meaning |
 | --- | --- | --- |
 | `spec.runsOn` | label | Labels a bound Worker Host must carry to run the Tag's Tasks. See [Worker Host labels](#worker-host-labels). |
-| `spec.workspace` | `id`, `baseCommit`, `mcp` | The Workspace the Tag's Tasks work in, the commit new Sessions start from, and the `.mcp.json` servers they may use. See [Workspaces](#workspaces). |
+| `spec.workspace` | `id`, `baseCommit` or `ref`, `mcp` | The Workspace the Tag's Tasks work in, the commit new Sessions start from or the local branch whose current commit they start from, and the `.mcp.json` servers they may use. See [Workspaces](#workspaces). |
 | `spec.acceptsMessagesFrom` | Tag name | Mailbox grants where this Tag is the recipient |
 
 Where a Tag answers is a separate `SurfaceLocation` resource, a Tag **location**. It names the
@@ -228,8 +228,8 @@ token. Each token has a name, and SuperTag records what it does as `token:NAME`.
 leaves or a laptop is lost, revoking that one token is enough; nobody else's access changes.
 
 ```sh
-supertag operator-token create laptop-2 --state-directory ~/.supertag
-supertag get operator-token laptop-2 --state-directory ~/.supertag
+supertag operator-token create laptop-2
+supertag get operator-token laptop-2
 ```
 
 `get operator-token` shows a token without its secret:
@@ -289,7 +289,7 @@ language. A host carries three kinds of label:
 | Kind | Labels | Set by |
 | --- | --- | --- |
 | Automatic | `linux`, `macos`, or `windows`; `x64` or `arm64`; `harness:NAME` for each harness; `workspace:NAME` for each declared checkout; `mcp:NAME` for each [MCP server in the host's catalog](../surfaces/worker-tools.md) | The Worker Host |
-| Declared | Any label, such as `gpu` | `supertag worker-host --label LABEL` |
+| Declared | Any label, such as `gpu` | A [host service's `labels`](supertag-yaml.md#host-labels) in supertag.yaml, or `supertag worker-host --label LABEL` |
 | Granted | The Auth Key's `spec.labels` | The Auth Key the host joined with |
 
 `labels` in `supertag get host ID` lists all of a Worker Host's labels. `granted_labels` lists those its
@@ -308,7 +308,8 @@ label. For an `mcp:NAME` label, it also names the missing MCP server, such as `N
 provides MCP server sentry`.
 
 A Task granted `commands:execute` also skips an **unsandboxed harness**: one that runs commands
-as the host's user, without an operating-system sandbox: Cursor or OpenCode on a local host. It
+as the host's user, without an operating-system sandbox: Claude Code, Cursor, or OpenCode on a
+local host. It
 runs on one only when the host service lists it in `allow-unsandboxed-commands`. Otherwise it runs
 on another Worker Host, such as one serving Codex, or waits; its scheduling record names the
 requirement `allow-unsandboxed-commands:HOST`, and `supertag describe task` explains it. See
@@ -404,9 +405,13 @@ spec:
   workspace: { id: app, baseCommit: 4f2c0d1e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d, mcp: [docs-search] }
 ```
 
-A local Workspace needs a full `baseCommit`: new Sessions start from it, and later Tasks of a
-Session continue on the Session's branch, `supertag/session/SESSION`. A GitHub Workspace omits
-it. `mcp` selects servers from the `.mcp.json` at the base commit. The Tag's Tasks run only on
+A local Workspace needs a full `baseCommit` or a `ref`, never both. New Sessions start from the
+base commit, and later Tasks of a Session continue on the Session's branch,
+`supertag/session/SESSION`. `ref` names a local branch, such as `main`, instead: the Worker Host
+that starts a Session's first Task records the commit the branch names in its checkout, and the
+whole Session works from that commit. See
+[Follow a branch instead of a commit](../guides/workspaces.md#follow-a-branch-instead-of-a-commit).
+A GitHub Workspace omits both. `mcp` selects servers from the `.mcp.json` at the base commit. The Tag's Tasks run only on
 hosts that serve the Workspace. A message from a collaboration surface can select a GitHub
 Workspace that the Tag's Permission Sets allow. An Objective has no Workspace of its own: its
 turns work in the Workspaces of the Tags that run them.

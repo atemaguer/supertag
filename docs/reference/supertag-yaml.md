@@ -127,7 +127,8 @@ echoing secret values.
 | `models` | none | Models per harness: one model, or a list whose first is the default. See [Host models](#host-models) |
 | `workspaces` | none | Workspace name to a repository path, or `{ path, delivery, setup }`. See [Workspaces](#workspaces) |
 | `skills` | none | Local Skill directory or JSON catalog file selected by Context Sets. Relative paths resolve from this file |
-| `allow-unsandboxed-commands` | none | `cursor` or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
+| `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
+| `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
 | `concurrency` | `1` | Task Attempts each harness runs at once, from 1 through 16. See [Host concurrency](#host-concurrency) |
 | `attempt-timeout-seconds` | `3600` | Seconds a Task Attempt may run, from 1 through 86400 |
 | `depends_on` | none | Service names to bring up first |
@@ -152,6 +153,18 @@ terminal. After joining, the host uses its stored credential.
 The first model is the default for Tasks that name none. A Task that names a model runs only on a
 host that lists it. OpenCode requires a `provider/model`.
 
+### Host labels
+
+```yaml
+    harnesses: [codex]
+    labels: [gpu, team:infra]
+```
+
+The host reports these labels when it connects, in addition to its automatic ones. `supertag up`
+checks them before starting any service: each must be a valid label, outside the reserved
+`mcp:`, `mcp-login:`, `volume-credential:`, and `artifact-volume:` prefixes, and a host takes at
+most 64. Changing a host's labels restarts that host on the next `supertag up`.
+
 ### Host concurrency
 
 `concurrency` is per harness: `harnesses: [codex, claude-code]` with `concurrency: 2` runs up to
@@ -160,10 +173,19 @@ two Codex and two Claude Code Task Attempts at once. When only `concurrency` cha
 
 ### Unsandboxed harnesses
 
-Codex and Claude Code run commands in their own sandbox. Cursor and OpenCode have none that
-SuperTag can enforce, so a host refuses their Tasks that may run commands unless the harness is
-listed in `allow-unsandboxed-commands`. Commands then run as your user, with your files and
-network.
+Codex runs commands in its own sandbox. Claude Code, Cursor, and OpenCode have none that SuperTag
+can enforce, so a host does not run their Tasks that may run commands (`commands:execute`) unless
+the harness is listed in `allow-unsandboxed-commands`; such a Task waits for a host that allows
+it. Commands then run as your user, with your files, network, and the environment the harness
+receives, which may include its provider key. Cursor also needs `files:write` to run commands.
+
+```yaml
+    harnesses: [codex, claude-code]
+    allow-unsandboxed-commands: [claude-code]
+```
+
+A host started without supertag.yaml takes the same opt-in with `supertag worker-host
+--allow-unsandboxed-commands`.
 
 ### Workspaces
 
@@ -249,6 +271,6 @@ its own state directory beneath this one. See [Credential storage](credential-st
 ## Credentials
 
 The local Control Plane accepts this machine's local operator credential, a random token stored
-in `credentials.json`. Operator commands use it with `--state-directory ~/.supertag`. A host
+in `credentials.json`. Operator commands that name no other Control Plane use it. A host
 service never connects with it: it only enrolls the host, which then connects with its own
 credential. Neither credential is printed or logged.

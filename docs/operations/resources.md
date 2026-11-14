@@ -7,8 +7,9 @@ Objectives, Surface Accounts, and Workspaces shape what they do. See the
 [resource model](../reference/resource-model.md) for every kind and the
 [glossary](../reference/glossary.md) for terms.
 
-Every command names its Control Plane: `--state-directory ~/.supertag` for this machine's local
-services, or `--control-plane NAME` for a saved one. The examples use the local form.
+Without `--control-plane`, commands use the Control Plane that `supertag up` runs on this machine.
+The examples use these local services; add `--control-plane NAME` for a saved one. See
+[How commands find the Control Plane](cli.md#how-commands-find-the-control-plane).
 
 ## Read and describe
 
@@ -16,10 +17,10 @@ services, or `--control-plane NAME` for a saved one. The examples use the local 
 readable text, or the full record with `--output json`:
 
 ```sh
-supertag get tag --state-directory ~/.supertag
-supertag get objective flaky-tests --state-directory ~/.supertag
-supertag describe tag lead --state-directory ~/.supertag
-supertag describe task TASK_ID --output json --state-directory ~/.supertag
+supertag get tag
+supertag get objective flaky-tests
+supertag describe tag lead
+supertag describe task TASK_ID --output json
 ```
 
 The kinds are listed in [`supertag get`](../reference/cli.md#supertag-get). A list may be paged:
@@ -31,8 +32,8 @@ pass the returned cursor with `--cursor`. Pipe JSON through `jq` to filter it.
 Workstream posts:
 
 ```sh
-supertag watch task objective --state-directory ~/.supertag
-supertag watch objective flaky-tests --state-directory ~/.supertag
+supertag watch task objective
+supertag watch objective flaky-tests
 ```
 
 A notice says what changed; read the resource for its contents. `watch` reconnects from its last
@@ -42,7 +43,7 @@ resume token for 60 seconds after a disconnect, and `--resume-token` continues a
 ## Check that it worked
 
 ```sh
-supertag get tag lead --state-directory ~/.supertag
+supertag get tag lead
 ```
 
 prints the Tag as JSON. An unknown ID fails with `not found`.
@@ -86,8 +87,8 @@ spec:
 ```
 
 ```sh
-supertag diff -f organization.yaml --state-directory ~/.supertag
-supertag apply -f organization.yaml --state-directory ~/.supertag
+supertag diff -f organization.yaml
+supertag apply -f organization.yaml
 ```
 
 `-f` takes YAML documents, a JSON array, a directory of manifests, or `-` for standard input.
@@ -165,8 +166,8 @@ Permission Sets and Context Sets there.
 An **apply set** owns the resources and Tag relationships its files declare:
 
 ```sh
-supertag diff -f org/ --set org --prune --state-directory ~/.supertag
-supertag apply -f org/ --set org --prune --state-directory ~/.supertag
+supertag diff -f org/ --set org --prune
+supertag apply -f org/ --set org --prune
 ```
 
 With `--prune`, apply removes the set's resources that the files no longer declare. It never
@@ -200,8 +201,8 @@ value reports a conflict instead of silently reverting it.
 ## Delete a resource
 
 ```sh
-supertag delete permission-set review-tools --state-directory ~/.supertag
-supertag delete team core --state-directory ~/.supertag
+supertag delete permission-set review-tools
+supertag delete team core
 ```
 
 `delete` handles Teams, Permission Sets, Context Sets, Volumes, Workspaces, and surface
@@ -212,7 +213,7 @@ To preview an apply set's deletions, use `diff --set NAME --prune`.
 ## Cancel a Task
 
 ```sh
-supertag task cancel TASK_ID --state-directory ~/.supertag
+supertag task cancel TASK_ID
 ```
 
 ## Inspect Sessions
@@ -221,15 +222,15 @@ A **work Session** is a thread of work a Tag starts beneath another Session, suc
 Objective's. List those started from a Session, or read one with its latest Task and report:
 
 ```sh
-supertag get session --parent-session SESSION_ID --state-directory ~/.supertag
-supertag get session WORK_SESSION_ID --state-directory ~/.supertag
+supertag get session --parent-session SESSION_ID
+supertag get session WORK_SESSION_ID
 ```
 
 ## Inspect artifacts
 
 ```sh
-supertag get artifact --task TASK_ID --state-directory ~/.supertag
-supertag artifact download ARTIFACT_ID --path report.md --output report.md --state-directory ~/.supertag
+supertag get artifact --task TASK_ID
+supertag artifact download ARTIFACT_ID --path report.md --output report.md
 ```
 
 See [Artifacts](../reference/artifacts.md).
@@ -237,9 +238,9 @@ See [Artifacts](../reference/artifacts.md).
 ## Inspect and drain Worker Hosts
 
 ```sh
-supertag get host --state-directory ~/.supertag
-supertag describe host HOST_ID --state-directory ~/.supertag
-supertag host drain HOST_ID --state-directory ~/.supertag
+supertag get host
+supertag describe host HOST_ID
+supertag host drain HOST_ID
 ```
 
 A draining host finishes its running Task Attempts and claims no new ones. See

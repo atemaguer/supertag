@@ -57,10 +57,10 @@ brackets (`--yes` accepts every default and needs no terminal). It writes
 
 Nothing is written to the repository; state lives in `~/.supertag/`. New Sessions of `lead` start
 from the commit `init` recorded. To start them from a newer commit, apply a Tag manifest with a
-new `workspace.baseCommit`; see [Workspaces](../../docs/guides/workspaces.md#2-bind-a-tag-to-the-workspace).
+new `workspace.baseCommit`, or with `workspace.ref: BRANCH` to follow a local branch; see [Workspaces](../../docs/guides/workspaces.md#2-bind-a-tag-to-the-workspace).
 
-Operator commands name their Control Plane on each call. For these local services, that is
-`--state-directory ~/.supertag`.
+Operator commands use these local services without a flag; `--control-plane NAME` targets
+another Control Plane.
 
 ## 3. Create the first Objective
 
@@ -69,7 +69,7 @@ Choose an ID and state the outcome with evidence:
 ```sh
 supertag objective create readme-setup \
   "The README explains local setup. Done when a new contributor can follow it." \
-  --owner lead --state-directory ~/.supertag
+  --owner lead
 ```
 
 It prints the Objective as JSON and queues `lead`'s first turn. The Tag plans, does the work
@@ -78,8 +78,8 @@ itself or starts work Sessions for it, and reviews what each reports.
 ## 4. Follow it and find the result
 
 ```sh
-supertag watch objective readme-setup --state-directory ~/.supertag
-supertag describe objective readme-setup --state-directory ~/.supertag
+supertag watch objective readme-setup
+supertag describe objective readme-setup
 ```
 
 `watch objective` follows the Objective as a timeline until it closes. `describe` shows status,
@@ -98,8 +98,8 @@ work, select the Objective, press `m`, type the follow-up, and press Enter. For 
 follow [Operate SuperTag](../operate-supertag/SKILL.md#read-pending-questions-before-messaging).
 
 ```sh
-supertag objective review readme-setup approve --state-directory ~/.supertag
-supertag approval approve APPROVAL_ID --state-directory ~/.supertag
+supertag objective review readme-setup approve
+supertag approval approve APPROVAL_ID
 ```
 
 `supertag ps` lists the services, `supertag logs -f` follows them, `supertag down` stops them,
@@ -108,29 +108,27 @@ and `supertag up` starts them again. `restart: unless-stopped` on the services i
 
 ## 6. Next: add a chat channel
 
-Lark or Feishu is the shortest path on a laptop: the Gateway connects outbound, so no public URL
-is needed. Slack, GitHub, Linear, and Microsoft Teams send webhooks, which need a public HTTPS URL
+Lark or Feishu and Slack need no public URL on a laptop: the Gateway connects outbound, to Slack
+over Socket Mode. GitHub, Linear, and Microsoft Teams send webhooks, which need a public HTTPS URL
 forwarded to the Gateway's loopback listener, such as a tunnel. For Slack:
 
 1. Create the app from [`docs/surfaces/slack-app-manifest.yaml`](../../docs/surfaces/slack-app-manifest.yaml)
    following [`docs/surfaces/slack.md`](../../docs/surfaces/slack.md). You need its bot token
-   (`xoxb-…`) and signing secret.
-2. Enroll it. Setup prompts with masked input or reads `SLACK_BOT_TOKEN` and
-   `SLACK_SIGNING_SECRET`; never pass secrets as flags.
+   (`xoxb-…`) and an app-level token (`xapp-…`) with `connections:write`.
+2. Enroll it. Setup prompts with masked input or reads `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`;
+   never pass secrets as flags.
 
    ```sh
    supertag setup surface slack
    ```
 
-3. Forward your public URL to `127.0.0.1:3480` and set Slack's Request URL to
-   `https://YOUR_PUBLIC_HOST/slack/events`.
-4. Invite the app to the channel and add the channel's stable ID, not its name, to the Tag:
+3. Invite the app to the channel and add the channel's stable ID, not its name, to the Tag:
 
    ```sh
    supertag tag update lead --add-location slack --channel-id C0123456789
    ```
 
-5. Mention `@SuperTag` in the channel. `lead` replies in the thread; later replies in the thread
+4. Mention `@SuperTag` in the channel. `lead` replies in the thread; later replies in the thread
    continue the Session without another mention.
 
 A location grants only the mention lifecycle: receive an invocation, read the originating thread,
@@ -141,9 +139,9 @@ surfaces are in [connect-a-surface](../connect-a-surface/SKILL.md).
 
 ```sh
 supertag status
-supertag get host --state-directory ~/.supertag
-supertag describe tag lead --state-directory ~/.supertag
-supertag get surface-location --state-directory ~/.supertag
+supertag get host
+supertag describe tag lead
+supertag get surface-location
 ```
 
 `status` lists Worker Hosts, Tags, unfinished Objectives, and the inbox; the local host should
@@ -154,9 +152,9 @@ incur charges.
 If the reply does not arrive:
 
 ```sh
-supertag watch task --state-directory ~/.supertag
-supertag describe task TASK_ID --state-directory ~/.supertag
-supertag get reply --state-directory ~/.supertag
+supertag watch task
+supertag describe task TASK_ID
+supertag get reply
 supertag logs gateway
 ```
 

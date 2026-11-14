@@ -17,12 +17,13 @@ oauth_config:
       - chat:write
 settings:
   event_subscriptions:
-    # Replace with your public HTTPS URL that forwards to the Gateway's Slack listener.
-    request_url: https://YOUR_PUBLIC_HOST/slack/events
+    # Socket Mode delivers these events over the Gateway's outbound connection. For HTTP events
+    # instead, set socket_mode_enabled to false and add
+    # request_url: https://YOUR_PUBLIC_HOST/slack/events
     bot_events:
       - app_mention
       - message.channels
   org_deploy_enabled: false
-  socket_mode_enabled: false
+  socket_mode_enabled: true
   is_hosted: false
   token_rotation_enabled: false

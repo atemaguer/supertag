@@ -106,15 +106,15 @@ Choose your own ID, budget, and future deadline:
 ```sh
 supertag objective create checkout-retries \
   "Retried checkout requests create at most one order per idempotency key. Done when concurrency and timeout regression tests pass, an independent reviewer accepts transaction handling, and a report links the reviewed branch and test results. Keep the public API compatible. Do not deploy or alter production data. Ask before changing the database schema." \
-  --owner lead --budget-minor 30000 --currency USD --deadline 2027-03-31T17:00:00Z --state-directory ~/.supertag
+  --owner lead --budget-minor 30000 --currency USD --deadline 2027-03-31T17:00:00Z
 ```
 
 Creating the Objective queues its owner's first turn and refuses a request it cannot accept,
 with the reason. Then inspect progress:
 
 ```sh
-supertag watch objective checkout-retries --state-directory ~/.supertag
-supertag describe objective checkout-retries --state-directory ~/.supertag
+supertag watch objective checkout-retries
+supertag describe objective checkout-retries
 ```
 
 The CLI takes the statement as one argument after the ID; there are no separate done-when or

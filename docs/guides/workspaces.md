@@ -54,7 +54,7 @@ each Workspace. Several hosts may map the same Workspace name to their own clone
 ```sh
 supertag tag put builder --instructions "Implement bounded changes with tests." \
   --workspace-id app --workspace-base "$(git -C ~/code/app rev-parse HEAD)" \
-  --allow files:write --allow commands:execute --state-directory ~/.supertag
+  --allow files:write --allow commands:execute
 ```
 
 Or in a Tag manifest:
@@ -68,8 +68,31 @@ spec:
   workspace: { id: app, baseCommit: 4f2c0d1e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d }
 ```
 
-A local Workspace needs a full base commit: new Sessions start from it. Move the Tag to a newer
-commit by putting the binding again. The Tag's Tasks run only on hosts that map the Workspace.
+A local Workspace needs a full base commit or a branch to follow. With a base commit, new Sessions
+start from it; move the Tag to a newer commit by putting the binding again. The Tag's Tasks run
+only on hosts that map the Workspace.
+
+### Follow a branch instead of a commit
+
+To start each new Session from wherever a local branch points, name the branch instead of a
+commit:
+
+```sh
+supertag tag put builder --workspace-id app --workspace-ref main
+```
+
+Or in the manifest: `workspace: { id: app, ref: main }`. A Tag sets `baseCommit` or `ref`, not
+both, and only a Workspace with a local checkout can follow a branch; a GitHub Workspace is
+refused. `ref` is a short branch name such as `main` or `release/2.1`, not `refs/heads/main`, a
+tag, or a remote-tracking branch.
+
+The Worker Host that starts a Session's first Task looks the branch up in its own checkout of the
+Workspace and records the commit it names. Every later Task of that Session works from the same
+commit, even after the branch moves; the next new Session looks the branch up again.
+`supertag get task ID` shows the branch as `ref` and the recorded commit as `base_commit`, which
+stays empty until the host has looked it up. When the host's checkout has no such branch, the
+Task fails before the harness starts, with `Workspace branch BRANCH does not name a commit on
+this Worker Host`. SuperTag never fetches: update the host's checkout to move the branch.
 
 ### Prepare each checkout with setup
 
@@ -91,8 +114,8 @@ Your checkout stays on its own branch; SuperTag never switches it or changes its
 a delivery into another clone, or for a Workspace with `delivery: patch`:
 
 ```sh
-supertag fetch TASK_ID --repository ~/code/app-review --state-directory ~/.supertag
-supertag task download TASK_ID --kind patch --output change.patch --state-directory ~/.supertag
+supertag fetch TASK_ID --repository ~/code/app-review
+supertag task download TASK_ID --kind patch --output change.patch
 ```
 
 `fetch` also takes a Session ID, to import that Session's latest delivery. A Task with no
@@ -111,7 +134,7 @@ GitHub credentials:
 
 ```sh
 supertag workspace put api --account github --repository-id 123456789 --repository acme/api \
-  --ref main --pull-request-base main --state-directory ~/.supertag
+  --ref main --pull-request-base main
 ```
 
 `--account` is a Surface Account from `supertag setup surface github`. A moving `--ref` is pinned
@@ -192,7 +215,7 @@ catalog. A Workspace's own `.mcp.json` servers run only when the Tag lists them:
 
 ```sh
 supertag tag put builder --instructions "Implement bounded changes with tests." \
-  --workspace-id app --workspace-base COMMIT --workspace-mcp docs-search --state-directory ~/.supertag
+  --workspace-id app --workspace-base COMMIT --workspace-mcp docs-search
 ```
 
 The host reads `.mcp.json` from the Task's base commit, not from a Task's changes.

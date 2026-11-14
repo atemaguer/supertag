@@ -62,14 +62,14 @@ only an operator can end. `team` names the Team the manager may hand work to.
 Preview and apply it:
 
 ```sh
-supertag diff -f support-policy.yaml --state-directory ~/.supertag
-supertag apply -f support-policy.yaml --state-directory ~/.supertag
+supertag diff -f support-policy.yaml
+supertag apply -f support-policy.yaml
 ```
 
 Applying creates the Team and the Objective, and starts the manager: it takes its first turn in
 the Objective's own conversation. Applying again changes nothing. Keep the manifest in a
 directory with the Tags it names, and apply them together as a set, such as
-`supertag apply -f support/ --set support --state-directory ~/.supertag`.
+`supertag apply -f support/ --set support`.
 
 The same Objective can be created with a command instead:
 
@@ -77,7 +77,7 @@ The same Objective can be created with a command instead:
 supertag team create support --member support-specialist
 supertag objective create support-policy \
   "Maintain the support response policy. Investigate each overdue-ticket report that arrives in this conversation, and change the policy only after a specialist's written proposal." \
-  --owner support-manager --team support --ongoing --budget-minor 50000 --currency USD --state-directory ~/.supertag
+  --owner support-manager --team support --ongoing --budget-minor 50000 --currency USD
 ```
 
 **Check:** `supertag describe objective support-policy` shows status `working`, the Team and its
@@ -150,9 +150,9 @@ create a new Objective:
 
 ```sh
 supertag objective set-limits support-policy --budget-minor 80000 --currency USD \
-  --expected-revision REVISION --state-directory ~/.supertag
+  --expected-revision REVISION
 supertag objective set-runtime-actions support-policy --runtime-action files:write \
-  --expected-revision REVISION --state-directory ~/.supertag
+  --expected-revision REVISION
 ```
 
 Change the Team's members and `maxConcurrency` in its manifest and apply it again.
@@ -163,8 +163,7 @@ Prune cancels the Objective and keeps its history. See
 also cancel it directly:
 
 ```sh
-supertag objective cancel support-policy --reason "Policy moved to the new support platform" \
-  --state-directory ~/.supertag
+supertag objective cancel support-policy --reason "Policy moved to the new support platform"
 ```
 
 **Check:** `supertag get objective support-policy` shows status `cancelled` with your reason.

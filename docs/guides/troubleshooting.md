@@ -4,9 +4,8 @@ Trace a request from where someone asked a **Tag**, a persistent AI actor with i
 responsibilities and permissions, to the **Worker Host** that runs it and back. Work through the
 steps in order; each checks one layer. Terms are defined in the [glossary](../reference/glossary.md).
 
-Commands name their **Control Plane**, the service that stores your organization:
-`--state-directory ~/.supertag` for this machine's local services, as shown, or
-`--control-plane NAME` for a shared one.
+Commands talk to a **Control Plane**, the service that stores your organization. Without
+`--control-plane NAME`, they use this machine's local services, as shown.
 
 ## 1. Check the services
 
@@ -26,7 +25,7 @@ If a command says `pass --control-plane URL, --control-plane NAME of a saved Con
 ## 2. Check the Surface Account
 
 ```sh
-supertag get surface-account --state-directory ~/.supertag
+supertag get surface-account
 supertag logs gateway
 ```
 
@@ -43,7 +42,7 @@ Invite the app or bot to the channel; enrolling an account does not add it.
 ## 3. Check the Tag locations
 
 ```sh
-supertag get surface-location --state-directory ~/.supertag
+supertag get surface-location
 ```
 
 A mention starts work only at an enabled location for the exact channel, repository, chat, or
@@ -56,8 +55,8 @@ in threads that no mention started, are ignored by design.
 Mention the Tag again while watching:
 
 ```sh
-supertag watch task --state-directory ~/.supertag
-supertag describe task TASK_ID --state-directory ~/.supertag
+supertag watch task
+supertag describe task TASK_ID
 ```
 
 No Task means steps 2 and 3 failed. A refused request's reason is in the Gateway log, and a
@@ -66,8 +65,8 @@ refused Task's description names the missing permission.
 ## 5. Check placement
 
 ```sh
-supertag placement explain TASK_ID --state-directory ~/.supertag
-supertag get host --state-directory ~/.supertag
+supertag placement explain TASK_ID
+supertag get host
 ```
 
 A queued Task waits until a ready Worker Host may run its Tag, carries the Tag's `runsOn` labels,
@@ -92,14 +91,14 @@ supertag sign-in claude-code
 
 If it reports not signed in, follow the sign-in instructions it prints, as the same user that
 runs the host, and run `supertag up`. Keys belong in `~/.supertag/.env`: a service unit does not
-inherit your shell. Cursor and OpenCode Tasks that may run commands also need
+inherit your shell. Claude Code, Cursor, and OpenCode Tasks that may run commands also need
 `allow-unsandboxed-commands` on the host; see [Run Worker Hosts](workers.md#harnesses-without-a-sandbox).
 
 ## 7. Check the run and the reply
 
 ```sh
-supertag task events TASK_ID --state-directory ~/.supertag
-supertag get reply --state-directory ~/.supertag
+supertag task events TASK_ID
+supertag get reply
 ```
 
 `task events` shows the run's progress and result. `get reply` shows whether the Gateway
@@ -114,8 +113,7 @@ know whether the work finished. It shows in the inbox as `task-attention` and in
 
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
-  --evidence "The process is gone and no commit was delivered." --confirmed-stopped \
-  --state-directory ~/.supertag
+  --evidence "The process is gone and no commit was delivered." --confirmed-stopped
 ```
 
 `--decision retry` runs the Task again. See

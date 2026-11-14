@@ -18,18 +18,19 @@ authorize repository access. Context, declared authority, and native provider ac
 agree, or the Task fails closed.
 
 For the vocabulary, see [Tasks and Sessions](../../docs/concepts/tasks.md) and the
-[glossary](../../docs/reference/glossary.md). Every operator command names its Control Plane:
-`--state-directory ~/.supertag` for local services, or `--control-plane NAME`.
+[glossary](../../docs/reference/glossary.md). Operator commands use the local services unless
+they pass `--control-plane NAME`.
 
 ## Create a Tag
 
 ```sh
 supertag tag put reviewer --instructions "Review changes for correctness and tests." \
-  --allow files:read --harness claude-code --state-directory ~/.supertag
+  --allow files:read --harness claude-code
 ```
 
 `tag put` creates or replaces a Tag's instructions, allowed actions, harness, models
-(`--model`, default first), efforts (`--effort`), and Workspace (`--workspace-id`). A Worker Host
+(`--model`, default first), efforts (`--effort`), and Workspace (`--workspace-id`, with a pinned
+`--workspace-base COMMIT` or a followed local branch, `--workspace-ref BRANCH`). A Worker Host
 runs a Tag only when the host may run it: a local host runs every Tag, and a shared one runs the
 Tags its Auth Key names. `supertag placement runs-on TAG LABEL...` keeps a Tag on hosts with those
 labels. `supertag tag retire TAG` retires a Tag and keeps its history; `--dry-run` shows what
@@ -72,8 +73,8 @@ spec:
 ```
 
 ```sh
-supertag diff -f team.yaml --state-directory ~/.supertag
-supertag apply -f team.yaml --state-directory ~/.supertag
+supertag diff -f team.yaml
+supertag apply -f team.yaml
 ```
 
 A grant with `approval_required: true` waits in the operator inbox for each call. To apply a set
@@ -91,18 +92,18 @@ supertag permission-set activate engineering-access --tag builder --provider sla
 `diff` first:
 
 ```sh
-supertag diff -f org/ --set org --prune --state-directory ~/.supertag
-supertag apply -f org/ --set org --prune --state-directory ~/.supertag
+supertag diff -f org/ --set org --prune
+supertag apply -f org/ --set org --prune
 ```
 
 ## Inspect
 
 ```sh
-supertag describe tag builder --state-directory ~/.supertag
-supertag get role --state-directory ~/.supertag
-supertag get permission-set engineering-access --state-directory ~/.supertag
-supertag get role-assignment --state-directory ~/.supertag
-supertag get surface-location --state-directory ~/.supertag
+supertag describe tag builder
+supertag get role
+supertag get permission-set engineering-access
+supertag get role-assignment
+supertag get surface-location
 ```
 
 ## Cross-surface continuity

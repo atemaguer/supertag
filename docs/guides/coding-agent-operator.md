@@ -32,9 +32,8 @@ your Teams of Tags make up an **autonomous organization**: Teams may pursue diff
 share one Control Plane, its rules, and its record of the work. The **Control Plane** stores the
 organization and schedules work. A **Worker Host** provides execution capacity. Check that `supertag ps`
 shows the host connected. Note the lead Tag's name; the example below uses `lead`. Do not start a
-second Control Plane. Operator commands name the Control Plane on each call: the examples use
-`--state-directory ~/.supertag` for your local services; use `--control-plane NAME` for a
-shared one saved with `supertag connect`.
+second Control Plane. Operator commands use your local services unless you name another Control
+Plane: add `--control-plane NAME` for a shared one saved with `supertag connect`.
 
 Give your agent the
 [operate-supertag skill](../../skills/operate-supertag/SKILL.md).
@@ -132,8 +131,7 @@ outcome_file='PATH_FROM_MKTEMP'
 (
   trap 'rm -f -- "$outcome_file"' EXIT
   supertag objective create setup-docs "$(cat "$outcome_file")" --owner lead \
-    --budget-minor 1000 --currency USD --deadline 2027-03-31T17:00:00Z \
-    --state-directory ~/.supertag
+    --budget-minor 1000 --currency USD --deadline 2027-03-31T17:00:00Z
 )
 ```
 
@@ -156,10 +154,10 @@ this guide does not assume it offers a scheduler. Without one, return to the thr
 for another check. The agent uses:
 
 ```sh
-supertag get objective --state-directory ~/.supertag
-supertag describe objective setup-docs --state-directory ~/.supertag
-supertag get inbox-item --objective setup-docs --state-directory ~/.supertag
-supertag spend --by objective --output json --state-directory ~/.supertag
+supertag get objective
+supertag describe objective setup-docs
+supertag get inbox-item --objective setup-docs
+supertag spend --by objective --output json
 ```
 
 `describe objective` prints what was delivered, what needs you, and each Session's state; add
@@ -186,8 +184,7 @@ out of the process list, and an operation ID you reuse on retry:
 answer_file='PATH_FROM_MKTEMP'
 (
   trap 'rm -f -- "$answer_file"' EXIT
-  supertag question answer TASK_ID - --operation-id OPERATION_ID \
-    --state-directory ~/.supertag < "$answer_file"
+  supertag question answer TASK_ID - --operation-id OPERATION_ID < "$answer_file"
 )
 ```
 
@@ -216,7 +213,7 @@ use the artifact ID and path returned with the result:
 ```sh
 review_dir=$(mktemp -d)
 supertag artifact download ARTIFACT_ID --path reports/walkthrough.md \
-  --output "$review_dir/walkthrough.md" --state-directory ~/.supertag
+  --output "$review_dir/walkthrough.md"
 ```
 
 An **artifact** is a captured output file. Its path above is illustrative; use the exact path in

@@ -81,9 +81,8 @@ Scripts send a turn with `supertag task submit`. A Session name is the conversat
 starts one, and reusing it continues it.
 
 ```sh
-supertag task submit --tag lead --session release-notes "Draft the release notes for 2.4." \
-  --state-directory ~/.supertag
-supertag task events TASK_ID --state-directory ~/.supertag
+supertag task submit --tag lead --session release-notes "Draft the release notes for 2.4."
+supertag task events TASK_ID
 ```
 
 To give a working Objective a follow-up, submit to its owner in the Objective's Session, the
