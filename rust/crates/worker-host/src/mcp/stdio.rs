@@ -453,14 +453,21 @@ mod tests {
             .unwrap();
         assert_eq!(result["content"][0]["text"], "fixture release record");
         // The server's ping was answered while the call waited.
+        // The fixture creates the file before writing it, so wait for a complete value, not
+        // for the file to exist.
         let ping_file = directory.path().join("calls.jsonl.ping");
-        for _ in 0..50 {
-            if ping_file.exists() {
+        let mut ping = None;
+        for _ in 0..250 {
+            if let Some(value) = std::fs::read(&ping_file)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            {
+                ping = Some(value);
                 break;
             }
             time::sleep(Duration::from_millis(20)).await;
         }
-        let ping: Value = serde_json::from_slice(&std::fs::read(ping_file).unwrap()).unwrap();
+        let ping = ping.expect("the server's ping answer was never recorded");
         assert_eq!(
             ping,
             json!({"jsonrpc":"2.0","id":"server-ping","result":{}})
