@@ -88,6 +88,9 @@ pub struct DeleteArgs {
     /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
     #[arg(long)]
     operation_id: Option<String>,
+    /// Check the deletion and show what it would remove, without deleting anything.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 fn client(channel: ProtocolChannel) -> teams_client::TeamsClient<ProtocolChannel> {
@@ -147,6 +150,7 @@ pub(crate) async fn delete(
     let input = DeleteTeamRequest {
         team,
         operation_id: operation(args.operation_id),
+        dry_run: args.dry_run,
     };
     Ok(team_json(
         client(channel)

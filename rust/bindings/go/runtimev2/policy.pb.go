@@ -1606,8 +1606,10 @@ type DeleteSurfaceLocationRequest struct {
 	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	LocationId       string                 `protobuf:"bytes,2,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"`
 	ExpectedRevision uint64                 `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Checks the deletion without deleting or recording the operation.
+	DryRun        bool `protobuf:"varint,4,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeleteSurfaceLocationRequest) Reset() {
@@ -1659,6 +1661,13 @@ func (x *DeleteSurfaceLocationRequest) GetExpectedRevision() uint64 {
 		return x.ExpectedRevision
 	}
 	return 0
+}
+
+func (x *DeleteSurfaceLocationRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
 }
 
 type PolicyPermission struct {
@@ -2973,8 +2982,10 @@ type DeletePolicyResourceRequest struct {
 	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	Reference        string                 `protobuf:"bytes,2,opt,name=reference,proto3" json:"reference,omitempty"`
 	ExpectedRevision uint64                 `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Checks the deletion without deleting or recording the operation.
+	DryRun        bool `protobuf:"varint,4,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeletePolicyResourceRequest) Reset() {
@@ -3026,6 +3037,13 @@ func (x *DeletePolicyResourceRequest) GetExpectedRevision() uint64 {
 		return x.ExpectedRevision
 	}
 	return 0
+}
+
+func (x *DeletePolicyResourceRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
 }
 
 type DeletePolicyResourceResponse struct {
@@ -3611,12 +3629,13 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\x1cListSurfaceLocationsResponse\x12B\n" +
 	"\tlocations\x18\x01 \x03(\v2$.supertag.runtime.v2.SurfaceLocationR\tlocations\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"\x8f\x01\n" +
+	"nextCursor\"\xa8\x01\n" +
 	"\x1cDeleteSurfaceLocationRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1f\n" +
 	"\vlocation_id\x18\x02 \x01(\tR\n" +
 	"locationId\x12+\n" +
-	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\"\xbf\x02\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\x12\x17\n" +
+	"\adry_run\x18\x04 \x01(\bR\x06dryRun\"\xbf\x02\n" +
 	"\x10PolicyPermission\x12#\n" +
 	"\rpermission_id\x18\x01 \x01(\tR\fpermissionId\x12C\n" +
 	"\x06target\x18\x02 \x01(\x0e2+.supertag.runtime.v2.PolicyPermissionTargetR\x06target\x12\x16\n" +
@@ -3729,11 +3748,12 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\x11ListRolesResponse\x12/\n" +
 	"\x05roles\x18\x01 \x03(\v2\x19.supertag.runtime.v2.RoleR\x05roles\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"\x8b\x01\n" +
+	"nextCursor\"\xa4\x01\n" +
 	"\x1bDeletePolicyResourceRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1c\n" +
 	"\treference\x18\x02 \x01(\tR\treference\x12+\n" +
-	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\"8\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\x12\x17\n" +
+	"\adry_run\x18\x04 \x01(\bR\x06dryRun\"8\n" +
 	"\x1cDeletePolicyResourceResponse\x12\x18\n" +
 	"\adeleted\x18\x01 \x01(\bR\adeleted\"a\n" +
 	"\x11AssignRoleRequest\x12!\n" +

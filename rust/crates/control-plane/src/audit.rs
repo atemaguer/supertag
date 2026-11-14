@@ -292,7 +292,11 @@ fn rule(path: &str) -> Option<Rule> {
             named("Team", &value.team)
         }),
         ("Teams", "DeleteTeam") => rule!("team.delete", "Team", DeleteTeamRequest, |value| {
-            named("Team", &value.team)
+            if value.dry_run {
+                Some(Target::Skip)
+            } else {
+                named("Team", &value.team)
+            }
         }),
         ("Mailbox", "ChangeGrant") => rule!(
             "mailbox-grant.change",
@@ -319,7 +323,11 @@ fn rule(path: &str) -> Option<Rule> {
             "permission-set.delete",
             "PermissionSet",
             DeletePolicyResourceRequest,
-            |value| named("PermissionSet", &value.reference)
+            |value| if value.dry_run {
+                Some(Target::Skip)
+            } else {
+                named("PermissionSet", &value.reference)
+            }
         ),
         ("PolicyCatalog", "PutContextSet") => rule!(
             "context-set.put",
@@ -337,7 +345,11 @@ fn rule(path: &str) -> Option<Rule> {
             "context-set.delete",
             "ContextSet",
             DeletePolicyResourceRequest,
-            |value| named("ContextSet", &value.reference)
+            |value| if value.dry_run {
+                Some(Target::Skip)
+            } else {
+                named("ContextSet", &value.reference)
+            }
         ),
         ("PolicyCatalog", "PutRole") => rule!("role.put", "Role", PutRoleRequest, |value| {
             named(
@@ -385,7 +397,11 @@ fn rule(path: &str) -> Option<Rule> {
             "surface-location.delete",
             "SurfaceLocation",
             DeleteSurfaceLocationRequest,
-            |value| named("SurfaceLocation", &value.location_id)
+            |value| if value.dry_run {
+                Some(Target::Skip)
+            } else {
+                named("SurfaceLocation", &value.location_id)
+            }
         ),
         ("ManifestRelationships", "ReconcileTag") => rule!(
             "tag.relationships",
@@ -466,7 +482,11 @@ fn rule(path: &str) -> Option<Rule> {
             "github-workspace.delete",
             "GithubWorkspace",
             DeleteGithubWorkspaceRequest,
-            |value| named("GithubWorkspace", &value.workspace_id)
+            |value| if value.dry_run {
+                Some(Target::Skip)
+            } else {
+                named("GithubWorkspace", &value.workspace_id)
+            }
         ),
         ("GithubPublications", "Cancel") => rule!(
             "github-publication.cancel",
@@ -496,7 +516,11 @@ fn rule(path: &str) -> Option<Rule> {
             "artifact-volume.delete",
             "ArtifactVolume",
             DeleteArtifactVolumeRequest,
-            |value| named("ArtifactVolume", &value.volume_id)
+            |value| if value.dry_run {
+                Some(Target::Skip)
+            } else {
+                named("ArtifactVolume", &value.volume_id)
+            }
         ),
         ("WorkspaceVolumes", "Put") => rule!(
             "workspace-volume.put",

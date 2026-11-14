@@ -61,6 +61,20 @@ async fn cli(args: &[&str], token: &str) -> Result<Value> {
     Ok(serde_json::from_slice(&output.stdout)?)
 }
 
+/// Runs a command and returns its exit status, standard output, and standard error.
+async fn run(args: &[&str], token: &str) -> Result<(bool, String, String)> {
+    let output = timeout(
+        WAIT,
+        command(args).env("SUPERTAG_OPERATOR_TOKEN", token).output(),
+    )
+    .await??;
+    Ok((
+        output.status.success(),
+        String::from_utf8(output.stdout)?,
+        String::from_utf8(output.stderr)?,
+    ))
+}
+
 fn host_request<T>(input: T, token: &str, generation: u64) -> Result<Request<T>> {
     let mut request = authenticated_request(input, token, None)?;
     request
@@ -1028,6 +1042,24 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     )
     .await?;
     assert_eq!(objective["team_id"], "release");
+    // A dry run makes the deletion's checks: it is refused while an open Objective names the Team.
+    let (deleted, _, refusal) = run(
+        &[
+            "delete",
+            "--control-plane",
+            &public,
+            "team",
+            "release",
+            "--dry-run",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert!(!deleted);
+    assert!(
+        refusal.contains("cannot be deleted while Objective rollout names it"),
+        "{refusal}"
+    );
 
     let channel = protocol::negotiated(
         Channel::from_shared(public.clone())?
@@ -1305,6 +1337,53 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
             .is_none()
     );
 
+    // A dry run of a deletion that would succeed prints the change as `diff` does and deletes
+    // nothing; the real deletion follows.
+    cli(
+        &[
+            "team",
+            "--control-plane",
+            &public,
+            "create",
+            "spare",
+            "--member",
+            "reviewer",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let (deleted, preview, _) = run(
+        &[
+            "delete",
+            "--control-plane",
+            &public,
+            "team",
+            "spare",
+            "--dry-run",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert!(deleted);
+    assert_eq!(preview, "delete Team/spare\n");
+    let kept = cli(
+        &["get", "--control-plane", &public, "team", "spare"],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(kept["team_id"], "spare");
+    cli(
+        &["delete", "--control-plane", &public, "team", "spare"],
+        &operator_token,
+    )
+    .await?;
+    let (found, _, _) = run(
+        &["get", "--control-plane", &public, "team", "spare"],
+        &operator_token,
+    )
+    .await?;
+    assert!(!found);
+
     plane.kill().await?;
     Ok(())
 }
@@ -1420,6 +1499,25 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
         .await?
         .into_inner();
     assert!(staged.published_at_ms.is_none());
+    // `watch inbox-item` follows the inbox from an empty start and prints the question once it
+    // is published.
+    let mut watcher = command(&[
+        "watch",
+        "--control-plane",
+        &public,
+        "inbox-item",
+        "--objective",
+        "question-flow",
+        "--limit",
+        "1",
+        "--output",
+        "json",
+    ]);
+    let watcher = watcher
+        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
     assert!(
         inbox
             .list_items(authenticated_request(
@@ -1461,6 +1559,37 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
     .await?;
     assert_eq!(listed["items"].as_array().context("Inbox items")?.len(), 1);
     assert_eq!(listed["items"][0]["task_id"], attempt.task_id);
+    let watched = timeout(WAIT, watcher.wait_with_output()).await??;
+    assert!(
+        watched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&watched.stderr)
+    );
+    let watched: Value = serde_json::from_slice(&watched.stdout)?;
+    assert_eq!(watched["kind"], "question");
+    assert_eq!(watched["task_id"], attempt.task_id);
+    assert_eq!(watched["key"], listed["items"][0]["key"]);
+    let (watched, line, _) = run(
+        &[
+            "watch",
+            "--control-plane",
+            &public,
+            "inbox-item",
+            "--kind",
+            "question",
+            "--limit",
+            "1",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert!(watched);
+    assert!(
+        line.starts_with("question ")
+            && line.ends_with(": Which release route should I use?\n")
+            && line.contains(&format!("task={}", attempt.task_id)),
+        "{line}"
+    );
     assert_eq!(
         inbox
             .get_question(authenticated_request(

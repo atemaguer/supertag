@@ -82,6 +82,9 @@ pub struct DeleteArgs {
     /// Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key.
     #[arg(long)]
     operation_id: Option<String>,
+    /// Check the deletion and show what it would remove, without deleting anything.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Deserialize)]
@@ -408,6 +411,7 @@ pub(crate) async fn delete_location(
                 operation_id: operation_id(args.operation_id),
                 location_id: id,
                 expected_revision: args.expected_revision,
+                dry_run: args.dry_run,
             },
             &token,
         )?)

@@ -410,6 +410,7 @@ async fn contract(url: String) {
         operation_id: "delete".into(),
         workspace_id: "project".into(),
         expected_revision: updated.revision,
+        dry_run: false,
     };
     assert!(matches!(
         store.delete_github_workspace(OP, &delete).await,

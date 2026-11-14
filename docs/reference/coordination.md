@@ -717,7 +717,10 @@ The overview requires an operator credential. See the [Control Plane API](contro
 pending state when you ask. It creates no resource and grants no authority: the operator acts
 through the same commands as always. Filter it with `--objective ID` or `--kind KIND`, and page
 with `--limit` and `--cursor`. It prints JSON with `items`, `next_cursor`, and `truncated_kinds`,
-the kinds with more pending items than the page holds.
+the kinds with more pending items than the page holds. `supertag watch inbox-item` takes the same
+`--objective` and `--kind` filters and prints each item once as it appears: every item already
+waiting first, then new ones. It rereads the inbox every two seconds, and an item that leaves the
+inbox and returns prints again.
 
 | Kind | Appears when |
 | --- | --- |

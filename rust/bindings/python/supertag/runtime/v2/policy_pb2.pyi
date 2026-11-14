@@ -251,14 +251,16 @@ class ListSurfaceLocationsResponse(_message.Message):
     def __init__(self, locations: _Optional[_Iterable[_Union[SurfaceLocation, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
 
 class DeleteSurfaceLocationRequest(_message.Message):
-    __slots__ = ("operation_id", "location_id", "expected_revision")
+    __slots__ = ("operation_id", "location_id", "expected_revision", "dry_run")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     LOCATION_ID_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    DRY_RUN_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     location_id: str
     expected_revision: int
-    def __init__(self, operation_id: _Optional[str] = ..., location_id: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+    dry_run: bool
+    def __init__(self, operation_id: _Optional[str] = ..., location_id: _Optional[str] = ..., expected_revision: _Optional[int] = ..., dry_run: _Optional[bool] = ...) -> None: ...
 
 class PolicyPermission(_message.Message):
     __slots__ = ("permission_id", "target", "action", "surface_account_id", "scope", "reference", "resource", "approval_required")
@@ -491,14 +493,16 @@ class ListRolesResponse(_message.Message):
     def __init__(self, roles: _Optional[_Iterable[_Union[Role, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
 
 class DeletePolicyResourceRequest(_message.Message):
-    __slots__ = ("operation_id", "reference", "expected_revision")
+    __slots__ = ("operation_id", "reference", "expected_revision", "dry_run")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     REFERENCE_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    DRY_RUN_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     reference: str
     expected_revision: int
-    def __init__(self, operation_id: _Optional[str] = ..., reference: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+    dry_run: bool
+    def __init__(self, operation_id: _Optional[str] = ..., reference: _Optional[str] = ..., expected_revision: _Optional[int] = ..., dry_run: _Optional[bool] = ...) -> None: ...
 
 class DeletePolicyResourceResponse(_message.Message):
     __slots__ = ("deleted",)

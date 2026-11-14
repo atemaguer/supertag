@@ -99,9 +99,10 @@ transaction as the change:
 supertag audit --since 2026-11-01 --actor token:laptop-2 --control-plane team
 ```
 
-To also stream each entry as one JSON line, start the Control Plane with `--audit-log stderr` or
-`--audit-log /absolute/path`, or set `logging.audit` in `supertag.yaml`. The database keeps every
-entry either way.
+The JSON-lines audit stream is off unless you configure it. To stream each entry as one JSON
+line, start the Control Plane with `--audit-log stderr` or `--audit-log /absolute/path`, or set
+`logging.audit` in `supertag.yaml`. Without it, standard error carries only the service log that
+`supertag logs` shows. The database keeps every entry either way.
 
 ## Operator notifications
 
@@ -118,7 +119,11 @@ The operator inbox lists what needs a person:
 
 ```sh
 supertag get inbox-item --kind question --control-plane team
+supertag watch inbox-item --control-plane team
 ```
+
+`watch inbox-item` prints every item already waiting, then each new item once as it appears,
+until you stop it. It takes `--objective ID`, `--kind KIND`, `--limit N`, and `--output json`.
 
 The Gateway tells you when the inbox gains an item. Local `supertag up` uses desktop
 notifications. Choose destinations with the `control-plane` service's `notify` in

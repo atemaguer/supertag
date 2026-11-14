@@ -280,6 +280,7 @@ async fn exercise(url: &str) {
         operation_id: "delete".into(),
         volume_id: "durable".into(),
         expected_revision: 2,
+        dry_run: false,
     };
     assert!(matches!(
         store.delete_artifact_volume(OP, &delete).await,
@@ -432,6 +433,7 @@ async fn exercise(url: &str) {
         volume_id: "unused".into(),
         operation_id: "remove-unused".into(),
         expected_revision: old.revision,
+        dry_run: false,
     };
     assert!(
         store

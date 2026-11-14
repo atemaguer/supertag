@@ -19281,9 +19281,11 @@ func (x *UpdateTeamRequest) GetMaxConcurrency() uint32 {
 }
 
 type DeleteTeamRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OperationId   string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
-	Team          string                 `protobuf:"bytes,2,opt,name=team,proto3" json:"team,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	OperationId string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Team        string                 `protobuf:"bytes,2,opt,name=team,proto3" json:"team,omitempty"`
+	// Checks the deletion and returns the Team without deleting it or recording the operation.
+	DryRun        bool `protobuf:"varint,3,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -19330,6 +19332,13 @@ func (x *DeleteTeamRequest) GetTeam() string {
 		return x.Team
 	}
 	return ""
+}
+
+func (x *DeleteTeamRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
 }
 
 type WorkstreamPost struct {
@@ -24148,10 +24157,11 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\amembers\x18\x05 \x01(\v2 .supertag.runtime.v2.TeamMembersR\amembers\x12,\n" +
 	"\x0fmax_concurrency\x18\x06 \x01(\rH\x01R\x0emaxConcurrency\x88\x01\x01B\a\n" +
 	"\x05_nameB\x12\n" +
-	"\x10_max_concurrency\"J\n" +
+	"\x10_max_concurrency\"c\n" +
 	"\x11DeleteTeamRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x12\n" +
-	"\x04team\x18\x02 \x01(\tR\x04team\"\xfe\x01\n" +
+	"\x04team\x18\x02 \x01(\tR\x04team\x12\x17\n" +
+	"\adry_run\x18\x03 \x01(\bR\x06dryRun\"\xfe\x01\n" +
 	"\x0eWorkstreamPost\x12\x17\n" +
 	"\apost_id\x18\x01 \x01(\tR\x06postId\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\"\n" +

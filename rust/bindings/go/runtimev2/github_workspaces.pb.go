@@ -434,8 +434,10 @@ type DeleteGithubWorkspaceRequest struct {
 	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	WorkspaceId      string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	ExpectedRevision uint64                 `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Checks the deletion without deleting or recording the operation.
+	DryRun        bool `protobuf:"varint,4,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeleteGithubWorkspaceRequest) Reset() {
@@ -487,6 +489,13 @@ func (x *DeleteGithubWorkspaceRequest) GetExpectedRevision() uint64 {
 		return x.ExpectedRevision
 	}
 	return 0
+}
+
+func (x *DeleteGithubWorkspaceRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
 }
 
 type DeleteGithubWorkspaceResponse struct {
@@ -830,11 +839,12 @@ const file_supertag_runtime_v2_github_workspaces_proto_rawDesc = "" +
 	"workspaces\x18\x01 \x03(\v2$.supertag.runtime.v2.GithubWorkspaceR\n" +
 	"workspaces\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"\x91\x01\n" +
+	"nextCursor\"\xaa\x01\n" +
 	"\x1cDeleteGithubWorkspaceRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12+\n" +
-	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\"\x1f\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\x12\x17\n" +
+	"\adry_run\x18\x04 \x01(\bR\x06dryRun\"\x1f\n" +
 	"\x1dDeleteGithubWorkspaceResponse\"\xb0\x02\n" +
 	"\x0fGithubSourcePin\x12\x15\n" +
 	"\x06pin_id\x18\x01 \x01(\tR\x05pinId\x12\x15\n" +

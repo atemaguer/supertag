@@ -1235,6 +1235,7 @@ pub async fn update_tag(args: UpdateTag) -> Result<()> {
                         operation_id: Uuid::new_v4().to_string(),
                         location_id: id,
                         expected_revision: current.revision,
+                        dry_run: false,
                     },
                     &token,
                 )?)

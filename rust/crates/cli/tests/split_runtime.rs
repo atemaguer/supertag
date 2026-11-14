@@ -1886,6 +1886,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
             operation_id: "retire-location".into(),
             location_id: location.location_id,
             expected_revision: location.revision,
+            dry_run: false,
         })?)
         .await?;
     assert_eq!(

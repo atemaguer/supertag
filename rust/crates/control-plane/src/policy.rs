@@ -1094,7 +1094,9 @@ impl Store {
         name("policy reference", &input.reference)?;
         let hash = digest(&format!("delete-{}", M::KIND), input);
         let (mut tx, _) = self.write().await?;
-        if let Some(value) = replay(&mut tx, principal, &input.operation_id, &hash).await? {
+        if !input.dry_run
+            && let Some(value) = replay(&mut tx, principal, &input.operation_id, &hash).await?
+        {
             return Ok(value);
         }
         delete_policy_in::<M>(
@@ -1106,6 +1108,11 @@ impl Store {
         )
         .await?;
         let response = DeletePolicyResourceResponse { deleted: true };
+        if input.dry_run {
+            // A dry run makes every check the deletion makes, then rolls it back unrecorded.
+            tx.rollback().await?;
+            return Ok(response);
+        }
         receipt(&mut tx, principal, &input.operation_id, &hash, &response).await?;
         tx.commit().await?;
         Ok(response)

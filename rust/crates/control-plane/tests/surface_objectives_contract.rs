@@ -670,6 +670,7 @@ async fn delete_location(store: &Store, step: &str, location: &str) {
                 operation_id: step.into(),
                 location_id: location.into(),
                 expected_revision: current.revision,
+                dry_run: false,
             },
         )
         .await

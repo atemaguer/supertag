@@ -224,6 +224,7 @@ async fn exercise(url: &str) {
             &DeleteTeamRequest {
                 operation_id: op(),
                 team: "replaced".into(),
+                dry_run: false,
             },
         )
         .await
@@ -321,6 +322,7 @@ async fn exercise(url: &str) {
             &DeleteTeamRequest {
                 operation_id: op(),
                 team: "replaced".into(),
+                dry_run: false,
             },
         )
         .await

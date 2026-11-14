@@ -43,6 +43,8 @@ message DeleteGithubWorkspaceRequest {
   string operation_id = 1;
   string workspace_id = 2;
   uint64 expected_revision = 3;
+  // Checks the deletion without deleting or recording the operation.
+  bool dry_run = 4;
 }
 message DeleteGithubWorkspaceResponse {}
 

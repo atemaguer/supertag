@@ -136,6 +136,8 @@ message DeleteSurfaceLocationRequest {
   string operation_id = 1;
   string location_id = 2;
   uint64 expected_revision = 3;
+  // Checks the deletion without deleting or recording the operation.
+  bool dry_run = 4;
 }
 
 enum PolicyPermissionTarget {
@@ -281,6 +283,8 @@ message DeletePolicyResourceRequest {
   string operation_id = 1;
   string reference = 2;
   uint64 expected_revision = 3;
+  // Checks the deletion without deleting or recording the operation.
+  bool dry_run = 4;
 }
 message DeletePolicyResourceResponse { bool deleted = 1; }
 message AssignRoleRequest {

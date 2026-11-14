@@ -50,14 +50,16 @@ brackets (`--yes` accepts every default and needs no terminal). It writes
 `~/.supertag/supertag.yaml` and starts, in the background:
 
 - a `control-plane` service, which creates the Permission Set `local-tools`, the Role `Lead`, and
-  the Tag `lead`, bound to this repository's Workspace at the commit checked out when `init` ran;
+  the Tag `lead`, bound to this repository's Workspace and following the branch checked out when
+  `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as a Workspace named
   after it.
 
-Nothing is written to the repository; state lives in `~/.supertag/`. New Sessions of `lead` start
-from the commit `init` recorded. To start them from a newer commit, apply a Tag manifest with a
-new `workspace.baseCommit`, or with `workspace.ref: BRANCH` to follow a local branch; see [Workspaces](../../docs/guides/workspaces.md#2-bind-a-tag-to-the-workspace).
+Nothing is written to the repository; state lives in `~/.supertag/`. Each new Session of `lead`
+starts from the current commit of the branch `init` found (`workspace.ref`). When HEAD is
+detached, `init` pins the checked-out commit (`workspace.baseCommit`) instead and says so in its
+output. To follow another branch or pin a commit, apply a Tag manifest; see [Workspaces](../../docs/guides/workspaces.md#2-bind-a-tag-to-the-workspace).
 
 Operator commands use these local services without a flag; `--control-plane NAME` targets
 another Control Plane.

@@ -279,6 +279,13 @@ impl Store {
         name("operation ID", &input.operation_id)?;
         let digest = digest("delete", input);
         let (mut tx, order) = self.write().await?;
+        if input.dry_run {
+            // A dry run makes every check the deletion makes, then rolls it back unrecorded.
+            let team = team_by_reference_in(&mut tx, &input.team).await?;
+            delete_team_in(&mut tx, &team, None).await?;
+            tx.rollback().await?;
+            return Ok(team);
+        }
         if let Some(prior) = replay(&mut tx, principal, &input.operation_id, &digest).await? {
             tx.rollback().await?;
             return Ok(prior);

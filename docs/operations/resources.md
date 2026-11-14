@@ -201,13 +201,16 @@ value reports a conflict instead of silently reverting it.
 ## Delete a resource
 
 ```sh
-supertag delete permission-set review-tools
+supertag delete team core --dry-run
 supertag delete team core
 ```
 
 `delete` handles Teams, Permission Sets, Context Sets, Volumes, Workspaces, and surface
 locations. It refuses a resource still in use: a Team while an Objective names it, or a Permission
 Set a Role uses. Retire a Tag with `tag retire`, and a Role by putting it with `status: retired`.
+
+`--dry-run` makes every check the deletion makes and deletes nothing. It prints the deletion as
+`diff` does, such as `delete Team/core`, or fails with the reason the deletion would be refused.
 To preview an apply set's deletions, use `diff --set NAME --prune`.
 
 ## Cancel a Task

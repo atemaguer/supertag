@@ -360,13 +360,19 @@ impl Store {
         name("Workspace ID", &input.workspace_id)?;
         let digest = policy::digest("delete-github-workspace", input);
         let (mut tx, _) = self.write().await?;
-        if let Some(prior) =
-            policy::replay(&mut tx, principal, &input.operation_id, &digest).await?
+        if !input.dry_run
+            && let Some(prior) =
+                policy::replay(&mut tx, principal, &input.operation_id, &digest).await?
         {
             return Ok(prior);
         }
         delete_in(&mut tx, &input.workspace_id, input.expected_revision).await?;
         let response = DeleteGithubWorkspaceResponse {};
+        if input.dry_run {
+            // A dry run makes every check the deletion makes, then rolls it back unrecorded.
+            tx.rollback().await?;
+            return Ok(response);
+        }
         policy::receipt(&mut tx, principal, &input.operation_id, &digest, &response).await?;
         tx.commit().await?;
         Ok(response)

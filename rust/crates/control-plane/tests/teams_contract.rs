@@ -495,9 +495,20 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
     let delete = DeleteTeamRequest {
         operation_id: "delete-release".into(),
         team: "release".into(),
+        dry_run: false,
     };
     assert!(matches!(
         store.delete_team(OPERATOR, &delete).await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    // A dry run makes the same checks, so it is refused for the same reason.
+    let dry_run = DeleteTeamRequest {
+        operation_id: "delete-release-dry-run".into(),
+        dry_run: true,
+        ..delete.clone()
+    };
+    assert!(matches!(
+        store.delete_team(OPERATOR, &dry_run).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     finish(store, &host, &one).await;
@@ -550,7 +561,17 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
             .await
             .unwrap();
     }
+    // A dry run that would succeed deletes nothing and records no operation, so the real
+    // deletion with the same operation ID still happens afterwards.
+    let dry_run = DeleteTeamRequest {
+        dry_run: true,
+        ..delete.clone()
+    };
+    let previewed = store.delete_team(OPERATOR, &dry_run).await.unwrap();
+    assert_eq!(previewed.team_id, "release");
+    store.get_team(OPERATOR, "release").await.unwrap();
     let deleted = store.delete_team(OPERATOR, &delete).await.unwrap();
+    assert_eq!(deleted, previewed);
     assert_eq!(store.delete_team(OPERATOR, &delete).await.unwrap(), deleted);
     assert_eq!(
         store

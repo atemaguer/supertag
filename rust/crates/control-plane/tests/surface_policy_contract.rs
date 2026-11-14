@@ -194,6 +194,7 @@ async fn contract(url: &str) {
                     operation_id: "delete-edit".into(),
                     reference: "edit".into(),
                     expected_revision: 1,
+                    dry_run: false,
                 }
             )
             .await,
@@ -331,6 +332,7 @@ async fn contract(url: &str) {
                 operation_id: "delete-location".into(),
                 location_id: "editing".into(),
                 expected_revision: updated.revision,
+                dry_run: false,
             },
         )
         .await
@@ -354,6 +356,7 @@ async fn contract(url: &str) {
                 operation_id: "delete-edit".into(),
                 reference: "edit".into(),
                 expected_revision: 1,
+                dry_run: false,
             },
         )
         .await

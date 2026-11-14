@@ -2365,8 +2365,10 @@ type DeleteArtifactVolumeRequest struct {
 	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	VolumeId         string                 `protobuf:"bytes,2,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
 	ExpectedRevision uint64                 `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Checks the deletion without deleting or recording the operation.
+	DryRun        bool `protobuf:"varint,4,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeleteArtifactVolumeRequest) Reset() {
@@ -2418,6 +2420,13 @@ func (x *DeleteArtifactVolumeRequest) GetExpectedRevision() uint64 {
 		return x.ExpectedRevision
 	}
 	return 0
+}
+
+func (x *DeleteArtifactVolumeRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
 }
 
 type DeleteArtifactVolumeResponse struct {
@@ -4505,11 +4514,12 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\bafter_id\x18\x02 \x01(\tR\aafterId\"\x80\x01\n" +
 	"\x1bListArtifactVolumesResponse\x12=\n" +
 	"\avolumes\x18\x01 \x03(\v2#.supertag.runtime.v2.ArtifactVolumeR\avolumes\x12\"\n" +
-	"\rnext_after_id\x18\x02 \x01(\tR\vnextAfterId\"\x8a\x01\n" +
+	"\rnext_after_id\x18\x02 \x01(\tR\vnextAfterId\"\xa3\x01\n" +
 	"\x1bDeleteArtifactVolumeRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1b\n" +
 	"\tvolume_id\x18\x02 \x01(\tR\bvolumeId\x12+\n" +
-	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\"8\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\x12\x17\n" +
+	"\adry_run\x18\x04 \x01(\bR\x06dryRun\"8\n" +
 	"\x1cDeleteArtifactVolumeResponse\x12\x18\n" +
 	"\adeleted\x18\x01 \x01(\bR\adeleted\"\x88\x02\n" +
 	"\x1bCopyArtifactToVolumeRequest\x12!\n" +
