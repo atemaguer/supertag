@@ -52,9 +52,17 @@ function linkTargets(text) {
 export function checkLinks(root, file, text) {
   const problems = [];
   for (const { target, line } of linkTargets(text)) {
-    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu.test(target)) continue;
-    const [path, anchor] = target.split("#");
-    const destination = path ? resolve(dirname(file), decodeURIComponent(path)) : file;
+    // Published READMEs link this repository's files by absolute URL; check those files too.
+    const own = target.match(
+      /^https:\/\/github\.com\/atemaguer\/supertag\/(?:blob|tree)\/main\/(.*)$/u,
+    );
+    if (!own && /^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu.test(target)) continue;
+    const [path, anchor] = (own ? own[1] : target).split("#");
+    const destination = !path
+      ? file
+      : own
+        ? resolve(root, decodeURIComponent(path))
+        : resolve(dirname(file), decodeURIComponent(path));
     const at = `${relative(root, file)}:${line}`;
     if (internal.test(destination)) {
       problems.push(`${at}: links internal design record ${path}`);

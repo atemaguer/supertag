@@ -22,45 +22,37 @@ link every doc — a page reachable only from a sibling is invisible.
 
 ## CLI form
 
-Write `supertag`, never `pnpm supertag`. Readers install the CLI from npm with
-`npm install -g supertag-ai`; `pnpm supertag` resolves to
-`pnpm --filter @supertag/cli dev` and fails outside a checkout with
-`ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND`.
-
-Repository installation commands (`pnpm install`, `pnpm install:cli`, and
-`pnpm uninstall:cli`) belong in `CONTRIBUTING.md`. User installation instructions use npm
-and PyPI; Python prereleases need an explicit version pin.
+Write `supertag`, never `pnpm supertag`. Readers install the native release archive; see
+`docs/operations/install.md`. Repository build commands belong in `CONTRIBUTING.md`.
 
 Two intentional exceptions to the CLI form:
 
 - `CONTRIBUTING.md` documents the `pnpm supertag` shortcut for running uncommitted changes.
-- `docs/operations/control-plane.md` deliberately contrasts installed CLI / from a checkout / built
-  checkout / container.
+- `docs/operations/control-plane.md` may contrast invocation forms.
 
-Before documenting a command, confirm it exists in `helpText()` in `apps/cli/src/index.ts`, and
-that any resource kind exists in the map in `apps/cli/src/resources.ts`. Guides for the native
-services (Render, Cloudflare, Modal) document the native CLI instead: they carry
-`<!-- supertag-cli: native -->`, and `pnpm docs:check` checks their commands against
-`rust/docs/cli-reference.md`. Do not copy commands
-out of the internal architecture record — some were never implemented.
+`docs/reference/cli.md` is the command inventory. It is generated from the Rust CLI's help and
+checked by `rust/crates/cli/tests/cli_help.rs`; regenerate it with
+`SUPERTAG_UPDATE_CLI_REFERENCE=1`. Before documenting a command or flag, confirm it there.
+`pnpm docs:check` validates every documented `supertag` command and flag against it. Operator
+commands name their Control Plane on every call: examples use `--state-directory ~/.supertag` for
+local services or `--control-plane NAME` for a saved one. Do not copy commands out of the
+internal architecture record — some were never implemented.
 
 ## Capitalized vocabulary
 
 Capitalize a term only if it is something a user **creates, configures, inspects, or
 implements**. Everything else is lowercase prose.
 
-Configuration resources: **Tag, Presence, Permission Set, Context Set, Worker Profile,
-Surface Account**.
+Configuration resources: **Tag, Role, Permission Set, Context Set, Team, Objective, Workspace,
+Volume, Surface Account, Auth Key, Operator Token**.
 
 Operational resources: **Session, Task, Task Attempt, Worker Host**.
 
-Extension contracts (as named in `api-stability.md`): **Worker, Worker Host, Worker Runtime,
-Connector**, and the provider/resolver contracts. The harness contract is the exception: write
-*harness* in lowercase, like other industry terms. Keep multi-word SPI names such as **Harness
-Plan** and **Harness Runtime Provider** capitalized, and keep code identifiers such as `Harness`
-as written.
+Extension contracts (as named in `api-stability.md`): **Connector**. Write *harness* and *harness
+adapter* in lowercase, like other industry terms, and keep code identifiers such as `Harness` as
+written.
 
-Plus **Gateway**, the service itself.
+Plus **Control Plane** and **Gateway**, the services themselves.
 
 Lowercase, even though they are domain concepts: *collaboration surface*, *multiplayer*,
 *resource*, *thread*, *channel*, *repository*, *workspace*, *harness*.

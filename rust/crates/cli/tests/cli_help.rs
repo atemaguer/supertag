@@ -1,6 +1,6 @@
 //! The CLI's help, its reference page, and its usage errors, through the real binary.
 //!
-//! `rust/docs/cli-reference.md` records the help of every visible command. A change to a command,
+//! `docs/reference/cli.md` records the help of every visible command. A change to a command,
 //! flag, or description must update that page in the same change: rerun with
 //! `SUPERTAG_UPDATE_CLI_REFERENCE=1` and review the diff.
 
@@ -12,7 +12,7 @@ const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const UPDATE: &str = "SUPERTAG_UPDATE_CLI_REFERENCE";
 
 fn reference_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/cli-reference.md")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../docs/reference/cli.md")
 }
 
 fn supertag(args: &[&str]) -> Result<std::process::Output> {
@@ -78,12 +78,12 @@ fn commands() -> Result<Vec<Entry>> {
 
 fn render(entries: &[Entry]) -> String {
     let mut page = String::from(
-        "# Rust CLI reference\n\n\
-         Generated from `supertag --help` and the help of every visible command, and checked by\n\
-         `rust/crates/cli/tests/cli_help.rs`. Do not edit by hand: change the command's help, then\n\
-         rerun that test with `SUPERTAG_UPDATE_CLI_REFERENCE=1`.\n\n\
-         This page describes the Rust CLI. The pages under `docs/` still describe the TypeScript CLI\n\
-         until the docs switch.\n",
+        "# CLI reference\n\n\
+         The help of `supertag` and of every visible command. For a task-oriented tour, see\n\
+         [Use the CLI](../operations/cli.md).\n\n\
+         Generated from the CLI's help and checked by `rust/crates/cli/tests/cli_help.rs`. Do not\n\
+         edit by hand: change the command's help, then rerun that test with\n\
+         `SUPERTAG_UPDATE_CLI_REFERENCE=1`.\n",
     );
     for entry in entries {
         let name = if entry.path.is_empty() {
@@ -109,7 +109,7 @@ fn every_command_help_matches_the_reference() -> Result<()> {
         std::fs::write(&path, &rendered)?;
         return Ok(());
     }
-    let recorded = std::fs::read_to_string(&path).context("read rust/docs/cli-reference.md")?;
+    let recorded = std::fs::read_to_string(&path).context("read docs/reference/cli.md")?;
     if recorded == rendered {
         return Ok(());
     }
@@ -127,7 +127,7 @@ fn every_command_help_matches_the_reference() -> Result<()> {
         .map(|(now, before)| format!("reference:\n{before}\n\nhelp now:\n{now}"))
         .unwrap_or_else(|| "a command was added or removed".into());
     anyhow::bail!(
-        "the CLI help no longer matches rust/docs/cli-reference.md; rerun with {UPDATE}=1 and \
+        "the CLI help no longer matches docs/reference/cli.md; rerun with {UPDATE}=1 and \
          review the diff.\n{drift}"
     )
 }

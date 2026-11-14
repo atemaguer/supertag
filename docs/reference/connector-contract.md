@@ -1,7 +1,5 @@
 # Connector contract
 
-<!-- supertag-cli: native -->
-
 A **Connector** links one collaboration surface account to SuperTag. It turns surface events into
 [Tasks](glossary.md#task) and delivers each Task's reply back to the surface. The built-in
 connectors for Slack, GitHub, Linear, Lark, and Microsoft Teams run inside a
@@ -41,7 +39,7 @@ enrolls once. `AcceptEvent` serves accounts no Surface Account names, and those 
 Tag, so the key must trust the connector with every Tag:
 
 ```sh
-supertag auth-key create discord-acme --role gateway --all-tags
+supertag auth-key create discord-acme --role gateway --all-tags --state-directory ~/.supertag
 supertag gateway enroll discord-acme --control-plane https://cp.example.com \
   --state-directory /var/lib/discord-acme --auth-key file:/run/secrets/auth-key
 ```

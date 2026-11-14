@@ -1,34 +1,51 @@
 # MCP tools for GitHub, Slack, Linear, Teams, and Lark
 
 An MCP server gives a **Task**, one request accepted for a **Tag** (a persistent AI actor with
-its own responsibilities and permissions), tools to read or change an external service. A **Worker
-Host**, a machine or sandbox that provides execution capacity, runs the Task. There the **Worker**,
-the code that completes the Task, drives an agent system through its **harness**. Declare a preset
-for the provider on that host when the harness needs those tools. The host supplies the server
-credential, while a **Permission Set**, a set of allowed actions, selects tools and resources. The
-**Surface Account**, the connected external account, remains in the **Control Plane**, the SuperTag
-service, for incoming messages and thread replies.
+its own responsibilities and permissions), tools to read or change an external service. The
+**Worker Host**, the machine that runs the Task, offers MCP servers from its own catalog and holds
+their credentials. A **Permission Set**, a set of allowed actions, selects which tools and
+resources a Task may use. The **Surface Account**, the connected account the Gateway uses for
+incoming messages and thread replies, is separate. See the [glossary](../reference/glossary.md)
+for other terms.
 
-## GitHub
+Catalog tools serve Claude Code Tasks.
 
-For example, a Task may read one repository and send messages to one Slack channel. Set up the
-host's HTTP MCP servers in `supertag.yaml`:
+## Write the host's catalog
 
-```yaml
-services:
-  laptop:
-    type: host
-    mcp:
-      github: { preset: github, auth: { bearer: { env: GITHUB_MCP_TOKEN } } }
-      slack: { preset: slack, auth: { bearer: { env: SLACK_MCP_TOKEN } } }
+The catalog is an owner-only JSON file that the Worker Host reads with `--mcp-catalog`. A
+**preset** names an official server, its URL, and how its tool arguments map to resources:
+
+```json
+{
+  "version": 1,
+  "servers": [
+    { "name": "github", "preset": "github", "headerEnv": { "Authorization": "GITHUB_MCP_AUTH" } },
+    { "name": "slack", "preset": "slack", "headerEnv": { "Authorization": "SLACK_MCP_AUTH" } }
+  ]
+}
 ```
 
-Use host-local credentials restricted by GitHub and Slack to the intended repositories and
-channels. SuperTag reads the environment variables on the host and injects the headers in its
-per-Task policy proxy. The harness and its shell never receive them. See
-[host MCP servers](../reference/supertag-yaml.md#host-mcp-servers).
+Each `headerEnv` value names a Worker Host environment variable that holds the full header value,
+such as `Bearer TOKEN`. Use credentials restricted by the provider to the repositories and
+channels the Tags need. The host injects the headers for each Task Attempt; the agent and its
+shell never receive them.
 
-Grant the exact official tools in a Permission Set:
+```sh
+chmod 600 ~/mcp-catalog.json
+supertag mcp list --mcp-catalog ~/mcp-catalog.json
+supertag worker-host --control-plane https://supertag.example.com \
+  --state-directory ~/.supertag-host --harness claude-code --mcp-catalog ~/mcp-catalog.json
+```
+
+`mcp list` shows each server, its auth form, and whether its credentials are ready, without
+printing them. A server can also sign in with OAuth (`"oauth": true`, then
+`supertag mcp login NAME --mcp-catalog PATH`), or mint credentials per Task Attempt from a refresh
+token, client credentials, a GitHub App, or a helper command. See
+[`supertag worker-host`](../reference/cli.md#supertag-worker-host) for every catalog form.
+
+## Grant the tools
+
+Grant exact tools, and optionally resources, in a Permission Set:
 
 ```yaml
 apiVersion: supertag/v1
@@ -36,88 +53,61 @@ kind: PermissionSet
 metadata: { name: review-tools }
 spec:
   permissions:
-    - { target: mcp, action: "github/get_file_contents", resource: "repository:acme/api" }
-    - { target: mcp, action: "github/create_pull_request", resource: "repository:acme/api", approval: required }
-    - { target: mcp, action: "slack/slack_read_channel", resource: "channel:C0123456789" }
-    - { target: mcp, action: "slack/slack_send_message", resource: "channel:C0123456789", approval: required }
+    - { target: mcp, action: github/get_file_contents, resource: "repository:acme/api" }
+    - { target: mcp, action: github/create_pull_request, resource: "repository:acme/api", approval_required: true }
+    - { target: mcp, action: slack/slack_read_channel, resource: "channel:C0123456789" }
 ```
 
-The GitHub preset maps `owner` plus `repo` or `repository` to `repository:OWNER/REPO`.
-It maps `get_file_contents`, `issue_read`, `add_issue_comment`, `pull_request_read`,
-`create_branch`, `create_pull_request`, and `merge_pull_request`.
+The action is `SERVER/TOOL`, where `SERVER` is the catalog name. A call that requires approval
+waits in the operator inbox. A scoped call whose arguments cannot be checked against the resource
+fails. See [MCP server tools](../reference/iam.md#mcp-server-tools).
+
+## GitHub
+
+The `github` preset maps `owner` plus `repo` or `repository` to `repository:OWNER/REPO`.
+
+Git credentials for a GitHub **Workspace**, a repository that Tasks work in, are separate from MCP
+credentials; see [Workspaces](../guides/workspaces.md).
 
 ## Slack
 
-The Slack preset maps
-`channel_id`, `channelId`, or `channel` to `channel:ID` for `slack_read_channel`,
-`slack_read_thread`, and `slack_send_message`. A scoped call without checkable arguments fails.
-See [MCP server tools](../reference/iam.md#mcp-server-tools) for grants and approval.
-
-Git credentials for cloning a **Workspace**, a named repository that Tasks work in, or delivering its pull request are separate from MCP
-credentials. Those operations use the host's `GITHUB_TOKEN` and existing Workspace permissions;
-see [Workspaces](../guides/workspaces.md#deliver-pull-requests).
+The `slack` preset maps `channel_id`, `channelId`, or `channel` to `channel:ID` for
+`slack_read_channel`, `slack_read_thread`, and `slack_send_message`.
 
 ## Linear
 
-```yaml
-mcp:
-  linear: { preset: linear, auth: { bearer: { env: LINEAR_MCP_TOKEN } } }
-```
-
-The preset uses Linear's official server, `https://mcp.linear.app/mcp`. It maps `team_id`,
-`teamId`, or `team` to `team:ID` for `list_issues` and `create_issue`. Other Linear tools, such
-as `get_issue` and `create_comment`, take only an issue or comment ID, so grant them per tool,
-without a `resource`. Use a token restricted to the teams the Tag needs.
+The `linear` preset uses Linear's official server. It maps `team_id`, `teamId`, or `team` to
+`team:ID` for `list_issues` and `create_issue`. Tools that take only an issue or comment ID, such
+as `get_issue`, are granted per tool, without a `resource`.
 
 ## Teams
 
-```yaml
-mcp:
-  teams:
-    preset: teams
-    tenantId: contoso.onmicrosoft.com
-    auth: { bearer: { env: TEAMS_MCP_TOKEN } }
-```
-
-The preset uses Microsoft's preview Agent 365 Teams MCP server for the `tenantId` you give.
-It maps `team_id` or `teamId` plus `channel_id` or `channelId` to
-`team:TEAM_ID/channel:CHANNEL_ID` for `mcp_graph_teams_listChannelMessages`,
-`mcp_graph_teams_postChannelMessage`, and `mcp_graph_teams_replyToChannelMessage`. The
-Microsoft permission covers the whole tenant, so restrict the identity's Teams access as a
-second boundary.
+The `teams` preset uses Microsoft's preview Agent 365 Teams MCP server and needs `"tenantId"`, the
+Microsoft Entra tenant ID or domain. It maps `team_id` plus `channel_id` to
+`team:TEAM_ID/channel:CHANNEL_ID`. The Microsoft permission covers the whole tenant, so restrict
+the identity's Teams access as a second boundary.
 
 ## Lark / Feishu
 
-```yaml
-mcp:
-  lark:
-    preset: lark
-    env:
-      APP_ID: { env: LARK_APP_ID }
-      APP_SECRET: { env: LARK_APP_SECRET }
-      LARK_DOMAIN: { env: LARK_DOMAIN }   # optional: https://open.feishu.cn is the server's default
+Lark's server runs only over stdio. The `lark` preset runs `lark-mcp`, from the
+`@larksuiteoapi/lark-mcp` npm package, from the Worker Host's `PATH`:
+
+```json
+{ "name": "lark", "preset": "lark", "env": { "APP_ID": "LARK_APP_ID", "APP_SECRET": "LARK_APP_SECRET" } }
 ```
 
-Lark's server runs only over stdio. The preset runs the official `@larksuiteoapi/lark-mcp`
-package that ships with SuperTag. The Worker starts it for each **Task Attempt**, one execution or retry of a
-Task, and the harness
-reaches it only through the policy proxy. The App credentials reach only the server process. The
-preset maps these calls to `chat:ID`, so a grant can name one chat:
+The host starts the server for each Task Attempt with only the variables its `env` names, and
+stops it when the Task Attempt ends. A chat-scoped grant names `chat:ID`.
 
-- `im_v1_message_list` with `params.container_id_type: chat` uses `params.container_id`.
-- `im_v1_message_create` with `params.receive_id_type: chat_id` uses `data.receive_id`.
+## Other servers
 
-A chat-scoped grant refuses any other recipient type, such as `open_id`, because no chat can be
-checked. Grant other tools, such as
-`im_v1_message_reply`, per tool.
-
-The Lark Surface Account's Gateway credentials are separate and stay in the Control Plane.
+Any HTTPS server can be a catalog entry with `"url"` in place of `"preset"`, and any local
+command a stdio entry with `"command"`. An optional `resources.tools` object maps a tool's
+arguments to resources. HTTP endpoints must use TLS, except on loopback.
 
 ## Secret handling
 
-For where each credential is stored and who can resolve it, see
+Credentials stay on the Worker Host. They reach a server only through the headers or environment
+the catalog names, never Permission Sets, prompts, Session state, or command-line arguments.
+Known secret values are redacted from events and errors. See
 [credential storage](../reference/credential-storage.md).
-
-Credentials are resolved per Task Attempt on the **Worker Host**, the machine or sandbox that runs the Task. They are supplied through proxy headers or the stdio server's environment, never Permission Sets, Task snapshots, Runtime Input Manifests, prompts, session state, or command-line arguments. Built-in harnesses and local processes receive a minimal environment instead of inheriting every Worker Host variable. Known secret values are redacted from Worker events and errors before they cross the transport of the **Worklet**, the program that connects the Worker Host to the Control Plane.
-
-HTTP MCP endpoints must use TLS. A plain HTTP endpoint is accepted only on the loopback interface for local development and automated verification.

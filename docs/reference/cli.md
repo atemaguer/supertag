@@ -1,11 +1,11 @@
-# Rust CLI reference
+# CLI reference
 
-Generated from `supertag --help` and the help of every visible command, and checked by
-`rust/crates/cli/tests/cli_help.rs`. Do not edit by hand: change the command's help, then
-rerun that test with `SUPERTAG_UPDATE_CLI_REFERENCE=1`.
+The help of `supertag` and of every visible command. For a task-oriented tour, see
+[Use the CLI](../operations/cli.md).
 
-This page describes the Rust CLI. The pages under `docs/` still describe the TypeScript CLI
-until the docs switch.
+Generated from the CLI's help and checked by `rust/crates/cli/tests/cli_help.rs`. Do not
+edit by hand: change the command's help, then rerun that test with
+`SUPERTAG_UPDATE_CLI_REFERENCE=1`.
 
 ## `supertag`
 
@@ -1245,7 +1245,7 @@ Usage: supertag question answer [OPTIONS] <TASK_ID> <TEXT>
 
 Arguments:
   <TASK_ID>  The Task that asked
-  <TEXT>     
+  <TEXT>     The answer, or `-` to read it from standard input and keep it out of the process list
 
 Options:
       --control-plane <URL|NAME>

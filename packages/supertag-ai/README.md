@@ -52,18 +52,18 @@ supertag ps
 ```
 
 `init` sets up a local **Control Plane**, the service that stores your organization and schedules
-work, and connects your machine as a **Worker Host**, which provides execution capacity. A
-**Worker** completes a Task, and a **Worklet** connects its host to the Control Plane.
+work, and connects your machine as a **Worker Host**, which provides execution capacity and runs
+each Task on a harness such as Codex or Claude Code.
 
 Keep the default lead Tag name `lead`. Replace `YOUR_WORKSPACE` below with the Workspace name
 printed by setup; a **Workspace** connects a repository to SuperTag.
 
 ```sh
-supertag create objective first-reply --owner lead --workspace YOUR_WORKSPACE \
-  --budget-minor 1000 --budget-currency USD \
-  --outcome 'Create SUPERTAG-HELLO.md containing exactly: Hello from SuperTag. Done when the file exists and you have checked its contents. Do this yourself without delegating; change no other files.'
-supertag watch objective first-reply
-supertag describe objective first-reply
+supertag objective create first-reply \
+  'Create SUPERTAG-HELLO.md containing exactly: Hello from SuperTag. Done when the file exists and you have checked its contents. Do this yourself without delegating; change no other files.' \
+  --owner lead --budget-minor 1000 --currency USD --state-directory ~/.supertag
+supertag watch objective first-reply --state-directory ~/.supertag
+supertag describe objective first-reply --state-directory ~/.supertag
 ```
 
 Work arrives on a separate git branch for you to review. Use the branch and review commands printed
@@ -78,11 +78,11 @@ and use one conversation to create Objectives, follow progress, answer questions
 ## What you can use today
 
 - **Choose each Tag's coding harness.** Codex, Claude Code, Cursor, OpenCode, or a custom harness.
-  See [harness runtime](https://github.com/atemaguer/supertag/blob/main/docs/guides/harness-runtime.md)
+  See [Run Worker Hosts](https://github.com/atemaguer/supertag/blob/main/docs/guides/workers.md)
   for supported execution modes and credential handling.
 - **Run work where your code lives.** Use local or remote Worker Hosts, with execution adapters
   for Modal and E2B. Supported harness/provider combinations and current limits are documented in
-  [shared execution](https://github.com/atemaguer/supertag/blob/main/docs/guides/shared-execution.md).
+  [remote sandboxes and shared execution](https://github.com/atemaguer/supertag/blob/main/docs/reference/worker.md#remote-sandboxes-and-shared-execution).
 - **Direct the team from your tools.** Use the CLI or API, or connect Slack, GitHub, Linear,
   Lark/Feishu, and Microsoft Teams through
   [collaboration surfaces](https://github.com/atemaguer/supertag/blob/main/docs/surfaces/README.md).
@@ -193,16 +193,11 @@ Reuse the same sequence number and request body when retrying an event. The Work
 records the outcome after the adapter exits successfully. Keep process output and native
 provider calls inside the adapter's execution scope.
 
-See the [entry-point stability table](https://github.com/atemaguer/supertag/blob/main/docs/reference/api-stability.md#package-entry-points)
-before selecting an extension boundary. The
-[custom Worker guide](https://github.com/atemaguer/supertag/blob/main/docs/guides/custom-workers.md)
-and [external example](https://github.com/atemaguer/supertag/tree/main/examples/custom-worker)
-show complete implementations. To add reusable knowledge, follow
-[custom Context types](https://github.com/atemaguer/supertag/blob/main/docs/guides/custom-context.md).
-
-Custom Workers are ordinary applications run through Node.js, Bun, a container, or a process
-supervisor. The CLI launches SuperTag's built-in TypeScript Workers; it does not turn custom
-Workers into CLI subcommands. Optional execution integrations load through their explicit entry points.
+See the [stability table](https://github.com/atemaguer/supertag/blob/main/docs/reference/api-stability.md#current-stability-by-area)
+before selecting an extension boundary, and
+[Write a harness adapter](https://github.com/atemaguer/supertag/blob/main/docs/guides/harness-adapters.md) for the adapter protocol and
+how a Worker Host launches an adapter. Optional execution integrations load through their
+explicit entry points.
 
 The installed package includes guides under `dist/docs/` and wire schemas under `dist/spec/`.
 For example, resolve a schema through `supertag-ai/spec/task-attempt-spec.schema.json`.
@@ -216,10 +211,9 @@ The matching Python SDK is published separately as `supertag` on PyPI:
 python -m pip install 'supertag==0.2.0a9'
 ```
 
-Pin the prerelease explicitly so pip selects the matching SDK. Python applications can compose
-custom Workers and use the Codex or OpenAI Agents harness integrations. See the
-[Python Worker guide](https://github.com/atemaguer/supertag/blob/main/docs/guides/python-workers.md)
-for installation extras, examples, and Control Plane connection details.
+Pin the prerelease explicitly so pip selects the matching SDK. Python applications can write
+harness adapters, run the OpenAI Agents adapter, and call the Control Plane API. See the
+[Python SDK README](https://github.com/atemaguer/supertag/blob/main/sdks/python/README.md) for installation extras and examples.
 
 ## Contributing and support
 

@@ -11,8 +11,8 @@ Before a Task runs, SuperTag decides which reusable knowledge may be added and w
 allowed. Other terms on this page (see the [glossary](../reference/glossary.md)): a **Session**
 groups Tasks from the same thread of work; an **Objective** is an outcome a Tag owns; a **Team**
 is a flat list of member Tags; a **Skill** is a reusable package of instructions and supporting files; a
-**Worker** is the code that completes a Task, and a **harness** connects that Worker to an agent
-system; the **Control Plane** stores the **autonomous organization**, all your Teams of Tags with
+**Worker Host** is the machine that runs a Task, and a **harness** is the agent system it runs the
+Task on; the **Control Plane** stores the **autonomous organization**, all your Teams of Tags with
 their shared rules and record of the work, and applies its policy; a **collaboration surface**
 links SuperTag to an external work tool.
 
@@ -30,10 +30,9 @@ that Tag's work.
 
 Use a Context Set to select:
 
-- Skills available to a Worker;
+- Skills from the Worker Host's Skill catalog;
 - metadata summaries of captured [artifacts](../reference/artifacts.md), such as research reports,
-  from named source locations for the Tag;
-- custom knowledge types resolved by your Workers.
+  from named source locations for the Tag.
 
 Earlier work from the same conversation is available automatically. Use a Context Set when work
 from another Session or tool should be available too. Artifact selections provide IDs and bounded
@@ -49,7 +48,7 @@ metadata:
   name: shared-engineering
 spec:
   items:
-    - itemKey: skill:code-review
+    - item_key: skill:code-review
       type: supertag/skill
       version: 1
       required: true
@@ -59,7 +58,7 @@ spec:
 
 ```sh
 supertag apply -f shared-engineering.yaml
-supertag activate context-set shared-engineering --tag engineering \
+supertag context-set activate shared-engineering --tag engineering \
   --provider github --repo acme/api
 ```
 
@@ -67,16 +66,10 @@ Artifact selectors use exact collaboration-surface sources and same-Tag work. Th
 available on an Objective's own Tasks through Roles; those Tasks use the catalog's Objective
 visibility rules instead.
 
-### Custom knowledge types
-
-A **Context Item** is one entry in a Context Set. A **Context Resolver** is Worker code that turns
-an Item into values the harness can use; SuperTag calls those values **Runtime Inputs**. Custom
-Context Items use a namespaced type and version:
-
-Add custom items to the Context Set manifest and reapply it with
-`supertag apply -f shared-engineering.yaml`.
-
-See [Add a custom Context type](../guides/custom-context.md) for the resolver contract.
+A **Context Item** is one entry in a Context Set. Two types exist: `supertag/skill`, a Skill the
+Worker Host resolves from its catalog, and `supertag/artifacts`, artifact selections the Control
+Plane resolves. A Task with a required Item runs only on a Worker Host that can resolve it. See
+the [context resolution reference](../reference/context-resolution.md).
 
 Activating a set makes it apply at a particular location. Activation is one-way: this example makes
 selected Slack work available from `acme/api`; it does not expose GitHub work back to Slack.
@@ -113,18 +106,18 @@ spec:
 
 ```sh
 supertag apply -f engineering-access.yaml
-supertag activate permission-set engineering-access --tag engineering \
+supertag permission-set activate engineering-access --tag engineering \
   --provider slack --channel-id C_ENGINEERING
 ```
 
 A permission allows an action; it does not automatically add that resource to every prompt. Runtime
-actions use names that work across harnesses. Workers translate them into harness-specific controls,
+actions use names that work across harnesses. harness adapters translate them into harness-specific controls,
 so Permission Sets do not contain names such as Claude Code `Bash` or Codex feature flags.
 
 ### Tools of MCP servers
 
-An MCP server gives a Tag tools, such as Sentry's issue tools. A host service lists the
-servers its machine provides; see [host MCP servers](../reference/supertag-yaml.md#host-mcp-servers).
+An MCP server gives a Tag tools, such as Sentry's issue tools. A Worker Host's MCP catalog lists
+the servers its machine provides; see [MCP tools](../surfaces/worker-tools.md).
 A Task can use a server's tool only when a Permission Set grants it as `server/tool`:
 
 ```yaml
@@ -135,7 +128,7 @@ metadata:
 spec:
   permissions:
     - { target: mcp, action: "sentry/get_issue_details" }
-    - { target: mcp, action: "sentry/update_issue", approval: required }
+    - { target: mcp, action: "sentry/update_issue", approval_required: true }
     - { target: mcp, action: "notion/*" }
 ```
 
@@ -147,7 +140,7 @@ the exact rules.
 ### Actions that need a decision
 
 Some granted actions should still wait for a person, such as merging a pull request or running
-commands during a release. Mark those permissions `approval: required`. List `approvers` to let a
+commands during a release. Mark those permissions `approval_required: true`. List `approvers` to let a
 specific operator or a Tag, such as a release manager Tag, decide instead of any operator.
 
 ```yaml
@@ -162,10 +155,10 @@ spec:
     - target: mcp
       action: "github/merge_pull_request"
       resource: "repository:acme/api"
-      approval: required
+      approval_required: true
     - target: runtime
       action: commands:execute
-      approval: required
+      approval_required: true
 ```
 
 A gated collaboration surface or MCP call does not run. It returns "approval pending" with a request ID, and the AI
@@ -200,4 +193,4 @@ This separation lets an operator share relevant organizational knowledge without
 the ability to act on its source. The Control Plane resolves both dimensions at admission and
 captures them independently for the Task.
 
-For Runtime Input resolution, immutable plans, Skills, and target selection, see the [context resolution reference](../reference/context-resolution.md).
+For context resolution, immutable plans, Skills, and target selection, see the [context resolution reference](../reference/context-resolution.md).

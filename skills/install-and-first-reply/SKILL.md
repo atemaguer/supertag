@@ -9,24 +9,29 @@ Goal: one Tag that takes an Objective in a real git repository and delivers the 
 branch, followed by the same Tag answering in one chat channel. Do not configure more than one
 collaboration surface on the first run.
 
-Check [Requirements](../../docs/operations/requirements.md) for system tools, disk space,
-and harness installation and sign-in before starting.
-Before `supertag init`, sign in to each harness you will serve: run `codex login` for Codex or
-`claude` and follow its prompt for Claude Code. For Cursor, the user generates an API key at
-https://cursor.com/dashboard/api and adds `CURSOR_API_KEY=...` to `~/.supertag/.env` themselves; the
-Cursor app login does not authenticate the SDK. Never ask for the key in chat or write it for them. For OpenCode, set the provider API-key environment
-variable for the host service as [Requirements](../../docs/operations/requirements.md#choose-and-sign-in-to-a-harness)
-explains. If port 3434 is busy, enter a different number at init's `Port` prompt.
+Check [Requirements](../../docs/operations/requirements.md) for system tools and harness sign-in
+before starting. Before `supertag init`, sign in to each harness you will serve: run
+`codex -c 'cli_auth_credentials_store="file"' login` for Codex, or run `claude` and follow its
+prompt for Claude Code. For Cursor, the user generates an API key at
+https://cursor.com/dashboard/api and adds `CURSOR_API_KEY=...` to `~/.supertag/.env` themselves.
+Never ask for a key in chat or write it for them. For OpenCode, set the provider's API-key
+variable in `~/.supertag/.env`.
 
 ## 1. Install
 
+If the machine ran the earlier TypeScript runtime, retire it before installing: stop its services
+with its own CLI, archive and move aside its `~/.supertag`, as
+[Retire the earlier TypeScript runtime](../../docs/operations/install.md#retire-the-earlier-typescript-runtime)
+explains. The new installer replaces its `supertag` link, and there is no importer.
+
+Follow [the installation guide](../../docs/operations/install.md). Until release archives are
+published, it builds one from a checkout and installs it with
+`rust/scripts/install_native_release.py`. Then:
+
 ```sh
-npm install -g supertag-ai
+export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```
-
-Follow [the installation guide](../../docs/operations/install.md)
-for PATH setup and removal.
 
 ## 2. Set up the repository
 
@@ -35,157 +40,136 @@ cd ~/code/app
 supertag init
 ```
 
-`init` checks `claude`, `codex`, and `opencode` on PATH and Cursor through its SDK, then stops with install
-guidance, changing nothing, when none is. It then asks a few questions with defaults in brackets
-(Enter accepts; pass `--yes` to accept all, required without a terminal): Control Plane port and
-database, harnesses, the directory to work in, the Workspace name (here `app`), delivery, and the
-first Tag's name and access. It writes `~/.supertag/supertag.yaml` with a `control-plane` service and
-a `host` service named after the machine, brings up the Control Plane in the background
-(`supertag up`), creates the Workspace, Permission Set `local-tools`, Role `Lead`, and Tag `lead`
-through the API, then brings up the host service and binds it to `lead`. Nothing is written to
-the repository; all state lives in `~/.supertag/` (or `SUPERTAG_STATE_DIR`).
-At `Harnesses this machine serves`, `init` labels installed harnesses `signed in` or
-`not signed in`. OpenCode says `sign-in not checked (choose a model)` before model selection.
-The defaults include only harnesses that pass the sign-in check. After selection, `init` prints
-`not signed in (the credential check did not succeed)` for each failed check and its sign-in
-instructions. If none pass, setup stops; sign in and rerun `supertag init`.
+`init` finds `claude`, `codex`, and `opencode` on `PATH`, and Cursor through `CURSOR_API_KEY`, and
+stops without changing anything when none is available. It checks each harness's sign-in with
+the credentials the Worker Host will have and labels it `signed in` or not, with sign-in
+instructions. OpenCode prints `sign-in not checked (choose a model)` until you choose a model.
+It then asks for the Control Plane port, the harness, and the Tag's name, with defaults in
+brackets (`--yes` accepts every default and needs no terminal). It writes
+`~/.supertag/supertag.yaml` and starts, in the background:
 
-Every later `supertag` command uses the local Control Plane with this computer's local operator
-credential unless another Control Plane is selected; no `connect control-plane` or token setup is
-needed. Rerunning `init` in another repository adds it as another Workspace of the same host.
+- a `control-plane` service, which creates the Permission Set `local-tools`, the Role `Lead`, and
+  the Tag `lead`, bound to this repository's Workspace at the commit checked out when `init` ran;
+- a Gateway; and
+- a `host` service named after the machine, which maps this repository as a Workspace named
+  after it.
+
+Nothing is written to the repository; state lives in `~/.supertag/`. New Sessions of `lead` start
+from the commit `init` recorded. To start them from a newer commit, apply a Tag manifest with a
+new `workspace.baseCommit`; see [Workspaces](../../docs/guides/workspaces.md#2-bind-a-tag-to-the-workspace).
+
+Operator commands name their Control Plane on each call. For these local services, that is
+`--state-directory ~/.supertag`.
 
 ## 3. Create the first Objective
 
+Choose an ID and state the outcome with evidence:
+
 ```sh
-supertag create objective --owner lead --workspace app \
-  --outcome 'The README explains local setup. Done when a new contributor can follow it.'
+supertag objective create readme-setup \
+  "The README explains local setup. Done when a new contributor can follow it." \
+  --owner lead --state-directory ~/.supertag
 ```
 
-Stdout is a short summary: `objective/ID created`, the first Task of its conversation, and the
-next two commands. Warnings (for example, no connected Worker Host) go to stderr with the fix. Add
-`--output json` when a script needs the Objective record.
-
-Creating the Objective starts its conversation with `lead`. The Tag plans, does the work itself
-or starts a Session for it, and reviews what each Session reports.
+It prints the Objective as JSON and queues `lead`'s first turn. The Tag plans, does the work
+itself or starts work Sessions for it, and reviews what each reports.
 
 ## 4. Follow it and find the result
 
 ```sh
-supertag watch objective ID       # one line per event; exits when the Objective closes
-supertag describe objective ID    # status, owner, Delivered, Needs you, Tasks
+supertag watch objective readme-setup --state-directory ~/.supertag
+supertag describe objective readme-setup --state-directory ~/.supertag
 ```
 
-`watch --output json` emits JSON lines. `describe ... --output json` is the full record.
+`watch objective` follows the Objective as a timeline until it closes. `describe` shows status,
+owner, **Delivered**, **Needs you**, and each Session. When a Task changes the repository,
+`supertag up` imports its commits as the branch `supertag/session/SESSION` in your checkout:
 
-Under **Delivered**, a branch delivery shows the checkout path and the commands to inspect it:
-
-```text
-Branch supertag/ID/TASK in Workspace app (/Users/you/code/app), 3 changed files
-  Review:   git diff main...supertag/ID/TASK
-  Check out: git switch supertag/ID/TASK
+```sh
+git branch --list 'supertag/session/*'
+git diff main...supertag/session/SESSION
 ```
-
-A patch delivery shows its `supertag download artifact ...` command; a pull-request delivery
-shows the URL and state.
 
 ## 5. Answer, push back, or approve
 
-In the terminal UI, answer questions under **Waiting on you**. To redirect work, select the
-Objective, press `m`, type the follow-up, and press Enter. For automated replies, follow
-[Operate SuperTag](../operate-supertag/SKILL.md#read-pending-questions-before-messaging).
+Plain `supertag` opens the terminal UI. Answer questions under **Waiting on you**; to redirect
+work, select the Objective, press `m`, type the follow-up, and press Enter. For scripted answers,
+follow [Operate SuperTag](../operate-supertag/SKILL.md#read-pending-questions-before-messaging).
 
 ```sh
-supertag approve objective ID      # only when the Objective is ready_for_review
-supertag approve request REQUEST_ID
+supertag objective review readme-setup approve --state-directory ~/.supertag
+supertag approval approve APPROVAL_ID --state-directory ~/.supertag
 ```
 
-`supertag ps` lists both services, `supertag logs -f` follows them, `supertag down` stops both, and
-`supertag up` starts both again. `restart: unless-stopped` on both services in
+`supertag ps` lists the services, `supertag logs -f` follows them, `supertag down` stops them,
+and `supertag up` starts them again. `restart: unless-stopped` on the services in
 `~/.supertag/supertag.yaml` keeps them running after restarts.
 
 ## 6. Next: add a chat channel
 
-Slack Socket Mode is the shortest path because it needs no public Gateway URL.
+Lark or Feishu is the shortest path on a laptop: the Gateway connects outbound, so no public URL
+is needed. Slack, GitHub, Linear, and Microsoft Teams send webhooks, which need a public HTTPS URL
+forwarded to the Gateway's loopback listener, such as a tunnel. For Slack:
 
-1. Create the Slack app from [`docs/surfaces/slack-app-manifest.yaml`](../../docs/surfaces/slack-app-manifest.yaml)
-   following [`docs/surfaces/slack.md`](../../docs/surfaces/slack.md). You need a bot token
-   (`xoxb-…`) and an app-level token (`xapp-…`) with `connections:write`.
-2. Enroll it. Setup prompts with masked input or reads `SLACK_BOT_TOKEN`
-   and `SLACK_APP_TOKEN`; never pass tokens as flags.
+1. Create the app from [`docs/surfaces/slack-app-manifest.yaml`](../../docs/surfaces/slack-app-manifest.yaml)
+   following [`docs/surfaces/slack.md`](../../docs/surfaces/slack.md). You need its bot token
+   (`xoxb-…`) and signing secret.
+2. Enroll it. Setup prompts with masked input or reads `SLACK_BOT_TOKEN` and
+   `SLACK_SIGNING_SECRET`; never pass secrets as flags.
 
    ```sh
    supertag setup surface slack
    ```
 
-3. Invite the app to the channel and add the channel's stable ID (not its name) to the Tag in
-   a manifest, such as `tag.yaml`. `workspaces` names the Workspaces that
-   `@SuperTag objective ...` from that channel works in:
+3. Forward your public URL to `127.0.0.1:3480` and set Slack's Request URL to
+   `https://YOUR_PUBLIC_HOST/slack/events`.
+4. Invite the app to the channel and add the channel's stable ID, not its name, to the Tag:
 
-   ```yaml
-   apiVersion: supertag/v1
-   kind: Tag
-   metadata:
-     name: lead
-   spec:
-     roles: [Lead]
-     locations:
-       - provider: slack
-         channelId: C0123456789
-         workspaces: [app]
+   ```sh
+   supertag tag update lead --add-location slack --channel-id C0123456789
    ```
 
-4. Apply it with `supertag apply -f tag.yaml`, then mention `@SuperTag` in the channel. `lead` replies in the
-   thread; later replies in the thread continue the Session without another mention.
+5. Mention `@SuperTag` in the channel. `lead` replies in the thread; later replies in the thread
+   continue the Session without another mention.
 
 A location grants only the mention lifecycle: receive an invocation, read the originating thread,
-reply there. Add channel history, repository access, or tools with
-[configure-tags](../configure-tags/SKILL.md). Other surfaces are in
-[connect-a-surface](../connect-a-surface/SKILL.md).
+reply there. Add tools and knowledge with [configure-tags](../configure-tags/SKILL.md). Other
+surfaces are in [connect-a-surface](../connect-a-surface/SKILL.md).
 
 ## Connectivity check after init
 
-Keep the Control Plane and local Worker Host that `init` started running. This diagnostic
-uses the Tag's real Worker and requires its harness to be signed in.
-
 ```sh
-supertag status control-plane
-supertag list worker-host
-supertag describe tag lead
-supertag list surface
+supertag status
+supertag get host --state-directory ~/.supertag
+supertag describe tag lead --state-directory ~/.supertag
+supertag get surface-location --state-directory ~/.supertag
 ```
 
-Use your Tag's name if you chose something other than `lead`. The Control Plane should report
-`accepting`. In the Tag description, check **Bound Worker Hosts** and follow its
-`supertag describe worker-host HOST` command to inspect the local host's availability.
-The Slack account should appear in the surface list, and the Tag's **Locations** should include
-your channel. `init` binds the Tag to this computer's Worker Host; another host cannot run its
-Tasks unless it is also bound.
+`status` lists Worker Hosts, Tags, unfinished Objectives, and the inbox; the local host should
+be connected. In the configured channel, send `@SuperTag Reply with hello.` A threaded reply checks
+delivery, routing, execution, and the return path together. It uses the configured model and may
+incur charges.
 
-In the configured Slack channel, send `@SuperTag Reply with hello.` A threaded reply checks
-message delivery, Tag routing, Worker execution, and the return path together. This uses the
-configured model and may incur usage charges.
-
-If the reply does not arrive, inspect the Task and service logs:
+If the reply does not arrive:
 
 ```sh
-supertag list task
-supertag describe task ID
-supertag logs
+supertag watch task --state-directory ~/.supertag
+supertag describe task TASK_ID --state-directory ~/.supertag
+supertag get reply --state-directory ~/.supertag
+supertag logs gateway
 ```
 
-Replace `ID` with the Task for your mention. Its description explains execution status or why
-it is waiting. If no Task appears, check the channel location and Slack app invitation from
-step 6, then inspect the logs for connection errors.
-
-For more diagnostics, see [troubleshoot](../troubleshoot/SKILL.md). For an always-on team
-deployment, continue to [deploy-supertag](../deploy-supertag/SKILL.md).
+Mention the Tag again while `watch task` runs to see the new Task's ID. `describe task` explains
+a waiting Task, and `get reply` shows whether the reply was delivered. If no Task appears, check the location, the app
+invitation, and the Gateway log. See [troubleshoot](../troubleshoot/SKILL.md). For an always-on
+team deployment, continue to [deploy-supertag](../deploy-supertag/SKILL.md).
 
 ## Verify the setup
 
 | After step | Verify with |
 | --- | --- |
 | 1 | `supertag --version` prints a version |
-| 2 | `supertag status control-plane` reports `accepting`; `supertag list worker-host` shows this computer |
-| 3 | `supertag describe objective ID` shows `Runnable: yes` |
-| 4 | `describe objective` lists a branch under **Delivered** |
-| 6 | `supertag list surface` lists the Slack account, and a threaded reply appears |
+| 2 | `supertag ps` shows `control-plane`, `gateway`, and the host running |
+| 3 | `supertag describe objective readme-setup` shows the owner's turn queued or running |
+| 4 | `describe objective` lists a delivery, and `git branch` shows `supertag/session/...` |
+| 6 | `supertag get surface-location` lists the channel, and a threaded reply appears |

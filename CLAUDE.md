@@ -15,7 +15,7 @@ SuperTag:
 - [`skills/connect-a-surface/SKILL.md`](skills/connect-a-surface/SKILL.md)
 - [`skills/configure-tags/SKILL.md`](skills/configure-tags/SKILL.md)
 - [`skills/run-a-worker/SKILL.md`](skills/run-a-worker/SKILL.md)
-- [`skills/build-a-custom-worker/SKILL.md`](skills/build-a-custom-worker/SKILL.md)
+- [`skills/build-a-harness-adapter/SKILL.md`](skills/build-a-harness-adapter/SKILL.md)
 - [`skills/deploy-supertag/SKILL.md`](skills/deploy-supertag/SKILL.md)
 - [`skills/troubleshoot/SKILL.md`](skills/troubleshoot/SKILL.md)
 

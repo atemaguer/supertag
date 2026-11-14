@@ -73,6 +73,7 @@ pub enum QuestionCommand {
     Answer {
         /// The Task that asked.
         task_id: String,
+        /// The answer, or `-` to read it from standard input and keep it out of the process list.
         text: String,
         /// Supply the same ID to retry an answer after a lost response.
         #[arg(long)]
@@ -218,6 +219,12 @@ pub async fn run_question(connection: Connection, command: QuestionCommand) -> R
         text,
         operation_id,
     } = command;
+    let text = if text == "-" {
+        std::io::read_to_string(std::io::stdin())
+            .map_err(|error| anyhow::anyhow!("read the answer from standard input: {error}"))?
+    } else {
+        text
+    };
     let (channel, token) = connect_operator(connection).await?;
     let task = client(channel)
         .answer_question(request(

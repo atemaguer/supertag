@@ -1,12 +1,10 @@
 # Deploy the Control Plane on Modal
 
-<!-- supertag-cli: native -->
-
 A **Tag** is a persistent AI actor with its own responsibilities and permissions. The **Control
 Plane** is the service that stores a SuperTag organization and schedules its work; it is the one
 public endpoint for operators, **Worker Hosts** (the machines that run the work), and the
 optional **Gateway**, which connects **collaboration surfaces** such as Slack. This guide runs the
-native Control Plane in one always-on Modal container behind a web endpoint, with external
+Control Plane in one always-on Modal container behind a web endpoint, with external
 PostgreSQL. See the [glossary](../reference/glossary.md) for other terms.
 
 Modal's web endpoint terminates TLS and forwards HTTP/1.1 and WebSocket upgrades. The Control
@@ -34,16 +32,13 @@ files, including the TLS key: they share one trust boundary.
 The function supervises the service: if the Control Plane, or the Gateway beside it, exits, the
 container exits too and Modal starts a replacement.
 
-Modal also runs Workspaces for Worker Hosts; that is independent of where the Control Plane runs.
-See [Run a Worker in Modal](modal-workers.md).
+Modal can also run Cursor Tasks' Workspaces for a Worker Host; that is independent of where the
+Control Plane runs. See [Run Cursor in a sandbox](workers.md#run-cursor-in-a-sandbox).
 
 ## Before you start
 
-- The native `supertag` CLI, from the release you deploy. No native release archive is published
-  yet, so build it from that release's checkout with
-  `cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`
-  and put `rust/target/release/supertag` first on your `PATH`. The `supertag-ai` npm package
-  installs the TypeScript CLI, which cannot set up or verify this deployment.
+- The `supertag` CLI, from the release you deploy (`supertag --version`). See
+  [Install SuperTag](../operations/install.md).
 - The Modal CLI, authenticated, at the version in
   [`requirements.txt`](../../deploy/modal/requirements.txt).
 - The `hosted` service image for `linux/amd64` in a registry Modal can pull, with its digest. See
@@ -160,7 +155,7 @@ that connect outbound:
   secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
 
 GitHub, Linear, Microsoft Teams, and Slack HTTP events need inbound webhooks, which this
-deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see [native service deployments](../../deploy/native/README.md)), enrolled
+deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see [service deployment definitions](../../deploy/native/README.md)), enrolled
 with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
 URL with its own credential.
 
@@ -229,5 +224,5 @@ and Vault path if they were dedicated to this deployment. `modal app list` and
 
 ## Next
 
-- [Native service deployments](../../deploy/native/README.md) for the role contract and TLS files
+- [Service deployment definitions](../../deploy/native/README.md) for the role contract and TLS files
 - [Control Plane operations](../operations/control-plane.md)

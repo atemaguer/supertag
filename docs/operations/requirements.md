@@ -5,30 +5,23 @@ its own responsibilities and permissions, and Tags work in Teams. Together, your
 of Tags make up an **autonomous organization**: Teams may pursue different goals but share one set
 of rules and one record of the work. For example, a laptop can run the **Control Plane**, which
 stores your organization and accepts work, and act as a **Worker Host**, which provides execution
-capacity. A **Worker**, the code that does the work, completes a **Task**, one turn of a Tag's
-work, through a **harness**: the connection to an agent system such as Codex, Claude Code, or Cursor.
+capacity. A Worker Host runs each **Task**, one turn of a Tag's work, on a **harness**: an agent
+system such as Codex, Claude Code, or Cursor.
 Check this page before [installing SuperTag](install.md).
 
 ## System and tools
 
-- **Node.js 22.13.0 or newer.** The `engines.node` fields in the root
-  [package.json](../../package.json) and [SDK package](../../packages/supertag-ai/package.json)
-  define the supported runtime.
-- **npm**, included with Node.js, to install the published CLI and SDK. Source-development
-  tools are listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
+- **Node.js 22.13.0 or newer, in the 22 line**. The installer checks it and tests the bundled
+  harness bridges with it, and the Claude Code, Cursor, and OpenCode adapters run on it. Building a
+  release archive needs it too.
 - **git**, available on `PATH`, and a repository for your first Task.
-- **macOS or Linux.** Restarting background services uses launchd on macOS and systemd user
-  services on Linux. Native Windows is not a supported alpha installation target; in particular,
-  SuperTag does not implement a Windows service manager. Use a Linux host for that workflow.
-- **Disk space for dependencies and your work.** Allow about 1 GB for the installed package, plus
-  space for repositories, Task outputs, and logs. With `npm install -g`, npm also downloads the
-  Claude Code and Codex CLI copies that the vendor SDKs bundle, about 520 MB more on macOS arm64.
-  SuperTag doesn't use them, and the [installer script](install.md#1-install-the-cli-with-the-installer-script)
-  removes them.
-
-The small bridge that runs MCP tools inside a sandbox has a separate runtime minimum, enforced
-when SuperTag prepares that sandbox. See [MCP tools](../guides/mcp-tools.md#5-connect-from-the-execution-environment-when-the-server-lives-there).
-Use the supported runtime above when installing SuperTag itself.
+- **macOS or Linux**, on arm64 or amd64. Restarting background services uses launchd on macOS and
+  systemd user services on Linux. Native Windows is not supported; use a Linux host.
+- **Disk space for your work.** Allow space for the installed release, repositories, Task
+  checkouts, captured artifacts, and logs.
+- **To build a release archive from a checkout**: the Rust toolchain pinned in
+  `rust/rust-toolchain.toml`, Go, pnpm, Python 3.13, and uv. See
+  [Install SuperTag](install.md#install-a-release-archive).
 
 ## Choose and sign in to a harness
 
@@ -45,21 +38,21 @@ version and stop with the upgrade command when it is older.
 | [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | 2.1.280. Install with `npm install -g @anthropic-ai/claude-code`; upgrade with `claude update`. | Run `claude` and follow its sign-in prompt. |
 | [Codex](https://developers.openai.com/codex/cli/) | `codex` | 0.156.0. Install or upgrade with `npm install -g @openai/codex`. | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
 | [Cursor](https://cursor.com/docs/sdk/typescript.md) | None | None | Generate an API key and set `CURSOR_API_KEY` for the host service; see [Cursor setup](#cursor-setup-and-limits). Signing in to the Cursor app or `cursor-agent` is not enough. |
-| [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the **Worklet** process, the program that connects the Worker Host to the Control Plane, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |
+| [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the Worker Host, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |
 
 For provider API credentials, use provider environment variables or SuperTag's masked prompts;
 never put lasting credentials in command flags. Sign-in detection is local and best effort; a
-missing credential file does not prove you are signed out. A managed OpenCode Worker receives
-only provider environment credentials and does not use credentials from `opencode auth login`,
-even if initialization detects that login. OpenCode also needs an explicit `provider/model`
-selection during initialization. See [Run a Worker](../guides/workers.md) for
+missing credential file does not prove you are signed out. `supertag sign-in HARNESS` checks a
+harness the way a Worker Host uses it. OpenCode receives only provider environment credentials, or
+the file `--opencode-auth-file` names, and needs an explicit `provider/model`. See
+[Run Worker Hosts](../guides/workers.md) for
 remote hosts and [credential storage](../reference/credential-storage.md) for secret handling.
 
 ### Cursor setup and limits
 
 Cursor runs on macOS and Linux Worker Hosts. SuperTag drives Cursor through its TypeScript SDK,
 and the SDK signs in only with an API key. Signing in to the Cursor app or `cursor-agent` does
-not sign in the Worker, so every host that serves Cursor needs a key:
+not sign in the Worker Host, so every host that serves Cursor needs a key:
 
 1. Generate a user API key at [Cursor Dashboard → API Keys](https://cursor.com/dashboard/api).
    See [Cursor authentication](https://cursor.com/docs/cli/reference/authentication.md).
@@ -76,15 +69,15 @@ not sign in the Worker, so every host that serves Cursor needs a key:
    Cursor's models, which uses no model turn. A missing key stops the host with the reason.
    A rejected key reports `Cursor rejected CURSOR_API_KEY`.
 
-SuperTag passes the key only to the Cursor Worker. Tasks never receive it, and redaction removes
+SuperTag passes the key only to the Cursor adapter. Tasks never receive it, and redaction removes
 it from events and logs. To rotate the key, replace the line and restart the host with
 `supertag down` and `supertag up`.
 
 On Linux, a process running as the Worker Host's OS user may read the Cursor key from the
-Worker's memory. It may also read the SDK runner's memory when `ptrace_scope=0` permits
+Worker Host's memory. It may also read the SDK runner's memory when `ptrace_scope=0` permits
 same-user tracing. The runner receives the key over a private stdin channel, but Node does
 not expose Linux's `prctl(PR_SET_DUMPABLE, 0)` call. Adding that call only to the runner
-would still leave the key in the Worker's memory. Keep untrusted processes under a different
+would still leave the key in the adapter's memory. Keep untrusted processes under a different
 OS user, and restrict same-user tracing on hosts that run Cursor. Cursor's sandbox and log
 redaction do not protect process memory from a process with tracing access.
 
@@ -99,19 +92,18 @@ Choose a model ID returned by Cursor's model list. For example, a host can serve
 `execution.harness: cursor`. See [host models](../reference/supertag-yaml.md#host-models)
 and [Cursor models and pricing](https://cursor.com/docs/models-and-pricing.md).
 
-A **Context Set** selects reusable knowledge for a Tag. The bundled Worker resolves
+A **Context Set** selects reusable knowledge for a Tag. The Control Plane resolves
 `supertag/artifacts@1` selections into artifact summaries in Cursor's prompt; Cursor can retrieve
 selected content through admitted artifact tools. This selection applies only to Tasks from a
 collaboration surface, not internal Objective Tasks. A Role can also select
 `supertag/skill@1` when the Worker Host has a [Skill catalog](../reference/context-resolution.md#skills).
-The Worker does not include a general text Context resolver. If a Workspace selects a Skill with
-the same name, the Workspace Skill takes precedence.
+No other Context Item type is resolved.
 
 For colocated local Tasks, SuperTag allows Cursor's read, search, list, and MCP tools.
 It adds edit only for `files:write` and enables web search only for `web:search`.
 Subagents and Cursor's built-in shell stay disabled. To run commands, grant both `files:write`
 and `commands:execute` and set `allow-unsandboxed-commands: [cursor]` on the host service.
-The Worker runs those commands on the host, with the host's network access, so a package manager
+The adapter runs those commands on the host, with the host's network access, so a package manager
 can fetch the version pinned by the project. Use a trusted repository for local command access,
 or use a [remote environment](#cursor-with-a-remote-environment) to isolate its commands.
 
@@ -120,13 +112,14 @@ for the SDK and refuses a run if it is unavailable or a repository or Task Attem
 `.cursor/sandbox.json`. Reads may still reach outside the workspace. A private home excludes
 the operator's Cursor hooks, MCP servers, and rules; Cursor can still read workspace files.
 SuperTag supplies only the Task's admitted tools, as Cursor
-[custom tools](https://cursor.com/docs/sdk/typescript.md#custom-tools). The Worker stays their MCP
+[custom tools](https://cursor.com/docs/sdk/typescript.md#custom-tools). The adapter stays their MCP
 client. Sandboxed SDK runs reject inline MCP server tools because they cannot ask for approval.
 
 ### Cursor with a remote environment
 
-A host service with `environment: e2b` or `environment: { modal: ... }` runs Cursor's SDK on
-the Worker Host. Its API key and native Session state stay there; provider keys never enter
+A Worker Host run with `--e2b-workspace-provider` or `--modal-workspace-provider` runs Cursor's
+SDK on the host and keeps the Workspace in a sandbox; see
+[Run Cursor in a sandbox](../guides/workers.md#run-cursor-in-a-sandbox). Its API key and native Session state stay there; provider keys never enter
 the sandbox's files, environment variables, or processes. Install your project's command
 dependencies in the sandbox image. It needs `python3` and POSIX shell tools, with no Cursor
 executable.
@@ -135,20 +128,20 @@ In this split mode, Cursor has no built-in tools. SDK custom tools provide read,
 glob, grep, ls, and foreground commands in the sandbox, plus the Task's allowed external tools.
 Web search, subagents, and background commands are unavailable. A **Permission Set** selects
 allowed actions: write and edit require `files:write`; commands require both `commands:execute`
-and `files:write`. Remove `allow-unsandboxed-commands` from services with `environment`;
-startup refuses it.
+and `files:write`. `--allow-unsandboxed-commands` does not apply: the sandbox is the command
+boundary.
 
 `local.cwd` is an empty host directory. Repository rules do not load automatically, so supply
 needed instructions as Task context. Cursor's own sandbox provides no useful workspace
 protection in split mode; the remote provider enforces the command boundary, and the bridge
-checks file paths and permissions. See [Cursor reference](../reference/worker.md#cursor-split-execution).
+checks file paths and permissions. See [Cursor reference](../reference/worker.md#remote-sandboxes-and-shared-execution).
 
 ### Cursor local runtime details
 
 The SDK and local commands each get a private `HOME` and private XDG directories. Commands run
-from the Task checkout and use the Worker's `PATH`, with the Worker's Node directory first.
+from the Task checkout and use the Worker Host's `PATH`, with the adapter's Node directory first.
 They do not inherit `CURSOR_API_KEY`, `COREPACK_HOME`, `PNPM_HOME`, or `npm_config_*` variables.
-Run the Worker with a Node version that meets the project's requirements and put the project’s
+Run the Worker Host with a Node version that meets the project's requirements and put the project’s
 package manager or a compatible Corepack shim on its `PATH`. For example, Corepack can use
 `"packageManager": "pnpm@10.15.1"` in `package.json` to install and run the pinned version.
 The private home keeps operator configuration and caches separate.
@@ -164,14 +157,14 @@ own configuration boundary; SuperTag does not relax it.
 The SDK reports tokens per Task Attempt. SuperTag records provider cost when returned, estimates
 cost only for a model with a published price, and otherwise marks the Task Attempt unpriced.
 For `auto`, SuperTag records provider-reported cost when available, but does not estimate one.
-See [usage reporting](../reference/worker.md#cursor).
+See [usage reporting](../reference/worker.md#built-in-harnesses).
 
 ### Credentials available during Tasks
 
-When using a file-backed Codex sign-in, a local Codex Worker copies `~/.codex/auth.json`
+When using a file-backed Codex sign-in, a local Codex Worker Host copies `~/.codex/auth.json`
 (or the file under the host's `CODEX_HOME`) into each Task's working area. That copy can contain
 a long-lived ChatGPT refresh token; its file permissions are restricted to the OS user.
-Local Claude Workers can use that user's secure credential store, including macOS Keychain.
+Local Claude Code Tasks can use that user's secure credential store, including macOS Keychain.
 Commands running as the same user may be able to access these credentials.
 
 For shared or unattended Worker Hosts, prefer scoped `CODEX_API_KEY` or `ANTHROPIC_API_KEY`
@@ -180,41 +173,32 @@ the Codex sign-in file; `OPENAI_API_KEY` is only a fallback after the file copy 
 
 ## Telemetry and network traffic
 
-SuperTag does not send product analytics or usage telemetry to SuperTag maintainers. Its built-in
-RPC counters stay in process memory and are exposed through its own operator diagnostics.
+SuperTag does not send product analytics or usage telemetry to SuperTag maintainers.
 Configured integrations still contact their services: the Control Plane, collaboration tools,
 MCP servers, storage, execution providers, and model providers. Disabling telemetry does not
-stop the model requests needed to perform Tasks. The default implementation is
-[process-local RPC counters](../../packages/runtime/sdk/src/rpc-telemetry.ts), connected to
-[Control Plane diagnostics](../../apps/cli/src/control-plane-api.ts).
+stop the model requests needed to perform Tasks.
 
 Harnesses have separate policies. SuperTag isolates their configuration for each Task, so their
-standalone opt-out instructions do not necessarily apply to managed Workers.
+standalone opt-out instructions do not necessarily apply to SuperTag's Tasks.
 
 ### Codex
 
-The default Worker runs `codex exec`, which sends usage analytics by default. SuperTag gives it
-a Task-local `CODEX_HOME` and passes `--ignore-user-config`. Setting `[analytics] enabled = false`
-in your personal `config.toml` therefore does not disable analytics for this Worker. SuperTag
-does not expose an analytics setting for the managed exec path.
-
-To use the analytics-off default instead, select `--codex-execution-mode app-server` when
-connecting a Codex Worklet. See the [Worklet example](../guides/workers.md#optional-limit-reported-tokens).
-The bundled app-server disables analytics by default, and SuperTag does not pass its opt-in flag.
-App-server also refuses active user or project configuration. OpenTelemetry export is separate
-and off by default; SuperTag does not configure an exporter. See
+The Codex adapter runs `codex app-server` with a Task-local `CODEX_HOME` and sets
+`analytics.enabled=false`, so managed Codex Tasks send no usage analytics. Your personal
+`config.toml` does not apply to them. See [Codex](../guides/workers.md#codex). OpenTelemetry
+export is separate and off by default; SuperTag does not configure an exporter. See
 [Codex metrics](https://developers.openai.com/codex/config-advanced/#metrics) and the
 [configuration reference](https://developers.openai.com/codex/config-reference/).
 
 ### Claude Code
 
-Managed Claude Workers retain Anthropic's default usage statistics and error reporting.
+Claude Code Tasks retain Anthropic's default usage statistics and error reporting.
 SuperTag passes an allowlisted environment, disables settings sources, and uses a Task-local
 configuration directory. It does not forward `DISABLE_TELEMETRY` or `DISABLE_ERROR_REPORTING`,
 nor `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DO_NOT_TRACK`. Setting these variables in
-your shell or personal Claude settings does not opt managed Workers out.
+your shell or personal Claude settings does not opt SuperTag's Tasks out.
 
-There is currently no supported telemetry opt-out for managed Claude Workers. SuperTag also
+There is currently no supported telemetry opt-out for Claude Code Tasks. SuperTag also
 does not forward `CLAUDE_CODE_ENABLE_TELEMETRY`, so it does not opt into OpenTelemetry export.
 See Anthropic's [data usage](https://code.claude.com/docs/en/data-usage) and
 [monitoring](https://code.claude.com/docs/en/monitoring-usage) policies for the installed version
@@ -225,5 +209,5 @@ and account type.
 SuperTag generates the OpenCode configuration and leaves `experimental.openTelemetry` unset,
 so optional AI SDK tracing is off. It disables session sharing, automatic updates, and project
 configuration, and uses a Task-local home directory. Editing your personal `opencode.json`
-does not configure a managed Worker. See [OpenCode configuration](https://opencode.ai/docs/config/);
+does not configure SuperTag's OpenCode Tasks. See [OpenCode configuration](https://opencode.ai/docs/config/);
 your selected model provider also has its own data policy.

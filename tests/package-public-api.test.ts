@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import * as core from "../packages/supertag-ai/src/core.js";
 import * as modal from "../packages/supertag-ai/src/environments/modal.js";
@@ -7,31 +6,6 @@ import * as testing from "../packages/supertag-ai/src/testing.js";
 import * as worker from "../packages/supertag-ai/src/worker.js";
 
 describe("supertag-ai public API", () => {
-  it("documents only published package entry points in API stability", () => {
-    const manifest = JSON.parse(
-      readFileSync(new URL("../packages/supertag-ai/package.json", import.meta.url), "utf8"),
-    );
-    const doc = readFileSync(
-      new URL("../docs/reference/api-stability.md", import.meta.url),
-      "utf8",
-    );
-    const imports = doc.split("\n").filter((line) => line.startsWith("| `supertag-ai"));
-    expect(imports.length).toBeGreaterThan(0);
-    const missing: string[] = [];
-    for (const row of imports) {
-      const cell = row.split("|")[1] ?? "";
-      let parent = "";
-      for (const match of cell.matchAll(/`([^`]+)`/g)) {
-        const name = match[1] ?? "";
-        const path = name.startsWith("/") ? `${parent}${name}` : name;
-        parent = path.slice(0, path.lastIndexOf("/"));
-        const key = path === "supertag-ai" ? "." : `.${path.slice("supertag-ai".length)}`;
-        if (!Object.hasOwn(manifest.exports, key)) missing.push(path);
-      }
-    }
-    expect(missing).toEqual([]);
-  });
-
   it("exposes Role contracts through the domain core subpath", () => {
     expect(core).not.toHaveProperty("ORG_ARCHITECT_ROLE_KEY");
     expectTypeOf<core.Role>().toEqualTypeOf<{

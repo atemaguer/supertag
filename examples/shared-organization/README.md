@@ -122,7 +122,7 @@ reads from the setup probe and checks the backend call ledger.
 The service owns the ledger separately from workload files. It records observed fixture calls;
 manager identity comes from the Worker configuration, so it is not cryptographic provenance. This
 example demonstrates routing and policy checks in a shared, trusted workspace. See
-[Route MCP tools](../../docs/guides/mcp-tools.md) for client placement and recovery boundaries.
+[MCP tools](../../docs/surfaces/worker-tools.md) for client placement and recovery boundaries.
 
 ## Inspect recovery
 
@@ -198,5 +198,5 @@ setup, update their URLs, and provide trusted certificates. Do not simply expose
 plain HTTP endpoints publicly. Each Worklet initiates its connection; Worker Hosts need no inbound
 listener. Keep the native CLI login local to each host.
 
-See the [shared execution guide](../../docs/guides/shared-execution.md) for placement and isolation
+See the [shared execution notes](../../docs/guides/workers.md#run-cursor-in-a-sandbox) for placement and isolation
 boundaries, and the [Worker Host guide](../../docs/guides/workers.md) for enrollment.

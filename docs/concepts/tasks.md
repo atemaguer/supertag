@@ -46,8 +46,8 @@ next turn. See [Define and complete an Objective](../guides/objectives.md).
 ## Task
 
 A Task records what the requester asked SuperTag to do. It keeps the status, policy, execution
-needs, source, and final result. Each Task Attempt records the execution recipe that ran it; the Tag and
-Session do not choose a permanent recipe.
+needs, source, and final result. Each Task Attempt records the Worker Host, harness, and model that ran it; the
+Tag and Session do not choose a permanent host.
 
 A Task may remain pending while no compatible execution capacity is ready. Losing a connection to
 an execution machine does not erase the Task.
@@ -61,8 +61,8 @@ mention `@SuperTag` again.
 
 Continuity within a Session is automatic and limited to that conversation. Each Session maps to one
 native harness session. A new Task resumes that native session whenever the harness can load it: the
-same Tag, the same Session, the same harness, and the same reply audience. A different profile of
-the same harness, or a newer revision of it, can resume too.
+same Tag, the same Session, the same harness, and the same reply audience. Another Worker Host
+that serves the same harness can resume it too.
 
 Resuming carries the conversation, not authority. Each Task runs under the permissions, Context
 Sets, workspace, and tools admitted for that Task, so a policy change applies on the next turn.
@@ -74,11 +74,10 @@ When there is no usable native state, the Task receives bounded history entries 
 completed Tasks in the Session instead. This replay covers a first turn, a switch to another
 harness, lost state, and a turn that failed for a reason other than its spending limit. A Task never receives the replay alongside a resume.
 
-Different threads remain different Sessions, even when they invoke the same Tag. They still share
-one memory: each conversation sees the Tag's open Objectives, and the Tag can search and read its
-other Sessions when a question needs them. A Session is **shared** or **private**, depending on its
+Different threads remain different Sessions, even when they invoke the same Tag, and one Session
+does not read another's transcript. A Session is **shared** or **private**, depending on its
 conversation. A direct chat or a conversation in the terminal UI is private to that person. See
-[across Sessions](multiplayer.md#across-sessions-one-tag-one-memory).
+[across Sessions](multiplayer.md#across-sessions-one-tag-many-conversations).
 
 A conversation, or an Objective's conversation, can hand longer work to a **work Session** with
 `start_session`. A work Session is a Session whose parent is the Session that started it. Its
@@ -152,9 +151,9 @@ When a work Session's Task calls an action that needs approval, the call doesn't
 ends, completed and **waiting on approval** of that request. The approval notice posts to the
 conversation. The notice names the request and the permission that requires approval. If it
 appears under **Waiting on you** in the terminal UI, decide it there. For a request shown only
-in the conversation, use `supertag approve request` or `supertag deny request`.
+in the conversation, use `supertag approval approve` or `supertag approval deny`.
 The notice says the work Session continues on its own once the person decides.
-`supertag list approval` shows the work Session's description of the request. A work Session's
+`supertag get approval` shows the work Session's description of the request. A work Session's
 Task gets one notice per permission while its requests wait, however many it makes. The report
 turn tells the person briefly what the work Session waits for. A chat message never approves an
 action.
@@ -171,14 +170,10 @@ conversation is told why.
 
 ### Where a work Session's edits go
 
-A work Session keeps its edits the way an Objective Task does. It works in a Workspace the
-conversation has, and the Worker commits its changes to the work Session's own branch, such as
-`supertag/session/0f3c2a9e`. The conversation's Workspaces are the ones its location attaches, as
-for [an Objective created there](../reference/resource-model.md#objectives-from-a-location). A
-private operator conversation has no location, so it uses the Workspaces that the Tag's Worker
-Hosts declare.
-With one Workspace the work Session uses it. With several, the Tag names one when it starts the
-work Session. With none, the work Session runs without a Workspace, like its conversation.
+A work Session keeps its edits the way an Objective Task does. It works in the Workspace of the
+Tag that runs it, and the Worker Host commits its changes to the work Session's own branch, such
+as `supertag/session/0f3c2a9e`. A Tag with no Workspace runs its work Sessions without one. See
+[Workspaces](../reference/resource-model.md#workspaces).
 
 A work Session has one branch, and every Task of it works there. A continued Task picks up the
 branch at the work Session's latest commit, sees the earlier edits, and commits on top of them. A
@@ -216,7 +211,7 @@ left, in the Objective's currency. When less than a twentieth of the budget is l
 spent: SuperTag admits no new turn and refuses `start_session`. A finished work Session's report
 turn still comes in, capped at what is left. Once the running Task Attempts settle, the
 Objective's status becomes `limited`, and SuperTag tells the person in its thread.
-Raise the budget with `supertag update objective ID --budget-minor N` to continue.
+Raise the budget with `supertag objective set-limits ID --budget-minor N` to continue.
 
 ## Task Attempt
 
@@ -238,7 +233,7 @@ not automatically grant another allocation. Accepted artifacts and completed Obj
 outcomes; a later overrun does not revoke them.
 
 A Tag cannot raise its own limits. A person raises an Objective's budget with
-`supertag update objective ID --budget-minor N`; the Objective's next turn runs against the larger
+`supertag objective set-limits ID --budget-minor N`; the Objective's next turn runs against the larger
 pool. Raising it starts a new Task Attempt on a Task stopped by the budget. Earlier usage and
 allocations remain in its history. A compatible, successfully archived native session can preserve
 progress; it does not preserve a workspace or grant new permissions. If no safe archive exists,
@@ -272,78 +267,36 @@ other Sessions; an agent then inspects or retrieves the selected artifact throug
 
 ## Details for integrators
 
-The sections below explain scheduling and live-input behavior. You can skip them if you only need
+The sections below explain execution settings and live-input behavior. You can skip them if you only need
 the core concepts. They use these [glossary](../reference/glossary.md) terms: the **Control
-Plane** stores and schedules work; a **Worklet** connects a **Worker Host** to it; a **Worker
-Profile** is a saved recipe for running a **Worker**, the code that completes a Task; a
-**harness** connects the Worker to an agent system.
+Plane** stores and schedules work; a **Worker Host** runs it; a **harness** is the agent system a
+Task runs on.
 [Worker Host selection](../reference/scheduling-and-recovery.md#worker-host-selection) explains
 how the Control Plane ranks hosts and orders the queue.
 
-### Execution requirements
+### Execution settings
 
-`Task.execution` describes placement requirements independently of Tag identity:
+A Tag's or Role's `execution` names the harness, models, and reasoning efforts its Tasks may use,
+with the defaults first; a Tag's own settings override its Roles'. Worker Hosts advertise the
+harnesses and models they serve, and a Tag's `runsOn` labels narrow which hosts may run it. These
+settings choose where work runs; they grant no permission. See
+[execution settings](../reference/resource-model.md#execution-settings).
 
-```json
-{
-  "requires": [{ "id": "supertag.process-output-streaming", "version": 1 }],
-  "prefers": [{ "id": "supertag.process-input-streaming", "version": 1 }],
-  "harness": "codex"
-}
-```
-
-`requires` filters candidates; `prefers` ranks compatible candidates. Capability versions are
-positive integers. Optional `profile: { "id": "local-codex", "revision": "1" }` constrains
-selection to an exact recipe. An empty object leaves selection to the Control Plane's compatibility
-checks. These requirements do not grant permissions or change the authorization snapshot.
-
-A trusted integrator admitting a collaboration surface event can use the Control Plane embedding API:
-
-```ts
-await controlPlane.ingestSurfaceEvent(event, {
-  execution: { harness: "codex" },
-});
-```
-
-This is an integration option, not an instruction inferred from untrusted message text.
-The CLI creates Tags with `supertag create tag NAME`; it has no Tag profile binding or general
-Task execution flag. Worklet profile flags describe available execution recipes.
-
-The Control Plane freezes the selected profile on the Task Attempt before execution. Recovery observes
-that same Task Attempt and selection; it does not choose another Worker Profile for accepted work.
-Sessions have no profile binding. A Session's native state prefers the profile that produced it,
-and any profile of the same harness can resume it.
+The Control Plane records the selected harness and model on the Task before execution. Recovery
+keeps that selection. A Session with native state stays on the harness that produced it, and its
+checkpoint can be resumed by any Worker Host that serves that harness.
 
 ### Cancelling a Task
 
-An operator cancels one Task with `supertag cancel task ID`, and every open Task of an Objective
-with `supertag cancel objective ID`. Cancellation stops further
-results from that execution from being accepted. The Task event history records who cancelled it,
-when, and its previous status in `task.cancelled`. This event is saved with the cancellation itself, so
-an interrupted Worker does not need to report the action afterward.
+An operator cancels one Task with `supertag task cancel ID`, and every open Task of an Objective
+with `supertag objective cancel ID`. Cancellation stops further
+results from that execution from being accepted, and the Worker Host stops the harness adapter.
+The Task event history records who cancelled it, when, and its previous status. This event is
+saved with the cancellation itself, so an interrupted Worker Host does not need to report the
+action afterward.
 
-A Worker completes its own Task by returning its output. It should not cancel its Task or
-try to accept its own running work to signal completion.
-
-### Reusing an execution selection
-
-The Control Plane remembers a selected profile for each Tag and set of execution
-requirements. Later Tasks prefer that profile while it remains eligible and has
-capacity. Context support is checked again; permissions continue to be enforced by normal
-admission and execution.
-
-If the cached profile is unavailable or no longer compatible, scheduling selects
-another eligible profile and updates the cache. A Session with native state takes precedence. Its
-Task prefers the profile that produced the state while that profile can run the Task, then
-another profile of the same harness. Either way, the Task waits for that profile's capacity rather
-than switch harness. When no profile of that harness can run the Task, scheduling picks any
-eligible profile, and the Task continues from the replayed history.
-
-This is an in-memory scheduling preference, not a Tag binding or a reservation.
-The cache holds at most 1,000 selections, expires each selection after five minutes,
-and evicts the least recently used entry when full. Collaboration surface and Objective
-Tasks share the Control Plane cache. Restarting the Control Plane discards it and triggers
-fresh selection. It does not keep Worker Hosts or sandboxes alive.
+A harness adapter completes its own Task by returning its result. It should not cancel its Task to
+signal completion.
 
 ### Messages while work is running
 
@@ -379,10 +332,10 @@ On macOS and Linux, it tracks detached tools and children whose parents already 
 those processes before committing the Task branch. If process inspection or ownership is uncertain,
 it reports a cleanup failure and withholds the result and normal completion. It also refuses to
 launch Claude Code when process inspection is unavailable. A one-shot Claude Code CLI run and the
-OpenCode adapter use the Control Plane queue. A custom harness can
-advertise `inputMode: "queue"` or `"steer"` alongside its
-`input` control operation; it must process accepted input before reporting successful completion
-and exporting its session state.
+OpenCode adapter use the Control Plane queue. A custom
+[harness adapter](../guides/harness-adapters.md) takes live input with `Harness.TakeLiveInput` and
+records what it did with `SettleLiveInput`; it must process accepted input before it completes the
+Task Attempt and exports its checkpoint.
 
 ### When delivery is uncertain
 
@@ -407,6 +360,6 @@ This message path does not yet infer answers to specific harness clarification o
 
 ## Where to go next
 
-- Learn how [Worker Hosts, Worklets, Workers, and harnesses](workers.md) execute a Task Attempt.
+- Learn how [Worker Hosts and harnesses](workers.md) execute a Task Attempt.
 - See how [multiplayer continuity](multiplayer.md) shares completed work.
 - Inspect Tasks and Task Attempts with the [resource commands](../operations/resources.md).

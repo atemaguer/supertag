@@ -71,14 +71,28 @@ test("first-reply diagnostic keeps init services and the bound host running", ()
     /supertag down|supertag start control-plane|SUPERTAG_WORKLET_TRANSPORT/u,
   );
   for (const command of [
-    "supertag status control-plane",
-    "supertag list worker-host",
+    "supertag status",
+    "supertag get host",
     "supertag describe tag lead",
-    "supertag list surface",
-    "supertag list task",
-    "supertag describe task ID",
+    "supertag get surface-location",
+    "supertag watch task",
+    "supertag describe task TASK_ID",
     "supertag logs",
   ]) {
     assert.ok(diagnostic.includes(command), `diagnostic includes ${command}`);
   }
+});
+test("links to this repository's files by GitHub URL resolve", () => {
+  const file = resolve(root, "packages/supertag-ai/README.md");
+  const base = "https://github.com/atemaguer/supertag/blob/main";
+  assert.deepEqual(checkLinks(root, file, `[ok](${base}/docs/README.md)`), []);
+  assert.equal(checkLinks(root, file, `[gone](${base}/docs/guides/removed.md)`).length, 1);
+  assert.equal(
+    checkLinks(root, file, `[anchor](${base}/docs/README.md#no-such-heading)`).length,
+    1,
+  );
+  assert.deepEqual(
+    checkLinks(root, file, "[other](https://github.com/other/repo/blob/main/x.md)"),
+    [],
+  );
 });

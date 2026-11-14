@@ -1,199 +1,125 @@
 # Deploy the Control Plane on Fly.io
 
-A **Tag** is a persistent AI actor with its own responsibilities and permissions, and Tags work
-in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
-may pursue different goals but share one set of rules and one record of the work. Run the **Control
-Plane** (the service that stores and coordinates a SuperTag organization) as one always-on Fly.io
-Machine with PostgreSQL and a persistent volume. Use this option when you want to choose the
-Machine's region and manage its storage directly. A **Worker Host** supplies execution capacity
-elsewhere; its **Worklet** connects outbound to the Control Plane over HTTPS/WebSocket. See the
-[glossary](../reference/glossary.md) for other terms.
+Run the **Control Plane**, the service that stores a SuperTag organization and schedules its
+work, as one always-on Fly.io Machine with PostgreSQL and a volume. Add the optional **Gateway**,
+which connects collaboration surfaces such as Slack, as a second app. **Worker Hosts**, the
+machines that run the work, connect from elsewhere. See the [glossary](../reference/glossary.md)
+for other terms.
+
+```text
+operators, Worker Hosts ── https:// :443 (raw TCP) ──> supertag-control-plane ── PostgreSQL
+supertag-gateway (optional) ── 6PN supertag-control-plane.internal:3434 ──┘
+```
+
+The Control Plane terminates its own TLS, so port 443 passes raw TCP to it and gRPC reaches it
+unchanged. The definitions are [`deploy/native/fly/control-plane.toml`](../../deploy/native/fly/control-plane.toml)
+and [`deploy/native/fly/gateway.toml`](../../deploy/native/fly/gateway.toml).
 
 ## Before you start
 
-- The installed `supertag` CLI, matching the release you deploy (`supertag --version`).
-- The [Fly CLI](https://fly.io/docs/flyctl/install/), installed and authenticated.
-- A Fly organization with billing enabled for an always-on deployment. [Trial Machines stop
-  after five minutes](https://fly.io/docs/about/free-trial/).
-- A checkout of the repository; run the commands below from its root.
-- A private environment file prepared with `supertag setup deployment --platform fly`, as
-  described in [Configure a hosted Control Plane](deployment-setup.md). Use
-  `https://YOUR-APP.fly.dev` as the coordination URL.
+- The `supertag` CLI, from the release you deploy. See [Install SuperTag](../operations/install.md).
+- The [Fly CLI](https://fly.io/docs/flyctl/install/), authenticated, and an organization with
+  billing for an always-on Machine.
+- The `hosted` image in a registry Fly.io can pull, with its digest. See
+  [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image).
+- PostgreSQL reachable from Fly.io, such as Fly Managed Postgres.
+- A TLS certificate that names the public host name and `supertag-control-plane.internal`, which
+  a Gateway dials. See [TLS files](../../deploy/native/README.md#tls-files).
 
-## 1. Create the app and volume
-
-Choose a unique app name and create its volume in the region selected in
-[`deploy/fly/fly.toml`](../../deploy/fly/fly.toml) (`iad` by default):
+## 1. Create the app, volume, and addresses
 
 ```sh
-fly apps create YOUR-APP
-fly volumes create supertag_state --app YOUR-APP --region iad --size 1
+fly apps create supertag-control-plane
+fly volumes create supertag_control_plane_state --app supertag-control-plane --region iad --size 1
+fly ips allocate-v4 --app supertag-control-plane
+fly ips allocate-v6 --app supertag-control-plane
 ```
 
-The volume stores Control Plane credentials, including those for each **collaboration surface**,
-an external work tool such as Slack where SuperTag meets people. Worker Hosts retain the output
-files they capture.
+Fly.io's shared IPv4 addresses route only HTTP and TLS-handler services. Without a dedicated IPv4
+address, clients on IPv4-only networks cannot reach the raw TCP service.
 
-## 2. Provision PostgreSQL
-
-Provision PostgreSQL in a nearby region, using Fly Managed Postgres or another provider. Keep its
-connection URL private. PostgreSQL stores organization state; it and the volume both require
-backups.
-
-## 3. Check, import, and deploy
+## 2. Prepare the configuration
 
 ```sh
-supertag setup deployment --platform fly
-supertag check deployment --platform fly --env-file .env.deployment
-fly secrets import --app YOUR-APP --stage < .env.deployment
-fly deploy --app YOUR-APP --config deploy/fly/fly.toml --ha=false
+export SUPERTAG_DATABASE_URL='postgresql://...'
+supertag setup deployment fly --output supertag-deployment
+supertag check deployment fly --directory supertag-deployment
 ```
 
-Run the deploy command from the repository root so the Docker build includes the workspace.
-For a release image you already built and published, add `--image YOUR-IMAGE@sha256:DIGEST`.
-The shared Docker image reads port 3434. Fly terminates TLS, forwards WebSocket upgrades, and
-checks `/healthz`; `/readyz` waits for a compatible Worklet and is not the deployment health check.
+See [Configure a deployment](deployment-setup.md) for the files.
 
-The release command runs ordinary migrations before replacing the Machine. Its temporary Machine
-has no mounted state volume, which is fine because migrations only need PostgreSQL.
-
-Always use `--ha=false` on initial deployment, and confirm `fly machine list --app YOUR-APP` shows
-one serving Machine. See [Fly deployment behavior](https://fly.io/docs/launch/deploy/).
-
-## 4. Connect your CLI and create an Auth Key
+## 3. Import the secrets and deploy
 
 ```sh
-supertag verify deployment https://YOUR-APP.fly.dev --env-file .env.deployment
-supertag connect control-plane https://YOUR-APP.fly.dev
-supertag create auth-key build-host --tag engineering
+fly secrets import --app supertag-control-plane < supertag-deployment/control-plane.env
+fly secrets set --app supertag-control-plane \
+  SUPERTAG_TLS_CERT_PEM="$(cat server.pem)" SUPERTAG_TLS_KEY_PEM="$(cat server.key)"
+fly deploy --config deploy/native/fly/control-plane.toml --image IMAGE@sha256:DIGEST
 ```
 
-The connect command reads `SUPERTAG_ADMIN_TOKEN` from your environment or a masked prompt. The
-[Auth Key](../reference/resource-model.md#auth-keys) prints a `stak_` secret once. The host that joins
-with it is bound to the Tag. A Tag with no bound Worker Host rejects every mention.
+Run exactly one Machine. Its volume holds the transfer directory, and every Control Plane process
+runs the controllers. The Control Plane migrates PostgreSQL when it starts.
 
-## 5. Connect a Worklet
+## 4. Verify and connect
 
-On the Worker Host, set the secret in `SUPERTAG_AUTH_KEY`, then follow [Run a Worker](workers.md)
-to connect a Worklet. A **Worker** is the code on that host that completes a Tag's work. The host
-joins on its first connection. This template uses WebSocket by
-default; see [Choose the Worker connection](deployment-setup.md#choose-the-worker-connection).
+```sh
+supertag verify deployment https://supertag-control-plane.fly.dev \
+  --env-file supertag-deployment/operator.env
+supertag connect https://supertag-control-plane.fly.dev --name team
+```
+
+Set `SUPERTAG_SERVER_CA_FILE` first when the certificate comes from your own CA. Then connect a
+Worker Host as in [Self-host SuperTag](self-hosting.md#6-connect-a-worker-host).
+
+## Optional: add the Gateway
+
+Deploy the Gateway only to connect a collaboration surface or send operator notifications.
+Create the app `supertag-gateway` in the same organization, with the volume
+`supertag_gateway_state` and no public IP:
+
+```sh
+fly apps create supertag-gateway
+fly volumes create supertag_gateway_state --app supertag-gateway --region iad --size 1
+fly secrets import --app supertag-gateway < supertag-deployment/gateway.env
+fly deploy --config deploy/native/fly/gateway.toml --image IMAGE@sha256:DIGEST
+```
+
+Add `SUPERTAG_SERVER_CA_PEM` when the Control Plane's certificate comes from your own CA. Append
+the connector flags of each surface to the Gateway's command in `gateway.toml`; see
+[Connect a collaboration surface](../surfaces/README.md). Its webhook listeners are loopback
+only, so put a reverse proxy for them in the same Machine. If you rename the Control Plane app,
+change `--control-plane` in `gateway.toml` to match.
 
 ## Check that it worked
 
-Repeat verification with readiness required:
-
 ```sh
-supertag verify deployment https://YOUR-APP.fly.dev --env-file .env.deployment --require-ready
+supertag verify deployment https://supertag-control-plane.fly.dev \
+  --env-file supertag-deployment/operator.env --require-ready
 ```
-
-A **Task** is one turn of a Tag's work. After connecting your CLI, run `supertag` to open the
-terminal UI. Send the Tag a request that requires the Worker to run a command, and check its
-reply. Restart the Machine and verify that the Worklet reconnects, prior Tasks are still visible,
-and the Tag can complete a new Task.
-
-## Optional: add a supertag.yaml
-
-The Control Plane starts with `supertag up --foreground control-plane`, so it also reads a
-[`supertag.yaml`](../reference/supertag-yaml.md). The `fly.toml` environment and Fly secrets remain the main configuration and override
-the file. Keep `SUPERTAG_DATABASE_URL`, `SUPERTAG_ADMIN_TOKEN`, and `SUPERTAG_COORDINATION_URL` there,
-because the platform check reads them from the environment. A file suits settings such as `notify`,
-`logging`, `operators.file`, or a `provision` list, which creates missing resources each time the
-Control Plane starts; leave `ports` out.
-
-Copy the file into the Fly volume mounted at `/var/lib/supertag`, then restart the Machine:
-
-```sh
-fly ssh sftp shell --app YOUR-APP
-# at the prompt: put supertag.yaml /var/lib/supertag/supertag.yaml
-fly apps restart YOUR-APP
-```
-
-The file stays on the volume across deployments.
-
-See [In containers and hosting platforms](../reference/supertag-yaml.md#in-containers-and-hosting-platforms)
-for the keys that behave differently in a container.
 
 ## Limits
 
-- Keep one Control Plane Machine. This template does not support multiple instances sharing local
-  credentials or routing Worklets independently.
-- Automatic stopping is disabled so scheduling and collaboration surface connections continue without incoming
-  requests.
-- The immediate deployment strategy replaces the single instance with a brief interruption.
-- Back up both PostgreSQL and the volume.
+- One Machine per app. Back up PostgreSQL and both volumes; they hold different state.
+- The volume holds transfer files such as Session checkpoints. Losing it loses checkpoints that
+  are not yet consumed.
 
-## Optional: add a native gRPC listener
-
-A gRPC listener lets remote Worklets and their internal clients use HTTP/2 directly. This optional
-profile keeps the management API on HTTPS port 443 and forwards encrypted TCP port 8443 to the
-Control Plane's TLS listener on port 3435. It does not terminate TLS at Fly Proxy or expose a
-plaintext gRPC port. [Fly documents TCP passthrough and its addressing requirements](https://fly.io/docs/networking/services/).
-
-### Before you start
-
-- A hostname and matching certificate whose private key you control. Fly-managed edge certificates
-  are not installed into the paths below automatically.
-- A dedicated IPv6 address or a dedicated IPv4 address for raw TCP passthrough. Shared IPv4 routing
-  requires an edge handler and cannot serve this profile as configured.
-
-### 1. Mount the certificate
-
-Mount the full certificate chain at `/var/lib/supertag/tls/fullchain.pem` and private key at
-`/var/lib/supertag/tls/privkey.pem`, readable only by the container's runtime user. Keep these
-files out of the repository and command arguments. Arrange renewal and restart the Control Plane to
-load renewed files.
-
-### 2. Prepare the gRPC environment
-
-Prepare the deployment environment with `supertag setup deployment --platform fly --transport grpc`.
-The gRPC profile requires these non-secret settings (the certificate and key stay in mounted files):
-
-```dotenv
-SUPERTAG_DEPLOYMENT_RPC_TRANSPORT=grpc
-SUPERTAG_WORKLET_GRPC_PORT=3435
-SUPERTAG_WORKLET_GRPC_TLS_CERT_FILE=/var/lib/supertag/tls/fullchain.pem
-SUPERTAG_WORKLET_GRPC_TLS_KEY_FILE=/var/lib/supertag/tls/privkey.pem
-```
-
-### 3. Deploy and connect Worklets
-
-Import the environment and deploy using `--config deploy/fly/fly.grpc.toml` instead of
-`deploy/fly/fly.toml`. Keep `SUPERTAG_COORDINATION_URL` on the management HTTPS origin. Connect
-Worklets with `--transport grpc --control-plane https://YOUR-GRPC-HOST:8443` and their existing
-Worker Host credential files. For a private certificate authority, configure the Worklet's trusted
-CA using the [Worker guide](workers.md); keep certificate verification enabled.
-
-### Check that it worked
-
-Check both paths before moving production Workers:
+## Remove the deployment
 
 ```sh
-supertag verify deployment https://YOUR-APP.fly.dev --env-file .env.deployment --grpc-url https://YOUR-GRPC-HOST:8443
+fly apps destroy supertag-gateway
+fly apps destroy supertag-control-plane
 ```
 
-The RPC probe checks routing and authentication rejection; it does not prove long-lived stream
-recovery or application capacity. Exercise an authenticated Worklet reconnect and accepted-Task
-recovery through your actual ingress. This profile is generated and locally checked; it has not
-been validated by deploying to a hosted Fly app. To roll back, connect Workers using
-`--transport websocket` to the management origin and use the WebSocket deployment profile.
-
-## Optional: remove a test deployment
-
-For a disposable deployment test, destroy only the app created for that test with
-`fly apps destroy YOUR-TEST-APP`. Verify its Machines and volumes are removed, and separately delete
-any test database or external storage you created. Stopping a Machine alone leaves billable storage.
+Destroying an app removes its volumes. Delete the database separately.
 
 ## If something goes wrong
 
-- **`/readyz` returns unavailable.** This is expected until a compatible Worklet connects. See
-  [Health and readiness](../operations/control-plane.md#health-and-readiness).
-- **The Worklet cannot connect.** HTTPS Worklet addresses select gRPC unless you pass
-  `--transport websocket`. See [Choose the Worker connection](deployment-setup.md#choose-the-worker-connection)
-  and [Troubleshooting](troubleshooting.md).
+- **Clients time out.** Check that the app has a dedicated IPv4 address and that port 443 has
+  `handlers = []`.
+- **The Gateway restarts repeatedly.** It exits when it cannot reach the Control Plane. Check its
+  credential and, for your own CA, `SUPERTAG_SERVER_CA_PEM`.
 
 ## Next
 
 - [Control Plane operations](../operations/control-plane.md)
-- [Run a Worker](workers.md)
-- [collaboration surface guides](../surfaces/README.md)
+- [Run Worker Hosts](workers.md)

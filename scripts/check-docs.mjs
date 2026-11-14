@@ -1,14 +1,12 @@
-// Checks user documentation, agent skills, and SDK READMEs against the CLI and itself:
-// every `supertag` command names an ACTION RESOURCE pair listed by `supertag --help` and
-// flags listed there or by that command's own --help, relative links and heading anchors resolve, and docs follow
-// the repository's documentation rules. Run `pnpm build` first; help comes from
-// the built CLI so docs are checked against the command inventory users see.
+// Checks user documentation, agent skills, and SDK READMEs against the CLI and itself: every
+// `supertag` command and flag appears in the generated CLI reference (docs/reference/cli.md),
+// relative links and heading anchors resolve, and docs follow the repository's documentation rules.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkDocumentationNodeVersions } from "./check-docs-node.mjs";
+import { checkCommand, checkProseFlag, commandsIn, parseReference } from "./docs-commands.mjs";
 import { deprecatedDocProblems } from "./docs-deprecations.mjs";
 import { checkLinks, checkOrphans } from "./docs-links.mjs";
 import { versionProblems } from "./docs-versions.mjs";
@@ -19,7 +17,15 @@ execFileSync(
   process.execPath,
   [
     "--test",
-    ...["check-install-docs", "docs-versions"].map((n) => join(root, `scripts/${n}.test.mjs`)),
+    ...[
+      "check-install-docs",
+      "check-docs-node",
+      "docs-commands",
+      "docs-deprecations",
+      "docs-links",
+      "docs-versions",
+      "docs-vocabulary",
+    ].map((n) => join(root, `scripts/${n}.test.mjs`)),
   ],
   { stdio: "inherit" },
 );
@@ -30,9 +36,6 @@ if (!existsSync(join(root, "docs", objectiveGuide)))
   throw new Error(`docs/${objectiveGuide}: Objective-writing guide is missing`);
 if (!readFileSync(join(root, "docs/README.md"), "utf8").includes(`](${objectiveGuide})`))
   throw new Error("docs/README.md: link the Objective-writing guide");
-
-const cli = join(root, "apps/cli/dist/index.js");
-if (!existsSync(cli)) throw new Error("Build the CLI first: pnpm build");
 
 // Internal design records are gitignored and must not be linked or checked.
 const internal = /(architecture|product-brief)[^/]*\.md$/u;
@@ -58,200 +61,11 @@ const files = [
   ),
 ];
 
-// --- Command inventory from help text -------------------------------------------------------
-// An empty state directory keeps help invocations from reading or creating local state.
-const state = mkdtempSync(join(tmpdir(), "supertag-docs-check-"));
-process.on("exit", () => rmSync(state, { recursive: true, force: true }));
-const runHelp = (args) =>
-  execFileSync(process.execPath, [cli, ...args, "--help"], {
-    encoding: "utf8",
-    env: { ...process.env, SUPERTAG_STATE_DIR: state },
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 10_000,
-  });
-const help = runHelp([]);
-const alternatives = (token) => token.split("|");
-const variable = (token) => /^[A-Z][A-Z0-9_]*$/u.test(token) || token.includes("|");
-const inventory = new Map(); // "action resource" -> { flags: Set, openFlags: boolean }
-const actionOnly = new Map(); // action -> same shape, for forms such as `supertag team create`
-function register(map, key, line) {
-  const entry = map.get(key) ?? { flags: new Set(), openFlags: false };
-  for (const [flag] of line.matchAll(/--[a-z][a-z0-9-]*/gu)) entry.flags.add(flag);
-  // Placeholders such as "[provider scope flags]" or "[arguments]" admit flags help cannot list.
-  if (/\[(provider [a-z ]+|flags|arguments)\]/u.test(line)) entry.openFlags = true;
-  map.set(key, entry);
-}
-for (const raw of help.split("\n")) {
-  const line = raw.trim();
-  if (!line.startsWith("supertag ")) continue;
-  // Skip whole bracketed option groups, so `[--by tag|objective|day]` is not read as a resource.
-  const tokens = [];
-  let depth = 0;
-  for (const token of line.split(/\s+/u).slice(1)) {
-    if (depth === 0 && !token.startsWith("[")) tokens.push(token);
-    depth += (token.match(/\[/gu) ?? []).length - (token.match(/\]/gu) ?? []).length;
-  }
-  if (!tokens.length) continue;
-  const [first, second] = tokens;
-  if (first.startsWith("--")) continue;
-  if (second && !second.startsWith("--") && !/^[A-Z]/u.test(second)) {
-    for (const action of alternatives(first))
-      for (const resource of alternatives(second)) {
-        if (first === "team" || first === "coordinate") register(actionOnly, action, line);
-        else register(inventory, `${action} ${resource}`, line);
-      }
-  } else for (const action of alternatives(first)) register(actionOnly, action, line);
-}
-const globalFlags = new Set(["--control-plane", "--help", "--version", "--output"]);
-// Top-level help summarizes; a command's own --help lists its complete options. Output that
-// repeats the top-level help means the command has no specific help.
-const commandHelpFlags = new Map();
-function commandFlags(action, resource) {
-  const key = `${action} ${resource}`;
-  if (!commandHelpFlags.has(key)) {
-    let text = "";
-    try {
-      text = runHelp([action, resource]);
-    } catch (error) {
-      text = `${error.stdout ?? ""}`;
-    }
-    commandHelpFlags.set(
-      key,
-      text.trim() === help.trim()
-        ? new Set()
-        : new Set([...text.matchAll(/--[a-z][a-z0-9-]*/gu)].map(([flag]) => flag)),
-    );
-  }
-  return commandHelpFlags.get(key);
-}
-
-// --- Extraction -----------------------------------------------------------------------------
-function commandsIn(text) {
-  const found = [];
-  let fence = null;
-  const lines = text.split("\n");
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index];
-    const marker = line.match(/^\s*(```+|~~~+)\s*([\w-]*)/u);
-    if (marker) {
-      fence = fence ? null : marker[2] || "text";
-      continue;
-    }
-    if (fence && /^(sh|bash|shell|zsh|console|text)$/u.test(fence)) {
-      let command = line.replace(/^\s*\$\s+/u, "");
-      let end = index;
-      while (command.trimEnd().endsWith("\\") && end + 1 < lines.length)
-        command = `${command.trimEnd().slice(0, -1)} ${lines[++end].trim()}`;
-      // Allow leading environment assignments: FOO=bar supertag ...
-      const match = command.match(/^\s*(?:[A-Z_][A-Z0-9_]*=\S*\s+)*supertag(\s.*)?$/u);
-      if (match) found.push({ line: index + 1, command: `supertag${match[1] ?? ""}` });
-      index = end;
-    } else if (!fence) {
-      for (const span of line.matchAll(/`(supertag\s[^`]+)`/gu))
-        found.push({ line: index + 1, command: span[1] });
-    }
-  }
-  return found;
-}
-
-function checkCommand({ command }) {
-  const words = command
-    .replace(/\s+#.*$/u, "")
-    .replace(/["'][^"']*["']/gu, "VALUE")
-    .split(/\s+/u)
-    .slice(1);
-  // Strip the global Control Plane selector wherever it appears before the action.
-  while (words[0]?.startsWith("--")) {
-    if (words[0] === "--control-plane") words.splice(0, 2);
-    else if (words[0] === "--help" || words[0] === "--version") return null;
-    else return `unknown global flag ${words[0]}`;
-  }
-  const [action, resource] = words;
-  if (!action || action === "..." || variable(action)) return null;
-  const knownAction =
-    actionOnly.has(action) || [...inventory.keys()].some((key) => key.startsWith(`${action} `));
-  // Prose may name an action alone ("the `supertag watch` command"). A placeholder resource is
-  // valid only where help uses one itself, such as `supertag coordinate COMMAND`.
-  if (knownAction && !resource) return null;
-  if (resource && variable(resource) && !resource.includes("|")) {
-    if (actionOnly.has(action)) return null;
-    return `\`supertag ${action} ${resource}\` needs a resource listed by supertag --help`;
-  }
-  const pair = resource && inventory.get(`${action} ${resource}`);
-  const entry = pair || actionOnly.get(action);
-  if (!entry)
-    return resource
-      ? `\`supertag ${action} ${resource}\` is not in supertag --help`
-      : `\`supertag ${action}\` is not in supertag --help`;
-  if (entry.openFlags) return null;
-  let unknown = words
-    .filter((word) => /^--[a-z]/u.test(word))
-    .map((word) => word.split("=")[0])
-    .filter((flag) => !entry.flags.has(flag) && !globalFlags.has(flag));
-  if (unknown.length && pair) {
-    const documented = commandFlags(action, resource);
-    unknown = unknown.filter((flag) => !documented.has(flag));
-  }
-  return unknown.length
-    ? `flag ${[...new Set(unknown)].join(", ")} not listed for \`supertag ${action}${pair ? ` ${resource}` : ""}\` in supertag --help`
-    : null;
-}
-
-// --- Native CLI pages -------------------------------------------------------------------------
-// Guides for the native services (Render, Cloudflare, Modal) document the native `supertag`
-// CLI. They carry this marker, and their commands are checked against its reference instead.
-const nativeMarker = "<!-- supertag-cli: native -->";
-// A page that otherwise documents the TypeScript CLI marks native-only passages, such as
-// Workspace Volume copies, between these lines.
-const nativeStart = "<!-- supertag-cli: native start -->";
-const nativeEnd = "<!-- supertag-cli: native end -->";
-function nativeLines(text) {
-  const lines = new Set();
-  let inside = false;
-  text.split("\n").forEach((content, index) => {
-    if (content.trim() === nativeStart) inside = true;
-    else if (content.trim() === nativeEnd) inside = false;
-    else if (inside) lines.add(index + 1);
-  });
-  return lines;
-}
-const nativeCommands = new Map(); // "host enroll" -> Set of flags its help lists
-for (const section of readFileSync(join(root, "rust/docs/cli-reference.md"), "utf8")
-  .split(/^## /mu)
-  .slice(1)) {
-  const heading = section.match(/^`supertag ([^`]+)`/u);
-  if (heading)
-    nativeCommands.set(
-      heading[1],
-      new Set([...section.matchAll(/--[a-z][a-z0-9-]*/gu)].map(([flag]) => flag)),
-    );
-}
-function checkNativeCommand({ command }) {
-  const words = command
-    .replace(/\s+#.*$/u, "")
-    .replace(/["'][^"']*["']/gu, "VALUE")
-    .split(/\s+/u)
-    .slice(1);
-  const path = [];
-  for (const word of words) {
-    if (word.startsWith("-")) break;
-    path.push(word);
-  }
-  let key;
-  for (let length = path.length; length > 0 && !key; length--) {
-    const candidate = path.slice(0, length).join(" ");
-    if (nativeCommands.has(candidate)) key = candidate;
-  }
-  if (!key)
-    return `\`supertag ${path.slice(0, 2).join(" ")}\` is not in rust/docs/cli-reference.md`;
-  const unknown = words
-    .filter((word) => /^--[a-z]/u.test(word))
-    .map((word) => word.split("=")[0])
-    .filter((flag) => flag !== "--help" && !nativeCommands.get(key).has(flag));
-  return unknown.length
-    ? `flag ${[...new Set(unknown)].join(", ")} not listed for \`supertag ${key}\` in rust/docs/cli-reference.md`
-    : null;
-}
+// --- Command inventory from the CLI reference ----------------------------------------------
+// docs/reference/cli.md is generated from the help of every visible command, and
+// rust/crates/cli/tests/cli_help.rs fails when the CLI's help no longer matches it.
+const reference = "docs/reference/cli.md";
+const cli = parseReference(readFileSync(join(root, reference), "utf8"));
 
 // --- Links and anchors ------------------------------------------------------------------------
 // Long sections are hard to scan. They are reported but do not fail the check.
@@ -351,13 +165,16 @@ for (const file of files) {
         );
     });
   warnings.push(...longSections(name, text));
-  const native = text.includes(nativeMarker);
-  const nativePassages = nativeLines(text);
-  for (const found of commandsIn(text)) {
+  const { commands, flags } = commandsIn(text);
+  for (const found of commands) {
     commandCount++;
-    const problem =
-      native || nativePassages.has(found.line) ? checkNativeCommand(found) : checkCommand(found);
-    if (problem) problems.push(`${name}:${found.line}: ${problem}`);
+    const problem = checkCommand(cli, found.command);
+    if (problem) problems.push(`${name}:${found.line}: ${problem} in ${reference}`);
+  }
+  // CONTRIBUTING.md describes flags of repository scripts, not of the CLI.
+  for (const found of name === "CONTRIBUTING.md" ? [] : flags) {
+    const problem = checkProseFlag(cli, found.flag);
+    if (problem) problems.push(`${name}:${found.line}: ${problem} in ${reference}`);
   }
 }
 if (warnings.length) console.warn(`${warnings.join("\n")}\n`);

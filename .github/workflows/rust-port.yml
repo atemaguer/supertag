@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'rust/**'
+      - 'docs/reference/cli.md'
       - 'packages/runtime/**'
       - 'packages/core/**'
       - 'packages/operator-api/go/**'
@@ -19,6 +20,7 @@ on:
     branches: [main]
     paths:
       - 'rust/**'
+      - 'docs/reference/cli.md'
       - 'packages/runtime/**'
       - 'packages/core/**'
       - 'packages/operator-api/go/**'

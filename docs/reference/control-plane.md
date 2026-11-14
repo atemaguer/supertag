@@ -1,109 +1,66 @@
 # SuperTag Control Plane
 
-<!-- supertag-cli: native -->
-
-The Control Plane is one of SuperTag's two top-level runtime components. It maintains the durable
-state of an AI [organization](glossary.md#autonomous-organization) and decides what work the
-organization accepts and where that work runs. [Worker Hosts](glossary.md#worker-host) form the
-execution side of the system.
+The **Control Plane** maintains the durable state of an AI
+[organization](glossary.md#autonomous-organization) and decides what work it accepts and where
+that work runs. [Worker Hosts](glossary.md#worker-host) form the execution side of the system,
+and an optional [Gateway](glossary.md#gateway) connects collaboration surfaces.
 
 This page uses these SuperTag terms, each defined in the glossary: [Tag](glossary.md#tag),
 [Role](glossary.md#role), [Objective](glossary.md#objective), [Team](glossary.md#team),
 [Workstream](glossary.md#workstream), [Task](glossary.md#task),
 [Task Attempt](glossary.md#task-attempt), [Session](glossary.md#session),
-[Context Set](glossary.md#context-set), [Permission Set](glossary.md#permission-set),
-[Control Plane](glossary.md#control-plane), [API Server](glossary.md#api-server),
-[Gateway](glossary.md#gateway), [Surface Account](glossary.md#surface-account),
-[Worklet API](glossary.md#worklet-api), [Worklet](glossary.md#worklet), and
-[Worker](glossary.md#worker).
-
-The API Server is the Control Plane's public endpoint: the authenticated management, resource, and
-Worklet API boundary that operators, Worker Hosts, and Gateways call. It keeps no durable state
-apart from transfer files, and the API Server and the controllers run as one process. Running API
-Server replicas apart from the controllers is not supported yet: every Control Plane process also
-runs its own controllers. Several Control Plane processes can share one PostgreSQL database and one
-transfer directory; a SQLite database serves one process. The Gateway connects collaboration
-surfaces to the Control Plane. It runs as a separate, optional process and is an ordinary client
-of the API Server. These boundaries keep resource semantics and admission separate from
-collaboration transport and from reconciliation.
+[Context Set](glossary.md#context-set), [Permission Set](glossary.md#permission-set), and
+[Surface Account](glossary.md#surface-account).
 
 ## System boundary
 
 ```text
-Slack / GitHub / Linear / Lark / Teams       CLI / API
-                    |                            |
-                 Gateway                    API Server
-                    \____________________________/
-                                  |
-                            Control Plane
-                    - controllers and scheduling
-                    - durable state and audit
-                                  |
-                         API Server / Worklet API
-                                  |
-                           Worker Hosts
-                        - one Worklet per host
-                        - Workers and Worker Profiles
-                        - harnesses and environments
+Slack / GitHub / Linear / Lark / Teams     CLI / terminal UI / desktop app / applications
+                 |                                         |
+              Gateway (client) ─────────┐                  |
+                                        v                  v
+                        Control Plane: one gRPC API, supertag.runtime.v2
+                        - authentication and the role table
+                        - admission, policy, and budgets
+                        - scheduling, leases, and recovery
+                        - durable state and audit (SQLite or PostgreSQL)
+                                        ^
+                                        | outbound connections
+                                  Worker Hosts
+                        - harness adapters and Workspace checkouts
 ```
 
 The Control Plane owns:
 
 - Tags, Roles, Objectives, Teams, Workstreams, Tasks, Sessions, and Mailboxes;
 - Context Sets, Permission Sets, admission, identity, policy, and budgets;
-- scheduling, leases, retries, recovery, cancellation, and reconciliation; and
-- desired state, observed state, events, and audit history.
+- scheduling, leases, recovery decisions, cancellation, and reconciliation; and
+- events and audit history.
 
-The API Server authenticates operator and Worklet requests, validates resource representations,
-applies admission rules, and exposes desired and observed state through versioned resources. Its
-Worklet API registers Worker Hosts, carries assignments and cancellation, accepts heartbeats and
-execution observations, and reports backpressure. Resource watch clients compare the resource
-versions represented by the API Server. It does not run controllers or execute Tasks.
+It keeps transfer files, such as Session checkpoints, workspace bundles, and captured artifact
+files, in its transfer directory, never in its database. Several Control Plane processes can share one
+PostgreSQL database and one transfer directory; a SQLite database serves one process.
 
-The Gateway terminates and authenticates collaboration-surface connections, normalizes incoming
-messages, forwards them to the appropriate Control Plane service, and delivers outbound
-presentations. It reports collaboration surface transport success, failure, and health. It does not own the
-management or Worklet APIs, decide organizational policy, create work, or schedule Worker Hosts.
-
-Worker Hosts do not become part of the Control Plane. Each provides execution capacity through a
-Worklet and one or more Workers. See [Worker Hosts, Worklets, Workers, and harnesses](worker.md).
-
-## Stable API boundary
-
-```text
-CLI / dashboard / automation
-            |
-      API Server
-  authentication, validation,
-  admission and resources
-            |
- PostgreSQL + credential vault
-            |
-       controllers
-       /         \
- Worklet API    Gateway connections to surfaces
-```
-
-All management clients use the Control Plane API Server. PostgreSQL tables, logical credential IDs,
-and vault implementations are private implementation details. Local and hosted deployments differ
-only in how the CLI locates and authenticates to the Control Plane.
+The Gateway terminates collaboration surface connections, turns their events into Tasks through
+the `Connector` service, and delivers replies and operator notifications. It does not decide
+policy, create work on its own, or schedule Worker Hosts. Worker Hosts do not become part of the
+Control Plane; each claims work and reports its execution. See the
+[Worker Host reference](worker.md).
 
 ## Connections
 
-The local CLI configuration separates three concerns:
+Clients reach the Control Plane at one URL: `https://` for native gRPC, `wss://` for the
+WebSocket tunnel behind platforms that forward only HTTP, or `http://` on loopback. Every
+connection first negotiates a protocol version. See [Control Plane API](control-plane-api.md).
 
-- **Control Plane** — the deployment whose API Server the CLI and Worklets use.
-- **Operator credential** — how this CLI authenticates, resolved through a client-side provider.
-- **Connection** — a named pairing of one Control Plane and one operator credential.
-
-The active connection is used automatically. Names remain optional for the first Control Plane and
-become useful when an operator manages several deployments. This concept is intentionally called a
-connection rather than a context; Context Sets already describe knowledge admitted to Tag work.
+The CLI, the terminal UI, and the desktop app share saved Control Planes: `supertag connect URL
+--name NAME` saves one, and `--control-plane NAME` uses it. `--state-directory` reaches the local
+services that `supertag up` runs.
 
 ## Callers and roles
 
 Every caller of the Control Plane authenticates with its own bearer credential. One
-default-deny table at the API Server maps every RPC to the roles allowed to call it; an RPC
+default-deny table maps every RPC to the roles allowed to call it; an RPC
 missing from the table is refused.
 
 | Principal | Credential | Obtained with |
@@ -143,9 +100,8 @@ Control Plane resources use `apiVersion`, `kind`, `metadata`, `spec`, and `statu
 - Reconciled or observed state belongs in `status`.
 - Cross-resource actions may use explicit virtual resources instead of ad hoc RPC or shell execution.
 
-The API Server's resource contract is versioned independently from database schemas, CLI syntax,
-and Gateway protocols. This allows a dashboard, SDK, or newer CLI to share the same resource
-contract.
+The resource contract is versioned with the API's protocol, independently of database schemas
+and CLI syntax, so the CLI, the terminal UI, the desktop app, and applications share it.
 
 ## Controllers
 
@@ -153,24 +109,13 @@ A controller continuously reconciles one named responsibility and exposes status
 
 | Controller | Desired input | Observed responsibility |
 | --- | --- | --- |
-| `surfaces` | Enrolled Surface Accounts | Gateway connections and HTTP collaboration surface readiness |
-| `task-dispatch` | Durable admitted Tasks | Worker selection, Task Attempts, retries, and results |
+| `surfaces` | Surface Accounts and locations | Which Gateway serves each account |
+| `task-dispatch` | Durable admitted Tasks | Worker Host selection, Task Attempts, retries, and results |
 | `reply-delivery` | Durable outbound presentations | Gateway delivery, retry, and completion |
 
 Controllers do not define SuperTag's main building blocks. They are replaceable implementations
 behind the resource API. Security admission remains synchronous: a controller cannot later broaden
 a Tag's Context Sets or Permission Sets beyond what the Control Plane admitted.
 
-The Control Plane writes a warning to its process log when one event-loop turn runs for more than
-one second. The warning includes `lagMs` and the HTTP route or background job active during the
-stall. For example, a long dispatch pass reports `job: task dispatch`.
-
 For how `task-dispatch` picks a Worker Host and handles interrupted execution, see
 [Scheduling and interrupted execution](scheduling-and-recovery.md).
-
-## Current scope
-
-The first API version establishes resource envelopes, idempotent Tag creation, observable
-controller status, collaboration surface enrollment, and versioned virtual operations for compound Tag changes.
-Tag location state remains part of the Tag; other resources gain collection APIs as their mutation
-contracts stabilize.

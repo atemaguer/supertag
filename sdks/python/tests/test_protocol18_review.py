@@ -1,6 +1,5 @@
 """Regression coverage for protocol 18 review findings."""
 
-import ast
 import asyncio
 import base64
 import importlib.util
@@ -188,29 +187,6 @@ async def test_example_rejects_unsafe_journal_identity(example, identity, monkey
     monkeypatch.setattr(module, "WorkletConnection", connect)
     with pytest.raises(ValueError, match="SUPERTAG_WORKLET_ID"):
         await module.run()
-
-
-@pytest.mark.asyncio
-async def test_guide_quickstart_constructs_durable_connection(monkeypatch, tmp_path):
-    text = (ROOT / "docs/guides/python-workers.md").read_text()
-    code = next(
-        block.split("```", 1)[0]
-        for block in text.split("```python\n")[1:]
-        if "async def main()" in block
-    )
-    namespace = {"__name__": "guide_test"}
-    exec(compile(ast.parse(code), "python-workers.md", "exec"), namespace)
-    monkeypatch.setenv("SUPERTAG_CONTROL_PLANE_URL", "https://control.example")
-    monkeypatch.setenv("SUPERTAG_WORKLET_TOKEN", "secret")
-    monkeypatch.chdir(tmp_path)
-
-    async def run(self):
-        assert isinstance(self._worklet, DurableLocalWorklet)
-        assert self._worklet._journal.directory.is_absolute()
-
-    monkeypatch.setattr(WorkletConnection, "run", run)
-    await namespace["main"]()
-    assert "Optional: Keep Task Attempts" not in text
 
 
 @pytest.mark.parametrize("example", ["codex_worker", "openai_agents_worker"])

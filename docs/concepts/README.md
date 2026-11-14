@@ -80,9 +80,9 @@ system can narrow those limits, but cannot widen them.
 ## See where the work runs
 
 The **Control Plane** is the service that stores the organization, applies its rules, and schedules
-work. A **Worker Host** is a machine or sandbox that provides execution capacity. A **Worklet**
-connects that host to the Control Plane. A **Worker** completes a Task. A **harness** connects the
-Worker to an agent system such as Codex or Claude Code.
+work. A **Worker Host** is a machine or sandbox that provides execution capacity. It runs each Task
+through a **harness adapter**, which drives a **harness**: an agent system such as Codex or Claude
+Code. A **Gateway** connects collaboration surfaces such as Slack to the Control Plane.
 
 Read [how SuperTag fits together](how-it-works.md) and the
 [execution overview](workers.md) for more detail. Keeping organization and execution separate lets

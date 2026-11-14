@@ -24,13 +24,12 @@ describe("operator documentation discovery", () => {
   });
   it.each(operatorPages)("guards pending-question replies in %s", (page) => {
     const content = readFileSync(resolve(root, page), "utf8");
-    // The operator reads and quotes the pending question and answers its exact inbox key,
-    // keeping the answer text in a file.
+    // The operator reads and quotes the pending question and answers the exact Task that asked,
+    // keeping the answer text in a private file.
     expect(content).toMatch(/quote\s+the\s+question/iu);
     expect(content).toMatch(/pending questions\s+\*{0,2}before\s+(?:sending|messaging)/iu);
-    expect(content).toContain("InboxService.AnswerQuestion");
-    expect(content).toMatch(/exact\s+`key` from the\s+current operator-eligible question/u);
-    expect(content).toMatch(/`text` read from the private file/u);
+    expect(content).toContain("supertag question answer TASK_ID");
+    expect(content).toMatch(/text read from the\s+private file/u);
     expect(content).not.toMatch(/supertag message (?:tag|objective)/u);
   });
   it.each(operatorPages)("guards administrator credentials in %s", (page) => {

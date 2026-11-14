@@ -1,12 +1,10 @@
 # Deploy the Control Plane on Render
 
-<!-- supertag-cli: native -->
-
 A **Tag** is a persistent AI actor with its own responsibilities and permissions. The **Control
 Plane** is the service that stores a SuperTag organization and schedules its work; it is the one
 public endpoint for operators, **Worker Hosts** (the machines that run the work), and the
 optional **Gateway**, which connects **collaboration surfaces** such as Slack. This guide runs the
-native Control Plane on Render from a Blueprint, with Render PostgreSQL. See the
+Control Plane on Render from a Blueprint, with Render PostgreSQL. See the
 [glossary](../reference/glossary.md) for other terms.
 
 Render's edge terminates TLS and forwards only HTTP/1.1. The Control Plane therefore carries its
@@ -29,11 +27,8 @@ supertag-gateway (background worker, optional) ── wss:// ──┘
 
 ## Before you start
 
-- The native `supertag` CLI, from the release you deploy. No native release archive is published
-  yet, so build it from that release's checkout with
-  `cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`
-  and put `rust/target/release/supertag` first on your `PATH`. The `supertag-ai` npm package
-  installs the TypeScript CLI, which cannot set up or verify this deployment.
+- The `supertag` CLI, from the release you deploy (`supertag --version`). See
+  [Install SuperTag](../operations/install.md).
 - The `hosted` service image pushed to a registry Render can pull, with its digest. See
   [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image).
 - `openssl`, to issue certificates from your own CA.
@@ -155,7 +150,7 @@ none, it runs no connector.
   secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
 
 GitHub, Linear, Microsoft Teams, and Slack HTTP events need inbound webhooks, which this
-deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see [native service deployments](../../deploy/native/README.md)), enrolled
+deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see [service deployment definitions](../../deploy/native/README.md)), enrolled
 with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
 URL with its own credential.
 
@@ -211,5 +206,5 @@ and the database are gone. Deleting a service removes its disk.
 
 ## Next
 
-- [Native service deployments](../../deploy/native/README.md) for the role contract and TLS files
+- [Service deployment definitions](../../deploy/native/README.md) for the role contract and TLS files
 - [Control Plane operations](../operations/control-plane.md)

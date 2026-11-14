@@ -15,7 +15,7 @@ Finish the quickstart and send your first message to `lead` in the terminal UI. 
 repository, run `supertag` to reopen that conversation. The quickstart creates `lead`, the
 `local-tools` **Permission Set** (allowed file edits and commands), and a **Workspace** named
 after your repository. A Workspace tells SuperTag where repository work belongs; this guide uses
-`app`.
+`app`. Commands below name the local Control Plane with `--state-directory ~/.supertag`.
 
 The **Control Plane** coordinates work. Your **Worker Host** supplies execution capacity through a
 signed-in harness such as Codex or Claude Code. Check that both services are running:
@@ -23,11 +23,11 @@ signed-in harness such as Codex or Claude Code. Check that both services are run
 ```sh
 supertag up
 supertag ps
-supertag list worker-host
+supertag get host --state-directory ~/.supertag
 ```
 
-Use the connected Worker Host's name below instead of `YOUR_HOST`. Both Tags can use this one
-host. They are separate actors even when they use the same harness and machine.
+A Worker Host in the same `supertag.yaml` as the local Control Plane runs every Tag, so both Tags
+can use this one host. They are separate actors even when they use the same harness and machine.
 
 ## 1. Add the builder
 
@@ -60,12 +60,11 @@ spec:
   roles: [Builder]
 ```
 
-Apply the manifest and bind the builder to your connected host:
+Apply the manifest:
 
 ```sh
-supertag apply -f builder.yaml
-supertag update tag builder --add-worker-host YOUR_HOST
-supertag describe tag builder
+supertag apply -f builder.yaml --state-directory ~/.supertag
+supertag describe tag builder --state-directory ~/.supertag
 ```
 
 The Role grants the same local file-editing and command permissions that `init` gave `lead`.
@@ -75,12 +74,8 @@ selected host.
 ## 2. Create the Team
 
 ```sh
-supertag create team first-team --member lead --member builder
-supertag get team first-team
-```
-
-```text
-team/first-team created.
+supertag team create first-team --member lead --member builder --state-directory ~/.supertag
+supertag get team first-team --state-directory ~/.supertag
 ```
 
 The Team is a flat list: both Tags are members, and neither leads. Members may message each other
@@ -90,24 +85,17 @@ and share one Workstream.
 
 In your quickstart checkout, open `supertag`, select `lead`, and enter `/goal` on its own.
 Enter the outcome from the example below, choose `first-team`, and leave the budget blank.
-SuperTag uses the Workspace registered for the checkout. Copy the Objective ID shown after
-creation for the CLI commands that follow.
+Copy the Objective ID shown after creation for the CLI commands that follow.
 
-For a shared Control Plane, or to choose a Workspace and Objective ID explicitly, use the CLI.
+To choose the Objective ID yourself, or for a shared Control Plane, use the CLI.
 
 ```sh
-supertag create objective team-greeting --owner lead --team first-team --workspace app \
-  --outcome 'Create TEAM-HELLO.md containing exactly: Hello from the team. Have builder write the file; review what it reports. Done when you have checked the delivered file, posted a one-line summary to the Workstream, and sent builder a message saying the file was accepted. Change no other files; do not push.'
+supertag objective create team-greeting \
+  'Create TEAM-HELLO.md containing exactly: Hello from the team. Have builder write the file; review what it reports. Done when you have checked the delivered file, posted a one-line summary to the Workstream, and sent builder a message saying the file was accepted. Change no other files; do not push.' \
+  --owner lead --team first-team --state-directory ~/.supertag
 ```
 
-```text
-objective/team-greeting created
-Started lead with Task 6c2b48d0-9e13-4a77-b5f2-80ad1e6c4932.
-Follow it: supertag watch objective team-greeting
-See results: supertag describe objective team-greeting
-```
-
-Creating the Objective starts it. The lead takes its first turn in the Objective's own
+It prints the Objective as JSON. Creating the Objective starts it. The lead takes its first turn in the Objective's own
 conversation, starts a Session of `builder` for the file, and gets a turn back there when that
 Session reports. Use new Objective and Team IDs if these already exist.
 
@@ -117,8 +105,8 @@ Select the new Objective under **Objectives** to follow its Sessions and see wha
 attention. To follow along from a shell, use its ID in these commands in place of `team-greeting`.
 
 ```sh
-supertag watch objective team-greeting
-supertag describe objective team-greeting
+supertag watch objective team-greeting --state-directory ~/.supertag
+supertag describe objective team-greeting --state-directory ~/.supertag
 ```
 
 `describe` lists the Objective's conversation and the Session beneath it under **Work**:
@@ -129,10 +117,11 @@ Work: 2 Sessions
   completed  builder  Write TEAM-HELLO.md         (Task 4c71…)
 ```
 
-Under **Delivered**, copy the builder's branch name and the checkout path printed beside it. Each
-Session commits to its own branch, so the change stays there until you choose to integrate it. You
-are still in `~/supertag-first-team`, which is not a git checkout, so inspect the file with
-`git -C`, replacing `APP_CHECKOUT` and `BUILDER_BRANCH`:
+Each Session's work arrives in your repository as its own branch, `supertag/session/SESSION`, so
+the change stays there until you choose to integrate it. You are still in `~/supertag-first-team`,
+which is not a git checkout, so inspect the file with `git -C`, replacing `APP_CHECKOUT` with your
+repository and `BUILDER_BRANCH` with the builder Session's branch from
+`git -C APP_CHECKOUT branch --list 'supertag/session/*'`:
 
 ```sh
 git -C APP_CHECKOUT show BUILDER_BRANCH:TEAM-HELLO.md
@@ -143,8 +132,8 @@ It should contain `Hello from the team.`
 ## 5. Check the post and the message
 
 ```sh
-supertag list workstream-post --team first-team --limit 10
-supertag list message --mailbox builder --limit 10
+supertag get workstream-post --team first-team --state-directory ~/.supertag
+supertag get message --mailbox builder --state-directory ~/.supertag
 ```
 
 The first command shows the lead's one-line summary in the Team's Workstream, which every member
@@ -152,8 +141,7 @@ can read. The second shows the lead's message to `builder`, `pending` until the 
 takes it and `handled` afterwards.
 
 In the terminal UI, open **Waiting on you** to answer a question from the lead. Your answer
-becomes its next turn. If no builder Session starts, check `supertag describe tag builder` for the host
-binding, then use [first-reply troubleshooting](troubleshooting.md). A provider error needs a
+becomes its next turn. If no builder Session starts, check `supertag placement explain TASK_ID`, then use [first-reply troubleshooting](troubleshooting.md). A provider error needs a
 working harness sign-in before the Team can finish.
 
 ## Stop or continue
@@ -163,7 +151,7 @@ supertag down
 ```
 
 This stops your local services. `supertag up` starts them again. To stop unfinished work as well,
-run `supertag cancel objective team-greeting` before shutting down.
+run `supertag objective cancel team-greeting --state-directory ~/.supertag` before shutting down.
 
 Next, [connect Slack or another collaboration surface](../surfaces/README.md), or read
 [Organize Tags into Teams](teams.md) and

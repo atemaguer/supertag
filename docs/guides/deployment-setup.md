@@ -1,171 +1,107 @@
-# Configure a hosted Control Plane
+# Configure a deployment
 
-A **Tag** is a persistent AI actor with its own responsibilities and permissions, and Tags work
-in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
-may pursue different goals but share one set of rules and one record of the work. Prepare, check,
-and verify one configuration for a hosted **Control Plane** (the service that stores and coordinates
-a SuperTag organization) on Railway or Fly.io. Agents execute on separate **Worker Hosts**, each
-connected by an outbound **Worklet**. Both platforms use the same setup and verification commands;
-see the [glossary](../reference/glossary.md) for other terms.
-
-Render, Cloudflare, and Modal run the native Control Plane and Gateway services instead, reached
-through a `wss://` URL. Their guides carry their own setup and verification:
-[Render](deploy-render.md), [Cloudflare](deploy-cloudflare.md), and [Modal](deploy-modal.md).
+Prepare, check, and verify the configuration of a hosted **Control Plane**, the service that
+stores a SuperTag organization and schedules its work, and of its optional **Gateway**, the
+service that connects collaboration surfaces such as Slack. Every platform uses the same three
+commands. A Tag is a persistent AI actor with its own responsibilities and permissions; see the
+[glossary](../reference/glossary.md) for other terms.
 
 ## Before you start
 
-- The installed `supertag` CLI, matching the release you deploy (`supertag --version`). See
-  [Install the matching SuperTag version](../operations/install.md).
-- An account on your chosen hosting platform.
-- A PostgreSQL database, storage, and public hostname, created with the platform guide in step 1.
+- The `supertag` CLI, from the release you deploy. See [Install SuperTag](../operations/install.md).
+- A platform from [Self-host SuperTag](self-hosting.md#1-choose-a-platform).
+- PostgreSQL, unless the platform is Compose, which runs its own, or Render, whose Blueprint
+  creates one.
 
-## 1. Choose storage and create the services
+## 1. Prepare the files
 
-All platforms run the same Node.js container, use PostgreSQL, accept authenticated HTTPS and
-WebSocket requests, and expose `/healthz` for liveness. `/readyz` also checks whether the organization
-can accept work. The deployment runs one Control Plane instance.
-
-| Platform | Credential storage | Platform setup |
-| --- | --- | --- |
-| Railway | Persistent volume at `/var/lib/supertag` | [Railway](deploy-railway.md) |
-| Fly.io | Persistent volume at `/var/lib/supertag` | [Fly.io](deploy-fly.md) |
-
-Both can also use Vault. The Control Plane stores no artifact bytes (captured output files) on any
-platform; Worker Hosts keep them. Create the database, storage, and public hostname using the
-platform guide before preparing the final configuration.
-
-<a id="choose-the-worker-connection"></a>
-
-## 2. Choose the Worker connection
-
-A **Worker** is the code that completes work on a Worker Host, and the host's Worklet carries its
-connection. Hosted templates use WebSocket by default. On Worker Hosts, select `--transport websocket`
-when connecting to the template's HTTPS management origin, or use its `wss://` Worklet address.
-SuperTag normally selects gRPC for an HTTPS Worklet address; a hosting provider's support for
-HTTP/2 at its public edge does not establish native, bidirectional gRPC forwarding to your process.
-
-| Template | Worker connection | Native gRPC choice |
-| --- | --- | --- |
-| Fly.io | WebSocket by default | Optional separate TLS passthrough listener; see [Fly.io](deploy-fly.md) |
-| Railway | WebSocket | Not configured in this template; public edge HTTP/2 alone is insufficient evidence |
-
-These are template capabilities, not restrictions on every networking product from those
-providers. [Railway documents edge HTTP/2](https://docs.railway.com/networking/public-networking/specs-and-limits).
-Keep the explicit WebSocket choice, and do not enable a gRPC listener behind a template's ingress,
-until a native bidirectional HTTP/2 path has been configured and verified.
-
-## 3. Prepare one environment file
-
-Use the installed CLI, selecting your platform:
+Supply the values you already have in the environment, then run setup for your platform:
+`compose`, `fly`, `railway`, `render`, `cloudflare`, or `modal`.
 
 ```sh
-supertag setup deployment --platform railway
-# Or: supertag setup deployment --platform fly
+export SUPERTAG_DATABASE_URL='postgresql://supertag@db.example.com/supertag'
+supertag setup deployment fly --output supertag-deployment
 ```
 
-Setup reads existing environment variables and prompts for missing required values. Secret prompts
-are masked. If an administrative token is not supplied during interactive setup, it generates one.
-It writes `.env.deployment` with owner-only permissions and refuses to overwrite an existing file.
-Use `--output PATH` for a separate environment. Keep this file private and out of version control.
-It is a dotenv file for configuration tools; do not execute or shell-source it.
+Setup reads these variables and prompts, masked, for a missing required value:
 
-For automated setup, supply all required values through your environment and add `--non-interactive`.
-Secret values are never passed as flags. To reuse an existing file, use `--env-file PATH`; values
-in that file take precedence over your shell environment.
-
-### Common settings
-
-| Variable | Meaning |
+| Variable | Use |
 | --- | --- |
-| `SUPERTAG_DEPLOYMENT_PLATFORM` | `railway` or `fly`; set by setup |
-| `SUPERTAG_DATABASE_URL` | PostgreSQL connection URL, kept secret |
-| `SUPERTAG_ADMIN_TOKEN` | Administrative credential, kept secret |
-| `SUPERTAG_COORDINATION_URL` | Public HTTPS origin, without a path |
-| `SUPERTAG_WORKLET_TRANSPORT` | `remote` for all hosted deployments |
-| `SUPERTAG_DEPLOYMENT_RPC_TRANSPORT` | `websocket` by default, or `grpc` from `--transport grpc`; set by setup. Only the Fly.io template accepts `grpc` |
-| `SUPERTAG_STATE_DIR` | `/var/lib/supertag`; persistent on Railway and Fly.io by default |
-| `SUPERTAG_CREDENTIAL_VAULT` | `file` by default, or `vault` |
+| `SUPERTAG_DATABASE_URL` | The Control Plane's PostgreSQL URL. Not for Render, whose Blueprint supplies it. Compose generates its own database when unset |
+| `SUPERTAG_OPERATOR_TOKEN` | The admin Operator Token. Generated when unset |
+| `SUPERTAG_OPERATOR_PRINCIPAL` | The admin operator's name in the audit log |
+| `SUPERTAG_GATEWAY_CREDENTIAL` | The Gateway's credential. Generated when unset |
+| `SUPERTAG_CREDENTIAL_VAULT`, `VAULT_*` | `vault` keeps connector credentials in HashiCorp Vault instead of the Gateway's volume. Cloudflare and Modal require it |
 
-For Vault, supply `VAULT_ADDR` and `VAULT_TOKEN`, with optional `SUPERTAG_VAULT_MOUNT`,
-`SUPERTAG_VAULT_PATH_PREFIX`, and `VAULT_NAMESPACE`. To select Vault on Railway or Fly.io, set
-`SUPERTAG_CREDENTIAL_VAULT=vault` before running setup. Preserve existing credentials when changing
-providers; setup does not migrate them.
+Secrets are never accepted as flags or printed. `--non-interactive` fails instead of prompting.
+Setup writes a new directory, never replaces one, and creates each file readable only by you:
 
-## 4. Check the file
+| File | For | Holds |
+| --- | --- | --- |
+| `control-plane.env` | Control Plane | Database URL, the Gateway's bootstrap credential, the operator token, its state directory |
+| `gateway.env` | Gateway | Its credential, state directory, and credential vault settings |
+| `operator.env` | Your machine | The admin Operator Token, for `verify deployment` and `supertag connect` |
+| `postgres.env` | Compose's PostgreSQL | A generated database password, when you supplied no database URL |
 
-```sh
-supertag check deployment --platform railway --env-file .env.deployment
-```
+Setup ends with the next steps for the platform. Upload each file through your platform's secret
+controls. Do not shell-source them.
 
-The check validates configuration locally and reports field names without printing their values.
-It does not prove service connectivity or that a volume is mounted. The hosted Control Plane uses
-the same validation at startup when `SUPERTAG_DEPLOYMENT_PLATFORM` is set.
-
-## 5. Apply configuration and deploy
-
-- **Railway:** setup and check require `SUPERTAG_DATABASE_URL` to be a real `postgresql://` URL,
-  so they reject the reference `${{Postgres.DATABASE_URL}}`. Give setup the database's current URL
-  or a placeholder `postgresql://` URL. Import the file using the service Variables RAW Editor.
-  Then set `SUPERTAG_DATABASE_URL` in the service back to `${{Postgres.DATABASE_URL}}`, so provider
-  rotation remains effective, and attach the persistent volume. See
-  [Railway variables](https://docs.railway.com/variables).
-- **Fly.io:** import the file with `fly secrets import --app YOUR-APP --stage < .env.deployment`,
-  then deploy the Fly manifest from the repository root with `--ha=false`.
-
-Both provider manifests share the same runtime commands and health path, and apply ordinary
-migrations in a pre-deploy or release step.
-
-## 6. Verify and connect execution
-
-After deployment, use the same command on every platform:
+## 2. Check the files
 
 ```sh
-supertag verify deployment https://YOUR-CONTROL-PLANE --env-file .env.deployment
+supertag check deployment fly --directory supertag-deployment
 ```
 
-This checks liveness, rejects anonymous management access, tests your administrative credential,
-and reports readiness. It does not follow redirects with credentials. Connect your CLI using
-`supertag connect control-plane`, enroll a Worker Host, and connect its Worklet as described in the
-platform guide.
+`check` validates the files without connecting. It refuses unknown keys, settings meant for
+another platform, files that others can read, and values Compose would change, such as double
+quotes or an unquoted `$`.
+
+## 3. Add TLS and deploy
+
+The Control Plane terminates its own TLS. Give it a certificate for its public host name and,
+when the certificate comes from your own certificate authority, give every client that authority.
+See [TLS files](../../deploy/native/README.md#tls-files). Then deploy with your platform's guide:
+[Self-host SuperTag](self-hosting.md#docker-compose) for Compose, or [Fly.io](deploy-fly.md),
+[Railway](deploy-railway.md), [Render](deploy-render.md), [Cloudflare](deploy-cloudflare.md), or
+[Modal](deploy-modal.md).
+
+The Control Plane creates and migrates its database schema when it starts.
+
+## 4. Verify
+
+```sh
+supertag verify deployment https://supertag.example.com \
+  --env-file supertag-deployment/operator.env
+```
+
+Use the `wss://` URL on Render, Cloudflare, and Modal. Set `SUPERTAG_SERVER_CA_FILE` for a
+certificate from your own CA, and `SUPERTAG_CLIENT_CERT_FILE` and `SUPERTAG_CLIENT_KEY_FILE` when
+the Control Plane requires client certificates.
+
+Verification checks gRPC health, that anonymous calls and an invalid Worker Host credential are
+refused, and that the operator token works. It registers no Worker Host and runs no Task.
 
 ## Check that it worked
 
-Require readiness:
+Connect a Worker Host as in [Self-host SuperTag](self-hosting.md#6-connect-a-worker-host), then:
 
 ```sh
-supertag verify deployment https://YOUR-CONTROL-PLANE --env-file .env.deployment --require-ready
+supertag verify deployment https://supertag.example.com \
+  --env-file supertag-deployment/operator.env --require-ready
 ```
 
-Mention a Tag in a
-connected Slack channel and confirm that a Worker replies. Finally, confirm that the Worklet
-reconnects after a restart and that an existing artifact remains available. These checks exercise
-storage and execution beyond the read-only HTTP verification.
-
-## Optional: keep artifacts on Worker Hosts
-
-Each Worklet keeps the artifact bytes captured by its **Tasks**, the accepted assignments it runs, in its own state directory and serves
-authorized downloads directly to other Worklets. The hosted Control Plane stores none.
-
-1. Give every participating Worker Host persistent storage and a transfer endpoint reachable from
-   the other participating hosts. A Worklet's outbound connection to the Control Plane is
-   sufficient for assignments, but direct artifact transfer also requires this peer reachability.
-   Use a private network or tunnel and TLS outside a trusted local network.
-2. Connect each Worklet with the transfer endpoint options listed in the
-   [Worker guide](workers.md#keep-artifacts-on-worker-hosts).
-
-If a host cannot accept peer connections, other Worker Hosts cannot fetch the artifacts it holds.
-The Control Plane does not relay them.
+`--require-ready` fails until at least one Worker Host is ready.
 
 ## If something goes wrong
 
-- **`/readyz` returns unavailable.** This is expected until a compatible Worklet connects. See
-  [Health and readiness](../operations/control-plane.md#health-and-readiness).
-- **The Worklet cannot connect.** Pass `--transport websocket`; see
-  [step 2](#choose-the-worker-connection) and [Troubleshooting](troubleshooting.md).
+- **Setup refuses a value.** A value with a single quote or a line break cannot be written
+  safely. Percent-encode a quote in a database URL as `%27`.
+- **Verification reports a TLS failure.** The certificate must name the host in the URL, and
+  `SUPERTAG_SERVER_CA_FILE` must name the authority that issued it.
+- **Verification says the operator token was refused.** Use the `operator.env` from the same
+  setup run as the deployed `control-plane.env`.
 
 ## Next
 
-- Your platform guide: [Railway](deploy-railway.md) or [Fly.io](deploy-fly.md); for the native
-  services, [Render](deploy-render.md), [Cloudflare](deploy-cloudflare.md), or [Modal](deploy-modal.md)
-- [Run a Worker](workers.md)
 - [Control Plane operations](../operations/control-plane.md)
+- [Service deployment definitions](../../deploy/native/README.md)

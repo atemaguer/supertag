@@ -21,8 +21,8 @@ that is a different audience with different rules.
 
 | Skill | Read it when |
 | --- | --- |
-| [run-a-worker](run-a-worker/SKILL.md) | Attaching Codex or Claude Code so Tags give real answers |
-| [build-a-custom-worker](build-a-custom-worker/SKILL.md) | Integrating another agent SDK via the `supertag-ai` SDK |
+| [run-a-worker](run-a-worker/SKILL.md) | Connecting a machine as a Worker Host for Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents |
+| [build-a-harness-adapter](build-a-harness-adapter/SKILL.md) | Integrating another agent system with a harness adapter |
 
 ## Deploy
 
@@ -36,13 +36,13 @@ A team adopting SuperTag from scratch, in order:
 
 ```text
 install-and-first-reply    ->  a first Objective in a local repository, then one chat channel
-run-a-worker               ->  real answers from Codex or Claude Code
+run-a-worker               ->  more machines and harnesses
 configure-tags             ->  authority and knowledge beyond the thread
 connect-a-surface          ->  additional surfaces
 deploy-supertag            ->  always-on Control Plane on PostgreSQL
 ```
 
-`troubleshoot` applies at every stage. `build-a-custom-worker` is only needed when the shipped
+`troubleshoot` applies at every stage. `build-a-harness-adapter` is only needed when the shipped
 harnesses do not fit.
 
 ## Background reading
@@ -53,28 +53,31 @@ context — it is precise, and guessing produces wrong configuration.
 - [Glossary](../docs/reference/glossary.md) — one-line definitions of every public term
 - [How SuperTag fits together](../docs/concepts/how-it-works.md) — the service architecture
 - [Tasks and Sessions](../docs/concepts/tasks.md) — durable intent, retries, continuity
-- [Worker Hosts, Worklets, Workers, and harnesses](../docs/concepts/workers.md) — the execution vocabulary
+- [Worker Hosts and harnesses](../docs/concepts/workers.md) — the execution vocabulary
 - [Resource model](../docs/reference/resource-model.md) — what is configured versus observed
 
 ## Conventions
 
-The CLI is `supertag`, installed from npm with `npm install -g supertag-ai`; see [installation](../docs/operations/install.md). Check [Requirements](../docs/operations/requirements.md) for system tools and harness sign-in.
+The CLI is `supertag`; see [installation](../docs/operations/install.md). Check
+[Requirements](../docs/operations/requirements.md) for system tools and harness sign-in.
 
 Local state and credentials live in `~/.supertag`; override with `SUPERTAG_STATE_DIR`.
 `~/.supertag/supertag.yaml` lists the services `supertag up` runs on a machine, like a compose
-file: a `control-plane` service and `host` services (the machine as a Worker Host). Local
-development uses SQLite; production uses PostgreSQL via `database.url` or `SUPERTAG_DATABASE_URL`.
+file: a `control-plane` service and `host` services (the machine as a Worker Host); `supertag up`
+also runs a local Gateway. Local state uses SQLite; shared deployments use PostgreSQL.
 
-Credentials come from masked prompts or environment variables — **never** command-line flags. Do
-not construct a command that puts a secret in argv.
+Operator commands name their Control Plane on every call: `--state-directory ~/.supertag` for
+this machine's local services, or `--control-plane NAME` for one saved with `supertag connect`.
 
-Confirm any command against `supertag --help` before running it. That help text is the
-authoritative inventory.
+Credentials come from masked prompts, environment variables, or private files, **never**
+command-line flags. Do not construct a command that puts a secret in argv.
+
+Confirm any command against `supertag COMMAND --help` or the
+[CLI reference](../docs/reference/cli.md) before running it. Help is the authoritative inventory.
 
 ## Terminology note
 
 "Skill" is overloaded here. This directory holds instructions for *coding agents*. SuperTag also
-has a product **Skill**: a Worker-local, digest-pinned catalog entry passed via
-host service `skills` path and selected by a Context Set. For that, see
-[Run a Worker](../docs/guides/workers.md#optional-skills) and
-[Add a custom Context type](../docs/guides/custom-context.md).
+has a product **Skill**: a host-local, pinned catalog entry named by a host service's `skills`
+path and selected by a Context Set. For that, see
+[Run Worker Hosts](../docs/guides/workers.md#optional-skills).
