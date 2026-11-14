@@ -41,8 +41,13 @@ Worker Host will have, and asks for a Control Plane port, a harness, and the Tag
 `~/.supertag/supertag.yaml` with two services and starts them in the background:
 
 - a `control-plane` service, which also creates a `local-tools` Permission Set, a `Lead` Role,
-  and the `lead` Tag; and
+  and the `lead` Tag, bound to the repository's Workspace at the commit checked out when `init`
+  ran; and
 - a `host` service named after this machine, which maps the repository as a Workspace.
+
+New Sessions of `lead` start from that commit. To move them to a newer one, put the binding again
+with `supertag tag put lead --workspace-id ID --workspace-base COMMIT`; see
+[Work in a repository with Workspaces](../guides/workspaces.md#2-bind-a-tag-to-the-workspace).
 
 `supertag init --yes` accepts every default. See [supertag.yaml and local state](../reference/supertag-yaml.md)
 for the file.
@@ -159,7 +164,9 @@ supertag approval deny APPROVAL_ID --reason "Not before the release freeze." --s
 supertag objective review flaky-tests approve --state-directory ~/.supertag
 ```
 
-See [Respond to an Objective](../guides/objective-decisions.md).
+`question answer TASK_ID -` reads the answer from standard input, which keeps a long or sensitive
+answer out of the shell history and the process list. See
+[Respond to an Objective](../guides/objective-decisions.md).
 
 ## Bring delivered work into your repository
 

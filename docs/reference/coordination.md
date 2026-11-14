@@ -421,8 +421,8 @@ tool the turn does not get; it does not only leave it out of the list.
 
 A work Session sees only its own work: it gets no reads, cannot message another Tag, and cannot
 change an Objective. Its final reply returns to the Session that started it.
-`request_action_approval` is open to every turn, but is never advertised to the model: the Worker
-calls it when a gated action needs a decision.
+`request_action_approval` is open to every turn, but is never advertised to the model: the harness
+adapter calls it when a gated action needs a decision.
 
 ### The tools
 
@@ -566,7 +566,7 @@ number of Objectives may name one Team.
 ## Approval requests
 
 An approval request records one ask for a person or a named approver. SuperTag creates one, of
-kind `surface-action`, when a Worker is about to forward a collaboration surface call whose
+kind `surface-action`, when a Worker Host is about to forward a collaboration surface call whose
 permission has `approval_required: true`.
 
 Each request stores the Objective, Task, Task Attempt, requesting Tag, the actions, a `sha256`
@@ -609,10 +609,10 @@ brief final reply and no further tool call. Then:
    does this when the Task completes. The Task's message is the decision:
    "Approval request ID was approved (scope: once). Retry the same call to continue.", or the
    denial with its reason. It runs under the waiting Task's own authorization and context, with no
-   new grants. Its `task.admitted` event carries `continued: true` and `approvalRequestId`.
+   new grants. The approval records it as `continuation_task_id`.
 5. The retried call matches the approval, because a `once` approval covers the same action and
-   arguments in any Task of that Session. The Control Plane records `approval.consumed` on the
-   retrying Task.
+   arguments in any Task of that Session. The Control Plane records `consumed_at_ms` on the
+   approval.
 
 The Control Plane continues a waiting Session after each decision, and also retries every few
 seconds and on start, so a restart does not leave it waiting. It continues each waiting Task once;
@@ -620,9 +620,8 @@ a second decision for the same Task admits nothing, because that Task is no long
 latest.
 
 A work Session does not continue when the Tag's permissions changed while it waited, or when too
-little of its budget is left. The conversation then gets a notice in SuperTag's words, the waiting
-Task records a `session.not-continued` event with the `reason` (`permissions` or `budget`), and
-the Session waits on nothing. After a permission change, start a new work Session.
+little of its budget is left. The conversation then gets a notice in SuperTag's words, and the
+Session waits on nothing. After a permission change, start a new work Session.
 
 ### Deciding
 
@@ -639,12 +638,10 @@ the Session waits on nothing. After a permission change, start a new work Sessio
   when one is configured. The [operator channel](../operations/control-plane.md#operator-notifications), when
   configured, also receives requests that no Objective thread carries.
 
-Task events record each step with the Permission Sets and the decider: `approval.requested`,
-`approval.granted-by-scope`, `approval.approved`, `approval.denied` and `approval.consumed`.
-
-The operator API mirrors the CLI with `InboxService.ListApprovals`, `Approve` and `Deny`; see
-[Inbox](control-plane-api.md#operator-services). Scoped operator credentials need the `list_approvals` and
-`decide_approval` actions.
+`supertag get approval ID` shows each step: `requested_at_ms`, the decider in `decided_by` with
+`decided_at_ms` and any `reason`, `valid_until_ms`, and `consumed_at_ms`. The operator API mirrors
+the CLI with the `Inbox` service's `ListApprovals`, `GetApproval`, and `DecideApproval`; see
+[Control Plane API](control-plane-api.md).
 
 ## Review findings
 
@@ -654,7 +651,7 @@ severity and an optional location. A finding is part of a result, not a separate
 - A result carries at most 50 findings. Each has `severity` (`high`, `medium` or `low`), a
   one-sentence `summary` of at most 500 characters, and an optional `location` such as
   `src/session.ts:42`.
-- The Control Plane assigns the identifiers `F1`, `F2`, … in result order, whatever the Worker
+- The Control Plane assigns the identifiers `F1`, `F2`, … in result order, whatever the harness
   supplied, and refuses any other field. A finding therefore cannot name another Task.
 - `supertag describe objective ID` and the Objective overview list the high findings in the
   latest result of each of the Objective's Sessions, so the owner and the operator see what is
@@ -722,8 +719,7 @@ Task, such as a disconnected host, a missing harness or Workspace, or labels tha
 
 ### Access
 
-The overview requires the `read_objective` action plus access to the requested Objective. See
-[Objectives](control-plane-api.md#operator-services) in the API reference.
+The overview requires an operator credential. See the [Control Plane API](control-plane-api.md).
 
 ## Operator inbox
 
@@ -747,7 +743,8 @@ the kinds with more pending items than the page holds.
   carries the question, an `approval` item the approval's ID, requesting Tag, action, resource
   and summary.
 - To answer a `question` item, use **Waiting on you** in the terminal UI or
-  `supertag question answer TASK_ID TEXT`. Decide an approval with
+  `supertag question answer TASK_ID TEXT`; pass `-` as the text to read the answer from standard
+  input, which keeps it out of the process list. Decide an approval with
   `supertag approval approve APPROVAL_ID` or `supertag approval deny APPROVAL_ID --reason TEXT`.
 - Item identity for notification is the item's `occurrence`: its `key`, plus the Task Attempt
   when the item cites a Task. The same decision after another Task Attempt is a new occurrence.
