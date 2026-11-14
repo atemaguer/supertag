@@ -119,7 +119,8 @@ the [CLI operator guide](cli.md) for a complete local run.
 
 On a Rust deployment, the CLI reads the same manifest envelope and connects to the Control
 Plane. Use the `--control-plane` option for a remote Control Plane and supply the operator token
-through `SUPERTAG_OPERATOR_TOKEN`. Use `--state-directory` for a local deployment started by the Rust CLI.
+through `SUPERTAG_OPERATOR_TOKEN`. Without `--control-plane`, the Rust CLI uses the local Control Plane
+that `supertag up` runs from `~/.supertag` or the directory `SUPERTAG_STATE_DIR` names.
 Preview shows the planned resource and relationship changes before writing. The Rust CLI
 supports files, directories, and standard input.
 

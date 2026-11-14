@@ -30,11 +30,23 @@ struct Process {
 }
 impl Process {
     fn spawn(state: &Path, file: Option<&Path>, env: &[(&str, &str)]) -> Result<Self> {
+        Self::spawn_in(Some(state), state, file, env)
+    }
+    /// Starts `up` in `state`, naming it with `--state-directory` only when `explicit` is set;
+    /// otherwise `up` finds it from `env` the way an operator's shell would.
+    fn spawn_in(
+        explicit: Option<&Path>,
+        state: &Path,
+        file: Option<&Path>,
+        env: &[(&str, &str)],
+    ) -> Result<Self> {
         let log = state.with_extension(format!("{}.log", Uuid::new_v4().simple()));
         let mut command = Command::new(BIN);
+        command.args(["up", "--foreground"]);
+        if let Some(explicit) = explicit {
+            command.arg("--state-directory").arg(explicit);
+        }
         command
-            .args(["up", "--foreground", "--state-directory"])
-            .arg(state)
             .env_clear()
             .envs(env.iter().copied())
             .stdin(Stdio::null())
@@ -346,6 +358,85 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state(
     assert!(!rejected.status.success());
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("not running"));
     Ok(())
+}
+/// With no flag, operator commands reach the Control Plane `supertag up` runs from
+/// `~/.supertag`, or from `SUPERTAG_STATE_DIR`; `SUPERTAG_CONTROL_PLANE_URL` and the flags win.
+async fn operator_commands_default_to_the_local_control_plane(database: String) -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let home = temp.path().join("home");
+    let elsewhere = temp.path().join("elsewhere");
+    fs::create_dir_all(&home)?;
+    fs::create_dir_all(&elsewhere)?;
+    let state = home.join(".supertag");
+    let file = temp.path().join("supertag.yaml");
+    let (section, secrets) = if database.starts_with("postgres") {
+        database_password::config(&database, temp.path())?
+    } else {
+        (Value::Null, serde_json::json!({}))
+    };
+    yaml(
+        &file,
+        &serde_json::json!({"version":1,"secrets":secrets,"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"database":section}
+        }}),
+    )?;
+    let home_text = home.to_str().context("home path")?;
+    let mut supervisor = Process::spawn_in(None, &state, Some(&file), &[("HOME", home_text)])?;
+    supervisor.ready()?;
+    uses_database(&state, &database)?;
+    let get_tags = |env: &[(&str, &str)], extra: &[&std::ffi::OsStr]| {
+        Command::new(BIN)
+            .args(["get", "tags"])
+            .args(extra)
+            .env_clear()
+            .envs(env.iter().copied())
+            .output()
+    };
+    let elsewhere_text = elsewhere.to_str().context("elsewhere path")?;
+    let state_text = state.to_str().context("state path")?;
+    for env in [
+        vec![("HOME", home_text)],
+        vec![("HOME", elsewhere_text), ("SUPERTAG_STATE_DIR", state_text)],
+    ] {
+        let output = get_tags(&env, &[])?;
+        ensure!(
+            output.status.success(),
+            "{env:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let output = get_tags(&[("HOME", elsewhere_text)], &[])?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!(
+            "no local Control Plane is running from {}",
+            elsewhere.join(".supertag").display()
+        )) && stderr.contains("supertag up"),
+        "{stderr}"
+    );
+    let output = get_tags(
+        &[("HOME", home_text)],
+        &["--state-directory".as_ref(), elsewhere.as_os_str()],
+    )?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains(&format!(
+        "no local Control Plane is running from {}",
+        elsewhere.display()
+    )));
+    // A selected Control Plane is never replaced by the local one.
+    let output = get_tags(
+        &[
+            ("HOME", home_text),
+            ("SUPERTAG_CONTROL_PLANE_URL", "http://127.0.0.1:9"),
+            ("SUPERTAG_OPERATOR_TOKEN", "stop_unused"),
+        ],
+        &[],
+    )?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("no local Control Plane"), "{stderr}");
+    supervisor.stop().await
 }
 async fn remote_host_only_env_and_file_auth_keys_are_needed_only_for_first_join(
     database: String,
@@ -2377,6 +2468,17 @@ async fn slack_notify_destination_posts_as_a_slack_surface_without_a_location() 
 }
 
 // Each `supertag up` case runs with the local Control Plane on SQLite and on PostgreSQL.
+
+#[tokio::test]
+async fn sqlite_operator_commands_default_to_the_local_control_plane() -> Result<()> {
+    with_database(false, operator_commands_default_to_the_local_control_plane).await
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_operator_commands_default_to_the_local_control_plane() -> Result<()> {
+    with_database(true, operator_commands_default_to_the_local_control_plane).await
+}
 
 #[tokio::test]
 async fn sqlite_configured_local_hosts_restart_and_reap_with_stable_private_state() -> Result<()> {

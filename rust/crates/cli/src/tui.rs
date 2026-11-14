@@ -14,25 +14,6 @@ use crate::{Connection, ROOT_CONTROL_PLANE, resolve_target};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn default_connection() -> Result<Connection> {
-    ensure!(
-        // terminal-safe: only checks whether output is a terminal.
-        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-        "run supertag in a terminal or select a command with --help"
-    );
-    if let Ok(control_plane) = std::env::var("SUPERTAG_CONTROL_PLANE_URL") {
-        return Ok(Connection {
-            control_plane: Some(control_plane),
-            state_directory: None,
-        });
-    }
-    let state_directory = crate::local_config::state_directory(None).ok();
-    Ok(Connection {
-        control_plane: None,
-        state_directory,
-    })
-}
-
 pub async fn launch(
     connection: Connection,
     binary: Option<PathBuf>,
@@ -41,13 +22,15 @@ pub async fn launch(
     let implicit = connection.control_plane.is_none()
         && ROOT_CONTROL_PLANE.get().is_none()
         && connection.state_directory.is_none();
-    let connection = if implicit {
-        default_connection()?
-    } else {
-        connection
-    };
+    ensure!(
+        // terminal-safe: only checks whether output is a terminal.
+        !implicit || (std::io::stdin().is_terminal() && std::io::stdout().is_terminal()),
+        "run supertag in a terminal or select a command with --help"
+    );
+    // With nothing selected and no local services running in ~/.supertag, the terminal UI opens
+    // on the Control Planes saved in it.
     let allow_saved_only = implicit
-        && connection.control_plane.is_none()
+        && crate::environment_control_plane().is_none()
         && std::env::var_os("SUPERTAG_STATE_DIR").is_none()
         && workspace.is_none();
     let target = match resolve_target(connection) {
