@@ -35,7 +35,3 @@ Ask the provider whether that operation committed. A matching receipt can establ
 a failed lookup cannot establish that nothing happened. If the provider cannot answer reliably,
 leave the outcome uncertain for an operator rather than automatically sending the write again.
 
-The [ongoing support example](../../examples/ongoing-support/README.md) includes a small provider
-that commits its state and receipt together. Its manager inspects that receipt after a lost response
-and on later Task Attempts. This is an application example of provider-specific recovery, not a new
-SuperTag resource or a general guarantee for all MCP servers.

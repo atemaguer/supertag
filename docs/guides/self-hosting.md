@@ -50,9 +50,9 @@ setup and verification in their own guides.
 | Option | Best for | PostgreSQL | Collaboration surface secret storage | Configured by |
 | --- | --- | --- | --- | --- |
 | Docker Compose | A server you operate | bundled container | named volume | `compose.yaml` and `.env`; `supertag.yaml` optional |
-| [Railway](deploy-railway.md) | Fast hosted Control Plane setup | Railway PostgreSQL service | Railway volume | Platform config and environment; `supertag.yaml` optional |
+| [Railway](../../deploy/native/README.md) | Fast hosted Control Plane setup | Railway PostgreSQL service | Railway volume | Platform config and environment; `supertag.yaml` optional |
 | [Render](deploy-render.md) | Blueprint-based hosted setup | Render Postgres | Render persistent disk on the Gateway | Blueprint and `supertag setup deployment render` |
-| [Fly.io](deploy-fly.md) | Choosing the region and managing storage directly | Fly Managed Postgres or another provider | Fly volume | Platform config and environment; `supertag.yaml` optional |
+| [Fly.io](../../deploy/native/README.md) | Choosing the region and managing storage directly | Fly Managed Postgres or another provider | Fly volume | Platform config and environment; `supertag.yaml` optional |
 | [Modal](deploy-modal.md) | An always-on Modal container with external storage | external PostgreSQL | external HashiCorp Vault KV v2 | `app.py` and `supertag setup deployment modal` |
 | [Cloudflare](deploy-cloudflare.md) | A Container behind a Cloudflare Worker | external PostgreSQL | external HashiCorp Vault KV v2 | Wrangler and `supertag setup deployment cloudflare` |
 | [Native service](#native-single-host-alternative) | A server without containers, kept running by systemd or launchd | external PostgreSQL | host filesystem | `supertag.yaml` |

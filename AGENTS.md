@@ -18,22 +18,26 @@ actions. Each Task keeps the
 policy recorded when SuperTag accepted it.
 
 The **Control Plane** stores the organization, accepts and schedules work, recovers interrupted
-work, and preserves audit history. Its **Gateway** carries traffic to and from external work tools.
-Its **API Server** handles management requests and execution connections. A **Worker Host** is a
-machine or sandbox that provides execution capacity. A **Worklet** connects a Worker Host to the
-API Server and supervises its **Workers**. A Worker completes a Task and may use a **harness** such
-as Codex or Claude Code. The API Server and Gateway are code boundaries inside the same Control
-Plane process and deployment.
+work, and preserves audit history. It is the public API for operator clients (the CLI, the
+terminal UI, the desktop app, and SDKs) and for Worker Hosts. A **Gateway** runs collaboration
+surfaces only, as a client of the Control Plane. A **Worker Host** is a machine or sandbox that
+provides execution capacity: it connects outbound to the Control Plane and runs each Task through a
+**harness** adapter such as Codex, Claude Code, Cursor, or OpenCode.
+
+The services and CLI are Rust (`rust/`). The TypeScript that remains is the Node harness bridges
+and Workspace providers that Worker Hosts start (`packages/runtime`), the shared code they use
+(`packages/core`), and the desktop app's frontend (`apps/desktop`). The terminal UI is Go
+(`apps/tui`). [`rust/docs/typescript-removal-inventory.md`](rust/docs/typescript-removal-inventory.md)
+records why each remaining TypeScript package stays.
 
 ## Rules that are easy to violate
 
-**One public package.** `packages/supertag-ai` is the only package published to npm. It
-re-exports internal workspace packages behind deliberate entry points. Never tell users to depend
-on `@supertag/*` — those are private and carry no compatibility promise.
+**No public npm package from this checkout.** The `@supertag/*` workspace packages are private
+and carry no compatibility promise; never tell users to depend on them.
 
-**Two databases, always.** Every schema change touches both `src/schema/sqlite.ts` and
-`src/schema/postgresql.ts` and generates migrations for both. Validate both Drizzle
-configurations before reporting the change complete.
+**Two databases, always.** Every schema change adds a migration to both
+`rust/crates/control-plane/migrations/sqlite` and `rust/crates/control-plane/migrations/postgresql`,
+and its tests run on both databases (`::sqlite` and `::postgres` cases).
 
 **`docs/` is for users and integrators.** Explain how to use SuperTag and how it works.
 Put contributor workflows, repository layout, testing, and simulation instructions in
@@ -55,8 +59,8 @@ controlled term before using it in navigation or explanation, and a page that ca
 must define its subject and any neighboring SuperTag concepts used in its introduction.
 
 **Docs use `supertag`, not `pnpm supertag`.** Documentation is written for a reader who installed
-the self-contained release CLI or the `supertag-ai` npm package. The `pnpm supertag` form only
-works inside a checkout after `pnpm install`, and belongs in `CONTRIBUTING.md`. The one exception is
+the release CLI. The `pnpm supertag` form runs the checkout's Rust CLI through `cargo run`, and
+belongs in `CONTRIBUTING.md`. The one exception is
 `docs/operations/control-plane.md`, which deliberately contrasts installed / checkout / built /
 container invocations.
 
@@ -68,26 +72,29 @@ environment variables. Preserve this when touching setup or worker credential pa
 bootstrap secrets, such as Auth Keys, may also be flags, following Tailscale's `--auth-key`; always
 offer an environment variable and a `file:PATH` form beside the flag.
 
-**Custom Workers are applications, not CLI commands.** `supertag worklet connect` composes and
-launches only SuperTag's built-in TypeScript Workers. SDK users run custom JavaScript, TypeScript,
-Python, or other Workers through their normal language runtime or deployment process. Do not add
-language-specific Worker executables to an SDK package.
+**Harness adapters run behind a Worker Host.** `supertag worker-host` supervises execution and
+starts a harness adapter for each Task. TypeScript and Python implement harness adapters and
+clients, not Worker runtimes.
 
 **Docs describe SuperTag as it is now.** Design notes, experiment records, and planning stay in
 the gitignored `contributing/`, `docs/**/*architecture*.md`, and `docs/**/*product-brief*.md`.
 Never link to them from tracked files, and don't treat their commands or fields as shipped:
 `supertag worker pair`, for example, appears there but is not implemented.
 
-**`supertag --help` is the command inventory.** `helpText()` in `apps/cli/src/index.ts` is the
-only complete list, and docs are written against it. Update it when adding a command.
+**`rust/docs/cli-reference.md` is the command inventory.** It records the help of every visible
+command, and `pnpm docs:check` checks documented commands and flags against it. After changing a
+command, rerun `cli_help.rs` with `SUPERTAG_UPDATE_CLI_REFERENCE=1` and review the diff. Pages listed
+in `scripts/docs-pending-cli.txt` still describe the removed TypeScript CLI and are not checked
+until they are rewritten.
 
 ## Verify before reporting done
 
 ```sh
-pnpm check   # biome + drizzle schema check + typecheck
+pnpm check   # biome + protobuf generation + typecheck + docs
 pnpm test    # vitest
-pnpm build   # tsc --build, then the supertag-ai bundle
+pnpm build   # tsc --build
+cargo test --manifest-path rust/Cargo.toml --locked --workspace --all-features
 ```
 
-Also run `pnpm --filter supertag-ai test:package` when changing the published SDK. PostgreSQL
-suites require their documented test database and may otherwise skip.
+Run `go test ./...` in `apps/tui` after terminal UI changes. PostgreSQL and fixture-dependent Rust
+tests are ignored by default; CONTRIBUTING.md describes how to include them.

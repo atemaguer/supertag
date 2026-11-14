@@ -1,67 +1,35 @@
 ---
 name: repo-orientation
-description: Decide which package a change belongs in, and respect the public/private package boundary. Read before adding files or moving code between packages.
+description: Decide which crate, package, or app a change belongs in. Read before adding files or moving code.
 ---
 
 # Repo orientation
 
-pnpm workspace, TypeScript, ESM only. Node.js 20.18.1 or newer (`.node-version` pins 20.18.1).
+The services and CLI are Rust. The terminal UI is Go. The TypeScript that remains runs under
+Worker Hosts or in the desktop app. `rust/docs/typescript-removal-inventory.md` records why each
+TypeScript package stays.
 
 ## Where code belongs
 
 | Path | Owns |
 | --- | --- |
-| `apps/cli` | CLI entry point and runtime composition root |
-| `packages/core` | Domain values and ports |
-| `packages/store` | Drizzle schemas, SQLite/PostgreSQL adapters, migrations |
-| `packages/control-plane` | Durable admission, dispatch, reply outbox, service lifecycle |
-| `packages/connectors/sdk` | Connector contract |
-| `packages/connectors/{slack,github,lark,linear,teams}` | Enrollment, ingress, normalization, surface rendering, replies |
-| `packages/runtime/sdk` | Worker, Worker Runtime, Execution Context, Harness, environment, Runtime Input, checkpoint contracts |
-| `packages/runtime/transport` | Authenticated Gateway-to-Worker transport |
-| `packages/runtime/harnesses/{codex,claude-code}` | Harness implementations |
-| `packages/runtime/resources/*` | Worker-side resources and hosted MCP Tool Providers |
-| `packages/runtime/environments/e2b` | Remote sandbox environment |
-| `packages/supertag-ai` | **The only published package.** Public entry points over the above |
+| `rust/crates/cli` | The `supertag` CLI, local supervisor, and process tests |
+| `rust/crates/control-plane` | Store, migrations, admission, scheduling, recovery, public API |
+| `rust/crates/gateway` | Collaboration surfaces: ingress, rendering, reply delivery, notifications |
+| `rust/crates/worker-host` | Execution supervision, journal, adapters, MCP, artifacts |
+| `rust/crates/{protocol,api,transport}` | Wire types, gRPC services, tunnel and TLS transport |
+| `rust/crates/{workspaces,github,shared-execution,credential-vault,codex-adapter}` | Workspaces, GitHub, shared execution, credential vault, native Codex adapter |
+| `rust/proto`, `rust/bindings` | `supertag.runtime.v2` contract and generated Go, TypeScript, and Python bindings |
+| `packages/runtime/harnesses/{claude-code,cursor,opencode}` | Node harness bridges a Worker Host starts |
+| `packages/runtime/environments/{e2b,modal}` | Node Workspace providers a Worker Host starts |
+| `packages/runtime/sdk`, `packages/core` | Shared code for those bridges |
+| `apps/tui` | Go terminal UI; uses `packages/operator-api/go` types |
+| `apps/desktop` | Tauri desktop app |
+| `sdks/python` | Python SDK and harness adapters |
+| `deploy/` | Container images and platform definitions for the native services |
 
-Keep the abstraction surface narrow: domain and IAM declarations in `core`, collaboration
-protocol behavior in connectors and `gateway`, harness-specific adaptation and credentials
-under `runtime`. `docs/reference/repository-layout.md` is the canonical version of this table —
-update it when the layout changes.
+## Boundaries
 
-## The boundary that matters
-
-`packages/supertag-ai` is the only package published to npm. Everything else is
-`"private": true` and versioned `0.0.0`. `supertag-ai` bundles the internal packages into its
-own output via tsup `noExternal: [/^@supertag\//]`, so consumers never resolve `@supertag/*`.
-
-Consequences:
-
-- Never document or suggest installing `@supertag/core`, `@supertag/control-plane`, or any other
-  workspace package. They carry no compatibility promise.
-- A new capability intended for external use needs a `supertag-ai` entry point. See
-  [public-api-export](../public-api-export/SKILL.md).
-- Internal packages may import each other with `workspace:*`.
-
-## Composition root
-
-`apps/cli/src/index.ts` is the dispatcher. Commands are matched positionally, not with a
-framework:
-
-- `migrate`, `gateway`, `setup <provider>`, `tag`, `task`, `worker connect`,
-  `worker credential`
-- Resource verbs `get | describe | apply | diff | watch` are routed through
-  `apps/cli/src/resources.ts`, which holds the valid kind map (`tags`, `permission-sets`,
-  `context-sets`, `connector-accounts`, `presences`, `worker-hosts`, `worker-profiles`,
-  `tasks`, `sessions`, each with singular and unspaced aliases)
-- A global `--gateway NAME` prefix is parsed before dispatch
-
-When adding a command, update `helpText()` in the same file. The help text is the only
-inventory of commands, and documentation is written against it.
-
-## Conventions
-
-- Biome for formatting and linting, configured in `biome.json`
-- Vitest, with tests in top-level `tests/`, not colocated
-- Credentials are read from masked prompts or provider environment variables, never from
-  flags — preserve this in any setup or credential path
+- No package in this checkout is published to npm. Never suggest installing `@supertag/*`.
+- A Node bridge is packaged with the native release by `rust/scripts/node_bridges.py`; a new
+  bridge needs an entry there and in `rust/crates/cli/src/node_bridges.rs`.

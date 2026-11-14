@@ -12,6 +12,16 @@ is `rust/docs/`, which is tracked. Nothing under `docs/` links here.
 **Baseline.** The TypeScript product at the rewrite's merge base with upstream, `a369dc4`, which
 includes the `0b6a8ff` baseline named by the approved design.
 
+**Frozen.** This ledger is frozen at `6c934be8`, the last commit that contained the TypeScript
+runtime. The cutover branch removed the TypeScript Control Plane, Gateway, CLI, store, surfaces,
+Worklet transport, Codex harness, shared-execution package, and the portable baseline drivers (see
+`rust/docs/typescript-removal-inventory.md`). TypeScript test citations below name files as they
+were at `6c934be8`; read them with `git show 6c934be8:PATH`. Wording such as "TypeScript code is
+kept" describes the state at the freeze. The removal does not approve any row that is still a
+proposed drop. `tests/rust-port-baseline/capability-ledger.test.ts` now checks that Rust citations
+still name existing Rust tests, and that TypeScript citations and test-file assignments match the
+freeze commit.
+
 ## How to read this ledger
 
 Capabilities were derived by sweeping `tests/` (306 test files), `tests/e2e/`, `tests/runtime/`,

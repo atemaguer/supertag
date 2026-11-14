@@ -5,13 +5,6 @@ import { checkVocabulary } from "./docs-vocabulary.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("init sign-in guidance follows the per-harness check", () => {
-  const init = read("apps/cli/src/init.ts");
-  assert.match(init, /not signed in \(the credential check did not succeed\)/u);
-  for (const path of ["README.md", "docs/guides/troubleshooting.md"])
-    assert.match(read(path), /not signed in \(the credential check did not succeed\)/u);
-});
-
 test("newly freed pages use the public vocabulary", () => {
   for (const path of [
     "docs/concepts/persistence.md",

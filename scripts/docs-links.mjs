@@ -60,11 +60,6 @@ export function checkLinks(root, file, text) {
       problems.push(`${at}: links internal design record ${path}`);
       continue;
     }
-    // The published SDK README points into documentation copied by the bundle build.
-    // On a fresh checkout those files are absent; once present, check them normally.
-    const generatedSdkDoc =
-      relative(root, file) === "packages/supertag-ai/README.md" && path.startsWith("dist/docs/");
-    if (generatedSdkDoc && !existsSync(destination)) continue;
     if (!existsSync(destination)) {
       problems.push(`${at}: broken link ${target}`);
       continue;

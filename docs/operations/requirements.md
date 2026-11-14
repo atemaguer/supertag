@@ -11,9 +11,8 @@ Check this page before [installing SuperTag](install.md).
 
 ## System and tools
 
-- **Node.js 22.13.0 or newer.** The `engines.node` fields in the root
-  [package.json](../../package.json) and [SDK package](../../packages/supertag-ai/package.json)
-  define the supported runtime.
+- **Node.js 22.13.0 or newer.** The `engines.node` field in the root
+  [package.json](../../package.json) defines the supported runtime.
 - **npm**, included with Node.js, to install the published CLI and SDK. Source-development
   tools are listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - **git**, available on `PATH`, and a repository for your first Task.
@@ -186,7 +185,7 @@ Configured integrations still contact their services: the Control Plane, collabo
 MCP servers, storage, execution providers, and model providers. Disabling telemetry does not
 stop the model requests needed to perform Tasks. The default implementation is
 [process-local RPC counters](../../packages/runtime/sdk/src/rpc-telemetry.ts), connected to
-[Control Plane diagnostics](../../apps/cli/src/control-plane-api.ts).
+Control Plane diagnostics.
 
 Harnesses have separate policies. SuperTag isolates their configuration for each Task, so their
 standalone opt-out instructions do not necessarily apply to managed Workers.

@@ -11,7 +11,7 @@ import { Agent, createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateCoordinationTls } from "../../examples/shared-organization/coordination-tls.mjs";
+import { generateTestTls } from "./test-tls.ts";
 
 // Pass the fixture CA only to HTTPS connections targeting an active fixture endpoint.
 // Keep verification enabled and use APIs supported by Node 22.13.0. Reuse certificates
@@ -38,7 +38,7 @@ async function testCertificates() {
   certificates ??= (async () => {
     const directory = await mkdtemp(join(tmpdir(), "supertag-fake-s3-tls-"));
     try {
-      const files = await generateCoordinationTls(directory);
+      const files = await generateTestTls(directory);
       return {
         ca: await readFile(files.caFile, "utf8"),
         cert: await readFile(files.certFile),

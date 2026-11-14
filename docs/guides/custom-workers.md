@@ -267,8 +267,7 @@ see [Resolver registries](../reference/worker.md#resolver-registries).
 ## 3. Run the conformance probe
 
 Run the reusable conformance probe in your own test runner before you connect to a Control Plane.
-This example checks the harness against a prepared local environment. The complete runnable
-version is [`examples/custom-worker/verify.mjs`](../../examples/custom-worker/verify.mjs).
+This example checks the harness against a prepared local environment.
 
 ```ts
 import { LocalExecutionEnvironmentProvider } from "supertag-ai";
@@ -732,8 +731,7 @@ Code, Codex, and OpenCode behavior inside an environment, see
 - [Extend harness execution](harness-runtime.md) for split runtimes, live control, and profiles.
 - [Worker reference](../reference/worker.md) for the complete contracts and placement model. The
   normative lifecycle rules are in the [Worker SPI](../../spec/worker-spi.md).
-- [`examples/custom-worker`](../../examples/custom-worker) for matching
-  [JavaScript](../../examples/custom-worker/worker.mjs) and
-  [Python](../../examples/custom-worker/worker.py) Workers, harnesses, and Environment Providers.
+- [`examples/custom-worker`](../../examples/custom-worker) for a
+  [Python](../../examples/custom-worker/worker.py) Worker, harness, and Environment Provider.
   The npm package does not include the examples.
 - [Self-host SuperTag](self-hosting.md) for a production Control Plane.

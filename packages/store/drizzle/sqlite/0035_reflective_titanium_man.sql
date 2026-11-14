@@ -1,2 +1,0 @@
-ALTER TABLE `TagMessage` ADD `review` text;--> statement-breakpoint
-CREATE INDEX `TagMessage_objective_review_idx` ON `TagMessage` (`objectiveId`,`createdAt`,`id`) WHERE "TagMessage"."review" is not null;

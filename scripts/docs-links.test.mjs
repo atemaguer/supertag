@@ -42,18 +42,6 @@ test("broken skill links and heading anchors are reported", () => {
   assert.deepEqual(checkLinks(root, file, "```md\n[example](missing.md)\n```"), []);
 });
 
-test("SDK README skips absent generated docs but checks source docs", () => {
-  const file = resolve(root, "packages/supertag-ai/README.md");
-  assert.deepEqual(
-    checkLinks(
-      root,
-      file,
-      "[generated](dist/docs/missing-guide.md)\n[source](../../docs/missing-guide.md)",
-    ),
-    ["packages/supertag-ai/README.md:2: broken link ../../docs/missing-guide.md"],
-  );
-});
-
 test("reference definitions and angle-bracket destinations are checked", () => {
   const file = resolve(root, "README.md");
   assert.deepEqual(checkLinks(root, file, "[guide]: missing.md\n[guide](<missing file.md>)"), [

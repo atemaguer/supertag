@@ -33,9 +33,9 @@ and each Worker Host.
 | Option | Best for | Guide |
 | --- | --- | --- |
 | Docker Compose | A server you operate | [Self-host](../../docs/guides/self-hosting.md) |
-| Railway | Fast hosted Control Plane | [Railway](../../docs/guides/deploy-railway.md) |
+| Railway | Fast hosted Control Plane | [Railway](../../deploy/native/README.md) |
 | Render | Blueprint: native Control Plane web service, optional Gateway worker, Render PostgreSQL | [Render](../../docs/guides/deploy-render.md) |
-| Fly.io | Always-on Machine with attached storage | [Fly.io](../../docs/guides/deploy-fly.md) |
+| Fly.io | Always-on Machine with attached storage | [Fly.io](../../deploy/native/README.md) |
 | Modal | Native services in one always-on container behind a web endpoint | [Modal](../../docs/guides/deploy-modal.md) |
 | Cloudflare | Native services in one Container behind a tunnel Worker | [Cloudflare](../../docs/guides/deploy-cloudflare.md) |
 | Native service | `supertag.yaml` and `supertag up`, kept running by systemd or launchd | [Self-host](../../docs/guides/self-hosting.md#native-single-host-alternative) |

@@ -22,14 +22,10 @@ link every doc — a page reachable only from a sibling is invisible.
 
 ## CLI form
 
-Write `supertag`, never `pnpm supertag`. Readers install the CLI from npm with
-`npm install -g supertag-ai`; `pnpm supertag` resolves to
-`pnpm --filter @supertag/cli dev` and fails outside a checkout with
-`ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND`.
+Write `supertag`, never `pnpm supertag`. `pnpm supertag` runs the checkout's Rust CLI through
+`cargo run` and works only in a checkout.
 
-Repository installation commands (`pnpm install`, `pnpm install:cli`, and
-`pnpm uninstall:cli`) belong in `CONTRIBUTING.md`. User installation instructions use npm
-and PyPI; Python prereleases need an explicit version pin.
+Repository installation commands (`pnpm install`) belong in `CONTRIBUTING.md`.
 
 Two intentional exceptions to the CLI form:
 
@@ -37,12 +33,11 @@ Two intentional exceptions to the CLI form:
 - `docs/operations/control-plane.md` deliberately contrasts installed CLI / from a checkout / built
   checkout / container.
 
-Before documenting a command, confirm it exists in `helpText()` in `apps/cli/src/index.ts`, and
-that any resource kind exists in the map in `apps/cli/src/resources.ts`. Guides for the native
-services (Render, Cloudflare, Modal) document the native CLI instead: they carry
-`<!-- supertag-cli: native -->`, and `pnpm docs:check` checks their commands against
-`rust/docs/cli-reference.md`. Do not copy commands
-out of the internal architecture record — some were never implemented.
+Before documenting a command, confirm it exists in `rust/docs/cli-reference.md`, the help of every
+visible command. `pnpm docs:check` checks commands and flags against it. Pages listed in
+`scripts/docs-pending-cli.txt` still describe the removed TypeScript CLI; rewrite a page against
+the reference and remove it from that list. Do not copy commands out of the internal architecture
+record — some were never implemented.
 
 ## Capitalized vocabulary
 

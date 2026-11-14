@@ -78,5 +78,4 @@ The `native-release-check.yml` workflow has a fast `contracts` mode and a full
 four-platform `package` mode. Run it manually, or add the `release-check` label to a pull request
 to run the full `package` mode on its head commit. Its explicit host labels follow the
 [GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). It uses read-only repository permissions and has no upload,
-registry, release, signing, or notarization step. The existing TypeScript release, npm,
-and installer-channel workflows remain separate until an explicit cutover.
+registry, release, signing, or notarization step. No workflow publishes native releases yet.

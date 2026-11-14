@@ -1,6 +1,5 @@
 packages:
   - apps/*
-  - deploy/shared
   - packages/**
 
 allowBuilds:
@@ -8,13 +7,4 @@ allowBuilds:
   better-sqlite3: true
   cbor-extract: false
   esbuild: true
-  keytar: true
   protobufjs: true
-
-minimumReleaseAgeExclude:
-  - '@types/pg@8.20.1'
-  - '@microsoft/teams.api@2.0.15'
-  - '@microsoft/teams.apps@2.0.15'
-  - '@microsoft/teams.cards@2.0.15'
-  - '@microsoft/teams.common@2.0.15'
-  - '@microsoft/teams.graph@2.0.15'

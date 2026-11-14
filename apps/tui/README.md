@@ -138,13 +138,8 @@ Build with `./build.sh`, which cross-compiles static binaries for macOS and Linu
 amd64) into `dist/supertag-tui-GOOS-GOARCH`. It uses the Rust workspace version from
 `rust/Cargo.toml` by default. Set `SUPERTAG_TUI_VERSION` when building for a launcher with a
 different version.
-Run the tests with `go test ./...`. The Node launcher end-to-end test uses tmux and a temporary
-git checkout. Build the binary with the version in the npm package manifest before running it.
-
-```sh
-SUPERTAG_TUI_VERSION="$(node -p 'require("../../packages/supertag-ai/package.json").version')" ./build.sh
-SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .
-```
+Run the tests with `go test ./...`. The Rust CLI's `operator_runtime.rs` tests drive a built
+binary end to end under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
 
 Plain `supertag`, run in an interactive terminal, launches it. The CLI resolves the current
 Control Plane as every other command does, and the others it can switch to, starts the binary with

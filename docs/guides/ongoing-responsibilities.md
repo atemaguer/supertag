@@ -179,14 +179,6 @@ supertag cancel objective support-policy --reason "Policy moved to the new suppo
   A network timeout does not establish whether a write happened; inspect the external operation's
   status before retrying. See [action effects](../reference/action-effects.md).
 
-## Run an organization with a backlog
-
-The [ongoing support example](../../examples/ongoing-support/README.md) packages Roles and
-resource setup with a Claude Code manager and a Codex specialist. Its status command combines the
-Objective overview with the application's own evidence.
-
-**Check:** its status command reports the Objective overview alongside the application's evidence.
-
 ## If something goes wrong
 
 - **The manager never woke after a message.** Check `supertag describe objective support-policy`:

@@ -27,8 +27,8 @@ can accept work. The deployment runs one Control Plane instance.
 
 | Platform | Credential storage | Platform setup |
 | --- | --- | --- |
-| Railway | Persistent volume at `/var/lib/supertag` | [Railway](deploy-railway.md) |
-| Fly.io | Persistent volume at `/var/lib/supertag` | [Fly.io](deploy-fly.md) |
+| Railway | Persistent volume at `/var/lib/supertag` | [native service definitions](../../deploy/native/README.md) |
+| Fly.io | Persistent volume at `/var/lib/supertag` | [native service definitions](../../deploy/native/README.md) |
 
 Both can also use Vault. The Control Plane stores no artifact bytes (captured output files) on any
 platform; Worker Hosts keep them. Create the database, storage, and public hostname using the
@@ -46,7 +46,7 @@ HTTP/2 at its public edge does not establish native, bidirectional gRPC forwardi
 
 | Template | Worker connection | Native gRPC choice |
 | --- | --- | --- |
-| Fly.io | WebSocket by default | Optional separate TLS passthrough listener; see [Fly.io](deploy-fly.md) |
+| Fly.io | WebSocket by default | Optional separate TLS passthrough listener; see [native service definitions](../../deploy/native/README.md) |
 | Railway | WebSocket | Not configured in this template; public edge HTTP/2 alone is insufficient evidence |
 
 These are template capabilities, not restrictions on every networking product from those
@@ -165,7 +165,7 @@ The Control Plane does not relay them.
 
 ## Next
 
-- Your platform guide: [Railway](deploy-railway.md) or [Fly.io](deploy-fly.md); for the native
+- Your platform guide: [Fly.io and Railway](../../deploy/native/README.md); for the other native
   services, [Render](deploy-render.md), [Cloudflare](deploy-cloudflare.md), or [Modal](deploy-modal.md)
 - [Run a Worker](workers.md)
 - [Control Plane operations](../operations/control-plane.md)

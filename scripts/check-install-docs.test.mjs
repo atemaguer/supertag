@@ -10,7 +10,6 @@ const files = [
   "skills/SKILLS.md",
   "skills/install-and-first-reply/SKILL.md",
   "skills/deploy-supertag/SKILL.md",
-  "packages/supertag-ai/README.md",
 ];
 for (const file of files) {
   test(`${file} uses published CLI installation`, () => {
@@ -23,7 +22,6 @@ for (const file of files) {
 test("application guides install the published TypeScript SDK", () => {
   for (const file of [
     "README.md",
-    "packages/supertag-ai/README.md",
     "docs/guides/custom-workers.md",
     "docs/guides/modal-workers.md",
   ]) {
@@ -53,5 +51,5 @@ test("Python installation pins the matching PyPI prerelease", () => {
 
 test("the user install guide keeps source-development scripts in CONTRIBUTING.md", () => {
   assert.doesNotMatch(read("docs/operations/install.md"), /\bpnpm\s/u);
-  assert.match(read("CONTRIBUTING.md"), /pnpm install:cli/u);
+  assert.match(read("CONTRIBUTING.md"), /pnpm supertag/u);
 });

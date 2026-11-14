@@ -18,9 +18,7 @@ Worker should run workspace tools somewhere other than its harness.
   organization**: Teams may pursue different goals but share one Control Plane, its rules, and
   its record of the work.
 
-See the [glossary](../reference/glossary.md) for other terms. For a complete application, see the
-[two-manager shared organization example](../../examples/shared-organization/README.md). It uses
-native Claude Code and Codex sign-ins to build and independently review one result in Docker.
+See the [glossary](../reference/glossary.md) for other terms.
 
 ## Before you start
 
