@@ -248,7 +248,7 @@ Which granted servers a Task needs depends on whether it has a Workspace:
 
 | Task | Needs |
 | --- | --- |
-| With a Workspace, such as a work Session Task | Every server its grants name. A server comes from the host, which carries the label `mcp:NAME`, or from the Workspace's [`spec.mcp`](../guides/workspaces.md#select-repository-skills-and-mcp-servers). |
+| With a Workspace, such as a work Session Task | Every server its grants name. A server comes from the host, which carries the label `mcp:NAME`, or from the Workspace's `.mcp.json` servers the Tag lists in [`workspace.mcp`](../guides/workspaces.md#select-repository-skills-and-mcp-servers). |
 | Without a Workspace, such as a conversation turn | Only the granted servers a bound Worker Host declares. |
 
 A conversation turn stays light. A granted server that no bound host declares, such as one only a
