@@ -108,8 +108,9 @@ lists them, and `supertag describe session ID` shows one with its latest Task an
   See [shared and private Sessions](../concepts/multiplayer.md#shared-and-private-sessions).
 - **The Tag answers with its Roles' permissions only.** A terminal conversation has no location,
   so no location's Permission Sets or Context Sets apply.
-- **The Tag remembers its other conversations.** It sees its open Objectives and can search its
-  shared Sessions, such as Slack threads and GitHub issues, when a question needs them.
+- **Each conversation stands alone.** The Tag does not read its other conversations, such as
+  Slack threads and GitHub issues. Share earlier work through a captured artifact, or tell it what
+  it needs.
 - **Messages from other Tags arrive elsewhere.** A Tag's inbox is its own thread of turns, so a
   message another Tag sends it never interrupts your conversation. See
   [Send messages between Tags](tag-messaging.md).
@@ -121,7 +122,7 @@ lists them, and `supertag describe session ID` shows one with its latest Task an
 - **A work Session sees only its own work.** It can't read your conversation, the Tag's other
   Sessions, or its Objectives, so the Tag gives it everything it needs when it starts it.
 - **A work Session commits its edits to its own branch.** When the Tag's Worker Hosts declare a
-  Workspace, the work Session edits it and the Worker commits to a branch such as
+  Workspace, the work Session edits it and the Worker Host commits to a branch such as
   `supertag/session/0f3c2a9e`. Your checkout stays on its branch. The report names the branch, and
   a continued work Session commits on top of it, on the same branch. With
   several Workspaces, the Tag picks one when it starts the work Session. See
@@ -166,5 +167,5 @@ lists them, and `supertag describe session ID` shows one with its latest Task an
 
 ## Next
 
-- [Across Sessions: one Tag, one memory](../concepts/multiplayer.md#across-sessions-one-tag-one-memory)
+- [Across Sessions: one Tag, many conversations](../concepts/multiplayer.md#across-sessions-one-tag-many-conversations)
 - [Define and complete an Objective](objectives.md)

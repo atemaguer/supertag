@@ -19,8 +19,8 @@ A conversation with a Tag is a Session of its own. It can happen in the SuperTag
 in a Slack thread, or on a GitHub issue. A quick question gets an answer. For longer work the Tag
 starts a work Session, tells you, and reports the result back in the same conversation. When the
 work needs you, the question or approval appears there too, and your next message continues the
-conversation. The Tag sees its open Objectives in every conversation, so you can ask how one is
-going from anywhere. See [Talk to a Tag](../guides/talk-to-a-tag.md).
+conversation. An Objective's progress is in its own conversation and in `supertag describe
+objective`. See [Talk to a Tag](../guides/talk-to-a-tag.md).
 
 ## Declare an outcome, then steer the work
 
@@ -37,8 +37,8 @@ requirements change. You do not need to supply every next step.
 
 Completion records an assessment and its evidence. SuperTag does not independently prove that
 the assessment is true. Request a separate reviewer and human approval in the outcome when
-those checks matter. The owner normally completes the Objective; when the statement requires
-a person's review, it submits the result for that decision. An Objective that asks you a question
+those checks matter. The owner reports its assessment, and a person completes the Objective, or
+approves the assessment when the owner submitted it for review. An Objective that asks you a question
 waits for your answer: its turn ends, and the answer starts the next one. The question appears in
 the operator inbox and in the Objective overview.
 

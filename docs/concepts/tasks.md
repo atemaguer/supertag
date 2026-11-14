@@ -74,11 +74,10 @@ When there is no usable native state, the Task receives bounded history entries 
 completed Tasks in the Session instead. This replay covers a first turn, a switch to another
 harness, lost state, and a turn that failed for a reason other than its spending limit. A Task never receives the replay alongside a resume.
 
-Different threads remain different Sessions, even when they invoke the same Tag. They still share
-one memory: each conversation sees the Tag's open Objectives, and the Tag can search and read its
-other Sessions when a question needs them. A Session is **shared** or **private**, depending on its
+Different threads remain different Sessions, even when they invoke the same Tag, and one Session
+does not read another's transcript. A Session is **shared** or **private**, depending on its
 conversation. A direct chat or a conversation in the terminal UI is private to that person. See
-[across Sessions](multiplayer.md#across-sessions-one-tag-one-memory).
+[across Sessions](multiplayer.md#across-sessions-one-tag-many-conversations).
 
 A conversation, or an Objective's conversation, can hand longer work to a **work Session** with
 `start_session`. A work Session is a Session whose parent is the Session that started it. Its

@@ -167,11 +167,11 @@ Every Session you expected appears across the pages, and each held or waiting tu
 ## Reasons and next actions
 
 The overview explains recorded approval, review, timer or backoff, and wait conditions. It also
-shows Team capacity constraints, the last stored Worker compatibility diagnosis, expired execution
-**leases** (the Control Plane's time-limited claim on a running Attempt), and budget or deadline
+shows Team capacity constraints, why no bound Worker Host can take a waiting turn, expired execution
+**leases** (the Control Plane's time-limited claim on a running Task Attempt), and budget or deadline
 concerns. Explanations are evidence and suggested next steps, not permission grants.
 
-- An expired running lease calls for reconciliation. It does not prove the Worker stopped, and it
+- An expired running lease calls for reconciliation. It does not prove the harness stopped, and it
   does not authorize repeating an external action.
 - A spent budget pool stops new turns. The Objective's status becomes `limited`; raise the budget
   to let work continue.
@@ -180,14 +180,14 @@ concerns. Explanations are evidence and suggested next steps, not permission gra
   [restart a blocked Objective](objective-decisions.md#5-restart-a-blocked-objective).
 - A `cancelled` Objective shows when it was cancelled and the operator's reason. No new work
   starts for it. See [Cancel an Objective](objectives.md#cancel-an-objective).
-- No recorded blocker does not establish that work can proceed. Worker availability and other
+- No recorded blocker does not establish that work can proceed. Worker Host availability and other
   admission conditions can change between one reading and the next.
 
 ## If something goes wrong
 
 - **Access is denied.** The overview needs operator access to the whole Objective; see
   [access](../reference/coordination.md#access).
-- **A turn stays pending with no blocker.** Check Worker availability with
+- **A turn stays pending with no blocker.** Check Worker Host availability with
   [troubleshooting](troubleshooting.md), and the Team's `maxConcurrency`.
 - **A running lease expired.** See
   [After a Control Plane restart](../reference/coordination.md#after-a-control-plane-restart).

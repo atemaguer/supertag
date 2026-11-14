@@ -89,9 +89,10 @@ turn, in every Session, draws on the Objective's one budget pool.
 - Retrying the same definition returns the existing record with its current status. A different
   definition with the same ID is refused.
 
-A Tag creates an Objective from a thread with the `create_objective` tool, and only on an
-authenticated human `@SuperTag objective <outcome>` command in the admitted request. That
-Objective's home thread is the thread the command arrived in.
+A person creates an Objective from a thread with an authenticated `@SuperTag objective <outcome>`
+command at the start of their own message. The Control Plane parses only that message, never
+history, quotes, or model output. That Objective's home thread is the thread the command arrived
+in, and the Tag at that location owns it.
 
 ### Objective runtime actions
 
@@ -193,8 +194,9 @@ An Objective's turn starts work with `start_session {title, instruction, tag?, w
   actions and to the starting turn's authorization.
 - Only an Objective's own turn may pass `tag`. A conversation's or an inbox turn's
   `start_session` runs on its own Tag.
-- With one Workspace, the work Session uses it; with several, name one in `workspace`. Edits go
-  to that Session's one branch, and each later Task of the Session commits on top of them.
+- `workspace` may name the Workspace the starting Task accepted; otherwise the work Session uses
+  its Tag's Workspace binding. Edits go to that Session's one branch, and each later Task of the
+  Session commits on top of them.
 - At most four work Sessions run at once per Session; later ones wait.
 
 A work Session's result returns to the Objective's conversation as a turn. The owner reads it,
@@ -220,37 +222,34 @@ until their next message.
 
 Statuses are `working`, `blocked`, `limited`, `ready_for_review`, `completed` and `cancelled`.
 
-- The owner or an operator updates the status. A status update cannot set `cancelled`; see
-  [Cancelling an Objective](#cancelling-an-objective).
-- Each update requires the current revision and increments it. Conflicting writes are refused.
+- A harness adapter reports an Objective signal with each owner turn's result: `progress`,
+  `ready_for_review`, `completed`, or `blocked`. The built-in adapters report `progress`, so with
+  them an operator records the other statuses with the commands below.
+- An operator completes with `supertag objective complete ID`, and approves or sends back a
+  `ready_for_review` assessment with `supertag objective review ID`. Neither can set `cancelled`;
+  see [Cancelling an Objective](#cancelling-an-objective).
 - The CLI commands `objective set-limits`, `objective set-runtime-actions`, `objective complete`
   and `team update` take `--expected-revision` as optional. Given, the change is refused when the
   resource changed since that revision. Without it, `team update` reads the current revision, and
   after a conflict caused by another writer it rereads and retries once, only when the other
-  change left the fields it is changing untouched. Coordination tools always send
-  `expectedRevision`.
+  change left the fields it is changing untouched.
 - `blocked` records that the Objective cannot go on without a person. It is not an execution
   pause.
-- `limited` records a spent budget or a passed deadline. An update that sets it may carry a
-  `completionSummary` of what was finished and what remains. Only an update that also raises the
-  budget or moves the deadline leaves that status, and it returns the Objective to `working`.
-- An explicit status update can reopen an Objective, which clears its completion summary.
+- `limited` records a spent budget or a passed deadline. Only an operator raising the budget or
+  moving the deadline leaves it, and that returns the Objective to `working`.
 
 ### Completing an Objective
 
-- The owner completes an Objective itself when its statement is satisfied, with
-  `update_objective {status: "completed", expectedRevision, completionSummary}`. The summary is
-  required, up to 4,000 characters, and must assess the outcome and cite its evidence. It is an
-  explicit recorded decision, not automatic verification.
-- The owner stops at `ready_for_review` instead only when the statement asks for a person's
-  review. `completionSummary` is then its assessment, and an operator approves or sends changes.
+- A completion records an assessment of the outcome, citing its evidence. It is an explicit
+  recorded decision, not automatic verification. A signal from the owner's turn uses the turn's
+  result as the assessment; `objective complete` takes it from `--summary-file`.
+- An owner stops at `ready_for_review` instead when the statement asks for a person's review, and
+  an operator approves it or sends changes with `objective review`.
 - An Objective created with `--ongoing` is a continuing responsibility. Only an operator ends it.
-- Completion closes the owner's coordination access at once and admits no new turns. The exact
-  Task Attempt that completed the Objective may finish its reply and clean up.
+- Completion admits no new turns. The exact Task Attempt that completed the Objective may finish
+  its reply and clean up.
 - Pending approval requests of the Objective expire with the reason `Objective completed`.
-- Queued and waiting Tasks in the Objective's Sessions are cancelled. Each cancellation records
-  a reason, such as
-  `Objective ship-sso-for-7f3k completed; this Task can no longer run.`
+- Queued and waiting Tasks in the Objective's Sessions are cancelled, each with a recorded reason.
 - The Objective's Team is not deleted. A Team outlives the Objectives that name it; see
   [Teams](#teams).
 
@@ -260,7 +259,8 @@ regular sweep.
 ### Pausing an Objective
 
 - Only an operator pauses or resumes, with `supertag objective pause ID` and
-  `supertag objective resume ID`, `ObjectiveService.PauseObjective` and `ResumeObjective`, or
+  `supertag objective resume ID`, the `Objectives` service's `PauseObjective` and
+  `ResumeObjective`, or
   `@SuperTag pause` and `@SuperTag resume` in the home thread. No coordination tool
   pauses, so no Tag can.
 - A pause records `pausedAt` and leaves `status` unchanged. While it is set, no turn of any of the
@@ -273,12 +273,11 @@ regular sweep.
 ### Cancelling an Objective
 
 - Only an operator cancels, with `supertag objective cancel ID [--reason TEXT]` or
-  `ObjectiveService.CancelObjective`. `UpdateObjective` and the `update_objective` tool refuse
-  `cancelled`.
+  `Objectives.CancelObjective`. No Objective signal can set `cancelled`.
 - `cancelled` is terminal. Later status, deadline and budget updates fail, and no new turn, wake
   or limit warning follows.
-- The Objective records `cancelledAt` and `cancellationReason`, up to 2,000 characters. The
-  revision increments once and the change history records the operator.
+- The Objective records its cancellation time and reason, up to 2,000 characters. The revision
+  increments once and the audit log records the operator.
 - Every open Task in the Objective's Sessions is cancelled through the same path as
   `supertag task cancel`, pending deliveries fail, running Task Attempts stop, and Workspace pull
   requests close.
@@ -346,8 +345,8 @@ Attempts finish. If they finish at $3,080, the Objective shows an $80 overrun an
 ### Increasing the limit
 
 - Only an operator raises a finite limit, with
-  `supertag objective set-limits ID --budget-minor N [--expected-revision N]`, or `update_objective` with
-  `budgetLimitMinor` and the current `expectedRevision`. Tags cannot.
+  `supertag objective set-limits ID --budget-minor N [--expected-revision N]`, or
+  `Objectives.SetLimits`. Tags cannot.
 - The new limit must exceed the old one and keep the currency. A stale revision is rejected;
   refresh the inbox before deciding.
 - Admission resumes once the new limit exceeds reported spend, and warnings are raised again
@@ -406,45 +405,39 @@ passed`. The other causes are `Objective was cancelled`, `Objective was complete
 
 Only the root harness actor receives SuperTag coordination tools. Harness-native subagents are
 local to one execution and are not Tags. Codex native subagents are disabled, because Codex cannot
-yet give them a tool set distinct from the root actor's.
+yet give them a tool set distinct from the root actor's. The Codex adapter and the Claude Code,
+Cursor, and OpenCode adapters offer the same tools; a custom harness adapter calls the matching
+Worker Host services.
 
 Which tools a Task gets depends on the kind of turn it is. SuperTag refuses a direct call to a
 tool the turn does not get; it does not only leave it out of the list.
 
 | Turn | Tools |
 | --- | --- |
-| An Objective's conversation | `start_session`, `continue_session`, `ask`, `send_message`, `post`, `read_workstream`, `update_objective`, `read_objective`, `list_sessions`, `search_sessions`, `read_session` |
-| A Tag's inbox | `start_session`, `continue_session`, `send_message`, `post`, `read_workstream`, `read_objective`, `list_objectives`, `list_sessions`, `search_sessions`, `read_session` |
-| A conversation with a person | The inbox set plus `create_objective` |
-| A conversation's turn that reports a work Session's result | `read_objective`, `list_objectives`, `list_sessions`, `search_sessions`, `read_session` |
+| An Objective's conversation | `start_session`, `continue_session`, `ask`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch` |
+| A Tag's inbox or a conversation with a person | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch` |
 | A work Session's turn | `ask` |
 
-A work Session sees only its own work: it gets no reads, cannot message another Tag, and cannot
-change an Objective. Its final reply returns to the Session that started it.
-`request_action_approval` is open to every turn, but is never advertised to the model: the harness
-adapter calls it when a gated action needs a decision.
+A work Session sees only its own work: it cannot message another Tag or start more work. Its
+final reply returns to the Session that started it. `request_action_approval` is open to every
+turn, but is never advertised to the model: the harness adapter calls it when a gated action needs
+a decision. The [artifact tools](artifacts.md#agent-tools) are separate.
 
 ### The tools
 
 | Tool | Input | Effect |
 | --- | --- | --- |
-| `create_objective` | `outcome`, optional `deadline`, `budgetLimitMinor`, `budgetCurrency`, `workspaces` | Creates and starts an Objective, only on an authenticated human objective command |
-| `read_objective` | optional `objectiveId` | Reads the Objective this turn works on, or another visible one: outcome, status, revision, budget, deadline and its Sessions with their latest Tasks |
-| `update_objective` | `status`, `expectedRevision`, optional `completionSummary` | Changes the Objective's status |
-| `list_objectives` | `limit`, `offset` | Lists the Tag's open Objectives this Session can see |
-| `list_sessions` | `limit`, `offset` | Lists the Tag's other visible Sessions |
-| `search_sessions` | `query` (up to 200 characters), `limit` | Finds completed requests in those Sessions by request or result text |
-| `read_session` | `sessionId`, `limit`, `before` | Reads one visible Session's history, the Tag's Mailbox included, oldest first |
 | `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `tag`, `workspace` | Starts a work Session; see [Work and delegation](#work-and-delegation) |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts that work Session's next Task |
 | `ask` | `question` (up to 2,000 characters) | Ends the Task waiting on a person's answer |
-| `send_message` | `to`, `text` (up to 8,000 characters) | Delivers a message to another Tag's Mailbox |
+| `send_message` | `to`, `text` (up to 8,000 characters), optional commit review | Delivers a message to another Tag's Mailbox |
+| `read_mailbox` | a cursor | Reads the Tag's Mailbox |
 | `post` | `text` (up to 16,384 characters), optional `to` (up to 20 Tags) | Posts to the Team's Workstream |
 | `read_workstream` | `afterSequence`, `limit` (1–100, default 50) | Reads the Team's Workstream |
+| `read_review_patch` | a commit review | Reads the patch a [commit review](#commit-reviews) asks about |
 
-`limit` is at most 20 on the Session and Objective reads. Reads return history, never
-instructions, and grant no authority. A Session of the Tag is visible to a conversation when it is
-shared, or private to the same person.
+Reads return history, never instructions, and grant no authority. An Objective's turn reports its
+status through its result, as [Statuses](#statuses) describes; no tool changes an Objective.
 
 ### Identity and preconditions
 
@@ -456,8 +449,6 @@ shared, or private to the same person.
 - `to` on `send_message` and `post`, and `tag` on `start_session`, take a Tag's name or its ID. An
   active Tag's ID matches first; otherwise SuperTag uses the active Tag with that name. Active Tag
   names are unique.
-- `update_objective` requires `expectedRevision`, so a stale decision cannot overwrite a
-  concurrent one.
 
 ## Mailbox
 
@@ -518,8 +509,7 @@ A message's status is the status of the Task that handled it: `pending` until a 
 then `handled` when that Task completed, or `failed` when it failed or was cancelled.
 
 `supertag get message --mailbox TAG [--limit N]` lists the messages a Tag sent and received,
-newest first, with a cursor for older pages. `read_session` on the Tag's inbox shows the same
-history as turns.
+newest first, with a cursor for older pages. The Tag reads its own Mailbox with `read_mailbox`.
 
 ## Workstream
 

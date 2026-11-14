@@ -179,20 +179,18 @@ owner as its next turn. See
 
 Rules:
 
-- Only the explicit `objective` command creates an Objective. An ordinary mention cannot, even if
-  the Tag calls `create_objective`. Quoted commands and commands embedded in other text do not
-  count.
+- Only the explicit `objective` command, at the start of a person's own message, creates an
+  Objective. An ordinary mention cannot, and the Tag cannot create one. Quoted commands and
+  commands embedded in other text do not count.
 - The Objective inherits the requesting turn's runtime permission ceiling. The request cannot
   grant additional collaboration surface access.
-- The Objective gets the Workspaces the Tag's location attaches, such as a Slack channel's
-  `workspaces` in the Tag manifest. A GitHub location without any gets every Workspace whose
-  `source` is that repository. The Tag may name a subset, never another Workspace. See
+- The Objective's work runs in the Workspaces of the Tags that do it. See
   [Work in a repository with Workspaces](workspaces.md#start-from-slack-or-github).
-- A chat message saying "approved" approves nothing. Approvals go through
-  `supertag approval approve`.
-- A custom **Worker** must advertise the surface coordination capability and pass the supplied
-  coordination tools to its harness to support this flow. See
-  [Build a custom Worker](harness-adapters.md).
+- In the home thread, `@SuperTag approve`, `@SuperTag pause`, and `@SuperTag resume` act on the
+  Objective. A chat message saying "approved" approves nothing, and an action approval goes
+  through `supertag approval approve`.
+- A custom [harness adapter](harness-adapters.md) offers the coordination tools through the Worker
+  Host's harness services to support this flow.
 
 ## 3. Watch the owner work
 
@@ -245,24 +243,22 @@ next turn. You can also answer in the Objective's home thread. See
 
 ## 5. Complete it, or review it first
 
-The owner completes the Objective itself when the statement is satisfied, recording an assessment
-with the evidence for each condition. You do not need to approve routine results.
+The owner reports its assessment, with the evidence for each condition, in the Objective's
+conversation. A harness adapter can also signal that the Objective is complete or ready for
+review; the built-in adapters report progress only, so with them you record the result.
 
-If you want to check the result first, say so in the statement, for example “A person reviews the
-change before it counts as done.” The owner then stops at `ready_for_review` with its assessment.
-Open the Objective in the terminal UI to read it. To request changes, press `m`, describe what
-should change, and press Enter. The Objective returns to `working` and the owner acts on your
-text.
+If the owner stopped at `ready_for_review`, open the Objective in the terminal UI to read its
+assessment. To request changes, press `m`, describe what should change, and press Enter, or run
+`supertag objective review usage-billing request-changes --feedback TEXT`. The Objective returns
+to `working` and the owner acts on your text. To approve, run
+`supertag objective review usage-billing approve`; approval completes the Objective with the
+owner's assessment as the summary.
 
-To approve the result, run `supertag objective review usage-billing`. approve Approval completes a
-`ready_for_review` Objective using the owner's assessment as the summary. If the owner recorded
-none, the summary says who approved it.
-
-Scripts can complete an Objective directly:
+Complete an Objective directly with your own assessment:
 
 ```sh
 printf '%s\n' "Reconciliation suite passed in CI run 1482; billing review approved." | \
-  supertag objective complete usage-billing --summary-file -
+  supertag objective complete usage-billing --summary-file - --state-directory ~/.supertag
 ```
 
 Completion records an assessment; it does not verify the claims automatically. Once the Objective

@@ -129,9 +129,8 @@ To request a revision, press `m`, type what should change, and press Enter. For 
 runbook still names the old dashboard. Update it.” The Objective returns to `working` and the
 owner acts on your text.
 
-To accept the result, run `supertag objective review service-operations`. approve This completes a
-`ready_for_review` Objective and uses the owner's assessment as the completion summary. If
-the owner recorded none, the summary says who approved it.
+To accept the result, run `supertag objective review service-operations approve`. This completes a
+`ready_for_review` Objective and uses the owner's assessment as the completion summary.
 
 ## Reply from a collaboration thread
 

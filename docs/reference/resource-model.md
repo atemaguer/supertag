@@ -77,9 +77,8 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
   when a turn starts is handled together in that turn. See [Mailbox](coordination.md#mailbox).
 - **Session** preserves automatic continuity for one Tag conversation. The `audience` field is
   `shared` or `private`. A direct chat or a conversation in the terminal UI is private to one
-  person. A Tag's conversation Tasks can list, search, and read its shared Sessions and
-  their own person's private ones. See
-  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory). A [work Session](../concepts/tasks.md#session)
+  person. One Session does not read another's transcript. See
+  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-many-conversations). A [work Session](../concepts/tasks.md#session)
   reports its conversation as `parentSessionId`. In `supertag get session`, `latestTaskStatus` is
   the status of a Session's latest Task, `tag` the Tag's name, and `title` a work Session's title
   or a conversation's first request.

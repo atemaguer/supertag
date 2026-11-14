@@ -24,12 +24,12 @@ whole system rather than another first-class resource.
   [the coordination reference](coordination.md#objectives).
 - <a id="task"></a>**Task** — one request or assignment accepted for a Tag under a recorded policy. See
   [the task concepts](../concepts/tasks.md).
-- <a id="session"></a>**Session** — a group of Tasks from the same conversation. All of a Tag's Sessions share
-  its open Objectives and can read each other. Only one person's Sessions can read their private
-  Sessions, such as a direct chat or a conversation in the terminal UI. A work Session is a Session a
+- <a id="session"></a>**Session** — a group of Tasks from the same conversation, with its own harness
+  session. A Session is shared, such as a channel thread, or private to one person, such as a
+  conversation in the terminal UI. A work Session is a Session a
   conversation started for longer work; its parent is that conversation, it sees only its own
   work, and its result returns there through the Tag. See
-  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory) and
+  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-many-conversations) and
   [Session](../concepts/tasks.md#session).
 - <a id="team"></a>**Team** — a flat list of member Tags with an optional concurrency limit. Members
   message each other and share the Team's Workstream, and an Objective that names the Team may

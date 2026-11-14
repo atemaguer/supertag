@@ -117,8 +117,7 @@ Each message shows its sender, its text, and its status: `pending` until the inb
 `handled` with the turn that took it, or `failed`. The same command with
 `--mailbox support` shows the reply.
 
-A Tag reads its own inbox history with `read_session`, the same tool it uses for any other
-Session of its Tag.
+A Tag reads its own Mailbox with the `read_mailbox` tool.
 
 ## If something goes wrong
 
