@@ -45,8 +45,7 @@
     "includes": [
       "**",
       "!packages/runtime/sdk/src/rust-harness/gen",
-      "!rust/bindings/typescript/supertag/runtime/v2",
-      "!spec/manifests"
+      "!rust/bindings/typescript/supertag/runtime/v2"
     ]
   }
 }
