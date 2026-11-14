@@ -2282,6 +2282,14 @@ class ReportCleanupFailureResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
+class ResolveWorkspaceRefRequest(_message.Message):
+    __slots__ = ("attempt", "base_commit")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    base_commit: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., base_commit: _Optional[str] = ...) -> None: ...
+
 class TaskArtifactInputSelection(_message.Message):
     __slots__ = ("artifact_id", "paths", "require_accepted", "publication_approval_id")
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2967,18 +2975,20 @@ class CheckpointDownload(_message.Message):
     def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
 
 class WorkspaceSpec(_message.Message):
-    __slots__ = ("workspace_id", "base_commit", "github_source", "mounts", "mcp_servers")
+    __slots__ = ("workspace_id", "base_commit", "github_source", "mounts", "mcp_servers", "base_ref")
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
     GITHUB_SOURCE_FIELD_NUMBER: _ClassVar[int]
     MOUNTS_FIELD_NUMBER: _ClassVar[int]
     MCP_SERVERS_FIELD_NUMBER: _ClassVar[int]
+    BASE_REF_FIELD_NUMBER: _ClassVar[int]
     workspace_id: str
     base_commit: str
     github_source: _github_workspaces_pb2.GithubWorkspace
     mounts: _containers.RepeatedCompositeFieldContainer[WorkspaceCopyMount]
     mcp_servers: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., github_source: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., mounts: _Optional[_Iterable[_Union[WorkspaceCopyMount, _Mapping]]] = ..., mcp_servers: _Optional[_Iterable[str]] = ...) -> None: ...
+    base_ref: str
+    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., github_source: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., mounts: _Optional[_Iterable[_Union[WorkspaceCopyMount, _Mapping]]] = ..., mcp_servers: _Optional[_Iterable[str]] = ..., base_ref: _Optional[str] = ...) -> None: ...
 
 class WorkspaceCopyMount(_message.Message):
     __slots__ = ("volume_id", "destination", "max_bytes", "volume", "read_write")

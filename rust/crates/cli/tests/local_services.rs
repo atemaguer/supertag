@@ -1709,6 +1709,7 @@ async fn shared_host_lanes_use_separate_workspace_checkouts(database: String) ->
                 allowed_actions: vec!["files:read".into(), "files:write".into()],
                 harness_kind: HarnessKind::Codex as i32,
                 workspace: Some(WorkspaceSpec {
+                    base_ref: String::new(),
                     workspace_id: "repo".into(),
                     base_commit: base.clone(),
                     mounts: vec![],

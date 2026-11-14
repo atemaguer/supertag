@@ -31,6 +31,8 @@ database_tests! {
     named_auth_keys_and_rotated_host_credentials;
     #[tokio::test]
     workspace_setup_prepares_checkouts_and_a_failure_fails_the_task;
+    #[tokio::test]
+    a_tag_following_a_branch_starts_each_session_at_its_current_commit;
 }
 
 struct Services {
@@ -359,6 +361,158 @@ async fn workspace_setup_prepares_checkouts_and_a_failure_fails_the_task(
     ensure!(
         !result.contains("Change:"),
         "the harness never ran: {result}"
+    );
+    Ok(())
+}
+
+async fn a_tag_following_a_branch_starts_each_session_at_its_current_commit(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let app = root.join("app");
+    let first = repository(&app, "app source\n").await?;
+    let branch = git(&app, &["symbolic-ref", "--short", "HEAD"]).await?;
+    let services = Services::start(&database, root).await?;
+    let cli = |args: &[&str]| services.cli(args);
+    let put = |tag: &str, base: &[&str]| {
+        let mut args = vec![
+            "tag",
+            "put",
+            tag,
+            "--instructions",
+            "Edit the repository",
+            "--allow",
+            "files:write",
+            "--workspace-id",
+            "app",
+        ];
+        args.extend_from_slice(base);
+        cli(&args)
+    };
+    // A Tag pins a commit or follows a branch, never both.
+    let both = output(put(
+        "builder",
+        &["--workspace-base", &first, "--workspace-ref", &branch],
+    ))
+    .await?;
+    ensure!(!both.status.success());
+    ensure!(
+        String::from_utf8_lossy(&both.stderr).contains("cannot be used with"),
+        "{}",
+        String::from_utf8_lossy(&both.stderr)
+    );
+    json(put("builder", &["--workspace-ref", &branch])).await?;
+    json(put("ghost", &["--workspace-ref", "no-such-branch"])).await?;
+    let tag = json(cli(&["describe", "tag", "builder", "--output", "json"])).await?;
+    assert_eq!(
+        tag["workspace"],
+        json!({"workspace_id": "app", "base_commit": null, "ref": branch}),
+        "{tag}"
+    );
+    let described = String::from_utf8(success(cli(&["describe", "tag", "builder"])).await?.stdout)?;
+    ensure!(described.contains(&format!("Ref: {branch}")), "{described}");
+    // A manifest names the branch as `ref`, and refuses it beside `baseCommit`.
+    let manifest = root.join("follower.yaml");
+    let tag_manifest = |workspace: &str| {
+        format!(
+            "apiVersion: supertag/v1\nkind: Tag\nmetadata: {{name: follower}}\nspec:\n  instructions: Edit the repository\n  workspace: {workspace}\n"
+        )
+    };
+    std::fs::write(
+        &manifest,
+        tag_manifest(&format!("{{id: app, ref: {branch}, baseCommit: {first}}}")),
+    )?;
+    let manifest_path = manifest.to_str().context("manifest path")?;
+    let refused = output(cli(&["apply", "-f", manifest_path])).await?;
+    ensure!(!refused.status.success());
+    ensure!(
+        String::from_utf8_lossy(&refused.stderr).contains("sets baseCommit or ref, not both"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    std::fs::write(
+        &manifest,
+        tag_manifest(&format!("{{id: app, ref: {branch}}}")),
+    )?;
+    success(cli(&["apply", "-f", manifest_path])).await?;
+    let follower = json(cli(&["get", "tag", "follower"])).await?;
+    assert_eq!(follower["workspace"]["ref"], branch.as_str(), "{follower}");
+    assert_eq!(
+        String::from_utf8(success(cli(&["diff", "-f", manifest_path])).await?.stdout)?.trim(),
+        "No changes."
+    );
+
+    let submit = |tag: &str, session: &str| {
+        cli(&[
+            "task",
+            "submit",
+            "--tag",
+            tag,
+            "--session",
+            session,
+            session,
+        ])
+    };
+    let state = root.join("host-state");
+    let worker = || services.worker(&state, Some(&services.host), &[("app", &app)]);
+    let get = |id: &str| cli(&["get", "task", id]);
+
+    // The first Session starts from the branch's commit when its first Attempt starts.
+    let alpha = field(&json(submit("builder", "alpha")).await?, "task_id")?.to_owned();
+    let queued = json(get(&alpha)).await?;
+    assert_eq!(queued["workspace"]["base_commit"], "", "{queued}");
+    assert_eq!(queued["workspace"]["ref"], branch.as_str(), "{queued}");
+    success(worker()).await?;
+    let alpha = json(get(&alpha)).await?;
+    assert_eq!(alpha["state"], "TASK_STATE_SUCCEEDED", "{alpha}");
+    assert_eq!(
+        alpha["result"],
+        "Change: alpha\nWorkspace before:\napp source\n"
+    );
+    assert_eq!(alpha["workspace"]["base_commit"], first.as_str(), "{alpha}");
+    assert_eq!(alpha["workspace_delivery"]["base_commit"], first.as_str());
+
+    // The branch moves on. A later Task of the same Session keeps its commit; a new Session
+    // starts from the branch's new commit.
+    std::fs::write(app.join("workspace.txt"), "app source v2\n")?;
+    git(&app, &["commit", "--quiet", "-am", "Advance the branch"]).await?;
+    let second = git(&app, &["rev-parse", "HEAD"]).await?;
+    let again = field(&json(submit("builder", "alpha")).await?, "task_id")?.to_owned();
+    assert_eq!(
+        json(get(&again)).await?["workspace"]["base_commit"],
+        first.as_str()
+    );
+    success(worker()).await?;
+    let again = json(get(&again)).await?;
+    assert_eq!(again["state"], "TASK_STATE_SUCCEEDED", "{again}");
+    assert_eq!(again["workspace_delivery"]["base_commit"], first.as_str());
+    let beta = field(&json(submit("builder", "beta")).await?, "task_id")?.to_owned();
+    success(worker()).await?;
+    let beta = json(get(&beta)).await?;
+    assert_eq!(beta["state"], "TASK_STATE_SUCCEEDED", "{beta}");
+    assert_eq!(
+        beta["result"],
+        "Change: beta\nWorkspace before:\napp source v2\n"
+    );
+    assert_eq!(beta["workspace"]["base_commit"], second.as_str(), "{beta}");
+    assert_eq!(beta["workspace_delivery"]["base_commit"], second.as_str());
+
+    // A branch the host's checkout lacks fails the Task before the harness runs.
+    let ghost = field(&json(submit("ghost", "gamma")).await?, "task_id")?.to_owned();
+    success(worker()).await?;
+    let ghost = json(get(&ghost)).await?;
+    assert_eq!(ghost["state"], "TASK_STATE_FAILED", "{ghost}");
+    assert_eq!(
+        ghost["result"],
+        "Workspace branch no-such-branch does not name a commit on this Worker Host"
+    );
+    assert_eq!(ghost["workspace"]["base_commit"], "", "{ghost}");
+    // Nothing was written into the operator's checkout.
+    assert_eq!(git(&app, &["rev-parse", "HEAD"]).await?, second);
+    assert_eq!(
+        git(&app, &["for-each-ref", "--format=%(refname)"]).await?,
+        git(&app, &["symbolic-ref", "HEAD"]).await?
     );
     Ok(())
 }

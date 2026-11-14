@@ -895,6 +895,18 @@ impl WorkerHost for Api {
         .await
     }
 
+    async fn resolve_workspace_ref(
+        &self,
+        request: Request<ResolveWorkspaceRefRequest>,
+    ) -> Result<Response<Task>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .resolve_workspace_ref(request)
+                .await
+        })
+        .await
+    }
+
     async fn report_attempt_usage(
         &self,
         request: Request<ReportAttemptUsageRequest>,

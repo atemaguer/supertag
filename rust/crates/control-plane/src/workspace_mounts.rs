@@ -121,9 +121,9 @@ pub(crate) async fn configure_in(
     let Some(spec) = workspace.as_mut().filter(|spec| !spec.mounts.is_empty()) else {
         return Ok(());
     };
-    if spec.base_commit.is_empty() {
+    if spec.base_commit.is_empty() && spec.base_ref.is_empty() {
         return Err(invalid(
-            "Workspace mounts require a local pinned Git Workspace",
+            "Workspace mounts require a local Git Workspace that pins a commit or follows a branch",
         ));
     }
     normalize_mounts(&mut spec.mounts).map_err(|error| invalid(error.message()))?;

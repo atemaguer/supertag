@@ -287,6 +287,9 @@ const (
 	// WorkerHostReportCleanupFailureProcedure is the fully-qualified name of the WorkerHost's
 	// ReportCleanupFailure RPC.
 	WorkerHostReportCleanupFailureProcedure = "/supertag.runtime.v2.WorkerHost/ReportCleanupFailure"
+	// WorkerHostResolveWorkspaceRefProcedure is the fully-qualified name of the WorkerHost's
+	// ResolveWorkspaceRef RPC.
+	WorkerHostResolveWorkspaceRefProcedure = "/supertag.runtime.v2.WorkerHost/ResolveWorkspaceRef"
 	// LiveInputsQueueInputProcedure is the fully-qualified name of the LiveInputs's QueueInput RPC.
 	LiveInputsQueueInputProcedure = "/supertag.runtime.v2.LiveInputs/QueueInput"
 	// LiveInputsGetInputProcedure is the fully-qualified name of the LiveInputs's GetInput RPC.
@@ -2670,6 +2673,10 @@ type WorkerHostClient interface {
 	// Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
 	// execution report. The Attempt stays uncertain until the host or an operator resolves it.
 	ReportCleanupFailure(context.Context, *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error)
+	// The commit the running Attempt's host resolved for its Task's Workspace `base_ref`. The first
+	// resolution in a Session wins and is recorded on every unresolved Task of the Session; the
+	// returned Task carries the recorded commit.
+	ResolveWorkspaceRef(context.Context, *connect.Request[runtimev2.ResolveWorkspaceRefRequest]) (*connect.Response[runtimev2.Task], error)
 }
 
 // NewWorkerHostClient constructs a client for the supertag.runtime.v2.WorkerHost service. By
@@ -2791,6 +2798,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("ReportCleanupFailure")),
 			connect.WithClientOptions(opts...),
 		),
+		resolveWorkspaceRef: connect.NewClient[runtimev2.ResolveWorkspaceRefRequest, runtimev2.Task](
+			httpClient,
+			baseURL+WorkerHostResolveWorkspaceRefProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ResolveWorkspaceRef")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -2814,6 +2827,7 @@ type workerHostClient struct {
 	reclaimAttempt          *connect.Client[runtimev2.ReclaimAttemptRequest, runtimev2.AttemptResolution]
 	reportAppliedLimits     *connect.Client[runtimev2.ReportAppliedLimitsRequest, runtimev2.ReportAppliedLimitsResponse]
 	reportCleanupFailure    *connect.Client[runtimev2.ReportCleanupFailureRequest, runtimev2.ReportCleanupFailureResponse]
+	resolveWorkspaceRef     *connect.Client[runtimev2.ResolveWorkspaceRefRequest, runtimev2.Task]
 }
 
 // RegisterHost calls supertag.runtime.v2.WorkerHost.RegisterHost.
@@ -2906,6 +2920,11 @@ func (c *workerHostClient) ReportCleanupFailure(ctx context.Context, req *connec
 	return c.reportCleanupFailure.CallUnary(ctx, req)
 }
 
+// ResolveWorkspaceRef calls supertag.runtime.v2.WorkerHost.ResolveWorkspaceRef.
+func (c *workerHostClient) ResolveWorkspaceRef(ctx context.Context, req *connect.Request[runtimev2.ResolveWorkspaceRefRequest]) (*connect.Response[runtimev2.Task], error) {
+	return c.resolveWorkspaceRef.CallUnary(ctx, req)
+}
+
 // WorkerHostHandler is an implementation of the supertag.runtime.v2.WorkerHost service.
 type WorkerHostHandler interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
@@ -2931,6 +2950,10 @@ type WorkerHostHandler interface {
 	// Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
 	// execution report. The Attempt stays uncertain until the host or an operator resolves it.
 	ReportCleanupFailure(context.Context, *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error)
+	// The commit the running Attempt's host resolved for its Task's Workspace `base_ref`. The first
+	// resolution in a Session wins and is recorded on every unresolved Task of the Session; the
+	// returned Task carries the recorded commit.
+	ResolveWorkspaceRef(context.Context, *connect.Request[runtimev2.ResolveWorkspaceRefRequest]) (*connect.Response[runtimev2.Task], error)
 }
 
 // NewWorkerHostHandler builds an HTTP handler from the service implementation. It returns the path
@@ -3048,6 +3071,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("ReportCleanupFailure")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostResolveWorkspaceRefHandler := connect.NewUnaryHandler(
+		WorkerHostResolveWorkspaceRefProcedure,
+		svc.ResolveWorkspaceRef,
+		connect.WithSchema(workerHostMethods.ByName("ResolveWorkspaceRef")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.WorkerHost/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkerHostRegisterHostProcedure:
@@ -3086,6 +3115,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostReportAppliedLimitsHandler.ServeHTTP(w, r)
 		case WorkerHostReportCleanupFailureProcedure:
 			workerHostReportCleanupFailureHandler.ServeHTTP(w, r)
+		case WorkerHostResolveWorkspaceRefProcedure:
+			workerHostResolveWorkspaceRefHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3165,6 +3196,10 @@ func (UnimplementedWorkerHostHandler) ReportAppliedLimits(context.Context, *conn
 
 func (UnimplementedWorkerHostHandler) ReportCleanupFailure(context.Context, *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportCleanupFailure is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ResolveWorkspaceRef(context.Context, *connect.Request[runtimev2.ResolveWorkspaceRefRequest]) (*connect.Response[runtimev2.Task], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ResolveWorkspaceRef is not implemented"))
 }
 
 // LiveInputsClient is a client for the supertag.runtime.v2.LiveInputs service.

@@ -2654,6 +2654,11 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "instructions": tag.instructions,
         "allowed_actions": tag.allowed_actions,
         "harness": tag.harness_kind().as_str_name(),
+        "workspace": tag.workspace.as_ref().map(|spec| json!({
+            "workspace_id": spec.workspace_id,
+            "base_commit": (!spec.base_commit.is_empty()).then_some(&spec.base_commit),
+            "ref": (!spec.base_ref.is_empty()).then_some(&spec.base_ref),
+        })),
         "workspace_mounts": tag.workspace.as_ref().map(|spec| workspace_mounts::describe(&spec.mounts)),
         "workspace_mcp_servers": tag.workspace.as_ref().map(|spec| &spec.mcp_servers),
         "shared_execution_environment_id": tag.execution.as_ref().and_then(|settings| settings.shared_execution_environment_id.as_deref()),
@@ -2673,7 +2678,11 @@ fn task_json(task: &Task) -> serde_json::Value {
         "harness": task.harness_kind().as_str_name(),
         "shared_execution_environment_id": supertag_protocol::shared_execution::environment(task.policy_snapshot.as_ref()),
         "workspace": task.workspace.as_ref().map(|spec| json!({
-            "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
+            "workspace_id": spec.workspace_id,
+            // The commit the Task starts from: pinned by its Tag, or resolved from `ref` when the
+            // Session's first Attempt started (empty until then).
+            "base_commit": spec.base_commit,
+            "ref": (!spec.base_ref.is_empty()).then_some(&spec.base_ref),
             "mounts": workspace_mounts::describe(&spec.mounts),
             "mcp_servers": spec.mcp_servers,
             "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),

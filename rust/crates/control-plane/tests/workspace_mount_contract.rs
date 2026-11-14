@@ -70,6 +70,7 @@ fn tag(
         harness_kind: harness.into(),
         allowed_actions: actions.iter().map(|action| (*action).into()).collect(),
         workspace: Some(WorkspaceSpec {
+            base_ref: String::new(),
             mcp_servers: vec![],
             workspace_id: "repo".into(),
             base_commit: BASE.into(),

@@ -636,6 +636,18 @@ impl worker_host_server::WorkerHost for ControlPlane {
         Ok(Response::new(ReportCleanupFailureResponse {}))
     }
 
+    async fn resolve_workspace_ref(
+        &self,
+        request: Request<ResolveWorkspaceRefRequest>,
+    ) -> Result<Response<Task>, Status> {
+        let principal = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .resolve_workspace_ref(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
     async fn report_attempt_usage(
         &self,
         request: Request<ReportAttemptUsageRequest>,

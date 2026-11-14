@@ -233,6 +233,7 @@ async fn contract(
             instructions: "Follow the fixture Task with its admitted tools.".into(),
             allowed_actions: vec!["files:read".into(), "files:write".into()],
             workspace: Some(WorkspaceSpec {
+                base_ref: String::new(),
                 mcp_servers: vec![],
                 mounts: vec![
                     mount("data-ro", "ro", false)?,

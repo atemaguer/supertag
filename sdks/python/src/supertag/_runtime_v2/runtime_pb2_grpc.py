@@ -3209,6 +3209,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureResponse.FromString,
                 _registered_method=True)
+        self.ResolveWorkspaceRef = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ResolveWorkspaceRef',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveWorkspaceRefRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+                _registered_method=True)
 
 
 class WorkerHostServicer:
@@ -3327,6 +3332,15 @@ class WorkerHostServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ResolveWorkspaceRef(self, request, context):
+        """The commit the running Attempt's host resolved for its Task's Workspace `base_ref`. The first
+        resolution in a Session wins and is recorded on every unresolved Task of the Session; the
+        returned Task carries the recorded commit.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerHostServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -3419,6 +3433,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.ReportCleanupFailure,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureResponse.SerializeToString,
+            ),
+            'ResolveWorkspaceRef': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResolveWorkspaceRef,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveWorkspaceRefRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -3907,6 +3926,33 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/ReportCleanupFailure',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ResolveWorkspaceRef(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ResolveWorkspaceRef',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveWorkspaceRefRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
             options,
             channel_credentials,
             insecure,

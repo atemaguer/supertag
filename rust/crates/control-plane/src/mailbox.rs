@@ -162,7 +162,9 @@ pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>) -> Result<()> {
              WHERE previous.tag_id=m.recipient_tag_id
              AND previous.session_id=('inbox:' || m.recipient_tag_id)
              AND (COALESCE(previous.workspace_id,'')<>COALESCE(tag.workspace_id,'')
-               OR COALESCE(previous.workspace_base_commit,'')<>COALESCE(tag.workspace_base_commit,'')
+               OR COALESCE(previous.workspace_base_ref,'')<>COALESCE(tag.workspace_base_ref,'')
+               OR (tag.workspace_base_ref IS NULL
+                 AND COALESCE(previous.workspace_base_commit,'')<>COALESCE(tag.workspace_base_commit,''))
                OR (tag.harness_kind<>0 AND previous.harness_kind<>tag.harness_kind)))
          GROUP BY m.recipient_tag_id ORDER BY MIN(m.delivery_order) LIMIT 128",
     )

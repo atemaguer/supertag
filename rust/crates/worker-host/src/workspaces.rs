@@ -170,6 +170,26 @@ impl Workspaces {
         ))
     }
 
+    /// The commit the branch a Task's Workspace follows names now in this host's mapped source.
+    /// Only a local checkout resolves branches; a GitHub Workspace selects its own revision.
+    pub async fn resolve_ref(
+        &self,
+        workspace_id: &str,
+        branch: &str,
+        cancel: &CancellationToken,
+    ) -> Result<String> {
+        ensure!(
+            supertag_protocol::valid_git_branch(branch),
+            "Workspace ref is not a branch name"
+        );
+        let source = self
+            .mapping(workspace_id)
+            .context("Task workspace is not configured on this Worker Host")?
+            .local_root()
+            .context("only a local Workspace follows a branch")?;
+        supertag_workspaces::base_ref::resolve(source, branch, cancel).await
+    }
+
     pub async fn prepare(
         &self,
         task: &Task,
@@ -181,6 +201,10 @@ impl Workspaces {
         let Some(spec) = &task.workspace else {
             return Ok(None);
         };
+        ensure!(
+            !spec.base_commit.is_empty(),
+            "Task Workspace branch was not resolved before preparation"
+        );
         let mapping = self
             .mapping(&spec.workspace_id)
             .context("Task workspace is not configured on this Worker Host")?;

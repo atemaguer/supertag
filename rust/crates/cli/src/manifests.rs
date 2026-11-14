@@ -101,7 +101,11 @@ struct WorkspaceSpecInput {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct WorkspaceBinding {
     id: String,
+    /// A full commit every Session starts from.
     base_commit: Option<String>,
+    /// A local Workspace branch whose current commit each new Session starts from.
+    #[serde(rename = "ref")]
+    base_ref: Option<String>,
     /// Servers the Workspace's `.mcp.json` declares that the Tag's Tasks may use.
     #[serde(default)]
     mcp: Vec<String>,

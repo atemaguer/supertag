@@ -10,6 +10,61 @@ use crate::{
 };
 
 impl Store {
+    /// Records the commit the running Attempt's Worker Host resolved for its Task's Workspace
+    /// branch. The first resolution in a Session wins: it is recorded on every unresolved Task of
+    /// the Session that follows the same branch, and a later or repeated report returns the
+    /// recorded commit unchanged.
+    pub async fn resolve_workspace_ref(
+        &self,
+        host: &HostAuthority,
+        input: &ResolveWorkspaceRefRequest,
+    ) -> Result<Task> {
+        let attempt = input
+            .attempt
+            .as_ref()
+            .ok_or_else(|| invalid("Task Attempt is required"))?;
+        if !supertag_protocol::valid_git_commit(&input.base_commit) {
+            return Err(invalid("full Git base commit required"));
+        }
+        let (mut tx, _) = self.write().await?;
+        let task = owned(
+            &mut tx,
+            host,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
+        )
+        .await?;
+        require_running(&task, self.execution_now_ms())?;
+        let spec = workspace_from_row(&task)?.ok_or_else(|| invalid("Attempt has no workspace"))?;
+        if spec.base_ref.is_empty() {
+            return Err(StoreError::FailedPrecondition(
+                "Task Workspace does not follow a branch".into(),
+            ));
+        }
+        if spec.base_commit.is_empty() {
+            sqlx::query(
+                "UPDATE supertag_v2_tasks SET workspace_base_commit=$1
+                 WHERE tag_id=$2 AND session_id=$3 AND workspace_id=$4 AND workspace_base_ref=$5
+                   AND workspace_base_commit='' AND state IN ($6,$7,$8)",
+            )
+            .bind(&input.base_commit)
+            .bind(task.try_get::<String, _>("tag_id")?)
+            .bind(task.try_get::<String, _>("session_id")?)
+            .bind(&spec.workspace_id)
+            .bind(&spec.base_ref)
+            // A Task that ended unresolved never started from any commit, so it stays unresolved.
+            .bind(TaskState::Queued as i64)
+            .bind(TaskState::Claimed as i64)
+            .bind(TaskState::Running as i64)
+            .execute(&mut *tx)
+            .await?;
+        }
+        let task = crate::store::task_in(&mut tx, &attempt.task_id).await?;
+        tx.commit().await?;
+        Ok(task)
+    }
+
     pub async fn get_workspace_continuation(
         &self,
         host: &HostAuthority,
@@ -240,9 +295,82 @@ pub(crate) async fn continuation_in(
     bytes.map(decode_delivery).transpose()
 }
 
+/// The stored form of a Workspace's followed branch: absent when it pins a commit.
+pub(crate) fn encode_base_ref(workspace: Option<&WorkspaceSpec>) -> Option<&str> {
+    workspace
+        .filter(|spec| !spec.base_ref.is_empty())
+        .map(|spec| spec.base_ref.as_str())
+}
+
+/// A Task of a Tag that follows a branch keeps the commit an earlier Task of its Session resolved
+/// for the same Workspace and branch, so a Session never moves to a newer commit.
+pub(crate) async fn bind_session_ref_in(
+    tx: &mut Transaction<'_, Any>,
+    (tag_id, session_id): (&str, &str),
+    workspace: &mut Option<WorkspaceSpec>,
+) -> Result<()> {
+    let Some(spec) = workspace
+        .as_mut()
+        .filter(|spec| !spec.base_ref.is_empty() && spec.base_commit.is_empty())
+    else {
+        return Ok(());
+    };
+    let resolved: Option<String> = sqlx::query_scalar(
+        "SELECT workspace_base_commit FROM supertag_v2_tasks
+         WHERE tag_id=$1 AND session_id=$2 AND workspace_id=$3 AND workspace_base_ref=$4
+           AND workspace_base_commit<>''
+         ORDER BY accepted_order LIMIT 1",
+    )
+    .bind(tag_id)
+    .bind(session_id)
+    .bind(&spec.workspace_id)
+    .bind(&spec.base_ref)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(resolved) = resolved {
+        spec.base_commit = resolved;
+    }
+    Ok(())
+}
+
+/// Current policy compared with a Task that already resolved the branch it follows: the same
+/// Workspace and branch keep that commit.
+pub(crate) fn inherit_resolved_ref(
+    current: &mut Option<WorkspaceSpec>,
+    prior: Option<&WorkspaceSpec>,
+) {
+    if let (Some(current), Some(prior)) = (current, prior)
+        && !current.base_ref.is_empty()
+        && current.base_commit.is_empty()
+        && current.workspace_id == prior.workspace_id
+        && current.base_ref == prior.base_ref
+    {
+        current.base_commit = prior.base_commit.clone();
+    }
+}
+
+/// Whether a Task keeps its Session's Workspace. Two Tasks that follow the same branch match even
+/// when only one has resolved it yet; the Session's resolution then applies to both.
+pub(crate) fn same_session_workspace(
+    previous: Option<&WorkspaceSpec>,
+    next: Option<&WorkspaceSpec>,
+) -> bool {
+    match (previous, next) {
+        (Some(previous), Some(next)) if !next.base_ref.is_empty() => {
+            let unresolved = |spec: &WorkspaceSpec| WorkspaceSpec {
+                base_commit: String::new(),
+                ..spec.clone()
+            };
+            unresolved(previous) == unresolved(next)
+        }
+        _ => previous == next,
+    }
+}
+
 pub(crate) fn workspace_from_row(row: &AnyRow) -> Result<Option<WorkspaceSpec>> {
     let id: Option<String> = row.try_get("workspace_id")?;
     let base: Option<String> = row.try_get("workspace_base_commit")?;
+    let base_ref: Option<String> = row.try_get("workspace_base_ref")?;
     // Tag rows have no source pin: admission resolves their configured catalog.
     let bytes = match row.try_get::<Vec<u8>, _>("workspace_github_source") {
         Ok(bytes) => bytes,
@@ -261,6 +389,7 @@ pub(crate) fn workspace_from_row(row: &AnyRow) -> Result<Option<WorkspaceSpec>> 
             github_source,
             mounts: crate::workspace_mounts::decode(row.try_get("workspace_mounts")?)?,
             mcp_servers: decode_mcp_servers(row.try_get("workspace_mcp_servers")?)?,
+            base_ref: base_ref.unwrap_or_default(),
         })),
         (None, None) => Ok(None),
         _ => Err(sqlx::Error::Protocol("incomplete stored workspace policy".into()).into()),
