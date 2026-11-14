@@ -86,7 +86,7 @@ pub struct AdapterOptions {
     /// Owner-only API credential file. Also accepts SUPERTAG_OPENCODE_AUTH_FILE.
     #[arg(long, requires = "harness")]
     opencode_auth_file: Option<PathBuf>,
-    /// Allow OpenCode or Cursor commands without an operating-system sandbox.
+    /// Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox.
     #[arg(long, requires = "harness")]
     allow_unsandboxed_commands: bool,
     /// Claude executable used by the Agent SDK.
@@ -384,8 +384,11 @@ impl AdapterOptions {
         );
         ensure!(
             !self.allow_unsandboxed_commands
-                || matches!(self.harness, Some(Harness::Opencode | Harness::Cursor)),
-            "--allow-unsandboxed-commands requires --harness opencode or cursor"
+                || matches!(
+                    self.harness,
+                    Some(Harness::ClaudeCode | Harness::Opencode | Harness::Cursor)
+                ),
+            "--allow-unsandboxed-commands requires --harness claude-code, opencode, or cursor"
         );
         if let Some(path) = self.adapter {
             return Ok((interpreter_path(path)?, self.adapter_arg));
@@ -546,6 +549,9 @@ impl AdapterOptions {
                     "--timeout-seconds".into(),
                     timeout_seconds.to_string().into(),
                 ]);
+                if self.allow_unsandboxed_commands {
+                    args.push("--allow-unsandboxed-commands".into());
+                }
                 Ok((runtime, args))
             }
         }
@@ -817,6 +823,64 @@ mod tests {
         let other =
             Command::try_parse_from(["test", "--harness", "codex", "--allow-unsandboxed-commands"])
                 .unwrap();
+        assert!(other.options.launch(42).is_err());
+    }
+
+    #[test]
+    fn claude_code_command_opt_in_is_explicit_and_preserved_for_local_host() {
+        let (_d, _binary, entry, node) = fixture();
+        let claude = |opt_in: bool| {
+            let mut args = vec![
+                OsString::from("test"),
+                "--harness".into(),
+                "claude-code".into(),
+                "--harness-runtime".into(),
+                node.clone().into_os_string(),
+                "--harness-entrypoint".into(),
+                entry.clone().into_os_string(),
+            ];
+            if opt_in {
+                args.push("--allow-unsandboxed-commands".into());
+            }
+            let command = Command::try_parse_from(args).unwrap();
+            assert_eq!(
+                command
+                    .options
+                    .execution_profile()
+                    .unwrap()
+                    .allow_unsandboxed_commands,
+                opt_in
+            );
+            let mut forwarded = vec![OsString::from("test")];
+            forwarded.extend(command.options.worker_args());
+            Command::try_parse_from(forwarded)
+                .unwrap()
+                .options
+                .launch(42)
+                .unwrap()
+                .1
+        };
+        assert_eq!(
+            claude(true),
+            vec![
+                entry.canonicalize().unwrap().into_os_string(),
+                "--timeout-seconds".into(),
+                "42".into(),
+                "--allow-unsandboxed-commands".into()
+            ]
+        );
+        assert!(
+            !claude(false)
+                .iter()
+                .any(|argument| argument == "--allow-unsandboxed-commands")
+        );
+        let other = Command::try_parse_from([
+            "test",
+            "--harness",
+            "openai-agents",
+            "--allow-unsandboxed-commands",
+        ])
+        .unwrap();
         assert!(other.options.launch(42).is_err());
     }
 

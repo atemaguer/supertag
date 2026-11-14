@@ -771,8 +771,8 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 }
                 if unsandboxed.contains(harness) {
                     ensure!(
-                        matches!(harness.as_str(), "opencode" | "cursor"),
-                        "only OpenCode and Cursor accept unsandboxed command consent"
+                        matches!(harness.as_str(), "claude-code" | "opencode" | "cursor"),
+                        "only Claude Code, OpenCode, and Cursor accept unsandboxed command consent"
                     );
                     args.push("--allow-unsandboxed-commands".into());
                 }
@@ -1668,6 +1668,30 @@ secrets:
                 .expect("must reject");
             assert!(!error.to_string().contains("literal-secret"));
         }
+    }
+    #[test]
+    fn claude_code_accepts_unsandboxed_command_consent_only_when_named() {
+        let profile = |consent: &str| {
+            let input = format!(
+                "services: {{host: {{type: host, control-plane: https://example.com, harnesses: [claude-code, openai-agents]{consent}}}}}"
+            );
+            let config = parse(input.as_bytes(), Path::new("/trusted"), |_| None)?;
+            let host = &config.hosts[0];
+            host.harnesses
+                .iter()
+                .map(|h| Ok(h.execution_profile()?.allow_unsandboxed_commands))
+                .collect::<Result<Vec<_>>>()
+        };
+        assert_eq!(profile("").unwrap(), [false, false]);
+        assert_eq!(
+            profile(", allow-unsandboxed-commands: [claude-code]").unwrap(),
+            [true, false]
+        );
+        let refused = profile(", allow-unsandboxed-commands: [openai-agents]").unwrap_err();
+        assert!(
+            format!("{refused:#}").contains("only Claude Code, OpenCode, and Cursor"),
+            "{refused:#}"
+        );
     }
     #[test]
     fn provisioning_configuration_requires_owner_control() {

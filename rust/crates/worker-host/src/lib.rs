@@ -175,7 +175,7 @@ impl Attempt {
             task.attempt_execution.as_ref().is_some_and(|attempt| {
                 matches!(
                     attempt.harness_kind(),
-                    HarnessKind::Opencode | HarnessKind::Cursor
+                    HarnessKind::ClaudeCode | HarnessKind::Opencode | HarnessKind::Cursor
                 ) && attempt.shared_execution.is_none()
                     && task
                         .allowed_actions

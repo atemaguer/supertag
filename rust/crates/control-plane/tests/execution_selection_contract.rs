@@ -306,6 +306,11 @@ async fn host_defaults_and_command_opt_in(url: &str) {
             "openai/local-fixture",
         ),
         ("local-cursor", HarnessKind::Cursor, "cursor-local-fixture"),
+        (
+            "local-claude",
+            HarnessKind::ClaudeCode,
+            "claude-local-fixture",
+        ),
     ] {
         put_builtin_tag(
             &store,
