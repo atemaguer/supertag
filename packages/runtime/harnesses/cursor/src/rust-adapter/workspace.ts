@@ -31,11 +31,18 @@ export function validateActions(actions: readonly string[], allowUnsandboxedComm
     throw new Error("Cursor command access requires files:write and Worker Host opt-in");
 }
 
+/** A Workspace Volume copy the Worker Host staged for this Attempt. */
+export interface WorkspaceCopy {
+  readonly destination: string;
+  readonly readWrite: boolean;
+}
+
 export async function createWorkspace(
   actions: readonly string[],
   timeoutMs: number,
   runnerEntrypoint?: string,
   remote?: CursorSplitExecutor,
+  copies: readonly WorkspaceCopy[] = [],
 ) {
   const environment = process.env;
   const scratchPath = environment["SUPERTAG_ADAPTER_STATE_DIRECTORY"] ?? "";
@@ -83,9 +90,16 @@ export async function createWorkspace(
   };
   if (remote)
     return { home, nativeWorkspace, storeDirectory, workspace, runtime, executor: remote };
+  // A local copy is a canonical directory outside the checkout. The file tools reach it as one
+  // more root: read-only copies only for reading, read-write copies also for writing.
+  for (const copy of copies)
+    if (!isAbsolute(copy.destination) || (await realpath(copy.destination)) !== copy.destination)
+      throw new Error("Cursor Workspace copy is not a canonical local directory");
   const files = createWorkspaceToolBridge({
     environment: {
-      rootDirectory: workspace,
+      // Every root must be inside the environment root, so copies widen it to the filesystem
+      // root; each root is then checked against its own canonical path.
+      rootDirectory: copies.length ? "/" : workspace,
       resolvePath: (path) => resolve(workspace, path),
       async read(path) {
         // Used for edit. Refuse oversized files and FIFOs before reading their contents.
@@ -105,6 +119,8 @@ export async function createWorkspace(
       spawn: runtime.spawn,
     },
     workspaceRoot: workspace,
+    readOnlyRoots: copies.filter((copy) => !copy.readWrite).map((copy) => copy.destination),
+    writableRoots: copies.filter((copy) => copy.readWrite).map((copy) => copy.destination),
     permissions: { filesWrite: actions.includes("files:write"), commandsExecute: false },
   });
   // The local command adapter has a credential-free HOME and invokes a non-login shell.

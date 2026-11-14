@@ -14,6 +14,7 @@ import {
   TaskState,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import {
+  type OpenCodeCopy,
   type OpenCodeMcpTool,
   type OpenCodeRunRequest,
   openCodeConfigurationEnvironment,
@@ -218,6 +219,7 @@ export async function nativeRequest(
   const scratch = await realpath(scratchPath);
   const workspace = await realpath(workspacePath);
   if (!(await lstat(workspace)).isDirectory()) throw new Error("OpenCode Workspace is missing");
+  const copies = await workspaceCopies(task);
   if (!(await verifyWorkspaceLinks(workspace, signal)))
     throw new SafeOpenCodeFailure(
       "OpenCode Workspace contains an unsafe symbolic link. Native execution did not start.",
@@ -303,11 +305,39 @@ export async function nativeRequest(
         environment: {
           ...environmentWithoutCredentials,
           ...(keyName && envKey ? { [keyName]: envKey } : {}),
-          ...openCodeConfigurationEnvironment(model, task.allowedActions, tools, true),
+          ...openCodeConfigurationEnvironment(
+            model,
+            task.allowedActions,
+            tools,
+            true,
+            copies,
+            workspace,
+          ),
         },
       };
     },
   };
+}
+
+/**
+ * The Worker Host's staged Workspace Volume copies. Each must be a canonical directory that holds
+ * no OpenCode wildcard, so its permission patterns name exactly that directory.
+ */
+async function workspaceCopies(task: Task): Promise<OpenCodeCopy[]> {
+  const copies: OpenCodeCopy[] = [];
+  for (const { destination, readWrite } of task.workspace?.mounts ?? []) {
+    if (
+      !isAbsolute(destination) ||
+      /[*?\p{Cc}]/u.test(destination) ||
+      (await realpath(destination)) !== destination ||
+      !(await lstat(destination)).isDirectory()
+    )
+      throw new SafeOpenCodeFailure(
+        "OpenCode cannot confine a Workspace Volume copy. Native execution did not start.",
+      );
+    copies.push({ destination, readWrite });
+  }
+  return copies;
 }
 
 function coordinationSecrets(tools: readonly OpenCodeMcpTool[]): string[] {

@@ -8,7 +8,7 @@
 //! provider's trusted copy of the base commit. Its stdin and stdout cross the Worker Host's
 //! private provider stream; ending that stream stops the server, never the sandbox.
 
-use std::{process::Stdio, time::Duration};
+use std::{collections::BTreeMap, process::Stdio, time::Duration};
 
 use serde_json::{Value, json};
 use supertag_protocol::{
@@ -29,7 +29,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
     Failure, SandboxConnection,
-    catalog::StdioServer,
+    catalog::{StdioServer, TRACKED_ENV_VALUE_BYTES},
     http::{PROTOCOL_VERSION, accepted_version, decode},
 };
 
@@ -58,6 +58,8 @@ pub(super) struct Session {
     /// Set once the stream failed or a request went unanswered; nothing more is sent.
     broken: bool,
     pub(super) unconfirmed_call: bool,
+    /// Values this launch read from the server's credential files, withheld from Task output.
+    pub(super) secrets: Vec<String>,
 }
 
 /// The base environment every stdio server receives.
@@ -78,12 +80,23 @@ impl Session {
         server: &StdioServer,
         processes: Option<&crate::journal::Processes>,
     ) -> Result<Self, Failure> {
+        // Credential files are read at each launch, so a rotated file takes effect.
+        let mut files = BTreeMap::new();
+        for (variable, file) in &server.env_files {
+            files.insert(variable, file.read().map_err(|_| Failure::Unavailable)?);
+        }
+        let secrets = files
+            .values()
+            .filter(|value| value.len() >= TRACKED_ENV_VALUE_BYTES)
+            .cloned()
+            .collect();
         let mut command = Command::new(&server.command[0]);
         command
             .args(&server.command[1..])
             .env_clear()
             .envs(base_environment())
             .envs(&server.env)
+            .envs(&files)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -115,6 +128,7 @@ impl Session {
             next_id: 1,
             broken: false,
             unconfirmed_call: false,
+            secrets,
         })
     }
 
@@ -191,6 +205,7 @@ impl Session {
             next_id: 1,
             broken: false,
             unconfirmed_call: false,
+            secrets: Vec::new(),
         })
     }
 
@@ -387,6 +402,7 @@ mod tests {
                 mode.into(),
             ],
             env: BTreeMap::from([("CATALOG_TOKEN".into(), "stdio-secret-value-7f3a".into())]),
+            env_files: BTreeMap::new(),
             cwd: None,
             sandboxed: false,
         }
@@ -437,14 +453,21 @@ mod tests {
             .unwrap();
         assert_eq!(result["content"][0]["text"], "fixture release record");
         // The server's ping was answered while the call waited.
+        // The fixture creates the file before writing it, so wait for a complete value, not
+        // for the file to exist.
         let ping_file = directory.path().join("calls.jsonl.ping");
-        for _ in 0..50 {
-            if ping_file.exists() {
+        let mut ping = None;
+        for _ in 0..250 {
+            if let Some(value) = std::fs::read(&ping_file)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            {
+                ping = Some(value);
                 break;
             }
             time::sleep(Duration::from_millis(20)).await;
         }
-        let ping: Value = serde_json::from_slice(&std::fs::read(ping_file).unwrap()).unwrap();
+        let ping = ping.expect("the server's ping answer was never recorded");
         assert_eq!(
             ping,
             json!({"jsonrpc":"2.0","id":"server-ping","result":{}})
@@ -530,6 +553,7 @@ mod tests {
                 pid_file.display().to_string(),
             ],
             env: BTreeMap::new(),
+            env_files: BTreeMap::new(),
             cwd: None,
             sandboxed: false,
         };
@@ -560,10 +584,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reads_its_credential_files_again_at_each_launch() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let token = directory.path().join("token");
+        let write = |value: &str| {
+            std::fs::write(&token, value).unwrap();
+            std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+        };
+        let output = directory.path().join("seen");
+        let server = StdioServer {
+            command: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                r#"printf %s "$DB_TOKEN" > "$0.tmp"; mv "$0.tmp" "$0"; exec sleep 60"#.into(),
+                output.display().to_string(),
+            ],
+            env: BTreeMap::new(),
+            env_files: BTreeMap::from([(
+                "DB_TOKEN".into(),
+                super::super::catalog::CredentialFile::new(&token, 4096, false).unwrap(),
+            )]),
+            cwd: None,
+            sandboxed: false,
+        };
+        for value in ["stdio-file-value-one", "stdio-file-value-two"] {
+            write(&format!("{value}\n"));
+            let _ = std::fs::remove_file(&output);
+            let mut session = Session::start(&server, None).unwrap();
+            // The value this launch read is withheld from Task-visible output.
+            assert_eq!(session.secrets, [value]);
+            let mut seen = None;
+            for _ in 0..200 {
+                if let Ok(text) = std::fs::read_to_string(&output) {
+                    seen = Some(text);
+                    break;
+                }
+                time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(seen.as_deref(), Some(value));
+            session.close().await;
+        }
+        // A file that became shared refuses the launch.
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(
+            Session::start(&server, None),
+            Err(Failure::Unavailable)
+        ));
+    }
+
+    #[tokio::test]
     async fn reports_a_server_that_cannot_start() {
         let missing = StdioServer {
             command: vec!["/nonexistent/supertag-missing-mcp-server".into()],
             env: BTreeMap::new(),
+            env_files: BTreeMap::new(),
             cwd: None,
             sandboxed: false,
         };

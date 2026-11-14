@@ -450,6 +450,22 @@ async fn exercise(url: &str) {
         assert!(admitted.workspace.unwrap().mounts[0].read_write);
         store.cancel_task(&admitted.task_id).await.unwrap();
     }
+    // Cursor and OpenCode confine their file tools to the checkout and granted copies.
+    for (id, harness) in [
+        ("cursor", HarnessKind::Cursor),
+        ("opencode", HarnessKind::Opencode),
+    ] {
+        store
+            .put_tag_spec(tag(id, harness, &["files:read"], vec![mount(&destination)]))
+            .await
+            .unwrap();
+        let admitted = store
+            .submit_task(OPERATOR, &submit(id, "s", id))
+            .await
+            .unwrap();
+        assert_eq!(admitted.workspace.unwrap().mounts.len(), 1, "{id}");
+        store.cancel_task(&admitted.task_id).await.unwrap();
+    }
     for (id, harness, actions) in [
         (
             "runner",
@@ -462,8 +478,7 @@ async fn exercise(url: &str) {
             &["files:read", "web:fetch"][..],
         ),
         ("blind", HarnessKind::Codex, &[][..]),
-        ("cursor", HarnessKind::Cursor, &["files:read"][..]),
-        ("opencode", HarnessKind::Opencode, &["files:read"][..]),
+        ("agents", HarnessKind::OpenaiAgents, &["files:read"][..]),
     ] {
         store
             .put_tag_spec(tag(id, harness, actions, vec![mount(&destination)]))

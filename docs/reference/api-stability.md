@@ -32,6 +32,7 @@ require changes at any time.
 | The connector protocol: `supertag.runtime.v2.Connector` | Experimental | [Connector contract](connector-contract.md) |
 | The shared execution protocol, `supertag.environment.v2` | Experimental | Used by `supertag-shared-execution` and Worker Hosts |
 | Generated Go, TypeScript, and Python bindings in `rust/bindings` | Experimental | Regenerated from the protos; not published as packages yet |
+| Workspace Volumes (`workspace-volume put`, `get workspace-volume`), Tag `--workspace-mounts` copies, and Worker Host `--workspace-mount-mappings` | Experimental | `file://` and `s3://` sources; an `s3://` Volume holds a credential label, never a value, and each Worker Host pins its endpoint, region, and key variables. Copies only; read-only provider-native Modal Volume mounts are on the backlog |
 | `deploy/` definitions and the `hosted` image's environment | Beta | The role contract in [Configure a deployment](../guides/deployment-setup.md) |
 
 ## Release policy

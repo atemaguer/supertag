@@ -360,10 +360,13 @@ async fn task(
     credentials: &Credentials,
     id: &str,
 ) -> Result<Task> {
-    Ok(client
+    let mut task = client
         .get_task(credentials.request(GetTaskRequest { task_id: id.into() })?)
         .await?
-        .into_inner())
+        .into_inner();
+    // Only GetTask computes the execution report; these cases compare Tasks other calls return.
+    task.execution_report = None;
+    Ok(task)
 }
 
 async fn events(

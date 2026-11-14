@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { open, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   attemptModel,
@@ -427,20 +427,59 @@ export class OpenCodeHarness implements Harness {
   }
 }
 
-export function openCodePermissions(actions: readonly string[]): Record<string, "allow" | "deny"> {
-  const allow = (action: string) =>
-    actions.includes(action) ? ("allow" as const) : ("deny" as const);
+type OpenCodeAction = "allow" | "deny";
+type OpenCodeRule = OpenCodeAction | Readonly<Record<string, OpenCodeAction>>;
+
+/**
+ * A Workspace Volume copy the Worker Host staged outside the Task worktree: a canonical
+ * directory without wildcard characters, so its OpenCode permission patterns match it exactly.
+ */
+export interface OpenCodeCopy {
+  readonly destination: string;
+  readonly readWrite: boolean;
+}
+
+/**
+ * OpenCode asks `external_directory` with the absolute parent directory of each file outside the
+ * worktree, followed by `/*`, and `edit` with the file's path relative to the worktree. The last
+ * matching rule wins, and `*` matches across `/`.
+ */
+export function openCodePermissions(
+  actions: readonly string[],
+  copies: readonly OpenCodeCopy[] = [],
+  worktree?: string,
+): Record<string, OpenCodeRule> {
+  const allow = (action: string): OpenCodeAction => (actions.includes(action) ? "allow" : "deny");
+  const readOnly = copies.filter(({ readWrite }) => !readWrite);
+  const edit: OpenCodeRule =
+    allow("files:write") === "allow" && readOnly.length > 0 && worktree !== undefined
+      ? {
+          "*": "allow",
+          ...Object.fromEntries(
+            readOnly.flatMap(({ destination }) => [
+              [`${relative(worktree, destination)}/*`, "deny"],
+              [`${destination}/*`, "deny"],
+            ]),
+          ),
+        }
+      : allow("files:write");
   return {
     "*": "deny",
     read: allow("files:read"),
     glob: allow("files:read"),
     grep: allow("files:read"),
-    edit: allow("files:write"),
+    edit,
     bash: allow("commands:execute"),
     webfetch: allow("web:fetch"),
     websearch: allow("web:search"),
     task: "deny",
-    external_directory: "deny",
+    // Only the Worker Host's copies are reachable outside the worktree.
+    external_directory: copies.length
+      ? {
+          "*": "deny",
+          ...Object.fromEntries(copies.map(({ destination }) => [`${destination}/*`, "allow"])),
+        }
+      : "deny",
     question: "deny",
     skill: "deny",
     lsp: "deny",
@@ -461,8 +500,10 @@ export function openCodeConfigurationEnvironment(
   actions: readonly string[],
   tools: readonly OpenCodeMcpTool[],
   disableAuxiliaryProcesses = false,
+  copies: readonly OpenCodeCopy[] = [],
+  worktree?: string,
 ): Readonly<Record<string, string>> {
-  const admittedPermission = openCodePermissions(actions);
+  const admittedPermission = openCodePermissions(actions, copies, worktree);
   const permission: Record<string, unknown> = {
     ...admittedPermission,
     task: { "*": "deny", general: "allow", explore: "allow" },

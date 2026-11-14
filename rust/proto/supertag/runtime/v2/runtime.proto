@@ -709,6 +709,9 @@ service WorkerHost {
   rpc ReclaimAttempt(ReclaimAttemptRequest) returns (AttemptResolution);
   // Limits the Attempt's adapter confirmed it applies, for the Task execution report.
   rpc ReportAppliedLimits(ReportAppliedLimitsRequest) returns (ReportAppliedLimitsResponse);
+  // Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
+  // execution report. The Attempt stays uncertain until the host or an operator resolves it.
+  rpc ReportCleanupFailure(ReportCleanupFailureRequest) returns (ReportCleanupFailureResponse);
 }
 
 enum HostPhase {
@@ -996,6 +999,72 @@ service RemoteWorkspaceProvider {
   // The first input is the start record; later inputs are its stdin. Outputs are its stdout.
   // Ending or cancelling the call stops the server process, never the sandbox.
   rpc RunMcpServer(stream RemoteMcpServerInput) returns (stream RemoteMcpServerOutput);
+  // One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
+  // Harness starts: the header, then for each file its record and exactly its bytes, and each
+  // empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+  // the returned tree.
+  rpc StageCopy(stream RemoteWorkspaceCopyUpload) returns (RemoteWorkspaceCopyStaged);
+  // After a successful Capture, a read-write copy's changed and created regular files: each
+  // record, then the summary, then each recorded file's bytes in record order.
+  rpc CaptureCopy(RemoteWorkspaceCaptureCopyRequest) returns (stream RemoteWorkspaceCopyDownload);
+  // Records the staged preparation sandbox as a prepared artifact, which later allocations start
+  // from. Only a sandbox allocated with `prepare` is snapshotted, never a Task sandbox.
+  rpc Snapshot(RemoteWorkspaceSnapshotRequest) returns (RemoteWorkspaceSnapshot);
+  // Deletes a prepared artifact; deleting one that is already gone succeeds.
+  rpc RemoveArtifact(RemoteWorkspaceRemoveArtifactRequest) returns (RemoteWorkspaceRemoveArtifactResponse);
+}
+
+// A Volume-relative file of a copy and its exact bytes' length and SHA-256.
+message RemoteWorkspaceCopyFile {
+  string key = 1;
+  uint64 size = 2;
+  string sha256 = 3;
+}
+
+message RemoteWorkspaceCopyHeader {
+  // `volumes/<SHA-256 of the Attempt ID>/<name>`, relative to the checkout.
+  string path = 1;
+  bool read_write = 2;
+}
+
+message RemoteWorkspaceCopyUpload {
+  oneof part {
+    RemoteWorkspaceCopyHeader header = 1;
+    RemoteWorkspaceCopyFile file = 2;
+    bytes payload = 3;
+    // An empty directory of the copy, by its Volume-relative path.
+    string directory = 4;
+  }
+}
+
+message RemoteWorkspaceCopyStaged {
+  uint64 files = 1;
+}
+
+message RemoteWorkspaceCaptureCopyRequest {
+  string path = 1;
+  // The copy's byte limit. Listing refuses a change set over it, or a changed file over it or
+  // 5 GiB, before reading that file, so it hashes at most the staged bytes and this limit.
+  uint64 max_bytes = 2;
+}
+
+// What the provider found in a read-write copy, after its changed and created file records.
+message RemoteWorkspaceCopyListed {
+  // Unchanged files, links, and other entries that are never written back.
+  uint64 skipped = 1;
+  // The first entry that refuses the copy: an unwritable name, a hard link, a directory
+  // nested too deeply, too many entries, or a change over the copy's byte limits. No bytes
+  // follow a refusal.
+  string error_key = 2;
+  string error_reason = 3;
+}
+
+message RemoteWorkspaceCopyDownload {
+  oneof part {
+    RemoteWorkspaceCopyFile file = 1;
+    RemoteWorkspaceCopyListed listed = 2;
+    bytes payload = 3;
+  }
 }
 
 message RemoteWorkspaceProviderBootstrap {
@@ -1017,6 +1086,12 @@ message RemoteWorkspaceAllocateRequest {
   // The trusted commit's devcontainer subset, translated by the Worker Host. Absent when the
   // commit declares none: the sandbox starts from the operator's template or image.
   optional RemoteWorkspaceEnvironment environment = 3400;
+  // Start from a prepared artifact this host recorded instead of building `environment`'s
+  // image. Stage then updates the prepared checkout, which keeps its untracked setup output.
+  optional string prepared_artifact = 3500;
+  // A preparation sandbox: Stage takes a bundle of the trusted commit alone and runs the setup
+  // lines, and Snapshot records the result. With `prepared_artifact`, preparation is warm.
+  bool prepare = 3501;
 }
 
 // A sandbox image and setup derived only from the trusted commit's devcontainer subset.
@@ -1037,6 +1112,19 @@ message RemoteWorkspaceEnvironment {
 message RemoteWorkspaceAllocation {
   string sandbox_id = 1;
 }
+
+message RemoteWorkspaceSnapshotRequest {}
+
+message RemoteWorkspaceSnapshot {
+  // The provider's artifact: an E2B snapshot ID or a Modal image ID.
+  string artifact = 1;
+}
+
+message RemoteWorkspaceRemoveArtifactRequest {
+  string artifact = 1;
+}
+
+message RemoteWorkspaceRemoveArtifactResponse {}
 
 message RemoteWorkspaceStageHeader {
   string start_commit = 1;
@@ -1516,7 +1604,69 @@ message Task {
   // What each Attempt's read-write Workspace copies wrote back to their Volumes. Set only by
   // GetTask; the Control Plane records the summary, never the bytes.
   repeated AttemptWorkspaceMountWrites workspace_mount_writes = 5100;
+  // What the current Attempt's durable records show about its limits and its cleanup. Set only
+  // by GetTask.
+  TaskExecutionReport execution_report = 5200;
 }
+
+// How the current Attempt ended against its execution limits.
+enum ExecutionLimitOutcome {
+  EXECUTION_LIMIT_OUTCOME_UNSPECIFIED = 0;
+  // No limit was requested or applied.
+  EXECUTION_LIMIT_OUTCOME_NOT_REQUESTED = 1;
+  // The Attempt has not ended and no threshold was reached yet.
+  EXECUTION_LIMIT_OUTCOME_PENDING = 2;
+  EXECUTION_LIMIT_OUTCOME_WITHIN_LIMITS = 3;
+  EXECUTION_LIMIT_OUTCOME_THRESHOLD_REACHED = 4;
+  // The Attempt ended, but its records cannot show whether every limit held.
+  EXECUTION_LIMIT_OUTCOME_UNKNOWN = 5;
+}
+
+// One limited dimension of the current Attempt. Unspecified: the dimension has no limit.
+enum ExecutionThreshold {
+  EXECUTION_THRESHOLD_UNSPECIFIED = 0;
+  EXECUTION_THRESHOLD_NOT_REACHED = 1;
+  EXECUTION_THRESHOLD_REACHED = 2;
+  // No applied limit, or no observation that decides it.
+  EXECUTION_THRESHOLD_UNDETERMINED = 3;
+}
+
+// Whether the current Attempt's execution was proven stopped.
+enum AttemptCleanup {
+  ATTEMPT_CLEANUP_UNSPECIFIED = 0;
+  // No Attempt, or one whose execution never started.
+  ATTEMPT_CLEANUP_NOT_STARTED = 1;
+  // The Attempt still holds execution authority.
+  ATTEMPT_CLEANUP_PENDING = 2;
+  // The host confirmed execution stopped, or an operator recorded that it did.
+  ATTEMPT_CLEANUP_CONFIRMED = 3;
+  // Execution may still be running: the host could not confirm cleanup or lost its authority.
+  ATTEMPT_CLEANUP_UNKNOWN = 4;
+}
+
+message TaskExecutionReport {
+  ExecutionLimitOutcome limit_outcome = 1;
+  ExecutionThreshold max_reported_tokens = 2;
+  ExecutionThreshold max_reported_cost = 3;
+  ExecutionThreshold max_native_agents = 4;
+  // Every requested limit has an applied limit at or below it.
+  bool limits_applied = 5;
+  // Whether the Attempt's usage records are final. Absent when no token or cost limit applies.
+  optional bool usage_complete = 6;
+  // The report classifies every limited dimension of an ended Attempt.
+  bool complete = 7;
+  AttemptCleanup cleanup = 8;
+  // The host's redacted reasons when it could not confirm cleanup: at most 8, each at most 160
+  // characters. Cleared when the host later confirms cleanup.
+  repeated string cleanup_failure = 9;
+}
+
+message ReportCleanupFailureRequest {
+  InspectAttemptRequest attempt = 1;
+  repeated string reasons = 2;
+}
+
+message ReportCleanupFailureResponse {}
 
 message TaskArtifactInputSelection {
   string artifact_id = 1;

@@ -15,9 +15,10 @@ use crate::{
     CoordinationClients, HostOptions,
     adapter::artifact_acquisition::AcquisitionClient,
     journal::{Attempt, Journal, RemoteSandboxState},
-    remote_provider::RemoteProvider,
+    remote_provider::{RemoteProvider, Start},
     task_artifact_inputs::RemoteInputs,
     task_outputs::PendingOutputs,
+    workspace_mounts::{Mounted, WorkspaceMounts, record_remote, remote_writer},
     workspaces::{PreparedWorkspace, Workspaces},
 };
 
@@ -25,6 +26,19 @@ use crate::{
 pub(crate) const MAX_SANDBOX_LIFETIME: Duration = Duration::from_secs(3600);
 /// Sandbox life kept after the harness stops, for capture and cleanup.
 const SANDBOX_CLEANUP_MARGIN: Duration = Duration::from_secs(180);
+/// The rate, in bytes per second, at which sandbox life is kept for capturing
+/// read-write copies: the sandbox hashes what each copy staged and up to its
+/// limit, then returns up to its limit.
+const COPY_CAPTURE_RATE: u64 = 32 * 1024 * 1024;
+
+/// Sandbox life kept after the harness stops to capture read-write copies,
+/// each given as its staged bytes and its byte limit.
+fn copy_capture_margin(read_write: impl Iterator<Item = (u64, u64)>) -> Duration {
+    let bytes = read_write
+        .map(|(staged, max_bytes)| staged.saturating_add(max_bytes.saturating_mul(2)))
+        .fold(0u64, u64::saturating_add);
+    Duration::from_secs(bytes.div_ceil(COPY_CAPTURE_RATE))
+}
 
 /// The Attempt time limit must be positive, and a remote sandbox must outlive it.
 pub(crate) fn validate_time_limit(limit: Duration, remote: bool) -> Result<()> {
@@ -38,6 +52,8 @@ pub(crate) fn validate_time_limit(limit: Duration, remote: bool) -> Result<()> {
 }
 
 pub(crate) const CAPTURE_FAILED: &str = "Remote Workspace output could not be captured safely";
+pub(crate) const COPY_CAPTURE_FAILED: &str =
+    "Remote Workspace Volume copies could not be captured safely";
 pub(crate) const OUTPUTS_FAILED: &str = "Task output files could not be captured safely";
 
 pub(crate) async fn prepare(
@@ -45,7 +61,11 @@ pub(crate) async fn prepare(
     journal: &Journal,
     workspaces: &Workspaces,
     (attempt, workspace, task): (&Attempt, &PreparedWorkspace, &Task),
-    (mcp_commit, environment): (Option<&str>, Option<RemoteDevcontainer>),
+    (mcp_commit, environment, mounted): (
+        Option<&str>,
+        Option<RemoteDevcontainer>,
+        Option<&Mounted>,
+    ),
     (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
     cancel: &CancellationToken,
 ) -> Result<(RemoteProvider, Option<String>, Instant)> {
@@ -73,6 +93,26 @@ pub(crate) async fn prepare(
         attempt: attempt.inspect(),
     };
     let inputs = RemoteInputs::download(&acquisition, task, cancel).await?;
+    // A devcontainer with lifecycle commands starts the Task's sandbox from a prepared artifact:
+    // its image, trusted checkout, and setup are already there.
+    let prepared = match environment
+        .as_ref()
+        .filter(|environment| environment.prepared)
+    {
+        Some(environment) => Some(
+            crate::prepared::artifact(
+                options,
+                journal,
+                workspaces,
+                (attempt, workspace),
+                environment,
+                registration,
+                cancel,
+            )
+            .await?,
+        ),
+        None => None,
+    };
     let provider = RemoteProvider::spawn(config, &journal.remote_scratch()?, cancel).await?;
     ensure!(!cancel.is_cancelled(), "sandbox preparation cancelled");
     let record = journal.begin_remote_sandbox(
@@ -81,19 +121,43 @@ pub(crate) async fn prepare(
         registration.generation,
         config.authority_fingerprint(),
     )?;
+    let read_write = mounted.into_iter().flat_map(|mounted| {
+        mounted
+            .copies()
+            .iter()
+            .filter(|copy| copy.read_write)
+            .map(|copy| {
+                (
+                    copy.files.iter().map(|file| file.size).sum(),
+                    copy.max_bytes,
+                )
+            })
+    });
+    let margin = SANDBOX_CLEANUP_MARGIN.saturating_add(copy_capture_margin(read_write));
     let timeout = options
         .attempt_timeout
-        .saturating_add(SANDBOX_CLEANUP_MARGIN)
+        .saturating_add(margin)
         .min(MAX_SANDBOX_LIFETIME);
+    ensure!(
+        timeout > margin,
+        "Workspace copies leave a remote sandbox no time for the Harness; lower their byte limits"
+    );
     // The sandbox's clock starts no earlier than this request, so the harness stops in time
-    // to leave the cleanup margin even when preparation took part of the lifetime.
-    let execution_ends = Instant::now() + timeout - SANDBOX_CLEANUP_MARGIN;
-    let environment = environment.map(|environment| RemoteWorkspaceEnvironment {
-        image: environment.image,
-        dockerfile_commands: environment.dockerfile_commands,
-        user: environment.user,
-        setup_commands: environment.setup_commands,
-    });
+    // to leave the cleanup margin, and time to capture read-write copies, even when
+    // preparation took part of the lifetime.
+    let execution_ends = Instant::now() + timeout - margin;
+    let (environment, start) = match prepared {
+        Some(artifact) => (None, Start::Prepared(artifact)),
+        None => (
+            environment.map(|environment| RemoteWorkspaceEnvironment {
+                image: environment.image,
+                dockerfile_commands: environment.dockerfile_commands,
+                user: environment.user,
+                setup_commands: environment.setup_commands,
+            }),
+            Start::Fresh,
+        ),
+    };
     let setup = environment
         .as_ref()
         .is_some_and(|environment| !environment.setup_commands.is_empty());
@@ -102,7 +166,7 @@ pub(crate) async fn prepare(
             &record.owner(),
             timeout,
             &allowed_actions,
-            environment,
+            (environment, &start),
             cancel,
         )
         .await?;
@@ -117,7 +181,19 @@ pub(crate) async fn prepare(
             cancel,
         )
         .await?;
-    let instructions = inputs.delivered(&acquisition, cancel).await?;
+    let mut instructions = inputs.delivered(&acquisition, cancel).await?;
+    if let Some(mounted) = mounted {
+        // Each copy was staged on this host with its Volume's credential; only
+        // its files reach the sandbox.
+        for copy in mounted.copies() {
+            provider
+                .stage_copy(copy, &attempt.attempt_id, cancel)
+                .await?;
+        }
+        instructions
+            .get_or_insert_default()
+            .push_str(&mounted.remote_instructions(&attempt.attempt_id)?);
+    }
     Ok((provider, instructions, execution_ends))
 }
 
@@ -126,7 +202,7 @@ pub(crate) async fn capture(
     journal: &Journal,
     (workspace, workspaces, has_inputs): (&PreparedWorkspace, &Workspaces, bool),
     outputs: Option<Box<PendingOutputs>>,
-    state: &std::path::Path,
+    (state, copies): (&std::path::Path, Option<(&Mounted, &WorkspaceMounts)>),
     authority: (&crate::checkpoints::Transfers, &Attempt, &str),
     cancel: &CancellationToken,
 ) -> Result<(TransferArtifact, Option<Box<PendingOutputs>>), Status> {
@@ -137,9 +213,18 @@ pub(crate) async fn capture(
         .capture(&directory, cancel)
         .await
         .map_err(|_| Status::failed_precondition(CAPTURE_FAILED))?;
+    let attempt_id = &authority.1.attempt_id;
+    let mut excluded = vec![];
     if has_inputs {
+        excluded.push(input_root(attempt_id));
+    }
+    if copies.is_some() {
+        excluded.push(supertag_protocol::workspace_mounts::remote_copy_root(
+            attempt_id,
+        ));
+    }
+    for root in excluded {
         let archive = tree.clone();
-        let root = input_root(&authority.1.attempt_id);
         let cancel = cancel.clone();
         tokio::task::spawn_blocking(move || {
             supertag_workspaces::verify_return_excludes(&archive, &root, &cancel)
@@ -147,6 +232,33 @@ pub(crate) async fn capture(
         .await
         .map_err(|_| Status::internal(CAPTURE_FAILED))?
         .map_err(|_| Status::failed_precondition(CAPTURE_FAILED))?;
+    }
+    if let Some((mounted, mounts)) = copies {
+        // Read-write copies come back into their host copies, which the
+        // journaled write-back then writes to their Volumes.
+        for copy in mounted.copies().iter().filter(|copy| copy.read_write) {
+            let listing = provider
+                .capture_copy(
+                    copy,
+                    attempt_id,
+                    |listing| {
+                        listing
+                            .writable(copy.max_bytes)
+                            .then(|| remote_writer(mounts, state, attempt_id, copy.index))
+                            .transpose()
+                    },
+                    cancel,
+                )
+                .await
+                .map_err(|error| {
+                    supertag_protocol::terminal_text::warn(&format!(
+                        "Remote Workspace Volume copy capture failed: {error:#}"
+                    ));
+                    Status::failed_precondition(COPY_CAPTURE_FAILED)
+                })?;
+            record_remote(state, attempt_id, copy.index, &listing)
+                .map_err(|_| Status::failed_precondition(COPY_CAPTURE_FAILED))?;
+        }
     }
     let outputs = if let Some(outputs) = outputs {
         Some(Box::new(
@@ -226,5 +338,20 @@ mod tests {
         assert!(validate_time_limit(Duration::from_secs(86_400), false).is_ok());
         assert!(validate_time_limit(MAX_SANDBOX_LIFETIME, true).is_ok());
         assert!(validate_time_limit(MAX_SANDBOX_LIFETIME + Duration::from_secs(1), true).is_err());
+    }
+
+    #[test]
+    fn read_write_copies_keep_sandbox_life_for_their_capture() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        assert_eq!(copy_capture_margin(std::iter::empty()), Duration::ZERO);
+        // A default 1 GiB copy that staged 1 GiB: listing 2 GiB, returning 1 GiB.
+        assert_eq!(
+            copy_capture_margin([(GIB, GIB)].into_iter()),
+            Duration::from_secs(96)
+        );
+        // The largest copy still leaves the Harness most of a sandbox's hour.
+        let largest = copy_capture_margin([(20 * GIB, 20 * GIB)].into_iter());
+        assert_eq!(largest, Duration::from_secs(1920));
+        assert!(largest + SANDBOX_CLEANUP_MARGIN < MAX_SANDBOX_LIFETIME);
     }
 }

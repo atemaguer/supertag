@@ -8,13 +8,30 @@ use crate::{
 };
 
 pub const MAX_WORKSPACE_MOUNTS: usize = 8;
-pub const MAX_WORKSPACE_MOUNT_BYTES: u64 = 256 * 1024 * 1024;
+/// A copy's byte limit when its declaration sets none: 1 GiB, as in TypeScript.
+pub const DEFAULT_WORKSPACE_MOUNT_BYTES: u64 = 1024 * 1024 * 1024;
+/// The largest byte limit one copy may declare, and the most bytes one Attempt copies across
+/// all of its copies: 20 GiB, as in TypeScript.
+pub const MAX_WORKSPACE_MOUNT_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+/// Most files one copy may hold, as in TypeScript.
+pub const MAX_WORKSPACE_MOUNT_FILES: usize = 10_000;
+/// Most directory entries, files and directories alike, one `file://` copy visits.
+pub const MAX_WORKSPACE_MOUNT_ENTRIES: usize = 4 * MAX_WORKSPACE_MOUNT_FILES;
 /// Most files one copy may write back in one Attempt, as in TypeScript.
 pub const MAX_WRITE_FILES: usize = 1_000;
+/// Largest file one copy may write back: 5 GiB, a single S3 `PUT`, as in TypeScript.
+pub const MAX_WRITE_FILE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 /// Most bytes, as protobuf, one Attempt's write summaries may take.
 pub const MAX_WRITES_BYTES: usize = 512 * 1024;
 /// Longest Volume-relative key a copy may hold or write.
 pub const MAX_KEY_BYTES: usize = 1024;
+
+/// Where a remote Workspace holds an Attempt's copies, relative to its checkout. The returned
+/// tree never includes it.
+pub fn remote_copy_root(attempt_id: &str) -> String {
+    use sha2::Digest;
+    format!("volumes/{:x}", sha2::Sha256::digest(attempt_id.as_bytes()))
+}
 
 /// Credential names are labels Worker Hosts map to their own secrets.
 pub fn credential_name(name: &str) -> bool {
@@ -141,7 +158,6 @@ pub fn normalize_mounts(mounts: &mut [WorkspaceCopyMount]) -> Result<(), Status>
     }
     mounts.sort_unstable_by(|a, b| a.destination.cmp(&b.destination));
     let mut paths = Vec::new();
-    let mut total = 0u64;
     for mount in mounts {
         let path = absolute_path(&mount.destination)?;
         // Dot names are configuration for tools that read the parent directory.
@@ -153,10 +169,9 @@ pub fn normalize_mounts(mounts: &mut [WorkspaceCopyMount]) -> Result<(), Status>
                 "Workspace mount destination cannot be a dot name",
             ));
         }
-        total = total.saturating_add(mount.max_bytes);
+        // The Attempt's 20 GiB across copies bounds what is copied, not the declared limits.
         if !volume_id(&mount.volume_id)
             || !(1..=MAX_WORKSPACE_MOUNT_BYTES).contains(&mount.max_bytes)
-            || total > MAX_WORKSPACE_MOUNT_BYTES
             || paths.iter().any(|&prior| overlaps(prior, path))
         {
             return Err(Status::invalid_argument(
@@ -193,10 +208,14 @@ pub fn normalize_capabilities(items: &mut [WorkspaceMountCapability]) -> Result<
     Ok(())
 }
 
-/// Harnesses whose local tools Worker Hosts confine to granted roots, so a
-/// copy is readable and, when read-write, writable without other access.
+/// Harnesses whose tools Worker Hosts confine to the checkout and granted roots, so a copy is
+/// readable and, when read-write, writable without other access. Cursor's remote file tools
+/// reach a copy the Worker Host staged into the sandbox beside the checkout.
 pub fn mount_harness(harness: HarnessKind) -> bool {
-    matches!(harness, HarnessKind::Codex | HarnessKind::ClaudeCode)
+    matches!(
+        harness,
+        HarnessKind::Codex | HarnessKind::ClaudeCode | HarnessKind::Cursor | HarnessKind::Opencode
+    )
 }
 
 /// Copies need file reads, and every read-write copy needs file writes.
@@ -220,7 +239,6 @@ pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionPro
         return true;
     };
     mount_harness(harness)
-        && !profile.remote_file_workspace
         && profile.shared_execution.is_none()
         && spec.github_source.is_none()
         && mount_actions(&spec.mounts, &task.allowed_actions)
@@ -362,8 +380,38 @@ mod tests {
             &[mount(false)],
             &read(&["files:read", "web:fetch"])
         ));
-        assert!(mount_harness(HarnessKind::Codex) && mount_harness(HarnessKind::ClaudeCode));
-        assert!(!mount_harness(HarnessKind::Opencode) && !mount_harness(HarnessKind::Cursor));
+        for harness in [
+            HarnessKind::Codex,
+            HarnessKind::ClaudeCode,
+            HarnessKind::Cursor,
+            HarnessKind::Opencode,
+        ] {
+            assert!(mount_harness(harness));
+        }
+        assert!(!mount_harness(HarnessKind::OpenaiAgents));
+    }
+
+    #[test]
+    fn copy_limits_match_typescript() {
+        let mut mounts = vec![mount(false)];
+        mounts[0].max_bytes = MAX_WORKSPACE_MOUNT_BYTES;
+        assert!(normalize_mounts(&mut mounts).is_ok());
+        mounts[0].max_bytes += 1;
+        assert!(normalize_mounts(&mut mounts).is_err());
+        mounts[0].max_bytes = 0;
+        assert!(normalize_mounts(&mut mounts).is_err());
+        // Each copy may declare up to 20 GiB; the Host bounds what the Attempt copies in total.
+        let mut many: Vec<_> = (0..MAX_WORKSPACE_MOUNTS)
+            .map(|index| WorkspaceCopyMount {
+                destination: format!("/mnt/data{index}"),
+                max_bytes: MAX_WORKSPACE_MOUNT_BYTES,
+                ..mount(false)
+            })
+            .collect();
+        assert!(normalize_mounts(&mut many).is_ok());
+        assert_eq!(DEFAULT_WORKSPACE_MOUNT_BYTES, 1 << 30);
+        assert_eq!(MAX_WORKSPACE_MOUNT_FILES, 10_000);
+        assert_eq!(MAX_WORKSPACE_MOUNT_ENTRIES, 40_000);
     }
 
     #[test]

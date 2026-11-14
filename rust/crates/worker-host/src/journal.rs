@@ -146,6 +146,16 @@ pub(crate) enum Entry {
 }
 
 impl Entry {
+    /// The Attempt whose execution started and was not yet confirmed stopped.
+    pub(crate) fn unsettled_attempt(&self) -> Option<&Attempt> {
+        match self {
+            Self::Executing { attempt, .. }
+            | Self::Finalizing { attempt, .. }
+            | Self::Finish { attempt, .. } => Some(attempt),
+            _ => None,
+        }
+    }
+
     /// Keep checkout ownership when an outcome is downgraded after local cleanup.
     pub(crate) fn prepared(&self, expected: &Attempt) -> Result<Option<Box<PreparedWorkspace>>> {
         let (attempt, prepared) = match self {
@@ -490,6 +500,18 @@ impl Journal {
         };
         self.save_remote_sandbox(&record)?;
         Ok(record)
+    }
+
+    /// Forgets a preparation sandbox whose stop was confirmed, so the Attempt's own sandbox can
+    /// be journaled next.
+    pub(crate) fn retire_stopped_sandbox(&self, record: &RemoteSandbox) -> Result<()> {
+        ensure!(
+            matches!(record.state, RemoteSandboxState::Stopped { .. })
+                && self.remote_sandbox()?.as_ref() == Some(record),
+            "only a confirmed sandbox stop can be retired"
+        );
+        fs::remove_file(self.remote_sandbox_path())?;
+        self.sync_directory()
     }
 
     pub(crate) fn write(

@@ -16,6 +16,8 @@ export interface SplitExecutionBridgeOptions {
   workspaceRoot: string;
   /** Staged input mounts outside the checkout. File tools may only read them. */
   readOnlyRoots?: readonly string[];
+  /** Read-write Workspace Volume copies outside the checkout, writable with files:write. */
+  writableRoots?: readonly string[];
   /** Worker-managed Task output directory, writable with files:write. */
   outputDirectory?: string;
   permissions: { filesWrite: boolean; commandsExecute: boolean };
@@ -154,7 +156,7 @@ function integer(value: unknown, fallback: number, maximum: number, minimum = 0)
   return Math.min(value as number, maximum);
 }
 function contained(root: string, path: string): boolean {
-  return path === root || path.startsWith(`${root}/`);
+  return path === root || path.startsWith(root === "/" ? root : `${root}/`);
 }
 function bounded(value: string, bytes: number): string {
   const buffer = Buffer.from(value);
@@ -243,6 +245,10 @@ export function createWorkspaceToolBridge(
     ...(options.outputDirectory === undefined
       ? []
       : [{ path: environment.resolvePath(options.outputDirectory), writable: true }]),
+    ...(options.writableRoots ?? []).map((path) => ({
+      path: environment.resolvePath(path),
+      writable: true,
+    })),
     ...(options.readOnlyRoots ?? []).map((path) => ({
       path: environment.resolvePath(path),
       writable: false,

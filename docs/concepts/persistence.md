@@ -41,33 +41,25 @@ dies.
 Docker doesn't refuse to run a container without a volume. SuperTag doesn't refuse either.
 Temporary output is a valid choice, as long as it's a known one.
 
-## Copies and live mounts
+## Copies of Volume data
 
-A **Workspace** names a git repository and can attach data from a Volume outside its checkout.
-For example, an analysis repository can read a dataset from a bucket without adding it to git.
-The mount strategy determines whether a Task reads a separate copy or the live source.
+A **Workspace** names a git repository. A Task can also receive data from a **Volume**, a host
+directory or an S3 bucket and prefix, outside its checkout. For example, an analysis Task can read
+a dataset from a bucket without adding it to git.
 
-| Strategy | What the Task reads | When to choose it |
-| --- | --- | --- |
-| Copy | Files copied into its environment before the harness starts, with a recorded manifest | A bounded dataset that fits in the Task environment |
-| Native mount | Live data from the source, without a copy manifest | A large dataset or data that must remain live |
+A Task always receives a copy. The Worker Host makes it fresh for each Task Attempt, after the
+checkout and `setup`, so prepared images and snapshots never contain the data. The Worker Host
+reads the source with its own credential, and the Task and its harness see only the files. In a
+remote E2B or Modal Workspace, only the files enter the sandbox.
 
-Native mounts attach at Task start, after setup. They can be read-only or read-write.
-Mounted content never becomes part of prepared images or setup snapshots. A live source can change
-between reads or Task runs, so a mount does not pin a dataset version. Object stores do not offer
-all local filesystem operations; keep tools that require rename, append, or locks in the checkout.
+A copy pins what the Task read: a later change to the source does not reach a running Task. A
+read-only copy cannot preserve Task output. A read-write copy can: after a successful Task
+Attempt, the Worker Host writes changed and created files back to the Volume, and records what it
+wrote. A failed Task Attempt writes nothing, and deletions are never written.
 
-The provider enforces the declared access and holds storage credentials outside the Task's
-environment and harness.
-Local and e2b providers refuse native mounts. SuperTag refuses unsupported strategies before
-calling a provider and never silently substitutes a copy.
-
-Modal attaches S3, R2, GCS, and Modal Volume sources with their declared access.
-[Attach persistent storage to a Workspace](../guides/workers.md#run-cursor-in-a-sandbox)
-
-Both strategies leave the source outside the sandbox's lifecycle. A copied dataset inside a
-sandbox disappears with that sandbox; the source remains subject to its own storage durability.
-Read-only mounts do not preserve Task outputs. Deliver those through git or store them as artifacts.
+Read-only provider-native Modal Volume mounts are on the backlog. Live read-write mounts are not
+offered: a write through one would bypass the Worker Host's bounded, recorded write-back.
+[Attach data outside the repository](../guides/workspaces.md#attach-data-outside-the-repository)
 
 ## Where artifacts are kept
 
@@ -94,27 +86,6 @@ applies to resumed Sessions (continued conversations) restoring harness-home art
 host. Configure a shared artifact Volume or a reachable transfer endpoint before moving that work.
 Native Session transcripts remain separate state on the Control Plane; they do not supply missing
 harness-home artifact bytes.
-
-## Read live data beside a checkout
-
-A Workspace names a git repository and can attach a Volume beside its checkout. For example,
-a training Task can read a shared model dataset without first copying the whole dataset.
-Modal can attach buckets and Modal Volumes as native read-only mounts. Setup runs before these
-mounts exist, so prepared images and snapshots never contain their data.
-
-The mount is live: another writer can change the source while a Task runs. SuperTag records the
-source, prefix, destination, and attachment time. It does not freeze the files or produce a copy
-manifest. Disposing the sandbox removes its attachment; the source stays with its storage provider.
-Read-only mounts cannot preserve new Task output. Capture outputs as artifacts or deliver git changes.
-
-Credentials stay with Modal. A host names a Modal Secret or an S3 OIDC role; a Modal Volume uses
-the provider's identity with the host's consent to that specific Volume.
-The host controls the Modal environment. The harness receives neither bucket credentials nor Modal account tokens.
-Local and e2b environments support copies only, and SuperTag never silently substitutes a copy.
-See [Volumes](../reference/resource-model.md#native-source-settings) for supported sources.
-
-Object stores do not behave like local disks. They lack the rename, append, and locking behavior
-that tools such as git and SQLite expect. Keep the checkout and writable tool state outside mounts.
 
 ## Credentials and local access
 

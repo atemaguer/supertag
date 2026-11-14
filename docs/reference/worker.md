@@ -127,11 +127,14 @@ follow and stop publication of verified results.
 
 A Tag may copy data from a **Volume**, a registered directory or S3 prefix, into its Tasks:
 `supertag workspace-volume put` registers it, `tag put --workspace-mounts` binds it, and each
-serving host maps it with `--workspace-mount-mappings`. A read-only copy is staged before the
-harness starts and removed afterwards. A read-write copy requires `files:write`; after a
-successful Task Attempt the host writes changed and created files back to the Volume, never
-deletions or links, and records a summary on the Task. Copies serve local Codex and Claude Code
-Tasks that do not run commands or fetch from the web.
+serving host maps it with `--workspace-mount-mappings FILE`, which pins an S3 Volume's endpoint,
+region, and key variables. A copy is staged after the checkout and `setup`, before the harness
+starts, and removed afterwards; the Volume credential never leaves the host. A read-write copy
+requires `files:write`; after a successful Task Attempt the host writes changed and created files
+back to the Volume, never deletions or links, and records a summary on the Task. Codex, Claude
+Code, Cursor, and OpenCode Tasks take copies when they do not run commands or fetch from the web.
+A Cursor Task in an E2B or Modal Workspace receives only the files inside its sandbox. Copies are
+the only form: read-only provider-native Modal Volume mounts are on the backlog.
 
 ## Remote sandboxes and shared execution
 
@@ -155,6 +158,14 @@ GitHub, Slack, Linear, Microsoft Teams, and Lark. A Task sees a catalog tool onl
 Permission Sets grant it, and calls that require approval wait in the operator inbox. An OAuth
 server's login lives on the host: `supertag mcp login NAME`. A Workspace's own `.mcp.json` servers
 run only when the Tag lists them with `--workspace-mcp`.
+
+Each MCP catalog credential names a Worker Host variable (`headerEnv`, `clientSecretEnv`,
+`privateKeyEnv`) or a file through the matching `File` field (`headerFile`, `clientSecretFile`,
+`privateKeyFile`); a stdio server's `env` value is a variable name or `{"file": PATH}`. A file path
+is absolute or starts with `~/`, and the file must be a regular file you own with no group or
+other permissions, such as mode `0600`. The host reads it again for each Task Attempt and after a
+401 or 403, so a replaced file takes effect without a restart. MCP credentials never reach the
+Control Plane or a sandbox.
 
 ## Artifacts
 

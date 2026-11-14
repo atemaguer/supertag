@@ -128,21 +128,62 @@ selects that repository's Workspace.
 
 ## Attach data outside the repository
 
-A **Volume** registers a directory or an S3 prefix of data. A Tag can copy one into its Tasks
-beside the checkout:
+A **Volume** registers a host directory or an S3 bucket and prefix of data. A Task receives it as
+a fresh copy beside its checkout, never as a live mount. Three parties agree on each copy:
 
-```sh
-supertag workspace-volume put datasets --source file:///srv/datasets --state-directory ~/.supertag
-supertag tag put analyst --instructions "Analyze the datasets." \
-  --workspace-mounts '[{"volumeId":"datasets","destination":"data","maxBytes":104857600,"access":"read-only"}]' \
-  --state-directory ~/.supertag
-```
+1. The operator registers the Volume. An `s3://` source names a credential label, never a secret:
 
-Each serving host maps the Volume with `--workspace-mount-mappings`, which also names, for an S3
-Volume, its endpoint, region, and the variables that hold its keys. A read-write copy needs
-`files:write`; after a successful Task Attempt the host writes changed and created files back to
-the Volume, never deletions or links. Copies serve local Codex and Claude Code Tasks that do not
-run commands or fetch from the web. See [Worker Host reference](../reference/worker.md#workspace-volumes).
+   ```sh
+   supertag workspace-volume put datasets --source file:///srv/data/datasets
+   supertag workspace-volume put reports --source s3://acme-data/reports --credential team-data
+   ```
+
+2. Each Worker Host owner maps the Volume in a file passed to
+   `supertag worker-host --workspace-mount-mappings FILE`. For `s3://`, only the host owner picks
+   the endpoint, region, and the variables that hold the keys:
+
+   ```json
+   [
+     { "volumeId": "datasets", "source": "file:///srv/data/datasets",
+       "destinationRoot": "/srv/supertag-mounts" },
+     { "volumeId": "reports", "source": "s3://acme-data/reports", "credential": "team-data",
+       "endpoint": "https://s3.eu-west-2.amazonaws.com", "region": "eu-west-2",
+       "credentialEnvPrefix": "REPORTS", "destinationRoot": "/srv/supertag-mounts" }
+   ]
+   ```
+
+   The host reads `REPORTS_ACCESS_KEY_ID`, `REPORTS_SECRET_ACCESS_KEY`, and optionally
+   `REPORTS_SESSION_TOKEN` from its own environment. `destinationRoot` must be an existing,
+   owner-only directory.
+
+3. The Tag declares its copies in a file passed to `supertag tag put TAG --workspace-mounts FILE`:
+
+   ```json
+   [
+     { "volumeId": "datasets", "destination": "/srv/supertag-mounts/datasets" },
+     { "volumeId": "reports", "destination": "/srv/supertag-mounts/reports",
+       "maxBytes": 5368709120, "access": "read-write" }
+   ]
+   ```
+
+Each destination sits directly in a mapped `destinationRoot`. `maxBytes` defaults to 1 GiB and may
+be at most 20 GiB. Copies require the Tag's `files:read` action, and a `read-write` copy also needs
+`files:write`. A Tag with copies may not run commands or fetch from the web. Codex, Claude Code,
+Cursor, and OpenCode Tasks take copies. The Control Plane freezes each Volume's revision when it
+accepts the Task; `supertag get workspace-volume datasets` shows the source and revision.
+
+The Worker Host makes each copy after the checkout and `setup`, so prepared images and snapshots
+never contain the data. The Volume credential never leaves the Worker Host process. A copy is
+refused when it passes its `maxBytes`, when one Task Attempt's copies together pass 20 GiB, or when
+it holds more than 10,000 files, symbolic links, or files with another hard link. A Cursor Task in
+an E2B or Modal Workspace receives only the files, uploaded to `volumes/<digest>/<name>` inside
+its checkout; the sandbox image needs `python3`.
+
+After a successful Task Attempt, the Worker Host writes a read-write copy's changed and created
+files back to the Volume, never deletions or links. A failed or cancelled Task Attempt writes
+nothing. `supertag describe task ID` shows what was written: `complete`, `partial`, or `refused`.
+A Workspace Volume must stay outside artifact storage. Read-only provider-native Modal Volume
+mounts are on the backlog. See [Worker Host reference](../reference/worker.md#workspace-volumes).
 
 ## Select repository Skills and MCP servers
 
@@ -176,7 +217,8 @@ host. A repository's `.devcontainer` settings choose the sandbox's image and set
 - A local Workspace's Tag binding pins one base commit; update it to move new Sessions forward.
 - The host's own Git commands ignore repository hooks, filters, and configuration, and a Task
   Attempt fails when the repository's Git configuration changes while it runs.
-- Workspace Volume copies do not yet serve Cursor, OpenCode, or Tasks in remote sandboxes.
+- Workspace Volumes arrive as copies only; a Tag with copies may not run commands or fetch from
+  the web.
 
 ## Next
 

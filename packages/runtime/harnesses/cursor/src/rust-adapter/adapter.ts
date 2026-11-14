@@ -199,6 +199,8 @@ export async function runAdapter(
             shared ? sharedTools : undefined,
           )
         : undefined,
+      // A remote Workspace's copies are in its sandbox, reached through the remote tools.
+      run.remoteWorkspace ? [] : (task.workspace?.mounts ?? []),
     );
     const { executor, home, nativeWorkspace, runtime, storeDirectory, workspace } = context;
     const workspaceMode = run.remoteWorkspace ? "remote" : "local";
