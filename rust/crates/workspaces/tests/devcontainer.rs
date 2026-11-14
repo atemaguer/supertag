@@ -670,6 +670,12 @@ fn translates_a_trusted_dockerfile_for_a_remote_workspace_owned_by_its_last_user
         run_setup(&remote.setup_commands, &physical),
         format!("create {}/it's\nupdate\npost\n", physical.display())
     );
+    // A warm preparation keeps the exports and runs updateContentCommand alone.
+    assert!(remote.prepared);
+    assert_eq!(
+        run_setup(&remote.warm_setup_commands, &physical),
+        "update\n"
+    );
 }
 
 #[test]
@@ -679,6 +685,8 @@ fn a_remote_workspace_sets_a_declared_user_on_the_operator_image_and_builds_noth
         remote_devcontainer(&plain).unwrap(),
         RemoteDevcontainer {
             setup_commands: vec!["sh -c 'true'".into()],
+            warm_setup_commands: vec!["sh -c 'true'".into()],
+            prepared: true,
             ..Default::default()
         }
     );

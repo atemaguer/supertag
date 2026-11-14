@@ -4,6 +4,7 @@ mod artifact_inputs;
 mod artifact_snapshots;
 mod changed_paths;
 mod checkpoints;
+mod cleanup_failure;
 pub mod context;
 mod credentials;
 mod enrollment;
@@ -11,6 +12,7 @@ pub mod environment;
 mod guardian;
 mod journal;
 mod mcp;
+mod prepared;
 mod readiness;
 mod remote;
 mod remote_provider;
@@ -299,9 +301,8 @@ pub async fn run(
             supertag_protocol::workspace_mounts::mount_harness(options.harness)
                 && !options.workspaces.is_empty()
                 && local_roots.len() == options.workspaces.len()
-                && options.remote_provider.is_none()
                 && options.shared_execution.is_none(),
-            "Workspace copy mounts require a local Codex or Claude Code Worker Host"
+            "Workspace copy mounts require a Codex, Claude Code, Cursor, or OpenCode Worker Host with local Workspace mappings"
         );
         let state_directory = options.state_directory.clone();
         let artifact_storage = options
@@ -584,7 +585,9 @@ pub async fn run(
                 .await?;
             }
             Entry::Executing { attempt, prepared } => {
-                ensure_providers_stopped(&options, &journal, &attempt, &registration).await?;
+                ensure_providers_stopped(&options, &journal, &attempt, &registration)
+                    .await
+                    .context(cleanup_failure::CleanupUnconfirmed::default())?;
                 match resolved(&mut host, &attempt, &token).await {
                     Ok(true) => journal.save(&Entry::Terminal { attempt, prepared })?,
                     Ok(false) if reclaim(&mut host, &journal, &attempt, &token).await? => {
@@ -604,11 +607,14 @@ pub async fn run(
                         }
                         wait_for_work(&shutdown).await;
                     }
-                    Ok(false) => bail!(
-                        "Task {} Attempt {} needs recovery before this host can claim work",
-                        attempt.task_id,
-                        attempt.attempt_id
-                    ),
+                    Ok(false) => {
+                        return Err(anyhow::anyhow!(
+                            "Task {} Attempt {} needs recovery before this host can claim work",
+                            attempt.task_id,
+                            attempt.attempt_id
+                        )
+                        .context(cleanup_failure::CleanupUnconfirmed::default()));
+                    }
                     Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
                     Err(error) => return Err(error.into()),
                 }
@@ -1058,6 +1064,15 @@ pub async fn run(
     Ok(())
     }.await;
     keep_awake.stop().await;
+    if let Err(error) = &outcome
+        && error
+            .downcast_ref::<cleanup_failure::CleanupUnconfirmed>()
+            .is_some()
+        && let Ok(Some(entry)) = journal.load()
+        && let Some(attempt) = entry.unsettled_attempt()
+    {
+        cleanup_failure::report(&mut host, attempt, &token, error).await;
+    }
     let stopped = presence.stop().await;
     outcome.and(stopped)
 }
@@ -1555,7 +1570,10 @@ async fn run_assignment(
         .await
         {
             Ok((mounted, expires)) => {
-                task.instructions.push_str(&mounted.instructions()?);
+                // A remote Workspace names its copies where the sandbox holds them.
+                if options.remote_provider.is_none() {
+                    task.instructions.push_str(&mounted.instructions()?);
+                }
                 valid_until = expires;
                 Some(mounted)
             }
@@ -1678,6 +1696,7 @@ async fn run_assignment(
                             .filter(|resolved| resolved.sandboxed())
                             .map(|_| workspace.checkout.base_commit.as_str()),
                         environment,
+                        mounted.as_ref(),
                     ),
                     (registration, coordination, token),
                     &cancel,
@@ -1893,6 +1912,7 @@ async fn run_assignment(
         shutdown,
     )
     .await
+    // The adapter run's errors carry its cleanup marker and the Attempt's values to redact.
     .with_context(|| {
         format!(
             "Task {} Attempt {} needs recovery",
@@ -1903,7 +1923,6 @@ async fn run_assignment(
     if let Some(reports) = reports {
         let _ = reports.await;
     }
-    drop(mounted);
     if let Some(mcp) = mcp {
         mcp.close().await;
     }
@@ -1926,7 +1945,12 @@ async fn run_assignment(
                     journal,
                     (workspace, workspaces, has_inputs),
                     outputs.take(),
-                    &options.state_directory,
+                    (
+                        &options.state_directory,
+                        mounted
+                            .as_ref()
+                            .map(|mounted| (mounted, &options.workspace_mounts)),
+                    ),
                     (transfers, &attempt, token),
                     &cancel,
                 ),
@@ -1943,6 +1967,7 @@ async fn run_assignment(
                             supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING
                         }
                         remote::OUTPUTS_FAILED => remote::OUTPUTS_FAILED,
+                        remote::COPY_CAPTURE_FAILED => remote::COPY_CAPTURE_FAILED,
                         _ => remote::CAPTURE_FAILED,
                     };
                     outcome = adapter::failed(message);
@@ -2187,11 +2212,12 @@ async fn with_cleanup_authority(
         }
     };
     tokio::pin!(cleanup);
-    tokio::select! {
+    let result = tokio::select! {
         biased;
         result = &mut cleanup => result,
         () = keep_lease => cleanup.await,
-    }
+    };
+    result.context(cleanup_failure::CleanupUnconfirmed::default())
 }
 
 /// Keep the execution lease alive during repository preparation and transfer.

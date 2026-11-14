@@ -755,10 +755,11 @@ async fn contract(url: &str) {
 #[tokio::test]
 async fn sqlite_approval_authority_and_single_continuation() {
     let directory = tempfile::tempdir().unwrap();
-    contract(&format!(
+    // Boxed: in debug builds the contract's future is too large for a test thread's stack.
+    Box::pin(contract(&format!(
         "sqlite://{}?mode=rwc",
         directory.path().join("approvals.db").display()
-    ))
+    )))
     .await;
 }
 #[tokio::test]
@@ -1343,10 +1344,11 @@ async fn coverage_contract(url: &str) {
 #[tokio::test]
 async fn sqlite_objective_coverage_and_paused_approval_waits() {
     let directory = tempfile::tempdir().unwrap();
-    coverage_contract(&format!(
+    // Boxed: in debug builds the contract's future is too large for a test thread's stack.
+    Box::pin(coverage_contract(&format!(
         "sqlite://{}?mode=rwc",
         directory.path().join("coverage.db").display()
-    ))
+    )))
     .await;
 }
 #[tokio::test]

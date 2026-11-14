@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import {
   access,
   appendFile,
+  cp,
   mkdir,
   readdir,
   readFile,
@@ -12,6 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -39,6 +42,11 @@ process.on("uncaughtException", async (error) => {
 });
 const { providerTransport } = JSON.parse(await readFile(join(root, "modules.json"), "utf8"));
 const { runRemoteWorkspaceTransport } = await import(pathToFileURL(providerTransport).href);
+// Copies run the provider SDK's own staging and listing code, with its sandbox
+// program executed here as the sandbox would.
+const { createWorkspaceCopies } = await import(
+  new URL("./copies.js", pathToFileURL(providerTransport)).href
+);
 const expected =
   provider === "modal"
     ? {
@@ -73,12 +81,35 @@ const trace = (value) =>
 const serializable = (owner) => ({ ...owner, hostGeneration: String(owner.hostGeneration) });
 let allocation;
 let directory;
+// A preparation sandbox, which Snapshot records; or the prepared artifact a sandbox starts from.
+let preparing = false;
+let preparedArtifact;
+const artifacts = join(root, "remote-artifacts");
 let actions = [];
 let environment;
 let staged = false;
 let mcpStaged = false;
 const mcpServers = new Set();
 const inputPaths = [];
+// Each staged Workspace copy by checkout path and its access, for the fixture's file tools.
+const copies = new Map();
+let workspaceCopies;
+const sandbox = {
+  async run(argv, timeoutMs, signal) {
+    return new Promise((resolve) => {
+      execFile(
+        argv[0],
+        argv.slice(1),
+        { timeout: timeoutMs, signal, maxBuffer: 1024 * 1024 },
+        (error, stdout) => resolve({ exitCode: error ? (error.code ?? 1) : 0, stdout }),
+      );
+    });
+  },
+  writeTransfer: (path, bytes) => writeFile(path, bytes, { flag: "wx", mode: 0o600 }),
+  readTransfer: async (path) => Readable.toWeb(createReadStream(path)),
+};
+let captured = false;
+const copyRoot = () => `volumes/${hash(allocation.owner.attemptId)}`;
 const enabled = (name) =>
   access(join(root, name)).then(
     () => true,
@@ -116,7 +147,14 @@ async function git(cwd, ...args) {
 
 const implementation = {
   provider: {
-    async allocate({ owner, allowedActions, timeoutMs, environment: requested }) {
+    async allocate({
+      owner,
+      allowedActions,
+      timeoutMs,
+      environment: requested,
+      preparedArtifact: artifact,
+      prepare,
+    }) {
       assert.equal(allocation, undefined);
       assert.ok(owner && owner.hostGeneration > 0n && timeoutMs > 0);
       assert.match(owner.allocationId, /^[\w-]+$/u);
@@ -136,12 +174,23 @@ const implementation = {
         user: requested.user,
         setupCommands: [...requested.setupCommands],
       };
-      if (environment) await trace({ type: "environment", provider, environment });
+      if (environment) await trace({ type: "environment", provider, environment, prepare });
+      preparing = prepare;
+      preparedArtifact = artifact;
+      if (artifact !== undefined) {
+        // The prepared checkout, with its untracked setup output, is the sandbox's filesystem.
+        assert.match(artifact, /^fixture-artifact-[0-9a-f]{8}$/u);
+        await cp(join(artifacts, artifact, "checkout"), join(directory, "checkout"), {
+          recursive: true,
+        });
+      }
       await persist(allocation);
       await trace({
         type: "allocate",
         provider,
         ...allocation,
+        prepare,
+        preparedArtifact: artifact,
         environment: Object.keys(process.env).sort(),
       });
       if (await enabled("lose-allocate-ack")) process.exit(7);
@@ -166,8 +215,10 @@ const implementation = {
       const bundlePath = join(directory, "prepared.bundle");
       await writeFile(bundlePath, bundle, { mode: 0o600 });
       const checkout = join(directory, "checkout");
-      await mkdir(checkout, { mode: 0o700 });
-      await git(checkout, "init", "--quiet");
+      if (preparedArtifact === undefined) {
+        await mkdir(checkout, { mode: 0o700 });
+        await git(checkout, "init", "--quiet");
+      }
       await git(
         checkout,
         "-c",
@@ -177,7 +228,8 @@ const implementation = {
         bundlePath,
         header.startCommit,
       );
-      await git(checkout, "checkout", "--quiet", "--detach", header.startCommit);
+      // Over a prepared checkout this is a forced checkout: untracked setup output stays.
+      await git(checkout, "checkout", "--quiet", "--force", "--detach", header.startCommit);
       assert.equal(await git(checkout, "rev-parse", "HEAD"), header.startCommit);
       let offset = bundle.length;
       for (const { path, blob } of header.inputFiles) {
@@ -206,7 +258,8 @@ const implementation = {
         await rm(archive);
         mcpStaged = true;
       }
-      if (environment?.setupCommands.length) {
+      if (preparing) assert.ok(header.inputFiles.length === 0 && header.mcpCommit === undefined);
+      if (environment?.setupCommands.length && (preparing || preparedArtifact === undefined)) {
         const { stdout } = await promisify(execFile)(
           "/bin/sh",
           [
@@ -217,7 +270,13 @@ const implementation = {
           ],
           { env: { PATH: "/usr/bin:/bin", HOME: directory }, timeout: 10_000 },
         );
-        await trace({ type: "setup", checkout, stdout });
+        await trace({
+          type: "setup",
+          checkout,
+          stdout,
+          prepare: preparing,
+          setupCommands: environment.setupCommands,
+        });
       }
       staged = true;
       await trace({
@@ -236,6 +295,24 @@ const implementation = {
         }
       }
       return { inputFiles: header.inputFiles };
+    },
+    async snapshot() {
+      assert.ok(preparing && staged && !allocation.stopped);
+      const artifact = `fixture-artifact-${createHash("sha256")
+        .update(allocation.owner.allocationId)
+        .digest("hex")
+        .slice(0, 8)}`;
+      await cp(join(directory, "checkout"), join(artifacts, artifact, "checkout"), {
+        recursive: true,
+      });
+      await trace({ type: "snapshot", artifact, preparedArtifact });
+      return { artifact };
+    },
+    async removeArtifact({ artifact }) {
+      assert.match(artifact, /^fixture-artifact-[0-9a-f]{8}$/u);
+      await rm(join(artifacts, artifact), { recursive: true, force: true });
+      await trace({ type: "remove-artifact", artifact });
+      return {};
     },
     async *capture() {
       assert.ok(staged && !allocation.stopped);
@@ -256,6 +333,8 @@ const implementation = {
           if (entry.name === ".git") continue;
           const path = prefix + entry.name;
           if (inputPaths.includes(path) && !(await enabled("return-private-input"))) continue;
+          // Workspace copies never return in the tree, unless a fault returns them.
+          if (copies.size && path === copyRoot() && !(await enabled("return-copy"))) continue;
           const physical = join(folder, entry.name);
           if (entry.isDirectory()) await files(physical, `${path}/`);
           else {
@@ -286,10 +365,70 @@ const implementation = {
         paths: entries.map(({ path }) => path),
         sha256: hash(tree),
       });
+      captured = true;
       yield {
         part: { case: "tree", value: { sha256: hash(tree), byteLength: BigInt(tree.length) } },
       };
       yield { part: { case: "payload", value: tree } };
+    },
+    async stageCopy(stream, context) {
+      assert.ok(staged && !allocation.stopped && !captured);
+      const inputs = stream[Symbol.asyncIterator]();
+      const first = await inputs.next();
+      assert.equal(first.value?.part.case, "header");
+      const header = first.value.part.value;
+      const keys = [];
+      const directories = [];
+      async function* parts() {
+        for (;;) {
+          const next = await inputs.next();
+          if (next.done) return;
+          const { part } = next.value;
+          assert.ok(["file", "payload", "directory"].includes(part.case));
+          if (part.case === "file") keys.push(part.value.key);
+          if (part.case === "directory") directories.push(part.value);
+          yield part;
+        }
+      }
+      workspaceCopies ??= createWorkspaceCopies({
+        sandbox,
+        root: directory,
+        attemptId: allocation.owner.attemptId,
+        label: "Fixture",
+        lifetime: new AbortController().signal,
+      });
+      const result = await workspaceCopies.stage(header, parts(), context.signal);
+      copies.set(header.path, { readWrite: header.readWrite });
+      await trace({
+        type: "stage-copy",
+        path: header.path,
+        readWrite: header.readWrite,
+        keys: keys.sort(),
+        directories: directories.sort(),
+      });
+      return result;
+    },
+    async *captureCopy(request, context) {
+      assert.ok(captured && !allocation.stopped);
+      const keys = [];
+      try {
+        for await (const part of workspaceCopies.capture(request, context.signal)) {
+          if (part.case === "file") keys.push(part.value.key);
+          if (part.case === "listed")
+            await trace({
+              type: "capture-copy",
+              path: request.path,
+              maxBytes: String(request.maxBytes),
+              keys,
+              skipped: String(part.value.skipped),
+              refusal: part.value.errorReason,
+            });
+          yield { part };
+        }
+      } catch (error) {
+        await trace({ type: "fixture-error", operation: "captureCopy", message: error.message });
+        throw error;
+      }
     },
     async *runMcpServer(stream, context) {
       assert.ok(staged && mcpStaged && !allocation.stopped);
@@ -338,6 +477,13 @@ const implementation = {
       allocation ??= JSON.parse(await readFile(join(directory, "allocation.json"), "utf8"));
       assert.deepEqual(serializable(owner), allocation.owner);
       if (sandboxId !== undefined) assert.equal(sandboxId, allocation.sandboxId);
+      if (await enabled("fail-stop-revealing-credentials")) {
+        // A provider error that quotes the Worker Host's provider credential and a URL password.
+        await trace({ type: "stop-failed", ...allocation });
+        throw new Error(
+          `Stop refused for ${process.env.E2B_API_KEY} at https://fixture:url-password-4242@sandbox.invalid/v1`,
+        );
+      }
       if (await enabled("refuse-stop")) {
         await trace({ type: "stop-uncertain", ...allocation });
         return {};
@@ -359,9 +505,12 @@ const implementation = {
     async execute({ operation }) {
       assert.ok(staged && !allocation.stopped);
       const requested = operation.value?.path ?? "";
+      // Like the provider's file tools, a read-only copy may only be read.
+      const copy = [...copies].find(([path]) => requested.startsWith(`${path}/`));
       if (
         !["workspace.txt", "marker.txt", "mcp-server.js", ".mcp.json"].includes(requested) &&
         !inputPaths.includes(requested) &&
+        !copy &&
         !/^(?:outputs\/[0-9a-f]{64}|deliverables|reports)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(
           requested,
         )
@@ -376,7 +525,8 @@ const implementation = {
       if (
         operation.case === "write" &&
         actions.includes("files:write") &&
-        !inputPaths.includes(requested)
+        !inputPaths.includes(requested) &&
+        (!copy || copy[1].readWrite)
       ) {
         await mkdir(dirname(path), { recursive: true, mode: 0o700 });
         await writeFile(path, operation.value.content);
@@ -388,7 +538,10 @@ const implementation = {
   },
 };
 for (const [service, names] of [
-  [implementation.provider, ["allocate", "stage", "stop"]],
+  [
+    implementation.provider,
+    ["allocate", "stage", "stageCopy", "stop", "snapshot", "removeArtifact"],
+  ],
   [implementation.workspace, ["execute"]],
 ]) {
   for (const name of names) {

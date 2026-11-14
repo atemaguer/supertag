@@ -182,17 +182,11 @@ operator credential, and a shared one reads `SUPERTAG_ADMIN_TOKEN` from its envi
 
 ### host service
 
-A Volume is a named storage source that a Workspace attaches beside its git checkout. A host
-service maps the Volume's credential name to a secret source on this machine. For example,
-`volume-credentials: { datasets: { environment: DATASET_TOKEN } }` lets the host use
-`DATASET_TOKEN` when it copies a Volume whose credential is `datasets`.
-The host advertises a mapping only when it can read the referenced secret. A `file://` Volume
-needs a `{ path: /srv/datasets }` mapping instead. The path names the host directory the operator
-consents to copy. SuperTag resolves links in both paths and refuses a Volume source outside that
-directory. An object-store mapping cannot authorize a `file://` source. To expose a home directory
-or a hidden directory below it, name that directory directly in the mapping. SuperTag always
-refuses sources that contain its state, settings, or secret files. SuperTag keeps credentials on the
-Worker Host and does not pass their values to a Task or provider. Tasks running under the same
+A host service maps an artifact Volume's credential name to a secret source on this machine. For
+example, `volume-credentials: { artifacts: { environment: ARTIFACT_TOKEN } }` lets the host use
+`ARTIFACT_TOKEN` for an artifact Volume whose credential is `artifacts`. Workspace Volume copies
+use the Worker Host's [mapping file](#workspace-volume-copies) instead. SuperTag keeps credentials on
+the Worker Host and does not pass their values to a Task or provider. Tasks running under the same
 operating-system account can still read credential files. See
 [Credentials and local access](../concepts/persistence.md#credentials-and-local-access) for isolation
 requirements.
@@ -209,7 +203,7 @@ requirements.
 | `models` | none | Models per harness: one model, or a list whose first is the default. See [Host models](#host-models). Cursor model IDs come from `Cursor.models.list`; OpenCode requires `provider/model`. |
 | `workspaces` | none | Workspace name to an absolute or `~` checkout path |
 | `local-mount-root` | none: refuse local mounts | Existing host directory containing every local mount destination. Resolved and verified at startup. |
-| `volume-credentials` | none | Volume credential name to a host-only `{ environment: VAR }` or `{ file: PATH }` reference for S3/R2, `{ modal-secret: NAME }` or `{ modal-oidc-role: ARN }` for native bucket mounts, `{ modal-volume: NAME }` for Modal Volume consent, or `{ path: DIR }` for a `file://` source. Relative paths resolve from this settings file. Hosts need the mapping to serve a workspace that mounts the Volume. |
+| `volume-credentials` | none | Artifact Volume credential name to a host-only `{ environment: VAR }` or `{ file: PATH }` reference. Relative paths resolve from this settings file. Workspace Volume copies use the Worker Host's [mapping file](#workspace-volume-copies) instead. |
 | `artifact-volume` | none: the host's state directory | The Volume this host stores the artifacts its Tasks capture on. Map its credential in `volume-credentials`. See [Artifact Volume](#artifact-volume). |
 | `labels` | none | Extra [placement labels](resource-model.md#worker-host-labels), such as `gpu` |
 | `mcp` | none | [MCP servers](#host-mcp-servers) this machine provides |
@@ -230,52 +224,38 @@ A missing or rejected key fails on the terminal. After the first join, the host 
 credential and ignores the key. Without `auth-key`, it uses `SUPERTAG_AUTH_KEY` from the
 environment.
 
-### Workspace mount strategies
+<!-- supertag-cli: native start -->
 
-Workspace manifests select `strategy: copy` (default) or `strategy: mount` under `spec.mounts`.
-`access` defaults to `read-only`; set `read-write` to save changes to the source. Placement refuses unsupported strategies before
-calling a provider and never changes `mount` to `copy`. Local and e2b support only copies.
-Modal attaches S3, R2, and GCS buckets and Modal Volumes with the declared access at Task start, after setup.
-Native mounts require a host credential mapping:
+### Workspace Volume copies
 
-```yaml
-volume-credentials:
-  datasets: { modal-secret: dataset-access }
-  team-data: { modal-volume: training }
-  training: { modal-oidc-role: arn:aws:iam::123456789012:role/training-reader }
-```
-
-These references are Experimental. `modal-secret` names an existing Modal Secret in the provider's
-Modal environment. `modal-oidc-role` names an IAM role and works only with `s3://` sources.
-SuperTag passes references to Modal's mount service, never secret values to the sandbox.
-Environment and file secret references cannot authorize `mount`; provider-held references cannot
-authorize `copy`. A `modal-volume://training/models/` source must name `credential: team-data`.
-The `{ modal-volume: training }` mapping consents to that exact, case-sensitive Volume name.
-Hosts without the named credential mapping are excluded during placement. Before any provider call,
-the selected host also checks that the mapped name matches the source exactly.
-Modal Volumes always use the host's configured Modal environment; source queries are rejected.
-See [Native source settings](resource-model.md#native-source-settings).
-See [Workspace mount fields](resource-model.md#workspaces).
-
-### Volume credential secrets
-
-For an `s3://` or `r2://` Volume, the secret is a JSON object. It needs `accessKeyId` and
-`secretAccessKey`, and may add only `sessionToken`:
+A host service does not configure Workspace Volume copies. A Worker Host that serves them runs with
+`supertag worker-host --workspace-mount-mappings FILE`, whose JSON array maps each Workspace Volume:
 
 ```json
-{ "accessKeyId": "AKIA...", "secretAccessKey": "...", "sessionToken": "..." }
+[
+  { "volumeId": "notes", "source": "file:///srv/data/notes", "destinationRoot": "/srv/supertag-mounts" },
+  { "volumeId": "datasets", "source": "s3://acme-data/datasets", "credential": "team-data",
+    "endpoint": "https://s3.eu-west-2.amazonaws.com", "region": "eu-west-2",
+    "credentialEnvPrefix": "DATASETS", "destinationRoot": "/srv/supertag-mounts" }
+]
 ```
 
-Any other secret field is refused, and the refusal never repeats its name or value.
-Set `region`, `endpoint`, and `forcePathStyle` in the [Volume's source URL](resource-model.md#volumes),
-for example `s3://acme-data/datasets/?region=eu-west-2&forcePathStyle=true`.
-An `r2://` source requires an `endpoint` query parameter. A host's `file://` Volume needs a
-`{ path: DIR }` mapping. Its source may not overlap the host's state directory, any loaded settings
-file, an env_file, or a `{ file }` secret from any service. This includes every host service's
-`volume-credentials` files. The Control Plane's TLS private key, operators file, SQLite database
-(including its WAL/SHM files), this machine's Worker Host artifact directory, and the host's
-artifact Volume are also protected, even outside the state directory. Overlap includes a source inside a protected directory
-or containing a protected path, after symbolic links resolve.
+| Field | Meaning |
+| --- | --- |
+| `volumeId`, `source`, `credential` | Exactly the Workspace Volume's ID, source, and credential label |
+| `destinationRoot` | An existing, canonical, owner-only directory that copies land in |
+| `endpoint` | `s3://` only: the HTTPS origin the host signs requests for |
+| `region` | `s3://` only: the signing region |
+| `credentialEnvPrefix` | `s3://` only: the host reads `PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET_ACCESS_KEY`, and optional `PREFIX_SESSION_TOKEN` from its environment |
+
+A `file://` mapping takes none of the `s3://` fields; the mapping is the host owner's consent. The
+host owner, not the Volume, pins the endpoint, so a host's keys only reach the store its owner
+chose, and requests are path-style. Keys stay in the Worker Host process and never reach a Task, a
+harness, or a sandbox. A mapping may not overlap the host's state, its Workspaces, home
+configuration such as `~/.ssh`, or artifact storage. Read-only provider-native Modal Volume mounts
+are on the backlog. See [Workspace Volume copies](resource-model.md#workspace-volume-copies).
+
+<!-- supertag-cli: native end -->
 
 ### Artifact Volume
 
@@ -633,6 +613,23 @@ stops the host with a message that names the server and the reference, never a v
   `refresh_token`, an optional `client_id`, and an optional `client_secret`, such as the value
   `supertag mcp login NAME --export` prints. A rotated refresh token replaces the old one until
   the host stops.
+
+### MCP credentials on a Rust deployment
+
+On a Rust deployment, a Worker Host reads its MCP servers from an owner-only JSON catalog that
+`--mcp-catalog PATH` names, not from `mcp` in this file. See `--mcp-catalog` in the
+[Rust CLI reference](../../rust/docs/cli-reference.md). Each credential field there names a
+Worker Host variable, such as `headerEnv`, `clientSecretEnv`, or `privateKeyEnv`. Or it names a
+file through the matching `File` field, such as `headerFile`, `clientSecretFile`, or
+`privateKeyFile`. A stdio server's `env` value is a variable name or `{"file": PATH}`. File
+references differ from the ones above:
+
+- The path is absolute or starts with `~/`. The catalog has no directory for a relative path.
+- The file must be a regular file you own, not a symbolic link, with no group or other
+  permissions, such as mode `0600`. Only a private key or a refresh token's JSON may span lines.
+- The Worker Host reads each file when it starts, and again for each Task Attempt and each
+  refetch after a 401 or 403. A replaced file takes effect without a restart.
+- `{ secretRef: NAME }` is not supported, because the catalog has no `secrets` map.
 
 ### MCP OAuth login
 

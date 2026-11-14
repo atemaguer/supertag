@@ -883,6 +883,18 @@ impl WorkerHost for Api {
         .await
     }
 
+    async fn report_cleanup_failure(
+        &self,
+        request: Request<ReportCleanupFailureRequest>,
+    ) -> Result<Response<ReportCleanupFailureResponse>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .report_cleanup_failure(request)
+                .await
+        })
+        .await
+    }
+
     async fn report_attempt_usage(
         &self,
         request: Request<ReportAttemptUsageRequest>,

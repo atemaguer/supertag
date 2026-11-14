@@ -546,6 +546,324 @@ fn a_restarted_attempt_restages_and_cancellation_leaves_nothing() {
     assert!(fixture.root_names().is_empty());
 }
 
+#[test]
+fn large_and_sparse_copies_stream_within_typescript_limits() {
+    use supertag_protocol::workspace_mounts::{
+        DEFAULT_WORKSPACE_MOUNT_BYTES, MAX_WORKSPACE_MOUNT_BYTES, MAX_WORKSPACE_MOUNT_FILES,
+    };
+    let fixture = fixture();
+    // A sparse file above the former 256 MiB cap is copied and written back through
+    // fixed-size buffers under the 1 GiB default.
+    let large = 300 * 1024 * 1024;
+    let file = File::create(fixture.source.join("large.bin")).unwrap();
+    file.set_len(large).unwrap();
+    drop(file);
+    fixture
+        .stage(
+            "large",
+            &[fixture.writable("data", DEFAULT_WORKSPACE_MOUNT_BYTES)],
+        )
+        .unwrap();
+    let copy = fixture.root.join("data");
+    assert_eq!(copy.join("large.bin").metadata().unwrap().len(), large);
+    {
+        use std::os::unix::fs::FileExt;
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(copy.join("large.bin"))
+            .unwrap();
+        file.write_all_at(b"end", large - 3).unwrap();
+    }
+    let writes = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "large",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Complete);
+    assert_eq!(keys(&writes[0]), ["large.bin"]);
+    {
+        use std::os::unix::fs::FileExt;
+        let written = File::open(fixture.source.join("large.bin")).unwrap();
+        assert_eq!(written.metadata().unwrap().len(), large);
+        let mut tail = [0u8; 3];
+        written.read_exact_at(&mut tail, large - 3).unwrap();
+        assert_eq!(&tail, b"end");
+    }
+    cleanup(&fixture.state, "large").unwrap();
+    fs::remove_file(fixture.source.join("large.bin")).unwrap();
+
+    // A sparse file beyond 20 GiB is refused before any byte is read, even under the largest
+    // declared limit.
+    let file = File::create(fixture.source.join("huge.bin")).unwrap();
+    file.set_len(MAX_WORKSPACE_MOUNT_BYTES + 1).unwrap();
+    drop(file);
+    let mut pin = fixture.pin("data");
+    pin.max_bytes = MAX_WORKSPACE_MOUNT_BYTES;
+    assert!(fixture.stage("huge", &[pin]).is_err());
+    cleanup(&fixture.state, "huge").unwrap();
+    assert!(fixture.root_names().is_empty());
+    fs::remove_file(fixture.source.join("huge.bin")).unwrap();
+
+    // TypeScript's 10,000-file limit: one more file is refused.
+    let many = fixture.source.join("many");
+    fs::create_dir(&many).unwrap();
+    // The fixture source already holds two files.
+    for index in 0..MAX_WORKSPACE_MOUNT_FILES - 2 {
+        fs::write(many.join(index.to_string()), "").unwrap();
+    }
+    fixture.stage("many", &[fixture.pin("data")]).unwrap();
+    cleanup(&fixture.state, "many").unwrap();
+    fs::write(many.join("one-more"), "").unwrap();
+    let refused = fixture.stage("too-many", &[fixture.pin("data")]);
+    assert!(
+        format!("{:#}", refused.err().unwrap()).contains("file limit"),
+        "a copy over 10,000 files is refused"
+    );
+    cleanup(&fixture.state, "too-many").unwrap();
+    assert!(fixture.root_names().is_empty());
+}
+
+#[test]
+fn write_back_refuses_a_file_over_five_gib() {
+    let fixture = fixture();
+    let max = supertag_protocol::workspace_mounts::MAX_WORKSPACE_MOUNT_BYTES;
+    fixture
+        .stage("attempt", &[fixture.writable("data", max)])
+        .unwrap();
+    let copy = fixture.root.join("data");
+    let file = File::create(copy.join("over.bin")).unwrap();
+    file.set_len(supertag_protocol::workspace_mounts::MAX_WRITE_FILE_BYTES + 1)
+        .unwrap();
+    drop(file);
+    let writes = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "attempt",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Refused);
+    assert_eq!(writes[0].error_key, "over.bin");
+    assert!(!fixture.source.join("over.bin").exists());
+    cleanup(&fixture.state, "attempt").unwrap();
+}
+
+#[test]
+fn remote_listings_replace_the_walk_and_captured_files_are_written_back() {
+    let fixture = fixture();
+    let mounted = fixture
+        .stage("remote", &[fixture.writable("data", 1024 * 1024)])
+        .unwrap();
+    let [copy] = mounted.copies() else {
+        panic!("one copy staged")
+    };
+    assert!(copy.read_write);
+    assert_eq!(
+        copy.sandbox_path("remote"),
+        format!(
+            "{}/data",
+            supertag_protocol::workspace_mounts::remote_copy_root("remote")
+        )
+    );
+    let mut staged: Vec<_> = copy.files.iter().map(|file| file.key.as_str()).collect();
+    staged.sort_unstable();
+    assert_eq!(staged, ["nested/notes.txt", "rows.csv"]);
+    assert!(
+        mounted
+            .remote_instructions("remote")
+            .unwrap()
+            .contains("relative to the remote Workspace")
+    );
+    let file = |key: &str, body: &[u8]| Copied {
+        key: key.into(),
+        size: body.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(body)),
+    };
+    let send = |file: &Copied, chunks: &[&[u8]]| {
+        let writer = remote_writer(&fixture.mounts, &fixture.state, "remote", copy.index).unwrap();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+        for chunk in chunks {
+            sender.try_send(chunk.to_vec()).unwrap();
+        }
+        drop(sender);
+        writer.write(file, &mut receiver)
+    };
+    // Bytes that differ from their listing never replace the host copy.
+    assert!(send(&file("rows.csv", b"x\ny\n"), &[b"x\nz\n"]).is_err());
+    let copy_root = fixture.root.join("data");
+    assert_eq!(
+        fs::read_to_string(copy_root.join("rows.csv")).unwrap(),
+        "a,b\n1,2\n"
+    );
+    let changed = [file("deep/new.txt", b"new\n"), file("rows.csv", b"x\ny\n")];
+    send(&changed[0], &[b"ne", b"w\n"]).unwrap();
+    send(&changed[1], &[b"x\ny\n"]).unwrap();
+    record_remote(
+        &fixture.state,
+        "remote",
+        copy.index,
+        &RemoteListing {
+            files: changed.to_vec(),
+            skipped: 3,
+            refusal: None,
+        },
+    )
+    .unwrap();
+    let writes = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "remote",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Complete);
+    assert_eq!(keys(&writes[0]), ["deep/new.txt", "rows.csv"]);
+    assert_eq!(writes[0].skipped, 3, "the sandbox's count");
+    assert_eq!(
+        fs::read_to_string(fixture.source.join("rows.csv")).unwrap(),
+        "x\ny\n"
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.source.join("deep/new.txt")).unwrap(),
+        "new\n"
+    );
+    cleanup(&fixture.state, "remote").unwrap();
+
+    // A refusal the sandbox found refuses the copy with its key and reason.
+    let mounted = fixture
+        .stage("refused", &[fixture.writable("data", 1024 * 1024)])
+        .unwrap();
+    record_remote(
+        &fixture.state,
+        "refused",
+        mounted.copies()[0].index,
+        &RemoteListing {
+            files: vec![file("a.txt", b"a")],
+            skipped: 0,
+            refusal: Some(("b.txt".into(), "a file has another link or changed".into())),
+        },
+    )
+    .unwrap();
+    assert!(
+        !RemoteListing {
+            files: vec![],
+            skipped: 0,
+            refusal: Some(("b.txt".into(), "x".into())),
+        }
+        .writable(1024)
+    );
+    let writes = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "refused",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Refused);
+    assert_eq!(writes[0].error_key, "b.txt");
+    assert_eq!(writes[0].not_attempted, ["a.txt", "b.txt"]);
+    assert!(!fixture.source.join("a.txt").exists());
+    cleanup(&fixture.state, "refused").unwrap();
+    assert!(fixture.root_names().is_empty());
+}
+
+#[test]
+fn a_remote_copy_reshaped_in_the_sandbox_writes_back_as_a_local_copy_would() {
+    let fixture = fixture();
+    fs::create_dir(fixture.source.join("empty")).unwrap();
+    let file = |key: &str, body: &[u8]| Copied {
+        key: key.into(),
+        size: body.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(body)),
+    };
+    // The Task turns the directory `nested` into a file and the file
+    // `rows.csv` into a directory.
+    let changed = [
+        file("nested", b"flat\n"),
+        file("rows.csv/inner.txt", b"inner\n"),
+    ];
+
+    let local = {
+        fixture
+            .stage("local", &[fixture.writable("data", 1024 * 1024)])
+            .unwrap();
+        let copy = fixture.root.join("data");
+        fs::remove_dir_all(copy.join("nested")).unwrap();
+        fs::write(copy.join("nested"), "flat\n").unwrap();
+        fs::remove_file(copy.join("rows.csv")).unwrap();
+        fs::create_dir(copy.join("rows.csv")).unwrap();
+        fs::write(copy.join("rows.csv/inner.txt"), "inner\n").unwrap();
+        let writes = write_back(
+            &fixture.mounts,
+            &fixture.state,
+            "local",
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        cleanup(&fixture.state, "local").unwrap();
+        writes
+    };
+
+    let mounted = fixture
+        .stage("remote", &[fixture.writable("data", 1024 * 1024)])
+        .unwrap();
+    let [copy] = mounted.copies() else {
+        panic!("one copy staged")
+    };
+    // Only files carry their parents, so the upload names empty directories.
+    assert_eq!(copy.empty, ["empty"]);
+    for (file, body) in changed.iter().zip([&b"flat\n"[..], b"inner\n"]) {
+        let writer = remote_writer(&fixture.mounts, &fixture.state, "remote", copy.index).unwrap();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+        sender.try_send(body.to_vec()).unwrap();
+        drop(sender);
+        writer.write(file, &mut receiver).unwrap();
+    }
+    let host_copy = fixture.root.join("data");
+    assert_eq!(
+        fs::read_to_string(host_copy.join("nested")).unwrap(),
+        "flat\n"
+    );
+    assert_eq!(
+        fs::read_to_string(host_copy.join("rows.csv/inner.txt")).unwrap(),
+        "inner\n"
+    );
+    record_remote(
+        &fixture.state,
+        "remote",
+        copy.index,
+        &RemoteListing {
+            files: changed.to_vec(),
+            skipped: 0,
+            refusal: None,
+        },
+    )
+    .unwrap();
+    let remote = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "remote",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    cleanup(&fixture.state, "remote").unwrap();
+
+    // The Volume still holds the directory `nested`, so both stop there with
+    // the same summary instead of failing the Task.
+    assert_eq!(status(&local[0]), WorkspaceMountWriteStatus::Partial);
+    assert_eq!(local[0].error_key, "nested");
+    for field in [
+        |write: &WorkspaceMountWrite| format!("{} {}", write.status, write.error_key),
+        |write: &WorkspaceMountWrite| write.error_reason.clone(),
+        |write: &WorkspaceMountWrite| format!("{:?} {:?}", keys(write), write.not_attempted),
+    ] {
+        assert_eq!(field(&local[0]), field(&remote[0]));
+    }
+    assert!(fixture.root_names().is_empty());
+}
+
 fn status(write: &WorkspaceMountWrite) -> WorkspaceMountWriteStatus {
     WorkspaceMountWriteStatus::try_from(write.status).unwrap()
 }
@@ -900,7 +1218,7 @@ mod object_store {
             WorkspaceCopyMount {
                 volume_id: "data".into(),
                 destination: self.root.join("data").to_str().unwrap().into(),
-                max_bytes: 1024,
+                max_bytes: 16 * 1024 * 1024,
                 volume: Some(WorkspaceVolume {
                     volume_id: "data".into(),
                     source: "s3://bucket-a/data".into(),
@@ -986,14 +1304,23 @@ mod object_store {
         fs::write(copy.join("rows.csv"), "changed").unwrap();
         fs::write(copy.join("nested/new.txt"), "created").unwrap();
         fs::write(copy.join("bad name+é.txt"), "any key").unwrap();
+        // Bodies stream in bounded chunks: a file of many chunks arrives whole.
+        let large: Vec<u8> = (0..3 * 1024 * 1024 + 7)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        fs::write(copy.join("large.bin"), &large).unwrap();
         let writes = fixture.write_back("write").await;
         assert_eq!(status(&writes[0]), WorkspaceMountWriteStatus::Complete);
         let mut written = keys(&writes[0]);
         written.sort();
-        assert_eq!(written, ["bad name+é.txt", "nested/new.txt", "rows.csv"]);
+        assert_eq!(
+            written,
+            ["bad name+é.txt", "large.bin", "nested/new.txt", "rows.csv"]
+        );
         assert_eq!(writes[0].skipped, 2, "two unchanged files");
         {
             let objects = fixture.store.objects.lock().unwrap();
+            assert_eq!(objects["bucket-a/data/large.bin"], large);
             assert_eq!(objects["bucket-a/data/rows.csv"], b"changed");
             assert_eq!(objects["bucket-a/data/nested/new.txt"], b"created");
             assert_eq!(objects["bucket-a/data/bad name+é.txt"], b"any key");

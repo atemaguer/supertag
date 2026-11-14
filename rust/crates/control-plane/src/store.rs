@@ -26,6 +26,7 @@ pub(crate) use authority::lease_is_live;
 pub use enrollments::Role;
 pub(crate) use enrollments::{client_tags_in, enrollee_name};
 pub use hosts::HostAuthority;
+pub(crate) use hosts::current_scope_in;
 pub(crate) use readiness::status_in as host_status_in;
 
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
@@ -93,7 +94,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 76;
+        const SCHEMA_VERSION: i64 = 77;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -256,6 +257,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0074_manifest_ownership.sql"),
                 include_str!("../migrations/sqlite/0075_workspace_mount_writes.sql"),
                 include_str!("../migrations/sqlite/0076_auth_key_join_operations.sql"),
+                include_str!("../migrations/sqlite/0077_cleanup_failure.sql"),
             ]
         } else {
             [
@@ -337,6 +339,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0074_manifest_ownership.sql"),
                 include_str!("../migrations/postgresql/0075_workspace_mount_writes.sql"),
                 include_str!("../migrations/postgresql/0076_auth_key_join_operations.sql"),
+                include_str!("../migrations/postgresql/0077_cleanup_failure.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -871,7 +874,7 @@ impl Store {
         let attempt = Uuid::new_v4().to_string();
         let lease = Uuid::new_v4().to_string();
         let attempt_execution = attempt_execution.encode_to_vec();
-        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL WHERE task_id = $8")
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL WHERE task_id = $8")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
         sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope, claimed_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
@@ -1085,14 +1088,14 @@ impl Store {
         if state == TaskState::Cancelled {
             // Finish is also the host's receipt that execution has stopped. Cancellation
             // remains authoritative; a late outcome cannot replace it.
-            sqlx::query("UPDATE supertag_v2_tasks SET cleanup_pending = 0, cleanup_observed = 1 WHERE task_id = $1")
+            sqlx::query("UPDATE supertag_v2_tasks SET cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL WHERE task_id = $1")
                 .bind(&input.task_id)
                 .execute(&mut *transaction)
                 .await?;
         } else if state == TaskState::Uncertain {
             // The host can confirm cleanup after its execution authority expired.
             // The recovery decision remains with the operator.
-            sqlx::query("UPDATE supertag_v2_tasks SET cleanup_observed = 1 WHERE task_id = $1")
+            sqlx::query("UPDATE supertag_v2_tasks SET cleanup_observed = 1, cleanup_failure = NULL WHERE task_id = $1")
                 .bind(&input.task_id)
                 .execute(&mut *transaction)
                 .await?;
@@ -1131,7 +1134,7 @@ impl Store {
             } else if !input.artifacts.is_empty() {
                 return Err(invalid("only a successful Task can submit artifacts"));
             }
-            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, finish_objective_signal = $3, finish_checkpoint_sha256 = $4 WHERE task_id = $5")
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL, finish_objective_signal = $3, finish_checkpoint_sha256 = $4 WHERE task_id = $5")
                 .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.checkpoint_sha256).bind(&input.task_id)
                 .execute(&mut *transaction).await?;
         }
@@ -2130,6 +2133,7 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
             .map(crate::policy::decode)
             .transpose()?,
         workspace_mount_writes: vec![],
+        execution_report: None,
     })
 }
 

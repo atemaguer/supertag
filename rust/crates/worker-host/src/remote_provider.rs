@@ -44,6 +44,14 @@ const TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const REAP_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_ENDPOINT_BYTES: usize = 512;
+/// The slowest Workspace copy transfer a remote Workspace waits for, in bytes per second.
+const MIN_COPY_RATE: u64 = 1024 * 1024;
+
+/// A copy transfer may take the transfer timeout plus one second per MiB it
+/// moves or the sandbox hashes.
+fn copy_deadline(bytes: u64) -> Duration {
+    TRANSFER_TIMEOUT + Duration::from_secs(bytes / MIN_COPY_RATE)
+}
 
 /// Only explicit provider credentials enter the helper. Do not derive Debug:
 /// configuration errors must never print the API key.
@@ -277,7 +285,7 @@ impl RemoteProvider {
         owner: &RemoteWorkspaceOwner,
         lifetime: Duration,
         allowed_actions: &[String],
-        environment: Option<RemoteWorkspaceEnvironment>,
+        (environment, start): (Option<RemoteWorkspaceEnvironment>, &Start),
         cancel: &CancellationToken,
     ) -> Result<String> {
         validate_owner(owner)?;
@@ -291,10 +299,19 @@ impl RemoteProvider {
                     .all(|action| matches!(action.as_str(), "files:read" | "files:write")),
             "remote provider supports only file actions"
         );
+        let (prepared_artifact, prepare) = match start {
+            Start::Fresh => (None, false),
+            Start::Prepare { from } => (from.clone(), true),
+            Start::Prepared(artifact) => (Some(artifact.clone()), false),
+        };
+        if let Some(artifact) = &prepared_artifact {
+            validate_artifact(artifact)?;
+        }
         // A devcontainer image is built before the sandbox starts.
-        let deadline = if environment
-            .as_ref()
-            .is_some_and(|environment| !environment.dockerfile_commands.is_empty())
+        let deadline = if prepared_artifact.is_none()
+            && environment
+                .as_ref()
+                .is_some_and(|environment| !environment.dockerfile_commands.is_empty())
         {
             BUILD_TIMEOUT
         } else {
@@ -309,6 +326,8 @@ impl RemoteProvider {
                         timeout_ms,
                         allowed_actions: allowed_actions.to_vec(),
                         environment,
+                        prepared_artifact,
+                        prepare,
                     },
                     deadline,
                 )?)
@@ -501,6 +520,237 @@ impl RemoteProvider {
         .await
     }
 
+    /// Upload one staged Workspace copy into the sandbox beside the checkout.
+    /// Bytes stream from the host copy in bounded chunks; no credential is sent.
+    pub(crate) async fn stage_copy(
+        &self,
+        copy: &crate::workspace_mounts::RemoteCopy,
+        attempt: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let total = copy.files.iter().map(|file| file.size).sum::<u64>();
+        // The sandbox hashes each file again once all of its bytes arrive.
+        let deadline = copy_deadline(total.saturating_mul(2));
+        let path = copy.sandbox_path(attempt);
+        let reader = copy.reader()?;
+        let files = copy.files.clone();
+        let empty = copy.empty.clone();
+        let header = RemoteWorkspaceCopyHeader {
+            path,
+            read_write: copy.read_write,
+        };
+        bounded(deadline, cancel, async {
+            let (sender, receiver) = mpsc::channel(4);
+            let request = self.request(ReceiverStream::new(receiver), deadline)?;
+            let count = files.len() as u64;
+            let producer = tokio::task::spawn_blocking(move || -> Result<()> {
+                use std::io::Read;
+                let send = |part| {
+                    sender
+                        .blocking_send(RemoteWorkspaceCopyUpload { part: Some(part) })
+                        .map_err(|_| anyhow!("provider closed the Workspace copy upload"))
+                };
+                send(remote_workspace_copy_upload::Part::Header(header))?;
+                for directory in empty {
+                    send(remote_workspace_copy_upload::Part::Directory(directory))?;
+                }
+                let mut buffer = vec![0; CHECKPOINT_CHUNK_BYTES];
+                for file in files {
+                    let mut input = reader.open(&file)?;
+                    send(remote_workspace_copy_upload::Part::File(
+                        RemoteWorkspaceCopyFile {
+                            key: file.key.clone(),
+                            size: file.size,
+                            sha256: file.sha256.clone(),
+                        },
+                    ))?;
+                    let mut hash = Sha256::new();
+                    let mut length = 0_u64;
+                    loop {
+                        let size = input.read(&mut buffer)?;
+                        if size == 0 {
+                            break;
+                        }
+                        length += size as u64;
+                        ensure!(length <= file.size, "Workspace copy changed during upload");
+                        hash.update(&buffer[..size]);
+                        send(remote_workspace_copy_upload::Part::Payload(
+                            buffer[..size].to_vec(),
+                        ))?;
+                    }
+                    ensure!(
+                        length == file.size && format!("{:x}", hash.finalize()) == file.sha256,
+                        "Workspace copy changed during upload"
+                    );
+                }
+                Ok(())
+            });
+            let staged = self.client().stage_copy(request).await;
+            let produced = producer
+                .await
+                .map_err(|_| anyhow!("Workspace copy upload failed"))?;
+            let staged = staged?.into_inner();
+            produced?;
+            ensure!(
+                staged.files == count,
+                "Workspace copy staging receipt differs from the upload"
+            );
+            Ok(())
+        })
+        .await
+    }
+
+    /// After a successful capture, list a read-write copy in the sandbox. When
+    /// `decide` returns a writer, receive each changed file into the host copy.
+    pub(crate) async fn capture_copy(
+        &self,
+        copy: &crate::workspace_mounts::RemoteCopy,
+        attempt: &str,
+        decide: impl FnOnce(
+            &crate::workspace_mounts::RemoteListing,
+        ) -> Result<Option<crate::workspace_mounts::RemoteWriter>>,
+        cancel: &CancellationToken,
+    ) -> Result<crate::workspace_mounts::RemoteListing> {
+        use crate::workspace_mounts::{Copied, RemoteListing};
+        use supertag_protocol::workspace_mounts::{MAX_WORKSPACE_MOUNT_FILES, volume_key};
+        // The listing hashes at most the staged bytes and the copy's limit,
+        // and the transfer moves at most the limit.
+        let deadline = copy_deadline(copy.max_bytes.saturating_mul(3));
+        let path = copy.sandbox_path(attempt);
+        bounded(deadline, cancel, async {
+            let mut stream = self
+                .client()
+                .capture_copy(self.request(
+                    RemoteWorkspaceCaptureCopyRequest {
+                        path,
+                        max_bytes: copy.max_bytes,
+                    },
+                    deadline,
+                )?)
+                .await?
+                .into_inner();
+            let mut listing = RemoteListing::default();
+            loop {
+                match stream.message().await?.and_then(|message| message.part) {
+                    Some(remote_workspace_copy_download::Part::File(file)) => {
+                        ensure!(
+                            listing.files.len() < 2 * MAX_WORKSPACE_MOUNT_FILES
+                                && volume_key(&file.key)
+                                && valid_sha256(&file.sha256)
+                                && listing.files.last().is_none_or(|last| last.key < file.key),
+                            "invalid remote Workspace copy listing"
+                        );
+                        listing.files.push(Copied {
+                            key: file.key,
+                            size: file.size,
+                            sha256: file.sha256,
+                        });
+                    }
+                    Some(remote_workspace_copy_download::Part::Listed(listed)) => {
+                        let reason_ok = listed.error_reason.len() <= 256
+                            && !listed.error_reason.chars().any(char::is_control);
+                        ensure!(
+                            reason_ok
+                                && (listed.error_key.is_empty() || volume_key(&listed.error_key))
+                                && (!listed.error_reason.is_empty() || listed.error_key.is_empty()),
+                            "invalid remote Workspace copy listing"
+                        );
+                        listing.skipped = listed.skipped;
+                        listing.refusal = (!listed.error_reason.is_empty())
+                            .then_some((listed.error_key, listed.error_reason));
+                        break;
+                    }
+                    _ => anyhow::bail!("invalid remote Workspace copy listing"),
+                }
+            }
+            let Some(writer) = decide(&listing)? else {
+                // A refused copy needs no bytes; ending the call stops the provider.
+                return Ok(listing);
+            };
+            let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(4);
+            let files = listing.files.clone();
+            let consumer = tokio::task::spawn_blocking(move || -> Result<()> {
+                for file in &files {
+                    writer.write(file, &mut receiver)?;
+                }
+                ensure!(
+                    receiver.blocking_recv().is_none(),
+                    "remote Workspace copy differs from its listing"
+                );
+                Ok(())
+            });
+            let receive = async {
+                for file in &listing.files {
+                    let mut remaining = file.size;
+                    while remaining > 0 {
+                        let Some(remote_workspace_copy_download::Part::Payload(bytes)) =
+                            stream.message().await?.and_then(|message| message.part)
+                        else {
+                            anyhow::bail!("remote Workspace copy ended early");
+                        };
+                        ensure!(
+                            !bytes.is_empty()
+                                && bytes.len() <= CHECKPOINT_CHUNK_BYTES
+                                && bytes.len() as u64 <= remaining,
+                            "remote Workspace copy differs from its listing"
+                        );
+                        remaining -= bytes.len() as u64;
+                        sender
+                            .send(bytes)
+                            .await
+                            .map_err(|_| anyhow!("Workspace copy capture stopped"))?;
+                    }
+                }
+                ensure!(
+                    stream.message().await?.is_none(),
+                    "remote Workspace copy differs from its listing"
+                );
+                drop(sender);
+                Ok(())
+            };
+            let received = receive.await;
+            let written = consumer
+                .await
+                .map_err(|_| anyhow!("Workspace copy capture failed"))?;
+            received?;
+            written?;
+            Ok(listing)
+        })
+        .await
+    }
+
+    /// Records the staged preparation sandbox as a prepared artifact.
+    pub async fn snapshot(&self, cancel: &CancellationToken) -> Result<String> {
+        bounded(BUILD_TIMEOUT, cancel, async {
+            let artifact = self
+                .client()
+                .snapshot(self.request(RemoteWorkspaceSnapshotRequest {}, BUILD_TIMEOUT)?)
+                .await?
+                .into_inner()
+                .artifact;
+            validate_artifact(&artifact)?;
+            Ok(artifact)
+        })
+        .await
+    }
+
+    /// Deletes a prepared artifact; one already gone counts as deleted.
+    pub async fn remove_artifact(&self, artifact: &str, cancel: &CancellationToken) -> Result<()> {
+        validate_artifact(artifact)?;
+        bounded(STOP_TIMEOUT, cancel, async {
+            self.client()
+                .remove_artifact(self.request(
+                    RemoteWorkspaceRemoveArtifactRequest {
+                        artifact: artifact.to_owned(),
+                    },
+                    STOP_TIMEOUT,
+                )?)
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn stop(
         &self,
         owner: &RemoteWorkspaceOwner,
@@ -634,6 +884,29 @@ fn validate_owner(owner: &RemoteWorkspaceOwner) -> Result<()> {
     );
     Ok(())
 }
+/// Where an allocation starts.
+pub(crate) enum Start {
+    /// From the devcontainer image, or the operator's template or image.
+    Fresh,
+    /// A preparation sandbox, warm when it starts from an earlier prepared artifact.
+    Prepare { from: Option<String> },
+    /// A Task sandbox from a prepared artifact.
+    Prepared(String),
+}
+
+/// An E2B snapshot or template ID, or a Modal image ID: one printable token.
+pub(crate) fn validate_artifact(artifact: &str) -> Result<()> {
+    ensure!(
+        !artifact.is_empty()
+            && artifact.len() <= 256
+            && artifact
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.:/".contains(&byte)),
+        "invalid prepared Workspace artifact"
+    );
+    Ok(())
+}
+
 fn validate_sandbox_id(id: &str) -> Result<()> {
     ensure!(
         crate::journal::valid_sandbox_id(id),
@@ -828,6 +1101,8 @@ mod tests {
         staged: Arc<Mutex<Vec<u8>>>,
         mcp_commit: Arc<Mutex<Option<String>>>,
         environment: Arc<Mutex<Option<RemoteWorkspaceEnvironment>>>,
+        /// The last allocation's prepared artifact and whether it was a preparation.
+        start: Arc<Mutex<(Option<String>, bool)>>,
         /// Each sandbox MCP start record, and whether its input ended.
         mcp: Arc<Mutex<Vec<(RemoteMcpServerStart, bool)>>>,
     }
@@ -855,6 +1130,10 @@ mod tests {
                 "allocation"
             );
             *self.environment.lock().unwrap() = request.get_ref().environment.clone();
+            *self.start.lock().unwrap() = (
+                request.get_ref().prepared_artifact.clone(),
+                request.get_ref().prepare,
+            );
             Ok(Response::new(RemoteWorkspaceAllocation {
                 sandbox_id: "sandbox-fixture".into(),
             }))
@@ -884,6 +1163,20 @@ mod tests {
             assert_eq!(format!("{:x}", Sha256::digest(&bytes)), reference.sha256);
             *self.staged.lock().unwrap() = bytes;
             Ok(Response::new(RemoteWorkspaceStageResponse::default()))
+        }
+        // The copy transfer is covered through the E2B and Modal provider fixtures.
+        async fn stage_copy(
+            &self,
+            _: Request<Streaming<RemoteWorkspaceCopyUpload>>,
+        ) -> Result<Response<RemoteWorkspaceCopyStaged>, Status> {
+            Err(Status::unimplemented("fixture"))
+        }
+        type CaptureCopyStream = ReceiverStream<Result<RemoteWorkspaceCopyDownload, Status>>;
+        async fn capture_copy(
+            &self,
+            _: Request<RemoteWorkspaceCaptureCopyRequest>,
+        ) -> Result<Response<Self::CaptureCopyStream>, Status> {
+            Err(Status::unimplemented("fixture"))
         }
         type CaptureStream = ReceiverStream<Result<RemoteWorkspaceCaptureChunk, Status>>;
         async fn capture(
@@ -954,6 +1247,27 @@ mod tests {
         }
         type RunMcpServerStream = ReceiverStream<Result<RemoteMcpServerOutput, Status>>;
         /// A line-oriented MCP server that answers from inside the fixture "sandbox".
+        async fn snapshot(
+            &self,
+            request: Request<RemoteWorkspaceSnapshotRequest>,
+        ) -> Result<Response<RemoteWorkspaceSnapshot>, Status> {
+            self.authorize(&request)?;
+            Ok(Response::new(RemoteWorkspaceSnapshot {
+                artifact: if self.mode.load(Ordering::SeqCst) == 10 {
+                    "not an artifact\n".into()
+                } else {
+                    "im-prepared".into()
+                },
+            }))
+        }
+        async fn remove_artifact(
+            &self,
+            request: Request<RemoteWorkspaceRemoveArtifactRequest>,
+        ) -> Result<Response<RemoteWorkspaceRemoveArtifactResponse>, Status> {
+            self.authorize(&request)?;
+            assert_eq!(request.get_ref().artifact, "im-prepared");
+            Ok(Response::new(RemoteWorkspaceRemoveArtifactResponse {}))
+        }
         async fn run_mcp_server(
             &self,
             request: Request<Streaming<RemoteMcpServerInput>>,
@@ -1066,6 +1380,7 @@ mod tests {
             staged: Arc::new(Mutex::new(Vec::new())),
             mcp_commit: Arc::default(),
             environment: Arc::default(),
+            start: Arc::default(),
             mcp: Arc::default(),
         };
         let shutdown = CancellationToken::new();
@@ -1125,7 +1440,7 @@ mod tests {
                     &owner(),
                     Duration::from_secs(60),
                     &["files:read".into(), "files:write".into()],
-                    Some(environment.clone()),
+                    (Some(environment.clone()), &Start::Fresh),
                     &CancellationToken::new()
                 )
                 .await
@@ -1134,6 +1449,56 @@ mod tests {
         );
         // The devcontainer translation reaches the provider only over the private channel.
         assert_eq!(*mock.environment.lock().unwrap(), Some(environment));
+        assert_eq!(*mock.start.lock().unwrap(), (None, false));
+        // A warm preparation names the artifact it starts from; a Task sandbox starts from one.
+        for (start, expected) in [
+            (
+                Start::Prepare {
+                    from: Some("im-earlier".into()),
+                },
+                (Some("im-earlier".to_owned()), true),
+            ),
+            (Start::Prepare { from: None }, (None, true)),
+            (
+                Start::Prepared("im-prepared".into()),
+                (Some("im-prepared".to_owned()), false),
+            ),
+        ] {
+            provider
+                .allocate(
+                    &owner(),
+                    Duration::from_secs(60),
+                    &[],
+                    (None, &start),
+                    &CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(*mock.start.lock().unwrap(), expected);
+        }
+        assert!(
+            provider
+                .allocate(
+                    &owner(),
+                    Duration::from_secs(60),
+                    &[],
+                    (None, &Start::Prepared("im prepared".into())),
+                    &CancellationToken::new(),
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            provider.snapshot(&CancellationToken::new()).await.unwrap(),
+            "im-prepared"
+        );
+        provider
+            .remove_artifact("im-prepared", &CancellationToken::new())
+            .await
+            .unwrap();
+        mock.mode.store(10, Ordering::SeqCst);
+        assert!(provider.snapshot(&CancellationToken::new()).await.is_err());
+        mock.mode.store(0, Ordering::SeqCst);
         let bytes = vec![b'x'; CHECKPOINT_CHUNK_BYTES * 2 + 7];
         let bundle = TransferArtifact {
             path: directory.join("source.bundle"),
@@ -1288,7 +1653,7 @@ mod tests {
                     &owner(),
                     Duration::from_secs(60),
                     &["commands:execute".into()],
-                    None,
+                    (None, &Start::Fresh),
                     &CancellationToken::new()
                 )
                 .await

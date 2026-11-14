@@ -209,13 +209,22 @@ impl Probe {
         Ok(bytes)
     }
 
+    /// A probe that stops reading (it answered and exited, or closed its input) is not an
+    /// error here: its output and exit status decide the result, so a broken pipe closes the
+    /// input instead of failing the check.
     pub async fn write(&mut self, bytes: &[u8]) -> Result<()> {
         let stdin = self.stdin.as_mut().context("probe input is closed")?;
-        stdin
-            .write_all(bytes)
-            .await
-            .context("could not write probe input")?;
-        stdin.flush().await.context("could not write probe input")
+        let written = match stdin.write_all(bytes).await {
+            Ok(()) => stdin.flush().await,
+            Err(error) => Err(error),
+        };
+        match written {
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {
+                self.close_input();
+                Ok(())
+            }
+            result => result.context("could not write probe input"),
+        }
     }
 
     pub async fn send(&mut self, value: &Value) -> Result<()> {
@@ -414,6 +423,26 @@ pub(super) mod tests {
         // SAFETY: signal 0 only checks that the process exists.
         let result = unsafe { libc::kill(pid, 0) };
         result == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+    }
+
+    #[tokio::test]
+    async fn a_probe_that_answers_without_reading_its_input_still_answers() {
+        let temporary = tempfile::tempdir().unwrap();
+        let program = script(temporary.path(), "answer", "exec printf ok");
+        let mut probe = Probe::start(
+            &program,
+            &[],
+            &Variables::from([("PATH".into(), "/usr/bin:/bin".into())]),
+            None,
+        )
+        .unwrap();
+        // Wait until the probe has exited, so its input pipe has no reader. Larger than a pipe
+        // buffer, so the write cannot complete without one.
+        let input = probe.stdin.take();
+        assert!(probe.wait().await.unwrap().success());
+        probe.stdin = input;
+        probe.write(&vec![b'x'; 1 << 20]).await.unwrap();
+        assert!(probe.stdin.is_none());
     }
 
     #[tokio::test]

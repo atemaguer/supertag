@@ -21,9 +21,9 @@ use sqlx::Connection;
 use supertag_protocol::{
     authenticated_request,
     v2::{
-        CancelTaskRequest, GetTaskRequest, HarnessKind, ListEventsRequest, ListNativeUsageRequest,
-        PolicyExecutionSettings, PutTagRequest, SubmitTaskRequest, Task, TaskEvent, TaskState,
-        WorkspaceSpec, operator_client::OperatorClient,
+        AttemptCleanup, CancelTaskRequest, GetTaskRequest, HarnessKind, ListEventsRequest,
+        ListNativeUsageRequest, PolicyExecutionSettings, PutTagRequest, SubmitTaskRequest, Task,
+        TaskEvent, TaskState, WorkspaceSpec, operator_client::OperatorClient,
     },
     valid_sha256,
 };
@@ -50,6 +50,8 @@ const WORKSPACE: &str = "cursor-project";
 mod remote_input_runtime;
 #[path = "support/remote_output_runtime.rs"]
 mod remote_output_runtime;
+#[path = "support/workspace_copy_runtime.rs"]
+mod workspace_copy_runtime;
 
 #[cfg(target_os = "linux")]
 #[path = "support/shared_command_runtime.rs"]
@@ -357,11 +359,15 @@ impl<'a> Runtime<'a> {
     }
 
     async fn submit(&mut self, tag_id: &str, mode: &str) -> Result<Task> {
+        self.submit_in(tag_id, SESSION, mode).await
+    }
+
+    async fn submit_in(&mut self, tag_id: &str, session: &str, mode: &str) -> Result<Task> {
         Ok(self
             .operator
             .submit_task(self.credentials.request(SubmitTaskRequest {
                 tag_id: tag_id.into(),
-                session_id: SESSION.into(),
+                session_id: session.into(),
                 operation_id: Uuid::new_v4().to_string(),
                 prompt: format!("fixture:{mode}"),
                 ..Default::default()
@@ -396,6 +402,18 @@ impl<'a> Runtime<'a> {
         allow_commands: bool,
         remote: Option<RemoteWorkspace>,
     ) -> Result<Child> {
+        Ok(self
+            .remote_worker_command(fixture, label, allow_commands, remote)
+            .spawn()?)
+    }
+
+    fn remote_worker_command(
+        &self,
+        fixture: &Fixture,
+        label: &str,
+        allow_commands: bool,
+        remote: Option<RemoteWorkspace>,
+    ) -> Command {
         let mut command = self.worker_command(fixture, label);
         command
             .arg("--workspace-id")
@@ -424,7 +442,7 @@ impl<'a> Runtime<'a> {
                 .env("E2B_DOMAIN", "fixture.e2b.invalid")
                 .env("SUPERTAG_E2B_TEMPLATE", "fixture-template");
         }
-        Ok(command.spawn()?)
+        command
     }
 
     fn worker_command(&self, fixture: &Fixture, label: &str) -> Command {
@@ -622,6 +640,10 @@ database_tests! {
     cursor_modal_workspace_builds_and_sets_up_the_trusted_devcontainer;
     #[tokio::test]
     cursor_remote_workspace_refuses_a_nonliteral_dockerfile_user_before_any_provider_call;
+    #[tokio::test]
+    cursor_remote_cleanup_failure_reaches_the_task_report_redacted;
+    #[tokio::test]
+    cursor_remote_workspace_reuses_and_warms_prepared_artifacts;
 }
 
 async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
@@ -1155,6 +1177,29 @@ async fn remote_devcontainer(provider: RemoteWorkspace, database: &str) -> Resul
     // The image is built before the sandbox exists; setup runs only once it is staged.
     assert!(order("environment") < order("allocate"));
     assert!(order("allocate") < order("setup"));
+    // Setup ran in a preparation sandbox, which was snapshotted; the Task's sandbox started from
+    // that artifact and ran no setup of its own.
+    assert_eq!(environment_prepare(&trace), [true]);
+    let snapshot = trace
+        .iter()
+        .find(|entry| entry["type"] == "snapshot")
+        .context("the preparation was never snapshotted")?;
+    assert!(order("setup") < order("snapshot"));
+    let allocations: Vec<&Value> = trace
+        .iter()
+        .filter(|entry| entry["type"] == "allocate")
+        .collect();
+    assert_eq!(allocations.len(), 2, "{trace:?}");
+    assert_eq!(allocations[0]["prepare"], true);
+    assert_eq!(allocations[1]["prepare"], false);
+    assert_eq!(allocations[1]["preparedArtifact"], snapshot["artifact"]);
+    assert_eq!(
+        trace
+            .iter()
+            .filter(|entry| entry["type"] == "setup")
+            .count(),
+        1
+    );
     let setup = trace
         .iter()
         .find(|entry| entry["type"] == "setup")
@@ -1171,6 +1216,266 @@ async fn remote_devcontainer(provider: RemoteWorkspace, database: &str) -> Resul
     // Nothing from the Worker Host's environment reached the provider.
     let serialized = serde_json::to_string(&trace)?;
     assert!(!serialized.contains(&fixture.source.display().to_string()));
+    runtime.stop().await
+}
+
+/// Whether each devcontainer environment the provider received was for a preparation sandbox.
+fn environment_prepare(trace: &[Value]) -> Vec<bool> {
+    trace
+        .iter()
+        .filter(|entry| entry["type"] == "environment")
+        .map(|entry| entry["prepare"] == true)
+        .collect()
+}
+
+/// Runs one remote Task in its own Session on a Worker Host that keeps `label`'s state
+/// directory, so its prepared Workspace records, releasing the fixture's writes as they start.
+async fn remote_task(
+    runtime: &mut Runtime<'_>,
+    fixture: &Fixture,
+    label: &str,
+    session: &str,
+) -> Result<Task> {
+    let task = runtime.submit_in(TAG, session, "remote-first").await?;
+    let mut worker =
+        runtime.worker_with_remote(fixture, label, false, Some(RemoteWorkspace::E2b))?;
+    let finished: std::process::ExitStatus = timeout(WAIT, async {
+        loop {
+            for entry in fixture.trace()? {
+                if entry["type"] == "started"
+                    && let Ok(runner) = pid(&entry, "pid")
+                {
+                    std::fs::write(fixture.root.join(format!("release-{runner}")), b"go")?;
+                }
+            }
+            if let Some(status) = worker.try_wait()? {
+                return Ok::<_, anyhow::Error>(status);
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .context("remote Task did not settle")??;
+    ensure!(
+        finished.success(),
+        "Worker Host failed; provider: {:?}",
+        fixture.provider_trace()?
+    );
+    let settled = runtime.task(&task.task_id).await?;
+    ensure!(
+        settled.state() == TaskState::Succeeded,
+        "{session}: {:?}; fixture: {:?}; provider: {:?}",
+        settled.result,
+        fixture.trace()?,
+        fixture.provider_trace()?
+    );
+    runtime.assert_success(&task.task_id, "remote-first").await
+}
+
+/// TypeScript parity (`PreparedWorkspaceCache`, `SandboxWorkspaceEnvironment.prepare`): one
+/// prepared artifact per trusted commit serves every Task; a new trusted commit prepares warm from
+/// its ancestor's artifact, running `updateContentCommand` alone; artifacts beyond three per
+/// Workspace are deleted.
+async fn cursor_remote_workspace_reuses_and_warms_prepared_artifacts(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut fixture = Fixture::prepare(directory.path()).await?;
+    commit_devcontainer(
+        &mut fixture,
+        &json!({
+            "onCreateCommand": "echo created >> .setup-log",
+            "updateContentCommand": "test ! -f notes.txt || cat notes.txt >> .setup-update",
+            "postCreateCommand": "echo post >> .setup-log",
+        }),
+        "FROM python:3.13-slim\n",
+    )
+    .await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let kinds = |trace: &[Value], kind: &str| -> Vec<Value> {
+        trace
+            .iter()
+            .filter(|entry| entry["type"] == kind)
+            .cloned()
+            .collect()
+    };
+
+    // The first Task prepares cold: every lifecycle command, once, in a preparation sandbox.
+    remote_task(&mut runtime, &fixture, "prepared", "first").await?;
+    let trace = fixture.provider_trace()?;
+    let setups = kinds(&trace, "setup");
+    assert_eq!(setups.len(), 1, "{trace:?}");
+    assert_eq!(setups[0]["prepare"], true);
+    let first = kinds(&trace, "snapshot")[0]["artifact"].clone();
+    assert_eq!(
+        kinds(&trace, "snapshot")[0]["preparedArtifact"],
+        Value::Null
+    );
+    let checkout = PathBuf::from(setups[0]["checkout"].as_str().context("checkout")?);
+    assert_eq!(
+        std::fs::read_to_string(checkout.join(".setup-log"))?,
+        "created\npost\n"
+    );
+
+    // The same trusted commit reuses the artifact: no preparation, no setup.
+    remote_task(&mut runtime, &fixture, "prepared", "second").await?;
+    let trace = fixture.provider_trace()?;
+    assert_eq!(kinds(&trace, "setup").len(), 1);
+    assert_eq!(kinds(&trace, "snapshot").len(), 1);
+    let allocations = kinds(&trace, "allocate");
+    assert_eq!(allocations.len(), 3);
+    assert_eq!(allocations[2]["preparedArtifact"], first);
+
+    // A new trusted commit that descends from the old one prepares warm from its artifact.
+    let mut artifacts = vec![first.clone()];
+    for (round, content) in ["second-base\n", "third-base\n", "fourth-base\n"]
+        .into_iter()
+        .enumerate()
+    {
+        std::fs::write(fixture.source.join("notes.txt"), content)?;
+        git(&fixture.source, &["add", "notes.txt"]).await?;
+        git(
+            &fixture.source,
+            &["commit", "--quiet", "-m", content.trim()],
+        )
+        .await?;
+        fixture.base = git(&fixture.source, &["rev-parse", "HEAD"]).await?;
+        runtime
+            .tag(
+                &fixture,
+                TAG,
+                HarnessKind::Cursor,
+                &["files:read", "files:write"],
+            )
+            .await?;
+        remote_task(&mut runtime, &fixture, "prepared", &format!("base-{round}")).await?;
+        let trace = fixture.provider_trace()?;
+        let setup = kinds(&trace, "setup").pop().context("warm setup")?;
+        assert_eq!(setup["prepare"], true);
+        // Exports, then updateContentCommand alone.
+        let lines: Vec<&str> = setup["setupCommands"]
+            .as_array()
+            .context("setup lines")?
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(
+            lines,
+            ["sh -c 'test ! -f notes.txt || cat notes.txt >> .setup-update'"]
+        );
+        let snapshot = kinds(&trace, "snapshot").pop().context("warm snapshot")?;
+        assert_eq!(snapshot["preparedArtifact"], *artifacts.last().unwrap());
+        let checkout = PathBuf::from(setup["checkout"].as_str().context("checkout")?);
+        assert_eq!(
+            std::fs::read_to_string(checkout.join(".setup-log"))?,
+            "created\npost\n",
+            "a warm preparation reran onCreateCommand or postCreateCommand"
+        );
+        assert!(std::fs::read_to_string(checkout.join(".setup-update"))?.ends_with(content));
+        artifacts.push(snapshot["artifact"].clone());
+        let allocation = kinds(&trace, "allocate").pop().context("Task allocation")?;
+        assert_eq!(allocation["preparedArtifact"], snapshot["artifact"]);
+    }
+    // Four artifacts for one Workspace: the least recently used one is deleted.
+    let removed = kinds(&fixture.provider_trace()?, "remove-artifact");
+    assert_eq!(removed.len(), 1, "{removed:?}");
+    assert_eq!(removed[0]["artifact"], artifacts[0]);
+    runtime.stop().await
+}
+
+/// TypeScript parity (`tests/durable-cleanup-unknown.test.ts`, second case): a sandbox the host
+/// cannot stop leaves the Attempt uncertain, and the host's reasons reach the Task execution
+/// report with the values of its own credential variables redacted. Two layers are checked: the
+/// provider's failure text, which quotes its credential and a URL password, never crosses the
+/// provider transport; and the host redacts its credential variables from the text that does,
+/// shown by a variable whose value is a word of the transport's own failure. The unit tests of
+/// `cleanup_failure` cover redacting each kind of secret from a cause.
+async fn cursor_remote_cleanup_failure_reaches_the_task_report_redacted(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    std::fs::write(
+        fixture.root.join("fail-stop-revealing-credentials"),
+        b"enabled",
+    )?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let task = runtime.submit(TAG, "remote-first").await?;
+    // A credential variable only this Worker Host holds, whose value the transport's own failure
+    // text contains, so the reason reaches the report only through the host's redaction.
+    let worker = runtime
+        .remote_worker_command(
+            &fixture,
+            "cleanup-failure",
+            false,
+            Some(RemoteWorkspace::E2b),
+        )
+        .env("FIXTURE_HOST_ONLY_TOKEN", "operation")
+        .spawn()?;
+    runtime
+        .wait_stream(&fixture, &task.task_id, "remote-first")
+        .await?;
+    let runner = pid(&fixture.started("remote-first")?, "pid")?;
+    std::fs::write(fixture.root.join(format!("release-{runner}")), b"go")?;
+    let output = timeout(WAIT, worker.wait_with_output()).await??;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    ensure!(
+        !output.status.success(),
+        "a sandbox the host could not stop was treated as stopped: {stderr}"
+    );
+    ensure!(
+        fixture
+            .provider_trace()?
+            .iter()
+            .any(|entry| entry["type"] == "stop-failed"),
+        "{:?}",
+        fixture.provider_trace()?
+    );
+    let task = runtime.task(&task.task_id).await?;
+    ensure!(
+        matches!(task.state(), TaskState::Running | TaskState::Uncertain),
+        "{task:?}"
+    );
+    let report = task.execution_report.context("execution report")?;
+    assert_eq!(report.cleanup(), AttemptCleanup::Unknown, "{report:?}");
+    let reasons = report.cleanup_failure.join("\n");
+    // The host redacted its own variable's value from the transport's failure.
+    assert!(
+        reasons.contains("Remote workspace [REDACTED] failed") && !reasons.contains("operation"),
+        "{reasons}"
+    );
+    // The provider's credential-bearing failure text never crossed the transport.
+    assert!(
+        !reasons.contains("synthetic-e2b-provider-key")
+            && !reasons.contains("url-password-4242")
+            && !reasons.contains("Stop refused"),
+        "{reasons}"
+    );
+    assert!(
+        report
+            .cleanup_failure
+            .iter()
+            .all(|reason| reason.chars().count() <= 160),
+        "{reasons}"
+    );
     runtime.stop().await
 }
 

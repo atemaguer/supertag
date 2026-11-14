@@ -191,7 +191,7 @@ impl Store {
             .bind(i64::from(input.decision)).bind(&input.evidence).bind(i64::from(input.confirmed_stopped))
             .bind(now).execute(&mut *transaction).await?;
         if decision == AttemptDecision::Retry {
-            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = NULL, attempt_id = NULL, host_principal = NULL, host_generation = NULL, lease_token = NULL, lease_expires_at_ms = NULL, cleanup_pending = 0, cleanup_observed = 0, event_sequence_base = 0, finish_objective_signal = 0 WHERE task_id = $2")
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = NULL, attempt_id = NULL, host_principal = NULL, host_generation = NULL, lease_token = NULL, lease_expires_at_ms = NULL, cleanup_pending = 0, cleanup_observed = 0, cleanup_failure = NULL, event_sequence_base = 0, finish_objective_signal = 0 WHERE task_id = $2")
                 .bind(TaskState::Queued as i64).bind(&input.task_id).execute(&mut *transaction).await?;
         } else {
             let state = if cancelled {
@@ -301,7 +301,7 @@ impl Store {
             .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(&host.principal).bind(&attempt.attempt_id)
             .bind(AttemptDecision::Failed as i64).bind(&input.evidence).bind(now)
             .execute(&mut *transaction).await?;
-        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = COALESCE(result, $2), cleanup_pending = 0, cleanup_observed = 1 WHERE task_id = $3")
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = COALESCE(result, $2), cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL WHERE task_id = $3")
             // A cancelled Task keeps its cancellation as its result.
             .bind(state as i64).bind((state == TaskState::Failed).then_some(RECLAIMED_RESULT)).bind(&attempt.task_id)
             .execute(&mut *transaction).await?;

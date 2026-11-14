@@ -281,6 +281,9 @@ The component that owns the client also owns its live connection and resolved cr
 - stdio credentials use the launched server's environment, never command-line arguments.
 - Secrets stay in the Worker Host unless an explicitly selected route requires staging them into a
   trusted harness runtime or execution environment.
+- A host MCP credential comes from a variable or a file on the Worker Host. The Worker Host reads
+  a file credential again for each Task Attempt and never sends it to the Control Plane or a
+  sandbox. See [MCP server authentication](../reference/supertag-yaml.md#mcp-server-authentication).
 - One Task Attempt owns the client session. Cleanup closes the connection and any policy proxy.
 - The environment HTTP client supports Streamable HTTP JSON and SSE responses, session headers,
   and session deletion. It does not follow redirects, negotiate interactive OAuth, or use the

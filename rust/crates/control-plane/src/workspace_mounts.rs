@@ -158,7 +158,7 @@ pub(crate) async fn admission_in(
         || !mount_actions(&spec.mounts, allowed)
     {
         return Err(StoreError::FailedPrecondition(
-            "Workspace mounts require local Codex or Claude Code execution that reads files, writes files for every read-write copy, and neither runs commands nor fetches from the web".into(),
+            "Workspace mounts require a Codex, Claude Code, Cursor, or OpenCode Task that reads files, writes files for every read-write copy, and neither runs commands nor fetches from the web".into(),
         ));
     }
     for mount in &mut spec.mounts {
