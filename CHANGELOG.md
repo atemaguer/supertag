@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.3.0-alpha.1] - 2026-11-14
+
 ### Added
 
 - `supertag watch inbox-item` prints the operator inbox items already waiting, then each new one.
@@ -36,11 +38,6 @@ within the pre-1.0 compatibility policy described in
   `connector_account_id` is `connectorAccountId`, and so on). Roles and SurfaceLocations name their
   sets `permissionSets` and `contextSets`, and an Objective's owner is `ownerTagId`; the other
   spellings are refused.
-
-## [0.3.0-alpha.1]
-
-### Changed
-
 - The installer script installs the native SuperTag release from GitHub Releases: a
   checksum-verified archive per platform holding the `supertag` command, the terminal UI, and the
   Claude Code, Cursor, OpenCode, E2B, and Modal bridges. Install with
