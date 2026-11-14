@@ -119,6 +119,12 @@ jobs:
           cargo test --locked --workspace --all-features -- --include-ignored \
             --skip installed_native_sign_in_steers_one_turn_and_resumes_its_checkpoint \
             --skip installed_native_objective_question_and_pinned_tool_resume
+      - name: Verify the supertag-ai package against the native Control Plane and Worker Host
+        working-directory: .
+        run: |
+          cargo build --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag
+          SUPERTAG_RUST_TEST_CLI="$GITHUB_WORKSPACE/rust/target/debug/supertag" \
+            pnpm --filter supertag-ai test:package
 
   # Shared execution switches workloads to a distinct UID, so these cases need real root. The
   # job runs as root inside a disposable container; nothing else on the runner is touched.

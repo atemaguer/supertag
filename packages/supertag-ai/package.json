@@ -1,0 +1,67 @@
+{
+  "name": "supertag-ai",
+  "version": "0.2.0-alpha.9",
+  "description": "TypeScript SDK for SuperTag: a Control Plane client and the harness adapter client for Worker Hosts.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "SuperTag contributors",
+  "homepage": "https://github.com/atemaguer/supertag#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/atemaguer/supertag.git",
+    "directory": "packages/supertag-ai"
+  },
+  "bugs": {
+    "url": "https://github.com/atemaguer/supertag/issues"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "harness",
+    "supertag"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "exports": {
+    "./control-plane-client": {
+      "types": "./dist/control-plane-client.d.ts",
+      "import": "./dist/control-plane-client.js"
+    },
+    "./harness": {
+      "types": "./dist/harness.d.ts",
+      "import": "./dist/harness.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm build",
+    "test:package": "pnpm build && publint && attw --pack . --profile esm-only && node scripts/verify-control-plane-client.mjs",
+    "typecheck": "tsc --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.15.0",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-node": "2.2.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@types/node": "26.1.2",
+    "publint": "0.3.23",
+    "tsup": "8.5.0",
+    "typescript": "5.9.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

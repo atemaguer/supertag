@@ -120,6 +120,7 @@ jobs:
       - run: node scripts/install-harness-clis.mjs
       - run: pnpm check
       - run: pnpm build
+      - run: pnpm --filter supertag-ai typecheck
       - run: pnpm test
       # Documentation and script checks under scripts/, which Vitest does not collect.
       - run: node --test scripts/*.test.mjs
