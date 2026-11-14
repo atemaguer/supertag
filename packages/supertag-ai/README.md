@@ -36,7 +36,7 @@ try {
 }
 ```
 
-Use Node.js 22.13.0 or newer. SuperTag is in alpha; the
+Use Node.js 22.13.0 or newer. SuperTag is below version 1.0; the
 [API stability policy](https://github.com/atemaguer/supertag/blob/main/docs/reference/api-stability.md)
 describes compatibility.
 

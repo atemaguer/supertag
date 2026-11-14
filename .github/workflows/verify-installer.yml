@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Published tag to verify (for example, v0.3.0-alpha.1)
+        description: Published tag to verify (for example, v0.3.0)
         required: true
         type: string
       check_latest:

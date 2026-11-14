@@ -59,6 +59,6 @@ jobs:
       - name: Publish with npm trusted publishing
         working-directory: packages/supertag-ai
         run: |
-          # Until a stable 1.0 exists, each alpha is the release users should get by default.
+          # Every published release is the one users should get by default.
           # npm adds provenance automatically when the source repository is public.
           npm publish --access public --tag latest

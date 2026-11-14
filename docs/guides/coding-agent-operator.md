@@ -250,7 +250,7 @@ could look like this illustrative report:
 Include evidence references and the time you read them. Shared capacity or conflicting changes
 need a user decision when the existing priorities do not settle them.
 
-## Alpha limits
+## Current limits
 
 - There is no notification channel into this operator thread yet. The agent or user must
   check the inbox. Separately configured operator notifications do not resume this thread.

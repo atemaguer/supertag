@@ -79,7 +79,7 @@ To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
 | --- | --- |
-| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.0-alpha.1`, to install that release. Releases before the native CLI have no archive, so the script refuses them |
+| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.0`, to install that release. Releases before the native CLI have no archive, so the script refuses them |
 | `SUPERTAG_INSTALL_ROOT` | `~/.local/share/supertag` |
 | `SUPERTAG_BIN_DIR` | `~/.local/bin` |
 
@@ -128,10 +128,10 @@ npm install supertag-ai
 ```
 
 The Python SDK is `supertag` on PyPI, in Python 3.10 or newer. Install the version that matches
-your CLI; the explicit version selects this prerelease, which Python spells `0.3.0a1`:
+your CLI:
 
 ```sh
-python -m pip install 'supertag==0.3.0a1'
+python -m pip install 'supertag==0.3.0'
 ```
 
 Each SDK connects to a Control Plane and lets a custom harness adapter talk to its Worker Host;

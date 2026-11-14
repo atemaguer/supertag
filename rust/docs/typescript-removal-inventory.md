@@ -249,7 +249,7 @@ semantic pass over the long reference pages.
 6. **Existing npm installations.** `rust/scripts/install_native_release.py` recognizes the npm
    `install.sh` layout so a native install can replace it. Keep or remove that recognition.
 7. **Version numbering.** Decided on 2026-11-14: `workspace.package.version` in
-   `rust/Cargo.toml` is the single source, now `0.3.0-alpha.1`. `rust/scripts/release_version.py
+   `rust/Cargo.toml` is the single source, now `0.3.0`. `rust/scripts/release_version.py
    --check` fails when any package manifest, the Python SDK, or the desktop app differs.
 
 ## Follow-ups not done here

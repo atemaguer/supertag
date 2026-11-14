@@ -26,7 +26,7 @@ Write `supertag`, never `pnpm supertag`. Readers install the CLI with the instal
 GitHub Release (`docs/operations/install.md`). `pnpm supertag` runs the checkout's Rust CLI through
 `cargo run` and works only in a checkout; repository build commands belong in `CONTRIBUTING.md`.
 User installation instructions use the installer script for the CLI, and PyPI and npm for the
-SDKs; Python prereleases need an explicit version pin.
+SDKs; the Python install pins the version that matches the CLI.
 
 Two intentional exceptions to the CLI form:
 

@@ -9,7 +9,7 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
-## [0.3.0-alpha.1] - 2026-11-14
+## [0.3.0] - 2026-11-14
 
 ### Added
 
@@ -561,7 +561,14 @@ within the pre-1.0 compatibility policy described in
 - Gateway control-plane support and Slack, GitHub, Linear, Microsoft Teams,
   and Lark Surfaces.
 
-[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.2.0-alpha.2...HEAD
+[Unreleased]: https://github.com/atemaguer/supertag/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/atemaguer/supertag/compare/v0.2.0-alpha.9...v0.3.0
+[0.2.0-alpha.9]: https://github.com/atemaguer/supertag/compare/v0.2.0-alpha.8...v0.2.0-alpha.9
+[0.2.0-alpha.8]: https://github.com/atemaguer/supertag/compare/v0.2.0-alpha.7...v0.2.0-alpha.8
+[0.2.0-alpha.7]: https://github.com/atemaguer/supertag/compare/v0.2.0-alpha.6...v0.2.0-alpha.7
+[0.2.0-alpha.6]: https://github.com/atemaguer/supertag/compare/v0.2.0-alpha.5...v0.2.0-alpha.6
+[0.2.0-alpha.5]: https://github.com/atemaguer/supertag/compare/v0.2.0-alpha.4...v0.2.0-alpha.5
+[0.2.0-alpha.4]: https://github.com/atemaguer/supertag/releases/tag/v0.2.0-alpha.4
 [0.2.0-alpha.2]: https://github.com/atemaguer/supertag/compare/v0.2.0-alpha.1...v0.2.0-alpha.2
 [0.2.0-alpha.1]: https://github.com/atemaguer/supertag/compare/v0.1.2...v0.2.0-alpha.1
 [0.1.2]: https://github.com/atemaguer/supertag/compare/v0.1.1...v0.1.2

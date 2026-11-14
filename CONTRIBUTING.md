@@ -359,12 +359,13 @@ every manifest and lockfile must carry the same version. The release and SDK pub
 A release takes three steps, so the README's `releases/latest` installer URL never points at a
 release without its archives:
 
-1. Push the release tag, for example `git push origin v0.3.0-alpha.1`. **Release SuperTag**
+1. Push the release tag, for example `git push origin v0.3.0`. **Release SuperTag**
    (`release.yml`) builds and verifies the four archives with `native-release-check.yml`, checks
    the pinned installer against them, and attaches them with their `SHA256SUMS` and an
    `install.sh` pinned to the release to a draft GitHub Release for the tag. It never changes a
    published release.
-2. Review the draft's notes and assets, then publish it. Don't mark an alpha as a prerelease:
+2. Review the draft's notes and assets, then publish it as the latest release, for example with
+   `gh release edit v0.3.0 --draft=false --latest`. Don't mark it as a prerelease:
    `releases/latest` skips prereleases.
 3. Publishing runs **Verify public installer** (`verify-installer.yml`), which installs from the
    README's URL on each platform in a clean home, checks the CLI and terminal UI versions, and
@@ -377,14 +378,14 @@ rebuild the archives for an existing tag without attaching them, dispatch the wo
 tag:
 
 ```sh
-gh workflow run release.yml -f release_tag=v0.3.0-alpha.1
+gh workflow run release.yml -f release_tag=v0.3.0
 ```
 
 Set `upload_assets` to true to replace the assets on that tag's draft release. To check a
 published release, dispatch **Verify public installer** with its tag:
 
 ```sh
-gh workflow run verify-installer.yml -f release_tag=v0.3.0-alpha.1
+gh workflow run verify-installer.yml -f release_tag=v0.3.0
 ```
 
 Select `check_latest` to check the README's installer URL for the current release.
