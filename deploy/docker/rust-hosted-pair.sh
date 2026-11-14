@@ -4,7 +4,8 @@
 # `supertag-hosted-entrypoint pair TUNNEL_ADDRESS [GATEWAY_FLAG...]`, already as UID 10001 under
 # tini. Each GATEWAY_FLAG is passed to the Gateway, which runs no connector without one: these
 # platforms route no inbound traffic to it, so only outbound connectors work here, such as
-# `--lark-state-directory /var/lib/supertag/lark` and `--notify webhook:HTTPS_URL`.
+# `--lark-state-directory /var/lib/supertag/lark`, `--slack-socket-mode --slack-state-directory
+# /var/lib/supertag/slack`, and `--notify webhook:HTTPS_URL`.
 #
 # The Control Plane accepts the platform's WebSocket tunnel on TUNNEL_ADDRESS (whose plain
 # GET /healthz serves the platform health check) and native gRPC on loopback only. The Gateway

@@ -1,8 +1,10 @@
-//! Slack Events API ingress and durable thread replies.
+//! Slack ingress, over signed Events API webhooks or a Socket Mode connection, and durable
+//! thread replies.
 
 mod delivery;
 mod progress;
 pub(crate) mod render;
+mod socket;
 
 use std::{
     path::PathBuf,
@@ -49,9 +51,17 @@ pub struct SlackConfig {
     pub channel_id: String,
     pub tag_id: String,
     pub allowed_users: Vec<String>,
-    pub signing_secret: String,
+    pub events: SlackEvents,
     pub bot_token: String,
     pub state_directory: PathBuf,
+}
+
+/// How Slack delivers events to the connector. Both admit the same messages.
+pub enum SlackEvents {
+    /// Signed Events API requests on a loopback webhook listener ([`Slack::serve`]).
+    Http { signing_secret: String },
+    /// Socket Mode: an outbound WebSocket opened with an app-level token ([`Slack::connect`]).
+    Socket { app_token: String },
 }
 
 #[derive(Clone)]
@@ -64,6 +74,9 @@ struct Connector {
     account: String,
     http: reqwest::Client,
     post_message: reqwest::Url,
+    /// Set by test builds whose Slack Web API is a loopback fixture: Socket Mode then connects
+    /// to that fixture over plain WebSocket instead of requiring TLS to Slack.
+    test_api: bool,
     journal: Journal,
     progress: ReplyProgressClient<ProtocolChannel>,
     progress_journal: Journal,
@@ -102,9 +115,19 @@ impl Slack {
             "configure at least one valid Slack user ID"
         );
         ensure!(
-            !config.signing_secret.trim().is_empty() && !config.bot_token.trim().is_empty(),
-            "Slack signing secret and bot token are required"
+            !config.bot_token.trim().is_empty(),
+            "Slack bot token is required"
         );
+        match &config.events {
+            SlackEvents::Http { signing_secret } => ensure!(
+                !signing_secret.trim().is_empty(),
+                "Slack signing secret is required for HTTP events"
+            ),
+            SlackEvents::Socket { app_token } => ensure!(
+                !app_token.trim().is_empty(),
+                "A Slack app-level token is required for Socket Mode"
+            ),
+        }
         let account = config.account_id.clone();
         connector_request((), &gateway_token, &account)
             .context("invalid private Slack connector credential")?;
@@ -135,6 +158,7 @@ impl Slack {
             account,
             http,
             post_message: POST_MESSAGE.parse()?,
+            test_api: false,
             journal,
         })))
     }
@@ -155,9 +179,10 @@ impl Slack {
                 && url.fragment().is_none(),
             "test Slack reply URL must use HTTP and a loopback IP"
         );
-        Arc::get_mut(&mut self.0)
-            .context("set test Slack URL before sharing the connector")?
-            .post_message = url;
+        let connector =
+            Arc::get_mut(&mut self.0).context("set test Slack URL before sharing the connector")?;
+        connector.post_message = url;
+        connector.test_api = true;
         Ok(self)
     }
 
@@ -171,7 +196,12 @@ impl Slack {
         }
     }
 
+    /// Serves signed Events API webhooks on `listener` and delivers replies.
     pub async fn serve(self, listener: TcpListener, shutdown: CancellationToken) -> Result<()> {
+        ensure!(
+            matches!(self.0.config.events, SlackEvents::Http { .. }),
+            "this Slack connector uses Socket Mode, not HTTP events"
+        );
         ensure!(
             listener.local_addr()?.ip().is_loopback(),
             "Slack webhook listener must bind to loopback"
@@ -205,6 +235,29 @@ impl Slack {
             }
         }
     }
+
+    /// Receives events over Socket Mode and delivers replies. The connection reopens after
+    /// Slack asks for a refresh or the link drops; it ends with an error when Slack refuses the
+    /// app-level token or disables Socket Mode for the app.
+    pub async fn connect(self, shutdown: CancellationToken) -> Result<()> {
+        let SlackEvents::Socket { app_token } = &self.0.config.events else {
+            anyhow::bail!("this Slack connector uses HTTP events, not Socket Mode");
+        };
+        let stop = shutdown.child_token();
+        let socket = self.0.socket_mode(app_token, &stop);
+        let deliver = self.0.deliver(&stop);
+        tokio::pin!(socket, deliver);
+        tokio::select! {
+            socket_result = &mut socket => {
+                stop.cancel();
+                socket_result.and(deliver.await)
+            }
+            delivery_result = &mut deliver => {
+                stop.cancel();
+                delivery_result.and(socket.await)
+            }
+        }
+    }
 }
 
 async fn webhook_deadline(request: HttpRequest, next: Next) -> Response {
@@ -227,37 +280,47 @@ async fn webhook(State(slack): State<Slack>, headers: HeaderMap, body: Bytes) ->
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let connector = &slack.0;
-    if !verify_signature(
-        &headers,
-        &body,
-        &connector.config.signing_secret,
-        now.as_secs(),
-    ) {
+    let SlackEvents::Http { signing_secret } = &connector.config.events else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !verify_signature(&headers, &body, signing_secret, now.as_secs()) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    match normalize(&connector.config, &body) {
-        Ok(Ingress::Challenge(challenge)) => {
-            Json(json!({ "challenge": challenge })).into_response()
-        }
-        Ok(Ingress::Ignore) => StatusCode::OK.into_response(),
-        Ok(Ingress::Accept(event)) => {
-            let Ok(request) = connector.request(event, ACCEPT_TIMEOUT) else {
-                return StatusCode::SERVICE_UNAVAILABLE.into_response();
-            };
-            let mut control_plane = connector.control_plane.clone();
-            supertag_protocol::crash_point("gateway.slack-admission", "before-forward");
-            match time::timeout(ACCEPT_TIMEOUT, control_plane.accept_slack_event(request)).await {
-                Ok(Ok(_)) => {
-                    supertag_protocol::crash_point("gateway.slack-admission", "after-forward");
-                    StatusCode::OK.into_response()
-                }
-                Ok(Err(error)) if error.code() == tonic::Code::AlreadyExists => {
-                    StatusCode::CONFLICT.into_response()
-                }
-                _ => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-            }
-        }
+    let Ok(payload) = serde_json::from_slice(&body) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    match connector.admit(payload).await {
+        Ok(Some(challenge)) => Json(json!({ "challenge": challenge })).into_response(),
+        Ok(None) => StatusCode::OK.into_response(),
         Err(status) => status.into_response(),
+    }
+}
+
+impl Connector {
+    /// Admits one Events API payload, from either transport. `Ok` means Slack may consider the
+    /// event delivered (with the URL verification challenge to echo, if it was one); an error
+    /// leaves it for Slack to redeliver.
+    async fn admit(&self, payload: Payload) -> Result<Option<String>, StatusCode> {
+        let event = match normalize_payload(&self.config, payload)? {
+            Ingress::Challenge(challenge) => return Ok(Some(challenge)),
+            Ingress::Ignore => return Ok(None),
+            Ingress::Accept(event) => event,
+        };
+        let request = self
+            .request(event, ACCEPT_TIMEOUT)
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        let mut control_plane = self.control_plane.clone();
+        supertag_protocol::crash_point("gateway.slack-admission", "before-forward");
+        match time::timeout(ACCEPT_TIMEOUT, control_plane.accept_slack_event(request)).await {
+            Ok(Ok(_)) => {
+                supertag_protocol::crash_point("gateway.slack-admission", "after-forward");
+                Ok(None)
+            }
+            Ok(Err(error)) if error.code() == tonic::Code::AlreadyExists => {
+                Err(StatusCode::CONFLICT)
+            }
+            _ => Err(StatusCode::SERVICE_UNAVAILABLE),
+        }
     }
 }
 
@@ -331,8 +394,16 @@ struct Event {
     thread_ts: Option<String>,
 }
 
+#[cfg(test)]
 fn normalize(config: &SlackConfig, body: &[u8]) -> Result<Ingress, StatusCode> {
-    match serde_json::from_slice(body).map_err(|_| StatusCode::BAD_REQUEST)? {
+    normalize_payload(
+        config,
+        serde_json::from_slice(body).map_err(|_| StatusCode::BAD_REQUEST)?,
+    )
+}
+
+fn normalize_payload(config: &SlackConfig, payload: Payload) -> Result<Ingress, StatusCode> {
+    match payload {
         Payload::UrlVerification { challenge }
             if !challenge.is_empty() && challenge.len() <= 1024 =>
         {

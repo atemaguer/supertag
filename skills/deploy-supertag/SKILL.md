@@ -162,8 +162,8 @@ horizontally on the current design.
 
 Webhook-based surfaces (GitHub, Linear, Teams, Slack HTTP) need their Gateway webhook route
 reachable through the proxy. Slack Socket Mode and Lark long connections do not. On Render, Modal,
-and Cloudflare the native Gateway has no Slack Socket Mode and receives no webhooks, so only Lark
-and webhook notifications work there. Check the
+and Cloudflare the Gateway receives no webhooks, so only Lark, Slack Socket Mode, and webhook
+notifications work there. Check the
 collaboration surface guide before exposing a route.
 
 ## Ongoing

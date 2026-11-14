@@ -152,7 +152,7 @@ Connect a Slack, GitHub, Lark, Linear, or Microsoft Teams account
 Usage: supertag setup surface <COMMAND>
 
 Commands:
-  slack   Enroll a Slack app for HTTP events: its bot token and signing secret
+  slack   Enroll a Slack app: its bot token, and its app-level token for Socket Mode (default) or its signing secret for HTTP events
   github  Enroll a GitHub fine-grained token (default) or, with --auth app, a GitHub App
   linear  Enroll a Linear workspace API key and webhook signing secret
   lark    Enroll a Lark or Feishu app for long-connection events and thread replies
@@ -166,7 +166,7 @@ Options:
 ## `supertag setup surface slack`
 
 ```text
-Enroll a Slack app for HTTP events: its bot token and signing secret
+Enroll a Slack app: its bot token, and its app-level token for Socket Mode (default) or its signing secret for HTTP events
 
 Usage: supertag setup surface slack [OPTIONS]
 
@@ -182,9 +182,9 @@ Options:
   -f, --file <FILE>
           Services file to record the surface in. Defaults to STATE_DIRECTORY/supertag.yaml
       --listen <LISTEN>
-          Loopback address of this account's webhook listener on the local Gateway
+          Loopback address of the Slack webhook listener on the local Gateway (http only)
       --transport <TRANSPORT>
-          Event transport. The Gateway receives Slack events over HTTP [default: http]
+          Event transport: an outbound Socket Mode connection, or signed webhooks over HTTP [default: socket] [possible values: socket, http]
   -h, --help
           Print help
 
@@ -192,7 +192,8 @@ Guide: docs/surfaces/slack.md (app manifest: docs/surfaces/slack-app-manifest.ya
 
 Optional environment variables:
   SLACK_BOT_TOKEN
-  SLACK_SIGNING_SECRET
+  SLACK_APP_TOKEN (socket)
+  SLACK_SIGNING_SECRET (http)
 ```
 
 ## `supertag setup surface github`
@@ -1949,10 +1950,13 @@ Options:
           Private directory holding the credential from `supertag gateway enroll`. Without it the Gateway reads SUPERTAG_GATEWAY_CREDENTIAL
 
       --slack-listen <SLACK_LISTEN>
-          Address for Slack webhooks. Requires the Slack state directory
+          Address for Slack HTTP event webhooks. Requires the Slack state directory
+
+      --slack-socket-mode
+          Receive Slack events over an outbound Socket Mode connection instead of webhooks. Requires the Slack state directory and SUPERTAG_SLACK_APP_TOKEN or a vault appToken
 
       --slack-state-directory <SLACK_STATE_DIRECTORY>
-          Private directory for Slack connector state and reply receipts
+          Private directory for Slack connector state and reply receipts. Requires --slack-listen or --slack-socket-mode
 
       --github-listen <GITHUB_LISTEN>
           Address for GitHub webhooks. Requires the GitHub state directory

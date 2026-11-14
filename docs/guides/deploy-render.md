@@ -145,12 +145,17 @@ none, it runs no connector.
   `SUPERTAG_LARK_ALLOWED_USERS` (comma-separated) in its environment. The app secret comes from the
   credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it, or from
   `SUPERTAG_LARK_APP_SECRET`.
+- **Slack**, over Socket Mode: `--slack-socket-mode --slack-state-directory
+  /var/lib/supertag/slack`, with `SUPERTAG_SLACK_ACCOUNT_ID`, `SUPERTAG_SLACK_TEAM_ID`,
+  `SUPERTAG_SLACK_CHANNEL_ID`, `SUPERTAG_SLACK_TAG_ID`, and `SUPERTAG_SLACK_ALLOWED_USERS`
+  (comma-separated) in its environment. The bot token and app-level token come from the credential vault,
+  where [`supertag setup surface slack`](../surfaces/slack.md) stores them, or from
+  `SUPERTAG_SLACK_BOT_TOKEN` and `SUPERTAG_SLACK_APP_TOKEN`.
 - **Operator notifications to a webhook**: `--notify webhook:HTTPS_URL#NAME`, with the bearer
   secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
 
-Slack, GitHub, Linear, and Microsoft Teams need inbound webhooks, which this deployment cannot
-receive, and the native Gateway has no Slack Socket Mode. For them, run a Gateway on a host that
-can receive webhooks (see [native service deployments](../../deploy/native/README.md)), enrolled
+GitHub, Linear, Microsoft Teams, and Slack HTTP events need inbound webhooks, which this
+deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see [native service deployments](../../deploy/native/README.md)), enrolled
 with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
 URL with its own credential.
 
@@ -185,8 +190,9 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
   terminal UI uses your CA when you save the Control Plane with `supertag connect --server-ca-file`;
   the desktop app trusts only the system roots, so it cannot connect to a certificate from your own
   CA.
-- The Gateway is a background worker with no inbound traffic, so it serves Lark and webhook
-  notifications only. Slack, GitHub, Linear, and Microsoft Teams need a Gateway on another host.
+- The Gateway is a background worker with no inbound traffic, so it serves Lark, Slack Socket
+  Mode, and webhook notifications only. GitHub, Linear, Microsoft Teams, and Slack HTTP events
+  need a Gateway on another host.
 
 ## Remove the deployment
 
