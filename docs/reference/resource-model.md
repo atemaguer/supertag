@@ -662,7 +662,7 @@ never erases history, and it refuses a resource that is still in use:
 | Permission Set, Context Set | A Role lists it, or a surface location activates it |
 | Volume | Reserved or verified artifact copies depend on it |
 | Workspace | Given an out-of-date `--expected-revision` |
-| Surface location | Given an out-of-date `--expected-revision` |
+| A surface location | Given an out-of-date `--expected-revision` |
 
 `supertag tag retire TAG` retires a Tag, and putting a Role with `status: retired` retires the
 Role. A **retired** Tag keeps its row, so Tasks, Sessions, approval requests, Objectives, and

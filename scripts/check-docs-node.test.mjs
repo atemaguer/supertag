@@ -54,7 +54,7 @@ test("requirements describe managed harness telemetry and credential limits", ()
   ).replace(/\s+/gu, " ");
   assert.match(requirements, /Codex adapter runs `codex app-server`/u);
   assert.match(requirements, /analytics\.enabled=false/u);
-  assert.match(requirements, /no supported telemetry opt-out for managed Claude Workers/u);
+  assert.match(requirements, /no supported telemetry opt-out for Claude Code Tasks/u);
   assert.match(requirements, /does not forward `DISABLE_TELEMETRY` or `DISABLE_ERROR_REPORTING`/u);
   assert.match(requirements, /OpenCode receives only provider environment credentials/u);
   assert.match(requirements, /copies `~\/\.codex\/auth\.json`/u);
