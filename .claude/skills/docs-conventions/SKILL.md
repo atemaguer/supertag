@@ -22,14 +22,14 @@ link every doc — a page reachable only from a sibling is invisible.
 
 ## CLI form
 
-Write `supertag`, never `pnpm supertag`. Readers install the CLI from npm with
-`npm install -g supertag-ai`; `pnpm supertag` resolves to
+Write `supertag`, never `pnpm supertag`. Readers install the CLI with the installer script
+from a GitHub Release (`docs/operations/install.md`); `pnpm supertag` resolves to
 `pnpm --filter @supertag/cli dev` and fails outside a checkout with
 `ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND`.
 
 Repository installation commands (`pnpm install`, `pnpm install:cli`, and
-`pnpm uninstall:cli`) belong in `CONTRIBUTING.md`. User installation instructions use npm
-and PyPI; Python prereleases need an explicit version pin.
+`pnpm uninstall:cli`) belong in `CONTRIBUTING.md`. User installation instructions use the
+installer script and PyPI; Python prereleases need an explicit version pin.
 
 Two intentional exceptions to the CLI form:
 

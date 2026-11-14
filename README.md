@@ -85,7 +85,7 @@ On macOS or Linux, install Node.js and Git, then set up a [supported coding agen
 Run this from an existing Git repository with at least one commit:
 
 ```sh
-curl -fsSL https://unpkg.com/supertag-ai@latest/install.sh | sh
+curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 supertag init
 supertag

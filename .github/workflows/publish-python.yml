@@ -25,29 +25,41 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install --upgrade build packaging twine
-      - name: Verify release tag
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-        run: |
-          python - <<'PY'
-          import os
-          import tomllib
-          from packaging.version import Version
-
-          with open("sdks/python/pyproject.toml", "rb") as source:
-              package_version = tomllib.load(source)["project"]["version"]
-          release_version = os.environ["RELEASE_TAG"].removeprefix("v")
-          if Version(release_version) != Version(package_version):
-              raise SystemExit(
-                  f"Release {release_version} does not match supertag {package_version}"
-              )
-          PY
+      - name: Check the tag names the release version
+        run: python rust/scripts/release_version.py "$RELEASE_TAG"
+      # The SDK ships the generated supertag.runtime.v2 bindings in supertag._runtime_v2.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: rust/bindings/go/go.mod
+          cache-dependency-path: rust/bindings/go/go.sum
+      - run: python -m pip install --upgrade build twine uv==0.9.5
+      - run: pnpm install --frozen-lockfile
+      - name: Check the generated bindings match the protobuf source
+        run: uv run --python 3.13 --script rust/scripts/generate-bindings.py --check
       - run: python -m build sdks/python --outdir dist
       - run: python -m twine check dist/*
+      - name: Check the wheel carries the generated bindings
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel"
+          "$RUNNER_TEMP/wheel/bin/pip" install --quiet "$(ls dist/*.whl)[runtime]"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel/bin/python" -c 'import supertag._runtime_v2.runtime_pb2_grpc, supertag.control_plane_client'
       - uses: pypa/gh-action-pypi-publish@release/v1

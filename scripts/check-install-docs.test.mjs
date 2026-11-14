@@ -10,13 +10,16 @@ const files = [
   "skills/SKILLS.md",
   "skills/install-and-first-reply/SKILL.md",
   "skills/deploy-supertag/SKILL.md",
-  "packages/supertag-ai/README.md",
 ];
 for (const file of files) {
   test(`${file} uses published CLI installation`, () => {
     const text = read(file).split("## Contributing")[0];
     assert.doesNotMatch(text, /pnpm install:cli|git clone|npm and PyPI packages come later/u);
-    assert.match(text, /npm install -g supertag-ai|\]\([^)]*operations\/install\.md/iu);
+    assert.doesNotMatch(text, /npm install -g supertag-ai|unpkg\.com/iu);
+    assert.match(
+      text,
+      /releases\/latest\/download\/install\.sh|\]\([^)]*operations\/install\.md/iu,
+    );
   });
 }
 

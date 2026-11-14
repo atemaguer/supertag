@@ -111,8 +111,6 @@
   "files": [
     "dist",
     "drizzle",
-    "install.sh",
-    "tui",
     "LICENSE",
     "NOTICE",
     "README.md"

@@ -1,0 +1,122 @@
+name: Release SuperTag
+
+# Publishing a GitHub Release attaches the native archives for macOS and Linux (arm64, amd64),
+# their SHA256SUMS, and an install.sh pinned to the release. The archives hold the supertag CLI,
+# the supertag-tui terminal UI, the shared execution provider, and the Node.js bridges.
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to build (for example, v0.3.0-alpha.1)
+        required: true
+        type: string
+      upload_assets:
+        description: Attach the archives and installer to that existing GitHub Release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-supertag
+  cancel-in-progress: false
+
+jobs:
+  source:
+    if: github.repository == 'atemaguer/supertag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+      version: ${{ steps.source.outputs.version }}
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.9'
+      - name: Check the tag names the release version
+        id: source
+        run: |
+          version=$(python rust/scripts/release_version.py "$RELEASE_TAG")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  package:
+    needs: source
+    uses: ./.github/workflows/native-release-check.yml
+    with:
+      commit: ${{ needs.source.outputs.commit }}
+      mode: package
+      profile: release
+      upload_artifacts: true
+      sign_macos: true
+    secrets:
+      APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+      APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+      APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+
+  publish:
+    if: github.event_name == 'release' || inputs.upload_assets
+    needs: [source, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      VERSION: ${{ needs.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: supertag-native-*
+          path: release
+          merge-multiple: true
+      - name: Verify the archives and write SHA256SUMS
+        working-directory: release
+        run: |
+          : > SHA256SUMS
+          for platform in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
+            archive="supertag-$VERSION-$platform-complete.tar.gz"
+            sha256sum --check "$archive.sha256"
+            cat "$archive.sha256" >> SHA256SUMS
+          done
+          test "$(wc -l < SHA256SUMS)" -eq 4
+      - name: Pin the installer to this release
+        run: |
+          sed -i "s/^RELEASE_DEFAULT_VERSION=\"latest\"$/RELEASE_DEFAULT_VERSION=\"$VERSION\"/" install.sh
+          grep -Fxq "RELEASE_DEFAULT_VERSION=\"$VERSION\"" install.sh
+          sh -n install.sh
+          cp install.sh release/install.sh
+      - name: Check the pinned installer against the archives
+        run: |
+          home=$(mktemp -d)
+          env -i HOME="$home" PATH="$PATH" SUPERTAG_DOWNLOAD_URL="file://$GITHUB_WORKSPACE/release" \
+            sh release/install.sh
+          test "$("$home/.local/bin/supertag" --version)" = "supertag $VERSION"
+      - name: Attach the archives and installer to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: release
+        run: gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber install.sh SHA256SUMS ./*-complete.tar.gz
+
+  verify-installer:
+    needs: publish
+    uses: ./.github/workflows/verify-installer.yml
+    with:
+      release_tag: ${{ github.event.release.tag_name || inputs.release_tag }}
+      check_latest: ${{ github.event_name == 'release' }}

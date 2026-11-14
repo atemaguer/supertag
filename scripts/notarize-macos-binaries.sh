@@ -1,8 +1,14 @@
 #!/bin/bash
-# Sign and notarize the two standalone macOS binaries before checksums are written.
+# Sign and notarize standalone macOS binaries before the release archive records their digests.
 set -euo pipefail
 
-dist=${1:?Usage: notarize-release-tui.sh DIST_DIRECTORY}
+dist=${1:?Usage: notarize-macos-binaries.sh DIRECTORY BINARY...}
+shift
+binaries=("$@")
+if [[ ${#binaries[@]} == 0 ]]; then
+  echo "Usage: notarize-macos-binaries.sh DIRECTORY BINARY..." >&2
+  exit 1
+fi
 credentials=(
   APPLE_DEVELOPER_ID_P12
   APPLE_DEVELOPER_ID_P12_PASSWORD
@@ -70,19 +76,18 @@ if [[ ! $identity =~ ^[[:xdigit:]]{40}$ ]]; then
 fi
 
 mkdir "$work/submission"
-binaries=(supertag-tui-darwin-arm64 supertag-tui-darwin-amd64)
 for binary in "${binaries[@]}"; do
   codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$identity" \
     "$dist/$binary"
   codesign --verify --strict "$dist/$binary"
   cp "$dist/$binary" "$work/submission/"
 done
-ditto -c -k "$work/submission" "$work/supertag-tui.zip"
+ditto -c -k "$work/submission" "$work/supertag-macos.zip"
 
 notary_auth=(--key "$work/AuthKey.p8" --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID")
 # The service can return a submission ID even if waiting fails.
 submit_exit=0
-xcrun notarytool submit "$work/supertag-tui.zip" "${notary_auth[@]}" \
+xcrun notarytool submit "$work/supertag-macos.zip" "${notary_auth[@]}" \
   --wait --timeout 20m --output-format json > "$work/receipt.json" || submit_exit=$?
 submission=$(jq -r '.id // empty' "$work/receipt.json")
 status=$(jq -r '.status // empty' "$work/receipt.json")
@@ -100,7 +105,7 @@ if [[ $submit_exit != 0 || $status != Accepted ]]; then
   exit 1
 fi
 
-# Apple publishes tickets online for standalone executables. Check both signed files appear.
+# Apple publishes tickets online for standalone executables. Check every signed file appears.
 for binary in "${binaries[@]}"; do
   cdhash=$(codesign --display --verbose=4 "$dist/$binary" 2>&1 | awk -F= '$1 == "CDHash" { print $2 }')
   jq -e --arg name "$binary" --arg hash "$cdhash" '

@@ -21,7 +21,8 @@ explains. If port 3434 is busy, enter a different number at init's `Port` prompt
 ## 1. Install
 
 ```sh
-npm install -g supertag-ai
+curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```
 

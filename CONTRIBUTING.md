@@ -77,13 +77,8 @@ CLI refuses a binary whose `--version` differs from its own and says how to rebu
 `SUPERTAG_TUI_BINARY` points the CLI at another binary. `go test ./...` in `apps/tui` runs its
 tests; `SUPERTAG_TUI_E2E=1` adds an end-to-end run under tmux against a fake Control Plane.
 
-The release workflow builds the four binaries at the release tag and computes their
-`SHA256SUMS` after macOS signing. The npm package and GitHub Release use the same files.
-To exercise the package layout
-before a release, run `apps/tui/build.sh` and `sh scripts/stage-cli-release.sh`, then pack
-`packages/supertag-ai` with `npm pack`. Point `SUPERTAG_PACKAGE_SOURCE` at that tarball and
-run `sh install.sh` from the checkout. `tests/install-script.test.ts` tests the same layout
-with fake binaries.
+Releases ship the terminal UI inside each platform's native archive, next to the `supertag`
+command; see [Test an installable release](#test-an-installable-release).
 
 ### Protobuf contracts
 
@@ -502,55 +497,69 @@ Task or feature branch, so parallel branches don't conflict on the file. Keep ea
 concise bullet.
 
 At release time, rename `[Unreleased]` to the version and date, add an empty `[Unreleased]` above
-it, set the package versions, and run the version tests in the same release commit:
+it, set the version in `rust/Cargo.toml` and the package versions, and run the version checks in
+the same release commit:
 
 ```sh
 pnpm exec vitest run tests/release-version.test.ts
+python3 rust/scripts/release_version.py vVERSION
 ```
 
-## Test an installable package
+## Test an installable release
 
-Users install the published packages from npm and PyPI (see [Install SuperTag](docs/operations/install.md)).
-To test local changes in the packaged CLI, build the actual package instead of
-creating a shell shim:
+Users install SuperTag with `install.sh`, which downloads a native archive from a GitHub
+Release, and the Python SDK from PyPI (see [Install SuperTag](docs/operations/install.md)).
+Nothing is published to npm. Each archive holds the `supertag` command, the terminal UI, the
+shared execution provider, and the Node.js bridges; the
+[native release platform checks](tests/native-release/README.md) build one. To install a local
+build the way users do, put the archive and a `SHA256SUMS` in one directory and point the
+installer at it:
 
 ```sh
-pnpm install
-pnpm --filter supertag-ai build
-mkdir -p dist
-npm pack ./packages/supertag-ai --ignore-scripts --pack-destination ./dist
-npm install --global --prefix "$HOME/.local" "$PWD"/dist/supertag-ai-*.tgz
-export PATH="$HOME/.local/bin:$PATH"
-supertag --version
-supertag setup surface slack --help
+mkdir /tmp/supertag-assets
+cp /tmp/supertag-macos-verification/supertag-*-complete.tar.gz /tmp/supertag-assets/
+(cd /tmp/supertag-assets && shasum -a 256 supertag-*-complete.tar.gz > SHA256SUMS)
+SUPERTAG_DOWNLOAD_URL=file:///tmp/supertag-assets HOME=$(mktemp -d) sh install.sh
 ```
 
-The version must match `packages/supertag-ai/package.json`. Setup help must print readable local
-paths for the guide and manifest. `pnpm --filter supertag-ai test:package` checks these bundled
-resources in addition to the CLI and SDK interfaces. The resulting archive is for local testing;
-building it does not publish a package.
+`rust/scripts/test_install_script.py` runs the installer against fixture archives.
+`scripts/smoke-installed-supertag.sh PATH_TO_SUPERTAG` starts an installed command's local
+services with a temporary state directory, lists Tags, and stops them.
 
-Before updating installation instructions for a release, publish the matching npm and PyPI
-packages and verify clean registry installs, the installer, versioned CLI archives, checksums,
-and documentation. Release tooling in this repository does not mean a release has been published.
+Before updating installation instructions for a release, publish the release and verify the
+installer, checksums, the PyPI package, and documentation. Release tooling in this repository
+does not mean a release has been published.
 
-The npm release runs the installer check in a separate job. It waits for npm and the CDN
-to serve the release, then checks the CLI and TUI versions in a clean home. To check an
-existing release, dispatch **Verify public installer** with its tag:
+The version in `rust/Cargo.toml` is the release version: the tag must be `v` followed by it, and
+`sdks/python/pyproject.toml` must carry the same version. Publishing a GitHub Release runs
+**Release SuperTag** (`release.yml`). It builds and verifies the four archives with
+`native-release-check.yml`, attaches them with their `SHA256SUMS` and an `install.sh` pinned to
+the release, and then runs the installer check. To build the archives for an existing tag
+without attaching them, dispatch it with that tag:
 
 ```sh
-gh workflow run verify-installer.yml -f release_tag=v0.2.0-alpha.9
+gh workflow run release.yml -f release_tag=v0.3.0-alpha.1
+```
+
+Set `upload_assets` to true to replace the assets on that release. The installer check runs the
+public installer on each platform in a clean home, checks the CLI and terminal UI versions, and
+starts and stops local services. To check an existing release, dispatch **Verify public
+installer** with its tag:
+
+```sh
+gh workflow run verify-installer.yml -f release_tag=v0.3.0-alpha.1
 ```
 
 Select `check_latest` to check the README's installer URL for the current release. When the
 installer check is the only failed job in a release run, **Re-run failed jobs** retries it
 on its own.
 
-### Sign and notarize the macOS terminal UI
+### Sign and notarize the macOS binaries
 
-The release workflow signs the arm64 and amd64 binaries with a Developer ID Application
-certificate and the hardened runtime. It submits both to Apple in a single ZIP and checks
-that Apple issued a ticket for each binary. Gatekeeper looks up tickets for standalone
+The release workflow signs the `supertag`, `supertag-tui`, and `supertag-shared-execution`
+binaries of each macOS archive with a Developer ID Application certificate and the hardened
+runtime, before the archive records their digests. It submits them to Apple in a single ZIP and
+checks that Apple issued a ticket for each binary. Gatekeeper looks up tickets for standalone
 executables online. See [Apple's notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
 
 Set these GitHub Actions secrets on the release repository:
@@ -567,15 +576,8 @@ Create the certificate and Team key under the same Apple Developer team. When al
 secrets are absent, the workflow warns and produces unsigned builds. An incomplete
 configuration or failed notarization stops publication.
 
-To test the current branch's binaries and credentials without publishing, dispatch
-**Release SuperTag CLI installer** with its default inputs:
-
-```sh
-gh workflow run release-cli.yml
-```
-
-The run uploads a workflow artifact for inspection. To replace assets on an existing GitHub
-Release, set `release_tag` to its tag and `upload_assets` to true.
+To test the signing credentials without publishing, dispatch **Release SuperTag** for an
+existing tag with `upload_assets` false; the archives remain workflow artifacts for seven days.
 
 ## Live Modal native mounts
 

@@ -9,6 +9,18 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Changed
+
+- The installer script installs the native SuperTag release from GitHub Releases: a
+  checksum-verified archive per platform holding the `supertag` command, the terminal UI, and the
+  Claude Code, Cursor, OpenCode, E2B, and Modal bridges. Install with
+  `curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh`.
+  It no longer needs npm, and Codex Tasks no longer need Node.js.
+
+### Removed
+
+- The `supertag-ai` npm package is no longer published.
+
 ### Fixed
 
 - Cursor Tags with local command access use the Worker Host's Node and the project's pinned
