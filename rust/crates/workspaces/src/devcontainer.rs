@@ -1109,10 +1109,15 @@ pub struct RemoteDevcontainer {
     pub user: Option<String>,
     /// Shell lines run in the checkout after staging. `"$1"` is the checkout path.
     pub setup_commands: Vec<String>,
+    /// The lines a warm preparation runs on an earlier prepared artifact: the same exports, then
+    /// `updateContentCommand` alone.
+    pub warm_setup_commands: Vec<String>,
+    /// Whether any lifecycle command runs, so a prepared artifact saves work.
+    pub prepared: bool,
 }
 
 /// Translates the subset for a remote Workspace whose provider chooses the checkout path.
-/// A fresh sandbox per Attempt is a cold preparation: all three lifecycle commands run.
+/// A cold preparation runs all three lifecycle commands, a warm one `updateContentCommand` alone.
 /// `${workspaceFolder}` resolves, at run time, to that checkout path.
 pub fn remote_devcontainer(devcontainer: &DevcontainerSubset) -> Result<RemoteDevcontainer> {
     ensure!(
@@ -1157,11 +1162,17 @@ pub fn remote_devcontainer(devcontainer: &DevcontainerSubset) -> Result<RemoteDe
             format!("export {name}={value}")
         })
         .collect();
-    setup_commands.extend(lifecycle_lines(devcontainer, false));
+    let mut warm_setup_commands = setup_commands.clone();
+    let lifecycle = lifecycle_lines(devcontainer, false);
+    let prepared = !lifecycle.is_empty();
+    setup_commands.extend(lifecycle);
+    warm_setup_commands.extend(lifecycle_lines(devcontainer, true));
     Ok(RemoteDevcontainer {
         image,
         dockerfile_commands,
         user,
         setup_commands,
+        warm_setup_commands,
+        prepared,
     })
 }

@@ -45,6 +45,8 @@ export interface SandboxWorkspace {
   }>;
   writeTransfer(path: string, bytes: Uint8Array, signal: AbortSignal): Promise<void>;
   readTransfer(path: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array>>;
+  /** Records this preparation sandbox's filesystem as a prepared artifact and returns its ID. */
+  snapshot(signal: AbortSignal): Promise<string>;
 }
 
 /**
@@ -88,13 +90,31 @@ export function validSandboxEnvironment(environment: SandboxEnvironment): boolea
 export interface SandboxWorkspaceProvider {
   readonly label: string;
   validateOwner(owner: SandboxOwner): void;
+  /**
+   * Creates the sandbox from `artifact`, a prepared artifact, when one is given: its image and
+   * setup are already there, so `environment`'s image is not built.
+   */
   allocate(
     owner: SandboxOwner,
     timeoutMs: number,
     signal: AbortSignal,
     environment?: SandboxEnvironment,
+    artifact?: string,
   ): Promise<SandboxWorkspace>;
   stop(owner: SandboxOwner, sandboxId?: string): Promise<SandboxStopResult>;
+  /** Deletes a prepared artifact; one already gone counts as deleted. */
+  removeArtifact(artifact: string): Promise<void>;
+}
+
+/**
+ * Where a preparation sandbox places the trusted checkout, and where every Task sandbox from its
+ * artifact finds it. The setup lines name the checkout path, so it never changes.
+ */
+export const PREPARED_ROOT = "/tmp/supertag-workspace-prepared";
+
+/** An E2B snapshot or template ID, or a Modal image ID. */
+export function validPreparedArtifact(artifact: string): boolean {
+  return /^[A-Za-z0-9._:/-]{1,256}$/u.test(artifact);
 }
 
 interface StageHeader {
@@ -273,8 +293,21 @@ function observedEnvironment(
   };
 }
 
-/** One private helper owns at most one allocation. A fresh helper may recover Stop alone. */
-export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider) {
+/**
+ * One private helper owns at most one allocation. A fresh helper may recover Stop alone.
+ *
+ * Prepared artifacts: an allocation with `prepare` is a preparation sandbox, where Stage takes
+ * the trusted commit alone at {@link PREPARED_ROOT} and runs the setup lines, and `snapshot`
+ * records it. A Task allocation from `preparedArtifact` finds that checkout there and Stage
+ * updates it like a forced checkout: the prepared commit's tracked files are replaced by the
+ * start commit's, and untracked setup output stays. A preparation from `preparedArtifact` is
+ * warm: the same update, then its setup lines (updateContentCommand alone).
+ */
+export function createSandboxWorkspaceSession(
+  provider: SandboxWorkspaceProvider,
+  options: { readonly preparedRoot?: string } = {},
+) {
+  const preparedRoot = options.preparedRoot ?? PREPARED_ROOT;
   const workspaceError = (message: string) => new Error(`${provider.label} Workspace ${message}`);
   const lifetime = new AbortController();
   let toolTail = Promise.resolve();
@@ -293,6 +326,10 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
   let root: string | undefined;
   let allowedActions: readonly string[] = [];
   let setupCommands: readonly string[] = [];
+  /** A preparation sandbox, which Snapshot records; never a Task sandbox. */
+  let preparing = false;
+  /** The sandbox started from a prepared artifact, so its checkout already exists. */
+  let fromArtifact = false;
   let stagedInputRoot = "";
   let tools: ReturnType<typeof createWorkspaceOperations> | undefined;
   let captured: CapturedTree | undefined;
@@ -314,7 +351,11 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
     ]);
   }
 
-  async function runTransfer(mode: "stage" | "capture", args: string[], signal: AbortSignal) {
+  async function runTransfer(
+    mode: "stage" | "restage" | "capture",
+    args: string[],
+    signal: AbortSignal,
+  ) {
     if (!sandbox || !root) throw workspaceError("allocation is unavailable");
     return sandbox.run(
       cleanCommand("python3", "-I", "-S", "-c", TREE_PROGRAM, mode, root, ...args),
@@ -439,6 +480,8 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         timeoutMs: number;
         allowedActions: readonly string[];
         environment?: SandboxEnvironment;
+        preparedArtifact?: string;
+        prepare?: boolean;
       },
       caller?: AbortSignal,
     ): Promise<{ sandboxId: string }> {
@@ -448,24 +491,43 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         throw workspaceError("sandbox lifetime is invalid");
       if (request.allowedActions.includes("commands:execute"))
         throw workspaceError("does not support commands:execute");
-      const { environment } = request;
+      const { environment, preparedArtifact } = request;
       if (environment !== undefined && !validSandboxEnvironment(environment))
         throw workspaceError("devcontainer environment is invalid");
-      const build = (environment?.dockerfileCommands.length ?? 0) > 0;
+      if (preparedArtifact !== undefined && !validPreparedArtifact(preparedArtifact))
+        throw workspaceError("prepared artifact is invalid");
+      // A preparation sandbox holds trusted content only and exposes no file tools.
+      if (request.prepare && request.allowedActions.length > 0)
+        throw workspaceError("preparation sandbox takes no file actions");
+      const build =
+        request.prepare ||
+        (preparedArtifact === undefined && (environment?.dockerfileCommands.length ?? 0) > 0);
       const signal = signalFor(caller, build ? BUILD_TIMEOUT_MS : ALLOCATE_TIMEOUT_MS);
       signal.throwIfAborted();
       phase = "allocating";
       allocationStarted = true;
       owner = { ...request.owner };
       allowedActions = [...request.allowedActions];
-      setupCommands = [...(environment?.setupCommands ?? [])];
+      // A Task sandbox from a prepared artifact runs no setup: the artifact holds its result.
+      setupCommands =
+        preparedArtifact !== undefined && !request.prepare
+          ? []
+          : [...(environment?.setupCommands ?? [])];
+      preparing = request.prepare === true;
+      fromArtifact = preparedArtifact !== undefined;
       try {
-        sandbox = await provider.allocate(owner, request.timeoutMs, signal, environment);
+        sandbox = await provider.allocate(
+          owner,
+          request.timeoutMs,
+          signal,
+          environment,
+          preparedArtifact,
+        );
         signal.throwIfAborted();
         sandboxId = sandbox.sandboxId;
         if (!sandboxId || sandboxId.length > 256 || /\p{Cc}/u.test(sandboxId))
           throw new Error("Invalid sandbox identity");
-        root = `/tmp/supertag-workspace-${randomUUID()}`;
+        root = preparing || fromArtifact ? preparedRoot : `/tmp/supertag-workspace-${randomUUID()}`;
         phase = "allocated";
         return { sandboxId };
       } catch {
@@ -497,6 +559,8 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
       )
         throw workspaceError("bundle length or digest differs from its receipt");
       const files = header.inputFiles ?? [];
+      if (preparing && (files.length > 0 || header.mcpCommit !== undefined))
+        throw workspaceError("preparation sandbox takes the trusted commit alone");
       if (
         inputManifest(files) !== inputs.byteLength ||
         bytes.byteLength + inputs.byteLength > MAX_TRANSFER ||
@@ -520,11 +584,14 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
       // The Host journals the verified ID before it begins Stage.
       hostRecordedSandbox = true;
       try {
+        // A prepared artifact already holds the private root, its objects, and the checkout.
         const prepared = await sandbox.run(
           cleanCommand(
             "/bin/sh",
             "-c",
-            'mkdir -m 700 -- "$1" && cd "$1" && pwd -P',
+            fromArtifact
+              ? 'cd -- "$1" && [ -O . ] && [ -d checkout ] && [ -d objects.git ] && [ -f staged-commit ] && pwd -P'
+              : 'mkdir -m 700 -- "$1" && cd "$1" && pwd -P',
             "prepare-workspace",
             root,
           ),
@@ -556,7 +623,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
           await sandbox.writeTransfer(`${root}/input-files.bin`, inputs, signal);
         }
         const result = await runTransfer(
-          "stage",
+          fromArtifact ? "restage" : "stage",
           [
             header.startCommit,
             header.bundle.sha256,
@@ -589,6 +656,10 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         }
         stagedInputRoot = expectedRoot;
         mcpStaged = header.mcpCommit !== undefined;
+        if (preparing) {
+          phase = "staged";
+          return;
+        }
         tools = createTools();
         phase = "staged";
       } catch {
@@ -709,6 +780,28 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         throw workspaceError("tree could not be captured");
       }
     },
+    /** Records the staged preparation sandbox as a prepared artifact. */
+    async snapshot(caller?: AbortSignal): Promise<string> {
+      if (!preparing || phase !== "staged" || !sandbox)
+        throw workspaceError("only a staged preparation sandbox is snapshotted");
+      const signal = signalFor(caller, BUILD_TIMEOUT_MS);
+      try {
+        const artifact = await sandbox.snapshot(signal);
+        if (!validPreparedArtifact(artifact)) throw new Error("Invalid prepared artifact");
+        return artifact;
+      } catch {
+        throw workspaceError("preparation could not be snapshotted");
+      }
+    },
+    async removeArtifact(artifact: string, caller?: AbortSignal): Promise<void> {
+      if (!validPreparedArtifact(artifact)) throw workspaceError("prepared artifact is invalid");
+      caller?.throwIfAborted();
+      try {
+        await provider.removeArtifact(artifact);
+      } catch {
+        throw workspaceError("prepared artifact could not be deleted");
+      }
+    },
     stop,
     async close(): Promise<void> {
       // Before Stage, discovery may be the only evidence for the Host's
@@ -791,11 +884,18 @@ def git_command(args, bound=0):
             if process.poll() is None:
                 process.kill()
 
-def materialize(commit, destination):
+def tracked(commit):
     raw_tree = git_command(["ls-tree", "-rz", "--full-tree", commit], MAX_MANIFEST)
     entries = raw_tree.split(b"\0")
     check(entries.pop() == b"" and len(entries) <= MAX_ENTRIES)
-    os.mkdir(destination)
+    return entries
+
+def materialize(commit, destination, replace=False):
+    entries = tracked(commit)
+    if replace:
+        check(os.path.isdir(destination) and not os.path.islink(destination))
+    else:
+        os.mkdir(destination)
     with subprocess.Popen(git + ["cat-file", "--batch"],
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                           stderr=subprocess.DEVNULL) as objects:
@@ -808,6 +908,11 @@ def materialize(commit, destination):
                 path = raw_path.decode("utf-8")
                 target = os.path.join(destination, *components(path))
                 os.makedirs(os.path.dirname(target), exist_ok=True)
+                parent, inside = os.path.realpath(os.path.dirname(target)), os.path.realpath(destination)
+                check(parent == inside or parent.startswith(inside + os.sep))
+                if replace and os.path.lexists(target):
+                    check(os.path.islink(target) or not os.path.isdir(target))
+                    os.unlink(target)
                 objects.stdin.write(oid.encode("ascii") + b"\n")
                 objects.stdin.flush()
                 actual_oid, kind, raw_size = objects.stdout.readline(128).split()
@@ -850,6 +955,11 @@ def stage(commit, expected_hash, expected_length, input_root, mcp_commit=""):
     git_command(["bundle", "unbundle", bundle])
     check(git_command(["cat-file", "-t", commit], 64) == b"commit\n")
     materialize(commit, checkout)
+    finish_stage(commit, bundle, input_root, mcp_commit)
+
+def finish_stage(commit, bundle, input_root, mcp_commit):
+    with open(os.path.join(root, "staged-commit"), "w") as marker:
+        marker.write(commit)
     if mcp_commit:
         # Workspace stdio MCP servers run from the trusted commit, outside the checkout.
         check(len(mcp_commit) == len(commit))
@@ -860,6 +970,30 @@ def stage(commit, expected_hash, expected_length, input_root, mcp_commit=""):
     if input_root:
         stage_inputs(input_root)
     print("staged")
+
+def restage(commit, expected_hash, expected_length, input_root, mcp_commit=""):
+    # A forced checkout of the prepared checkout: the prepared commit's tracked files give way to
+    # the start commit's, and untracked setup output stays.
+    bundle = os.path.join(root, "source.bundle")
+    check(file_hash(bundle) == (int(expected_length), expected_hash))
+    with open(os.path.join(root, "staged-commit")) as marker:
+        previous = marker.read(65)
+    check(len(previous) == len(commit) and all(c in "0123456789abcdef" for c in previous))
+    heads = git_command(["bundle", "list-heads", bundle], 4096).splitlines()
+    check(len(heads) == 1)
+    fields = heads[0].split()
+    check(len(fields) == 2 and fields[0] == commit.encode("ascii") and
+          fields[1].startswith(b"refs/heads/supertag-deliveries/"))
+    git_command(["bundle", "verify", bundle])
+    git_command(["bundle", "unbundle", bundle])
+    check(git_command(["cat-file", "-t", commit], 64) == b"commit\n")
+    check(git_command(["cat-file", "-t", previous], 64) == b"commit\n")
+    for entry in tracked(previous):
+        target = os.path.join(checkout, *components(entry.split(b"\t", 1)[1].decode("utf-8")))
+        if os.path.lexists(target) and (os.path.islink(target) or not os.path.isdir(target)):
+            os.unlink(target)
+    materialize(commit, checkout, replace=True)
+    finish_stage(commit, bundle, input_root, mcp_commit)
 
 @contextlib.contextmanager
 def open_dir(root_fd, parts):
@@ -1020,6 +1154,8 @@ os.environ.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null",
 try:
     if mode == "stage":
         stage(*sys.argv[3:])
+    elif mode == "restage":
+        restage(*sys.argv[3:])
     elif mode == "capture":
         capture(*sys.argv[3:])
     else:

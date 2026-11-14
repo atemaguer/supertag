@@ -390,6 +390,30 @@ impl Workspaces {
             .await
     }
 
+    /// A bundle of the Workspace's trusted base commit alone, for a preparation sandbox.
+    pub async fn export_trusted(
+        &self,
+        prepared: &PreparedWorkspace,
+        cancel: &CancellationToken,
+    ) -> Result<TransferArtifact> {
+        self.open(&prepared.workspace_id, &prepared.checkout.base_commit)?
+            .export_trusted(&prepared.checkout, cancel)
+            .await
+    }
+
+    /// Whether `ancestor` is the Task's base commit or an ancestor of it.
+    pub async fn base_descends_from(
+        &self,
+        prepared: &PreparedWorkspace,
+        ancestor: &str,
+        cancel: &CancellationToken,
+    ) -> bool {
+        match self.open(&prepared.workspace_id, &prepared.checkout.base_commit) {
+            Ok(workspace) => workspace.base_descends_from(ancestor, cancel).await,
+            Err(_) => false,
+        }
+    }
+
     pub async fn restore_remote(
         &self,
         prepared: &PreparedWorkspace,

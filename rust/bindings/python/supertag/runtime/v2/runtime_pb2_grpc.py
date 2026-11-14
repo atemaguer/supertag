@@ -3204,6 +3204,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsResponse.FromString,
                 _registered_method=True)
+        self.ReportCleanupFailure = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ReportCleanupFailure',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureResponse.FromString,
+                _registered_method=True)
 
 
 class WorkerHostServicer:
@@ -3314,6 +3319,14 @@ class WorkerHostServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReportCleanupFailure(self, request, context):
+        """Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
+        execution report. The Attempt stays uncertain until the host or an operator resolves it.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerHostServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -3401,6 +3414,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.ReportAppliedLimits,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsResponse.SerializeToString,
+            ),
+            'ReportCleanupFailure': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportCleanupFailure,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -3862,6 +3880,33 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/ReportAppliedLimits',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAppliedLimitsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportCleanupFailure(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ReportCleanupFailure',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -6044,6 +6089,16 @@ class RemoteWorkspaceProviderStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureCopyRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyDownload.FromString,
                 _registered_method=True)
+        self.Snapshot = channel.unary_unary(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/Snapshot',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceSnapshotRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceSnapshot.FromString,
+                _registered_method=True)
+        self.RemoveArtifact = channel.unary_unary(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/RemoveArtifact',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceRemoveArtifactRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceRemoveArtifactResponse.FromString,
+                _registered_method=True)
 
 
 class RemoteWorkspaceProviderServicer:
@@ -6102,6 +6157,21 @@ class RemoteWorkspaceProviderServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Snapshot(self, request, context):
+        """Records the staged preparation sandbox as a prepared artifact, which later allocations start
+        from. Only a sandbox allocated with `prepare` is snapshotted, never a Task sandbox.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RemoveArtifact(self, request, context):
+        """Deletes a prepared artifact; deleting one that is already gone succeeds.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RemoteWorkspaceProviderServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -6139,6 +6209,16 @@ def add_RemoteWorkspaceProviderServicer_to_server(servicer, server):
                     servicer.CaptureCopy,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureCopyRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyDownload.SerializeToString,
+            ),
+            'Snapshot': grpc.unary_unary_rpc_method_handler(
+                    servicer.Snapshot,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceSnapshotRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceSnapshot.SerializeToString,
+            ),
+            'RemoveArtifact': grpc.unary_unary_rpc_method_handler(
+                    servicer.RemoveArtifact,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceRemoveArtifactRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceRemoveArtifactResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -6332,6 +6412,60 @@ class RemoteWorkspaceProvider:
             '/supertag.runtime.v2.RemoteWorkspaceProvider/CaptureCopy',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureCopyRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCopyDownload.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Snapshot(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/Snapshot',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceSnapshotRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceSnapshot.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RemoveArtifact(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/RemoveArtifact',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceRemoveArtifactRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceRemoveArtifactResponse.FromString,
             options,
             channel_credentials,
             insecure,

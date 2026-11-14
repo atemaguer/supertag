@@ -138,7 +138,8 @@ async function fixture() {
     finished = true;
     return 137;
   });
-  const sandbox: ModalSandboxClient = { sandboxId, exec, terminate };
+  const snapshotFilesystem = vi.fn(async () => "im-prepared0000000000000000");
+  const sandbox = { sandboxId, exec, terminate, snapshotFilesystem };
   const create = vi.fn<ModalWorkspaceScope["create"]>(async (params) => {
     allocated = true;
     tags = { ...params.tags };
@@ -158,13 +159,18 @@ async function fixture() {
     ),
   };
   const close = vi.fn();
-  const open = vi.fn(async (): Promise<ModalWorkspaceScope> => ({ create, inventory, close }));
+  const deleteImage = vi.fn<ModalWorkspaceScope["deleteImage"]>(async () => {});
+  const open = vi.fn(
+    async (): Promise<ModalWorkspaceScope> => ({ create, inventory, deleteImage, close }),
+  );
   const session = createModalWorkspaceSession({ open });
   cleanups.push(() => session.close());
   return {
     session,
     open,
     create,
+    deleteImage,
+    snapshotFilesystem,
     close,
     inventory,
     exec,
@@ -556,3 +562,46 @@ it("builds the devcontainer's layers into the sandbox image and runs its setup i
   expect(plain.create.mock.calls[0]?.[0]).not.toHaveProperty("image");
   await plain.session.stop({ owner });
 }, 15_000);
+
+it("snapshots a preparation sandbox into an image, starts from it, and deletes it on eviction", async () => {
+  const preparation = await fixture();
+  await preparation.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: [],
+    prepare: true,
+    environment: {
+      image: "python:3.13-slim",
+      dockerfileCommands: ["RUN install-tools"],
+      setupCommands: [],
+    },
+  });
+  // The preparation builds the devcontainer's layers; the snapshot needs a staged sandbox.
+  expect(preparation.create.mock.calls[0]?.[0]).toHaveProperty("image");
+  await expect(preparation.session.snapshot()).rejects.toThrow(/staged preparation/u);
+  await preparation.session.stop({ owner });
+
+  const task = await fixture();
+  await task.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read"],
+    preparedArtifact: "im-prepared0000000000000000",
+    environment: {
+      image: "python:3.13-slim",
+      dockerfileCommands: ["RUN install-tools"],
+      setupCommands: [],
+    },
+  });
+  // A prepared image already holds the layers: none is built again.
+  expect(task.create).toHaveBeenCalledExactlyOnceWith({
+    name: sandboxOwnershipName(owner),
+    tags: sandboxOwnershipMetadata(owner),
+    timeoutMs: 60_000,
+    blockNetwork: true,
+    artifact: "im-prepared0000000000000000",
+  });
+  await task.session.stop({ owner });
+  await task.session.removeArtifact("im-prepared0000000000000000");
+  expect(task.deleteImage).toHaveBeenCalledWith("im-prepared0000000000000000");
+});

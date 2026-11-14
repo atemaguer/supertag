@@ -1321,6 +1321,22 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
             }),
             "{task}"
         );
+        // Its classifications: the host finished the Attempt, so cleanup is confirmed.
+        let report = &task["execution_report"];
+        assert_eq!(report["cleanup"], "confirmed", "{task}");
+        assert_eq!(report["cleanup_failure"], serde_json::json!([]), "{task}");
+        assert_eq!(report["limits_applied"], true, "{task}");
+        assert_eq!(report["usage_complete"], true, "{task}");
+        assert_eq!(
+            report["thresholds"]["max_reported_tokens"],
+            serde_json::Value::Null
+        );
+        if minor == 1000 && id != start {
+            // 600 of 1000 minor units reported.
+            assert_eq!(report["limits"], "within_limits", "{task}");
+            assert_eq!(report["thresholds"]["max_reported_cost"], "not_reached");
+            assert_eq!(report["complete"], true, "{task}");
+        }
         if minor == 1000 && id != start {
             let attempt = task["attempt_id"]
                 .as_str()

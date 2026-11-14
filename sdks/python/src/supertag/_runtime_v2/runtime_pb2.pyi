@@ -173,6 +173,30 @@ class HarnessKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     HARNESS_KIND_OPENCODE: _ClassVar[HarnessKind]
     HARNESS_KIND_CURSOR: _ClassVar[HarnessKind]
 
+class ExecutionLimitOutcome(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    EXECUTION_LIMIT_OUTCOME_UNSPECIFIED: _ClassVar[ExecutionLimitOutcome]
+    EXECUTION_LIMIT_OUTCOME_NOT_REQUESTED: _ClassVar[ExecutionLimitOutcome]
+    EXECUTION_LIMIT_OUTCOME_PENDING: _ClassVar[ExecutionLimitOutcome]
+    EXECUTION_LIMIT_OUTCOME_WITHIN_LIMITS: _ClassVar[ExecutionLimitOutcome]
+    EXECUTION_LIMIT_OUTCOME_THRESHOLD_REACHED: _ClassVar[ExecutionLimitOutcome]
+    EXECUTION_LIMIT_OUTCOME_UNKNOWN: _ClassVar[ExecutionLimitOutcome]
+
+class ExecutionThreshold(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    EXECUTION_THRESHOLD_UNSPECIFIED: _ClassVar[ExecutionThreshold]
+    EXECUTION_THRESHOLD_NOT_REACHED: _ClassVar[ExecutionThreshold]
+    EXECUTION_THRESHOLD_REACHED: _ClassVar[ExecutionThreshold]
+    EXECUTION_THRESHOLD_UNDETERMINED: _ClassVar[ExecutionThreshold]
+
+class AttemptCleanup(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ATTEMPT_CLEANUP_UNSPECIFIED: _ClassVar[AttemptCleanup]
+    ATTEMPT_CLEANUP_NOT_STARTED: _ClassVar[AttemptCleanup]
+    ATTEMPT_CLEANUP_PENDING: _ClassVar[AttemptCleanup]
+    ATTEMPT_CLEANUP_CONFIRMED: _ClassVar[AttemptCleanup]
+    ATTEMPT_CLEANUP_UNKNOWN: _ClassVar[AttemptCleanup]
+
 class OutputGitMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     OUTPUT_GIT_MODE_UNSPECIFIED: _ClassVar[OutputGitMode]
@@ -380,6 +404,21 @@ HARNESS_KIND_CLAUDE_CODE: HarnessKind
 HARNESS_KIND_OPENAI_AGENTS: HarnessKind
 HARNESS_KIND_OPENCODE: HarnessKind
 HARNESS_KIND_CURSOR: HarnessKind
+EXECUTION_LIMIT_OUTCOME_UNSPECIFIED: ExecutionLimitOutcome
+EXECUTION_LIMIT_OUTCOME_NOT_REQUESTED: ExecutionLimitOutcome
+EXECUTION_LIMIT_OUTCOME_PENDING: ExecutionLimitOutcome
+EXECUTION_LIMIT_OUTCOME_WITHIN_LIMITS: ExecutionLimitOutcome
+EXECUTION_LIMIT_OUTCOME_THRESHOLD_REACHED: ExecutionLimitOutcome
+EXECUTION_LIMIT_OUTCOME_UNKNOWN: ExecutionLimitOutcome
+EXECUTION_THRESHOLD_UNSPECIFIED: ExecutionThreshold
+EXECUTION_THRESHOLD_NOT_REACHED: ExecutionThreshold
+EXECUTION_THRESHOLD_REACHED: ExecutionThreshold
+EXECUTION_THRESHOLD_UNDETERMINED: ExecutionThreshold
+ATTEMPT_CLEANUP_UNSPECIFIED: AttemptCleanup
+ATTEMPT_CLEANUP_NOT_STARTED: AttemptCleanup
+ATTEMPT_CLEANUP_PENDING: AttemptCleanup
+ATTEMPT_CLEANUP_CONFIRMED: AttemptCleanup
+ATTEMPT_CLEANUP_UNKNOWN: AttemptCleanup
 OUTPUT_GIT_MODE_UNSPECIFIED: OutputGitMode
 OUTPUT_GIT_MODE_REFERENCE: OutputGitMode
 OUTPUT_GIT_MODE_CAPTURE: OutputGitMode
@@ -1546,16 +1585,20 @@ class RemoteWorkspaceOwner(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., host_generation: _Optional[int] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., allocation_id: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceAllocateRequest(_message.Message):
-    __slots__ = ("owner", "timeout_ms", "allowed_actions", "environment")
+    __slots__ = ("owner", "timeout_ms", "allowed_actions", "environment", "prepared_artifact", "prepare")
     OWNER_FIELD_NUMBER: _ClassVar[int]
     TIMEOUT_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
+    PREPARED_ARTIFACT_FIELD_NUMBER: _ClassVar[int]
+    PREPARE_FIELD_NUMBER: _ClassVar[int]
     owner: RemoteWorkspaceOwner
     timeout_ms: int
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
     environment: RemoteWorkspaceEnvironment
-    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., environment: _Optional[_Union[RemoteWorkspaceEnvironment, _Mapping]] = ...) -> None: ...
+    prepared_artifact: str
+    prepare: bool
+    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., environment: _Optional[_Union[RemoteWorkspaceEnvironment, _Mapping]] = ..., prepared_artifact: _Optional[str] = ..., prepare: _Optional[bool] = ...) -> None: ...
 
 class RemoteWorkspaceEnvironment(_message.Message):
     __slots__ = ("image", "dockerfile_commands", "user", "setup_commands")
@@ -1574,6 +1617,26 @@ class RemoteWorkspaceAllocation(_message.Message):
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     sandbox_id: str
     def __init__(self, sandbox_id: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceSnapshotRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class RemoteWorkspaceSnapshot(_message.Message):
+    __slots__ = ("artifact",)
+    ARTIFACT_FIELD_NUMBER: _ClassVar[int]
+    artifact: str
+    def __init__(self, artifact: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceRemoveArtifactRequest(_message.Message):
+    __slots__ = ("artifact",)
+    ARTIFACT_FIELD_NUMBER: _ClassVar[int]
+    artifact: str
+    def __init__(self, artifact: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceRemoveArtifactResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class RemoteWorkspaceStageHeader(_message.Message):
     __slots__ = ("start_commit", "bundle", "input_files", "mcp_commit")
@@ -2132,7 +2195,7 @@ class ExecutionLimits(_message.Message):
     def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "workspace_selection", "applied_execution_limits", "workspace_mount_writes")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "workspace_selection", "applied_execution_limits", "workspace_mount_writes", "execution_report")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2157,6 +2220,7 @@ class Task(_message.Message):
     WORKSPACE_SELECTION_FIELD_NUMBER: _ClassVar[int]
     APPLIED_EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_MOUNT_WRITES_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_REPORT_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -2181,7 +2245,42 @@ class Task(_message.Message):
     workspace_selection: str
     applied_execution_limits: AppliedExecutionLimits
     workspace_mount_writes: _containers.RepeatedCompositeFieldContainer[AttemptWorkspaceMountWrites]
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ...) -> None: ...
+    execution_report: TaskExecutionReport
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ..., execution_report: _Optional[_Union[TaskExecutionReport, _Mapping]] = ...) -> None: ...
+
+class TaskExecutionReport(_message.Message):
+    __slots__ = ("limit_outcome", "max_reported_tokens", "max_reported_cost", "max_native_agents", "limits_applied", "usage_complete", "complete", "cleanup", "cleanup_failure")
+    LIMIT_OUTCOME_FIELD_NUMBER: _ClassVar[int]
+    MAX_REPORTED_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    MAX_REPORTED_COST_FIELD_NUMBER: _ClassVar[int]
+    MAX_NATIVE_AGENTS_FIELD_NUMBER: _ClassVar[int]
+    LIMITS_APPLIED_FIELD_NUMBER: _ClassVar[int]
+    USAGE_COMPLETE_FIELD_NUMBER: _ClassVar[int]
+    COMPLETE_FIELD_NUMBER: _ClassVar[int]
+    CLEANUP_FIELD_NUMBER: _ClassVar[int]
+    CLEANUP_FAILURE_FIELD_NUMBER: _ClassVar[int]
+    limit_outcome: ExecutionLimitOutcome
+    max_reported_tokens: ExecutionThreshold
+    max_reported_cost: ExecutionThreshold
+    max_native_agents: ExecutionThreshold
+    limits_applied: bool
+    usage_complete: bool
+    complete: bool
+    cleanup: AttemptCleanup
+    cleanup_failure: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, limit_outcome: _Optional[_Union[ExecutionLimitOutcome, str]] = ..., max_reported_tokens: _Optional[_Union[ExecutionThreshold, str]] = ..., max_reported_cost: _Optional[_Union[ExecutionThreshold, str]] = ..., max_native_agents: _Optional[_Union[ExecutionThreshold, str]] = ..., limits_applied: _Optional[bool] = ..., usage_complete: _Optional[bool] = ..., complete: _Optional[bool] = ..., cleanup: _Optional[_Union[AttemptCleanup, str]] = ..., cleanup_failure: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class ReportCleanupFailureRequest(_message.Message):
+    __slots__ = ("attempt", "reasons")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    REASONS_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    reasons: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., reasons: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class ReportCleanupFailureResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class TaskArtifactInputSelection(_message.Message):
     __slots__ = ("artifact_id", "paths", "require_accepted", "publication_approval_id")

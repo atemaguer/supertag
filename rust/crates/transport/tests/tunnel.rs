@@ -17,8 +17,10 @@ use supertag_protocol::v2::{
     RemoteWorkspaceAllocateRequest, RemoteWorkspaceAllocation, RemoteWorkspaceCaptureChunk,
     RemoteWorkspaceCaptureCopyRequest, RemoteWorkspaceCaptureRequest, RemoteWorkspaceCopyDownload,
     RemoteWorkspaceCopyStaged, RemoteWorkspaceCopyUpload, RemoteWorkspaceOwner,
-    RemoteWorkspaceStageChunk, RemoteWorkspaceStageResponse, RemoteWorkspaceStopRequest,
-    RemoteWorkspaceStopResponse, remote_mcp_server_input, remote_workspace_capture_chunk,
+    RemoteWorkspaceRemoveArtifactRequest, RemoteWorkspaceRemoveArtifactResponse,
+    RemoteWorkspaceSnapshot, RemoteWorkspaceSnapshotRequest, RemoteWorkspaceStageChunk,
+    RemoteWorkspaceStageResponse, RemoteWorkspaceStopRequest, RemoteWorkspaceStopResponse,
+    remote_mcp_server_input, remote_workspace_capture_chunk,
     remote_workspace_provider_client::RemoteWorkspaceProviderClient,
     remote_workspace_provider_server::{RemoteWorkspaceProvider, RemoteWorkspaceProviderServer},
     remote_workspace_stage_chunk,
@@ -62,6 +64,20 @@ impl RemoteWorkspaceProvider for Provider {
         Ok(Response::new(RemoteWorkspaceAllocation {
             sandbox_id: format!("sandbox-for-{}", owner.task_id),
         }))
+    }
+
+    async fn snapshot(
+        &self,
+        _: Request<RemoteWorkspaceSnapshotRequest>,
+    ) -> Result<Response<RemoteWorkspaceSnapshot>, Status> {
+        Err(Status::unimplemented("the tunnel test takes no snapshot"))
+    }
+
+    async fn remove_artifact(
+        &self,
+        _: Request<RemoteWorkspaceRemoveArtifactRequest>,
+    ) -> Result<Response<RemoteWorkspaceRemoveArtifactResponse>, Status> {
+        Err(Status::unimplemented("the tunnel test removes no artifact"))
     }
 
     async fn stage(
