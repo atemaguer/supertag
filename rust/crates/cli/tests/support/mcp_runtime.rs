@@ -27,7 +27,7 @@ async fn grant(
     std::fs::write(
         &permissions,
         serde_json::json!({
-            "set_id": format!("{tag}-grants"), "name": format!("{tag}-grants"),
+            "setId": format!("{tag}-grants"), "name": format!("{tag}-grants"),
             "permissions": actions
                 .iter()
                 .map(|action| serde_json::json!({"target":"mcp","action":action}))
@@ -39,8 +39,8 @@ async fn grant(
     std::fs::write(
         &role,
         serde_json::json!({
-            "role_id": format!("{tag}-role"), "name": format!("{tag}-role"),
-            "purpose": "Use MCP tools", "permission_set_ids": [format!("{tag}-grants")]
+            "roleId": format!("{tag}-role"), "name": format!("{tag}-role"),
+            "purpose": "Use MCP tools", "permissionSets": [format!("{tag}-grants")]
         })
         .to_string(),
     )?;
@@ -296,16 +296,16 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
         .await?;
     let permissions = directory.join("mcp-grants.json");
     std::fs::write(&permissions, serde_json::json!({
-        "set_id":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
+        "setId":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
         "permissions":[
             {"target":"mcp","action":"catalog/list_*","resource":"repository:acme/docs"},
             {"target":"mcp","action":"catalog/publish"},
-            {"target":"mcp","action":"catalog/publish","resource":"repository:acme/docs","approval_required":true}
+            {"target":"mcp","action":"catalog/publish","resource":"repository:acme/docs","approvalRequired":true}
         ]
     }).to_string())?;
     let role = directory.join("mcp-role.json");
     std::fs::write(&role, serde_json::json!({
-        "role_id":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permission_set_ids":["mcp-grants"]
+        "roleId":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permissionSets":["mcp-grants"]
     }).to_string())?;
     services
         .operator(&[

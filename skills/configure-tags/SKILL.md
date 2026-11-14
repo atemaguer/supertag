@@ -54,7 +54,7 @@ spec:
   permissions:
     - { target: runtime, action: commands:execute }
     - { target: runtime, action: files:write }
-    - { target: mcp, action: github/create_pull_request, resource: "repository:acme/api", approval_required: true }
+    - { target: mcp, action: github/create_pull_request, resource: "repository:acme/api", approvalRequired: true }
 ---
 apiVersion: supertag/v1
 kind: Role
@@ -77,7 +77,7 @@ supertag diff -f team.yaml
 supertag apply -f team.yaml
 ```
 
-A grant with `approval_required: true` waits in the operator inbox for each call. To apply a set
+A grant with `approvalRequired: true` waits in the operator inbox for each call. To apply a set
 only in one channel, activate it at that location:
 
 ```sh

@@ -822,7 +822,7 @@ fn exercise_status(database: &str) -> Result<()> {
     let manifest = temp.path().join("organization.yaml");
     fs::write(
         &manifest,
-        "apiVersion: supertag/v1\nkind: Tag\nmetadata: {name: owner}\nspec: {instructions: Own it.}\n---\napiVersion: supertag/v1\nkind: Objective\nmetadata: {name: ship-it}\nspec: {ownerTag: owner, ongoing: true, outcome: Ship the fixture.}\n",
+        "apiVersion: supertag/v1\nkind: Tag\nmetadata: {name: owner}\nspec: {instructions: Own it.}\n---\napiVersion: supertag/v1\nkind: Objective\nmetadata: {name: ship-it}\nspec: {ownerTagId: owner, ongoing: true, outcome: Ship the fixture.}\n",
     )?;
     services.cli(&[
         "apply",

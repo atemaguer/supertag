@@ -91,7 +91,7 @@ pub struct AssignmentListArgs {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct PermissionSpec {
     #[serde(default)]
     set_id: String,
@@ -112,7 +112,7 @@ enum Target {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct GrantSpec {
     target: Target,
     action: String,
@@ -159,7 +159,7 @@ impl From<PermissionSpec> for PermissionSet {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct ContextSpec {
     #[serde(default)]
     set_id: String,
@@ -170,9 +170,8 @@ pub(crate) struct ContextSpec {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct ContextItemSpec {
-    #[serde(alias = "itemKey")]
     item_key: String,
     #[serde(rename = "type")]
     kind: String,
@@ -214,7 +213,7 @@ enum RoleState {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct RoleSpec {
     #[serde(default)]
     role_id: String,
@@ -223,9 +222,9 @@ pub(crate) struct RoleSpec {
     purpose: String,
     #[serde(default)]
     instructions: String,
-    #[serde(default, alias = "permissionSets")]
+    #[serde(default, rename = "permissionSets")]
     permission_set_ids: Vec<String>,
-    #[serde(default, alias = "contextSets")]
+    #[serde(default, rename = "contextSets")]
     context_set_ids: Vec<String>,
     #[serde(default)]
     status: RoleState,
@@ -233,10 +232,9 @@ pub(crate) struct RoleSpec {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct ExecutionSpec {
     harness: Option<String>,
-    #[serde(alias = "sharedExecutionEnvironmentId")]
     shared_execution_environment_id: Option<String>,
     #[serde(default)]
     models: Vec<String>,

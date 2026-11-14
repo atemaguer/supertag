@@ -55,7 +55,7 @@ apiVersion: supertag/v1
 kind: SurfaceAccount
 metadata: { name: acme-slack }
 spec:
-  identity: { provider: slack, team_id: T0123456789 }
+  identity: { provider: slack, teamId: T0123456789 }
   enabled: true
   gateway: local
 ---
@@ -63,16 +63,16 @@ apiVersion: supertag/v1
 kind: SurfaceLocation
 metadata: { name: eng-channel }
 spec:
-  account_id: acme-slack
-  connector_account_id: T0123456789
-  tag_id: lead
-  scope: { provider: slack, channel_id: C0123456789 }
+  accountId: acme-slack
+  connectorAccountId: T0123456789
+  tagId: lead
+  scope: { provider: slack, channelId: C0123456789 }
   enabled: true
-  permission_set_ids: [local-tools]
+  permissionSets: [local-tools]
 ```
 
-A location may also activate Permission Sets and Context Sets there, with `permission_set_ids`
-and `context_set_ids`, or later with `supertag permission-set activate` and `supertag context-set
+A location may also activate Permission Sets and Context Sets there, with `permissionSets`
+and `contextSets`, or later with `supertag permission-set activate` and `supertag context-set
 activate`. See [Manage Control Plane resources](../operations/resources.md).
 
 ## Credentials

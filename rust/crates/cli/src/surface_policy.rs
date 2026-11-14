@@ -88,7 +88,7 @@ pub struct DeleteArgs {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct AccountSpec {
     #[serde(default)]
     pub(crate) account_id: String,
@@ -99,7 +99,12 @@ pub(crate) struct AccountSpec {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "provider",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum IdentitySpec {
     Slack {
         team_id: String,
@@ -160,7 +165,7 @@ impl From<AccountSpec> for SurfaceAccount {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct LocationSpec {
     #[serde(default)]
     pub(crate) location_id: String,
@@ -169,14 +174,19 @@ pub(crate) struct LocationSpec {
     tag_id: String,
     scope: ScopeSpec,
     enabled: bool,
-    #[serde(default)]
+    #[serde(default, rename = "permissionSets")]
     permission_set_ids: Vec<String>,
-    #[serde(default)]
+    #[serde(default, rename = "contextSets")]
     context_set_ids: Vec<String>,
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "provider",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum ScopeSpec {
     Slack { channel_id: String },
     Github { repository_id: u64 },

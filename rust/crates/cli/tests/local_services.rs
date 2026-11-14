@@ -527,7 +527,7 @@ spec: {permissions: [{target: runtime, action: 'files:read'}]}
     )?;
     let mut config = serde_json::json!({"services":{
         "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"provision":[
-            {"apiVersion":"supertag/v1","kind":"Objective","metadata":{"name":"fixture-objective"},"spec":{"ownerTag":"engineer","ongoing":true,"outcome":"Read provisioned fixture evidence."}},
+            {"apiVersion":"supertag/v1","kind":"Objective","metadata":{"name":"fixture-objective"},"spec":{"ownerTagId":"engineer","ongoing":true,"outcome":"Read provisioned fixture evidence."}},
             "resources",
             {"apiVersion":"supertag/v1","kind":"Tag","metadata":{"name":"engineer"},"spec":{"instructions":"Initially provisioned","roles":["engineer-role"]}}
         ]},

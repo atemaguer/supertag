@@ -30,6 +30,12 @@ within the pre-1.0 compatibility policy described in
 - `supertag init` binds the lead Tag's Workspace to the current branch instead of a fixed commit.
   On a detached HEAD it pins the commit.
 - `supertag delete volume` no longer requires `--operation-id`.
+- Every resource manifest and `put --file` specification spells its fields in camelCase, with one
+  name per field. Role, PermissionSet, ContextSet, SurfaceAccount, and SurfaceLocation fields
+  change from snake_case (`approval_required` is now `approvalRequired`, `item_key` is `itemKey`,
+  `connector_account_id` is `connectorAccountId`, and so on). Roles and SurfaceLocations name their
+  sets `permissionSets` and `contextSets`, and an Objective's owner is `ownerTagId`; the other
+  spellings are refused.
 
 ## [0.3.0-alpha.1]
 

@@ -85,7 +85,7 @@ async fn exercise(root: &Path, database_url: &str) -> Result<()> {
 apiVersion: supertag/v1
 kind: Objective
 metadata: {name: release}
-spec: {ownerTag: builder, outcome: "Prepare a release.", team: engineering}
+spec: {ownerTagId: builder, outcome: "Prepare a release.", team: engineering}
 ---
 apiVersion: supertag/v1
 kind: Tag
@@ -472,7 +472,7 @@ async fn resume_apply_set(root: &Path, gateway: &str) -> Result<()> {
     let goal = |budget: u64| {
         format!(
             "apiVersion: supertag/v1\nkind: Objective\nmetadata: {{name: resume-goal}}\n\
-             spec: {{ownerTag: builder, outcome: \"Finish.\", budgetLimitMinor: {budget}, budgetCurrency: USD}}\n"
+             spec: {{ownerTagId: builder, outcome: \"Finish.\", budgetLimitMinor: {budget}, budgetCurrency: USD}}\n"
         )
     };
     let existing = root.join("resume-goal.yaml");

@@ -541,15 +541,15 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_through_the_control_
     let role = directory.path().join("role.json");
     std::fs::write(
         &permission,
-        r#"{"set_id":"edit","name":"edit","permissions":[{"target":"runtime","action":"files:write"}]}"#,
+        r#"{"setId":"edit","name":"edit","permissions":[{"target":"runtime","action":"files:write"}]}"#,
     )?;
     std::fs::write(
         &context,
-        r#"{"set_id":"notes","name":"notes","items":[{"item_key":"policy","type":"example/notes","version":1,"config":{"text":"Review the diff"}}]}"#,
+        r#"{"setId":"notes","name":"notes","items":[{"itemKey":"policy","type":"example/notes","version":1,"config":{"text":"Review the diff"}}]}"#,
     )?;
     std::fs::write(
         &role,
-        r#"{"role_id":"review","name":"review","purpose":"Review changes","instructions":"Keep the evidence.","permission_set_ids":["edit"],"context_set_ids":["notes"]}"#,
+        r#"{"roleId":"review","name":"review","purpose":"Review changes","instructions":"Keep the evidence.","permissionSets":["edit"],"contextSets":["notes"]}"#,
     )?;
     for (kind, file) in [
         ("permission-set", &permission),
