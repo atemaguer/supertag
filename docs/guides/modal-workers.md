@@ -116,89 +116,47 @@ image = modal.Image.from_dockerfile("deploy/docker/worker/Dockerfile", add_pytho
 print(image.build(app).object_id)
 ```
 
-### Attach persistent storage to a Workspace
+<!-- supertag-cli: native start -->
 
-A **Volume** names external storage a Workspace can attach beside its checkout. Use a native mount
-when a shared dataset is too large to copy.
-A Worker Host on macOS or Linux can start these mounts in its remote Modal sandboxes.
+### Give a Modal Workspace data from a Volume
 
-Create two Modal Volumes in the host's Modal environment. Put your dataset in `training-input`
-and use `training-output` for results. A sandbox can attach each Modal Volume once. The host
-service consents to each Volume by name. [Create and populate Modal Volumes](https://modal.com/docs/guide/volumes)
+A **Volume** names storage a Task's data comes from: a host directory or an S3 bucket and prefix.
+A Task receives a Volume as a copy beside its checkout, never as a live mount. A Cursor Worker
+Host with a Modal Workspace stages each copy on the host with its own credential, then uploads
+only the files into the sandbox. No Volume key enters the sandbox or reaches Modal.
 
-```yaml
-services:
-  cloud:
-    type: host
-    control-plane: https://supertag.example.com
-    harnesses: [claude-code]
-    environment: { modal: { app: supertag-workers } }
-    volume-credentials:
-      datasets: { modal-volume: training-input }
-      results: { modal-volume: training-output }
-```
+1. Register the Volume. An `s3://` source names a credential label, never a secret:
 
-Apply two Volume resources and a Workspace that mounts them.
+   ```sh
+   supertag workspace-volume put datasets --source s3://acme-data/datasets --credential team-data
+   ```
 
-```yaml
-apiVersion: supertag/v1
-kind: Volume
-metadata: { name: datasets }
-spec:
-  source: modal-volume://training-input/
-  credential: datasets
----
-apiVersion: supertag/v1
-kind: Volume
-metadata: { name: results }
-spec:
-  source: modal-volume://training-output/
-  credential: results
----
-apiVersion: supertag/v1
-kind: Workspace
-metadata: { name: research }
-spec:
-  source: https://github.com/acme/research.git
-  mounts:
-    - volume: datasets
-      path: /mnt/datasets
-      strategy: mount
-      access: read-only
-    - volume: results
-      path: /mnt/results
-      strategy: mount
-      access: read-write
-```
+2. On the Worker Host, map the Volume in a file passed to `--workspace-mount-mappings`. The host
+   owner pins the endpoint and region here, and the environment variables holding the keys:
 
-Save this manifest as `research.yaml`, then run:
+   ```json
+   [{ "volumeId": "datasets", "source": "s3://acme-data/datasets", "credential": "team-data",
+      "endpoint": "https://s3.eu-west-2.amazonaws.com", "region": "eu-west-2",
+      "credentialEnvPrefix": "DATASETS", "destinationRoot": "/srv/supertag-mounts" }]
+   ```
 
-```sh
-supertag apply -f research.yaml
-supertag up cloud
-```
+3. Declare the copy on the Tag with `supertag tag put TAG --workspace-mounts FILE`:
 
-Modal attaches the Volumes after setup, when the Task sandbox starts. An input mount with
-`access: read-only` rejects writes at the provider. Writes to `/mnt/results` persist in Modal
-and are visible independently of git branch review. Prepared images and snapshots exclude mounted
-data. `supertag describe task TASK_ID` shows the live source, prefix, access, and attachment time.
-Give the Tag an assignment in Workspace `research` to use the mounts. [Name a Workspace on an Objective](workspaces.md#3-name-the-workspace-on-an-objective)
+   ```json
+   [{ "volumeId": "datasets", "destination": "/srv/supertag-mounts/datasets" }]
+   ```
 
-To select a subdirectory, use a source such as `modal-volume://training-input/models/`. The host's
-mapping must match the Volume name exactly, including case. Modal Volume sources take no query
-parameters.
+The Task reads the copy at `volumes/<digest>/datasets` in its remote Workspace; its instructions
+name the path. Add `"access": "read-write"` to write changed and created files back to the Volume
+after a successful Task Attempt. The Modal sandbox image needs `python3`. See
+[Attach data outside the repository](workspaces.md#attach-data-outside-the-repository) for the
+limits, write-back, and refusals.
 
-For S3 or GCS, use `s3://BUCKET/PREFIX/` or `gs://BUCKET/PREFIX/` and map the credential to a
-Modal Secret with `{ modal-secret: SECRET_NAME }`. For R2, use
-`r2://BUCKET/PREFIX/?endpoint=https%3A%2F%2FACCOUNT.r2.cloudflarestorage.com` and a Modal Secret.
-S3 also accepts a host mapping of `{ modal-oidc-role: ARN }`. That role must trust Modal's OIDC
-identity and grant the required read access.
+Read-only provider-native Modal Volume mounts are on the backlog. `modal-volume://` and `gs://`
+sources, query settings such as `?endpoint=`, and a credential on the Volume resource are not
+accepted.
 
-Modal Volume and GCS sources require `strategy: mount`. Mount destinations cannot overlap
-the checkout, staged files, other mounts, or artifact storage. Use bucket prefixes ending in `/`;
-unsupported endpoint and path-style options produce an explicit refusal. See
-[Native source settings](../reference/resource-model.md#native-source-settings) for the full contract.
-These source and credential settings are Experimental.
+<!-- supertag-cli: native end -->
 
 The rest of this page builds a custom Worker instead.
 

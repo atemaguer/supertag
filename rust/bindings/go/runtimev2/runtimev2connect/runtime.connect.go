@@ -284,6 +284,9 @@ const (
 	// WorkerHostReportAppliedLimitsProcedure is the fully-qualified name of the WorkerHost's
 	// ReportAppliedLimits RPC.
 	WorkerHostReportAppliedLimitsProcedure = "/supertag.runtime.v2.WorkerHost/ReportAppliedLimits"
+	// WorkerHostReportCleanupFailureProcedure is the fully-qualified name of the WorkerHost's
+	// ReportCleanupFailure RPC.
+	WorkerHostReportCleanupFailureProcedure = "/supertag.runtime.v2.WorkerHost/ReportCleanupFailure"
 	// LiveInputsQueueInputProcedure is the fully-qualified name of the LiveInputs's QueueInput RPC.
 	LiveInputsQueueInputProcedure = "/supertag.runtime.v2.LiveInputs/QueueInput"
 	// LiveInputsGetInputProcedure is the fully-qualified name of the LiveInputs's GetInput RPC.
@@ -414,6 +417,18 @@ const (
 	// RemoteWorkspaceProviderRunMcpServerProcedure is the fully-qualified name of the
 	// RemoteWorkspaceProvider's RunMcpServer RPC.
 	RemoteWorkspaceProviderRunMcpServerProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/RunMcpServer"
+	// RemoteWorkspaceProviderStageCopyProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's StageCopy RPC.
+	RemoteWorkspaceProviderStageCopyProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/StageCopy"
+	// RemoteWorkspaceProviderCaptureCopyProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's CaptureCopy RPC.
+	RemoteWorkspaceProviderCaptureCopyProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/CaptureCopy"
+	// RemoteWorkspaceProviderSnapshotProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's Snapshot RPC.
+	RemoteWorkspaceProviderSnapshotProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/Snapshot"
+	// RemoteWorkspaceProviderRemoveArtifactProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's RemoveArtifact RPC.
+	RemoteWorkspaceProviderRemoveArtifactProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/RemoveArtifact"
 	// HarnessQuestionsAskQuestionProcedure is the fully-qualified name of the HarnessQuestions's
 	// AskQuestion RPC.
 	HarnessQuestionsAskQuestionProcedure = "/supertag.runtime.v2.HarnessQuestions/AskQuestion"
@@ -2652,6 +2667,9 @@ type WorkerHostClient interface {
 	ReclaimAttempt(context.Context, *connect.Request[runtimev2.ReclaimAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
 	// Limits the Attempt's adapter confirmed it applies, for the Task execution report.
 	ReportAppliedLimits(context.Context, *connect.Request[runtimev2.ReportAppliedLimitsRequest]) (*connect.Response[runtimev2.ReportAppliedLimitsResponse], error)
+	// Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
+	// execution report. The Attempt stays uncertain until the host or an operator resolves it.
+	ReportCleanupFailure(context.Context, *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error)
 }
 
 // NewWorkerHostClient constructs a client for the supertag.runtime.v2.WorkerHost service. By
@@ -2767,6 +2785,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("ReportAppliedLimits")),
 			connect.WithClientOptions(opts...),
 		),
+		reportCleanupFailure: connect.NewClient[runtimev2.ReportCleanupFailureRequest, runtimev2.ReportCleanupFailureResponse](
+			httpClient,
+			baseURL+WorkerHostReportCleanupFailureProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ReportCleanupFailure")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -2789,6 +2813,7 @@ type workerHostClient struct {
 	finishTask              *connect.Client[runtimev2.FinishTaskRequest, runtimev2.Task]
 	reclaimAttempt          *connect.Client[runtimev2.ReclaimAttemptRequest, runtimev2.AttemptResolution]
 	reportAppliedLimits     *connect.Client[runtimev2.ReportAppliedLimitsRequest, runtimev2.ReportAppliedLimitsResponse]
+	reportCleanupFailure    *connect.Client[runtimev2.ReportCleanupFailureRequest, runtimev2.ReportCleanupFailureResponse]
 }
 
 // RegisterHost calls supertag.runtime.v2.WorkerHost.RegisterHost.
@@ -2876,6 +2901,11 @@ func (c *workerHostClient) ReportAppliedLimits(ctx context.Context, req *connect
 	return c.reportAppliedLimits.CallUnary(ctx, req)
 }
 
+// ReportCleanupFailure calls supertag.runtime.v2.WorkerHost.ReportCleanupFailure.
+func (c *workerHostClient) ReportCleanupFailure(ctx context.Context, req *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error) {
+	return c.reportCleanupFailure.CallUnary(ctx, req)
+}
+
 // WorkerHostHandler is an implementation of the supertag.runtime.v2.WorkerHost service.
 type WorkerHostHandler interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
@@ -2898,6 +2928,9 @@ type WorkerHostHandler interface {
 	ReclaimAttempt(context.Context, *connect.Request[runtimev2.ReclaimAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
 	// Limits the Attempt's adapter confirmed it applies, for the Task execution report.
 	ReportAppliedLimits(context.Context, *connect.Request[runtimev2.ReportAppliedLimitsRequest]) (*connect.Response[runtimev2.ReportAppliedLimitsResponse], error)
+	// Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
+	// execution report. The Attempt stays uncertain until the host or an operator resolves it.
+	ReportCleanupFailure(context.Context, *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error)
 }
 
 // NewWorkerHostHandler builds an HTTP handler from the service implementation. It returns the path
@@ -3009,6 +3042,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("ReportAppliedLimits")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostReportCleanupFailureHandler := connect.NewUnaryHandler(
+		WorkerHostReportCleanupFailureProcedure,
+		svc.ReportCleanupFailure,
+		connect.WithSchema(workerHostMethods.ByName("ReportCleanupFailure")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.WorkerHost/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkerHostRegisterHostProcedure:
@@ -3045,6 +3084,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostReclaimAttemptHandler.ServeHTTP(w, r)
 		case WorkerHostReportAppliedLimitsProcedure:
 			workerHostReportAppliedLimitsHandler.ServeHTTP(w, r)
+		case WorkerHostReportCleanupFailureProcedure:
+			workerHostReportCleanupFailureHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3120,6 +3161,10 @@ func (UnimplementedWorkerHostHandler) ReclaimAttempt(context.Context, *connect.R
 
 func (UnimplementedWorkerHostHandler) ReportAppliedLimits(context.Context, *connect.Request[runtimev2.ReportAppliedLimitsRequest]) (*connect.Response[runtimev2.ReportAppliedLimitsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportAppliedLimits is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ReportCleanupFailure(context.Context, *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportCleanupFailure is not implemented"))
 }
 
 // LiveInputsClient is a client for the supertag.runtime.v2.LiveInputs service.
@@ -4609,6 +4654,19 @@ type RemoteWorkspaceProviderClient interface {
 	// The first input is the start record; later inputs are its stdin. Outputs are its stdout.
 	// Ending or cancelling the call stops the server process, never the sandbox.
 	RunMcpServer(context.Context) *connect.BidiStreamForClient[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
+	// One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
+	// Harness starts: the header, then for each file its record and exactly its bytes, and each
+	// empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+	// the returned tree.
+	StageCopy(context.Context) *connect.ClientStreamForClient[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged]
+	// After a successful Capture, a read-write copy's changed and created regular files: each
+	// record, then the summary, then each recorded file's bytes in record order.
+	CaptureCopy(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureCopyRequest]) (*connect.ServerStreamForClient[runtimev2.RemoteWorkspaceCopyDownload], error)
+	// Records the staged preparation sandbox as a prepared artifact, which later allocations start
+	// from. Only a sandbox allocated with `prepare` is snapshotted, never a Task sandbox.
+	Snapshot(context.Context, *connect.Request[runtimev2.RemoteWorkspaceSnapshotRequest]) (*connect.Response[runtimev2.RemoteWorkspaceSnapshot], error)
+	// Deletes a prepared artifact; deleting one that is already gone succeeds.
+	RemoveArtifact(context.Context, *connect.Request[runtimev2.RemoteWorkspaceRemoveArtifactRequest]) (*connect.Response[runtimev2.RemoteWorkspaceRemoveArtifactResponse], error)
 }
 
 // NewRemoteWorkspaceProviderClient constructs a client for the
@@ -4653,16 +4711,44 @@ func NewRemoteWorkspaceProviderClient(httpClient connect.HTTPClient, baseURL str
 			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunMcpServer")),
 			connect.WithClientOptions(opts...),
 		),
+		stageCopy: connect.NewClient[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderStageCopyProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("StageCopy")),
+			connect.WithClientOptions(opts...),
+		),
+		captureCopy: connect.NewClient[runtimev2.RemoteWorkspaceCaptureCopyRequest, runtimev2.RemoteWorkspaceCopyDownload](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderCaptureCopyProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("CaptureCopy")),
+			connect.WithClientOptions(opts...),
+		),
+		snapshot: connect.NewClient[runtimev2.RemoteWorkspaceSnapshotRequest, runtimev2.RemoteWorkspaceSnapshot](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderSnapshotProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Snapshot")),
+			connect.WithClientOptions(opts...),
+		),
+		removeArtifact: connect.NewClient[runtimev2.RemoteWorkspaceRemoveArtifactRequest, runtimev2.RemoteWorkspaceRemoveArtifactResponse](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderRemoveArtifactProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RemoveArtifact")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // remoteWorkspaceProviderClient implements RemoteWorkspaceProviderClient.
 type remoteWorkspaceProviderClient struct {
-	allocate     *connect.Client[runtimev2.RemoteWorkspaceAllocateRequest, runtimev2.RemoteWorkspaceAllocation]
-	stage        *connect.Client[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse]
-	capture      *connect.Client[runtimev2.RemoteWorkspaceCaptureRequest, runtimev2.RemoteWorkspaceCaptureChunk]
-	stop         *connect.Client[runtimev2.RemoteWorkspaceStopRequest, runtimev2.RemoteWorkspaceStopResponse]
-	runMcpServer *connect.Client[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
+	allocate       *connect.Client[runtimev2.RemoteWorkspaceAllocateRequest, runtimev2.RemoteWorkspaceAllocation]
+	stage          *connect.Client[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse]
+	capture        *connect.Client[runtimev2.RemoteWorkspaceCaptureRequest, runtimev2.RemoteWorkspaceCaptureChunk]
+	stop           *connect.Client[runtimev2.RemoteWorkspaceStopRequest, runtimev2.RemoteWorkspaceStopResponse]
+	runMcpServer   *connect.Client[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
+	stageCopy      *connect.Client[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged]
+	captureCopy    *connect.Client[runtimev2.RemoteWorkspaceCaptureCopyRequest, runtimev2.RemoteWorkspaceCopyDownload]
+	snapshot       *connect.Client[runtimev2.RemoteWorkspaceSnapshotRequest, runtimev2.RemoteWorkspaceSnapshot]
+	removeArtifact *connect.Client[runtimev2.RemoteWorkspaceRemoveArtifactRequest, runtimev2.RemoteWorkspaceRemoveArtifactResponse]
 }
 
 // Allocate calls supertag.runtime.v2.RemoteWorkspaceProvider.Allocate.
@@ -4690,6 +4776,26 @@ func (c *remoteWorkspaceProviderClient) RunMcpServer(ctx context.Context) *conne
 	return c.runMcpServer.CallBidiStream(ctx)
 }
 
+// StageCopy calls supertag.runtime.v2.RemoteWorkspaceProvider.StageCopy.
+func (c *remoteWorkspaceProviderClient) StageCopy(ctx context.Context) *connect.ClientStreamForClient[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged] {
+	return c.stageCopy.CallClientStream(ctx)
+}
+
+// CaptureCopy calls supertag.runtime.v2.RemoteWorkspaceProvider.CaptureCopy.
+func (c *remoteWorkspaceProviderClient) CaptureCopy(ctx context.Context, req *connect.Request[runtimev2.RemoteWorkspaceCaptureCopyRequest]) (*connect.ServerStreamForClient[runtimev2.RemoteWorkspaceCopyDownload], error) {
+	return c.captureCopy.CallServerStream(ctx, req)
+}
+
+// Snapshot calls supertag.runtime.v2.RemoteWorkspaceProvider.Snapshot.
+func (c *remoteWorkspaceProviderClient) Snapshot(ctx context.Context, req *connect.Request[runtimev2.RemoteWorkspaceSnapshotRequest]) (*connect.Response[runtimev2.RemoteWorkspaceSnapshot], error) {
+	return c.snapshot.CallUnary(ctx, req)
+}
+
+// RemoveArtifact calls supertag.runtime.v2.RemoteWorkspaceProvider.RemoveArtifact.
+func (c *remoteWorkspaceProviderClient) RemoveArtifact(ctx context.Context, req *connect.Request[runtimev2.RemoteWorkspaceRemoveArtifactRequest]) (*connect.Response[runtimev2.RemoteWorkspaceRemoveArtifactResponse], error) {
+	return c.removeArtifact.CallUnary(ctx, req)
+}
+
 // RemoteWorkspaceProviderHandler is an implementation of the
 // supertag.runtime.v2.RemoteWorkspaceProvider service.
 type RemoteWorkspaceProviderHandler interface {
@@ -4701,6 +4807,19 @@ type RemoteWorkspaceProviderHandler interface {
 	// The first input is the start record; later inputs are its stdin. Outputs are its stdout.
 	// Ending or cancelling the call stops the server process, never the sandbox.
 	RunMcpServer(context.Context, *connect.BidiStream[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]) error
+	// One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
+	// Harness starts: the header, then for each file its record and exactly its bytes, and each
+	// empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+	// the returned tree.
+	StageCopy(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceCopyUpload]) (*connect.Response[runtimev2.RemoteWorkspaceCopyStaged], error)
+	// After a successful Capture, a read-write copy's changed and created regular files: each
+	// record, then the summary, then each recorded file's bytes in record order.
+	CaptureCopy(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureCopyRequest], *connect.ServerStream[runtimev2.RemoteWorkspaceCopyDownload]) error
+	// Records the staged preparation sandbox as a prepared artifact, which later allocations start
+	// from. Only a sandbox allocated with `prepare` is snapshotted, never a Task sandbox.
+	Snapshot(context.Context, *connect.Request[runtimev2.RemoteWorkspaceSnapshotRequest]) (*connect.Response[runtimev2.RemoteWorkspaceSnapshot], error)
+	// Deletes a prepared artifact; deleting one that is already gone succeeds.
+	RemoveArtifact(context.Context, *connect.Request[runtimev2.RemoteWorkspaceRemoveArtifactRequest]) (*connect.Response[runtimev2.RemoteWorkspaceRemoveArtifactResponse], error)
 }
 
 // NewRemoteWorkspaceProviderHandler builds an HTTP handler from the service implementation. It
@@ -4740,6 +4859,30 @@ func NewRemoteWorkspaceProviderHandler(svc RemoteWorkspaceProviderHandler, opts 
 		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RunMcpServer")),
 		connect.WithHandlerOptions(opts...),
 	)
+	remoteWorkspaceProviderStageCopyHandler := connect.NewClientStreamHandler(
+		RemoteWorkspaceProviderStageCopyProcedure,
+		svc.StageCopy,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("StageCopy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	remoteWorkspaceProviderCaptureCopyHandler := connect.NewServerStreamHandler(
+		RemoteWorkspaceProviderCaptureCopyProcedure,
+		svc.CaptureCopy,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("CaptureCopy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	remoteWorkspaceProviderSnapshotHandler := connect.NewUnaryHandler(
+		RemoteWorkspaceProviderSnapshotProcedure,
+		svc.Snapshot,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Snapshot")),
+		connect.WithHandlerOptions(opts...),
+	)
+	remoteWorkspaceProviderRemoveArtifactHandler := connect.NewUnaryHandler(
+		RemoteWorkspaceProviderRemoveArtifactProcedure,
+		svc.RemoveArtifact,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("RemoveArtifact")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.RemoteWorkspaceProvider/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RemoteWorkspaceProviderAllocateProcedure:
@@ -4752,6 +4895,14 @@ func NewRemoteWorkspaceProviderHandler(svc RemoteWorkspaceProviderHandler, opts 
 			remoteWorkspaceProviderStopHandler.ServeHTTP(w, r)
 		case RemoteWorkspaceProviderRunMcpServerProcedure:
 			remoteWorkspaceProviderRunMcpServerHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderStageCopyProcedure:
+			remoteWorkspaceProviderStageCopyHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderCaptureCopyProcedure:
+			remoteWorkspaceProviderCaptureCopyHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderSnapshotProcedure:
+			remoteWorkspaceProviderSnapshotHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderRemoveArtifactProcedure:
+			remoteWorkspaceProviderRemoveArtifactHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -4779,6 +4930,22 @@ func (UnimplementedRemoteWorkspaceProviderHandler) Stop(context.Context, *connec
 
 func (UnimplementedRemoteWorkspaceProviderHandler) RunMcpServer(context.Context, *connect.BidiStream[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) StageCopy(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceCopyUpload]) (*connect.Response[runtimev2.RemoteWorkspaceCopyStaged], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.StageCopy is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) CaptureCopy(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureCopyRequest], *connect.ServerStream[runtimev2.RemoteWorkspaceCopyDownload]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.CaptureCopy is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) Snapshot(context.Context, *connect.Request[runtimev2.RemoteWorkspaceSnapshotRequest]) (*connect.Response[runtimev2.RemoteWorkspaceSnapshot], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.Snapshot is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) RemoveArtifact(context.Context, *connect.Request[runtimev2.RemoteWorkspaceRemoveArtifactRequest]) (*connect.Response[runtimev2.RemoteWorkspaceRemoveArtifactResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.RemoveArtifact is not implemented"))
 }
 
 // HarnessQuestionsClient is a client for the supertag.runtime.v2.HarnessQuestions service.

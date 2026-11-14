@@ -15,7 +15,10 @@ use anyhow::{Context, Result, ensure};
 use supertag_protocol::v2::{
     ArtifactInputFile, RemoteMcpServerInput, RemoteMcpServerOutput, RemoteMcpServerStart,
     RemoteWorkspaceAllocateRequest, RemoteWorkspaceAllocation, RemoteWorkspaceCaptureChunk,
-    RemoteWorkspaceCaptureRequest, RemoteWorkspaceOwner, RemoteWorkspaceStageChunk,
+    RemoteWorkspaceCaptureCopyRequest, RemoteWorkspaceCaptureRequest, RemoteWorkspaceCopyDownload,
+    RemoteWorkspaceCopyStaged, RemoteWorkspaceCopyUpload, RemoteWorkspaceOwner,
+    RemoteWorkspaceRemoveArtifactRequest, RemoteWorkspaceRemoveArtifactResponse,
+    RemoteWorkspaceSnapshot, RemoteWorkspaceSnapshotRequest, RemoteWorkspaceStageChunk,
     RemoteWorkspaceStageResponse, RemoteWorkspaceStopRequest, RemoteWorkspaceStopResponse,
     remote_mcp_server_input, remote_workspace_capture_chunk,
     remote_workspace_provider_client::RemoteWorkspaceProviderClient,
@@ -63,6 +66,20 @@ impl RemoteWorkspaceProvider for Provider {
         }))
     }
 
+    async fn snapshot(
+        &self,
+        _: Request<RemoteWorkspaceSnapshotRequest>,
+    ) -> Result<Response<RemoteWorkspaceSnapshot>, Status> {
+        Err(Status::unimplemented("the tunnel test takes no snapshot"))
+    }
+
+    async fn remove_artifact(
+        &self,
+        _: Request<RemoteWorkspaceRemoveArtifactRequest>,
+    ) -> Result<Response<RemoteWorkspaceRemoveArtifactResponse>, Status> {
+        Err(Status::unimplemented("the tunnel test removes no artifact"))
+    }
+
     async fn stage(
         &self,
         request: Request<Streaming<RemoteWorkspaceStageChunk>>,
@@ -108,6 +125,22 @@ impl RemoteWorkspaceProvider for Provider {
         _: Request<RemoteWorkspaceStopRequest>,
     ) -> Result<Response<RemoteWorkspaceStopResponse>, Status> {
         Ok(Response::new(RemoteWorkspaceStopResponse::default()))
+    }
+
+    async fn stage_copy(
+        &self,
+        _: Request<Streaming<RemoteWorkspaceCopyUpload>>,
+    ) -> Result<Response<RemoteWorkspaceCopyStaged>, Status> {
+        Err(Status::unimplemented("not part of the tunnel fixture"))
+    }
+
+    type CaptureCopyStream = Boxed<RemoteWorkspaceCopyDownload>;
+
+    async fn capture_copy(
+        &self,
+        _: Request<RemoteWorkspaceCaptureCopyRequest>,
+    ) -> Result<Response<Self::CaptureCopyStream>, Status> {
+        Err(Status::unimplemented("not part of the tunnel fixture"))
     }
 
     type RunMcpServerStream = Boxed<RemoteMcpServerOutput>;
@@ -328,10 +361,13 @@ impl Fixture {
     /// A platform edge: terminates the outer TLS with the platform's certificate and
     /// relays the decrypted HTTP/1.1 bytes to `backend`.
     async fn edge(&self, backend: SocketAddr) -> Result<Edge> {
-        self.edge_on(0, backend).await
+        self.edge_on(TcpListener::bind(("127.0.0.1", 0)).await?, backend)
+            .await
     }
 
-    async fn edge_on(&self, port: u16, backend: SocketAddr) -> Result<Edge> {
+    /// An edge serving on `listener`, which the caller binds, so a test that reuses a port keeps
+    /// it from the moment it is free.
+    async fn edge_on(&self, listener: TcpListener, backend: SocketAddr) -> Result<Edge> {
         let config = ServerConfig::builder_with_provider(Arc::new(
             tokio_rustls::rustls::crypto::ring::default_provider(),
         ))
@@ -342,7 +378,6 @@ impl Fixture {
             PrivateKeyDer::from_pem_file(&self.edge.key)?,
         )?;
         let acceptor = TlsAcceptor::from(Arc::new(config));
-        let listener = TcpListener::bind(("127.0.0.1", port)).await?;
         let address = listener.local_addr()?;
         let links: Arc<Mutex<Vec<AbortHandle>>> = Arc::default();
         let open = links.clone();
@@ -703,15 +738,15 @@ async fn a_dropped_tunnel_fails_calls_as_retryable_and_the_channel_recovers() ->
         "an unreachable edge is not retryable: {status:?}"
     );
 
-    // A new edge on the same address: the same channel reconnects.
+    // A new edge on the same address: the same channel reconnects. The port is held from the
+    // moment it frees, so no other test can take it in between.
     let listener = loop {
         match TcpListener::bind(("127.0.0.1", port)).await {
             Ok(listener) => break listener,
             Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
         }
     };
-    drop(listener);
-    let _restored = fixture.edge_on(port, served.tunnel).await?;
+    let _restored = fixture.edge_on(listener, served.tunnel).await?;
     let mut recovered = None;
     for _ in 0..50 {
         match client

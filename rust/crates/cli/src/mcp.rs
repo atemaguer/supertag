@@ -21,7 +21,7 @@ pub enum McpCommand {
     /// tokens in this host's MCP login store and the Worker Host refreshes them.
     Login {
         /// Run the same browser login, store nothing, and print the refresh token once, for
-        /// "oauth": {"refreshTokenEnv": VAR} on a remote Worker Host.
+        /// "oauth": {"refreshTokenEnv": VAR} or {"refreshTokenFile": PATH} on a remote Worker Host.
         #[arg(long)]
         export: bool,
         name: String,
@@ -66,7 +66,7 @@ pub async fn run(command: McpCommand) -> Result<()> {
                 (Some(url), _) => url,
                 (None, true) if entry.auth == "oauth refresh token" => &entry.target,
                 (None, true) => bail!(
-                    "MCP server {name} does not use OAuth; --export needs \"oauth\": true or \"oauth\": {{\"refreshTokenEnv\": VAR}}"
+                    "MCP server {name} does not use OAuth; --export needs \"oauth\": true, or \"oauth\" with refreshTokenEnv or refreshTokenFile"
                 ),
                 (None, false) => bail!(
                     "MCP server {name} does not use \"oauth\": true, so it has no login to store; declare it with \"oauth\": true to log in"
@@ -98,7 +98,7 @@ pub async fn run(command: McpCommand) -> Result<()> {
                 }
                 outln!("{exported}");
                 outln!(
-                    "Store this value as a secret on the remote Worker Host, such as {variable}, and give the server \"oauth\": {{\"refreshTokenEnv\": \"{variable}\"}} in its MCP catalog. It is not stored here and is not shown again."
+                    "Store this value as a secret on the remote Worker Host, such as {variable}, and give the server \"oauth\": {{\"refreshTokenEnv\": \"{variable}\"}} in its MCP catalog, or save it in an owner-only file there and give \"oauth\": {{\"refreshTokenFile\": PATH}}. It is not stored here and is not shown again."
                 );
                 return Ok(());
             }

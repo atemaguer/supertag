@@ -1,3 +1,4 @@
+export { type CopySandbox, createWorkspaceCopies } from "./copies.js";
 export { createWorkspaceHandlers } from "./handlers.js";
 export { createWorkspaceOperations, type WorkspaceOperation } from "./operations.js";
 export {

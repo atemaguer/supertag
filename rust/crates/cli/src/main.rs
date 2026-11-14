@@ -508,15 +508,17 @@ enum Command {
             conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider"],
             long_help = r#"Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
 
-Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment. An HTTP server with "oauth":true instead uses the login `supertag mcp login NAME --mcp-catalog PATH` stores on this host.
+Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment, or use "headerFile":{"Authorization":"/PATH"} to read it from a file. An HTTP server with "oauth":true instead uses the login `supertag mcp login NAME --mcp-catalog PATH` stores on this host.
 
-An HTTP server may instead mint its credentials for each Task Attempt, with exactly one of: "oauth":{"refreshTokenEnv":"VAR"} (a refresh token, or the JSON `supertag mcp login NAME --export` prints); "clientCredentials":{"clientId":"ID","clientSecretEnv":"VAR"} or {"clientId":"ID","assertionKeyEnv":"VAR"} (a client secret, or an RSA or EC private key for a signed JWT client assertion; also "clientIdEnv", "scope", and "tokenUrl"); "githubApp":{"appId":1,"installationId":2,"privateKeyEnv":"VAR"} (a GitHub App installation token); or "helper":["/path/to/command","arg"] (a host command that prints a JSON object of header names to values). Each VAR names a Worker Host variable. Without "tokenUrl", the token endpoint comes from the server's OAuth metadata and must share the server's origin.
+An HTTP server may instead mint its credentials for each Task Attempt, with exactly one of: "oauth":{"refreshTokenEnv":"VAR"} (a refresh token, or the JSON `supertag mcp login NAME --export` prints); "clientCredentials":{"clientId":"ID","clientSecretEnv":"VAR"} or {"clientId":"ID","assertionKeyEnv":"VAR"} (a client secret, or an RSA or EC private key for a signed JWT client assertion; also "clientIdEnv", "scope", and "tokenUrl"); "githubApp":{"appId":1,"installationId":2,"privateKeyEnv":"VAR"} (a GitHub App installation token); or "helper":["/path/to/command","arg"] (a host command that prints a JSON object of header names to values). Each VAR names a Worker Host variable; each *Env field may instead be the matching *File field naming a file, such as "clientSecretFile" or "privateKeyFile". Without "tokenUrl", the token endpoint comes from the server's OAuth metadata and must share the server's origin.
 
-A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable or, for {"file":"/ABSOLUTE/PATH"}, from that owner-only file, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
+A stdio server has a command instead of a url, such as {"name":"db","command":["npx","-y","@acme/db-mcp"],"env":{"DB_TOKEN":"ACME_DB_TOKEN"}}. The Worker Host launches it for each Task Attempt with only its env, each value read from the named Worker Host variable or, for {"file":"/PATH"}, from that file, plus HOME, PATH, and a few locale variables, and stops its process group when the Attempt ends.
 
 The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
 
 A preset names an official HTTP server instead of a url, with its URL and resource mapping: {"name":"github","preset":"github","headerEnv":{"Authorization":"GITHUB_MCP_AUTH"}}. Presets are github, slack, linear, and teams; teams also needs "tenantId", the Microsoft Entra tenant ID or domain. The lark preset is a stdio server that runs lark-mcp, from the @larksuiteoapi/lark-mcp npm package, on the Worker Host's PATH: {"name":"lark","preset":"lark","env":{"APP_ID":"LARK_APP_ID","APP_SECRET":"LARK_APP_SECRET"}}.
+
+A file path is absolute or starts with ~/. The file must be a regular file, not a symbolic link, owned by the Worker Host's user and not readable or writable by group or others, holding one value (a private key or refresh token JSON may span lines). The Worker Host reads it at start, so a missing file stops it, and again at each use, so a replaced file takes effect without a restart.
 
 Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval appear in the operator Inbox. Endpoints must use HTTPS or literal loopback HTTP."#
         )]
@@ -632,7 +634,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(subcommand)]
         command: volumes::VolumeCommand,
     },
-    /// Register a file Volume for read-only Workspace data.
+    /// Register a Volume whose files Tasks receive as Workspace copies.
     WorkspaceVolume {
         #[command(flatten)]
         connection: Connection,
@@ -2717,6 +2719,30 @@ fn task_json(task: &Task) -> serde_json::Value {
                 },
             })
         }),
+        "execution_report": task.execution_report.as_ref().map(execution_report_json),
+    })
+}
+
+/// The Task execution report's classifications, as lower-case words without their prefixes.
+fn execution_report_json(report: &supertag_protocol::v2::TaskExecutionReport) -> serde_json::Value {
+    use supertag_protocol::v2::ExecutionThreshold;
+    let word = |name: &str, prefix: &str| name.trim_start_matches(prefix).to_ascii_lowercase();
+    let threshold = |value: ExecutionThreshold| {
+        (value != ExecutionThreshold::Unspecified)
+            .then(|| word(value.as_str_name(), "EXECUTION_THRESHOLD_"))
+    };
+    json!({
+        "limits": word(report.limit_outcome().as_str_name(), "EXECUTION_LIMIT_OUTCOME_"),
+        "thresholds": {
+            "max_reported_tokens": threshold(report.max_reported_tokens()),
+            "max_reported_cost": threshold(report.max_reported_cost()),
+            "max_native_agents": threshold(report.max_native_agents()),
+        },
+        "limits_applied": report.limits_applied,
+        "usage_complete": report.usage_complete,
+        "complete": report.complete,
+        "cleanup": word(report.cleanup().as_str_name(), "ATTEMPT_CLEANUP_"),
+        "cleanup_failure": report.cleanup_failure,
     })
 }
 

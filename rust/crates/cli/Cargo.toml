@@ -7,7 +7,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [features]
-test-fixtures = ["supertag-api/test-fixtures", "supertag-gateway/test-fixtures", "supertag-github/test-fixtures", "supertag-protocol/crash-points"]
+test-fixtures = ["supertag-api/test-fixtures", "supertag-gateway/test-fixtures", "supertag-github/test-fixtures", "supertag-protocol/crash-points", "supertag-worker-host/test-fixtures"]
 
 [[bin]]
 name = "supertag"

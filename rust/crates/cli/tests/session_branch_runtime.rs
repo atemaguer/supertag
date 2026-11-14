@@ -5,6 +5,8 @@ mod prerequisites;
 #[macro_use]
 #[path = "support/database.rs"]
 mod database;
+#[path = "support/database_password.rs"]
+mod database_password;
 
 use std::{
     fs,
@@ -357,21 +359,31 @@ async fn local_supervisor_advances_one_session_branch_for_each_task(
     fs::write(source.join("notes.txt"), "uncommitted\n")?;
     let state = root.join("state");
     let file = root.join("supertag.yaml");
+    let (control_plane, secrets) = if database.starts_with("postgres") {
+        let (section, secrets) = database_password::config(&database, root)?;
+        (
+            serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"], "database": section}),
+            secrets,
+        )
+    } else {
+        (
+            serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"]}),
+            serde_json::json!({}),
+        )
+    };
     fs::write(
         &file,
-        serde_json::to_vec(&serde_json::json!({"version": 1, "services": {
-            "control-plane": if database.starts_with("postgres") {
-                serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"], "database": {"url": database}})
-            } else {
-                serde_json::json!({"type": "control-plane", "ports": ["127.0.0.1:0"]})
-            },
-            "laptop": {
-                "type": "host",
-                "adapter": ADAPTER,
-                "adapter-args": ["--workspace-fixture"],
-                "workspaces": {"project": "./source"},
-            },
-        }}))?,
+        serde_json::to_vec(
+            &serde_json::json!({"version": 1, "secrets": secrets, "services": {
+                "control-plane": control_plane,
+                "laptop": {
+                    "type": "host",
+                    "adapter": ADAPTER,
+                    "adapter-args": ["--workspace-fixture"],
+                    "workspaces": {"project": "./source"},
+                },
+            }}),
+        )?,
     )?;
     let log = root.join("supervisor.log");
     let mut supervisor = std::process::Command::new(BINARY)

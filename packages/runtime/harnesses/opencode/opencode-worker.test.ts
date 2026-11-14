@@ -520,3 +520,19 @@ it("serves the Task's model from its list and advertises no effort option", asyn
     harness.plan({ ...context, attempt: { ...spec(), execution: { model: "other/model" } } }),
   ).rejects.toThrow("OpenCode on this Worker Host does not serve model other/model");
 });
+
+it("lets OpenCode reach only the Worker Host's Workspace copies outside the worktree", () => {
+  const copies = [
+    { destination: "/srv/mounts/ro", readWrite: false },
+    { destination: "/srv/mounts/rw", readWrite: true },
+  ];
+  expect(
+    openCodePermissions(["files:read", "files:write"], copies, "/work/checkout"),
+  ).toMatchObject({
+    edit: { "*": "allow", "../../srv/mounts/ro/*": "deny", "/srv/mounts/ro/*": "deny" },
+    external_directory: { "*": "deny", "/srv/mounts/ro/*": "allow", "/srv/mounts/rw/*": "allow" },
+  });
+  // Without file writes, every edit stays denied; without copies, every outside directory.
+  expect(openCodePermissions(["files:read"], copies, "/work/checkout").edit).toBe("deny");
+  expect(openCodePermissions(["files:read", "files:write"]).external_directory).toBe("deny");
+});

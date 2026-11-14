@@ -1,4 +1,6 @@
 //! The ordinary native `up -f` entry point owns every service and its private enrollment.
+#[path = "support/database_password.rs"]
+mod database_password;
 #[path = "support/protocol.rs"]
 mod protocol;
 use anyhow::{Context, Result, ensure};
@@ -244,15 +246,15 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state(
     let temp = tempfile::tempdir()?;
     let state = temp.path().join("state");
     let file = temp.path().join("supertag.yaml");
+    let (section, secrets) = if database.starts_with("postgres") {
+        database_password::config(&database, temp.path())?
+    } else {
+        (Value::Null, serde_json::json!({}))
+    };
     yaml(
         &file,
-        &serde_json::json!({"version":1,"services":{
-            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],
-                "database":if database.starts_with("postgres") {
-                    serde_json::json!({"url": database})
-                } else {
-                    Value::Null
-                }},
+        &serde_json::json!({"version":1,"secrets":secrets,"services":{
+            "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],"database":section},
             "reader":{"type":"host","adapter":ADAPTER,"restart":"unless-stopped","concurrency":1},
             "writer":{"type":"host","adapter":ADAPTER,"concurrency":1}
         }}),
@@ -746,6 +748,9 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     database: String,
 ) -> Result<()> {
     let postgres = database.starts_with("postgres");
+    // A server that requires a password gets its real one through the same env_file secret.
+    let (database, password) = database_password::split(&database)?;
+    let password = password.unwrap_or_else(|| "file-db-password".into());
     let temp = tempfile::tempdir()?;
     let state = temp.path().join("state");
     let home = temp.path().join("home");
@@ -753,7 +758,9 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
     let env_file = temp.path().join("services.env");
     fs::write(
         &env_file,
-        "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_CREDENTIAL=file-gateway-token\nHTTPS_PROXY=https://proxy.invalid:443\nNO_PROXY=example.test\nLOCAL_DB_PASSWORD=file-db-password\n",
+        format!(
+            "FIXTURE_PORT=0\nOPENAI_API_KEY=file-openai\nexport CODEX_API_KEY=file-codex\nCURSOR_API_KEY='file-cursor'\nSUPERTAG_GATEWAY_CREDENTIAL=file-gateway-token\nHTTPS_PROXY=https://proxy.invalid:443\nNO_PROXY=example.test\nLOCAL_DB_PASSWORD={password}\n"
+        ),
     )?;
     fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600))?;
     let file = temp.path().join("supertag.yaml");
@@ -845,7 +852,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         })
     );
     if postgres {
-        assert_eq!(roles["control-plane"]["PGPASSWORD"], "file-db-password");
+        assert_eq!(roles["control-plane"]["PGPASSWORD"], password);
         assert_eq!(roles["control-plane"]["SUPERTAG_DATABASE_URL"], database);
     }
     // The Gateway holds no operator credential, only its own enrolled one.
@@ -866,7 +873,11 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         names(&roles["reporter"]),
         expected(&["SUPERTAG_HOST_TOKEN"])
     );
-    for environment in roles.values() {
+    for (role, environment) in &roles {
+        // The database password reaches the Control Plane alone, under any name.
+        if *role != "control-plane" {
+            assert!(environment.values().all(|value| *value != password));
+        }
         assert_eq!(environment["HOME"], home_value);
         assert_eq!(environment["HTTPS_PROXY"], "https://proxy.invalid:443");
         assert_eq!(environment["NO_PROXY"], "example.test");
@@ -960,7 +971,7 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         "file-cursor",
         "shell-codex",
         "file-gateway-token",
-        "file-db-password",
+        password.as_str(),
     ] {
         assert!(!log.contains(value));
     }
@@ -2282,16 +2293,30 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
     assert!(
         fs::read_to_string(&desktop)?.ends_with(&format!("SuperTag needs you|{message}\n--\n"))
     );
-    // The Inbox shows that the question reached the operator, and through what.
-    let inbox: Value =
-        serde_json::from_str(&cli(&["get", "inbox-items", "--objective", "release"])?)?;
-    let notification = &inbox["items"][0]["notification"];
-    assert_eq!(notification["status"], "delivered", "{inbox}");
-    let via = notification["reason"].as_str().context("delivery reason")?;
-    assert!(
-        via == "via desktop,webhook" || via == "via webhook,desktop",
-        "{via}"
-    );
+    // The Inbox shows that the question reached the operator, and through what. Each
+    // destination's message is settled after its send returns, so a destination this test saw
+    // receive the message may not be recorded yet: wait for both settlements.
+    let mut inbox = Value::Null;
+    let settled = timeout(WAIT, async {
+        loop {
+            inbox = serde_json::from_str(&cli(&["get", "inbox-items", "--objective", "release"])?)?;
+            let notification = &inbox["items"][0]["notification"];
+            if notification["status"] == "delivered"
+                && matches!(
+                    notification["reason"].as_str(),
+                    Some("via desktop,webhook" | "via webhook,desktop")
+                )
+            {
+                return Ok::<_, anyhow::Error>(());
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    match settled {
+        Ok(result) => result?,
+        Err(_) => anyhow::bail!("both deliveries were not recorded: {inbox}"),
+    }
     supervisor.stop().await
 }
 
