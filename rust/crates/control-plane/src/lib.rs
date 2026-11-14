@@ -17,6 +17,7 @@ mod context;
 mod conversations;
 mod effect_receipts;
 mod enrollments;
+mod execution_report;
 mod external_effects;
 mod github_publications;
 mod github_workspaces;
@@ -360,7 +361,9 @@ impl operator_server::Operator for ControlPlane {
         let principal = self.actor(&request)?;
         let task_id = request.into_inner().task_id;
         self.store.ensure_task_access(&principal, &task_id).await?;
-        Ok(Response::new(self.store.get_task(&task_id).await?))
+        let mut task = self.store.get_task(&task_id).await?;
+        task.execution_report = Some(self.store.task_execution_report(&task).await?);
+        Ok(Response::new(task))
     }
 
     async fn get_session_delivery(
@@ -620,6 +623,17 @@ impl worker_host_server::WorkerHost for ControlPlane {
             .report_applied_limits(&principal, &request.into_inner())
             .await?;
         Ok(Response::new(ReportAppliedLimitsResponse {}))
+    }
+
+    async fn report_cleanup_failure(
+        &self,
+        request: Request<ReportCleanupFailureRequest>,
+    ) -> Result<Response<ReportCleanupFailureResponse>, Status> {
+        let principal = self.host_authority(&request)?;
+        self.store
+            .report_cleanup_failure(&principal, &request.into_inner())
+            .await?;
+        Ok(Response::new(ReportCleanupFailureResponse {}))
     }
 
     async fn report_attempt_usage(

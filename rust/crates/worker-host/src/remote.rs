@@ -15,7 +15,7 @@ use crate::{
     CoordinationClients, HostOptions,
     adapter::artifact_acquisition::AcquisitionClient,
     journal::{Attempt, Journal, RemoteSandboxState},
-    remote_provider::RemoteProvider,
+    remote_provider::{RemoteProvider, Start},
     task_artifact_inputs::RemoteInputs,
     task_outputs::PendingOutputs,
     workspaces::{PreparedWorkspace, Workspaces},
@@ -73,6 +73,26 @@ pub(crate) async fn prepare(
         attempt: attempt.inspect(),
     };
     let inputs = RemoteInputs::download(&acquisition, task, cancel).await?;
+    // A devcontainer with lifecycle commands starts the Task's sandbox from a prepared artifact:
+    // its image, trusted checkout, and setup are already there.
+    let prepared = match environment
+        .as_ref()
+        .filter(|environment| environment.prepared)
+    {
+        Some(environment) => Some(
+            crate::prepared::artifact(
+                options,
+                journal,
+                workspaces,
+                (attempt, workspace),
+                environment,
+                registration,
+                cancel,
+            )
+            .await?,
+        ),
+        None => None,
+    };
     let provider = RemoteProvider::spawn(config, &journal.remote_scratch()?, cancel).await?;
     ensure!(!cancel.is_cancelled(), "sandbox preparation cancelled");
     let record = journal.begin_remote_sandbox(
@@ -88,12 +108,18 @@ pub(crate) async fn prepare(
     // The sandbox's clock starts no earlier than this request, so the harness stops in time
     // to leave the cleanup margin even when preparation took part of the lifetime.
     let execution_ends = Instant::now() + timeout - SANDBOX_CLEANUP_MARGIN;
-    let environment = environment.map(|environment| RemoteWorkspaceEnvironment {
-        image: environment.image,
-        dockerfile_commands: environment.dockerfile_commands,
-        user: environment.user,
-        setup_commands: environment.setup_commands,
-    });
+    let (environment, start) = match prepared {
+        Some(artifact) => (None, Start::Prepared(artifact)),
+        None => (
+            environment.map(|environment| RemoteWorkspaceEnvironment {
+                image: environment.image,
+                dockerfile_commands: environment.dockerfile_commands,
+                user: environment.user,
+                setup_commands: environment.setup_commands,
+            }),
+            Start::Fresh,
+        ),
+    };
     let setup = environment
         .as_ref()
         .is_some_and(|environment| !environment.setup_commands.is_empty());
@@ -102,7 +128,7 @@ pub(crate) async fn prepare(
             &record.owner(),
             timeout,
             &allowed_actions,
-            environment,
+            (environment, &start),
             cancel,
         )
         .await?;

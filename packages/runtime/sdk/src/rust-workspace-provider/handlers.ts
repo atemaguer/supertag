@@ -75,12 +75,15 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
       async allocate(request, context) {
         if (!request.owner)
           throw new ConnectError("Workspace owner is required", Code.InvalidArgument);
-        const { owner, timeoutMs, allowedActions, environment } = request;
+        const { owner, timeoutMs, allowedActions, environment, preparedArtifact, prepare } =
+          request;
         return session.allocate(
           {
             owner,
             timeoutMs,
             allowedActions,
+            ...(preparedArtifact === undefined ? {} : { preparedArtifact }),
+            prepare,
             ...(environment === undefined
               ? {}
               : {
@@ -194,6 +197,13 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           // Ends its input, so its supervisor stops its process group, never the sandbox.
           await session.stopMcpServer(server);
         }
+      },
+      async snapshot(_request, context) {
+        return { artifact: await session.snapshot(context.signal) };
+      },
+      async removeArtifact(request, context) {
+        await session.removeArtifact(request.artifact, context.signal);
+        return {};
       },
       async stop(request) {
         if (!request.owner)

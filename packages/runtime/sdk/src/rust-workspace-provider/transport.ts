@@ -234,6 +234,10 @@ export async function startRemoteWorkspaceTransport(
           },
           stop: (request, context) =>
             invoke(context, () => options.provider.stop(request, context)),
+          snapshot: (request, context) =>
+            invoke(context, () => options.provider.snapshot(request, context)),
+          removeArtifact: (request, context) =>
+            invoke(context, () => options.provider.removeArtifact(request, context)),
           runMcpServer: async function* (stream, context) {
             try {
               yield* options.provider.runMcpServer(

@@ -726,7 +726,7 @@ async fn supervise(
 }
 
 /// The secrets of this Worker Host's environment, plus `credentials` it holds itself.
-fn host_secrets(credentials: &[&str]) -> Vec<SensitiveValue> {
+pub(crate) fn host_secrets(credentials: &[&str]) -> Vec<SensitiveValue> {
     let environment = std::env::vars_os()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect::<Vec<_>>();

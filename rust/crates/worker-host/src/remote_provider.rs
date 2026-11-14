@@ -277,7 +277,7 @@ impl RemoteProvider {
         owner: &RemoteWorkspaceOwner,
         lifetime: Duration,
         allowed_actions: &[String],
-        environment: Option<RemoteWorkspaceEnvironment>,
+        (environment, start): (Option<RemoteWorkspaceEnvironment>, &Start),
         cancel: &CancellationToken,
     ) -> Result<String> {
         validate_owner(owner)?;
@@ -291,10 +291,19 @@ impl RemoteProvider {
                     .all(|action| matches!(action.as_str(), "files:read" | "files:write")),
             "remote provider supports only file actions"
         );
+        let (prepared_artifact, prepare) = match start {
+            Start::Fresh => (None, false),
+            Start::Prepare { from } => (from.clone(), true),
+            Start::Prepared(artifact) => (Some(artifact.clone()), false),
+        };
+        if let Some(artifact) = &prepared_artifact {
+            validate_artifact(artifact)?;
+        }
         // A devcontainer image is built before the sandbox starts.
-        let deadline = if environment
-            .as_ref()
-            .is_some_and(|environment| !environment.dockerfile_commands.is_empty())
+        let deadline = if prepared_artifact.is_none()
+            && environment
+                .as_ref()
+                .is_some_and(|environment| !environment.dockerfile_commands.is_empty())
         {
             BUILD_TIMEOUT
         } else {
@@ -309,6 +318,8 @@ impl RemoteProvider {
                         timeout_ms,
                         allowed_actions: allowed_actions.to_vec(),
                         environment,
+                        prepared_artifact,
+                        prepare,
                     },
                     deadline,
                 )?)
@@ -501,6 +512,38 @@ impl RemoteProvider {
         .await
     }
 
+    /// Records the staged preparation sandbox as a prepared artifact.
+    pub async fn snapshot(&self, cancel: &CancellationToken) -> Result<String> {
+        bounded(BUILD_TIMEOUT, cancel, async {
+            let artifact = self
+                .client()
+                .snapshot(self.request(RemoteWorkspaceSnapshotRequest {}, BUILD_TIMEOUT)?)
+                .await?
+                .into_inner()
+                .artifact;
+            validate_artifact(&artifact)?;
+            Ok(artifact)
+        })
+        .await
+    }
+
+    /// Deletes a prepared artifact; one already gone counts as deleted.
+    pub async fn remove_artifact(&self, artifact: &str, cancel: &CancellationToken) -> Result<()> {
+        validate_artifact(artifact)?;
+        bounded(STOP_TIMEOUT, cancel, async {
+            self.client()
+                .remove_artifact(self.request(
+                    RemoteWorkspaceRemoveArtifactRequest {
+                        artifact: artifact.to_owned(),
+                    },
+                    STOP_TIMEOUT,
+                )?)
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn stop(
         &self,
         owner: &RemoteWorkspaceOwner,
@@ -634,6 +677,29 @@ fn validate_owner(owner: &RemoteWorkspaceOwner) -> Result<()> {
     );
     Ok(())
 }
+/// Where an allocation starts.
+pub(crate) enum Start {
+    /// From the devcontainer image, or the operator's template or image.
+    Fresh,
+    /// A preparation sandbox, warm when it starts from an earlier prepared artifact.
+    Prepare { from: Option<String> },
+    /// A Task sandbox from a prepared artifact.
+    Prepared(String),
+}
+
+/// An E2B snapshot or template ID, or a Modal image ID: one printable token.
+pub(crate) fn validate_artifact(artifact: &str) -> Result<()> {
+    ensure!(
+        !artifact.is_empty()
+            && artifact.len() <= 256
+            && artifact
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.:/".contains(&byte)),
+        "invalid prepared Workspace artifact"
+    );
+    Ok(())
+}
+
 fn validate_sandbox_id(id: &str) -> Result<()> {
     ensure!(
         crate::journal::valid_sandbox_id(id),
@@ -828,6 +894,8 @@ mod tests {
         staged: Arc<Mutex<Vec<u8>>>,
         mcp_commit: Arc<Mutex<Option<String>>>,
         environment: Arc<Mutex<Option<RemoteWorkspaceEnvironment>>>,
+        /// The last allocation's prepared artifact and whether it was a preparation.
+        start: Arc<Mutex<(Option<String>, bool)>>,
         /// Each sandbox MCP start record, and whether its input ended.
         mcp: Arc<Mutex<Vec<(RemoteMcpServerStart, bool)>>>,
     }
@@ -855,6 +923,10 @@ mod tests {
                 "allocation"
             );
             *self.environment.lock().unwrap() = request.get_ref().environment.clone();
+            *self.start.lock().unwrap() = (
+                request.get_ref().prepared_artifact.clone(),
+                request.get_ref().prepare,
+            );
             Ok(Response::new(RemoteWorkspaceAllocation {
                 sandbox_id: "sandbox-fixture".into(),
             }))
@@ -954,6 +1026,27 @@ mod tests {
         }
         type RunMcpServerStream = ReceiverStream<Result<RemoteMcpServerOutput, Status>>;
         /// A line-oriented MCP server that answers from inside the fixture "sandbox".
+        async fn snapshot(
+            &self,
+            request: Request<RemoteWorkspaceSnapshotRequest>,
+        ) -> Result<Response<RemoteWorkspaceSnapshot>, Status> {
+            self.authorize(&request)?;
+            Ok(Response::new(RemoteWorkspaceSnapshot {
+                artifact: if self.mode.load(Ordering::SeqCst) == 10 {
+                    "not an artifact\n".into()
+                } else {
+                    "im-prepared".into()
+                },
+            }))
+        }
+        async fn remove_artifact(
+            &self,
+            request: Request<RemoteWorkspaceRemoveArtifactRequest>,
+        ) -> Result<Response<RemoteWorkspaceRemoveArtifactResponse>, Status> {
+            self.authorize(&request)?;
+            assert_eq!(request.get_ref().artifact, "im-prepared");
+            Ok(Response::new(RemoteWorkspaceRemoveArtifactResponse {}))
+        }
         async fn run_mcp_server(
             &self,
             request: Request<Streaming<RemoteMcpServerInput>>,
@@ -1066,6 +1159,7 @@ mod tests {
             staged: Arc::new(Mutex::new(Vec::new())),
             mcp_commit: Arc::default(),
             environment: Arc::default(),
+            start: Arc::default(),
             mcp: Arc::default(),
         };
         let shutdown = CancellationToken::new();
@@ -1125,7 +1219,7 @@ mod tests {
                     &owner(),
                     Duration::from_secs(60),
                     &["files:read".into(), "files:write".into()],
-                    Some(environment.clone()),
+                    (Some(environment.clone()), &Start::Fresh),
                     &CancellationToken::new()
                 )
                 .await
@@ -1134,6 +1228,56 @@ mod tests {
         );
         // The devcontainer translation reaches the provider only over the private channel.
         assert_eq!(*mock.environment.lock().unwrap(), Some(environment));
+        assert_eq!(*mock.start.lock().unwrap(), (None, false));
+        // A warm preparation names the artifact it starts from; a Task sandbox starts from one.
+        for (start, expected) in [
+            (
+                Start::Prepare {
+                    from: Some("im-earlier".into()),
+                },
+                (Some("im-earlier".to_owned()), true),
+            ),
+            (Start::Prepare { from: None }, (None, true)),
+            (
+                Start::Prepared("im-prepared".into()),
+                (Some("im-prepared".to_owned()), false),
+            ),
+        ] {
+            provider
+                .allocate(
+                    &owner(),
+                    Duration::from_secs(60),
+                    &[],
+                    (None, &start),
+                    &CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(*mock.start.lock().unwrap(), expected);
+        }
+        assert!(
+            provider
+                .allocate(
+                    &owner(),
+                    Duration::from_secs(60),
+                    &[],
+                    (None, &Start::Prepared("im prepared".into())),
+                    &CancellationToken::new(),
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            provider.snapshot(&CancellationToken::new()).await.unwrap(),
+            "im-prepared"
+        );
+        provider
+            .remove_artifact("im-prepared", &CancellationToken::new())
+            .await
+            .unwrap();
+        mock.mode.store(10, Ordering::SeqCst);
+        assert!(provider.snapshot(&CancellationToken::new()).await.is_err());
+        mock.mode.store(0, Ordering::SeqCst);
         let bytes = vec![b'x'; CHECKPOINT_CHUNK_BYTES * 2 + 7];
         let bundle = TransferArtifact {
             path: directory.join("source.bundle"),
@@ -1288,7 +1432,7 @@ mod tests {
                     &owner(),
                     Duration::from_secs(60),
                     &["commands:execute".into()],
-                    None,
+                    (None, &Start::Fresh),
                     &CancellationToken::new()
                 )
                 .await

@@ -26,6 +26,8 @@ export interface E2BWorkspaceSandbox {
   readonly client: E2BSandboxClient;
   writeTransfer(path: string, bytes: Uint8Array, signal: AbortSignal): Promise<void>;
   readTransfer(path: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array>>;
+  /** Snapshots this sandbox; later sandboxes are created from the snapshot ID. */
+  snapshot(signal: AbortSignal): Promise<string>;
 }
 
 /**
@@ -46,9 +48,14 @@ export interface E2BWorkspaceTemplates {
 
 interface E2BWorkspaceSessionOptions {
   readonly template?: string;
-  readonly factory?: { create(options: SandboxOpts): Promise<E2BWorkspaceSandbox> };
+  readonly factory?: {
+    create(options: SandboxOpts): Promise<E2BWorkspaceSandbox>;
+    /** Deletes a prepared snapshot; one already gone counts as deleted. */
+    deleteSnapshot(snapshotId: string): Promise<void>;
+  };
   readonly inventory?: SandboxInventory;
   readonly templates?: E2BWorkspaceTemplates;
+  readonly preparedRoot?: string;
 }
 
 export const nativeWorkspaceTemplates: E2BWorkspaceTemplates = {
@@ -121,7 +128,15 @@ const nativeFactory = {
           streamIdleTimeoutMs: API_TIMEOUT_MS,
         });
       },
+      async snapshot(signal) {
+        signal.throwIfAborted();
+        return (await client.createSnapshot({ requestTimeoutMs: TRANSFER_TIMEOUT_MS })).snapshotId;
+      },
     };
+  },
+  async deleteSnapshot(snapshotId: string) {
+    // Deleting a snapshot that is already gone succeeds.
+    await Sandbox.deleteSnapshot(snapshotId, { requestTimeoutMs: API_TIMEOUT_MS });
   },
 };
 
@@ -134,52 +149,61 @@ export function createE2BWorkspaceSession(
   const factory = options.factory ?? nativeFactory;
   const templates = options.templates ?? nativeWorkspaceTemplates;
   const inventory = options.inventory ?? e2bSandboxInventory({ requestTimeoutMs: API_TIMEOUT_MS });
-  return createSandboxWorkspaceSession({
-    label: "E2B",
-    validateOwner: sandboxOwnershipMetadata,
-    async allocate(owner, timeoutMs, signal, environment) {
-      const metadata = sandboxOwnershipMetadata(owner);
-      const build = environment && e2bWorkspaceTemplateBuild(environment, template);
-      const built = build === undefined ? template : await templates.build(build);
-      signal.throwIfAborted();
-      const sandbox = await factory.create({
-        template: built,
-        metadata: { ...metadata },
-        timeoutMs: Math.min(timeoutMs, MAX_LIFETIME_MS),
-        requestTimeoutMs: 30_000,
-        allowInternetAccess: false,
-        secure: true,
-        lifecycle: { onTimeout: "kill", autoResume: false },
-        signal,
-      });
-      signal.throwIfAborted();
-      const sandboxId = sandbox.client.sandboxId;
-      if (!sandboxId || sandboxId.length > 256 || /\p{Cc}/u.test(sandboxId))
-        throw new Error("Invalid sandbox identity");
-      const identity = await inventory.get(sandboxId);
-      if (
-        identity?.sandboxId !== sandboxId ||
-        !Object.entries(metadata).every(([key, value]) => identity.metadata[key] === value)
-      )
-        throw new Error("Unexpected sandbox ownership");
-      return {
-        sandboxId,
-        environment: (root) =>
-          sandboxExecutionEnvironment(
-            adaptE2B(sandbox.client),
-            root,
-            new E2BExecutionEnvironmentProvider({ maxOutputCharacters: 65_536 }).options,
-          ),
-        run: (argv, timeoutMs, signal) =>
-          sandbox.client.commands.run(argv.map(shellQuote).join(" "), {
-            cwd: "/tmp",
-            timeoutMs,
-            signal,
-          }),
-        writeTransfer: (path, bytes, signal) => sandbox.writeTransfer(path, bytes, signal),
-        readTransfer: (path, signal) => sandbox.readTransfer(path, signal),
-      };
+  return createSandboxWorkspaceSession(
+    {
+      label: "E2B",
+      validateOwner: sandboxOwnershipMetadata,
+      async allocate(owner, timeoutMs, signal, environment, artifact) {
+        const metadata = sandboxOwnershipMetadata(owner);
+        // A prepared snapshot already holds the devcontainer's image and setup.
+        const build =
+          artifact === undefined && environment
+            ? e2bWorkspaceTemplateBuild(environment, template)
+            : undefined;
+        const built = artifact ?? (build === undefined ? template : await templates.build(build));
+        signal.throwIfAborted();
+        const sandbox = await factory.create({
+          template: built,
+          metadata: { ...metadata },
+          timeoutMs: Math.min(timeoutMs, MAX_LIFETIME_MS),
+          requestTimeoutMs: 30_000,
+          allowInternetAccess: false,
+          secure: true,
+          lifecycle: { onTimeout: "kill", autoResume: false },
+          signal,
+        });
+        signal.throwIfAborted();
+        const sandboxId = sandbox.client.sandboxId;
+        if (!sandboxId || sandboxId.length > 256 || /\p{Cc}/u.test(sandboxId))
+          throw new Error("Invalid sandbox identity");
+        const identity = await inventory.get(sandboxId);
+        if (
+          identity?.sandboxId !== sandboxId ||
+          !Object.entries(metadata).every(([key, value]) => identity.metadata[key] === value)
+        )
+          throw new Error("Unexpected sandbox ownership");
+        return {
+          sandboxId,
+          environment: (root) =>
+            sandboxExecutionEnvironment(
+              adaptE2B(sandbox.client),
+              root,
+              new E2BExecutionEnvironmentProvider({ maxOutputCharacters: 65_536 }).options,
+            ),
+          run: (argv, timeoutMs, signal) =>
+            sandbox.client.commands.run(argv.map(shellQuote).join(" "), {
+              cwd: "/tmp",
+              timeoutMs,
+              signal,
+            }),
+          writeTransfer: (path, bytes, signal) => sandbox.writeTransfer(path, bytes, signal),
+          readTransfer: (path, signal) => sandbox.readTransfer(path, signal),
+          snapshot: (signal) => sandbox.snapshot(signal),
+        };
+      },
+      stop: (owner, sandboxId) => stopOwnedSandbox(inventory, owner, sandboxId),
+      removeArtifact: (artifact) => factory.deleteSnapshot(artifact),
     },
-    stop: (owner, sandboxId) => stopOwnedSandbox(inventory, owner, sandboxId),
-  });
+    options.preparedRoot === undefined ? {} : { preparedRoot: options.preparedRoot },
+  );
 }

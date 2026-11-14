@@ -190,7 +190,7 @@ impl Store {
     }
 }
 
-pub(super) async fn current_scope_in(
+pub(crate) async fn current_scope_in(
     transaction: &mut Transaction<'_, Any>,
     host: &HostAuthority,
 ) -> Result<i64> {
@@ -288,7 +288,7 @@ async fn settle_removed_host_in(
         return Ok(());
     }
     let principal = format!("host:{id}");
-    sqlx::query("UPDATE supertag_v2_tasks SET state=$1,result=NULL,attempt_id=NULL,host_principal=NULL,host_generation=NULL,lease_token=NULL,lease_expires_at_ms=NULL,cleanup_pending=0,cleanup_observed=0,event_sequence_base=0,finish_objective_signal=0 WHERE host_principal=$2 AND host_generation=$3 AND state=$4")
+    sqlx::query("UPDATE supertag_v2_tasks SET state=$1,result=NULL,attempt_id=NULL,host_principal=NULL,host_generation=NULL,lease_token=NULL,lease_expires_at_ms=NULL,cleanup_pending=0,cleanup_observed=0,cleanup_failure=NULL,event_sequence_base=0,finish_objective_signal=0 WHERE host_principal=$2 AND host_generation=$3 AND state=$4")
         .bind(TaskState::Queued as i64).bind(&principal).bind(generation).bind(TaskState::Uncertain as i64)
         .execute(&mut **transaction).await?;
     sqlx::query("UPDATE supertag_v2_tasks SET cleanup_pending=0,cleanup_observed=1 WHERE host_principal=$1 AND host_generation=$2 AND state=$3 AND cleanup_pending=1")

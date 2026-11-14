@@ -709,6 +709,9 @@ service WorkerHost {
   rpc ReclaimAttempt(ReclaimAttemptRequest) returns (AttemptResolution);
   // Limits the Attempt's adapter confirmed it applies, for the Task execution report.
   rpc ReportAppliedLimits(ReportAppliedLimitsRequest) returns (ReportAppliedLimitsResponse);
+  // Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
+  // execution report. The Attempt stays uncertain until the host or an operator resolves it.
+  rpc ReportCleanupFailure(ReportCleanupFailureRequest) returns (ReportCleanupFailureResponse);
 }
 
 enum HostPhase {
@@ -996,6 +999,11 @@ service RemoteWorkspaceProvider {
   // The first input is the start record; later inputs are its stdin. Outputs are its stdout.
   // Ending or cancelling the call stops the server process, never the sandbox.
   rpc RunMcpServer(stream RemoteMcpServerInput) returns (stream RemoteMcpServerOutput);
+  // Records the staged preparation sandbox as a prepared artifact, which later allocations start
+  // from. Only a sandbox allocated with `prepare` is snapshotted, never a Task sandbox.
+  rpc Snapshot(RemoteWorkspaceSnapshotRequest) returns (RemoteWorkspaceSnapshot);
+  // Deletes a prepared artifact; deleting one that is already gone succeeds.
+  rpc RemoveArtifact(RemoteWorkspaceRemoveArtifactRequest) returns (RemoteWorkspaceRemoveArtifactResponse);
 }
 
 message RemoteWorkspaceProviderBootstrap {
@@ -1017,6 +1025,12 @@ message RemoteWorkspaceAllocateRequest {
   // The trusted commit's devcontainer subset, translated by the Worker Host. Absent when the
   // commit declares none: the sandbox starts from the operator's template or image.
   optional RemoteWorkspaceEnvironment environment = 3400;
+  // Start from a prepared artifact this host recorded instead of building `environment`'s
+  // image. Stage then updates the prepared checkout, which keeps its untracked setup output.
+  optional string prepared_artifact = 3500;
+  // A preparation sandbox: Stage takes a bundle of the trusted commit alone and runs the setup
+  // lines, and Snapshot records the result. With `prepared_artifact`, preparation is warm.
+  bool prepare = 3501;
 }
 
 // A sandbox image and setup derived only from the trusted commit's devcontainer subset.
@@ -1037,6 +1051,19 @@ message RemoteWorkspaceEnvironment {
 message RemoteWorkspaceAllocation {
   string sandbox_id = 1;
 }
+
+message RemoteWorkspaceSnapshotRequest {}
+
+message RemoteWorkspaceSnapshot {
+  // The provider's artifact: an E2B snapshot ID or a Modal image ID.
+  string artifact = 1;
+}
+
+message RemoteWorkspaceRemoveArtifactRequest {
+  string artifact = 1;
+}
+
+message RemoteWorkspaceRemoveArtifactResponse {}
 
 message RemoteWorkspaceStageHeader {
   string start_commit = 1;
@@ -1516,7 +1543,69 @@ message Task {
   // What each Attempt's read-write Workspace copies wrote back to their Volumes. Set only by
   // GetTask; the Control Plane records the summary, never the bytes.
   repeated AttemptWorkspaceMountWrites workspace_mount_writes = 5100;
+  // What the current Attempt's durable records show about its limits and its cleanup. Set only
+  // by GetTask.
+  TaskExecutionReport execution_report = 5200;
 }
+
+// How the current Attempt ended against its execution limits.
+enum ExecutionLimitOutcome {
+  EXECUTION_LIMIT_OUTCOME_UNSPECIFIED = 0;
+  // No limit was requested or applied.
+  EXECUTION_LIMIT_OUTCOME_NOT_REQUESTED = 1;
+  // The Attempt has not ended and no threshold was reached yet.
+  EXECUTION_LIMIT_OUTCOME_PENDING = 2;
+  EXECUTION_LIMIT_OUTCOME_WITHIN_LIMITS = 3;
+  EXECUTION_LIMIT_OUTCOME_THRESHOLD_REACHED = 4;
+  // The Attempt ended, but its records cannot show whether every limit held.
+  EXECUTION_LIMIT_OUTCOME_UNKNOWN = 5;
+}
+
+// One limited dimension of the current Attempt. Unspecified: the dimension has no limit.
+enum ExecutionThreshold {
+  EXECUTION_THRESHOLD_UNSPECIFIED = 0;
+  EXECUTION_THRESHOLD_NOT_REACHED = 1;
+  EXECUTION_THRESHOLD_REACHED = 2;
+  // No applied limit, or no observation that decides it.
+  EXECUTION_THRESHOLD_UNDETERMINED = 3;
+}
+
+// Whether the current Attempt's execution was proven stopped.
+enum AttemptCleanup {
+  ATTEMPT_CLEANUP_UNSPECIFIED = 0;
+  // No Attempt, or one whose execution never started.
+  ATTEMPT_CLEANUP_NOT_STARTED = 1;
+  // The Attempt still holds execution authority.
+  ATTEMPT_CLEANUP_PENDING = 2;
+  // The host confirmed execution stopped, or an operator recorded that it did.
+  ATTEMPT_CLEANUP_CONFIRMED = 3;
+  // Execution may still be running: the host could not confirm cleanup or lost its authority.
+  ATTEMPT_CLEANUP_UNKNOWN = 4;
+}
+
+message TaskExecutionReport {
+  ExecutionLimitOutcome limit_outcome = 1;
+  ExecutionThreshold max_reported_tokens = 2;
+  ExecutionThreshold max_reported_cost = 3;
+  ExecutionThreshold max_native_agents = 4;
+  // Every requested limit has an applied limit at or below it.
+  bool limits_applied = 5;
+  // Whether the Attempt's usage records are final. Absent when no token or cost limit applies.
+  optional bool usage_complete = 6;
+  // The report classifies every limited dimension of an ended Attempt.
+  bool complete = 7;
+  AttemptCleanup cleanup = 8;
+  // The host's redacted reasons when it could not confirm cleanup: at most 8, each at most 160
+  // characters. Cleared when the host later confirms cleanup.
+  repeated string cleanup_failure = 9;
+}
+
+message ReportCleanupFailureRequest {
+  InspectAttemptRequest attempt = 1;
+  repeated string reasons = 2;
+}
+
+message ReportCleanupFailureResponse {}
 
 message TaskArtifactInputSelection {
   string artifact_id = 1;

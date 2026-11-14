@@ -52,7 +52,7 @@ function wait(child: ChildProcess) {
   });
 }
 
-async function fixture() {
+async function fixture(preparedRoot?: string) {
   const builds: E2BWorkspaceTemplateBuild[] = [];
   const templates = {
     build: vi.fn(async (spec: E2BWorkspaceTemplateBuild) => {
@@ -150,12 +150,14 @@ async function fixture() {
       },
     });
   });
+  const snapshot = vi.fn(async () => "snapshot-prepared");
   const factory = {
     create: vi.fn(async (options: SandboxOpts) => {
       alive = true;
       metadata = options.metadata ?? {};
-      return { client, writeTransfer, readTransfer };
+      return { client, writeTransfer, readTransfer, snapshot };
     }),
+    deleteSnapshot: vi.fn(async (_snapshotId: string) => {}),
   };
   const inventory = {
     find: vi.fn(async () => (alive ? [{ sandboxId: client.sandboxId, metadata }] : [])),
@@ -169,9 +171,11 @@ async function fixture() {
     inventory,
     templates,
     template: "test-template",
+    ...(preparedRoot === undefined ? {} : { preparedRoot }),
   });
   return {
     session,
+    snapshot,
     templates,
     factory,
     inventory,
@@ -920,3 +924,155 @@ it("refuses an inconsistent devcontainer environment before any provider call", 
     expect(factory.create).not.toHaveBeenCalled();
   }
 });
+
+/** Two commits of one repository, each bundled with its full history. */
+async function history() {
+  const root = await mkdtemp(join(tmpdir(), "supertag-e2b-history-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const git = async (...args: string[]) => {
+    const result = await wait(spawn("git", args, { cwd: root }));
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+    return result.stdout.trim();
+  };
+  const commit = async (name: string) => {
+    await git("add", "-A", ".");
+    await git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgSign=false",
+      "commit",
+      "-qm",
+      name,
+    );
+    const head = await git("rev-parse", "HEAD");
+    const ref = `refs/heads/supertag-deliveries/${name}`;
+    await git("update-ref", ref, head);
+    const path = join(root, `${name}.bundle`);
+    await git("bundle", "create", path, ref);
+    const bytes = await readFile(path);
+    await rm(path);
+    return {
+      bytes,
+      header: {
+        startCommit: head,
+        bundle: {
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          byteLength: BigInt(bytes.length),
+        },
+      },
+    };
+  };
+  await git("init", "-q", "--template=");
+  await writeFile(join(root, ".gitignore"), ".setup-*\n");
+  await writeFile(join(root, "a.txt"), "one\n");
+  await writeFile(join(root, "gone.txt"), "removed later\n");
+  const trusted = await commit("trusted");
+  await writeFile(join(root, "a.txt"), "two\n");
+  await rm(join(root, "gone.txt"));
+  const next = await commit("next");
+  return { trusted, next };
+}
+
+it("prepares the trusted commit once, snapshots it, and starts Task sandboxes from the artifact", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "supertag-e2b-prepared-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const preparedRoot = join(directory, "prepared");
+  const { trusted, next } = await history();
+  const setup = ["sh -c 'echo built >> .setup-log'", "sh -c 'echo tracked-edit > a.txt'"];
+
+  // A preparation sandbox takes the trusted commit alone, runs setup, and is snapshotted.
+  const build = await fixture(preparedRoot);
+  await expect(
+    build.session.allocate({
+      owner,
+      timeoutMs: 60_000,
+      allowedActions: ["files:read"],
+      prepare: true,
+      environment: { dockerfileCommands: [], setupCommands: setup },
+    }),
+  ).rejects.toThrow(/no file actions/u);
+  const preparation = await fixture(preparedRoot);
+  await preparation.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: [],
+    prepare: true,
+    environment: { dockerfileCommands: [], setupCommands: setup },
+  });
+  await expect(
+    preparation.session.stage(
+      { ...trusted.header, mcpCommit: trusted.header.startCommit },
+      trusted.bytes,
+    ),
+  ).rejects.toThrow(/trusted commit alone/u);
+  await preparation.session.stage(trusted.header, trusted.bytes);
+  await expect(preparation.session.execute({ kind: "read", path: "a.txt" })).rejects.toThrow(
+    /not staged/u,
+  );
+  await expect(preparation.session.snapshot()).resolves.toBe("snapshot-prepared");
+  await preparation.session.stop({ owner });
+
+  // A Task sandbox from the artifact builds nothing, runs no setup, and checks out its start
+  // commit over the prepared one: tracked files follow the commit, setup output stays.
+  const task = await fixture(preparedRoot);
+  await task.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+    preparedArtifact: "snapshot-prepared",
+    environment: { dockerfileCommands: ["USER node"], user: "node", setupCommands: setup },
+  });
+  expect(task.templates.build).not.toHaveBeenCalled();
+  expect(task.factory.create).toHaveBeenCalledWith(
+    expect.objectContaining({ template: "snapshot-prepared" }),
+  );
+  await task.session.stage(next.header, next.bytes);
+  expect(
+    vi
+      .mocked(task.client.commands.run)
+      .mock.calls.some(([command]) => command.includes("devcontainer-setup")),
+  ).toBe(false);
+  await expect(task.session.snapshot()).rejects.toThrow(/preparation sandbox/u);
+  const captured = await task.session.capture();
+  expect(unpack(captured.bytes)).toEqual([
+    { path: ".gitignore", mode: "100644", body: ".setup-*\n" },
+    { path: ".setup-log", mode: "100644", body: "built\n" },
+    { path: "a.txt", mode: "100644", body: "two\n" },
+  ]);
+  await task.session.stop({ owner });
+
+  // A warm preparation starts from the artifact and runs its own setup lines on the new commit.
+  const warm = await fixture(preparedRoot);
+  await warm.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: [],
+    prepare: true,
+    preparedArtifact: "snapshot-prepared",
+    environment: { dockerfileCommands: [], setupCommands: ["sh -c 'echo warm >> .setup-log'"] },
+  });
+  await warm.session.stage(next.header, next.bytes);
+  expect(await readFile(join(preparedRoot, "checkout", ".setup-log"), "utf8")).toBe(
+    "built\nwarm\n",
+  );
+  await warm.session.snapshot();
+  await warm.session.stop({ owner });
+
+  // Eviction deletes the provider's snapshot; an invalid ID never reaches it.
+  await warm.session.removeArtifact("snapshot-prepared");
+  expect(warm.factory.deleteSnapshot).toHaveBeenCalledWith("snapshot-prepared");
+  await expect(warm.session.removeArtifact("bad artifact")).rejects.toThrow(/invalid/u);
+  const other = await fixture(preparedRoot);
+  await expect(
+    other.session.allocate({
+      owner,
+      timeoutMs: 60_000,
+      allowedActions: [],
+      preparedArtifact: "bad artifact",
+    }),
+  ).rejects.toThrow(/prepared artifact is invalid/u);
+  expect(other.factory.create).not.toHaveBeenCalled();
+}, 30_000);

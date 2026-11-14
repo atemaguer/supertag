@@ -2717,6 +2717,30 @@ fn task_json(task: &Task) -> serde_json::Value {
                 },
             })
         }),
+        "execution_report": task.execution_report.as_ref().map(execution_report_json),
+    })
+}
+
+/// The Task execution report's classifications, as lower-case words without their prefixes.
+fn execution_report_json(report: &supertag_protocol::v2::TaskExecutionReport) -> serde_json::Value {
+    use supertag_protocol::v2::ExecutionThreshold;
+    let word = |name: &str, prefix: &str| name.trim_start_matches(prefix).to_ascii_lowercase();
+    let threshold = |value: ExecutionThreshold| {
+        (value != ExecutionThreshold::Unspecified)
+            .then(|| word(value.as_str_name(), "EXECUTION_THRESHOLD_"))
+    };
+    json!({
+        "limits": word(report.limit_outcome().as_str_name(), "EXECUTION_LIMIT_OUTCOME_"),
+        "thresholds": {
+            "max_reported_tokens": threshold(report.max_reported_tokens()),
+            "max_reported_cost": threshold(report.max_reported_cost()),
+            "max_native_agents": threshold(report.max_native_agents()),
+        },
+        "limits_applied": report.limits_applied,
+        "usage_complete": report.usage_complete,
+        "complete": report.complete,
+        "cleanup": word(report.cleanup().as_str_name(), "ATTEMPT_CLEANUP_"),
+        "cleanup_failure": report.cleanup_failure,
     })
 }
 

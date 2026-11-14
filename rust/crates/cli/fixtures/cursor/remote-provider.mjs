@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   access,
   appendFile,
+  cp,
   mkdir,
   readdir,
   readFile,
@@ -73,6 +74,10 @@ const trace = (value) =>
 const serializable = (owner) => ({ ...owner, hostGeneration: String(owner.hostGeneration) });
 let allocation;
 let directory;
+// A preparation sandbox, which Snapshot records; or the prepared artifact a sandbox starts from.
+let preparing = false;
+let preparedArtifact;
+const artifacts = join(root, "remote-artifacts");
 let actions = [];
 let environment;
 let staged = false;
@@ -116,7 +121,14 @@ async function git(cwd, ...args) {
 
 const implementation = {
   provider: {
-    async allocate({ owner, allowedActions, timeoutMs, environment: requested }) {
+    async allocate({
+      owner,
+      allowedActions,
+      timeoutMs,
+      environment: requested,
+      preparedArtifact: artifact,
+      prepare,
+    }) {
       assert.equal(allocation, undefined);
       assert.ok(owner && owner.hostGeneration > 0n && timeoutMs > 0);
       assert.match(owner.allocationId, /^[\w-]+$/u);
@@ -136,12 +148,23 @@ const implementation = {
         user: requested.user,
         setupCommands: [...requested.setupCommands],
       };
-      if (environment) await trace({ type: "environment", provider, environment });
+      if (environment) await trace({ type: "environment", provider, environment, prepare });
+      preparing = prepare;
+      preparedArtifact = artifact;
+      if (artifact !== undefined) {
+        // The prepared checkout, with its untracked setup output, is the sandbox's filesystem.
+        assert.match(artifact, /^fixture-artifact-[0-9a-f]{8}$/u);
+        await cp(join(artifacts, artifact, "checkout"), join(directory, "checkout"), {
+          recursive: true,
+        });
+      }
       await persist(allocation);
       await trace({
         type: "allocate",
         provider,
         ...allocation,
+        prepare,
+        preparedArtifact: artifact,
         environment: Object.keys(process.env).sort(),
       });
       if (await enabled("lose-allocate-ack")) process.exit(7);
@@ -166,8 +189,10 @@ const implementation = {
       const bundlePath = join(directory, "prepared.bundle");
       await writeFile(bundlePath, bundle, { mode: 0o600 });
       const checkout = join(directory, "checkout");
-      await mkdir(checkout, { mode: 0o700 });
-      await git(checkout, "init", "--quiet");
+      if (preparedArtifact === undefined) {
+        await mkdir(checkout, { mode: 0o700 });
+        await git(checkout, "init", "--quiet");
+      }
       await git(
         checkout,
         "-c",
@@ -177,7 +202,8 @@ const implementation = {
         bundlePath,
         header.startCommit,
       );
-      await git(checkout, "checkout", "--quiet", "--detach", header.startCommit);
+      // Over a prepared checkout this is a forced checkout: untracked setup output stays.
+      await git(checkout, "checkout", "--quiet", "--force", "--detach", header.startCommit);
       assert.equal(await git(checkout, "rev-parse", "HEAD"), header.startCommit);
       let offset = bundle.length;
       for (const { path, blob } of header.inputFiles) {
@@ -206,7 +232,8 @@ const implementation = {
         await rm(archive);
         mcpStaged = true;
       }
-      if (environment?.setupCommands.length) {
+      if (preparing) assert.ok(header.inputFiles.length === 0 && header.mcpCommit === undefined);
+      if (environment?.setupCommands.length && (preparing || preparedArtifact === undefined)) {
         const { stdout } = await promisify(execFile)(
           "/bin/sh",
           [
@@ -217,7 +244,13 @@ const implementation = {
           ],
           { env: { PATH: "/usr/bin:/bin", HOME: directory }, timeout: 10_000 },
         );
-        await trace({ type: "setup", checkout, stdout });
+        await trace({
+          type: "setup",
+          checkout,
+          stdout,
+          prepare: preparing,
+          setupCommands: environment.setupCommands,
+        });
       }
       staged = true;
       await trace({
@@ -236,6 +269,24 @@ const implementation = {
         }
       }
       return { inputFiles: header.inputFiles };
+    },
+    async snapshot() {
+      assert.ok(preparing && staged && !allocation.stopped);
+      const artifact = `fixture-artifact-${createHash("sha256")
+        .update(allocation.owner.allocationId)
+        .digest("hex")
+        .slice(0, 8)}`;
+      await cp(join(directory, "checkout"), join(artifacts, artifact, "checkout"), {
+        recursive: true,
+      });
+      await trace({ type: "snapshot", artifact, preparedArtifact });
+      return { artifact };
+    },
+    async removeArtifact({ artifact }) {
+      assert.match(artifact, /^fixture-artifact-[0-9a-f]{8}$/u);
+      await rm(join(artifacts, artifact), { recursive: true, force: true });
+      await trace({ type: "remove-artifact", artifact });
+      return {};
     },
     async *capture() {
       assert.ok(staged && !allocation.stopped);
@@ -338,6 +389,13 @@ const implementation = {
       allocation ??= JSON.parse(await readFile(join(directory, "allocation.json"), "utf8"));
       assert.deepEqual(serializable(owner), allocation.owner);
       if (sandboxId !== undefined) assert.equal(sandboxId, allocation.sandboxId);
+      if (await enabled("fail-stop-revealing-credentials")) {
+        // A provider error that quotes the Worker Host's provider credential and a URL password.
+        await trace({ type: "stop-failed", ...allocation });
+        throw new Error(
+          `Stop refused for ${process.env.E2B_API_KEY} at https://fixture:url-password-4242@sandbox.invalid/v1`,
+        );
+      }
       if (await enabled("refuse-stop")) {
         await trace({ type: "stop-uncertain", ...allocation });
         return {};
@@ -388,7 +446,7 @@ const implementation = {
   },
 };
 for (const [service, names] of [
-  [implementation.provider, ["allocate", "stage", "stop"]],
+  [implementation.provider, ["allocate", "stage", "stop", "snapshot", "removeArtifact"]],
   [implementation.workspace, ["execute"]],
 ]) {
   for (const name of names) {

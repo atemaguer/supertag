@@ -102,6 +102,56 @@ impl Workspace {
         Ok(exported)
     }
 
+    /// Export the trusted commit alone, the Workspace's base, for a preparation sandbox where
+    /// no Task runs. Never includes the Task's own history.
+    pub async fn export_trusted(
+        &self,
+        checkout: &Checkout,
+        cancel: &CancellationToken,
+    ) -> Result<TransferArtifact> {
+        check_cancelled(cancel)?;
+        let _guard = self.inner.gate.lock().await;
+        check_cancelled(cancel)?;
+        let record = self.transfer_record(checkout)?;
+        let path = record.join("trusted.bundle");
+        let staging = tempfile::tempdir_in(self.inner.root.join("temporary"))?;
+        let bundle = staging.path().join("trusted.bundle");
+        self.repository(cancel)
+            .await?
+            .bundle(
+                &checkout.base_commit,
+                &format!(
+                    "{}-trusted",
+                    identity(&checkout.task_id, &checkout.attempt_id)
+                ),
+                &bundle,
+                cancel,
+            )
+            .await?;
+        let bytes = paths::read_regular(&bundle, MAX_ARCHIVE)?;
+        File::open(&bundle)?.sync_all()?;
+        check_cancelled(cancel)?;
+        fs::rename(&bundle, &path)?;
+        File::open(&record)?.sync_all()?;
+        Ok(TransferArtifact {
+            path,
+            sha256: sha256(&bytes),
+            byte_length: bytes.len() as u64,
+        })
+    }
+
+    /// Whether `ancestor` is this Workspace's base commit or one of its ancestors. A commit the
+    /// repository does not hold is not.
+    pub async fn base_descends_from(&self, ancestor: &str, cancel: &CancellationToken) -> bool {
+        let Ok(repository) = self.repository(cancel).await else {
+            return false;
+        };
+        repository
+            .assert_ancestor(ancestor, &self.inner.config.base_commit, cancel)
+            .await
+            .is_ok()
+    }
+
     /// Restore one immutable returned tree after the caller confirms remote
     /// execution stopped. Authority and provider cleanup are the Host's job.
     /// Validation and private staging precede replacement. A durable intent makes

@@ -4,6 +4,7 @@ mod artifact_inputs;
 mod artifact_snapshots;
 mod changed_paths;
 mod checkpoints;
+mod cleanup_failure;
 pub mod context;
 mod credentials;
 mod enrollment;
@@ -11,6 +12,7 @@ pub mod environment;
 mod guardian;
 mod journal;
 mod mcp;
+mod prepared;
 mod readiness;
 mod remote;
 mod remote_provider;
@@ -584,7 +586,9 @@ pub async fn run(
                 .await?;
             }
             Entry::Executing { attempt, prepared } => {
-                ensure_providers_stopped(&options, &journal, &attempt, &registration).await?;
+                ensure_providers_stopped(&options, &journal, &attempt, &registration)
+                    .await
+                    .context(cleanup_failure::CleanupUnconfirmed)?;
                 match resolved(&mut host, &attempt, &token).await {
                     Ok(true) => journal.save(&Entry::Terminal { attempt, prepared })?,
                     Ok(false) if reclaim(&mut host, &journal, &attempt, &token).await? => {
@@ -604,11 +608,14 @@ pub async fn run(
                         }
                         wait_for_work(&shutdown).await;
                     }
-                    Ok(false) => bail!(
-                        "Task {} Attempt {} needs recovery before this host can claim work",
-                        attempt.task_id,
-                        attempt.attempt_id
-                    ),
+                    Ok(false) => {
+                        return Err(anyhow::anyhow!(
+                            "Task {} Attempt {} needs recovery before this host can claim work",
+                            attempt.task_id,
+                            attempt.attempt_id
+                        )
+                        .context(cleanup_failure::CleanupUnconfirmed));
+                    }
                     Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
                     Err(error) => return Err(error.into()),
                 }
@@ -1058,6 +1065,15 @@ pub async fn run(
     Ok(())
     }.await;
     keep_awake.stop().await;
+    if let Err(error) = &outcome
+        && error
+            .downcast_ref::<cleanup_failure::CleanupUnconfirmed>()
+            .is_some()
+        && let Ok(Some(entry)) = journal.load()
+        && let Some(attempt) = entry.unsettled_attempt()
+    {
+        cleanup_failure::report(&mut host, attempt, &token, error).await;
+    }
     let stopped = presence.stop().await;
     outcome.and(stopped)
 }
@@ -1898,7 +1914,8 @@ async fn run_assignment(
             "Task {} Attempt {} needs recovery",
             attempt.task_id, attempt.attempt_id
         )
-    });
+    })
+    .context(cleanup_failure::CleanupUnconfirmed);
     stop_reports.cancel();
     if let Some(reports) = reports {
         let _ = reports.await;
@@ -2187,11 +2204,12 @@ async fn with_cleanup_authority(
         }
     };
     tokio::pin!(cleanup);
-    tokio::select! {
+    let result = tokio::select! {
         biased;
         result = &mut cleanup => result,
         () = keep_lease => cleanup.await,
-    }
+    };
+    result.context(cleanup_failure::CleanupUnconfirmed)
 }
 
 /// Keep the execution lease alive during repository preparation and transfer.
