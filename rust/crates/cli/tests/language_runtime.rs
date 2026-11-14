@@ -416,16 +416,16 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
         .write_all(config.to_string().as_bytes())?;
     let permissions = directory.path().join("mcp-grants.json");
     std::fs::write(&permissions, serde_json::json!({
-        "set_id":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
+        "setId":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
         "permissions":[
             {"target":"mcp","action":"catalog/list_*","resource":"repository:acme/docs"},
             {"target":"mcp","action":"catalog/publish"},
-            {"target":"mcp","action":"catalog/publish","resource":"repository:acme/docs","approval_required":true}
+            {"target":"mcp","action":"catalog/publish","resource":"repository:acme/docs","approvalRequired":true}
         ]
     }).to_string())?;
     let role = directory.path().join("mcp-role.json");
     std::fs::write(&role, serde_json::json!({
-        "role_id":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permission_set_ids":["mcp-grants"]
+        "roleId":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permissionSets":["mcp-grants"]
     }).to_string())?;
     services
         .operator(&[
@@ -627,16 +627,16 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         .write_all(config.to_string().as_bytes())?;
     let permissions = directory.join("mcp-grants.json");
     std::fs::write(&permissions, serde_json::json!({
-        "set_id":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
+        "setId":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
         "permissions":[
             {"target":"mcp","action":"catalog/list_*","resource":"repository:acme/docs"},
             {"target":"mcp","action":"catalog/publish"},
-            {"target":"mcp","action":"catalog/publish","resource":"repository:acme/docs","approval_required":true}
+            {"target":"mcp","action":"catalog/publish","resource":"repository:acme/docs","approvalRequired":true}
         ]
     }).to_string())?;
     let role = directory.join("mcp-role.json");
     std::fs::write(&role, serde_json::json!({
-        "role_id":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permission_set_ids":["mcp-grants"]
+        "roleId":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permissionSets":["mcp-grants"]
     }).to_string())?;
     services
         .operator(&[

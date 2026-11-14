@@ -98,7 +98,7 @@ dependency order. Applying the same files again changes nothing.
 
 | Kind | Declares |
 | --- | --- |
-| `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `scope`, and `approval_required` |
+| `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `scope`, and `approvalRequired` |
 | `ContextSet` | Knowledge items a Task may receive, each with a `type`, `version`, and `config` |
 | `Role` | `purpose`, `instructions`, `permissionSets`, `contextSets`, and `execution` |
 | `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, and `acceptsMessagesFrom` |
@@ -118,7 +118,7 @@ apiVersion: supertag/v1
 kind: Objective
 metadata: { name: dependency-upkeep }
 spec:
-  ownerTag: lead
+  ownerTagId: lead
   outcome: Keep dependencies current. Report each upgrade with its test results.
   ongoing: true
   team: core
@@ -142,7 +142,7 @@ apiVersion: supertag/v1
 kind: SurfaceAccount
 metadata: { name: acme-slack }
 spec:
-  identity: { provider: slack, team_id: T0123456789 }
+  identity: { provider: slack, teamId: T0123456789 }
   enabled: true
   gateway: local
 ---
@@ -150,12 +150,12 @@ apiVersion: supertag/v1
 kind: SurfaceLocation
 metadata: { name: eng-channel }
 spec:
-  account_id: acme-slack
-  connector_account_id: T0123456789
-  tag_id: lead
-  scope: { provider: slack, channel_id: C0123456789 }
+  accountId: acme-slack
+  connectorAccountId: T0123456789
+  tagId: lead
+  scope: { provider: slack, channelId: C0123456789 }
   enabled: true
-  permission_set_ids: [local-tools]
+  permissionSets: [local-tools]
 ```
 
 A location admits work for its Tag at one channel, repository, chat, or team, and may activate

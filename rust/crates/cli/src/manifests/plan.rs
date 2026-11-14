@@ -651,12 +651,12 @@ impl<'a> Catalog<'a> {
                         flag(value.enabled),
                     ),
                     field(
-                        "spec.permission_set_ids",
+                        "spec.permissionSets",
                         old.map(|v| list(&v.permission_set_ids)),
                         list(&value.permission_set_ids),
                     ),
                     field(
-                        "spec.context_set_ids",
+                        "spec.contextSets",
                         old.map(|v| list(&v.context_set_ids)),
                         list(&value.context_set_ids),
                     ),

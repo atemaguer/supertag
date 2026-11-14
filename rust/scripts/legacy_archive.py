@@ -1027,20 +1027,19 @@ def translate_config(source, destination):
 # surface_policy.rs). Anything else makes `supertag apply` refuse the whole document.
 RUST_SPEC = {
     "Tag": {"instructions", "allowedActions", "workspace", "execution", "roles", "acceptsMessagesFrom", "runsOn"},
-    "Role": {"role_id", "name", "purpose", "instructions", "permission_set_ids", "permissionSets",
-             "context_set_ids", "contextSets", "status", "execution"},
-    "PermissionSet": {"set_id", "name", "approvers", "permissions"},
-    "ContextSet": {"set_id", "name", "items"},
+    "Role": {"roleId", "name", "purpose", "instructions", "permissionSets", "contextSets", "status", "execution"},
+    "PermissionSet": {"setId", "name", "approvers", "permissions"},
+    "ContextSet": {"setId", "name", "items"},
     "Volume": {"source"},
     "Team": {"name", "members", "maxConcurrency"},
-    "Objective": {"ownerTagId", "ownerTag", "outcome", "ongoing", "deadlineMs", "deadline", "budgetLimitMinor",
+    "Objective": {"ownerTagId", "outcome", "ongoing", "deadlineMs", "deadline", "budgetLimitMinor",
                   "budgetCurrency", "team", "runtimeActions"},
-    "SurfaceLocation": {"location_id", "account_id", "connector_account_id", "tag_id", "scope", "enabled",
-                        "permission_set_ids", "context_set_ids"},
+    "SurfaceLocation": {"locationId", "accountId", "connectorAccountId", "tagId", "scope", "enabled",
+                        "permissionSets", "contextSets"},
 }
-RUST_EXECUTION = {"harness", "shared_execution_environment_id", "sharedExecutionEnvironmentId", "models", "efforts"}
-RUST_GRANT = {"target", "action", "surface_account_id", "scope", "reference", "resource", "approval_required"}
-RUST_CONTEXT_ITEM = {"item_key", "itemKey", "type", "version", "required", "config"}
+RUST_EXECUTION = {"harness", "sharedExecutionEnvironmentId", "models", "efforts"}
+RUST_GRANT = {"target", "action", "surfaceAccountId", "scope", "reference", "resource", "approvalRequired"}
+RUST_CONTEXT_ITEM = {"itemKey", "type", "version", "required", "config"}
 MANIFEST_GUIDANCE = {
     ("Tag", "workerHosts"): "local Worker Hosts serve every Tag; route remote hosts with Auth Key labels and runsOn",
     ("Tag", "locations"): "bind each location with a SurfaceLocation document or `supertag surface-location`, "
@@ -1108,12 +1107,9 @@ def translate_manifests(source, destination):
             for number, grant in enumerate(spec.get("permissions") or [], 1):
                 if not isinstance(grant, dict):
                     continue
-                if "surfaceAccountId" in grant:
-                    grant["surface_account_id"] = grant.pop("surfaceAccountId")
-                    change(f"permissions[{number}].surfaceAccountId -> surface_account_id")
                 if "approval" in grant:
-                    grant["approval_required"] = grant.pop("approval") == "required"
-                    change(f"permissions[{number}].approval -> approval_required")
+                    grant["approvalRequired"] = grant.pop("approval") == "required"
+                    change(f"permissions[{number}].approval -> approvalRequired")
                 for key in [key for key in grant if key not in RUST_GRANT]:
                     drop(grant, key, f"permissions[{number}].{key}")
         if kind == "ContextSet":

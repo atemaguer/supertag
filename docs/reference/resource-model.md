@@ -40,7 +40,7 @@ and [execution environments](glossary.md#execution-environment).
   to eligible Worker Hosts. You assign work to a Tag by name. Its configuration, open
   assignments, and results persist across model and harness sessions.
 - **Permission Set** — reusable authority to perform surface-backed actions, use harness/runtime tools, or call tools of MCP servers.
-  A permission can carry `approval_required: true`, and `spec.approvers` lists the operators
+  A permission can carry `approvalRequired: true`, and `spec.approvers` lists the operators
   (`operator:<id>`) and Tags (`tag:<name or id>`) that may decide. See [IAM approval](iam.md#approval).
 - **Context Set** — reusable knowledge and [Skills](glossary.md#skill) that may enter a Task.
 - **Role** — passive reusable policy for a responsibility, combining instructions, Context Sets, and Permission Sets.
@@ -626,7 +626,7 @@ apiVersion: supertag/v1
 kind: SurfaceAccount
 metadata: { name: acme-slack }
 spec:
-  identity: { provider: slack, team_id: T0123456789 }
+  identity: { provider: slack, teamId: T0123456789 }
   enabled: true
   gateway: local
 ---
@@ -634,18 +634,18 @@ apiVersion: supertag/v1
 kind: SurfaceLocation
 metadata: { name: eng-channel }
 spec:
-  account_id: acme-slack
-  connector_account_id: T0123456789
-  tag_id: lead
-  scope: { provider: slack, channel_id: C0123456789 }
+  accountId: acme-slack
+  connectorAccountId: T0123456789
+  tagId: lead
+  scope: { provider: slack, channelId: C0123456789 }
   enabled: true
-  permission_set_ids: [local-tools]
-  context_set_ids: []
+  permissionSets: [local-tools]
+  contextSets: []
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `spec.identity` | The provider and the account's provider ID, such as a Slack `team_id`. |
+| `spec.identity` | The provider and the account's provider ID, such as a Slack `teamId`. |
 | `spec.enabled` | Whether the account admits work. |
 | `spec.gateway` | The enrolled Gateway that serves it, by the `NAME` of `gateway:NAME`. |
 

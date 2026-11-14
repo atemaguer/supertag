@@ -912,15 +912,15 @@ async fn exercise(database_url: &str) -> Result<()> {
     };
     let permission = spec(
         "permission.json",
-        json!({"set_id":"edit","name":"edit","permissions":[{"target":"runtime","action":"files:write"}]}),
+        json!({"setId":"edit","name":"edit","permissions":[{"target":"runtime","action":"files:write"}]}),
     )?;
     let context = spec(
         "context.json",
-        json!({"set_id":"notes","name":"notes","items":[{"item_key":"policy","type":"example/notes","version":1,"config":{"text":"Review the diff"}}]}),
+        json!({"setId":"notes","name":"notes","items":[{"itemKey":"policy","type":"example/notes","version":1,"config":{"text":"Review the diff"}}]}),
     )?;
     let role = spec(
         "role.json",
-        json!({"role_id":"review","name":"review","purpose":"Review changes","permission_set_ids":["edit"],"context_set_ids":["notes"]}),
+        json!({"roleId":"review","name":"review","purpose":"Review changes","permissionSets":["edit"],"contextSets":["notes"]}),
     )?;
     for (kind, file) in [
         ("permission-set", &permission),
@@ -988,7 +988,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     .await?;
     let account = spec(
         "account.json",
-        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true,"gateway":"local"}),
+        json!({"accountId":"github-source","identity":{"provider":"github","externalAccountId":"installation:42"},"enabled":true,"gateway":"local"}),
     )?;
     ok(
         &home,

@@ -630,7 +630,7 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
     let account = spec(
         root,
         "account.json",
-        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true,"gateway":"local"}),
+        json!({"accountId":"github-source","identity":{"provider":"github","externalAccountId":"installation:42"},"enabled":true,"gateway":"local"}),
     )?;
     json(cli(&["surface-account", "put", &account])).await?;
     json(cli(&[
@@ -664,13 +664,13 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
     let grant = spec(
         root,
         "grant.json",
-        json!({"set_id":"read-source","name":"read-source","permissions":[{"target":"surface","surface_account_id":"github-source","scope":"repository:123","action":"contents:read"}]}),
+        json!({"setId":"read-source","name":"read-source","permissions":[{"target":"surface","surfaceAccountId":"github-source","scope":"repository:123","action":"contents:read"}]}),
     )?;
     json(cli(&["permission-set", "put", &grant])).await?;
     let role = spec(
         root,
         "role.json",
-        json!({"role_id":"reader","name":"reader","purpose":"Read source","permission_set_ids":["read-source"]}),
+        json!({"roleId":"reader","name":"reader","purpose":"Read source","permissionSets":["read-source"]}),
     )?;
     json(cli(&["role", "put", &role])).await?;
     json(cli(&["role-assignment", "create", "reader", "builder"])).await?;
@@ -700,7 +700,7 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
     let narrowed = spec(
         root,
         "narrowed.json",
-        json!({"set_id":"read-source","name":"read-source","permissions":[{"target":"surface","surface_account_id":"github-source","scope":"repository:124","action":"contents:read"}]}),
+        json!({"setId":"read-source","name":"read-source","permissions":[{"target":"surface","surfaceAccountId":"github-source","scope":"repository:124","action":"contents:read"}]}),
     )?;
     json(cli(&[
         "permission-set",

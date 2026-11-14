@@ -527,7 +527,7 @@ class LegacyArchiveTests(unittest.TestCase):
         self.assertEqual((tag["metadata"], tag["spec"]), ({"name": "lead"}, {"roles": ["Lead"]}))
         self.assertEqual(volume["spec"], {"source": "s3://bucket/prefix"})
         self.assertEqual(permissions["spec"]["permissions"], [
-            {"target": "surface", "scope": "C1", "action": "post", "surface_account_id": "slack", "approval_required": True}])
+            {"target": "surface", "scope": "C1", "action": "post", "surfaceAccountId": "slack", "approvalRequired": True}])
         self.assertEqual(objective["spec"], {"outcome": "Ship it", "ownerTagId": "lead", "budgetLimitMinor": 500,
                                              "budgetCurrency": "USD"})
 

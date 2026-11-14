@@ -388,7 +388,7 @@ async fn scenario(
     };
     let account = spec(
         "account.json",
-        json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true,"gateway":"local"}),
+        json!({"accountId":"github-source","identity":{"provider":"github","externalAccountId":"installation:42"},"enabled":true,"gateway":"local"}),
     )?;
     json(cli(&["surface-account", "put", &account])).await?;
     let mut create_source = cli(&[
@@ -455,19 +455,19 @@ async fn scenario(
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     let mut permissions = vec![
-        json!({"target":"surface","surface_account_id":"github-source","scope":"repository:123","action":"contents:read"}),
+        json!({"target":"surface","surfaceAccountId":"github-source","scope":"repository:123","action":"contents:read"}),
     ];
     if publication {
-        permissions.push(json!({"target":"surface","surface_account_id":"github-source","scope":"repository:123","action":"pull-requests:create","approval_required":true}));
+        permissions.push(json!({"target":"surface","surfaceAccountId":"github-source","scope":"repository:123","action":"pull-requests:create","approvalRequired":true}));
     }
     let grant = spec(
         "grant.json",
-        json!({"set_id":"read-source","name":"read-source","permissions":permissions}),
+        json!({"setId":"read-source","name":"read-source","permissions":permissions}),
     )?;
     json(cli(&["permission-set", "put", &grant])).await?;
     let role = spec(
         "role.json",
-        json!({"role_id":"reader","name":"reader","purpose":"Read source","permission_set_ids":["read-source"]}),
+        json!({"roleId":"reader","name":"reader","purpose":"Read source","permissionSets":["read-source"]}),
     )?;
     json(cli(&["role", "put", &role])).await?;
     json(cli(&["role-assignment", "create", "reader", "builder"])).await?;

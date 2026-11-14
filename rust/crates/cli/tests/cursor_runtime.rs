@@ -338,13 +338,13 @@ impl<'a> Runtime<'a> {
         let set = directory.join(format!("{tag_id}-grants.json"));
         std::fs::write(
             &set,
-            json!({"set_id": format!("{tag_id}-grants"), "name": format!("{tag_id}-grants"), "permissions": permissions})
+            json!({"setId": format!("{tag_id}-grants"), "name": format!("{tag_id}-grants"), "permissions": permissions})
                 .to_string(),
         )?;
         let role = directory.join(format!("{tag_id}-role.json"));
         std::fs::write(
             &role,
-            json!({"role_id": format!("{tag_id}-role"), "name": format!("{tag_id}-role"), "purpose": "Use Workspace MCP tools", "permission_set_ids": [format!("{tag_id}-grants")]})
+            json!({"roleId": format!("{tag_id}-role"), "name": format!("{tag_id}-role"), "purpose": "Use Workspace MCP tools", "permissionSets": [format!("{tag_id}-grants")]})
                 .to_string(),
         )?;
         let set = set.to_str().context("permission set path")?;
@@ -919,7 +919,7 @@ async fn sandbox_mcp(provider: RemoteWorkspace, database: &str) -> Result<()> {
             TAG,
             json!([
                 {"target": "mcp", "action": "tools/read_marker"},
-                {"target": "mcp", "action": "tools/write_note", "approval_required": true}
+                {"target": "mcp", "action": "tools/write_note", "approvalRequired": true}
             ]),
         )
         .await?;

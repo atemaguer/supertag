@@ -137,7 +137,6 @@ struct TeamSpec {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct ObjectiveSpec {
-    #[serde(alias = "ownerTag")]
     owner_tag_id: String,
     outcome: String,
     #[serde(default)]
@@ -522,4 +521,87 @@ pub async fn run(args: ManifestArgs, apply: bool) -> Result<()> {
         outln!("{}", crate::terminal::text(&line));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn parse(kind: &str, spec: Value) -> Result<Manifest> {
+        manifest(
+            json!({"apiVersion": "supertag/v1", "kind": kind, "metadata": {"name": "n"}, "spec": spec}),
+            "test",
+        )
+    }
+
+    #[test]
+    fn every_kind_takes_one_camel_case_name_per_field() {
+        let accepted = [
+            (
+                "Role",
+                json!({"roleId": "n", "purpose": "p", "permissionSets": ["a"], "contextSets": ["b"],
+                       "execution": {"sharedExecutionEnvironmentId": "e"}}),
+            ),
+            (
+                "PermissionSet",
+                json!({"setId": "n", "permissions": [{"target": "surface", "action": "post",
+                       "surfaceAccountId": "s", "approvalRequired": true}]}),
+            ),
+            (
+                "ContextSet",
+                json!({"setId": "n", "items": [{"itemKey": "k", "type": "t", "version": 1, "config": {}}]}),
+            ),
+            (
+                "SurfaceAccount",
+                json!({"accountId": "n", "identity": {"provider": "lark", "appId": "a", "tenantKey": "t"},
+                       "enabled": true, "gateway": "local"}),
+            ),
+            (
+                "SurfaceLocation",
+                json!({"locationId": "n", "accountId": "a", "connectorAccountId": "c", "tagId": "t",
+                       "scope": {"provider": "microsoft_teams", "teamId": "x", "channelId": "y"},
+                       "enabled": true, "permissionSets": ["a"], "contextSets": []}),
+            ),
+            ("Objective", json!({"ownerTagId": "t", "outcome": "o"})),
+            (
+                "Tag",
+                json!({"execution": {"sharedExecutionEnvironmentId": "e"}}),
+            ),
+        ];
+        for (kind, spec) in accepted {
+            parse(kind, spec).unwrap_or_else(|error| panic!("{kind}: {error:#}"));
+        }
+        let refused = [
+            ("Role", json!({"purpose": "p", "permission_set_ids": ["a"]})),
+            ("Role", json!({"purpose": "p", "permissionSetIds": ["a"]})),
+            ("Role", json!({"purpose": "p", "context_set_ids": ["a"]})),
+            (
+                "Role",
+                json!({"purpose": "p", "execution": {"shared_execution_environment_id": "e"}}),
+            ),
+            ("PermissionSet", json!({"set_id": "n"})),
+            (
+                "PermissionSet",
+                json!({"permissions": [{"target": "runtime", "action": "a", "approval_required": true}]}),
+            ),
+            (
+                "ContextSet",
+                json!({"items": [{"item_key": "k", "type": "t", "version": 1, "config": {}}]}),
+            ),
+            (
+                "SurfaceAccount",
+                json!({"identity": {"provider": "slack", "team_id": "T"}, "enabled": true, "gateway": "g"}),
+            ),
+            (
+                "SurfaceLocation",
+                json!({"account_id": "a", "connectorAccountId": "c", "tagId": "t",
+                       "scope": {"provider": "slack", "channelId": "C"}, "enabled": true}),
+            ),
+            ("Objective", json!({"ownerTag": "t", "outcome": "o"})),
+        ];
+        for (kind, spec) in refused {
+            assert!(parse(kind, spec.clone()).is_err(), "{kind} accepted {spec}");
+        }
+    }
 }

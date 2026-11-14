@@ -54,7 +54,7 @@ metadata: { name: review-tools }
 spec:
   permissions:
     - { target: mcp, action: github/get_file_contents, resource: "repository:acme/api" }
-    - { target: mcp, action: github/create_pull_request, resource: "repository:acme/api", approval_required: true }
+    - { target: mcp, action: github/create_pull_request, resource: "repository:acme/api", approvalRequired: true }
     - { target: mcp, action: slack/slack_read_channel, resource: "channel:C0123456789" }
 ```
 
