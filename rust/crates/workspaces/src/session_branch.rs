@@ -438,7 +438,7 @@ async fn checked_out(
 }
 
 /// Run Git in the operator's repository; exit status 1 is `None`.
-async fn status(
+pub(crate) async fn status(
     repository: &Path,
     args: &[&str],
     cancel: &CancellationToken,

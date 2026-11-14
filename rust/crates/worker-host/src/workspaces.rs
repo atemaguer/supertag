@@ -177,17 +177,29 @@ impl Workspaces {
         workspace_id: &str,
         branch: &str,
         cancel: &CancellationToken,
-    ) -> Result<String> {
-        ensure!(
-            supertag_protocol::valid_git_branch(branch),
-            "Workspace ref is not a branch name"
-        );
-        let source = self
-            .mapping(workspace_id)
-            .context("Task workspace is not configured on this Worker Host")?
-            .local_root()
-            .context("only a local Workspace follows a branch")?;
-        supertag_workspaces::base_ref::resolve(source, branch, cancel).await
+    ) -> BranchResolution {
+        let source = match self.mapping(workspace_id) {
+            None => {
+                return BranchResolution::Failed(
+                    "Task workspace is not configured on this Worker Host".into(),
+                );
+            }
+            Some(mapping) => match mapping.local_root() {
+                Some(source) => source,
+                None => {
+                    return BranchResolution::Failed(
+                        "only a local Workspace follows a branch".into(),
+                    );
+                }
+            },
+        };
+        if !supertag_protocol::valid_git_branch(branch) {
+            return BranchResolution::Failed(format!(
+                "Workspace ref {branch} is not a branch name"
+            ));
+        }
+        let resolved = supertag_workspaces::base_ref::resolve(source, branch, cancel).await;
+        branch_resolution(branch, resolved, cancel)
     }
 
     pub async fn prepare(
@@ -710,11 +722,93 @@ impl Transfers {
     }
 }
 
+/// What a Worker Host decides after resolving the branch a Tag follows.
+#[derive(Debug, PartialEq, Eq)]
+pub enum BranchResolution {
+    /// The branch names this commit now.
+    Commit(String),
+    /// The Worker Host stopped during the lookup; the Attempt stays for recovery.
+    Interrupted,
+    /// The Task cannot start from this branch on this host; the text says why.
+    Failed(String),
+}
+
+fn branch_resolution(
+    branch: &str,
+    resolved: Result<Option<String>>,
+    cancel: &CancellationToken,
+) -> BranchResolution {
+    match resolved {
+        Ok(Some(commit)) => BranchResolution::Commit(commit),
+        Ok(None) => BranchResolution::Failed(format!(
+            "Workspace branch {branch} does not name a commit on this Worker Host"
+        )),
+        Err(_) if cancel.is_cancelled() => BranchResolution::Interrupted,
+        Err(error) => {
+            supertag_protocol::terminal_text::warn(&format!(
+                "Workspace branch {branch} could not be resolved: {error:#}"
+            ));
+            BranchResolution::Failed(format!(
+                "Workspace branch {branch} could not be resolved on this Worker Host"
+            ))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::journal::{Entry, Journal};
     use std::process::Command;
+
+    #[tokio::test]
+    async fn only_a_missing_branch_fails_the_task_and_shutdown_leaves_it_for_recovery() -> Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        let source = root.path().join("source");
+        fs::create_dir(&source)?;
+        git(&source, &["init", "--quiet", "--initial-branch=main"])?;
+        fs::write(source.join("readme"), "original\n")?;
+        git(&source, &["add", "readme"])?;
+        git(&source, &["commit", "--quiet", "-m", "base"])?;
+        let head = git(&source, &["rev-parse", "HEAD"])?;
+        let workspaces = Workspaces::new(
+            &root.path().join("host"),
+            vec![WorkspaceMapping {
+                workspace_id: "project".into(),
+                source: WorkspaceSource::Local(source),
+                setup: None,
+            }],
+        )?;
+        let live = CancellationToken::new();
+        assert_eq!(
+            workspaces.resolve_ref("project", "main", &live).await,
+            BranchResolution::Commit(head)
+        );
+        assert_eq!(
+            workspaces.resolve_ref("project", "missing", &live).await,
+            BranchResolution::Failed(
+                "Workspace branch missing does not name a commit on this Worker Host".into()
+            )
+        );
+        let stopping = CancellationToken::new();
+        stopping.cancel();
+        assert_eq!(
+            workspaces.resolve_ref("project", "main", &stopping).await,
+            BranchResolution::Interrupted
+        );
+        assert_eq!(
+            branch_resolution(
+                "main",
+                Err(anyhow::anyhow!("Git command exceeded its deadline")),
+                &live
+            ),
+            BranchResolution::Failed(
+                "Workspace branch main could not be resolved on this Worker Host".into()
+            )
+        );
+        Ok(())
+    }
 
     fn git(source: &Path, arguments: &[&str]) -> Result<String> {
         let output = Command::new("/usr/bin/git")

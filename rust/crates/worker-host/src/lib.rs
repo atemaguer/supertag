@@ -1303,17 +1303,16 @@ async fn run_assignment(
         // A Tag that follows a branch: this Session's first Attempt resolves it here, and the
         // Control Plane records the first resolution for every Task of the Session.
         let branch = workspace.base_ref.clone();
-        let Ok(commit) = workspaces
+        let commit = match workspaces
             .resolve_ref(&workspace.workspace_id, &branch, shutdown)
             .await
-        else {
-            return save_finish(
-                journal,
-                attempt,
-                adapter::failed(&format!(
-                    "Workspace branch {branch} does not name a commit on this Worker Host"
-                )),
-            );
+        {
+            workspaces::BranchResolution::Commit(commit) => commit,
+            // Shutdown keeps the Starting entry, so recovery retries this exact Attempt.
+            workspaces::BranchResolution::Interrupted => return Ok(()),
+            workspaces::BranchResolution::Failed(message) => {
+                return save_finish(journal, attempt, adapter::failed(&message));
+            }
         };
         match host
             .resolve_workspace_ref(request(

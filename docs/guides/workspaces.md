@@ -92,7 +92,9 @@ commit, even after the branch moves; the next new Session looks the branch up ag
 `supertag get task ID` shows the branch as `ref` and the recorded commit as `base_commit`, which
 stays empty until the host has looked it up. When the host's checkout has no such branch, the
 Task fails before the harness starts, with `Workspace branch BRANCH does not name a commit on
-this Worker Host`. SuperTag never fetches: update the host's checkout to move the branch.
+this Worker Host`; if Git itself fails during the lookup, it fails with `Workspace branch BRANCH
+could not be resolved on this Worker Host`. A host that stops during the lookup leaves the Task
+for recovery instead. SuperTag never fetches: update the host's checkout to move the branch.
 
 ### Prepare each checkout with setup
 
