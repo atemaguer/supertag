@@ -3,6 +3,7 @@ mod budget;
 mod commit_reviews;
 mod coordination;
 mod partition_calls;
+mod tag_sessions;
 
 use std::{io::Read, time::Duration};
 
@@ -609,6 +610,9 @@ async fn main() -> Result<()> {
     coordination::start_parallel(&bootstrap, &task).await?;
     if let Some(effects) = coordination::effects(&bootstrap, &task).await? {
         result = effects;
+    }
+    if let Some(summary) = tag_sessions::exercise(&bootstrap, &run, &task).await? {
+        result = summary;
     }
     if std::env::args().any(|arg| arg == "--artifact-acquisition-fixture") {
         result = artifact_acquisition::exercise(&bootstrap, &run).await?;

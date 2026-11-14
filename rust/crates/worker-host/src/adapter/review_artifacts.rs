@@ -183,6 +183,10 @@ mod tests {
                         channel.clone(),
                         headers.clone(),
                     ),
+                tag_sessions: supertag_protocol::v2::attempt_tag_sessions_client::AttemptTagSessionsClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
             },
             state: Default::default(),
             attached: Default::default(),

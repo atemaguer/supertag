@@ -179,6 +179,11 @@ path = "tests/work_sessions_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "tag_sessions_runtime"
+path = "tests/tag_sessions_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "opencode_runtime"
 path = "tests/opencode_runtime.rs"
 required-features = ["test-fixtures"]

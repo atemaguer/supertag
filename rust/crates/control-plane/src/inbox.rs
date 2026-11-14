@@ -70,6 +70,16 @@ impl Store {
             crate::work_sessions::continuation::may_continue_in(&mut tx, &task, scope.as_ref())
                 .await?;
         let may_start_work_session = crate::work_sessions::may_start_in(&mut tx, &task).await?;
+        let (may_create_objective, tag_portfolio) =
+            match crate::tag_sessions::viewer_in(&mut tx, task.clone(), kind).await? {
+                Some(viewer) => (
+                    crate::tag_sessions::objective_command_in(&mut tx, &viewer)
+                        .await?
+                        .is_some(),
+                    Some(crate::tag_sessions::portfolio_in(&mut tx, &viewer).await?),
+                ),
+                None => (false, None),
+            };
         let tag: String = row.try_get("tag_id")?;
         let may_use_workstream = match crate::teams::workstreams::workstream_for_task_in(
             &mut tx,
@@ -96,6 +106,9 @@ impl Store {
             may_continue_work_session,
             may_ask_work_session_question: kind == Some(crate::work_sessions::CHILD),
             may_request_commit_review,
+            may_read_tag_sessions: tag_portfolio.is_some(),
+            may_create_objective,
+            tag_portfolio: tag_portfolio.unwrap_or_default(),
         })
     }
 

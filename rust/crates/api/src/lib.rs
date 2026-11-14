@@ -33,6 +33,7 @@ mod policy;
 mod readiness_tests;
 mod spend;
 mod surface_policy;
+mod tag_sessions;
 mod teams;
 pub mod transfers;
 mod watch;
@@ -208,6 +209,7 @@ impl Api {
             self.work_sessions_service(),
             self.attempt_work_sessions_service(),
             self.attempt_mailbox_service(),
+            self.attempt_tag_sessions_service(),
             self.attempt_mcp_effects_service(),
             self.attempt_changed_paths_service(),
             self.attempt_effects_service(),

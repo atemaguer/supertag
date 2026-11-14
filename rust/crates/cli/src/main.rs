@@ -1705,6 +1705,7 @@ async fn state_owner(
         .add_service(plane.work_sessions_service())
         .add_service(plane.attempt_work_sessions_service())
         .add_service(plane.attempt_mailbox_service())
+        .add_service(plane.attempt_tag_sessions_service())
         .add_service(plane.attempt_mcp_effects_service())
         .add_service(plane.attempt_changed_paths_service())
         .add_service(plane.attempt_effects_service())

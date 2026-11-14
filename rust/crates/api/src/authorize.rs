@@ -215,6 +215,8 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("AttemptInputs", "*", HOST),
     ("AttemptWorkstreams", "*", HOST),
     ("AttemptMailbox", "*", HOST),
+    // A root turn reads its own Tag's Sessions and Objectives through its Worker Host.
+    ("AttemptTagSessions", "*", HOST),
     ("AttemptWorkSessions", "*", HOST),
     ("AttemptMcpEffects", "*", HOST),
     ("AttemptChangedPaths", "*", HOST),
@@ -244,6 +246,7 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("HarnessMailbox", "*", PEER_LOCAL),
     ("HarnessMcp", "*", PEER_LOCAL),
     ("HarnessQuestions", "*", PEER_LOCAL),
+    ("HarnessTagSessions", "*", PEER_LOCAL),
     ("HarnessWorkSessions", "*", PEER_LOCAL),
     ("HarnessWorkspace", "*", PEER_LOCAL),
     ("HarnessWorkstreams", "*", PEER_LOCAL),

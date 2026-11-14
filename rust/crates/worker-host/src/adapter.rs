@@ -6,6 +6,7 @@ mod limits;
 mod mcp;
 mod questions;
 mod review_artifacts;
+mod tag_sessions;
 mod work_sessions;
 mod workspace;
 pub(crate) use artifact_capture::upload_records;
@@ -581,6 +582,7 @@ async fn run(
             .add_service(bridge.workstreams_service())
             .add_service(bridge.mailbox_service())
             .add_service(bridge.work_sessions_service())
+            .add_service(bridge.tag_sessions_service())
             .add_service(bridge.workspace_service())
             .add_service(bridge.mcp_service())
             .add_service(bridge.artifact_capture_service())

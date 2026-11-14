@@ -336,29 +336,41 @@ impl Store {
         let mut tx = self.pool.begin().await?;
         crate::objectives::ensure_objective_access_in(&mut tx, principal, &input.objective_id)
             .await?;
-        let (objective, model) =
-            crate::objectives::objective_limits_in(&mut tx, &input.objective_id).await?;
-        let id = objective.objective_id.clone();
-        let status = objective.status();
-        let closed = matches!(
-            status,
-            ObjectiveStatus::Completed | ObjectiveStatus::Cancelled
-        );
+        let overview = overview_in(&mut tx, input, limit, now_ms).await?;
+        tx.commit().await?;
+        Ok(overview)
+    }
+}
 
-        let team = match &objective.team_id {
-            Some(team_id) => {
-                let row = sqlx::query(
-                    "SELECT name, max_concurrency FROM supertag_v2_teams WHERE team_id=$1",
-                )
-                .bind(team_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-                match row {
-                    Some(row) => {
-                        let members: Vec<String> = sqlx::query_scalar("SELECT tag_id FROM supertag_v2_team_members WHERE team_id=$1 ORDER BY tag_id")
-                            .bind(team_id).fetch_all(&mut *tx).await?;
-                        // The same slots the Team's concurrency limit counts.
-                        let running: i64 = sqlx::query_scalar(
+/// The overview of one Objective, read in `tx`. The caller has checked access.
+pub(crate) async fn overview_in(
+    tx: &mut Transaction<'_, Any>,
+    input: &GetObjectiveOverviewRequest,
+    limit: u32,
+    now_ms: i64,
+) -> Result<ObjectiveOverview> {
+    let (objective, model) =
+        crate::objectives::objective_limits_in(tx, &input.objective_id).await?;
+    let id = objective.objective_id.clone();
+    let status = objective.status();
+    let closed = matches!(
+        status,
+        ObjectiveStatus::Completed | ObjectiveStatus::Cancelled
+    );
+
+    let team = match &objective.team_id {
+        Some(team_id) => {
+            let row =
+                sqlx::query("SELECT name, max_concurrency FROM supertag_v2_teams WHERE team_id=$1")
+                    .bind(team_id)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            match row {
+                Some(row) => {
+                    let members: Vec<String> = sqlx::query_scalar("SELECT tag_id FROM supertag_v2_team_members WHERE team_id=$1 ORDER BY tag_id")
+                            .bind(team_id).fetch_all(&mut **tx).await?;
+                    // The same slots the Team's concurrency limit counts.
+                    let running: i64 = sqlx::query_scalar(
                             "SELECT COUNT(*) FROM supertag_v2_tasks active
                             JOIN supertag_v2_objective_tasks link ON link.task_id=active.task_id
                             JOIN supertag_v2_objectives objective ON objective.objective_id=link.objective_id
@@ -372,78 +384,71 @@ impl Store {
                         .bind(TaskState::Running as i64)
                         .bind(TaskState::Claimed as i64)
                         .bind(now_ms)
-                        .fetch_one(&mut *tx)
+                        .fetch_one(&mut **tx)
                         .await?;
-                        Some(ObjectiveOverviewTeam {
-                            team_id: team_id.clone(),
-                            name: row.try_get("name")?,
-                            member_tag_ids: members,
-                            max_concurrency: row
-                                .try_get::<Option<i64>, _>("max_concurrency")?
-                                .map(|value| value as u32),
-                            running_turns: running as u32,
-                        })
-                    }
-                    None => None,
+                    Some(ObjectiveOverviewTeam {
+                        team_id: team_id.clone(),
+                        name: row.try_get("name")?,
+                        member_tag_ids: members,
+                        max_concurrency: row
+                            .try_get::<Option<i64>, _>("max_concurrency")?
+                            .map(|value| value as u32),
+                        running_turns: running as u32,
+                    })
                 }
+                None => None,
             }
-            None => None,
-        };
-
-        // The owner's Session, then each Work Session under the Objective.
-        let owner = session_status(
-            &mut tx,
-            &objective.owner_tag_id,
-            &objective.session_id,
-            now_ms,
-        )
-        .await?;
-        let owner_question = owner.question.clone();
-        let owner_latest = owner.latest_task_id.clone();
-        let mut sessions = vec![session_view(
-            objective.session_id.clone(),
-            objective.owner_tag_id.clone(),
-            owner,
-        )];
-        sessions[0].owner = true;
-        let total_work: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM supertag_v2_work_sessions WHERE objective_id=$1",
-        )
-        .bind(&id)
-        .fetch_one(&mut *tx)
-        .await?;
-        let work = sqlx::query("SELECT work_session_id, title, parent_session_id, tag_id FROM supertag_v2_work_sessions WHERE objective_id=$1 ORDER BY created_order LIMIT $2")
-            .bind(&id).bind(MAX_SESSIONS - 1).fetch_all(&mut *tx).await?;
-        for row in work {
-            let session_id: String = row.try_get("work_session_id")?;
-            let tag_id: String = row.try_get("tag_id")?;
-            let state = session_status(&mut tx, &tag_id, &session_id, now_ms).await?;
-            let mut view = session_view(session_id, tag_id, state);
-            view.title = row.try_get("title")?;
-            view.parent_session_id = row.try_get("parent_session_id")?;
-            sessions.push(view);
         }
+        None => None,
+    };
 
-        let pending_approvals: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM supertag_v2_approvals WHERE objective_id=$1 AND state=$2",
-        )
-        .bind(&id)
-        .bind(ApprovalState::Pending as i64)
-        .fetch_one(&mut *tx)
-        .await?;
+    // The owner's Session, then each Work Session under the Objective.
+    let owner = session_status(tx, &objective.owner_tag_id, &objective.session_id, now_ms).await?;
+    let owner_question = owner.question.clone();
+    let owner_latest = owner.latest_task_id.clone();
+    let mut sessions = vec![session_view(
+        objective.session_id.clone(),
+        objective.owner_tag_id.clone(),
+        owner,
+    )];
+    sessions[0].owner = true;
+    let total_work: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_work_sessions WHERE objective_id=$1")
+            .bind(&id)
+            .fetch_one(&mut **tx)
+            .await?;
+    let work = sqlx::query("SELECT work_session_id, title, parent_session_id, tag_id FROM supertag_v2_work_sessions WHERE objective_id=$1 ORDER BY created_order LIMIT $2")
+            .bind(&id).bind(MAX_SESSIONS - 1).fetch_all(&mut **tx).await?;
+    for row in work {
+        let session_id: String = row.try_get("work_session_id")?;
+        let tag_id: String = row.try_get("tag_id")?;
+        let state = session_status(tx, &tag_id, &session_id, now_ms).await?;
+        let mut view = session_view(session_id, tag_id, state);
+        view.title = row.try_get("title")?;
+        view.parent_session_id = row.try_get("parent_session_id")?;
+        sessions.push(view);
+    }
 
-        // What needs a person, each with the command that acts on it.
-        let mut attention = vec![];
-        if !owner_question.is_empty() {
-            attention.push(ObjectiveAttention {
-                kind: ObjectiveAttentionKind::Question as i32,
-                message: format!("{} asks: \"{owner_question}\"", objective.owner_tag_id),
-                next_actions: vec![format!("supertag question answer {owner_latest} TEXT")],
-                task_id: owner_latest.clone(),
-                tag_id: objective.owner_tag_id.clone(),
-            });
-        }
-        match status {
+    let pending_approvals: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_approvals WHERE objective_id=$1 AND state=$2",
+    )
+    .bind(&id)
+    .bind(ApprovalState::Pending as i64)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    // What needs a person, each with the command that acts on it.
+    let mut attention = vec![];
+    if !owner_question.is_empty() {
+        attention.push(ObjectiveAttention {
+            kind: ObjectiveAttentionKind::Question as i32,
+            message: format!("{} asks: \"{owner_question}\"", objective.owner_tag_id),
+            next_actions: vec![format!("supertag question answer {owner_latest} TEXT")],
+            task_id: owner_latest.clone(),
+            tag_id: objective.owner_tag_id.clone(),
+        });
+    }
+    match status {
             ObjectiveStatus::ReadyForReview => attention.push(ObjectiveAttention {
                 kind: ObjectiveAttentionKind::Review as i32,
                 message: "The owner submitted the Objective for review.".into(),
@@ -482,62 +487,62 @@ impl Store {
             }),
             _ => {}
         }
-        if let (Some(paused_at), false) = (objective.paused_at_ms, closed) {
-            attention.push(ObjectiveAttention {
-                kind: ObjectiveAttentionKind::Paused as i32,
-                message: format!(
-                    "Paused since {}: no new turn starts, and running Task Attempts finish.",
-                    limits::Timestamp::from_millis(paused_at)
-                        .map_or_else(|| paused_at.to_string(), |at| at.to_string())
-                ),
-                next_actions: vec![format!("supertag objective resume {id}")],
-                ..Default::default()
-            });
-        }
-        if pending_approvals > 0 && !closed {
-            attention.push(ObjectiveAttention {
-                kind: ObjectiveAttentionKind::Approvals as i32,
-                message: format!(
-                    "{pending_approvals} approval request{} wait{} for a decision.",
-                    if pending_approvals == 1 { "" } else { "s" },
-                    if pending_approvals == 1 { "s" } else { "" }
-                ),
-                next_actions: vec![format!("supertag get inbox-items --objective {id}")],
-                ..Default::default()
-            });
-        }
+    if let (Some(paused_at), false) = (objective.paused_at_ms, closed) {
+        attention.push(ObjectiveAttention {
+            kind: ObjectiveAttentionKind::Paused as i32,
+            message: format!(
+                "Paused since {}: no new turn starts, and running Task Attempts finish.",
+                limits::Timestamp::from_millis(paused_at)
+                    .map_or_else(|| paused_at.to_string(), |at| at.to_string())
+            ),
+            next_actions: vec![format!("supertag objective resume {id}")],
+            ..Default::default()
+        });
+    }
+    if pending_approvals > 0 && !closed {
+        attention.push(ObjectiveAttention {
+            kind: ObjectiveAttentionKind::Approvals as i32,
+            message: format!(
+                "{pending_approvals} approval request{} wait{} for a decision.",
+                if pending_approvals == 1 { "" } else { "s" },
+                if pending_approvals == 1 { "s" } else { "" }
+            ),
+            next_actions: vec![format!("supertag get inbox-items --objective {id}")],
+            ..Default::default()
+        });
+    }
 
-        // The owner's conversation: its latest turns, oldest first.
-        let mut conversation = vec![];
-        for row in sqlx::query(&format!("SELECT {TURN_COLUMNS} FROM supertag_v2_tasks t LEFT JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id LEFT JOIN supertag_v2_work_session_tasks wt ON wt.task_id=t.task_id WHERE t.tag_id=$1 AND t.session_id=$2 ORDER BY t.accepted_order DESC LIMIT $3"))
+    // The owner's conversation: its latest turns, oldest first.
+    let mut conversation = vec![];
+    for row in sqlx::query(&format!("SELECT {TURN_COLUMNS} FROM supertag_v2_tasks t LEFT JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id LEFT JOIN supertag_v2_work_session_tasks wt ON wt.task_id=t.task_id WHERE t.tag_id=$1 AND t.session_id=$2 ORDER BY t.accepted_order DESC LIMIT $3"))
             .bind(&objective.owner_tag_id).bind(&objective.session_id).bind(CONVERSATION_TURNS)
-            .fetch_all(&mut *tx).await?
+            .fetch_all(&mut **tx).await?
         {
             conversation.push(turn(&row, &objective.starting_task_id, now_ms)?);
         }
-        conversation.reverse();
+    conversation.reverse();
 
-        // One page of every Task of the Objective's Sessions.
-        let total_tasks: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM supertag_v2_objective_tasks WHERE objective_id=$1",
-        )
-        .bind(&id)
-        .fetch_one(&mut *tx)
-        .await?;
-        let mut tasks = vec![];
-        for row in sqlx::query(&format!("SELECT {TURN_COLUMNS} FROM supertag_v2_objective_tasks ot JOIN supertag_v2_tasks t ON t.task_id=ot.task_id LEFT JOIN supertag_v2_work_session_tasks wt ON wt.task_id=t.task_id WHERE ot.objective_id=$1 ORDER BY t.accepted_order LIMIT $2 OFFSET $3"))
+    // One page of every Task of the Objective's Sessions.
+    let total_tasks: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_objective_tasks WHERE objective_id=$1",
+    )
+    .bind(&id)
+    .fetch_one(&mut **tx)
+    .await?;
+    let mut tasks = vec![];
+    for row in sqlx::query(&format!("SELECT {TURN_COLUMNS} FROM supertag_v2_objective_tasks ot JOIN supertag_v2_tasks t ON t.task_id=ot.task_id LEFT JOIN supertag_v2_work_session_tasks wt ON wt.task_id=t.task_id WHERE ot.objective_id=$1 ORDER BY t.accepted_order LIMIT $2 OFFSET $3"))
             .bind(&id).bind(i64::from(limit)).bind(i64::from(input.offset))
-            .fetch_all(&mut *tx).await?
+            .fetch_all(&mut **tx).await?
         {
             tasks.push(turn(&row, &objective.starting_task_id, now_ms)?);
         }
-        let next = u64::from(input.offset) + tasks.len() as u64;
-        let next_offset = (next < total_tasks as u64 && !tasks.is_empty()).then_some(next as u32);
+    let next = u64::from(input.offset) + tasks.len() as u64;
+    let next_offset = (next < total_tasks as u64 && !tasks.is_empty()).then_some(next as u32);
 
-        let mut posts = vec![];
-        if let Some(team) = &team {
-            for row in sqlx::query("SELECT sequence, author_tag_id, to_tag_ids, body, created_at_ms FROM supertag_v2_workstream_posts WHERE team_id=$1 ORDER BY sequence DESC LIMIT $2")
-                .bind(&team.team_id).bind(TEAM_POSTS).fetch_all(&mut *tx).await?
+    let mut posts = vec![];
+    if let Some(team) = &team {
+        for row in sqlx::query("SELECT sequence, author_tag_id, to_tag_ids, body, created_at_ms FROM supertag_v2_workstream_posts WHERE team_id=$1 ORDER BY sequence DESC LIMIT $2")
+                .bind(&team.team_id).bind(TEAM_POSTS).fetch_all(&mut **tx).await?
             {
                 posts.push(ObjectiveTeamPost {
                     sequence: row.try_get::<i64, _>("sequence")? as u64,
@@ -547,45 +552,43 @@ impl Store {
                     created_at_ms: row.try_get("created_at_ms")?,
                 });
             }
-            posts.reverse();
-        }
-        let times = sqlx::query(
-            "SELECT created_at_ms, updated_at_ms FROM supertag_v2_objectives WHERE objective_id=$1",
-        )
-        .bind(&id)
-        .fetch_one(&mut *tx)
-        .await?;
-        tx.commit().await?;
-
-        let notices = limits::limit_events(&model)
-            .into_iter()
-            .map(|notice| ObjectiveLimitNotice {
-                key: notice.key,
-                kind: notice_kind(notice.kind).into(),
-                at_ms: notice.at.as_millis(),
-                message: notice.message,
-            })
-            .collect();
-        Ok(ObjectiveOverview {
-            objective_created_at_ms: times.try_get("created_at_ms")?,
-            objective_updated_at_ms: times.try_get("updated_at_ms")?,
-            pool: Some(pool(&objective, &model)),
-            deadline: deadline(&model, now_ms),
-            objective: Some(objective),
-            as_of_ms: now_ms,
-            team,
-            attention,
-            sessions,
-            conversation,
-            posts,
-            tasks,
-            total_tasks: total_tasks as u32,
-            next_offset,
-            notices,
-            pending_approvals: pending_approvals as u32,
-            total_sessions: (total_work + 1) as u32,
-        })
+        posts.reverse();
     }
+    let times = sqlx::query(
+        "SELECT created_at_ms, updated_at_ms FROM supertag_v2_objectives WHERE objective_id=$1",
+    )
+    .bind(&id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let notices = limits::limit_events(&model)
+        .into_iter()
+        .map(|notice| ObjectiveLimitNotice {
+            key: notice.key,
+            kind: notice_kind(notice.kind).into(),
+            at_ms: notice.at.as_millis(),
+            message: notice.message,
+        })
+        .collect();
+    Ok(ObjectiveOverview {
+        objective_created_at_ms: times.try_get("created_at_ms")?,
+        objective_updated_at_ms: times.try_get("updated_at_ms")?,
+        pool: Some(pool(&objective, &model)),
+        deadline: deadline(&model, now_ms),
+        objective: Some(objective),
+        as_of_ms: now_ms,
+        team,
+        attention,
+        sessions,
+        conversation,
+        posts,
+        tasks,
+        total_tasks: total_tasks as u32,
+        next_offset,
+        notices,
+        pending_approvals: pending_approvals as u32,
+        total_sessions: (total_work + 1) as u32,
+    })
 }
 
 impl ControlPlane {

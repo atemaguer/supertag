@@ -60,6 +60,7 @@ use supertag_protocol::{
         attempt_effects_client::AttemptEffectsClient, attempt_inputs_client::AttemptInputsClient,
         attempt_mailbox_client::AttemptMailboxClient,
         attempt_mcp_effects_client::AttemptMcpEffectsClient,
+        attempt_tag_sessions_client::AttemptTagSessionsClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workspace_mounts_client::AttemptWorkspaceMountsClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
@@ -159,6 +160,7 @@ pub(crate) struct CoordinationClients {
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
     work_sessions: AttemptWorkSessionsClient<InterceptedService<Channel, HostHeaders>>,
+    tag_sessions: AttemptTagSessionsClient<InterceptedService<Channel, HostHeaders>>,
     mcp_effects: AttemptMcpEffectsClient<InterceptedService<Channel, HostHeaders>>,
     changed_paths: AttemptChangedPathsClient<InterceptedService<Channel, HostHeaders>>,
     effects: AttemptEffectsClient<InterceptedService<Channel, HostHeaders>>,
@@ -435,6 +437,9 @@ pub async fn run(
         )
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        tag_sessions: AttemptTagSessionsClient::with_interceptor(channel.clone(), headers.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
         mcp_effects: AttemptMcpEffectsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),

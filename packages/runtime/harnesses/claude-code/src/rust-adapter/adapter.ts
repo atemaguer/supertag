@@ -19,6 +19,7 @@ import {
   receipt,
   redact,
   TaskState,
+  tagPortfolio,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { ClaudeProcessTree } from "../process-tree.js";
 import {
@@ -394,7 +395,7 @@ export async function runAdapter(
         syncClaudeAiPlugins: false,
         disableSkillShellExecution: true,
       },
-      systemPrompt: task.instructions,
+      systemPrompt: [task.instructions, tagPortfolio(run)].filter(Boolean).join("\n\n"),
       env,
       stderr: () => {},
       includePartialMessages: true,

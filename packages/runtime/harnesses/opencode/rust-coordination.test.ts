@@ -4,6 +4,11 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import {
   HarnessRunSchema,
   harnessClient,
+  ListTagSessionsResponseSchema,
+  ReadTagSessionResponseSchema,
+  SearchTagSessionsResponseSchema,
+  TagSessionAudience,
+  tagPortfolio,
   WorkSessionQuestionSchema,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { expect, it, vi } from "vitest";
@@ -156,6 +161,125 @@ it("exposes scoped artifact reads and attachment only with their accepted capabi
       ).isError,
     ).toBe(true);
     expect(attach).not.toHaveBeenCalled();
+  } finally {
+    await client.close();
+    await service.close();
+  }
+});
+
+it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and carries the portfolio", async () => {
+  const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
+  const listSessions = vi.spyOn(bridge.tagSessions, "listSessions").mockImplementation(async () =>
+    create(ListTagSessionsResponseSchema, {
+      sessions: [
+        {
+          sessionId: "conversation/earlier",
+          audience: TagSessionAudience.PRIVATE,
+          firstRequest: `Draft notes ${grpcToken}`,
+          lastInteractionAtMs: 1_796_083_200_000n,
+        },
+      ],
+    }),
+  );
+  const search = vi.spyOn(bridge.tagSessions, "searchSessions").mockImplementation(async () =>
+    create(SearchTagSessionsResponseSchema, {
+      matches: [
+        { sessionId: "conversation/earlier", taskId: "earlier", resultExcerpt: "v2 notes" },
+      ],
+    }),
+  );
+  const readSession = vi.spyOn(bridge.tagSessions, "readSession").mockImplementation(async () =>
+    create(ReadTagSessionResponseSchema, {
+      entries: [{ taskId: "earlier", state: 3, request: "Draft", result: "Drafted" }],
+      nextBefore: 4n,
+    }),
+  );
+  const createObjective = vi.spyOn(bridge.tagSessions, "createObjective");
+  const run = create(HarnessRunSchema, {
+    task: { taskId, tagId, sessionId: "conversation/now" },
+    attemptId,
+    coordination: {
+      mayReadTagSessions: true,
+      mayCreateObjective: false,
+      tagPortfolio: "Tag portfolio: this Tag owns no open Objectives you can see.",
+    },
+  });
+  expect(tagPortfolio(run)).toBe(
+    "SuperTag context:\nTag portfolio: this Tag owns no open Objectives you can see.",
+  );
+  expect(tagPortfolio(create(HarnessRunSchema, { coordination: {} }))).toBe("");
+  const abort = new AbortController();
+  const service = await startCoordination(bridge, run, {
+    taskId,
+    tagId,
+    attemptId,
+    secrets: [grpcToken],
+    signal: abort.signal,
+    active: () => !abort.signal.aborted,
+  });
+  const client = new Client({ name: "session-reader", version: "1" });
+  try {
+    const tool = service.tools[0];
+    if (!tool) throw new Error("missing private Session tools");
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(tool.url), {
+        requestInit: { headers: tool.headers },
+      }),
+    );
+    expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
+      "list_sessions",
+      "search_sessions",
+      "read_session",
+      "list_objectives",
+      "read_objective",
+      "create_objective",
+    ]);
+    const listed = JSON.stringify(
+      await client.callTool({ name: "list_sessions", arguments: { limit: 5 } }),
+    );
+    expect(listed).toContain("conversation/earlier");
+    expect(listed).toContain("Draft notes [REDACTED]");
+    expect(listed).toContain("untrusted");
+    expect(listSessions).toHaveBeenCalledWith(
+      { limit: 5, offset: 0 },
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
+    expect(
+      JSON.stringify(
+        await client.callTool({ name: "search_sessions", arguments: { query: "notes" } }),
+      ),
+    ).toContain("v2 notes");
+    expect(search).toHaveBeenCalledWith(
+      { query: "notes", limit: 0 },
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
+    const page = JSON.stringify(
+      await client.callTool({
+        name: "read_session",
+        arguments: { sessionId: "conversation/earlier", before: 9 },
+      }),
+    );
+    expect(page).toContain("Drafted");
+    expect(page).toContain('\\"nextBefore\\":4');
+    expect(readSession).toHaveBeenCalledWith(
+      { sessionId: "conversation/earlier", limit: 0, before: 9n },
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
+    const refused = await client.callTool({
+      name: "create_objective",
+      arguments: { outcome: "Ship it" },
+    });
+    expect(refused).toMatchObject({ isError: true });
+    expect(JSON.stringify(refused)).toContain("explicit objective command");
+    expect(createObjective).not.toHaveBeenCalled();
+    expect(
+      (
+        await client.callTool({
+          name: "search_sessions",
+          arguments: { query: "x".repeat(201) },
+        })
+      ).isError,
+    ).toBe(true);
   } finally {
     await client.close();
     await service.close();

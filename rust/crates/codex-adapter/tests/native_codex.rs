@@ -32,6 +32,14 @@ use supertag_protocol::v2::{
     harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
 };
 use supertag_protocol::v2::{
+    CreateTagObjectiveRequest, CreateTagObjectiveResponse, ListTagObjectivesRequest,
+    ListTagObjectivesResponse, ListTagSessionsRequest, ListTagSessionsResponse, Objective,
+    ReadTagObjectiveRequest, ReadTagSessionRequest, ReadTagSessionResponse,
+    SearchTagSessionsRequest, SearchTagSessionsResponse, TagObjectiveSummary, TagObjectiveView,
+    TagSessionAudience, TagSessionEntry, TagSessionSearchHit, TagSessionSummary,
+    harness_tag_sessions_server::{HarnessTagSessions, HarnessTagSessionsServer},
+};
+use supertag_protocol::v2::{
     HarnessAskWorkSessionQuestionRequest, HarnessContinueWorkSessionRequest,
     HarnessStartWorkSessionRequest, WorkSession, WorkSessionQuestion,
     harness_work_sessions_server::{HarnessWorkSessions, HarnessWorkSessionsServer},
@@ -88,6 +96,8 @@ struct Observed {
     work_starts: Vec<HarnessStartWorkSessionRequest>,
     work_continuations: Vec<HarnessContinueWorkSessionRequest>,
     work_questions: Vec<HarnessAskWorkSessionQuestionRequest>,
+    tag_session_calls: Vec<&'static str>,
+    created_objectives: Vec<CreateTagObjectiveRequest>,
     pending_post: bool,
     lose_post_response: bool,
     may_capture_artifacts: bool,
@@ -219,7 +229,7 @@ impl Harness for HarnessFixture {
             attempt_id: "native-attempt".into(),
             checkpoint: self.checkpoint.clone(),
             may_ask_objective_question: self.may_ask,
-            coordination: self.coordination,
+            coordination: self.coordination.clone(),
             resolved_skills: observed.resolved_skills.clone(),
             history: vec![],
             remote_workspace: false,
@@ -622,6 +632,136 @@ impl HarnessMailbox for HarnessFixture {
 }
 
 #[tonic::async_trait]
+impl HarnessTagSessions for HarnessFixture {
+    async fn list_sessions(
+        &self,
+        request: Request<ListTagSessionsRequest>,
+    ) -> Result<Response<ListTagSessionsResponse>, Status> {
+        self.authenticate(&request)?;
+        assert!(request.get_ref().attempt.is_none() && request.get_ref().limit == 5);
+        self.observed
+            .lock()
+            .await
+            .tag_session_calls
+            .push("list_sessions");
+        Ok(Response::new(ListTagSessionsResponse {
+            sessions: vec![TagSessionSummary {
+                session_id: "conversation/earlier".into(),
+                audience: TagSessionAudience::Private as i32,
+                provider: String::new(),
+                scope: String::new(),
+                first_request: "Draft the tag-list-receipt".into(),
+                last_interaction_at_ms: 1_796_083_200_000,
+            }],
+        }))
+    }
+    async fn search_sessions(
+        &self,
+        request: Request<SearchTagSessionsRequest>,
+    ) -> Result<Response<SearchTagSessionsResponse>, Status> {
+        self.authenticate(&request)?;
+        assert_eq!(request.get_ref().query, "release");
+        self.observed
+            .lock()
+            .await
+            .tag_session_calls
+            .push("search_sessions");
+        Ok(Response::new(SearchTagSessionsResponse {
+            matches: vec![TagSessionSearchHit {
+                session_id: "conversation/earlier".into(),
+                task_id: "earlier-task".into(),
+                completed_at_ms: Some(1_796_083_200_000),
+                provider: "slack".into(),
+                scope: "channel:C1".into(),
+                request_excerpt: "release".into(),
+                result_excerpt: "tag-search-receipt".into(),
+            }],
+        }))
+    }
+    async fn read_session(
+        &self,
+        request: Request<ReadTagSessionRequest>,
+    ) -> Result<Response<ReadTagSessionResponse>, Status> {
+        self.authenticate(&request)?;
+        assert_eq!(request.get_ref().before, Some(9));
+        self.observed
+            .lock()
+            .await
+            .tag_session_calls
+            .push("read_session");
+        Ok(Response::new(ReadTagSessionResponse {
+            session: None,
+            entries: vec![TagSessionEntry {
+                task_id: "earlier-task".into(),
+                state: 3,
+                request: "Draft".into(),
+                result: format!("tag-read-receipt {KEY}"),
+                completed_at_ms: None,
+            }],
+            next_before: Some(3),
+        }))
+    }
+    async fn list_objectives(
+        &self,
+        request: Request<ListTagObjectivesRequest>,
+    ) -> Result<Response<ListTagObjectivesResponse>, Status> {
+        self.authenticate(&request)?;
+        self.observed
+            .lock()
+            .await
+            .tag_session_calls
+            .push("list_objectives");
+        Ok(Response::new(ListTagObjectivesResponse {
+            objectives: vec![TagObjectiveSummary {
+                objective_id: "docs".into(),
+                status: 1,
+                outcome: "tag-objectives-receipt".into(),
+                ..Default::default()
+            }],
+            total: 1,
+        }))
+    }
+    async fn read_objective(
+        &self,
+        request: Request<ReadTagObjectiveRequest>,
+    ) -> Result<Response<TagObjectiveView>, Status> {
+        self.authenticate(&request)?;
+        assert_eq!(request.get_ref().objective_id.as_deref(), Some("docs"));
+        self.observed
+            .lock()
+            .await
+            .tag_session_calls
+            .push("read_objective");
+        Ok(Response::new(TagObjectiveView {
+            objective: Some(Objective {
+                objective_id: "docs".into(),
+                outcome: "Keep docs current".into(),
+                status: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+    }
+    async fn create_objective(
+        &self,
+        request: Request<CreateTagObjectiveRequest>,
+    ) -> Result<Response<CreateTagObjectiveResponse>, Status> {
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        observed.tag_session_calls.push("create_objective");
+        observed.created_objectives.push(request.into_inner());
+        Ok(Response::new(CreateTagObjectiveResponse {
+            objective: Some(Objective {
+                objective_id: "created-objective".into(),
+                status: 1,
+                ..Default::default()
+            }),
+            started_task_id: "started-task".into(),
+        }))
+    }
+}
+
+#[tonic::async_trait]
 impl HarnessWorkSessions for HarnessFixture {
     async fn start(
         &self,
@@ -751,7 +891,9 @@ impl HarnessProcess {
                 workspace_delivery: None,
                 task_id: "native-task".into(),
                 tag_id: "native-tag".into(),
-                session_id: if coordination.is_some_and(|scope| scope.may_ask_work_session_question)
+                session_id: if coordination
+                    .as_ref()
+                    .is_some_and(|scope| scope.may_ask_work_session_question)
                 {
                     "work/codex-child".into()
                 } else {
@@ -778,6 +920,7 @@ impl HarnessProcess {
                 .add_service(HarnessWorkstreamsServer::new(fixture.clone()))
                 .add_service(HarnessWorkSessionsServer::new(fixture.clone()))
                 .add_service(HarnessArtifactsServer::new(fixture.clone()))
+                .add_service(HarnessTagSessionsServer::new(fixture.clone()))
                 .add_service(HarnessMailboxServer::new(fixture))
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         );
@@ -915,7 +1058,7 @@ async fn native_work_session_asks_continues_and_resumes_the_child_checkpoint() -
         None,
         "Inspect the release",
         false,
-        child_capabilities,
+        child_capabilities.clone(),
     )
     .await?;
     run(native.options(), child.bootstrap.clone()).await?;
@@ -2860,5 +3003,93 @@ async fn informational_moderation_metadata_does_not_accept_a_failed_turn() -> Re
     assert_eq!(observed.questions.len(), 1);
     assert!(!observed.outcome.as_ref().unwrap().succeeded);
     assert!(observed.outcome.as_ref().unwrap().checkpoint.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_tag_session_tools_read_create_and_carry_the_portfolio() -> Result<()> {
+    let mut checkpoint = None;
+    for (read, create) in [(true, true), (true, false), (false, false)] {
+        let native = NativeFixture::new(&successful("Recalled earlier work"), "exit 0")?;
+        std::fs::write(native.directory.path().join("tag-sessions-mode"), "")?;
+        let server = HarnessProcess::configured_tools(
+            &["files:read"],
+            checkpoint.clone(),
+            "What did we decide?",
+            false,
+            Some(AttemptCapabilities {
+                may_read_tag_sessions: read,
+                may_create_objective: create,
+                tag_portfolio: if read {
+                    "Tag portfolio: tag-portfolio-fixture".into()
+                } else {
+                    String::new()
+                },
+                ..Default::default()
+            }),
+        )
+        .await?;
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        let saved = outcome.checkpoint.clone().context("checkpoint")?;
+        assert!(String::from_utf8_lossy(&saved.payload).contains("none-v1+tag-sessions-v1"));
+        if checkpoint.is_none() {
+            checkpoint = Some(saved);
+        }
+        let logs = native.read("requests.jsonl")?;
+        let expected: &[&str] = match (read, create) {
+            (true, true) => &[
+                "list_sessions",
+                "search_sessions",
+                "read_session",
+                "list_objectives",
+                "read_objective",
+                "create_objective",
+            ],
+            (true, false) => &[
+                "list_sessions",
+                "search_sessions",
+                "read_session",
+                "list_objectives",
+                "read_objective",
+            ],
+            _ => &[],
+        };
+        assert_eq!(observed.tag_session_calls, expected);
+        assert_eq!(
+            logs.contains("SuperTag context:\\nTag portfolio: tag-portfolio-fixture"),
+            read
+        );
+        if read {
+            for receipt in [
+                "tag-list-receipt",
+                "tag-search-receipt",
+                "tag-read-receipt [REDACTED]",
+                "tag-objectives-receipt",
+                "Keep docs current",
+            ] {
+                assert!(logs.contains(receipt), "{receipt} missing from {logs}");
+            }
+            assert!(!logs.contains(KEY));
+        } else {
+            assert!(!logs.contains("tag-search-receipt"));
+        }
+        if create {
+            let created = &observed.created_objectives[0];
+            assert_eq!(created.outcome, "Publish notes [REDACTED]");
+            assert_eq!(created.deadline_ms, Some(1_796_083_200_000));
+            assert_eq!(created.budget_limit_minor, Some(500));
+            assert_eq!(created.budget_currency.as_deref(), Some("USD"));
+            assert!(logs.contains("created-objective") && logs.contains("started-task"));
+        } else if read {
+            assert!(
+                logs.contains(
+                    "Refused: Creating an Objective requires an explicit objective command"
+                )
+            );
+        }
+    }
     Ok(())
 }

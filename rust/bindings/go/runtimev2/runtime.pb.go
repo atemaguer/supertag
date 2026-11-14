@@ -4783,8 +4783,17 @@ type AttemptCapabilities struct {
 	MayAskWorkSessionQuestion bool                   `protobuf:"varint,7,opt,name=may_ask_work_session_question,json=mayAskWorkSessionQuestion,proto3" json:"may_ask_work_session_question,omitempty"`
 	// An Objective owner report may request review of its own child delivery.
 	MayRequestCommitReview bool `protobuf:"varint,8,opt,name=may_request_commit_review,json=mayRequestCommitReview,proto3" json:"may_request_commit_review,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// A root turn reads the Tag's other Sessions and its Objectives
+	// (AttemptTagSessions); a Work Session's own Task does not.
+	MayReadTagSessions bool `protobuf:"varint,9,opt,name=may_read_tag_sessions,json=mayReadTagSessions,proto3" json:"may_read_tag_sessions,omitempty"`
+	// A conversation turn started by its requester's explicit
+	// `@SuperTag objective <outcome>` command may create that Objective.
+	MayCreateObjective bool `protobuf:"varint,10,opt,name=may_create_objective,json=mayCreateObjective,proto3" json:"may_create_objective,omitempty"`
+	// The Tag's open Objectives and how to recall its other Sessions, for the
+	// turn's context. State, not instructions. Empty when `may_read_tag_sessions` is false.
+	TagPortfolio  string `protobuf:"bytes,11,opt,name=tag_portfolio,json=tagPortfolio,proto3" json:"tag_portfolio,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AttemptCapabilities) Reset() {
@@ -4871,6 +4880,27 @@ func (x *AttemptCapabilities) GetMayRequestCommitReview() bool {
 		return x.MayRequestCommitReview
 	}
 	return false
+}
+
+func (x *AttemptCapabilities) GetMayReadTagSessions() bool {
+	if x != nil {
+		return x.MayReadTagSessions
+	}
+	return false
+}
+
+func (x *AttemptCapabilities) GetMayCreateObjective() bool {
+	if x != nil {
+		return x.MayCreateObjective
+	}
+	return false
+}
+
+func (x *AttemptCapabilities) GetTagPortfolio() string {
+	if x != nil {
+		return x.TagPortfolio
+	}
+	return ""
 }
 
 type WorkSession struct {
@@ -22917,7 +22947,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12AskQuestionRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"\xc8\x03\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\xd2\x04\n" +
 	"\x13AttemptCapabilities\x12;\n" +
 	"\x1amay_ask_objective_question\x18\x01 \x01(\bR\x17mayAskObjectiveQuestion\x12,\n" +
 	"\x12may_use_workstream\x18\x02 \x01(\bR\x10mayUseWorkstream\x12(\n" +
@@ -22926,7 +22956,11 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x16may_start_work_session\x18\x05 \x01(\bR\x13mayStartWorkSession\x129\n" +
 	"\x19may_continue_work_session\x18\x06 \x01(\bR\x16mayContinueWorkSession\x12@\n" +
 	"\x1dmay_ask_work_session_question\x18\a \x01(\bR\x19mayAskWorkSessionQuestion\x129\n" +
-	"\x19may_request_commit_review\x18\b \x01(\bR\x16mayRequestCommitReview\"\xda\x05\n" +
+	"\x19may_request_commit_review\x18\b \x01(\bR\x16mayRequestCommitReview\x121\n" +
+	"\x15may_read_tag_sessions\x18\t \x01(\bR\x12mayReadTagSessions\x120\n" +
+	"\x14may_create_objective\x18\n" +
+	" \x01(\bR\x12mayCreateObjective\x12#\n" +
+	"\rtag_portfolio\x18\v \x01(\tR\ftagPortfolio\"\xda\x05\n" +
 	"\vWorkSession\x12&\n" +
 	"\x0fwork_session_id\x18\x01 \x01(\tR\rworkSessionId\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\"\n" +
