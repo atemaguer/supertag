@@ -23,8 +23,12 @@ def legacy_schema(execute):
         'CREATE TABLE "Tag" (id TEXT PRIMARY KEY, name TEXT, execution TEXT, "createdAt" TEXT)',
         'CREATE TABLE "Role" (id TEXT PRIMARY KEY, name TEXT, "createdAt" TEXT)',
         'CREATE TABLE "RoleAssignment" (id TEXT PRIMARY KEY, "tagId" TEXT, "roleId" TEXT, status TEXT, "createdAt" TEXT)',
-        'CREATE TABLE "Objective" (id TEXT PRIMARY KEY, outcome TEXT, status TEXT, "createdAt" TEXT)',
-        'CREATE TABLE "ObjectiveMessage" (id TEXT PRIMARY KEY, "objectiveId" TEXT, body TEXT, "createdAt" TEXT)',
+        'CREATE TABLE "Objective" (id TEXT PRIMARY KEY, outcome TEXT, status TEXT, "teamId" TEXT, "createdAt" TEXT)',
+        'CREATE TABLE "Team" (id TEXT PRIMARY KEY, name TEXT, "memberTagIds" TEXT, "createdAt" TEXT)',
+        'CREATE TABLE "WorkstreamPost" (id TEXT PRIMARY KEY, "teamId" TEXT, "authorTagId" TEXT, body TEXT, '
+        'sequence INTEGER, "createdAt" TEXT)',
+        'CREATE TABLE "TagMessage" (id TEXT PRIMARY KEY, "senderTagId" TEXT, "recipientTagId" TEXT, '
+        '"objectiveId" TEXT, text TEXT, "createdAt" TEXT)',
         'CREATE TABLE "Session" (id TEXT PRIMARY KEY, "tagId" TEXT, "createdAt" TEXT)',
         'CREATE TABLE "Task" (id TEXT PRIMARY KEY, "tagId" TEXT, "sessionId" TEXT, "objectiveId" TEXT, '
         '"inboundEventId" TEXT, actor TEXT, "requestText" TEXT, "responseText" TEXT, result TEXT, status TEXT, "createdAt" TEXT)',
@@ -37,8 +41,11 @@ def legacy_schema(execute):
         ('INSERT INTO "Tag" VALUES (?, ?, ?, ?)', ("tag-1", "lead", '{"harness":"codex"}', "2026-10-01")),
         ('INSERT INTO "Role" VALUES (?, ?, ?)', ("role-1", "reviewer", "2026-10-01")),
         ('INSERT INTO "RoleAssignment" VALUES (?, ?, ?, ?, ?)', ("ra-1", "tag-1", "role-1", "active", "2026-10-01")),
-        ('INSERT INTO "Objective" VALUES (?, ?, ?, ?)', ("obj-1", "Ship the archive", "completed", "2026-10-02")),
-        ('INSERT INTO "ObjectiveMessage" VALUES (?, ?, ?, ?)', ("om-1", "obj-1", "Done?", "2026-10-03")),
+        ('INSERT INTO "Objective" VALUES (?, ?, ?, ?, ?)', ("obj-1", "Ship the archive", "completed", "team-1", "2026-10-02")),
+        ('INSERT INTO "Team" VALUES (?, ?, ?, ?)', ("team-1", "archive", '["tag-1"]', "2026-10-02")),
+        ('INSERT INTO "WorkstreamPost" VALUES (?, ?, ?, ?, ?, ?)', ("wp-2", "team-1", "tag-1", "Second", 2, "2026-10-03")),
+        ('INSERT INTO "WorkstreamPost" VALUES (?, ?, ?, ?, ?, ?)', ("wp-1", "team-1", "tag-1", "First", 1, "2026-10-03")),
+        ('INSERT INTO "TagMessage" VALUES (?, ?, ?, ?, ?, ?)', ("tm-1", "tag-1", "tag-1", "obj-1", "Done?", "2026-10-03")),
         ('INSERT INTO "Session" VALUES (?, ?, ?)', ("ses-1", "tag-1", "2026-10-02")),
         ('INSERT INTO "Task" VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
          ("task-1", "tag-1", "ses-1", "obj-1", "in-1", '{"kind":"operator"}', "Line one\nline \\two \"quoted\" é",
@@ -58,6 +65,12 @@ def make_state(root):
     (state / "supertag.yaml").write_text("services:\n  control-plane:\n    type: control-plane\n")
     (state / "credentials.json").write_text(json.dumps({"key": SECRET}))
     (state / "hosts/laptop/credential.json").write_text(json.dumps({"secret": SECRET}))
+    (state / "worker-hosts").mkdir()
+    (state / "worker-hosts/laptop%20two.credential.json").write_text(json.dumps({"secret": SECRET}))
+    (state / "hosts/laptop/home/.codex").mkdir(parents=True)
+    (state / "hosts/laptop/home/.codex/auth.json").write_text(json.dumps({"token": SECRET}))
+    (state / "hosts/laptop/home/.claude").mkdir(parents=True)
+    (state / "hosts/laptop/home/.claude/.credentials.json").write_text(json.dumps({"token": SECRET}))
     (state / ".env").write_text(f"CURSOR_API_KEY={SECRET}\n")
     (state / "workspaces/repo/.env.example").write_text("CURSOR_API_KEY=\n")
     (state / "hosts/laptop/attempt-journal/attempts.sqlite").write_bytes(b"journal\x00bytes")
@@ -107,8 +120,11 @@ class LegacyArchiveTests(unittest.TestCase):
     def test_round_trip_counts_rows_excludes_secrets_and_exports_records(self):
         report = create(self.state, self.archive)
         self.assertEqual(self.archive.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(report["rows"], 11)
-        self.assertEqual(sorted(report["secretsExcluded"]), [".env", "credentials.json", "hosts/laptop/credential.json"])
+        self.assertEqual(report["rows"], 14)
+        self.assertEqual(report["warnings"], [])
+        self.assertEqual(sorted(report["secretsExcluded"]), [
+            ".env", "credentials.json", "hosts/laptop/credential.json", "hosts/laptop/home/.claude/.credentials.json",
+            "hosts/laptop/home/.codex/auth.json", "worker-hosts/laptop%20two.credential.json"])
         self.assertTrue(verify(self.archive, source=self.state)["checkedAgainstSource"])
         tar = tarfile.open(fileobj=io.BytesIO(decompressed(self.archive)))
         names = tar.getnames()
@@ -131,7 +147,10 @@ class LegacyArchiveTests(unittest.TestCase):
         tags = json.load(tar.extractfile("records/tags.json"))
         self.assertEqual(tags[0]["roles"][0]["role"], "reviewer")
         objectives = json.load(tar.extractfile("records/objectives.json"))
-        self.assertEqual((objectives[0]["messages"][0]["body"], objectives[0]["taskIds"]), ("Done?", ["task-1"]))
+        self.assertEqual((objectives[0]["messages"][0]["text"], objectives[0]["taskIds"]), ("Done?", ["task-1"]))
+        self.assertEqual(objectives[0]["team"]["name"], "archive")
+        self.assertEqual([post["body"] for post in objectives[0]["team"]["posts"]], ["First", "Second"])
+        self.assertEqual(conversations["tagMessages"][0]["id"], "tm-1")
         self.assertTrue(Path(str(self.archive) + ".sha256").read_text().startswith(report["sha256"]))
 
     def test_refuses_running_services_or_an_unclosed_database(self):
@@ -145,6 +164,32 @@ class LegacyArchiveTests(unittest.TestCase):
             create(self.state, self.archive)
         self.assertFalse(self.archive.exists())
         self.assertFalse(Path(str(self.archive) + ".partial").exists())
+
+    def test_warns_when_the_state_directory_names_a_postgresql_database(self):
+        (self.state / "supertag.yaml").write_text(
+            "services:\n  control-plane:\n    type: control-plane\n    database:\n      url: ${DATABASE_URL}\n")
+        report = create(self.state, self.archive)
+        self.assertEqual(len(report["warnings"]), 1)
+        self.assertIn("--database-url-file", report["warnings"][0])
+
+    def test_damaged_archive_fails_without_a_traceback(self):
+        create(self.state, self.archive)
+        data = self.archive.read_bytes()[:-200]
+        self.archive.write_bytes(data)
+        Path(str(self.archive) + ".sha256").write_text(f"{hashlib.sha256(data).hexdigest()}  {self.archive.name}\n")
+        self.assertEqual(legacy_archive.main(["verify", str(self.archive)]), 1)
+
+    def test_postgres_url_passes_tls_and_socket_options_to_the_client_tools(self):
+        url_file = self.root / "url"
+        url_file.write_text("postgresql://user:p%40ss@/supertag?host=/var/run/postgresql&sslmode=verify-full"
+                            "&sslrootcert=/etc/ca.pem\n")
+        database = legacy_archive.Postgres(url_file)
+        self.assertEqual({key: database.env[key] for key in ("PGHOST", "PGPASSWORD", "PGSSLMODE", "PGSSLROOTCERT")},
+                         {"PGHOST": "/var/run/postgresql", "PGPASSWORD": "p@ss", "PGSSLMODE": "verify-full",
+                          "PGSSLROOTCERT": "/etc/ca.pem"})
+        url_file.write_text("postgresql://h/supertag?unknown=1\n")
+        with self.assertRaisesRegex(ArchiveError, "unknown"):
+            legacy_archive.Postgres(url_file)
 
     def test_verify_detects_a_changed_source(self):
         create(self.state, self.archive)
@@ -216,15 +261,23 @@ class LegacyArchiveTests(unittest.TestCase):
         source.write_text(
             "name: dogfood\nservices:\n  control-plane:\n    type: control-plane\n    tls: {cert: a, key: b}\n"
             "    logging: {level: info, audit: stderr}\n  laptop:\n    type: host\n    harnesses: [codex]\n"
-            "    labels: [gpu]\n    concurrency: 2\n    allow-unsandboxed-commands: [codex, cursor]\n")
+            "    labels: [gpu]\n    concurrency: 2\n    allow-unsandboxed-commands: [codex, cursor]\n"
+            "    x-note: kept by TypeScript\n  x-template:\n    harnesses: [codex]\n"
+            "x-anchor: &anchor {a: 1}\n")
+        text = source.read_text().replace("    tls:", "    credentials: vault://kv/supertag\n    x-owner: me\n    tls:")
+        source.write_text(text)
         result = translate_config(source, self.root / "rust.yaml")
         self.assertEqual(sorted(item["key"] for item in result["removed"]), [
-            "services.control-plane.logging.level", "services.control-plane.tls",
-            "services.laptop.allow-unsandboxed-commands[codex]", "services.laptop.labels"])
+            "services.control-plane.credentials", "services.control-plane.logging.level",
+            "services.control-plane.tls", "services.control-plane.x-owner",
+            "services.laptop.allow-unsandboxed-commands[codex]", "services.laptop.labels",
+            "services.laptop.x-note", "services.x-template"])
         translated = (self.root / "rust.yaml").read_text()
         self.assertIn("concurrency: 2", translated)
         self.assertNotIn("labels", translated)
         self.assertIn("- cursor", translated)
+        self.assertIn("x-anchor", translated)
+        self.assertNotIn("vault", translated)
 
     def test_manifests_rename_execution_fields_and_drop_local_workspaces(self):
         try:
@@ -241,6 +294,41 @@ class LegacyArchiveTests(unittest.TestCase):
         self.assertEqual([change["resource"] for change in result["changes"]], ["Workspace/repo", "Tag/lead", "Tag/lead", "Tag/lead"])
         [tag] = list(yaml.safe_load_all((self.root / "rust.yaml").read_text()))
         self.assertEqual(tag["spec"], {"roles": ["Lead"], "execution": {"harness": "codex", "models": ["m"], "efforts": ["low"]}})
+
+    def test_manifests_drop_what_rust_refuses_and_rename_what_it_renamed(self):
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML is not installed")
+        source = self.root / "org.yaml"
+        source.write_text(
+            "apiVersion: supertag/v1\nkind: Workspace\nmetadata: {name: api}\n"
+            "spec: {source: 'https://github.com/acme/api.git', ref: main}\n"
+            "---\napiVersion: supertag/v1\nkind: SurfaceAccount\nmetadata: {name: slack}\n"
+            "spec: {provider: slack, secrets: {botToken: {env: SLACK_BOT_TOKEN}}}\n"
+            "---\napiVersion: supertag/v1\nkind: Tag\nmetadata: {name: lead, labels: {a: b}}\n"
+            "spec: {roles: [Lead], locations: [{provider: slack, channelId: C1}]}\n"
+            "---\napiVersion: supertag/v1\nkind: Volume\nmetadata: {name: data}\n"
+            "spec: {source: 's3://bucket/prefix', credential: r2}\n"
+            "---\napiVersion: supertag/v1\nkind: PermissionSet\nmetadata: {name: slack-post}\n"
+            "spec: {permissions: [{target: surface, surfaceAccountId: slack, scope: C1, action: post, approval: required}]}\n"
+            "---\napiVersion: supertag/v1\nkind: Objective\nmetadata: {name: ship}\n"
+            "spec: {owner: lead, outcome: Ship it, budget: {minor: 500, currency: USD}, workspaces: [api]}\n")
+        result = translate_manifests(source, self.root / "rust.yaml")
+        self.assertEqual(result["documents"], 4)
+        messages = {(change["resource"], change["change"].split(":")[0]) for change in result["changes"]}
+        self.assertIn(("Workspace/api", "removed the document"), messages)
+        self.assertTrue(any("supertag workspace put" in change["change"] for change in result["changes"]))
+        self.assertIn(("SurfaceAccount/slack", "removed the document"), messages)
+        self.assertIn(("Tag/lead", "removed locations"), messages)
+        self.assertIn(("Volume/data", "removed credential"), messages)
+        tag, volume, permissions, objective = yaml.safe_load_all((self.root / "rust.yaml").read_text())
+        self.assertEqual((tag["metadata"], tag["spec"]), ({"name": "lead"}, {"roles": ["Lead"]}))
+        self.assertEqual(volume["spec"], {"source": "s3://bucket/prefix"})
+        self.assertEqual(permissions["spec"]["permissions"], [
+            {"target": "surface", "scope": "C1", "action": "post", "surface_account_id": "slack", "approval_required": True}])
+        self.assertEqual(objective["spec"], {"outcome": "Ship it", "ownerTagId": "lead", "budgetLimitMinor": 500,
+                                             "budgetCurrency": "USD"})
 
 
 @unittest.skipUnless(shutil.which("zstd") and os.environ.get("SUPERTAG_LEGACY_ARCHIVE_TEST_POSTGRES_URL_FILE"),
@@ -270,7 +358,7 @@ class LegacyPostgresArchiveTests(unittest.TestCase):
                 (state / "supertag.yaml").write_text("services: {}\n")
                 archive = root / "legacy.tar.zst"
                 report = create(state, archive, database_url_file=url_file)
-                self.assertEqual(report["rows"], 10)
+                self.assertEqual(report["rows"], 13)
                 tar = tarfile.open(fileobj=io.BytesIO(decompressed(archive)))
                 self.assertIn("database/supertag.pgdump", tar.getnames())
                 task = json.loads(tar.extractfile("tables/Task.jsonl").read())

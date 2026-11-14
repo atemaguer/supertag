@@ -8,9 +8,9 @@ both. `verify` re-reads an archive, and with --from also checks it against the s
 `config` and `manifests` translate a TypeScript supertag.yaml and resource manifests, listing what
 the Rust runtime no longer accepts.
 
-Secrets stay out of the archive: credential stores, host credentials, .env files, and private
-keys are listed in the manifest by path, size, and SHA-256 only. The archive still holds
-conversation text and Task output that may quote secrets, so keep it private.
+Secrets stay out of the archive: credential stores, host credentials, harness sign-ins, .env
+files, and private keys are listed in the manifest by path, size, and SHA-256 only. The archive
+still holds conversation text and Task output that may quote secrets, so keep it private.
 """
 from __future__ import annotations
 
@@ -32,14 +32,16 @@ import sys
 import tarfile
 import tempfile
 import time
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 FORMAT = "supertag-legacy-archive-v1"
 MANIFEST = "manifest.json"
 DATABASE_FILE = "supertag.db"
-# File names left out as secrets, and names that match them but hold no secret.
+# File names left out as secrets, and names that match them but hold no secret. `*credential.json`
+# covers hosts/ID/credential.json and worker-hosts/ID.credential.json; `*credentials.json` covers
+# the credential store and Claude Code's .credentials.json; auth.json is the Codex and OpenCode sign-in.
 SECRET_RULES = {
-    "names": ["credentials.json", "credential.json", ".env", ".env.*", "*.pem", "*.key",
+    "names": ["*credentials.json", "*credential.json", "auth.json", ".env", ".env.*", "*.pem", "*.key",
               "id_rsa", "id_rsa.*", "id_ecdsa", "id_ecdsa.*", "id_ed25519", "id_ed25519.*"],
     "except": ["*.example", "*.sample", "*.template"],
 }
@@ -128,6 +130,25 @@ def require_stopped(source):
                 "the old Control Plane once, then archive again")
 
 
+def postgres_hints(source):
+    """Where the state directory says its Control Plane used PostgreSQL, rather than supertag.db."""
+    hints = []
+    if re.search(r"^\s+database:", read_text(source / "supertag.yaml"), re.MULTILINE):
+        hints.append("supertag.yaml configures a Control Plane database")
+    if re.search(r"^\s*(export\s+)?SUPERTAG_DATABASE_URL\s*=", read_text(source / ".env"), re.MULTILINE):
+        hints.append(".env sets SUPERTAG_DATABASE_URL")
+    if os.environ.get("SUPERTAG_DATABASE_URL"):
+        hints.append("this shell sets SUPERTAG_DATABASE_URL")
+    return hints
+
+
+def read_text(path):
+    try:
+        return path.read_text(errors="replace")
+    except OSError:
+        return ""
+
+
 # Table export ------------------------------------------------------------------------------
 
 def sqlite_value(value):
@@ -175,19 +196,31 @@ def sqlite_counts(database):
         connection.close()
 
 
+# URL query parameters passed to the client tools as their libpq environment variables.
+LIBPQ_OPTIONS = {"sslmode": "PGSSLMODE", "sslrootcert": "PGSSLROOTCERT", "sslcert": "PGSSLCERT",
+                 "sslkey": "PGSSLKEY", "sslcrl": "PGSSLCRL", "connect_timeout": "PGCONNECT_TIMEOUT",
+                 "application_name": "PGAPPNAME", "options": "PGOPTIONS", "target_session_attrs":
+                 "PGTARGETSESSIONATTRS", "gssencmode": "PGGSSENCMODE"}
+
+
 class Postgres:
     """PostgreSQL client tools with the URL from a private file, never on a command line."""
 
     def __init__(self, url_file, pg_bin=None):
         parsed = urlsplit(Path(url_file).read_text().strip())
-        require(parsed.scheme in ("postgres", "postgresql") and parsed.hostname and parsed.path.strip("/"),
-                "the database URL file must hold a postgresql:// URL with a database name")
+        options = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+        host = unquote(parsed.hostname or "") or options.pop("host", "")
+        require(parsed.scheme in ("postgres", "postgresql") and host and parsed.path.strip("/"),
+                "the database URL file must hold a postgresql:// URL with a host and a database name")
+        unknown = sorted(set(options) - set(LIBPQ_OPTIONS))
+        require(not unknown, f"the database URL has query parameters this tool does not pass on: {', '.join(unknown)}")
         self.bin = Path(pg_bin) if pg_bin else None
-        self.description = {"host": parsed.hostname, "port": parsed.port or 5432,
+        self.description = {"host": host, "port": parsed.port or 5432,
                             "database": unquote(parsed.path.lstrip("/"))}
-        self.env = {**os.environ, "PGHOST": parsed.hostname, "PGPORT": str(parsed.port or 5432),
+        self.env = {**os.environ, "PGHOST": host, "PGPORT": str(parsed.port or 5432),
                     "PGUSER": unquote(parsed.username or ""), "PGPASSWORD": unquote(parsed.password or ""),
-                    "PGDATABASE": self.description["database"], "PGCONNECT_TIMEOUT": "10"}
+                    "PGDATABASE": self.description["database"], "PGCONNECT_TIMEOUT": "10",
+                    **{LIBPQ_OPTIONS[key]: value for key, value in options.items()}}
 
     def tool(self, name):
         return str(self.bin / name) if self.bin else (shutil.which(name) or name)
@@ -301,19 +334,22 @@ def build_records(tables_directory, records_directory):
             attempts.get(task.get("id"), []), key=lambda item: item.get("attemptNumber") or 0)]
         tasks.append(task)
 
-    messages = by(read_table(tables_directory, "ObjectiveMessage"), "objectiveId")
-    workstreams = by(read_table(tables_directory, "Workstream"), "objectiveId")
-    posts = by(read_table(tables_directory, "WorkstreamPost"), "workstreamId")
+    # Mailbox messages name their Objective; Workstream posts belong to the Objective's Team,
+    # which several Objectives may share.
+    tag_message_rows = sorted(read_table(tables_directory, "TagMessage"), key=created)
+    messages = by(tag_message_rows, "objectiveId")
+    teams = {row.get("id"): row for row in read_table(tables_directory, "Team")}
+    posts = by(read_table(tables_directory, "WorkstreamPost"), "teamId")
     tasks_by_objective = by(tasks_table, "objectiveId")
     objectives = []
     for objective in sorted(read_table(tables_directory, "Objective"), key=created):
         objective = decoded(objective)
-        identifier = objective.get("id")
-        objective["messages"] = [decoded(item) for item in sorted(messages.get(identifier, []), key=created)]
-        objective["workstreams"] = [
-            {**decoded(stream), "posts": [decoded(post) for post in sorted(
-                posts.get(stream.get("id"), []), key=lambda post: post.get("sequence") or 0)]}
-            for stream in sorted(workstreams.get(identifier, []), key=created)]
+        identifier, team = objective.get("id"), objective.get("teamId")
+        objective["messages"] = [decoded(item) for item in messages.get(identifier, [])]
+        objective["team"] = None if team is None else {
+            **decoded(teams.get(team, {"id": team})),
+            "posts": [decoded(post) for post in sorted(posts.get(team, []),
+                                                       key=lambda post: post.get("sequence") or 0)]}
         objective["taskIds"] = [task.get("id") for task in tasks_by_objective.get(identifier, [])]
         objectives.append(objective)
 
@@ -330,7 +366,7 @@ def build_records(tables_directory, records_directory):
             if task.get("inboundEventId") else [],
         } for task in tasks_by_session.get(session.get("id"), [])]
         sessions.append(session)
-    tag_messages = [decoded(item) for item in sorted(read_table(tables_directory, "TagMessage"), key=created)]
+    tag_messages = [decoded(item) for item in tag_message_rows]
 
     records = {"tags.json": tags, "objectives.json": objectives, "tasks.json": tasks,
                "conversations.json": {"sessions": sessions, "tagMessages": tag_messages}}
@@ -358,8 +394,8 @@ runtime. Rust starts with fresh state and never reads this archive.
 - `tables/TABLE.jsonl`: every row of every table, one JSON object per line. SQLite BLOB values
   appear as `{"$base64": "..."}`.
 - `records/`: the important records in readable JSON: `tags.json` (with Role assignments),
-  `objectives.json` (with messages, Workstream posts, and Task IDs), `tasks.json` (with requests,
-  responses, results, and Attempts), and `conversations.json` (Sessions as request and response
+  `objectives.json` (with Mailbox messages, the Team and its Workstream posts, and Task IDs),
+  `tasks.json` (with requests, responses, results, and Attempts), and `conversations.json` (Sessions as request and response
   turns with delivered replies, and Mailbox messages between Tags).
 - `manifest.json`: the SHA-256, size, and mode of every entry, the row count of every table, and
   the secret files that were left out, listed by path, size, and SHA-256 only.
@@ -399,6 +435,11 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
     require(not destination.resolve().is_relative_to(source), "write the archive outside the state directory")
     require(shutil.which("zstd"), "zstd is required")
     require_stopped(source)
+    warnings = [] if database_url_file else [
+        f"{hint}; this archive holds {DATABASE_FILE} only. If the old Control Plane used PostgreSQL, "
+        "archive again with --database-url-file" for hint in postgres_hints(source)]
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     sqlite_database = source / DATABASE_FILE
     require(database_url_file or sqlite_database.is_file(),
             f"{source} has no {DATABASE_FILE}; name the PostgreSQL database with --database-url-file")
@@ -477,6 +518,7 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
                         "secretRules": SECRET_RULES,
                         "excludedPatterns": list(patterns),
                         "skipped": skipped,
+                        "warnings": warnings,
                     }
                     payload = json.dumps(manifest, indent=1, sort_keys=True).encode()
                     info = tarfile.TarInfo(MANIFEST)
@@ -501,6 +543,7 @@ def create(source, destination, database_url_file=None, pg_bin=None, patterns=()
             "stateBytes": sum(item.get("bytes", 0) for name, item in archived.items() if name.startswith("state/")),
             "entries": len(archived), "tables": len(counts), "rows": sum(counts.values()), "records": records,
             "secretsExcluded": sorted(secrets), "skipped": sorted(skipped), "excludedPatterns": list(patterns),
+            "warnings": warnings,
             "seconds": {"export": round(exported, 2), "write": round(written - started - exported, 2),
                         "verify": report["seconds"], "total": round(time.monotonic() - started, 2)},
         }
@@ -553,13 +596,15 @@ def verify(archive, expected_sha256=None, source=None, database_url_file=None, p
                         if name in ("state/" + DATABASE_FILE, "database/supertag.pgdump") or (
                                 name.startswith("records/") and name[len("records/"):] in RECORD_FILES):
                             keep = (scratch / PurePosixPath(name).name).open("xb")
-                        for chunk in iter(lambda: stream.read(CHUNK), b""):
-                            digest.update(chunk)
-                            newlines += chunk.count(b"\n")
+                        try:
+                            for chunk in iter(lambda: stream.read(CHUNK), b""):
+                                digest.update(chunk)
+                                newlines += chunk.count(b"\n")
+                                if keep:
+                                    keep.write(chunk)
+                        finally:
                             if keep:
-                                keep.write(chunk)
-                        if keep:
-                            keep.close()
+                                keep.close()
                         seen[name] = {"kind": "file", "mode": member.mode, "bytes": member.size,
                                       "sha256": digest.hexdigest()}
                         if name.startswith("tables/"):
@@ -656,7 +701,10 @@ GUIDANCE = {
     "operators": "issue named Operator Tokens with `supertag operator-token create`",
     "labels": "grant labels with `supertag auth-key create --role host --label LABEL`",
     "environment": "put harness variables in env_file (STATE_DIRECTORY/.env by default)",
-    "mcp": "MCP servers are declared by Tags and Roles; see `supertag mcp list`",
+    "mcp": "write the servers to a JSON MCP catalog for `supertag worker-host --mcp-catalog`; "
+           "check it with `supertag mcp list --mcp-catalog PATH`",
+    "credentials": "the local supervisor keeps credentials in files; a deployed Control Plane chooses "
+                   "Vault with `supertag setup deployment` (SUPERTAG_CREDENTIAL_VAULT=vault)",
     "volume-credentials": "declare Volumes with `supertag volume put`",
     "artifact-volume": "declare Volumes with `supertag volume put`",
     "local-mount-root": "live mounts are not supported",
@@ -673,17 +721,28 @@ def translate_config(source, destination):
     removed = []
 
     def prune(mapping, allowed, path):
+        # Rust ignores x- keys only at the top level; below it they are unknown fields.
         for key in list(mapping):
-            if key not in allowed and not str(key).startswith("x-"):
-                removed.append({"key": ".".join([*path, str(key)]),
-                                "instead": GUIDANCE.get(key, "not supported by the Rust runtime")})
+            extension = str(key).startswith("x-")
+            if key not in allowed and not (extension and not path):
+                removed.append({"key": ".".join([*path, str(key)]), "instead": (
+                    "x- keys are allowed only at the top level" if extension
+                    else GUIDANCE.get(key, "not supported by the Rust runtime"))})
                 del mapping[key]
 
     prune(document, RUST_KEYS[None], [])
-    for name, service in document["services"].items():
+    services = document["services"]
+    for name in [name for name in services if str(name).startswith("x-")]:
+        removed.append({"key": f"services.{name}", "instead": "x- entries under services are not services; "
+                        "put shared YAML anchors in a top-level x- key"})
+        del services[name]
+    for name, service in services.items():
         kind = service.get("type") if isinstance(service, dict) else None
         require(kind in ("control-plane", "host"), f"service {name} has unknown type {kind!r}")
         prune(service, RUST_KEYS[kind], ["services", name])
+        if kind == "control-plane" and service.get("credentials") not in (None, "file"):
+            removed.append({"key": f"services.{name}.credentials", "instead": GUIDANCE["credentials"]})
+            del service["credentials"]
         consent = service.get("allow-unsandboxed-commands")
         if kind == "host" and isinstance(consent, list):
             kept = [harness for harness in consent if harness in UNSANDBOXED_HARNESSES]
@@ -705,6 +764,33 @@ def translate_config(source, destination):
     return {"removed": removed, "written": str(destination) if destination else None}
 
 
+# Spec fields each Rust manifest kind accepts (rust/crates/cli/src/manifests.rs, policy.rs, and
+# surface_policy.rs). Anything else makes `supertag apply` refuse the whole document.
+RUST_SPEC = {
+    "Tag": {"instructions", "allowedActions", "workspace", "execution", "roles", "acceptsMessagesFrom", "runsOn"},
+    "Role": {"role_id", "name", "purpose", "instructions", "permission_set_ids", "permissionSets",
+             "context_set_ids", "contextSets", "status", "execution"},
+    "PermissionSet": {"set_id", "name", "approvers", "permissions"},
+    "ContextSet": {"set_id", "name", "items"},
+    "Volume": {"source"},
+    "Team": {"name", "members", "maxConcurrency"},
+    "Objective": {"ownerTagId", "ownerTag", "outcome", "ongoing", "deadlineMs", "deadline", "budgetLimitMinor",
+                  "budgetCurrency", "team", "runtimeActions"},
+    "SurfaceLocation": {"location_id", "account_id", "connector_account_id", "tag_id", "scope", "enabled",
+                        "permission_set_ids", "context_set_ids"},
+}
+RUST_EXECUTION = {"harness", "shared_execution_environment_id", "sharedExecutionEnvironmentId", "models", "efforts"}
+RUST_GRANT = {"target", "action", "surface_account_id", "scope", "reference", "resource", "approval_required"}
+RUST_CONTEXT_ITEM = {"item_key", "itemKey", "type", "version", "required", "config"}
+MANIFEST_GUIDANCE = {
+    ("Tag", "workerHosts"): "local Worker Hosts serve every Tag; route remote hosts with Auth Key labels and runsOn",
+    ("Tag", "locations"): "bind each location with a SurfaceLocation document or `supertag surface-location`, "
+                          "after `supertag setup surface` connects its account",
+    ("Volume", "credential"): "the Control Plane supplies storage credentials; register with `supertag volume put`",
+    ("Objective", "workspaces"): "bind the owner Tag's Workspace with workspace: {id: NAME, baseCommit: SHA}",
+}
+
+
 def translate_manifests(source, destination):
     """Rename TypeScript manifest fields the Rust apply renamed, and drop what it no longer takes."""
     import yaml  # PyYAML, only for this command
@@ -714,25 +800,84 @@ def translate_manifests(source, destination):
     for index, document in enumerate(documents, 1):
         require(isinstance(document, dict) and "kind" in document, f"document {index} is not a manifest")
         kind, spec = document["kind"], document.get("spec") or {}
+        require(isinstance(spec, dict), f"document {index} has a spec that is not a mapping")
         name = f"{kind}/{(document.get('metadata') or {}).get('name')}"
-        if kind == "Workspace" and "github" not in spec:
-            moved = {key: spec[key] for key in ("delivery", "setup") if key in spec}
-            changes.append({"resource": name, "change": "removed: a local Workspace is a host's workspaces entry in "
-                            f"supertag.yaml; move {moved or 'nothing'} there, and bind Tags with "
-                            "workspace: {id: NAME, baseCommit: SHA}",
-                            "dropped": sorted(set(spec) - set(moved))})
+
+        def change(text, dropped=None):
+            changes.append({"resource": name, "change": text, **({} if dropped is None else {"dropped": dropped})})
+
+        def drop(mapping, key, path, guidance=None):
+            change(f"removed {path}: " + (guidance or MANIFEST_GUIDANCE.get(
+                (kind, key), "not a field of the Rust manifest")), mapping.pop(key))
+
+        if kind == "Workspace":
+            source_url = spec.get("source")
+            if isinstance(source_url, str) and re.search(r"github\.com[:/]", source_url):
+                guidance = (f"recreate this GitHub Workspace ({source_url}) with `supertag workspace put --account "
+                            "ACCOUNT --repository-id ID --repository OWNER/REPO NAME` after `supertag setup surface "
+                            "github`; a local checkout of it is a host's workspaces entry in supertag.yaml")
+            else:
+                guidance = ("a local repository is a host's workspaces entry in supertag.yaml; move "
+                            f"{ {key: spec[key] for key in ('delivery', 'setup') if key in spec} or 'nothing'} there")
+            change(f"removed the document: {guidance}. Bind Tags with workspace: {{id: NAME, baseCommit: SHA}}",
+                   spec)
             continue
+        if kind == "SurfaceAccount":
+            change("removed the document: connect the account again with `supertag setup surface "
+                   f"{spec.get('provider', 'PROVIDER')} --name {(document.get('metadata') or {}).get('name')}`", spec)
+            continue
+        if kind not in RUST_SPEC:
+            change(f"removed the document: the Rust runtime has no {kind} manifest", spec)
+            continue
+        for key in [key for key in document if key not in ("apiVersion", "kind", "metadata", "spec")]:
+            drop(document, key, key, "not part of a Rust manifest")
+        metadata = document.get("metadata")
+        if isinstance(metadata, dict):
+            for key in [key for key in metadata if key != "name"]:
+                drop(metadata, key, f"metadata.{key}", "Rust metadata holds only name")
+
         execution = spec.get("execution")
         if isinstance(execution, dict):
             for old, new in (("model", "models"), ("effort", "efforts")):
                 if old in execution:
                     value = execution.pop(old)
                     execution[new] = value if isinstance(value, list) else [value]
-                    changes.append({"resource": name, "change": f"execution.{old} -> execution.{new}"})
-        if kind == "Tag" and "workerHosts" in spec:
-            changes.append({"resource": name, "change": "removed workerHosts: local Worker Hosts serve every Tag; "
-                            "route remote hosts with Auth Key labels and runsOn",
-                            "dropped": spec.pop("workerHosts")})
+                    change(f"execution.{old} -> execution.{new}")
+            for key in [key for key in execution if key not in RUST_EXECUTION]:
+                drop(execution, key, f"execution.{key}")
+        if kind == "PermissionSet":
+            for number, grant in enumerate(spec.get("permissions") or [], 1):
+                if not isinstance(grant, dict):
+                    continue
+                if "surfaceAccountId" in grant:
+                    grant["surface_account_id"] = grant.pop("surfaceAccountId")
+                    change(f"permissions[{number}].surfaceAccountId -> surface_account_id")
+                if "approval" in grant:
+                    grant["approval_required"] = grant.pop("approval") == "required"
+                    change(f"permissions[{number}].approval -> approval_required")
+                for key in [key for key in grant if key not in RUST_GRANT]:
+                    drop(grant, key, f"permissions[{number}].{key}")
+        if kind == "ContextSet":
+            for number, item in enumerate(spec.get("items") or [], 1):
+                for key in [key for key in item if key not in RUST_CONTEXT_ITEM] if isinstance(item, dict) else []:
+                    drop(item, key, f"items[{number}].{key}")
+        if kind == "Objective":
+            if "owner" in spec:
+                spec["ownerTagId"] = spec.pop("owner")
+                change("owner -> ownerTagId")
+            budget = spec.get("budget")
+            if isinstance(budget, dict) and set(budget) <= {"minor", "currency"}:
+                spec.pop("budget")
+                if "minor" in budget:
+                    spec["budgetLimitMinor"] = budget["minor"]
+                if "currency" in budget:
+                    spec["budgetCurrency"] = budget["currency"]
+                change("budget -> budgetLimitMinor, budgetCurrency")
+            if isinstance(spec.get("team"), dict):
+                drop(spec, "team", "team", "declare the Team as a Team document and name it in team")
+        for key in [key for key in spec if key not in RUST_SPEC[kind]]:
+            drop(spec, key, key)
+        document["spec"] = spec
         kept.append(document)
     if destination:
         with os.fdopen(os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as output:
@@ -777,6 +922,11 @@ def main(argv=None):
             result = translate_manifests(arguments.file, arguments.destination)
     except (ArchiveError, OSError, sqlite3.Error) as error:
         print(f"error: {error}", file=sys.stderr)
+        return 1
+    except (ValueError, KeyError, TypeError, tarfile.TarError, EOFError) as error:
+        # A truncated archive or a malformed manifest.
+        print(f"error: the archive is damaged or not a legacy archive ({type(error).__name__}: {error})",
+              file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2))
     return 0
