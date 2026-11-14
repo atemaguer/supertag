@@ -33,9 +33,9 @@ the trust policy repository and `migration` access to the service repositories. 
 staging tools it uses to rehearse cutovers and rollbacks.
 
 ```sh
-supertag create team service-identity --member lead --member identity --member migration \
+supertag team create service-identity --member lead --member identity --member migration \
   --member verification --member rollout
-supertag list team
+supertag get team
 supertag get team service-identity
 ```
 
@@ -51,7 +51,7 @@ and no Objective of its own: several Objectives can name the same Team.
 `--member` replaces the whole member list, so pass every member you want to keep:
 
 ```sh
-supertag update team service-identity --member lead --member identity --member migration \
+supertag team update service-identity --member lead --member identity --member migration \
   --member verification --member rollout --member observability
 ```
 
@@ -62,8 +62,9 @@ without a change, when the Team already has the values you set.
 ## 3. Name the Team on an Objective
 
 ```sh
-supertag create objective service-identity-migration --owner lead --team service-identity \
-  --outcome "Move 12 production services to short-lived credentials issued to each service. Keep requests working through each rollout wave. Done when service checks pass and the old keys are retired. Ask me to approve each production cutover and retirement of the shared keys."
+supertag objective create service-identity-migration \
+  "Move 12 production services to short-lived credentials issued to each service. Keep requests working through each rollout wave. Done when service checks pass and the old keys are retired. Ask me to approve each production cutover and retirement of the shared keys." \
+  --owner lead --team service-identity --state-directory ~/.supertag
 ```
 
 `lead` owns the Objective and starts work Sessions with the other Tags for each wave. Each
@@ -108,7 +109,7 @@ supertag delete team service-identity
 Deletion is refused while an open Objective names the Team. Cancel or complete those Objectives
 first.
 
-Verify the deletion with `supertag list team`.
+Verify the deletion with `supertag get team`.
 
 ## Throttle a Team on purpose
 
@@ -117,7 +118,7 @@ a free slot. Set a limit only when you want fewer turns running at once, for exa
 rate-limited service:
 
 ```sh
-supertag update team service-identity --max-concurrency 2
+supertag team update service-identity --max-concurrency 2
 ```
 
 The limit counts turns across every open Objective that names the Team; later turns wait, and a
@@ -125,7 +126,7 @@ waiting turn holds no slot. Remove it again with an empty value, so Worker Host 
 only limit:
 
 ```sh
-supertag update team service-identity --max-concurrency ""
+supertag team update service-identity --max-concurrency ""
 ```
 
 Use `supertag describe objective service-identity-migration` to see the Team's limit or confirm
@@ -138,8 +139,8 @@ arrives in the recipient's inbox and it handles it in a turn of its own. To let 
 messages from a Tag outside its Teams, grant the route explicitly:
 
 ```sh
-supertag grant mailbox rollout --sender on-call
-supertag list mailbox-grant --mailbox rollout
+supertag mailbox-grant allow on-call rollout
+supertag get mailbox-grant --tag rollout
 ```
 
 A grant says only "this recipient accepts messages from this sender". It is directional, and it
@@ -152,11 +153,10 @@ addressed to Tags reaches their inboxes. See [Share a Team's Workstream](workstr
 
 - **An update fails with a revision conflict.** Read the Team again and retry with its current
   revision.
-- **Deletion is refused.** An open Objective names the Team. `supertag list objective` shows
+- **Deletion is refused.** An open Objective names the Team. `supertag get objective` shows
   which Objectives are still open.
 - **The owner cannot hand work to a Tag.** It must be a member of the Objective's Team, active,
-  and bound to a Worker Host. Bind it with
-  `supertag update tag NAME --add-worker-host HOST`.
+  and runnable by a Worker Host. `supertag placement explain TASK_ID` says why its Task waits.
 - **Turns stay pending while Worker Hosts have free slots.** The Team may have a concurrency
   limit, counted across every Objective that names it. Check
   `supertag describe objective ID`, and remove the limit if nobody meant to throttle the Team.

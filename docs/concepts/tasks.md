@@ -152,9 +152,9 @@ When a work Session's Task calls an action that needs approval, the call doesn't
 ends, completed and **waiting on approval** of that request. The approval notice posts to the
 conversation. The notice names the request and the permission that requires approval. If it
 appears under **Waiting on you** in the terminal UI, decide it there. For a request shown only
-in the conversation, use `supertag approve request` or `supertag deny request`.
+in the conversation, use `supertag approval approve` or `supertag approval deny`.
 The notice says the work Session continues on its own once the person decides.
-`supertag list approval` shows the work Session's description of the request. A work Session's
+`supertag get approval` shows the work Session's description of the request. A work Session's
 Task gets one notice per permission while its requests wait, however many it makes. The report
 turn tells the person briefly what the work Session waits for. A chat message never approves an
 action.
@@ -216,7 +216,7 @@ left, in the Objective's currency. When less than a twentieth of the budget is l
 spent: SuperTag admits no new turn and refuses `start_session`. A finished work Session's report
 turn still comes in, capped at what is left. Once the running Task Attempts settle, the
 Objective's status becomes `limited`, and SuperTag tells the person in its thread.
-Raise the budget with `supertag update objective ID --budget-minor N` to continue.
+Raise the budget with `supertag objective set-limits ID --budget-minor N` to continue.
 
 ## Task Attempt
 
@@ -238,7 +238,7 @@ not automatically grant another allocation. Accepted artifacts and completed Obj
 outcomes; a later overrun does not revoke them.
 
 A Tag cannot raise its own limits. A person raises an Objective's budget with
-`supertag update objective ID --budget-minor N`; the Objective's next turn runs against the larger
+`supertag objective set-limits ID --budget-minor N`; the Objective's next turn runs against the larger
 pool. Raising it starts a new Task Attempt on a Task stopped by the budget. Earlier usage and
 allocations remain in its history. A compatible, successfully archived native session can preserve
 progress; it does not preserve a workspace or grant new permissions. If no safe archive exists,
@@ -274,9 +274,8 @@ other Sessions; an agent then inspects or retrieves the selected artifact throug
 
 The sections below explain scheduling and live-input behavior. You can skip them if you only need
 the core concepts. They use these [glossary](../reference/glossary.md) terms: the **Control
-Plane** stores and schedules work; a **Worklet** connects a **Worker Host** to it; a **Worker
-Profile** is a saved recipe for running a **Worker**, the code that completes a Task; a
-**harness** connects the Worker to an agent system.
+Plane** stores and schedules work; a **Worker Host** runs it; a **harness** is the agent system a
+Task runs on.
 [Worker Host selection](../reference/scheduling-and-recovery.md#worker-host-selection) explains
 how the Control Plane ranks hosts and orders the queue.
 
@@ -306,18 +305,17 @@ await controlPlane.ingestSurfaceEvent(event, {
 ```
 
 This is an integration option, not an instruction inferred from untrusted message text.
-The CLI creates Tags with `supertag create tag NAME`; it has no Tag profile binding or general
-Task execution flag. Worklet profile flags describe available execution recipes.
+The CLI creates Tags with `supertag tag put NAME`; a Tag's or Role's `execution` names its harness,
+models, and efforts, and Worker Hosts advertise what they serve.
 
-The Control Plane freezes the selected profile on the Task Attempt before execution. Recovery observes
-that same Task Attempt and selection; it does not choose another Worker Profile for accepted work.
-Sessions have no profile binding. A Session's native state prefers the profile that produced it,
-and any profile of the same harness can resume it.
+The Control Plane records the selected harness and model on the Task before execution. Recovery
+keeps that selection. A Session's checkpoint can be resumed by any Worker Host that serves the same
+harness.
 
 ### Cancelling a Task
 
-An operator cancels one Task with `supertag cancel task ID`, and every open Task of an Objective
-with `supertag cancel objective ID`. Cancellation stops further
+An operator cancels one Task with `supertag task cancel ID`, and every open Task of an Objective
+with `supertag objective cancel ID`. Cancellation stops further
 results from that execution from being accepted. The Task event history records who cancelled it,
 when, and its previous status in `task.cancelled`. This event is saved with the cancellation itself, so
 an interrupted Worker does not need to report the action afterward.
@@ -407,6 +405,6 @@ This message path does not yet infer answers to specific harness clarification o
 
 ## Where to go next
 
-- Learn how [Worker Hosts, Worklets, Workers, and harnesses](workers.md) execute a Task Attempt.
+- Learn how [Worker Hosts and harnesses](workers.md) execute a Task Attempt.
 - See how [multiplayer continuity](multiplayer.md) shares completed work.
 - Inspect Tasks and Task Attempts with the [resource commands](../operations/resources.md).

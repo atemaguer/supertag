@@ -22,8 +22,8 @@ Other terms used here are defined in the glossary: [Role](glossary.md#role),
 [Task Attempt](glossary.md#task-attempt), [Permission Set](glossary.md#permission-set),
 [Control Plane](glossary.md#control-plane), [Gateway](glossary.md#gateway),
 [Surface Account](glossary.md#surface-account), [Worker Host](glossary.md#worker-host),
-[Worklet](glossary.md#worklet), [Worker Profile](glossary.md#worker-profile),
-[Worker](glossary.md#worker), and [Workspace](glossary.md#workspace).
+[Worker Profile](glossary.md#harness),
+[harness adapter](glossary.md#harness-adapter), and [Workspace](glossary.md#workspace).
 
 ## How coordination works
 
@@ -62,7 +62,7 @@ in that thread.
 
 `planner` owns the Objective, and `builder` and `reviewer` are the other members of its Team. Each
 work Session's result returns to the Objective's conversation as a turn. `planner`'s `ask` reaches
-Maya in the thread and in `supertag list inbox`; her reply is the conversation's next turn. Every
+Maya in the thread and in `supertag get inbox-item`; her reply is the conversation's next turn. Every
 turn, in every Session, draws on the Objective's one budget pool.
 
 ## Objectives
@@ -127,7 +127,7 @@ commands. `runtimeActions` is the Objective's ceiling for them.
   Team member whose Role grants `files:write` can write in its delegated Session. The
   owner's own Sessions receive no write access from this grant.
 - Only operators change the list afterwards, with
-  `supertag update objective ID --runtime-action ACTION ...`. The new list replaces the old one,
+  `supertag objective set-runtime-actions ID --runtime-action ACTION ...`. The new list replaces the old one,
   stays within the owner's Permission Sets at that moment, and applies to turns admitted
   afterwards.
 
@@ -165,12 +165,11 @@ next.
 ### Operator messages
 
 A message delivers the next turn of the conversation, attributed to the operator. Send it from
-the Objective view in the terminal UI with `m`. For scripts, call
-[`ObjectiveService.MessageObjective`](operator-api/objective.md#messageobjective). See
-[Send messages and answer questions](control-plane-api.md#send-messages-and-answer-questions).
+the Objective view in the terminal UI with `m`. For scripts, submit a turn to the owner in the
+Objective's Session with `supertag task submit`; see [Control Plane API](control-plane-api.md#operator-services).
 
 In a Slack or Lark home thread, a plain reply also delivers the next turn. `@SuperTag approve`
-acts as `supertag approve objective`, and `@SuperTag pause` and `@SuperTag resume` act as the
+acts as `supertag objective review ID approve`, and `@SuperTag pause` and `@SuperTag resume` act as the
 pause and resume commands. The operator ID is the provider and the user, such as `slack:U123`.
 Anyone who may create Objectives in that channel may do this.
 
@@ -182,10 +181,10 @@ Anyone who may create Objectives in that channel may do this.
   new key for each command.
 - The owner's answer to the message is its next reply in the home thread.
 
-`supertag approve objective ID` completes a `ready_for_review` Objective. The owner's assessment,
+`supertag objective review ID` approve completes a `ready_for_review` Objective. The owner's assessment,
 recorded with `ready_for_review`, becomes the completion summary. Without one, the summary reads
 `Approved by operator OPERATOR_ID. The owner recorded no assessment.`
-`supertag complete objective ID --summary-file FILE` remains for scripts.
+`supertag objective complete ID --summary-file FILE` remains for scripts.
 
 ### Asking a person
 
@@ -272,8 +271,8 @@ regular sweep.
 
 ### Pausing an Objective
 
-- Only an operator pauses or resumes, with `supertag pause objective ID` and
-  `supertag resume objective ID`, `ObjectiveService.PauseObjective` and `ResumeObjective`, or
+- Only an operator pauses or resumes, with `supertag objective pause ID` and
+  `supertag objective resume ID`, `ObjectiveService.PauseObjective` and `ResumeObjective`, or
   `@SuperTag pause` and `@SuperTag resume` in the home thread. No coordination tool
   pauses, so no Tag can.
 - A pause records `pausedAt` and leaves `status` unchanged. While it is set, no turn of any of the
@@ -285,7 +284,7 @@ regular sweep.
 
 ### Cancelling an Objective
 
-- Only an operator cancels, with `supertag cancel objective ID [--reason TEXT]` or
+- Only an operator cancels, with `supertag objective cancel ID [--reason TEXT]` or
   `ObjectiveService.CancelObjective`. `UpdateObjective` and the `update_objective` tool refuse
   `cancelled`.
 - `cancelled` is terminal. Later status, deadline and budget updates fail, and no new turn, wake
@@ -293,7 +292,7 @@ regular sweep.
 - The Objective records `cancelledAt` and `cancellationReason`, up to 2,000 characters. The
   revision increments once and the change history records the operator.
 - Every open Task in the Objective's Sessions is cancelled through the same path as
-  `supertag cancel task`, pending deliveries fail, running Task Attempts stop, and Workspace pull
+  `supertag task cancel`, pending deliveries fail, running Task Attempts stop, and Workspace pull
   requests close.
 - Cancellation needs no revision. Cancelling a cancelled Objective succeeds with `changed` false
   and retries any Task still open. Cancelling a completed Objective fails with
@@ -359,7 +358,7 @@ Attempts finish. If they finish at $3,080, the Objective shows an $80 overrun an
 ### Increasing the limit
 
 - Only an operator raises a finite limit, with
-  `supertag update objective ID --budget-minor N [--revision N]`, or `update_objective` with
+  `supertag objective set-limits ID --budget-minor N [--revision N]`, or `update_objective` with
   `budgetLimitMinor` and the current `expectedRevision`. Tags cannot.
 - The new limit must exceed the old one and keep the currency. A stale revision is rejected;
   refresh the inbox before deciding.
@@ -367,7 +366,7 @@ Attempts finish. If they finish at $3,080, the Objective shows an $80 overrun an
   against it. The increase is audited in the Objective's change history.
 
 The API rules are in
-[`UpdateObjective`](operator-api/objective.md#updateobjective). For the
+[`UpdateObjective`](control-plane-api.md#operator-services). For the
 procedure, see [Respond to budget and operator requests](../guides/objective-decisions.md).
 
 ## Deadlines
@@ -402,7 +401,7 @@ the Objective with evidence.
 Each warning and the deadline passing reach the conversation as a notice and the operator inbox as
 an `objective_limit` item.
 
-Only an operator moves a deadline, with `supertag update objective ID --deadline ISO`. The new
+Only an operator moves a deadline, with `supertag objective set-limits ID --deadline ISO`. The new
 deadline may replace one that passed; normal delivery resumes, the owner receives one notice with
 the old and new deadline, and warnings are raised again against a window that starts at the move.
 
@@ -484,9 +483,9 @@ waiting when a turn starts is handled together in that one turn.
   it.
 - A Tag may message another when they share a Team, or when the recipient accepts messages from
   it. A grant is exactly that: "this recipient accepts messages from this sender". Operators set
-  one with `supertag grant mailbox RECIPIENT --sender SENDER` and remove it with
-  `supertag revoke mailbox RECIPIENT --sender SENDER`; a Tag manifest's `acceptsMessagesFrom`
-  declares the same thing. `supertag list mailbox-grant --mailbox TAG` lists them. Without either,
+  one with `supertag mailbox-grant allow SENDER` RECIPIENT and remove it with
+  `supertag mailbox-grant revoke SENDER`; RECIPIENT a Tag manifest's `acceptsMessagesFrom`
+  declares the same thing. `supertag get mailbox-grant --tag TAG` lists them. Without either,
   the call returns 403 and names the reason.
 - A message to a Tag that is retired, or to the sender itself, is refused.
 
@@ -530,7 +529,7 @@ its final reply in the Session. Answering a sender takes another `send_message`.
 A message's status is the status of the Task that handled it: `pending` until a turn takes it,
 then `handled` when that Task completed, or `failed` when it failed or was cancelled.
 
-`supertag list message --mailbox TAG [--limit N]` lists the messages a Tag sent and received,
+`supertag get message --mailbox TAG [--limit N]` lists the messages a Tag sent and received,
 newest first, with a cursor for older pages. `read_session` on the Tag's inbox shows the same
 history as turns.
 
@@ -548,7 +547,7 @@ A Team's Workstream is its shared record of posts. Every member can read it, and
 - Posts carry information only. A post cannot approve, assign, accept or close anything.
 - `read_workstream` returns the newest posts, or the posts after `afterSequence`, oldest first.
   Each post has its sequence in the Team's Workstream, from 1.
-- `supertag list workstream-post --team TEAM [--after-sequence N] [--limit N]` reads the same
+- `supertag get workstream-post --team TEAM [--after-sequence N] [--limit N]` reads the same
   record as an operator.
 
 ## Teams
@@ -556,14 +555,14 @@ A Team's Workstream is its shared record of posts. Every member can read it, and
 A Team is a flat list of member Tags with an optional concurrency limit. It stands alone: any
 number of Objectives may name one Team.
 
-- `supertag create team NAME --member TAG [--member TAG ...] [--max-concurrency N]` creates one.
+- `supertag team create NAME --member TAG [--member TAG ...] [--max-concurrency N]` creates one.
   An Objective manifest's `team:` declares either an existing Team's name or the Objective's own
   Team as `{name?, members, maxConcurrency?}`; see
   [Declared Objectives](resource-model.md#declared-objectives).
 - Every member must be an active Tag, the name must be unused, and a Team holds at most 100
   members.
-- `supertag update team NAME [--member TAG ...] [--max-concurrency N] [--name TEXT] [--revision N]`
-  replaces the fields it names and requires the current revision. `supertag list team` and
+- `supertag team update NAME [--member TAG ...] [--max-concurrency N] [--name TEXT] [--revision N]`
+  replaces the fields it names and requires the current revision. `supertag get team` and
   `supertag get team NAME` read them.
 - `supertag delete team NAME` deletes the Team and its Workstream posts. It is refused with 409
   while an Objective that is not completed or cancelled names the Team.
@@ -641,7 +640,7 @@ the Session waits on nothing. After a permission change, start a new work Sessio
 
 | Decider | Interface |
 | --- | --- |
-| Operator | `supertag list inbox --kind approval` or `supertag list approval`, then `supertag approve request ID` or `supertag deny request ID --reason TEXT` |
+| Operator | `supertag get inbox-item --kind approval` or `supertag get approval`, then `supertag approval approve ID` or `supertag approval deny ID --reason TEXT` |
 | Named Tag approver | A Permission Set names it in `approvers`; see [IAM approval](iam.md#approval) |
 
 - An approval chooses `once` (the default) or `objective` scope, optionally until `validUntil`.
@@ -649,14 +648,14 @@ the Session waits on nothing. After a permission change, start a new work Sessio
 - A denial requires a reason.
 - A Tag cannot decide a request its own Task made.
 - Pending requests are batched into one notice per Objective to its notification destination,
-  when one is configured. The [operator channel](../operations/control-plane.md#operator-channel), when
+  when one is configured. The [operator channel](../operations/control-plane.md#operator-notifications), when
   configured, also receives requests that no Objective thread carries.
 
 Task events record each step with the Permission Sets and the decider: `approval.requested`,
 `approval.granted-by-scope`, `approval.approved`, `approval.denied` and `approval.consumed`.
 
 The operator API mirrors the CLI with `InboxService.ListApprovals`, `Approve` and `Deny`; see
-[Inbox](operator-api/inbox.md). Scoped operator credentials need the `list_approvals` and
+[Inbox](control-plane-api.md#operator-services). Scoped operator credentials need the `list_approvals` and
 `decide_approval` actions.
 
 ## Review findings
@@ -747,16 +746,16 @@ turns; it does not check Worker capacity, profile compatibility or approvals.
 ### Access
 
 The overview requires the `read_objective` action plus access to the requested Objective. See
-[Objectives](operator-api/objective.md) in the API reference.
+[Objectives](control-plane-api.md#operator-services) in the API reference.
 
 ## Operator inbox
 
-`supertag list inbox` is a redacted projection over pending stored state. It creates no resource
+`supertag get inbox-item` is a redacted projection over pending stored state. It creates no resource
 and grants no authority: the operator acts through the same commands as always. Filter it by
-Objective or kind. `supertag watch inbox` follows the
-[event stream](operator-api/event.md#watch), rereads the inbox whenever an item changes, and
+Objective or kind. `supertag get inbox-item` follows the
+[event stream](control-plane-api.md#operator-services), rereads the inbox whenever an item changes, and
 prints each new item occurrence once. `--output json` prints `InboxService` messages as proto JSON;
-see [Inbox](operator-api/inbox.md).
+see [Inbox](control-plane-api.md#operator-services).
 
 | Kind | Appears when |
 | --- | --- |
@@ -769,11 +768,11 @@ see [Inbox](operator-api/inbox.md).
 
 The CLI spells a kind with hyphens; the API names it `INBOX_ITEM_KIND_APPROVAL` and so on.
 
-- `supertag list inbox` shows the decisions an operator can make. `--all` adds items only a Tag
+- `supertag get inbox-item` shows the decisions an operator can make. `--all` adds items only a Tag
   can act on. Text output names both decision makers.
 - Items can carry `commands`, which list the CLI actions available for the item. To answer a
   `question` item, use **Waiting on you** in the terminal UI or call
-  [`InboxService.AnswerQuestion`](operator-api/inbox.md#answerquestion).
+  [`InboxService.AnswerQuestion`](control-plane-api.md#operator-services).
 - Item identity for watching and notification is the item's `occurrence`: its `key`, plus the
   Task's attempt count when the item cites a Task. The same decision after another Task Attempt is
   a new occurrence.
@@ -788,7 +787,7 @@ The CLI spells a kind with hyphens; the API names it `INBOX_ITEM_KIND_APPROVAL` 
   raises the budget or moves the deadline, or when the Objective finishes.
 - An `mcp-login` item's key is `mcp_login:TASK_ID:SERVER`, and its commands are
   `supertag mcp login SERVER`, then `supertag describe objective ID`. See
-  [MCP OAuth login](supertag-yaml.md#mcp-oauth-login).
+  [MCP OAuth login](../surfaces/worker-tools.md#write-the-hosts-catalog).
 
 The inbox remains the stored route in a headless deployment; external delivery is optional. A
 missing or unusable destination never removes an item. `supertag test notification [--objective
@@ -819,8 +818,8 @@ in [Operator notifications](../operations/control-plane.md#operator-notification
 `supertag describe task TASK_ID` reports the latest Task Attempt's host receipt when available.
 `unavailable` means the Control Plane cannot currently obtain one; it does not establish that
 execution failed. For the field meanings, see
-[`InspectTaskExecution`](operator-api/work.md#inspecttaskexecution) and
-[Execution evidence](control-plane-api.md#execution-evidence).
+[`InspectTaskExecution`](control-plane-api.md#operator-services) and
+[Execution evidence](control-plane-api.md#operator-services).
 General recovery rules are in [Scheduling and interrupted
 execution](scheduling-and-recovery.md).
 

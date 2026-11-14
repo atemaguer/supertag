@@ -59,11 +59,11 @@ Keep the default lead Tag name `lead`. Replace `YOUR_WORKSPACE` below with the W
 printed by setup; a **Workspace** connects a repository to SuperTag.
 
 ```sh
-supertag create objective first-reply --owner lead --workspace YOUR_WORKSPACE \
-  --budget-minor 1000 --budget-currency USD \
-  --outcome 'Create SUPERTAG-HELLO.md containing exactly: Hello from SuperTag. Done when the file exists and you have checked its contents. Do this yourself without delegating; change no other files.'
-supertag watch objective first-reply
-supertag describe objective first-reply
+supertag objective create first-reply \
+  'Create SUPERTAG-HELLO.md containing exactly: Hello from SuperTag. Done when the file exists and you have checked its contents. Do this yourself without delegating; change no other files.' \
+  --owner lead --budget-minor 1000 --currency USD --state-directory ~/.supertag
+supertag watch objective first-reply --state-directory ~/.supertag
+supertag describe objective first-reply --state-directory ~/.supertag
 ```
 
 Work arrives on a separate git branch for you to review. Use the branch and review commands printed

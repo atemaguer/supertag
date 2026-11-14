@@ -1,662 +1,216 @@
 # Direct work with the CLI
 
-Run SuperTag end to end on one computer. This page uses these terms:
+The `supertag` command sets up this machine, runs SuperTag's services, and directs the work of
+your Tags, the persistent AI actors with their own responsibilities and permissions. This page is
+a tour by task. Every command and flag is listed in the [CLI reference](../reference/cli.md).
 
-- A **Session** is one Tag's thread of work. A **Task** is one turn of a Session, and a
-  **Task Attempt** is one execution or retry of a Task.
-- The **Control Plane** stores and schedules the work.
-- A **Worker Host** is an enrolled computer or sandbox that can execute it.
-- A **Worklet** connects that host to the Control Plane and advertises a **Worker Profile**, which
-  tells the scheduler what kind of work its **Worker**, the code that completes a Task, can run.
-- A **harness** connects the Worker to Codex, Claude Code, Cursor, or OpenCode.
-- A **Tag** is a persistent AI actor with its own responsibilities and permissions.
-- An **Objective** is an outcome a Tag owns until it is met.
+Terms used here: the **Control Plane** stores your organization and schedules its work. A
+**Worker Host** is a machine or sandbox that runs that work. A **Task** is one turn of a Tag's
+work in a **Session**, one thread of work. An **Objective** is an outcome a Tag owns until it is
+met. See the [glossary](../reference/glossary.md) for other terms.
 
-The [quickstart](../../README.md#get-started) gets you talking to a Tag in the terminal UI.
-This walkthrough uses commands to create an Objective, follow it with `supertag watch objective`,
-and find its result with `supertag describe objective`. Tags work in Teams. Together, your Teams
-of Tags make up an
-**autonomous organization**: Teams may pursue different Objectives but share one Control Plane, its
-rules, and its record of the work. The rest of this page then does each step by hand: configure an
-organization, connect execution capacity, run an Objective, and download its result. Use it to learn
-the CLI before you run Worker Hosts elsewhere.
+## How commands find the Control Plane
 
-See the [glossary](../reference/glossary.md) for other terms. Commands follow this shape:
+Commands that read or change your organization talk to one Control Plane. Name it on each
+command:
 
-```text
-supertag ACTION RESOURCE [PRIMARY_TARGET] [flags]
-```
+| You pass | Commands use |
+| --- | --- |
+| `--state-directory ~/.supertag` | The Control Plane that `supertag up` runs on this machine, with this machine's local operator credential |
+| `--control-plane NAME` | A Control Plane saved under `NAME` by `supertag connect`, the terminal UI, or the desktop app |
+| `--control-plane https://HOST` or `wss://HOST` | That Control Plane, with the Operator Token in `SUPERTAG_OPERATOR_TOKEN` |
 
-For example, `supertag list task` returns a JSON collection, `supertag get task TASK_ID` returns
-one Task as JSON, and `supertag describe task TASK_ID` presents the same stored evidence for a
-person to read. `get` remains JSON even when a readable `describe` view exists.
+`--control-plane` may also come before the command, as in `supertag --control-plane team get tag`.
+The examples on this page use your local services. Against a shared Control Plane, replace
+`--state-directory ~/.supertag` with `--control-plane NAME`.
 
-Text views replace terminal controls and invisible fillers in reported values with spaces
-and limit stacked combining marks. Escape payload text remains visible. For example, a Worker
-Host name cannot clear the screen or add a fake output line.
-This applies to descriptions, lists, status, warnings, errors, and the inbox. Default JSON
-views on a terminal also filter reported values. Explicit `--output json` and piped `get` or
-`watch` output retain the original values for scripts.
-
-Commands that create or change something print a one-line summary for a person, such as
-`objective/cli-demo created` or `task/9f1c0b2e cancelled.`, with warnings on standard error.
-Add `--output json` to print the full record instead, for scripts. `get`, `list`, and `events`
-always print JSON.
-
-## Send messages from the CLI
-
-Use the [terminal UI](../guides/talk-to-a-tag.md) for conversations you steer yourself. A script
-can send a message to a Tag or follow up on an Objective through the same Control Plane.
-
-```sh
-printf '%s\n' 'Check whether the reconciliation suite passed.' |
-  supertag message tag lead - --session billing --output json
-supertag message objective usage-billing 'Use the staging records for the next check.' --output json
-```
-
-Pass `-` to read a message from standard input. `--session` selects a Tag conversation and
-defaults to `default`. Messages use the configured operator identity.
-
-`message tag --output json` returns the reply and reports from any work Sessions it started.
-It can return a report that asks for a decision. `message objective --output json` returns the
-acknowledgement and its Task ID as soon as the Control Plane accepts the message. With text
-output, the CLI follows replies it can read. For other Objectives, the owner replies in the
-Objective's home thread. Ctrl-C stops following while the Tag keeps working.
-
-## See what your organization is doing
-
-`supertag status` answers "what is my organization doing right now" on one screen. It takes no
-arguments. Run it when you come back to a running organization, before you read the details of
-any one Objective.
-
-```sh
-supertag status
-supertag status --output json
-```
-
-```text
-Worker Hosts
-  laptop  ready  2/3 Task Attempts running (claude-code 0/1, codex 2/2)
-
-Tags
-  builder  busy: 4c81d0a7-5f3e-4a62-9c55-1b2d8e6a0f31
-    4c81d0a7-5f3e-4a62-9c55-1b2d8e6a0f31  running `npm test` for 24m
-  lead  idle
-
-Objectives not finished
-  operator-reads  working; owner lead; $13.80 of $30.00; deadline in 1h 9m; 2 need you
-
-Operator inbox: 2 items; see supertag list inbox
-```
-
-It shows:
-
-- Each Worker Host's connection, and its running Task Attempts against capacity for each harness.
-- Each Tag as idle, or busy with the Tasks it is running.
-- The shell command each running Task is running, and for how long, when its harness reports
-  commands. Codex and Claude Code report them. A long test run shows here, so you can tell it
-  from a hang.
-- Each Objective that is not completed or cancelled: its status, owner, spend against budget,
-  time to its deadline, and how many inbox items wait for you. An unpriced Task Attempt shows
-  its token count and a warning that the monetary budget cannot be enforced for that usage.
-- How many items wait in your operator inbox. `supertag list inbox` lists them.
-
-## View organization spend
-
-`supertag spend` summarizes cost and token usage across Task Attempts. Codex records usage from completed turns in both execution modes. Its cost is estimated only when the provider publishes a model price. Spend and objective views label estimates, show unpriced models with their token counts, and monetary Objective budgets include only priced costs. For
-example, use it to see how much an Objective's work has cost so far. It groups by Objective by
-default; `--by tag` groups by the executing Tag and `--by day` groups by UTC calendar day.
-Each unknown cost says why. `no price for gpt-x in 2; tokens recorded` means the Harness reported
-tokens for a model missing from the Codex Harness price table, which ships with `supertag-ai`;
-upgrade `supertag-ai` to get new prices. `no cost reported in 1` means the Task
-Attempt reported no cost.
-
-```sh
-supertag spend
-supertag spend --by day --since 2026-10-01T00:00:00Z --output json
-```
-
-`--since` selects Task Attempts started at or after an ISO timestamp with a timezone. Text output
-shows cost in major units with the currency, such as `$13.80`; `--output json` keeps minor units
-(`1380`). Separate currencies stay separate. Unreported cost and tokens
-appear as unknown; a partial group includes the reported sum and an unknown Task Attempt count.
-Objective rows show the Objective's budget, or `none` when it has no budget. A budget without a
-currency is an allocation limit rather than a provider cost limit.
-
-## Before you start
-
-- SuperTag installed, with `supertag --version` succeeding.
-- A harness ready on this Worker Host: for example, Codex or Claude Code installed and signed in,
-  or Cursor configured with `CURSOR_API_KEY`.
-- A workspace that the harness may inspect.
-- Two terminal windows.
-
-Provider credentials stay in the provider's normal local store. Worker Host credentials are kept
-under `~/.supertag`; neither belongs in a command-line flag.
+`supertag status`, `supertag tag update`, and `supertag setup surface` default to the local
+services when you name neither.
 
 ## Start in a repository
 
-The shortest path is one command. From a git repository, run:
+Run `supertag init` from a Git repository with at least one commit:
 
 ```sh
 cd ~/code/app
 supertag init
 ```
 
-`init` checks `claude`, `codex`, and `opencode` on your PATH. It detects Cursor when
-`CURSOR_API_KEY` is set, `cursor-agent` is on your PATH, or an `agent` binary identifies itself as Cursor.
-Cursor Tasks require the key even if a CLI is installed.
-With none available, it stops before
-asking or changing anything and explains how to install one. Then it asks a few questions, with
-each default in brackets; press Enter to accept it, or pass `--yes` to accept them all:
+`init` finds the harnesses on your `PATH`, checks each one's sign-in with the credentials a
+Worker Host will have, and asks for a Control Plane port, a harness, and the Tag's name. It writes
+`~/.supertag/supertag.yaml` with two services and starts them in the background:
 
-1. The local **Control Plane**: its port (`3434`) and database (SQLite in `~/.supertag/`, or a
-   `postgresql://` URL).
-2. This computer as a **Worker Host**: the harnesses it serves, noting the ones that show a local
-   sign-in, and the directory to work in (this repository). OpenCode needs a model, so choosing it
-   asks for one as `provider/model`, and `--yes` leaves it out unless it is the only harness, in
-   which case `init` stops and asks you to run it in a terminal. The directory becomes a
-   **Workspace**, a named repository that Tasks work in, named after it, such as `app`. Its origin
-   URL is the source and its default branch the base. `init` also asks how finished work comes
-   back: as a branch (the default), a patch, or a draft pull request for a GitHub repository.
-   When you choose Claude Code or OpenCode, `init` explains that they run commands as you,
-   without a sandbox, so their Tags should get only trusted work. It asks whether to allow that,
-   defaulting to yes, and writes the answer as `allow-unsandboxed-commands`. `--yes` allows it and
-   prints how to undo it. See
-   [Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
-   Cursor uses its SDK and requires its own authentication; its app login does not suffice.
-   See [Cursor setup](requirements.md#cursor-setup-and-limits).
-3. The first **Tag**, named `lead` by default, and what it may do: read only, edit files and run
-   commands (the default), or also open pull requests. Pull requests need a GitHub collaboration surface, which you can add later.
+- a `control-plane` service, which also creates a `local-tools` Permission Set, a `Lead` Role,
+  and the `lead` Tag; and
+- a `host` service named after this machine, which maps the repository as a Workspace.
 
-`init` then writes `~/.supertag/supertag.yaml` with two services: `control-plane`, the local Control
-Plane, and a host service named after this computer, such as `studio`. It brings up the Control
-Plane with `supertag up` and creates the Workspace, the **Permission Set** `local-tools` (the
-actions the Tag may perform), the **Role** `Lead` (its enduring responsibility), and the Tag through
-the Control Plane's API. Then it brings up the host service, binds it to the Tag, checks that each
-harness Worker registered, and shows how to open the terminal UI. Run `supertag` from the same
-repository and select `lead` to start a conversation. See [Talk to a Tag](../guides/talk-to-a-tag.md).
-
-Scripts can create an Objective with the CLI.
-
-```sh
-supertag create objective --owner lead --workspace app \
-  --outcome 'The README explains local setup. Done when a new contributor can follow it.'
-```
-
-Creating the Objective also starts its conversation, with a first Task of `lead`. The command
-prints the Objective's ID and the next commands:
-
-```sh
-supertag watch objective ID      # one line per event, until the Objective closes
-supertag describe objective ID   # status, what was delivered, and what needs you
-```
-
-When a Task delivers a branch, `describe objective` shows where it is in your repository and the
-`git diff` and `git switch` commands to review it.
-
-`init` writes nothing in the repository. All state lives in `~/.supertag/`, or the directory
-`SUPERTAG_STATE_DIR` names; see [supertag.yaml and local state](../reference/supertag-yaml.md).
-
-Rerun `init` whenever you like. It shows the current setup and offers to keep it, change it, or
-exit. In another repository, it offers to add that repository as another Workspace of the same host
-service; there is one local Control Plane per computer. A rerun never deletes a resource or undoes a
-change you made with manifests. Without a terminal, such as in a script, pass `--yes`.
+`supertag init --yes` accepts every default. See [supertag.yaml and local state](../reference/supertag-yaml.md)
+for the file.
 
 ### Run and stop SuperTag
 
-`supertag up` brings up the services in `supertag.yaml`, in the background, and returns:
+| Command | Does |
+| --- | --- |
+| `supertag up` | Starts the services in `supertag.yaml` in the background and returns when they are ready |
+| `supertag up --foreground` | Runs them in this terminal, with their logs, until you interrupt it |
+| `supertag down` | Drains this machine's Worker Hosts, waits for running Task Attempts, and stops every service |
+| `supertag down --force` | Stops without waiting for running Task Attempts |
+| `supertag ps` | Lists this machine's services and their state |
+| `supertag logs -f` | Follows the service logs; name `control-plane`, `gateway`, or a host to narrow them |
+| `supertag config` | Prints the resolved `supertag.yaml`, or every problem in it |
+| `supertag status` | Shows Worker Hosts, Tags, unfinished Objectives, and the operator inbox |
+| `supertag version` | Prints this CLI's version and the version of the running services |
+
+Run `supertag up` again after editing `supertag.yaml`. It restarts only the services that
+changed and waits for their running Task Attempts unless you pass `--force`.
+
+### Run as a service
+
+A service with `restart: unless-stopped` makes `supertag up` install a per-user service unit
+(launchd on macOS, systemd on Linux) that starts SuperTag again after a failure or a login.
+`supertag down --remove-services` also uninstalls the unit.
+
+## Talk to a Tag
+
+The terminal UI is the place for conversations. Plain `supertag` opens it for your local
+services; `supertag tui --control-plane NAME` opens it for a saved Control Plane. See
+[Talk to a Tag from your terminal](../guides/talk-to-a-tag.md).
+
+## Send messages from the CLI
+
+`task submit` sends one turn of work to a Tag. A new Session name starts a new conversation;
+reusing it continues one:
 
 ```sh
-supertag up              # every service: the Control Plane first, then hosts
-supertag ps              # each service's state, address, and process
-supertag logs -f         # every log, each line prefixed with its service
-supertag down            # stops hosts first, then the Control Plane
+supertag task submit --tag lead --session first-look \
+  "Read this repository and tell me what you would improve first." \
+  --state-directory ~/.supertag
 ```
 
-`up` starts services in `depends_on` order and waits for each to become healthy. The Control Plane
-is healthy when it answers `/healthz`. A host is healthy when it is connected and every harness
-Worker registered. Name services to bring up only those and what they depend on, such as
-`supertag up studio`. `supertag logs studio` and `supertag down studio` take names the same way.
-
-Run `supertag up` again after you edit the file. It leaves alone a service whose settings did not
-change and restarts one whose settings did. A host whose only change is `concurrency` keeps
-running and takes the new limit at once; see
-[Changing concurrency](../reference/supertag-yaml.md#changing-concurrency).
-`supertag up --dry-run` prints what it would start, restart, drain, change, or leave, and which
-settings changed. `supertag config` prints the resolved file,
-or every problem in it. See [supertag.yaml and local state](../reference/supertag-yaml.md).
-
-A host restart never cuts off running work. SuperTag first drains the Worker Host, so it takes no
-new Task Attempts, and waits for running ones to finish. The wait lasts at most the longest
-remaining Task Attempt time limit plus 30 seconds, and never more than 30 minutes. With the default
-60-minute limit, that is up to 30 minutes; an idle host restarts at once. Progress prints every 10
-seconds. `--force` or Ctrl-C stops waiting, and interrupted Task Attempts follow the usual
-[recovery rules](../reference/scheduling-and-recovery.md#leases-and-unknown-outcomes).
-`supertag down` drains each Worker Host and lists the Task and Task Attempt IDs it waits for.
-It waits up to five minutes. If work remains, it reports those IDs, exits non-zero, and leaves
-the host and subsequent services running. Run `supertag down SERVICE --force` to stop now, or
-run `supertag down` again after the work finishes. A Control Plane restart does not drain;
-running Task Attempts may see a brief disconnect, and hosts reconnect.
-
-`supertag down` without names stops every service on this computer, including services the file no
-longer names.
-
-To retire a host service, delete it from `supertag.yaml`. Until you remove it, `supertag up` and
-`supertag ps` list it as no longer in the file. Then name it, as in `supertag down studio`:
-
-1. `down` drains and stops the host, if it runs.
-2. It removes the host's service unit.
-3. It unbinds the host's Worker Host from its Tags. This step needs operator access to the host's
-   Control Plane, which the local Control Plane always gives. On a teammate's Control Plane, an
-   operator unbinds it.
-4. It revokes the Worker Host with the host's own credential.
-5. It removes the host's state, including its logs, from `~/.supertag/hosts/`.
-
-`down` removes the host's state only after it unbinds and revokes the Worker Host. If it cannot,
-it keeps the state, including the host's credential, and says why. This happens when the Control
-Plane cannot be reached, you lack operator access to it, or the credential cannot be read. Fix the
-cause and run the same `supertag down` again.
-
-### Run in the foreground or as a service
-
-`supertag up --foreground` runs services in the terminal until Ctrl-C. With several services, each
-log line starts with its service name, such as `control-plane |`. Use it to debug startup.
-
-`restart: unless-stopped` on a service keeps it running after restarts:
-
-```yaml
-services:
-  control-plane:
-    type: control-plane
-    restart: unless-stopped
-  studio:
-    type: host
-    harnesses: [claude-code]
-    allow-unsandboxed-commands: [claude-code]
-    workspaces: { app: ~/code/app }
-    restart: unless-stopped
-```
-
-The next `supertag up` installs a per-user service unit for each such service. The unit starts it
-when you log in and restarts it if it fails. On macOS a unit is a LaunchAgent, such as
-`~/Library/LaunchAgents/ai.supertag.control-plane.plist`. On Linux it is a systemd user unit,
-such as `~/.config/systemd/user/supertag-control-plane.service`; to keep units
-running while you are logged out, run `loginctl enable-linger $USER` once. `ps`, `logs`, and `down`
-work with units: `down` stops them until the next login, and `supertag down --remove-services`
-uninstalls them. Units are not supported on Windows yet.
-
-A unit does not inherit your shell's environment. `supertag up` copies `PATH`, `HOME`, and the
-`SUPERTAG_*` overrides that hold no secret into the unit. Put secrets and other variables a service
-needs in `~/.supertag/.env`. A value that only your shell holds never restarts a unit's service;
-`up` warns and names it instead. See
-[Environment under a unit](../reference/supertag-yaml.md#environment-under-a-unit).
-
-### Which Control Plane commands use
-
-Commands such as `supertag create objective` use the local Control Plane with this computer's local
-operator credential, so the Objective command above needs no setup. `--control-plane NAME`,
-`SUPERTAG_CONTROL_PLANE`, and a saved connection from `supertag connect control-plane URL` choose
-another Control Plane, and `SUPERTAG_OPERATOR_TOKEN` replaces the credential.
-
-### See who changed what
-
-The Control Plane records each change an operator makes, such as an apply, a delete, an approval,
-or an Objective message, with who made it and whether it worked. List the latest changes:
+It prints the Task as JSON, including its `task_id`. Follow and steer it:
 
 ```sh
-supertag audit
-supertag audit --actor token:laptop-2 --since 2026-10-01T00:00:00Z --output json
+supertag watch task --state-directory ~/.supertag
+supertag task events TASK_ID --state-directory ~/.supertag
+supertag task input TASK_ID "Focus on the payment module." --state-directory ~/.supertag
+supertag task cancel TASK_ID --state-directory ~/.supertag
 ```
 
-See [Audit log](control-plane.md#audit-log).
+`task input` delivers a message to a running Task, or queues it as the Session's next turn when
+the Task cannot take it. `describe task TASK_ID` explains a Task that is waiting, such as one
+with no Worker Host that may run its Tag.
 
-### Join a teammate's Control Plane
+## See what your organization is doing
 
-For a Control Plane your team shares, an operator gives you an **Auth Key**, a secret that lets a
-computer join as a Worker Host. Save it in a file, and add a host service that names the shared
-Control Plane to `~/.supertag/supertag.yaml`:
-
-```yaml
-services:
-  laptop:
-    type: host
-    control-plane: https://supertag.example.com
-    auth-key: laptop-key
-    harnesses: [claude-code]
-    workspaces: { app: ~/code/app }
-secrets:
-  laptop-key: { file: ~/laptop.key }
-```
-
-Then run `supertag up`. The host joins with the key, stores its own credential in
-`~/.supertag/hosts/laptop/`, and runs in the background. Later runs use that credential and ignore
-the key. Resources on the shared Control Plane change only when someone with an **Operator Token**,
-a named credential that can manage the Control Plane, runs `supertag apply -f` with manifests. See
-[Add teammates](../guides/self-hosting.md#add-teammates).
-
-The rest of this walkthrough does each step by hand with `supertag start control-plane` and
-`supertag connect worklet`. It shows what `init` does, and it is how deployments and scripts run
-SuperTag. Neither command reads `supertag.yaml`. On a computer with an `init` setup, run
-`supertag down` first, so the walkthrough's Control Plane can use port 3434.
-
-## 1. Start the Control Plane
-
-In terminal 1, prepare the database and start a local Control Plane with a gRPC listener for the
-Worklet:
+`get KIND` lists a kind of resource as JSON, and `get KIND ID` reads one. `describe KIND ID`
+prints one in readable text:
 
 ```sh
-supertag migrate database
-
-SUPERTAG_WORKLET_TRANSPORT=remote \
-SUPERTAG_WORKLET_GRPC_PORT=3435 \
-supertag start control-plane
+supertag get tag --state-directory ~/.supertag
+supertag describe objective flaky-tests --state-directory ~/.supertag
+supertag get host --state-directory ~/.supertag
+supertag watch objective flaky-tests --state-directory ~/.supertag
 ```
 
-Keep this process running. Its management API listens on `127.0.0.1:3434`; the Worklet listener in
-this example is `127.0.0.1:3435`. Loopback gRPC may use plaintext. A non-loopback gRPC listener
-requires the TLS certificate and key settings shown by `supertag start control-plane --help`.
+`watch` streams change notices and reconnects from its last resume token. `watch objective ID`
+follows one Objective as a timeline until it closes. `supertag metrics` prints counts of Tasks,
+usage, Worker Host capacity, and backlogs.
 
-In terminal 2, confirm that the CLI can reach the saved local Control Plane:
+## Organize Tags
+
+Create or change a Tag directly:
 
 ```sh
-supertag status control-plane
+supertag tag put reviewer --instructions "Review changes for correctness and tests." \
+  --allow files:read --harness claude-code --state-directory ~/.supertag
 ```
 
-## 2. Give a Tag a Role and allowed actions
-
-The Tag accepts the Task. Its Role describes an enduring responsibility, and a Permission Set lists
-the actions that work under that Role may perform. One file can hold all three manifests, separated
-by `---`.
-
-Save this as `~/.supertag/cli-demo/local-builder.yaml`, after `mkdir -p "$HOME/.supertag/cli-demo"`:
-
-```yaml
-apiVersion: supertag/v1
-kind: PermissionSet
-metadata:
-  name: local-tools
-spec:
-  permissions:
-    - target: runtime
-      action: commands:execute
-    - target: runtime
-      action: files:write
----
-apiVersion: supertag/v1
-kind: Role
-metadata:
-  name: Local Builder
-spec:
-  purpose: Inspect a local project and produce requested files.
-  instructions: Use workspace evidence and report uncertainty clearly.
-  contextSets: []
-  permissionSets:
-    - local-tools
----
-apiVersion: supertag/v1
-kind: Tag
-metadata:
-  name: local-builder
-spec:
-  roles:
-    - Local Builder
-```
-
-Apply it. SuperTag checks every manifest first, then applies the Permission Set, the Role, and the
-Tag in dependency order, whatever their order in the file:
+For anything larger, keep your organization in manifest files and apply them. `diff` previews
+the change:
 
 ```sh
-supertag apply -f "$HOME/.supertag/cli-demo/local-builder.yaml"
-
-supertag describe tag local-builder
+supertag diff -f organization.yaml --state-directory ~/.supertag
+supertag apply -f organization.yaml --state-directory ~/.supertag
 ```
 
-The Tag has no Worker Host yet, so it cannot run Tasks. The next step adds one.
+See [Manage Control Plane resources](resources.md) for manifests and apply sets, and
+[Organize Tags into Teams](../guides/teams.md) for Teams.
 
-## 3. Create an Auth Key for this computer
-
-The host that joins with an Auth Key is bound to the key's Tags:
+## Give a Tag an Objective
 
 ```sh
-supertag create auth-key local-laptop --tag local-builder
+supertag objective create flaky-tests \
+  "The checkout tests pass ten runs in a row. Evidence: links to the CI runs." \
+  --owner lead --team core --deadline 2026-12-01T17:00:00Z \
+  --budget-minor 2000 --currency USD --state-directory ~/.supertag
+supertag watch objective flaky-tests --state-directory ~/.supertag
 ```
 
-The command prints a secret that starts with `stak_`, only once. The key joins one host and expires
-after one hour. Put the secret in an environment variable for the next step rather than in a
-command:
+The ID comes first and is yours to choose. See [Write an Objective](../guides/write-an-objective.md)
+and [Define and complete an Objective](../guides/objectives.md).
+
+## Answer what is waiting on you
 
 ```sh
-read -rs SUPERTAG_AUTH_KEY && export SUPERTAG_AUTH_KEY
+supertag get inbox-item --state-directory ~/.supertag
+supertag question answer TASK_ID "Use the staging database." --state-directory ~/.supertag
+supertag approval approve APPROVAL_ID --state-directory ~/.supertag
+supertag approval deny APPROVAL_ID --reason "Not before the release freeze." --state-directory ~/.supertag
+supertag objective review flaky-tests approve --state-directory ~/.supertag
 ```
 
-## 4. Connect a harness Worklet
+See [Respond to an Objective](../guides/objective-decisions.md).
 
-Still in terminal 2, choose the workspace the harness may use and start the Worklet in the
-background. The Worklet redeems the key, joins as Worker Host `local-laptop`, and stores the host's
-credential under `~/.supertag/worker-hosts/` with mode `0600`. The default connection keeps artifact
-copies locally but advertises no transfer endpoint. The catalog will show the holding Worker Host;
-downloading later needs a reachable transfer endpoint or a shared artifact **Volume**, a named
-storage location such as a bucket prefix. See
-[artifact transfer setup](../guides/workers.md#keep-artifacts-on-worker-hosts). For Codex:
+## Bring delivered work into your repository
+
+A Task that changes a Workspace delivers its commits. For a Workspace that `supertag.yaml` maps,
+`supertag up` imports each delivery into the repository as the branch `supertag/session/SESSION`,
+one branch per Session. Import a delivery yourself, or into another clone, with `fetch`:
 
 ```sh
-WORKSPACE="$(pwd)"
-
-supertag connect worklet \
-  --worklet-url http://127.0.0.1:3435 \
-  --transport grpc \
-  --worker-host local-laptop \
-  --harness codex \
-  --worker-profile local-codex \
-  --workspace "$WORKSPACE" \
-  > "$HOME/.supertag/cli-demo/worklet.log" 2>&1 &
-WORKLET_PID=$!
+supertag fetch TASK_ID --repository ~/code/app --state-directory ~/.supertag
+supertag task download TASK_ID --kind patch --output change.patch --state-directory ~/.supertag
 ```
 
-For Claude Code, replace the harness and profile lines with:
+See [Work in a repository with Workspaces](../guides/workspaces.md).
+
+## Spend and audit
 
 ```sh
-  --harness claude-code \
-  --worker-profile local-claude-code \
-  --allow-unsandboxed-commands \
+supertag spend --by tag --state-directory ~/.supertag
+supertag audit --since 2026-11-01 --state-directory ~/.supertag
 ```
 
-For Cursor, set `CURSOR_API_KEY` in the Worklet process environment and replace the harness and
-profile lines with `--harness cursor` and `--worker-profile local-cursor`. The bundled SDK runs
-Cursor; no Cursor CLI installation is required. Keep `--allow-unsandboxed-commands` for Tasks that
-may run commands: Cursor's sandbox policy is workspace-writable, so it is not an enforced boundary.
-See [Cursor setup](requirements.md#cursor-setup-and-limits).
+`spend` reports recorded spend by Objective, Tag, or day. `audit` lists operator changes, newest
+first, with who made them.
 
-Claude Code runs commands as you, without a sandbox, so it runs Tasks that may run commands only
-with `--allow-unsandboxed-commands`; see
-[Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
+## Join a teammate's Control Plane
 
-The public `--worklet-url` is the Worklet listener, which can differ from the saved management API
-address. HTTP and HTTPS Worklet URLs default to gRPC, but this example states the transport
-explicitly. The transport does not silently fall back to WebSocket. Joining uses the saved
-management API, because the gRPC listener does not serve it.
+Save a shared Control Plane under a name. `connect` reads one secret, from
+`SUPERTAG_OPERATOR_TOKEN` or a masked prompt:
 
-Later runs of the same command use the stored credential and ignore any key. On a computer that
-already holds operator credentials for this Control Plane, as here, `connect worklet` could also
-enroll the host without a key; an operator would then bind it with `supertag update tag`.
-
-For Codex Tasks that request a reported-token limit, connect with
-`--codex-execution-mode app-server`; see [Limit reported tokens](../guides/workers.md#optional-limit-reported-tokens).
-
-Check the Control Plane's stored view:
+- an **Operator Token** an administrator issued you with `supertag operator-token create`; or
+- a client **Auth Key** (`stak_...`) from `supertag auth-key create NAME --role client`, which
+  enrolls this device as `client:NAME` and saves only the device's own credential.
 
 ```sh
-supertag describe worker-host local-laptop
+supertag connect https://supertag.example.com --name team
+supertag get objective --control-plane team
+supertag tui --control-plane team
 ```
 
-Wait until it reports the expected Worklet and Worker Profile. This view uses the last stored
-heartbeat and does not probe the process on demand. If the host does not become ready, inspect
-`~/.supertag/cli-demo/worklet.log`.
+The terminal UI and the desktop app read the same saved names. Add `--server-ca-file` when the
+Control Plane's certificate comes from a private CA. See
+[Manage a remote Control Plane](control-plane.md#manage-a-remote-control-plane).
 
-The background process keeps the walkthrough to two terminals. Use a service supervisor for an
-always-on Worker Host.
+## Output and errors
 
-## 5. Create a Team and an Objective
-
-A **Team** is a flat list of member Tags. An **Objective** states the outcome and criteria for
-success and names one Team; its owner may start a Session of any member. The Objective's runtime
-actions are an upper bound for every Task under it. They default to the owner's, so this Objective
-allows the same two actions as the Role.
-
-```sh
-supertag create team cli-demo-team --member local-builder
-
-supertag create objective cli-demo \
-  --outcome "Write a short plain-text summary of what this project does to outputs/report.txt, using only evidence from files in this workspace. Done when the file exists and cites that evidence." \
-  --owner local-builder \
-  --team cli-demo-team
-```
-
-With no `--workspace`, the work uses the Workspace the connected Worker Host declares.
-
-Creating the Objective starts its conversation at once:
-
-```text
-objective/cli-demo created
-Started local-builder with Task 9f1c0b2e-6a44-4d0d-9f1b-2c7a5d3e8b10.
-Follow it: supertag watch objective cli-demo
-See results: supertag describe objective cli-demo
-```
-
-## 6. Follow the work
-
-`supertag watch objective cli-demo` prints one line per event until the Objective closes. Each
-line names the Session and its Task. `supertag describe objective cli-demo` lists the same
-Sessions with their Task IDs, so copy one into `TASK_ID`:
-
-```sh
-supertag describe objective cli-demo
-TASK_ID="PASTE_TASK_ID_HERE"
-```
-
-Inspect the current state, durable events, or subsequent resource changes:
-
-```sh
-supertag describe task "$TASK_ID"
-supertag events task "$TASK_ID"
-supertag watch task "$TASK_ID"
-```
-
-`watch` prints JSON whenever the stored resource version changes and continues until you press
-Control-C. `supertag get task "$TASK_ID"` always returns the current Task as JSON.
-
-A turn ends done or waiting. SuperTag starts the next turn when a report, an answer, or an
-approval decision arrives. If a Worklet is interrupted or killed mid-Task,
-see [Scheduling and interrupted execution](../reference/scheduling-and-recovery.md#leases-and-unknown-outcomes).
-
-Rules:
-
-- There is no `resume task` command. `resume worker-host` only returns a deliberately drained
-  host to scheduling.
-- Answer a question under **Waiting on you** in the terminal UI. To redirect the work, select
-  `cli-demo` under **Objectives**, press `m`, type your direction, and press Enter.
-
-## 7. Inspect continuity and the artifact
-
-A **Session** groups related Tasks for the Tag. `describe task` prints the Session ID. Use it to
-inspect the stored continuity record:
-
-```sh
-supertag describe session SESSION_ID
-supertag get session SESSION_ID
-```
-
-The readable view reports whether a resumable native archive and native Codex or Claude Code
-conversation ID were recorded. SuperTag supplies that state automatically to a later compatible
-Task. There is no manual Session resume command, and native Session state does not preserve
-workspace files.
-
-After a successful Task Attempt captures `outputs/report.txt`, list its artifact metadata:
-
-```sh
-supertag list artifact --task "$TASK_ID" --limit 20
-supertag get artifact ARTIFACT_ID
-supertag describe task "$TASK_ID"
-```
-
-To download, first configure the Worklet with a transfer endpoint reachable from your machine,
-or an artifact Volume your machine can read. Follow the
-[Worker setup guide](../guides/workers.md#keep-artifacts-on-worker-hosts) before running the Task.
-Operator downloads do not use loopback endpoints: the catalog cannot establish that your machine
-is the serving host. Use a reachable HTTPS endpoint or your own Volume credential mapping.
-
-With that storage setup, download the saved file:
-
-```sh
-supertag download artifact ARTIFACT_ID \
-  --path outputs/report.txt \
-  --out "$HOME/.supertag/cli-demo/report.txt"
-```
-
-The Control Plane keeps the artifact catalog, never the bytes: each copy stays on the Worker Host
-that stores it. `list`, `get`, and `describe task` show each recorded holder, including disconnected
-hosts. A recorded holder is not a promise that its bytes are reachable now. With the default
-connection above, `download` reports the holding host and points to `supertag describe task`.
-A consuming Task on another host likewise needs a reachable endpoint or shared Volume.
-
-## 8. Stop the local processes
-
-Stop the background Worklet from terminal 2:
-
-```sh
-kill "$WORKLET_PID"
-```
-
-Then press Control-C in terminal 1 to stop the Control Plane. The durable organization, Tasks,
-events, and Session metadata remain under `~/.supertag` for the next run. Artifact bytes remain
-in the producing Worker Host's state directory, or on its configured artifact Volume. Copies held
-only on ephemeral storage are lost when that storage disappears.
-
-## Check that it worked
-
-If you configured downloads, the downloaded report summarizes your workspace:
-
-```sh
-cat "$HOME/.supertag/cli-demo/report.txt"
-```
-
-`supertag describe task "$TASK_ID"` shows the Task as completed, and
-`supertag list artifact --task "$TASK_ID"` lists `outputs/report.txt`.
-
-## If something goes wrong
-
-- **The Worker Host never reports the expected Worklet.** Read
-  `~/.supertag/cli-demo/worklet.log`, then work through
-  [Troubleshoot the first reply](../guides/troubleshooting.md#4-separate-collaboration-surface-testing-from-worker-testing).
-- **The Task stays pending.** No compatible Worker Host is ready; see
-  [Inspect the Task](../guides/troubleshooting.md#5-inspect-the-task) and
-  [Worker Host selection](../reference/scheduling-and-recovery.md#worker-host-selection).
-- **The Task waits for approval.** A Permission Set of the Tag marks one of its runtime actions
-  `approval: required`. List the request and approve it:
-
-  ```sh
-  supertag list approval --objective cli-demo
-  supertag approve request REQUEST_ID
-  ```
-
-  `--scope objective` approves every matching action in the Objective. Deny with
-  `supertag deny request REQUEST_ID --reason TEXT`. See [IAM approval](../reference/iam.md#approval).
-- **A Task shows as uncertain.** Its Task Attempt may have executed, so SuperTag won't run it again,
-  and it holds a Worker slot. `supertag ps`, `describe task`, and the inbox show the recover command.
-  Follow [A Task is uncertain](../guides/troubleshooting.md#a-task-is-uncertain).
-- **The host stays at capacity after you killed the Worklet.** Follow
-  [A Worker Host stays at capacity after a forced kill](../guides/troubleshooting.md#a-worker-host-stays-at-capacity-after-a-forced-kill).
-- **`download artifact` can reach no copy.** The Control Plane stores no artifact bytes, so the
-  command reads a Volume that holds a copy, using this machine's own `volume-credentials` in
-  supertag.yaml, or fetches from the Worker Host that serves it. When neither works, it names the
-  Worker Hosts and Volumes that hold the file. Map that Volume's credential on this machine, or
-  download from a machine that can reach the serving host. See
-  [artifacts](../reference/artifacts.md#storage-and-limits).
+`get` prints JSON. `describe`, `status`, `ps`, `watch`, `spend`, `metrics`, and `audit` print
+readable text, or JSON with `--output json`. A usage error exits with status 2 and names the
+missing or unknown argument with the command's usage line.
 
 ## Next
 
-- [Run a Worker](../guides/workers.md) for remote Worker Hosts and production supervision.
-- [Manage Control Plane resources](resources.md) for the complete resource inspection model.
-- [Scheduling and interrupted execution](../reference/scheduling-and-recovery.md) for how hosts are
-  chosen and interrupted work is recovered.
+- [CLI reference](../reference/cli.md)
+- [Manage Control Plane resources](resources.md)
+- [Run Worker Hosts](../guides/workers.md)

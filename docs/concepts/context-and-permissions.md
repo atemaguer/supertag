@@ -59,7 +59,7 @@ spec:
 
 ```sh
 supertag apply -f shared-engineering.yaml
-supertag activate context-set shared-engineering --tag engineering \
+supertag context-set activate shared-engineering --tag engineering \
   --provider github --repo acme/api
 ```
 
@@ -76,7 +76,7 @@ Context Items use a namespaced type and version:
 Add custom items to the Context Set manifest and reapply it with
 `supertag apply -f shared-engineering.yaml`.
 
-See [Add a custom Context type](../guides/custom-context.md) for the resolver contract.
+See [Add a custom Context type](../reference/context-resolution.md) for the resolver contract.
 
 Activating a set makes it apply at a particular location. Activation is one-way: this example makes
 selected Slack work available from `acme/api`; it does not expose GitHub work back to Slack.
@@ -113,7 +113,7 @@ spec:
 
 ```sh
 supertag apply -f engineering-access.yaml
-supertag activate permission-set engineering-access --tag engineering \
+supertag permission-set activate engineering-access --tag engineering \
   --provider slack --channel-id C_ENGINEERING
 ```
 
@@ -124,7 +124,7 @@ so Permission Sets do not contain names such as Claude Code `Bash` or Codex feat
 ### Tools of MCP servers
 
 An MCP server gives a Tag tools, such as Sentry's issue tools. A host service lists the
-servers its machine provides; see [host MCP servers](../reference/supertag-yaml.md#host-mcp-servers).
+servers its machine provides; see [host MCP servers](../surfaces/worker-tools.md).
 A Task can use a server's tool only when a Permission Set grants it as `server/tool`:
 
 ```yaml

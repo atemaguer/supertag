@@ -79,19 +79,20 @@ thread, and the same Tag keeps the responsibilities you assigned it. [Connect a 
 
 ## Run your first Tag
 
-On macOS or Linux, install Node.js and Git, then set up a [supported coding agent](#works-with).
-[Check requirements and sign-in](docs/operations/requirements.md)
+On macOS or Linux, install Git and set up a [supported coding agent](#works-with). Claude Code,
+Cursor, and OpenCode also need Node.js. [Check requirements and sign-in](docs/operations/requirements.md)
 
-Run this from an existing Git repository with at least one commit:
+[Install SuperTag](docs/operations/install.md), then run this from an existing Git repository with
+at least one commit:
 
 ```sh
-curl -fsSL https://unpkg.com/supertag-ai@latest/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"
 supertag init
 supertag
 ```
 
-Keep the default Tag name, `lead`. Select it in the terminal and ask:
+`supertag init` checks your coding agent's sign-in, asks a few questions, and starts SuperTag in
+the background. Keep the default Tag name, `lead`. Plain `supertag` opens the terminal UI. Select
+`lead` and ask:
 
 > Read this repository and tell me what you would improve first.
 
@@ -102,8 +103,9 @@ like this.
 /goal Add a test for an uncovered edge case. Done when the new test and its suite pass. Ask me before changing application code.
 ```
 
-Open **Waiting on you** when the Tag needs a decision. With branch delivery enabled, review the
-branch it returns and decide whether to merge it or ask for a revision.
+Open **Waiting on you** when the Tag needs a decision. Each delivered change arrives in your
+repository as a `supertag/session/...` branch. Review it, then decide whether to merge it or ask
+for a revision.
 
 [Installation options](docs/operations/install.md) · [Talk to a Tag](docs/guides/talk-to-a-tag.md) · [Run your first Team](docs/guides/first-team.md) · [Direct SuperTag from your coding agent](docs/guides/coding-agent-operator.md)
 
@@ -137,9 +139,9 @@ same Objective and report back to its owner. You can also keep a shared Tag, suc
 
 | | Options |
 | --- | --- |
-| **Coding agents** | Claude Code · Codex · Cursor · OpenCode · [custom integrations](docs/guides/harness-runtime.md) |
+| **Coding agents** | Claude Code · Codex · Cursor · OpenCode · OpenAI Agents · [your own harness adapter](docs/guides/harness-adapters.md) |
 | **Where you talk to Tags** | Terminal · [Slack](docs/surfaces/slack.md) · [GitHub](docs/surfaces/github.md) · [Linear](docs/surfaces/linear.md) · [Lark/Feishu](docs/surfaces/lark.md) · [Microsoft Teams](docs/surfaces/teams.md) |
-| **Where work runs** | Laptops · servers · CI runners · [Modal](docs/guides/modal-workers.md) and [E2B](docs/guides/shared-execution.md) sandboxes |
+| **Where work runs** | Laptops · servers · CI runners · [Modal and E2B sandboxes](docs/guides/workers.md#run-cursor-in-a-sandbox) |
 
 ## When to choose SuperTag
 
@@ -155,32 +157,23 @@ same Objective and report back to its owner. You can also keep a shared Tag, suc
 
 ## Build on SuperTag
 
-Use the same infrastructure to give your own application persistent actors. The API lets your
-application create and direct Tags, send them work, and inspect their progress. For example, you
-could connect a dependency scanner to a maintenance Tag and show its branches and test results in
-your own review interface. [Explore the API](docs/reference/control-plane-api.md)
+Use the same infrastructure to give your own application persistent actors. The Control Plane's
+gRPC API lets your application create and direct Tags, send them work, and inspect their
+progress. For example, you could connect a dependency scanner to a maintenance Tag and show its
+branches and test results in your own review interface. Generated Go, TypeScript, and Python
+bindings come with the repository. [Explore the API](docs/reference/control-plane-api.md)
 
-To bring your own execution system, use the public SDK. A **Worker** runs a turn of work for a Tag.
-A **harness** connects a Worker to a coding agent or another execution system. You can implement
-either to fit your application.
+To bring your own execution system, write a **harness adapter**: a program that a Worker Host
+starts for each Task Attempt and that drives your agent through the harness protocol. Python and
+TypeScript adapters ship with SuperTag as examples.
 
-```sh
-npm install supertag-ai
-```
-
-For Python applications, install the SDK version that matches your Control Plane:
-
-```sh
-python -m pip install 'supertag==0.2.0a9'
-```
-
-[Build a custom Worker or harness](docs/guides/custom-workers.md) · [Use the Python SDK](docs/guides/python-workers.md) · [Check API stability](docs/reference/api-stability.md)
+[Write a harness adapter](docs/guides/harness-adapters.md) · [Connect your own collaboration surface](docs/reference/connector-contract.md) · [Check API stability](docs/reference/api-stability.md)
 
 ## FAQ
 
-**How do I control changes to my repository?** Set what each Tag is allowed to do. With branch
-delivery, repository work happens in a separate Git worktree and comes back as a branch you can
-review. [Work with repository branches](docs/guides/workspaces.md)
+**How do I control changes to my repository?** Set what each Tag is allowed to do. Repository
+work happens in a separate pinned checkout and comes back as a branch you can review.
+[Work with repository branches](docs/guides/workspaces.md)
 
 **Do I need a server?** You can start the Control Plane and run work on your laptop. For shared
 access or work that should stay available when your laptop is off, deploy the Control Plane and

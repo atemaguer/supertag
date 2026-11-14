@@ -11,7 +11,7 @@ Operators create and manage Objectives with the `ObjectiveService` RPCs defined 
 `ListObjectives`, `GetObjective`, `DescribeObjective`, `MessageObjective`, `UpdateObjective`,
 `ApproveObjective`, `CancelObjective`, `PauseObjective` and `ResumeObjective`. The proto comments
 are the reference for each request and response, generated into the
-[ObjectiveService reference](../docs/reference/operator-api/objective.md).
+[Control Plane API](../docs/reference/control-plane-api.md).
 
 Creating an Objective starts it: the Control Plane admits the first turn of its conversation and
 returns that Task's ID in `startedTaskId`. Starting is idempotent, so a retried creation returns

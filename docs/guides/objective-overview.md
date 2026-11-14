@@ -15,7 +15,7 @@ The **Control Plane** is the SuperTag service that stores and runs it. See the
 ## Before you start
 
 - The `supertag` CLI configured with operator access to the Control Plane.
-- An Objective ID, from `supertag list objective --owner TAG`.
+- An Objective ID, from `supertag get objective`.
 
 ## 1. Read the overview
 
@@ -41,7 +41,7 @@ Delivered:
 
 Needs you:
   Approval 3f1c…: Run the database migration (requested by Tag backend)
-    supertag approve request 3f1c…
+    supertag approval approve 3f1c…
 
 Work: 3 Sessions
   waiting    lead     Objective conversation        (Task 8d50c417-3e6b-49aa-b2f1-c07d5e9143ab)
@@ -64,7 +64,7 @@ Details:
   conversation and every Session beneath it. Unpriced Task Attempts are called out, because the
   budget cannot count them.
 - **Delivered** lists what finished work produced: its branch and changed files, a patch with its
-  `supertag download artifact` command, a pull request and its state, and output artifacts. When
+  `supertag artifact download` command, a pull request and its state, and output artifacts. When
   the Control Plane runs locally, a branch shows its checkout path and the `git diff` and
   `git switch` commands that review it.
 - **Needs you** lists approval requests, questions, results submitted for review, pauses, and
@@ -97,7 +97,7 @@ line.
 
 When the owner submits the Objective for review, the overview shows its assessment. Select the
 Objective in the terminal UI and press `m` to request changes, or accept the result with
-`supertag approve objective ID`. See [reviewing a result](objective-decisions.md#6-review-a-result).
+`supertag objective review ID`. approve See [reviewing a result](objective-decisions.md#6-review-a-result).
 
 ## 2. Follow it as it happens
 
@@ -128,7 +128,7 @@ one JSON object per line instead, with `at`, `actor`, `kind`, `message`, and, wh
 
 ```sh
 supertag describe task TASK_ID
-supertag events task TASK_ID
+supertag task events TASK_ID
 ```
 
 `describe task` shows a turn's state, its Tag, and what it delivered; `events task` shows its
@@ -157,15 +157,15 @@ Objectives but share one Control Plane, its rules, and its record of the work.
 The overview's **Needs you** covers one Objective. The operator inbox covers every Objective:
 
 ```sh
-supertag list inbox --output text
-supertag list inbox --objective OBJECTIVE_ID --output text
-supertag watch inbox
+supertag get inbox-item
+supertag get inbox-item --objective OBJECTIVE_ID
+supertag get inbox-item
 ```
 
-Items show the available actions, such as `supertag approve request ID`. A question shows up
+Items show the available actions, such as `supertag approval approve ID`. A question shows up
 to 500 characters of its text. `watch inbox` prints each new item on one line as
 it appears; press Ctrl-C to stop. To be told without watching, configure an
-[operator channel](../operations/control-plane.md#operator-channel) in Slack. How to decide each
+[operator channel](../operations/control-plane.md#operator-notifications) in Slack. How to decide each
 kind is in [Respond to an Objective](objective-decisions.md).
 
 ## 6. Read the Team's Workstream
@@ -173,7 +173,7 @@ kind is in [Respond to an Objective](objective-decisions.md).
 Posts live with the Team, not the Objective, so they outlast any one Objective:
 
 ```sh
-supertag list workstream-post --team TEAM --after-sequence 0 --limit 50
+supertag get workstream-post --team TEAM --after-sequence 0 --limit 50
 ```
 
 See [Share a Team's Workstream](workstreams.md).

@@ -1,7 +1,7 @@
 # Reliable external actions
 
 If the execution terms on this page are new, start with
-[Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md).
+[Worker Hosts and harnesses](../concepts/workers.md).
 
 This page uses these SuperTag terms, each defined in the glossary: [Tag](glossary.md#tag),
 [Task](glossary.md#task), [Task Attempt](glossary.md#task-attempt), and

@@ -120,7 +120,7 @@ The operator API is how the CLI and other tools manage a Control Plane: send a T
 read the inbox, or apply resources. The Control Plane serves it as RPCs defined in
 protobuf, in the package `supertag.operator.v1`. A Tag is a persistent AI actor with its own
 responsibilities and permissions. The
-[operator API reference](../../docs/reference/operator-api/README.md) lists
+[operator API reference](../../docs/reference/control-plane-api.md) lists
 every RPC.
 
 ### Rust Control Plane
@@ -222,7 +222,7 @@ except ConnectError as error:
     raise
 ```
 
-See [RPC errors](../../docs/reference/control-plane-api.md#rpc-errors) for each code and reason.
+See [RPC errors](../../docs/reference/control-plane-api.md#writes-retries-and-conflicts) for each code and reason.
 
 ## Compose a custom Worker
 

@@ -9,8 +9,8 @@ This page uses these SuperTag terms, each defined in the glossary: [Tag](glossar
 [Gateway](glossary.md#gateway), [Surface Account](glossary.md#surface-account),
 [Worker Host](glossary.md#worker-host), [host service](glossary.md#host-service),
 [Auth Key](glossary.md#auth-key), [admin token](glossary.md#admin-token),
-[Operator Token](glossary.md#operator-token), [Worklet API](glossary.md#worklet-api),
-[Worklet](glossary.md#worklet), [Worker](glossary.md#worker), and
+[Operator Token](glossary.md#operator-token), [Worklet API](glossary.md#control-plane),
+[harness adapter](glossary.md#harness-adapter), and
 [Workspace](glossary.md#workspace).
 
 SuperTag keeps credential storage behind replaceable interfaces so a deployment can move from local
@@ -23,7 +23,7 @@ resource API.
 | --- | --- | --- | --- |
 | Control Plane credential vault (`GatewayCredentialVault`) | Control Plane composition root | Gateway collaboration surface secrets, service keys, and Worker Host credential digests | `gateway` section of `~/.supertag/credentials.json` |
 | Operator credential provider | Operator's CLI | Control Plane admin token or [Operator Token](resource-model.md#operator-tokens) | `operator` section of `~/.supertag/credentials.json` |
-| Worker Host enrollment credential | One Worker Host | Worklet API authentication | `~/.supertag/hosts/SERVICE/credential.json` for a host service, or `~/.supertag/worker-hosts/<host-id>.credential.json` for `supertag connect worklet`, on that host |
+| Worker Host enrollment credential | One Worker Host | Its connection to the Control Plane | The host's own state directory, on that host |
 | MCP and git credentials | One Worker Host | MCP server and git credentials | The host's environment or `~/.supertag/.env`; see [MCP and git credentials](#mcp-and-git-credentials) |
 
 ### Local storage paths and model credentials
@@ -34,10 +34,9 @@ The local Control Plane that `supertag init` and `supertag up` run uses the same
 | Path in `~/.supertag/` | Holds |
 | --- | --- |
 | `credentials.json` | The Control Plane vault, and the local operator credential and MCP logins under `operator` |
-| `hosts/SERVICE/credential.json` | The Worker Host credential and ID of each host service in `supertag.yaml`, mode `0600` |
-| `worker-hosts/` | Worker Host credentials of hosts started with `supertag connect worklet`, one per Control Plane joined |
+| Host state directories | The Worker Host credential and execution journal of each host service in `supertag.yaml`, owner-only |
 | `supertag.yaml` | The services file. It never holds a secret value: keys that take a secret name an entry in `secrets`, whose value comes from an environment variable or a file. |
-| `supertag.db`, `supertag.db-wal`, `supertag.db-shm` | Local SQLite state, created or tightened to mode `0600` when the database opens |
+| `runtime.sqlite3` | Local SQLite state, owner-only |
 
 For `supertag init`, the bundled Claude Agent SDK checks the selected model using the Worker
 Host's credentials. Run `claude` and use `/login`, or set `ANTHROPIC_API_KEY` in the host's
@@ -60,7 +59,7 @@ credential once to enroll the host, then stores the host's own Worker Host crede
 Keeping the Worker Host ID with the credential means renaming the computer creates no new Worker
 Host. See [supertag.yaml and local state](supertag-yaml.md#credentials).
 
-Without operator credentials, `supertag revoke worker-host-credential ID` revokes a host with its
+Without operator credentials, `supertag host revoke ID` revokes a host with its
 own stored credential. It looks in `worker-hosts/` and in each `hosts/SERVICE/credential.json`,
 then deletes the file it used.
 
@@ -147,38 +146,24 @@ The CLI has a separate `OperatorCredentialProvider` contract and provider regist
 
 ## Worker Host enrollment credential
 
-A Worker Host enrollment credential is distinct from the credentials its Workers use. The usual
-way to obtain one is an [Auth Key](resource-model.md#auth-keys). The Control Plane stores only a
-SHA-256 digest of each `stak_` secret. When `supertag connect worklet` redeems a key, it writes the
-new host's credential to `~/.supertag/worker-hosts/<host-id>.credential.json`, with mode `0600`, and
-records the Control Plane URL in the file. Later connections to that Control Plane find it there.
-A host joined with an ephemeral key keeps its credential only in process memory. A host service
-in `supertag.yaml` always stores its credential, in `~/.supertag/hosts/SERVICE/credential.json`,
-because `supertag up` joins in one process and runs the Worklet in another.
+A Worker Host enrollment credential is distinct from the harness and MCP credentials its Tasks
+use. A host obtains one with a host [Auth Key](resource-model.md#auth-keys); the Control Plane
+stores only a SHA-256 digest of each `stak_` secret and of each enrolled `stcr_` credential, and
+compares them in constant time. Operator Tokens (`stop_`) are stored the same way.
 
-The Control Plane stores Operator Tokens the same way: only a SHA-256 digest of each `stop_`
-secret, compared in constant time.
-
-A custom Worker reads its host credential from its own secret manager. From an operator
-environment authenticated to the Control Plane, enroll the durable host identity:
+A Worker Host enrolls from its own side and keeps its credential in its owner-only state
+directory, outside any checkout a harness can read:
 
 ```bash
-supertag enroll worker-host build-east-1 --out build-east-1.credential.json
+supertag host enroll build-east-1 --control-plane https://supertag.example.com \
+  --state-directory /var/lib/supertag-host --auth-key file:build-east-1.key
 ```
 
-Enrollment writes the bearer token once to that file, with mode `0600`. Supply its `token` to the
-Worker Host's secret manager over an appropriate secure channel.
-
-`supertag connect worklet` owns the path `~/.supertag/worker-hosts/<host-id>.credential.json`. It
-creates the credential directory with mode `0700` and writes the file with mode `0600`.
-`SUPERTAG_STATE_DIR` relocates the entire SuperTag state directory for containerized deployments. Keep this supervisor-owned path outside any
-workspace exposed to a harness. The Control Plane
-stores only a SHA-256 digest under a unique logical ID containing the base64url-encoded host ID,
-credential revision, and issuance ID. The raw token exists only in the one-time API response and the
-Worker Host file. Rotation writes a new token once; install it on the Worker Host after issuance.
-Rotation creates a new revision, fences the previous connection, and removes the old digest after
-the durable update succeeds. Revocation durably marks and fences the host before
-removing its digest. Ordinary `WorkerHost` reads expose the revision and **connection generation**,
+A host service in `supertag.yaml` does the same on its first `supertag up`. A host that reads its
+credential from its own secret manager uses `SUPERTAG_HOST_TOKEN`; an operator writes a new one
+with `supertag host rotate-credential build-east-1 --out FILE`, and a stopped host's own
+credential is rotated with `--host-state-directory`. Rotation replaces the credential at once;
+revocation refuses it at once. Ordinary `WorkerHost` reads expose the revision and **connection generation**,
 an increasing number identifying the current connection. They never expose the token, digest,
 or logical credential ID. They also expose
 `lastAuthenticatedAt`, `failedAuthenticationCount`, and `lastAuthenticationFailureAt` so an
@@ -210,7 +195,7 @@ reference to any other variable stops the Task when it starts, with a message th
 variable and this rule. SuperTag never sends the literal `${VAR}` text instead. The rule follows
 GitHub Copilot's `COPILOT_MCP_` prefix. A stdio server starts with only a minimal environment plus
 its resolved `env`, so it never inherits the Worker's credentials either. See
-[Workspaces](../guides/workspaces.md#select-repository-mcp-servers).
+[Workspaces](../guides/workspaces.md#select-repository-skills-and-mcp-servers).
 
 ## Declared Surface Accounts
 

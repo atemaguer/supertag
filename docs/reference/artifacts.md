@@ -7,9 +7,9 @@ read it after the first agent's sandbox has been removed.
 The artifact catalog records which **Tag** (a persistent AI actor with its own responsibilities
 and permissions), **Task** (an accepted assignment), and **Task Attempt** (one execution of that
 Task) captured each artifact. The **Control Plane** keeps that catalog and decides which Tasks may
-use an artifact; it never stores or carries the bytes. A **Worklet** supervises a [Worker
-Host](glossary.md#worker-host), stores those bytes on it, and serves them directly. A **Worker**
-runs the Task, optionally through a **harness** such as Codex or Claude Code.
+use an artifact; it never stores or carries the bytes. A [**Worker Host**](glossary.md#worker-host)
+runs the Task through a **harness** such as Codex or Claude Code, stores those bytes, and serves
+them directly to other hosts.
 
 Other terms on this page are defined in the glossary: [Role](glossary.md#role),
 [Objective](glossary.md#objective), [Team](glossary.md#team), [Session](glossary.md#session),
@@ -17,17 +17,17 @@ Other terms on this page are defined in the glossary: [Role](glossary.md#role),
 [Auth Key](glossary.md#auth-key), [Volume](glossary.md#volume), and
 [Workspace](glossary.md#workspace).
 
-Artifact bytes live on Worker Hosts. Each Worklet stores the artifacts its Tasks capture on its own
-Worker Host and transfers them directly to other authorized Worklets. The Control Plane keeps only
+Artifact bytes live on Worker Hosts. Each Worker Host stores the artifacts its Tasks capture and
+transfers them directly to other authorized Worker Hosts. The Control Plane keeps only
 the catalog: identity, provenance, access rules, and which Worker Hosts hold each copy. It never
 receives, relays, or stores artifact bytes, so a copy held only on an ephemeral Worker Host is lost
 if that host stops.
 
 ```mermaid
 sequenceDiagram
-    participant Producer as Producing Worklet
+    participant Producer as Producing Worker Host
     participant Control as Control Plane
-    participant Consumer as Consuming Worklet
+    participant Consumer as Consuming Worker Host
 
     Producer->>Producer: Persist and verify bytes
     Producer->>Control: Register manifest and location
@@ -237,17 +237,17 @@ Untracked reports are still captured when selected, including reports in a Git-i
 ### Transfer recovery
 
 The Worker freezes output bytes before releasing the execution environment. Once cleanup is
-confirmed, a durable Worklet can retry local storage and catalog publication for the same Attempt,
+confirmed, a durable Worker Host can retry local storage and catalog publication for the same Attempt,
 including after a Worker process restart. The harness is not run again. Catalog publication uses
 a stable operation ID so a lost response does not create a second artifact. Publication also
-registers the Worklet's verified local copy. A consumer then resolves an
+registers the Worker Host's verified local copy. A consumer then resolves an
 authorized location through the Control Plane and transfers bytes directly from the serving
-Worklet; retrying that transfer does not rerun the producer.
+Worker Host; retrying that transfer does not rerun the producer.
 
 The transfer journal lives under the Worker host's `SUPERTAG_STATE_DIR` (by default
 `~/.supertag/output-transfers`); SDK applications can set `outputJournalDirectory`. Keep this
 private directory on persistent storage. It contains execution metadata and connection credentials,
-so protect it like other Worker state. The journal is removed after the durable Worklet records
+so protect it like other Worker state. The journal is removed after the durable Worker Host records
 completion. Direct Worker SDK consumers must acknowledge finalized outputs themselves.
 
 A crash before bytes are frozen or before cleanup is confirmed remains an uncertain Attempt,
@@ -368,7 +368,7 @@ Plane coordination over HTTP MCP and does not support these Worker-local artifac
 explicitly supplied unsupported binding fails before execution. Ordinary declared-file export and
 preselected artifact inputs still use the Worker storage path. A custom harness must advertise
 and implement the `worker-local` transport through its Worker-host client to receive these tools.
-See [custom Workers](../guides/custom-workers.md) for the surrounding execution contracts.
+See [Write a harness adapter](../guides/harness-adapters.md) for the surrounding execution contracts.
 
 ## Attachments and shared environments
 
@@ -434,12 +434,12 @@ authoritative catalog for identity, provenance, allowed access, and known storag
 Worker Hosts hold the immutable bytes; the Control Plane never stores them. The catalog may know
 several copies of one content digest without creating several artifacts.
 
-Every Worklet, including the host services that `supertag up` starts, stores the bytes its Tasks
+Every Worker Host, including the host services that `supertag up` starts, stores the bytes its Tasks
 capture beneath its Worker Host's `SUPERTAG_STATE_DIR/artifacts` (by default
-`~/.supertag/artifacts` on that Worker Host). A default loopback Worklet advertises no transfer
+`~/.supertag/artifacts` on that Worker Host). A default loopback Worker Host advertises no transfer
 endpoint to other machines. With a configured reachable endpoint, it advertises that endpoint and
-verified inventory to the Control Plane. A consuming Worklet resolves a permitted location and a
-short-lived transfer grant, then downloads directly from the serving Worklet. The serving Worklet
+verified inventory to the Control Plane. A consuming Worker Host resolves a permitted location and a
+short-lived transfer grant, then downloads directly from the serving Worker Host. The serving Worker Host
 verifies the grant locally and the consumer verifies the size and SHA-256 digest before making the
 copy available. Artifact bytes never pass through the Control Plane.
 
@@ -450,7 +450,7 @@ Task Attempt ran on the reporting host, and that the host advertises the named a
 The copy record is the enrolled host's report, not an independent check of the stored bytes.
 A different Task Attempt cannot claim that key, even when it reports the same digest.
 Consumers and operator downloads resolve only the producing Task Attempt's key. The Volume's
-credential stays on the host, mapped through `volume-credentials`. See [artifact Volume](supertag-yaml.md#artifact-volume).
+credential stays on the host, mapped through `volume-credentials`. See [artifact Volume](../operations/control-plane.md#artifact-storage).
 
 ### How consumers reach a copy
 
@@ -485,7 +485,7 @@ See [local credential access](../concepts/persistence.md#credentials-and-local-a
 
 ### Upload receipts on shared Volumes
 
-A Worklet registers only its own verified uploads from a shared artifact Volume. It keeps upload
+A Worker Host registers only its own verified uploads from a shared artifact Volume. It keeps upload
 receipts in its private state directory so it can register them again after restarting. It never
 adopts another host's files by listing the shared Volume. If those receipts are lost, the catalog's
 Volume copies remain available to consumers with a mapping for that Volume.
@@ -494,7 +494,7 @@ use only that host's records. Sharing a Volume alone does not make a host a hold
 
 ### Operator downloads
 
-`supertag download artifact` follows the same order from the operator's machine. It reads a Volume
+`supertag artifact download` follows the same order from the operator's machine. It reads a Volume
 copy with that machine's own `volume-credentials`, then tries the serving host under a one-minute
 grant scoped to that file and operator. It writes the file only when the size and digest match,
 and never overwrites an existing file. When neither is reachable, it writes nothing and reports
@@ -520,7 +520,7 @@ Hosts are recorded on it, even when those hosts are disconnected. The API return
 with the count; deletion dry runs and prune plans report the same refusal. Keep that Volume and
 source available for existing artifacts, and create a new Volume for future artifacts. Updating
 its credential name remains allowed. To retire the copies, revoke their hosts' credentials with
-`supertag revoke worker-host-credential HOST`. Copies attributed only to removed hosts no longer
+`supertag host revoke HOST`. Copies attributed only to removed hosts no longer
 block deletion or source changes.
 
 Automatic replication and repair between Worker Hosts are not implemented. Back up every required
@@ -545,20 +545,20 @@ but storing bytes alone does not create a discoverable artifact. Keep referenced
 configuring retention and back up the catalog alongside durable content.
 
 Agents receive artifact IDs and paths rather than storage credentials or raw locations. Transfer
-grants are internal Worklet credentials scoped to an exact artifact entry, source Worker Host,
-recipient Worker Host, and expiry. Knowing an artifact ID or digest is insufficient. Direct Worklet
+grants are internal Worker Host credentials scoped to an exact artifact entry, source Worker Host,
+recipient Worker Host, and expiry. Knowing an artifact ID or digest is insufficient. Direct Worker Host
 transfers remain bounded.
 
 Availability follows configured storage, rather than catalog presence alone:
 
-| Storage commitment | Survives producing Worker exit | Survives Worklet restart | Survives host or disk loss |
+| Storage commitment | Survives producing Worker exit | Survives Worker Host restart | Survives host or disk loss |
 | --- | --- | --- | --- |
-| One persistent Worklet copy | Yes | Yes | No |
+| One persistent Worker Host copy | Yes | Yes | No |
 | A copy on an artifact Volume | Yes | Yes | Yes, while the Volume lasts |
-| Several independent Worklet copies | Yes | Yes | While at least one verified copy remains |
+| Several independent Worker Host copies | Yes | Yes | While at least one verified copy remains |
 
 A cache is an expendable copy and does not satisfy a durable storage commitment. A location from
-an old or disconnected Worklet generation is not returned as available; a newer inventory can
+an old or disconnected Worker Host generation is not returned as available; a newer inventory can
 supersede its earlier advertisement. Consumers try another authorized location when one exists.
 SuperTag does not silently rerun the producing Task to reconstruct lost bytes.
 
@@ -578,14 +578,14 @@ recorded by an unrelated host do not count toward this artifact. The producing h
 a local copy and a recorded Volume copy.
 
 These locations are historical catalog evidence, not live checks. Receipts and retained
-inventory can outlast deleted host storage, including after a Worklet disconnects. An enrolled
+inventory can outlast deleted host storage, including after a Worker Host disconnects. An enrolled
 host appearing here does not guarantee that its bytes still exist. A download checks availability
 and verifies the digest. Removing a host marks its recorded local copy as gone.
 
 Listings and downloads use only copies recorded by the Worker Host that produced the artifact.
 Another host holding identical bytes is not a serving location for that artifact. A withdrawn
 advertisement doesn't count. Listings require an upload receipt for the producing Task Attempt;
-advertising a digest alone does not establish a copy of that artifact. A Worklet that fetches a
+advertising a digest alone does not establish a copy of that artifact. A Worker Host that fetches a
 copy checks its digest.
 
 An artifact has an ephemeral storage warning when its producing Worker Host joined with an
@@ -629,136 +629,9 @@ resumption. It is not a catalog artifact and is not exposed through artifact dis
 Workspace files and reports can be published separately as artifacts. Storing a conversation
 does not automatically publish its messages or tool output.
 
-## Custom Worker integration
+## Harness adapter integration
 
-A custom Worker can use `ArtifactClient` from `supertag-ai/worker`, or implement the same HTTP
-contract in another language. A Worker is the application executing a Task; its execution
-credential identifies the exact active Attempt. Keep that credential in the Worker process,
-outside model inputs. Reuse the Attempt's configured Control Plane URL.
-
-### Artifact stores
-
-Configure a Worker's `artifactStore` to export declared harness outputs; see
-[Preserve generated files](../guides/custom-workers.md#preserve-generated-files) for the steps.
-
-- The Control Plane stores no artifact bytes, so a Worker without an `artifactStore` captures no
-  artifacts.
-- A Worklet uses `WorkletArtifactStore` for local-first reads and writes and runs a
-  `WorkletArtifactTransferServer` over its copies. The copies live in a `FileArtifactStore`
-  directory by default; pass `copies` instead of `directory` to keep them elsewhere, such as an
-  `S3ArtifactStore` on a Volume's bucket with explicit `credentials`. Any `ArtifactCopies`
-  implementation works: it streams, lists its inventory, discards a damaged copy, and reports a
-  missing copy with the error code `ENOENT`. Its `publish` callback
-  registers the updated local inventory and posts `/internal/v1/artifacts/catalog/upload`, while its
-  `resolve` callback posts `/internal/v1/artifacts/catalog/resolve-transfer` to request authorized
-  locations for an allowed input. Other Worklets then stream the bytes directly from its
-  `/v1/artifacts/` endpoint; neither callback exposes a transfer grant to the harness.
-- `S3ArtifactStore` is the cloud backend. Without `credentials` or `client`, it uses the AWS
-  default credential chain.
-- `ArtifactStore` lets integrators supply other blob providers. Adapters use
-  `supertag-artifact:sha256:<hex>` URIs and matching `sha256:<hex>` digests. References identify
-  content; they do not grant access to arbitrary storage.
-
-Store rules:
-
-- The `artifactStore` factory runs once per Attempt, keeping its credential separate from harness
-  inputs.
-- Copies are content-addressed and idempotent; the receiving Worklet verifies SHA-256. Redirects
-  are refused, and transient transport failures have bounded retries. Use HTTPS when Workers connect
-  over untrusted networks.
-- Downloads require an active Objective Task Attempt and must match the input references frozen
-  at admission; knowing a digest does not grant access.
-- Completed or revoked Attempts cannot fetch data. The exact Attempt completing its Objective can
-  still export its final files before it settles. A registered wait closes artifact access.
-- Retain referenced content for as long as Tasks may need it.
-
-### gRPC catalog
-
-A Worker can inject `GrpcArtifactCatalogClient` from `supertag-ai/transport` through
-`ArtifactClient.catalogTransport`, or provide the `artifactCatalogTransport` factory when creating
-a Worker. `supertag.artifact.v1.ArtifactCatalogService` exposes `Find`, `Inspect`, `Capture`,
-`Acquire`, `Settle`, `RecordUpload`, and `ResolveTransfer`. `ArtifactHostService` exposes
-`RegisterCopies`, `GetTransferKey`, and `GetArtifactVolume`. `GetArtifactVolume` takes
-`workerHostId` and the Volume `name`, authenticates that host, and returns `name`, `source`, and
-`credential` (the credential name, never its value) for its configured artifact Volume. These
-services share the Worklet gRPC listener and contain metadata only. Catalog calls use the execution
-credential; inventory calls use a Worker Host credential. Requests need a deadline of at most 60 seconds and are bounded to 256 KiB. The
-TypeScript client uses 30 seconds and does not automatically retry uncertain transport failures.
-HTTP remains available for compatible clients. An expired execution credential fails the call with
-`Unauthenticated`; the client does not renew it.
-
-### HTTP catalog
-
-The HTTP form exposes the same catalog operations. Send JSON with `Authorization: Bearer <execution credential>` to these internal endpoints:
-
-| POST endpoint under `/internal/v1/artifacts/catalog/` | Request | Result |
-| --- | --- | --- |
-| `find` | Optional `query`, `kind`, `taskId`, `limit` (1–50), `cursor`. | Compact `artifacts` and optional `nextCursor`. The server determines the permitted scope. |
-| `inspect` | `artifactId`. | Permitted `artifact` metadata, entries, and visible input lineage. |
-| `capture` | `operationId`, `title`, optional `summary`, `kind`, `entries`. | Immutable `artifact`. Producer identity and input lineage come from server state. |
-| `acquire` | `operationId`, `artifactId`, `paths`, `delivery` (`read` or `materialize`), optional materialization `destination`. | `artifact` and the durable `acquisition`. |
-| `settle` | Acquisition `id` and `status` (`delivered`, `failed`, or `uncertain`). | Updated `acquisition`. |
-
-Store the bytes on the Worker Host first, then record a metadata-only upload receipt for the
-caller's Attempt with `POST /internal/v1/artifacts/catalog/upload`. Capture requires a matching
-receipt for every entry. To read an input after acquisition, resolve a location and download from
-the serving Worklet, as [Distributed transfers](#distributed-transfers) describes; only selected
-entries or original accepted Task inputs are available. The Control Plane has no endpoint that
-accepts or returns artifact bytes.
-
-Reusing an operation ID with the same capture or acquisition definition returns its existing
-record. Reusing it with different content or selection returns HTTP 409. Repeating metadata
-requests is distinct from replaying a filesystem write: a custom environment must preserve
-no-overwrite protection and report uncertain materialization outcomes instead of guessing.
-
-The catalog limits JSON request bodies to 256 KiB. HTTP 401 indicates unavailable execution
-authority; 404 hides absent or inaccessible artifacts. No endpoint accepts a caller-selected
-producer identity or raw cloud credential.
-
-### Submit artifacts with a result
-
-Custom Workers submit `{artifactId, paths}` after successful capture. The TypeScript Worker does
-this automatically for dynamic captures and declared outputs. Byte-only standalone exports can
-emit `artifact.created` events, but cannot submit uncataloged bytes as Task artifacts. The Python
-SDK provides `ArtifactSelection` and preserves attachment identity and provenance; automatic
-TypeScript capture and materialization behavior is not supplied by the Python runtime.
-
-### Distributed transfers
-
-Worklets using HTTP use these metadata endpoints:
-
-- `GET /internal/v1/artifacts/volume?name=NAME` authenticates with a Worker Host bearer credential
-  and `x-supertag-worker-host-id`. It returns `name`, `source`, and `credential` (the credential name)
-  for the host's configured artifact Volume; another Volume is refused.
-- `GET /internal/v1/artifacts/transfer-key` returns the Control Plane's transfer-verification key.
-- `PUT /internal/v1/artifacts/worklet-copies` authenticates the Worker Host and registers a
-  bounded, revisioned batch of verified copies with its advertised transfer base URL.
-- `POST /internal/v1/artifacts/catalog/upload` authenticates the producing Attempt and records its
-  metadata-only upload receipt after the copy is durable. Its body has `digest`, `sizeBytes`, and
-  optional `volume` (the Volume name). Volume receipts must also include `volumeSource`, the exact
-  catalog source used for that write. The internal gRPC `RecordUpload` request carries the same
-  fields. With `volume`, the producing host must be configured to store artifacts there. The catalog
-  checks the source under the same database lock as the copy insert. A changed source returns
-  HTTP 409 without recording the upload receipt or copy. The host clears its cached Volume lookup;
-  a retry must resolve the current source and write there before claiming a copy. The catalog records
-  the copy at `attempts/<attemptId>/sha256/HEX` beneath its source. It derives `attemptId` from the
-  authenticated Task Attempt and verifies that Task Attempt's host. `HEX` comes from the digest.
-  Success returns HTTP 204 with no JSON body.
-- `POST /internal/v1/artifacts/catalog/resolve-transfer` authenticates the consuming Attempt and
-  returns the exact admitted entry, currently available locations, and a separate short-lived
-  bearer grant for each location.
-
-These requests contain metadata only. If the consuming host reconnects after dispatch, transfer
-resolution returns HTTP 409 because its connection generation no longer matches the Task Attempt.
-The built-in Worker fails that Task Attempt, and its Objective Task settles as failed rather than
-retrying automatically. Retry the Task after the host connection is stable.
-
-The consumer then sends `GET /v1/artifacts/<hex-sha256>` directly to a selected Worklet with that
-location's bearer grant. The serving Worklet verifies the Ed25519 signature, expiry, source Host,
-and digest without a Control Plane round trip. Keep grants out of logs: each remains usable for its
-exact signed content until it expires. The consumer rejects redirects and verifies the declared
-size and digest while atomically saving the stream.
-
-### Protocol requirement
-
-Coordinated execution requires Worklet protocol 18.
+A harness adapter captures and reads artifacts through the `HarnessArtifacts` service of the
+harness protocol; see [Write a harness adapter](../guides/harness-adapters.md). Worker Hosts
+transfer bytes directly to each other over their transfer listeners, with short-lived grants the
+Control Plane issues.

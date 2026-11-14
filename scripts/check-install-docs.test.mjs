@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { pythonVersion } from "./docs-versions.mjs";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const files = [
@@ -10,45 +9,20 @@ const files = [
   "skills/SKILLS.md",
   "skills/install-and-first-reply/SKILL.md",
   "skills/deploy-supertag/SKILL.md",
-  "packages/supertag-ai/README.md",
 ];
 for (const file of files) {
-  test(`${file} uses published CLI installation`, () => {
+  test(`${file} installs the native release`, () => {
     const text = read(file).split("## Contributing")[0];
-    assert.doesNotMatch(text, /pnpm install:cli|git clone|npm and PyPI packages come later/u);
-    assert.match(text, /npm install -g supertag-ai|\]\([^)]*operations\/install\.md/iu);
+    // The npm package and its installer script install the retired TypeScript CLI.
+    assert.doesNotMatch(text, /npm install -g supertag-ai|supertag-ai@latest\/install\.sh/u);
+    assert.match(text, /install_native_release\.py|\]\([^)]*operations\/install\.md/iu);
   });
 }
 
-test("application guides install the published TypeScript SDK", () => {
-  for (const file of [
-    "README.md",
-    "packages/supertag-ai/README.md",
-    "docs/guides/custom-workers.md",
-    "docs/guides/modal-workers.md",
-  ]) {
-    assert.match(read(file), /npm install supertag-ai\b/u);
-    assert.doesNotMatch(read(file), /npm install \/absolute\/path\/to\/supertag/u);
-  }
-});
-
-test("Python installation pins the matching PyPI prerelease", () => {
-  const version = pythonVersion(JSON.parse(read("package.json")).version);
-  for (const file of [
-    "README.md",
-    "docs/operations/install.md",
-    "docs/guides/python-workers.md",
-    "sdks/python/README.md",
-  ]) {
-    assert.ok(read(file).includes(`python -m pip install 'supertag==${version}'`), file);
-    assert.doesNotMatch(read(file), /pip install .*sdks\/python|preview is unpublished/u);
-  }
-  for (const file of ["docs/guides/python-workers.md", "sdks/python/README.md"])
-    for (const extra of ["codex", "agents", "codex,agents"])
-      assert.ok(
-        read(file).includes(`python -m pip install 'supertag[${extra}]==${version}'`),
-        file,
-      );
+test("the install guide builds and installs a native release archive", () => {
+  const install = read("docs/operations/install.md");
+  assert.match(install, /rust\/scripts\/native_release\.py package/u);
+  assert.match(install, /rust\/scripts\/install_native_release\.py/u);
 });
 
 test("the user install guide keeps source-development scripts in CONTRIBUTING.md", () => {

@@ -58,8 +58,8 @@ Tag passes your answer to the work Session and reports back after it continues.
 
 If a request appears under **Waiting on you**, select it and review the requested action.
 Press `a` and Enter to approve it once, or press `d`, enter a reason, and press Enter to deny it.
-For requests shown only in the conversation, use `supertag list approval` to inspect the
-request, then `supertag approve request ID` or `supertag deny request ID --reason TEXT` to decide.
+For requests shown only in the conversation, use `supertag get approval` to inspect the
+request, then `supertag approval approve ID` or `supertag approval deny ID --reason TEXT` to decide.
 A decision lets the work Session continue on its own. If it cannot continue, the conversation
 shows the reason.
 
@@ -77,38 +77,34 @@ another member. See [Define and complete an Objective](objectives.md).
 
 ## Send messages from scripts
 
-Use [`supertag message tag` or `supertag message objective`](../operations/cli.md#send-messages-from-the-cli)
-for scripts that run the CLI. Both accept standard input and JSON output.
+Scripts send a turn with `supertag task submit`. A Session name is the conversation: a new name
+starts one, and reusing it continues it.
 
-For direct integrations, use the [operator API](../reference/control-plane-api.md#send-messages-and-answer-questions). Call
-[`ConversationService.SendMessage`](../reference/operator-api/conversation.md#sendmessage)
-to send to a Tag, or
-[`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective)
-to send to an Objective. After sending to a Tag, pass its name and the returned Task ID to
-[`ConversationService.FollowMessage`](../reference/operator-api/conversation.md#followmessage)
-to follow its reply and work Session reports.
+```sh
+supertag task submit --tag lead --session release-notes "Draft the release notes for 2.4." \
+  --state-directory ~/.supertag
+supertag task events TASK_ID --state-directory ~/.supertag
+```
+
+To give a working Objective a follow-up, submit to its owner in the Objective's Session, the
+`session_id` that `supertag get objective ID` prints. `supertag task input TASK_ID TEXT` steers a
+Task that is still running. Applications call the same operations through the
+[Control Plane API](../reference/control-plane-api.md).
 
 For a coding agent that operates SuperTag from a separate conversation, see
 [Run SuperTag from your coding agent](coding-agent-operator.md).
 
 ## Check that it worked
 
-```sh
-supertag list session
-```
-
-Your conversation appears as a Session with the key `cli:<you>:<conversation>`, titled by your
-first message. A work Session it started shows its own title, and the conversation's Session ID
-under `PARENT`. An Objective's conversation is titled `Objective ID`, and the Session that handles
-the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's status: `pending`, `running`, `completed`,
-`failed`, or `cancelled`.
-`supertag get session ID` reports `"audience": "SESSION_AUDIENCE_PRIVATE"`, and
-`supertag describe session ID` shows its Tasks.
+Your conversation appears in the terminal UI's conversation list, titled by your first message.
+An Objective's conversation is titled by the Objective. A work Session the Tag started appears
+beneath the conversation that started it; `supertag get session --parent-session SESSION_ID`
+lists them, and `supertag describe session ID` shows one with its latest Task and report.
 
 ## Rules
 
-- **The conversation is private to you.** The admin token and each Operator Token have their own
-  conversations, even with the same name. Other people's conversations with the Tag can't read it.
+- **The conversation is private to you.** The admin operator, each Operator Token, and each
+  client device have their own conversations, even with the same name. Other people's conversations with the Tag can't read it.
   See [shared and private Sessions](../concepts/multiplayer.md#shared-and-private-sessions).
 - **The Tag answers with its Roles' permissions only.** A terminal conversation has no location,
   so no location's Permission Sets or Context Sets apply.
@@ -153,7 +149,7 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
 - **The conversation shows `· waiting: REASON`.** No Worker Host bound to the Tag can run
   your turn yet. For example, `· waiting: no bound Worker Host provides MCP server notes` names
   a missing MCP server. The turn starts when you fix the reason. See
-  [A Tag stops answering](troubleshooting.md#a-tag-stops-answering).
+  [Troubleshoot the first reply](troubleshooting.md#5-check-placement).
 - **The terminal UI stops following a reply after losing its connection.** Open `supertag` again
   and select the same conversation. The reply and work Session reports appear there as they arrive.
 - **You send a message while the Tag is still replying.** If the Tag's harness accepts input while
@@ -162,11 +158,11 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
 - **`The requesting Task already finished; request expired`.** The work Session no longer waits
   on that request: it moved on to a later Task, or its Task ended without waiting on it. If the
   work Session still needs the action, its next call creates a new request and notice.
-- **`Tag NAME does not exist`.** Check the name with `supertag list tag`.
+- **`Tag NAME does not exist`.** Check the name with `supertag get tag`.
 
 ## Reference
 
-- [`ConversationService`: sending, reading, and following messages](../reference/operator-api/conversation.md)
+- [Control Plane API](../reference/control-plane-api.md): the `Conversations` service sends, reads, and follows messages
 
 ## Next
 

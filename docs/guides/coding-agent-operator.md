@@ -7,7 +7,7 @@ persistent AI actor with its own responsibilities and permissions. An **Objectiv
 desired outcome and how to verify it. The lead Tag owns that Objective.
 
 For example, ask your coding agent to coordinate a documentation fix while you work elsewhere.
-The agent uses the CLI to follow the team and the operator API to send messages. It presents the
+The agent uses the CLI to follow the team, answer questions, and send messages. It presents the
 result for your review.
 This operator session holds the administrator CLI credential. Never read or print `~/.supertag`.
 Never put secrets in Objective or message text; SuperTag stores that text and delivers it to AI
@@ -31,23 +31,21 @@ Tags work in Teams, flat lists of member Tags. Together,
 your Teams of Tags make up an **autonomous organization**: Teams may pursue different Objectives but
 share one Control Plane, its rules, and its record of the work. The **Control Plane** stores the
 organization and schedules work. A **Worker Host** provides execution capacity. Check that `supertag ps`
-shows the host connected. Note the lead Tag and **Workspace** names printed during setup; a
-Workspace identifies the repository where the team works. The example below uses `lead` and `app`.
-Do not start a second Control Plane.
+shows the host connected. Note the lead Tag's name; the example below uses `lead`. Do not start a
+second Control Plane. Operator commands name the Control Plane on each call: the examples use
+`--state-directory ~/.supertag` for your local services; use `--control-plane NAME` for a
+shared one saved with `supertag connect`.
 
 Give your agent the
 [operate-supertag skill](../../skills/operate-supertag/SKILL.md).
-Prefer a user-level installation outside the repository the team changes. A **Worker** is the
-code that completes a Tag's work, and Workers can edit
+Prefer a user-level installation outside the repository the team changes. Tags can edit
 project-level agent instructions in that repository. Treat changes to `.claude/skills/` and
 `AGENTS.md` there as needing your explicit review before the agent follows them.
 The examples below use the skill file downloaded above.
 
-For automated replies, set `SUPERTAG_CONTROL_PLANE_URL` to the API origin of the Control Plane
-the CLI uses. Supply an [Operator Token](../reference/control-plane-api.md#authentication) as
-`SUPERTAG_OPERATOR_TOKEN` through the coding agent's secret configuration. See
-[send messages and answer questions](../reference/control-plane-api.md#send-messages-and-answer-questions)
-for the request examples.
+For a shared Control Plane, give the agent its own [Operator Token](../operations/control-plane.md#give-teammates-operator-tokens)
+through the coding agent's secret configuration, as `SUPERTAG_OPERATOR_TOKEN`, so its changes are
+recorded under its name.
 
 ### Claude Code
 
@@ -88,7 +86,7 @@ cp ~/.local/share/supertag-operator/SKILL.md \
 
 Start a new Cursor agent conversation in the application repository. Ask it to use
 `operate-supertag` and confirm it read the skill. This operator conversation is separate from
-running Cursor as a SuperTag Worker. A Worker needs its own Cursor API key; see
+running Cursor as a SuperTag harness. A Worker Host needs its own Cursor API key; see
 [Cursor setup](../operations/requirements.md#cursor-setup-and-limits).
 
 ### Any other coding agent
@@ -98,8 +96,7 @@ Give it the absolute path directly in the conversation:
 > Read `/absolute/path/to/supertag-operator/SKILL.md` and use it to
 > coordinate SuperTag for this repository.
 
-The agent needs permission to read that file, run the configured `supertag` CLI, and reach the
-operator API. If its sandbox prevents access, it should report the missing access.
+The agent needs permission to read that file and run the configured `supertag` CLI. If its sandbox prevents access, it should report the missing access.
 
 ## Work through one Objective
 
@@ -134,9 +131,9 @@ putting the text in a shell command. It replaces `PATH_FROM_MKTEMP` with that pa
 outcome_file='PATH_FROM_MKTEMP'
 (
   trap 'rm -f -- "$outcome_file"' EXIT
-  supertag create objective setup-docs --owner lead --workspace app \
-    --outcome "$(cat "$outcome_file")" \
-    --budget-minor 1000 --budget-currency USD --deadline 2027-03-31T17:00:00Z
+  supertag objective create setup-docs "$(cat "$outcome_file")" --owner lead \
+    --budget-minor 1000 --currency USD --deadline 2027-03-31T17:00:00Z \
+    --state-directory ~/.supertag
 )
 ```
 
@@ -144,7 +141,7 @@ The date is illustrative; use the timestamp agreed with the user. The quoted com
 passes the statement as one argument without evaluating its contents as shell code. The trap
 removes the private file even if creation fails.
 1000 minor units in USD means
-USD 10. Creation starts the lead. Record the returned Objective ID and any warnings.
+USD 10. Creation queues the lead's first turn. Record the Objective ID and its `session_id`.
 
 ### 2. Check progress and answer questions
 
@@ -159,14 +156,14 @@ this guide does not assume it offers a scheduler. Without one, return to the thr
 for another check. The agent uses:
 
 ```sh
-supertag list objective
-supertag describe objective setup-docs --output json
-supertag list inbox --objective setup-docs --output json
-supertag spend --by objective --output json
+supertag get objective --state-directory ~/.supertag
+supertag describe objective setup-docs --state-directory ~/.supertag
+supertag get inbox-item --objective setup-docs --state-directory ~/.supertag
+supertag spend --by objective --output json --state-directory ~/.supertag
 ```
 
-`describe objective` and `list inbox` print proto3 JSON: enums are value names such as
-`INBOX_ITEM_KIND_QUESTION`, empty fields are omitted, and 64-bit numbers are strings.
+`describe objective` prints what was delivered, what needs you, and each Session's state; add
+`--output json` for the full record.
 
 Read the Objective's pending questions **before sending any message**. A general follow-up
 starts the owner's next turn and can answer a waiting question. Messages,
@@ -181,18 +178,25 @@ umask 077
 mktemp
 ```
 
-Write the quoted question and answer to the returned path with a file-writing tool. Call
-[`InboxService.AnswerQuestion`](../reference/operator-api/inbox.md#answerquestion) with the exact
-`key` from the current operator-eligible question, `text` read from the private file, and an
-`idempotencyKey` for that answer. Reuse that idempotency key and payload on retry. Use the
-[operator API example](../reference/control-plane-api.md#send-messages-and-answer-questions)
-to submit it. Remove the private file when finished and reread the inbox to verify that the
-question no longer waits.
+Write the quoted question and answer to the returned path with a file-writing tool. Answer the
+exact Task that asked, with the text read from the private file and an operation ID you reuse on
+retry:
+
+```sh
+answer_file='PATH_FROM_MKTEMP'
+(
+  trap 'rm -f -- "$answer_file"' EXIT
+  supertag question answer TASK_ID "$(cat "$answer_file")" --operation-id OPERATION_ID \
+    --state-directory ~/.supertag
+)
+```
+
+The trap removes the private file when finished. Reread the inbox to verify that the question no
+longer waits.
 
 To reply yourself, open **Waiting on you** in the terminal UI and select the question. For a
-general follow-up, select the Objective and press `m`, or call
-[`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective)
-from automation.
+general follow-up, select the Objective and press `m`, or send the owner a turn in the
+Objective's Session with `supertag task submit --tag lead --session SESSION_ID`.
 
 If the Objective asks to change application configuration or spend more, the agent presents
 the question, relevant evidence, and its recommendation to you. It waits for your decision.
@@ -211,7 +215,8 @@ use the artifact ID and path returned with the result:
 
 ```sh
 review_dir=$(mktemp -d)
-supertag download artifact ARTIFACT_ID --path reports/walkthrough.md --out "$review_dir/walkthrough.md"
+supertag artifact download ARTIFACT_ID --path reports/walkthrough.md \
+  --output "$review_dir/walkthrough.md" --state-directory ~/.supertag
 ```
 
 An **artifact** is a captured output file. Its path above is illustrative; use the exact path in
@@ -222,10 +227,10 @@ the host or storage holding the file; see
 The agent presents the branch, result, evidence, and remaining risks, and merges only
 when you explicitly authorize that merge.
 
-If the owner submits an Objective as `ready_for_review`, ask the user to review the assessment.
-After the user approves, run `supertag approve objective setup-docs`. Any Objective in that state
-can be approved. Only ongoing Objectives have an enforced operator closure gate; for other
-Objectives, “ask before merging” in the statement is a request the lead follows, not a gate.
+When the owner submits the Objective for review, ask the user to review the assessment. After
+the user approves, run `supertag objective review setup-docs approve`. To send it back, run
+`supertag objective review setup-docs request-changes --feedback TEXT` with the user's feedback.
+“Ask before merging” in the statement is a request the lead follows, not a gate.
 
 ## Coordinate several Objectives in one thread
 
@@ -236,7 +241,7 @@ IDs, repositories, budgets, deadlines, and decisions separate. Example user prom
 > each budget, and the next check-in. Flag conflicts between their repository changes. Do not
 > send progress nudges to their leads.
 
-Run `supertag list objective`, then describe each selected Objective and read its inbox. Use
+Run `supertag get objective`, then describe each selected Objective and read its inbox items. Use
 `supertag spend --by objective --output json` for reported spend across them. A concise check-in
 could look like this illustrative report:
 

@@ -71,7 +71,7 @@ processed until a page is empty. Reading does not subscribe to anything and ackn
 Operators read the same record from the CLI:
 
 ```sh
-supertag list workstream-post --team service-identity --after-sequence 0 --limit 50
+supertag get workstream-post --team service-identity --after-sequence 0 --limit 50
 ```
 
 Each post shows its author, its addressees, its text, and its sequence number.
@@ -79,8 +79,8 @@ Each post shows its author, its addressees, its text, and its sequence number.
 ## Check that it worked
 
 ```sh
-supertag list workstream-post --team service-identity --after-sequence 0 --limit 50
-supertag list message --mailbox migration --limit 10
+supertag get workstream-post --team service-identity --after-sequence 0 --limit 50
+supertag get message --mailbox migration --limit 10
 ```
 
 The first command lists the post in sequence order. The second shows the same post delivered to
@@ -94,7 +94,7 @@ The first command lists the post in sequence order. The second shows the same po
 - **The post is refused because a Tag in `to` is not a member.** Check the membership with
   `supertag get team service-identity`. Remove the Tag from `to`, or add it to the Team.
 - **An addressee never acted on the post.** It reaches the addressee's inbox only; confirm with
-  `supertag list message --mailbox TAG`. A Tag with no connected Worker Host cannot take the turn.
+  `supertag get message --mailbox TAG`. A Tag with no connected Worker Host cannot take the turn.
 - **A member sees no posts.** Posts belong to the Team, so a Tag that just joined sees the whole
   record, and a Tag that left sees none of it.
 

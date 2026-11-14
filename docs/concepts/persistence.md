@@ -63,7 +63,7 @@ Local and e2b providers refuse native mounts. SuperTag refuses unsupported strat
 calling a provider and never silently substitutes a copy.
 
 Modal attaches S3, R2, GCS, and Modal Volume sources with their declared access.
-[Attach persistent storage to a Workspace](../guides/modal-workers.md#attach-persistent-storage-to-a-workspace)
+[Attach persistent storage to a Workspace](../guides/workers.md#run-cursor-in-a-sandbox)
 
 Both strategies leave the source outside the sandbox's lifecycle. A copied dataset inside a
 sandbox disappears with that sandbox; the source remains subject to its own storage durability.

@@ -15,11 +15,11 @@ Other terms on this page are defined in the glossary: [Objective](glossary.md#ob
 [Team](glossary.md#team), [Task Attempt](glossary.md#task-attempt),
 [Context Item](glossary.md#context-item), [Context Plan](glossary.md#context-plan),
 [Control Plane](glossary.md#control-plane), [Worker Host](glossary.md#worker-host),
-[host service](glossary.md#host-service), [Worklet](glossary.md#worklet),
-[Worker Profile](glossary.md#worker-profile), [Worker](glossary.md#worker),
-[Workspace](glossary.md#workspace), [Runtime Input Provider](glossary.md#runtime-input-provider),
-[Runtime Input](glossary.md#runtime-input), and
-[Workspace Resolver](glossary.md#workspace-resolver).
+[host service](glossary.md#host-service), [Worklet](glossary.md#worker-host),
+[harness adapter](glossary.md#harness-adapter),
+[Workspace](glossary.md#workspace), [Runtime Input Provider](glossary.md#context-set),
+[Runtime Input](glossary.md#context-set), and
+[Workspace Resolver](glossary.md#workspace).
 
 ## Stored Task inputs
 
@@ -142,4 +142,4 @@ Workers advertise supported type/version pairs. Scheduling considers every requi
 
 Custom types normally resolve into portable Runtime Inputs such as `resource`, `instruction`, or `skill`. A harness therefore consumes a small stable input vocabulary without understanding every custom Context Item type.
 
-See [Add a custom Context type](../guides/custom-context.md) for TypeScript and Python examples.
+See [Add a custom Context type](context-resolution.md) for TypeScript and Python examples.

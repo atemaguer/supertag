@@ -101,25 +101,24 @@ packages. Ask before adding dependencies. **Budget:** $450 USD. **Deadline:** fi
 ## Create and inspect the Objective
 
 For the first example, assume `lead` is an existing owner Tag with execution capacity and
-`storefront` is an existing Workspace. Choose your own ID, budget, and future deadline:
+Choose your own ID, budget, and future deadline:
 
 ```sh
-supertag create objective checkout-retries --owner lead --workspace storefront \
-  --outcome "Retried checkout requests create at most one order per idempotency key. Done when concurrency and timeout regression tests pass, an independent reviewer accepts transaction handling, and a report links the reviewed branch and test results. Keep the public API compatible. Do not deploy or alter production data. Ask before changing the database schema." \
-  --budget-minor 30000 --budget-currency USD --deadline 2027-03-31T17:00:00Z \
-  --dry-run
+supertag objective create checkout-retries \
+  "Retried checkout requests create at most one order per idempotency key. Done when concurrency and timeout regression tests pass, an independent reviewer accepts transaction handling, and a report links the reviewed branch and test results. Keep the public API compatible. Do not deploy or alter production data. Ask before changing the database schema." \
+  --owner lead --budget-minor 30000 --currency USD --deadline 2027-03-31T17:00:00Z --state-directory ~/.supertag
 ```
 
-`--dry-run` checks the request without creating or starting work. Remove it to create the
-Objective and start its owner. Then inspect progress:
+Creating the Objective queues its owner's first turn and refuses a request it cannot accept,
+with the reason. Then inspect progress:
 
 ```sh
 supertag watch objective checkout-retries
 supertag describe objective checkout-retries
 ```
 
-The CLI takes the statement through `--outcome`; there are no separate done-when or constraint
-flags. Objectives can also be declared as resource manifests. `supertag.yaml` configures services;
+The CLI takes the statement as one argument after the ID; there are no separate done-when or
+constraint flags. Objectives can also be declared as resource manifests. `supertag.yaml` configures services;
 do not add these fields at its top level. See [Define and complete an Objective](objectives.md)
 for creation and [declared Objectives](../reference/resource-model.md#declared-objectives) for
 manifest fields.

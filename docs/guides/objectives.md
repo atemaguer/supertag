@@ -73,12 +73,9 @@ Use the CLI when scripting creation or setting a Workspace or deadline explicitl
 [declare the Objective in a manifest](../operations/resources.md#declare-objectives).
 
 ```sh
-supertag create objective usage-billing \
-  --outcome "Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change. Keep the public API unchanged." \
-  --owner lead \
-  --deadline 2027-03-31T23:00:00Z \
-  --budget-minor 200000 \
-  --budget-currency USD
+supertag objective create usage-billing \
+  "Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change. Keep the public API unchanged." \
+  --owner lead --deadline 2027-03-31T23:00:00Z --budget-minor 200000 --currency USD --state-directory ~/.supertag
 ```
 
 ```text
@@ -96,11 +93,11 @@ without one, SuperTag makes one from the first words of the outcome plus a short
 In this example, the owner starts its own work Sessions. To let it hand work to other Tags,
 create a Team and name it with `--team`. See [Organize Tags into Teams](teams.md).
 
-Read it back, and filter the list by owner:
+Read it back, and list Objectives; filter the JSON with a tool such as `jq`:
 
 ```sh
-supertag get objective usage-billing
-supertag list objective --owner lead
+supertag get objective usage-billing --state-directory ~/.supertag
+supertag get objective --state-directory ~/.supertag | jq '.objectives[] | select(.owner_tag_id == "lead")'
 ```
 
 Add `--output yaml` for the full record. `update`, `complete`, `approve`, `pause`, `resume`, and
@@ -125,15 +122,17 @@ A later Permission Set change does not rewrite it. To keep an Objective narrower
 it may use:
 
 ```sh
-supertag create objective docs-review --owner lead --runtime-action files:write \
-  --outcome "Fix the broken links in the docs. Done when the link checker passes."
+supertag objective create docs-review \
+  "Fix the broken links in the docs. Done when the link checker passes." \
+  --owner lead --runtime-action files:write --state-directory ~/.supertag
 ```
 
 A list can only narrow. An action the owner's Permission Sets do not allow is left out, with a
 warning. To change the list later, replace it:
 
 ```sh
-supertag update objective docs-review --runtime-action files:write --runtime-action commands:execute
+supertag objective set-runtime-actions docs-review --runtime-action files:write \
+  --runtime-action commands:execute --state-directory ~/.supertag
 ```
 
 The update applies to turns that start afterwards. An action marked `approval: required` still
@@ -153,7 +152,7 @@ Creation checks whether anything would hold the Objective's turns, and prints ea
 warning:
 
 ```text
-Warning: Tag lead has no Worker Host, so its Tasks cannot run. Create an Auth Key and join a host with it: supertag create auth-key NAME --tag lead
+Warning: Tag lead has no Worker Host, so its Tasks cannot run. Create an Auth Key and join a host with it: supertag auth-key create NAME --tag lead
 ```
 
 A warning does not stop creation; the turns wait until you fix the cause. When the owner itself
@@ -190,10 +189,10 @@ Rules:
   `source` is that repository. The Tag may name a subset, never another Workspace. See
   [Work in a repository with Workspaces](workspaces.md#start-from-slack-or-github).
 - A chat message saying "approved" approves nothing. Approvals go through
-  `supertag approve request`.
+  `supertag approval approve`.
 - A custom **Worker** must advertise the surface coordination capability and pass the supplied
   coordination tools to its harness to support this flow. See
-  [Build a custom Worker](custom-workers.md).
+  [Build a custom Worker](harness-adapters.md).
 
 ## 3. Watch the owner work
 
@@ -255,7 +254,7 @@ Open the Objective in the terminal UI to read it. To request changes, press `m`,
 should change, and press Enter. The Objective returns to `working` and the owner acts on your
 text.
 
-To approve the result, run `supertag approve objective usage-billing`. Approval completes a
+To approve the result, run `supertag objective review usage-billing`. approve Approval completes a
 `ready_for_review` Objective using the owner's assessment as the summary. If the owner recorded
 none, the summary says who approved it.
 
@@ -263,7 +262,7 @@ Scripts can complete an Objective directly:
 
 ```sh
 printf '%s\n' "Reconciliation suite passed in CI run 1482; billing review approved." | \
-  supertag complete objective usage-billing --summary-file -
+  supertag objective complete usage-billing --summary-file -
 ```
 
 Completion records an assessment; it does not verify the claims automatically. Once the Objective
@@ -277,8 +276,8 @@ summary.
 Only an operator can change limits:
 
 ```sh
-supertag update objective usage-billing --deadline 2027-04-15T23:00:00Z
-supertag update objective usage-billing --budget-minor 300000
+supertag objective set-limits usage-billing --deadline 2027-04-15T23:00:00Z
+supertag objective set-limits usage-billing --budget-minor 300000
 ```
 
 A new deadline can replace one that already passed. A budget can only increase. Each change
@@ -308,11 +307,11 @@ Pause an Objective to hold its work without losing any of it, for example while 
 direction. Only an operator can pause or resume. Tags cannot, including the owner.
 
 ```sh
-supertag pause objective usage-billing
+supertag objective pause usage-billing
 ```
 
 ```text
-objective/usage-billing paused; running Task Attempts finish, and no new work starts until: supertag resume objective usage-billing
+objective/usage-billing paused; running Task Attempts finish, and no new work starts until: supertag objective resume usage-billing
 ```
 
 While an Objective is paused:
@@ -323,7 +322,7 @@ While an Objective is paused:
 - `supertag describe objective` lists the pause under **Needs you** with the resume command.
 
 ```sh
-supertag resume objective usage-billing
+supertag objective resume usage-billing
 ```
 
 Resuming gives the owner a turn with a summary of how long the Objective was paused and what
@@ -339,7 +338,7 @@ longer does after you resume it.
 Cancel an Objective when the outcome no longer matters. Only an operator can cancel.
 
 ```sh
-supertag cancel objective usage-billing --reason "Billing moved to next quarter"
+supertag objective cancel usage-billing --reason "Billing moved to next quarter"
 ```
 
 Cancellation is final. SuperTag cancels every open Task of the Objective, so running Task Attempts

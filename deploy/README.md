@@ -54,7 +54,7 @@ rebuild after an upstream base image update.
 GitHub creates the package as private on first publication. When the image is ready for
 anonymous use, set the package visibility to Public in GitHub Packages and verify a pull from
 a machine without registry credentials. See the user guide for extending the image and
-configuring it on a Worker Host. [Build a Workspace image](../docs/guides/modal-workers.md#build-a-workspace-image)
+configuring it on a Worker Host. [Run Cursor in a sandbox](../docs/guides/workers.md#run-cursor-in-a-sandbox)
 
 Set Railway's Config File to `/deploy/railway/railway.json`, leaving the service root at the
 repository root. Set Render's Blueprint Path to `deploy/render/render.yaml`. Existing services

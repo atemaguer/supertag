@@ -12,8 +12,8 @@ This page uses these SuperTag terms, each defined in the glossary: [Role](glossa
 [Permission Set](glossary.md#permission-set), [Control Plane](glossary.md#control-plane),
 [Gateway](glossary.md#gateway), [Surface Account](glossary.md#surface-account),
 [Worker Host](glossary.md#worker-host), [host service](glossary.md#host-service),
-[Worker Profile](glossary.md#worker-profile), [Workspace](glossary.md#workspace),
-[Runtime Input](glossary.md#runtime-input), and [Tool Provider](glossary.md#tool-provider).
+[Workspace](glossary.md#workspace),
+[Runtime Input](glossary.md#context-set), and [Tool Provider](glossary.md#permission-set).
 
 SuperTag's IAM model treats a Tag as an accountable workload identity rather than equating it
 with a model process, harness session, collaboration surface bot, or credential. Governance policy attaches to
@@ -119,7 +119,7 @@ listed operators. A Tag never decides a request its own Task made.
 | --- | --- |
 | Collaboration surface action through hosted MCP | The Worker-local policy proxy asks the Control Plane before forwarding each call |
 | MCP server tool (`target: mcp`) | The Worker-local policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
-| Opening a Workspace pull request (`pull-requests:create`) | The Worker asks the Control Plane before pushing the Task branch; see [Workspaces](../guides/workspaces.md#deliver-pull-requests) |
+| Opening a Workspace pull request (`pull-requests:create`) | The Worker asks the Control Plane before pushing the Task branch; see [Workspaces](../guides/workspaces.md#use-a-github-repository) |
 | Shell commands and file writes inside a harness | Not checked per action yet; only through Task admission |
 
 The Worker fails closed. A gated call without a reachable Control Plane is not forwarded. The
@@ -171,7 +171,7 @@ the actions its owner Tag's Permission Sets allow, resolved once at creation:
 
 | Objective created | Default runtime actions |
 | --- | --- |
-| By an operator (`supertag create objective`, API) | Union across the owner's active Roles |
+| By an operator (`supertag objective create`, API) | Union across the owner's active Roles |
 | From a collaboration thread (`@SuperTag objective`) | The invoking Task's: the Tag's Roles and the Permission Sets activated at that location |
 
 An operator's explicit list narrows the default and never widens it. A Task in the Objective
@@ -189,7 +189,7 @@ Prefer narrow operations over `read`, `write`, or `admin` labels.
 ## MCP server tools
 
 A host service can provide MCP servers; see
-[host MCP servers](supertag-yaml.md#host-mcp-servers). A Permission Set grants their tools with
+[host MCP servers](../surfaces/worker-tools.md). A Permission Set grants their tools with
 `target: mcp`:
 
 ```yaml
@@ -249,7 +249,7 @@ Which granted servers a Task needs depends on whether it has a Workspace:
 
 | Task | Needs |
 | --- | --- |
-| With a Workspace, such as a work Session Task | Every server its grants name. A server comes from the host, which carries the label `mcp:NAME`, or from the Workspace's [`spec.mcp`](../guides/workspaces.md#select-repository-mcp-servers). |
+| With a Workspace, such as a work Session Task | Every server its grants name. A server comes from the host, which carries the label `mcp:NAME`, or from the Workspace's [`spec.mcp`](../guides/workspaces.md#select-repository-skills-and-mcp-servers). |
 | Without a Workspace, such as a conversation turn | Only the granted servers a bound Worker Host declares. |
 
 A conversation turn stays light. A granted server that no bound host declares, such as one only a
@@ -322,7 +322,7 @@ loopback alone. In `sandboxMode: "external"`, Codex runs without its own sandbox
 environment's network policy applies instead.
 
 The Worker records what the sandbox allows in the Task Attempt's Runtime Input Manifest, under
-`harness.provenance.sandbox`. Run `supertag events task TASK_ID` and find the event whose type ends
+`harness.provenance.sandbox`. Run `supertag task events TASK_ID` and find the event whose type ends
 in `runtime-inputs.resolved`. For a Task with `commands:execute` and `files:write`, it reads:
 
 ```json

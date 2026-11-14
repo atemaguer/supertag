@@ -71,10 +71,10 @@ directory with the Tags it names, and apply them together as a set, such as
 The same Objective can be created with a command instead:
 
 ```sh
-supertag create team support --member support-specialist
-supertag create objective support-policy --owner support-manager --team support --ongoing \
-  --budget-minor 50000 --budget-currency USD \
-  --outcome "Maintain the support response policy. Investigate each overdue-ticket report that arrives in this conversation, and change the policy only after a specialist's written proposal."
+supertag team create support --member support-specialist
+supertag objective create support-policy \
+  "Maintain the support response policy. Investigate each overdue-ticket report that arrives in this conversation, and change the policy only after a specialist's written proposal." \
+  --owner support-manager --team support --ongoing --budget-minor 50000 --currency USD --state-directory ~/.supertag
 ```
 
 **Check:** `supertag describe objective support-policy` shows status `working`, the Team and its
@@ -89,11 +89,11 @@ terminal UI, press `m`, and enter it. For example, “Overdue ticket 42: first r
 manager's next turn.
 
 For a monitoring script, use
-[`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective).
-Check [`InboxService.ListInboxItems`](../reference/operator-api/inbox.md#listinboxitems) first and
+[`ObjectiveService.MessageObjective`](../reference/control-plane-api.md#operator-services).
+Check [`InboxService.ListInboxItems`](../reference/control-plane-api.md#operator-services) first and
 hold the report while the manager waits for an answer. Configure the API credentials and save
 `call-operator-api.py` from the
-[operator API example](../reference/control-plane-api.md#send-messages-and-answer-questions).
+[operator API example](../reference/control-plane-api.md#operator-services).
 Send the report's `summary` as `text` and give it a key unique to that report. Reuse the same key
 when retrying delivery.
 
@@ -130,7 +130,7 @@ Once the manager applies a change, it posts the decision to the Team's Workstrea
 member reads it:
 
 ```sh
-supertag list workstream-post --team support --limit 20
+supertag get workstream-post --team support --limit 20
 ```
 
 With nothing left to do, the manager ends its turn. The Objective stays `working` and waits. No
@@ -159,7 +159,7 @@ Prune cancels the Objective and keeps its history. See
 also cancel it directly:
 
 ```sh
-supertag cancel objective support-policy --reason "Policy moved to the new support platform"
+supertag objective cancel support-policy --reason "Policy moved to the new support platform"
 ```
 
 **Check:** `supertag get objective support-policy` shows status `cancelled` with your reason.
@@ -193,11 +193,11 @@ Objective overview with the application's own evidence.
   a `Runnable: no.` line names what holds its turns, such as a Tag with no connected Worker Host,
   a pause, or a spent budget pool.
 - **The Objective is `limited`.** The budget pool is spent. Raise it with
-  `supertag update objective support-policy --budget-minor AMOUNT`; a budget can only increase.
+  `supertag objective set-limits support-policy --budget-minor AMOUNT`; a budget can only increase.
 - **Work waits although the budget has room.** The Team's `maxConcurrency` counts turns across
   every Objective that names the Team. See
   [Throttle a Team on purpose](teams.md#throttle-a-team-on-purpose).
-- **A turn needs attention.** Run `supertag list inbox --kind task-attention --output text`.
+- **A turn needs attention.** Run `supertag get inbox-item --kind task-attention`.
 - **Apply refuses a change.** `owner`, `outcome`, `ongoing`, `workspaces`, and which Team the
   Objective names are fixed. Create a new Objective for a different definition.
 

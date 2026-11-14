@@ -1,12 +1,10 @@
 # Deploy the Control Plane on Cloudflare
 
-<!-- supertag-cli: native -->
-
 A **Tag** is a persistent AI actor with its own responsibilities and permissions. The **Control
 Plane** is the service that stores a SuperTag organization and schedules its work; it is the one
 public endpoint for operators, **Worker Hosts** (the machines that run the work), and the
 optional **Gateway**, which connects **collaboration surfaces** such as Slack. This guide runs the
-native Control Plane in a Cloudflare Container behind a Worker, with external PostgreSQL. See the
+Control Plane in a Cloudflare Container behind a Worker, with external PostgreSQL. See the
 [glossary](../reference/glossary.md) for other terms.
 
 A Worker forwards only HTTP to a Container, so the Control Plane carries its gRPC API inside a
@@ -39,11 +37,8 @@ exits, the container stops, and the next request or cron run starts it again.
 
 ## Before you start
 
-- The native `supertag` CLI, from the release you deploy. No native release archive is published
-  yet, so build it from that release's checkout with
-  `cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`
-  and put `rust/target/release/supertag` first on your `PATH`. The `supertag-ai` npm package
-  installs the TypeScript CLI, which cannot set up or verify this deployment.
+- The `supertag` CLI, from the release you deploy (`supertag --version`). See
+  [Install SuperTag](../operations/install.md).
 - The Workers Paid plan, which Containers require, and Wrangler authenticated with your account.
 - Docker, and the `hosted` service image for `linux/amd64` (see
   [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image)), tagged locally:
@@ -155,8 +150,8 @@ start the Gateway without one.
   secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
 
 Slack, GitHub, Linear, and Microsoft Teams need inbound webhooks, which this deployment cannot
-receive, and the native Gateway has no Slack Socket Mode. For them, run a Gateway on a host that
-can receive webhooks (see [native service deployments](../../deploy/native/README.md)), enrolled
+receive, and the Gateway has no Slack Socket Mode. For them, run a Gateway on a host that
+can receive webhooks (see [service deployment definitions](../../deploy/native/README.md)), enrolled
 with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
 URL with its own credential.
 
@@ -225,5 +220,5 @@ Then delete the database and the Vault path if they were dedicated to this deplo
 
 ## Next
 
-- [Native service deployments](../../deploy/native/README.md) for the role contract and TLS files
+- [Service deployment definitions](../../deploy/native/README.md) for the role contract and TLS files
 - [Control Plane operations](../operations/control-plane.md)

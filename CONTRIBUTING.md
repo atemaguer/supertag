@@ -91,9 +91,7 @@ The protobuf contracts live in `spec/proto`. After editing one, run `pnpm proto:
 `pnpm check` runs `buf lint` and fails when a checked-in binding is stale. Generation also writes
 the Go operator API bindings into the Go module in `packages/operator-api/go`, which pins the
 plugins as tools, so it needs Go 1.26 or later. `go test ./...` in that directory checks the
-generated Go client against the generated handler. It also writes the operator API reference in
-`docs/reference/operator-api/` from the proto comments, so edit those comments rather than the
-pages; `pnpm check` fails when a page is stale.
+generated Go client against the generated handler.
 
 The Python SDK's operator bindings in `sdks/python/src/supertag/operator/v1` are not part of
 `pnpm proto:generate`. Regenerate them with

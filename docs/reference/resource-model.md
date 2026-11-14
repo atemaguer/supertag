@@ -2,7 +2,7 @@
 
 For a plain-language introduction, start with [core concepts](../concepts/README.md). Then
 read [Tags](../concepts/tags.md), [Tasks and Sessions](../concepts/tasks.md), or
-[Worker Hosts, Worklets, Workers, and harnesses](../concepts/workers.md) when you need more detail.
+[Worker Hosts and harnesses](../concepts/workers.md) when you need more detail.
 
 SuperTag capitalizes the names of resources and contracts users create, configure, inspect, or
 implement. General terms such as **collaboration surface** and **harness** stay lowercase.
@@ -25,14 +25,13 @@ PascalCase names such as `PermissionSet`.
 
 The **Control Plane** and **Worker Hosts** are SuperTag's two top-level runtime components. The
 Control Plane stores the organization and schedules its work, and a Worker Host is a machine,
-container, VM, or sandbox that runs it. The Control Plane contains an **API Server** for management and resource requests and a **Gateway** for
-**collaboration surface** transport. A collaboration surface is how SuperTag meets people in an external work tool, such as
+container, VM, or sandbox that runs it. A separate, optional **Gateway** carries
+**collaboration surface** traffic as a client of the Control Plane. A collaboration surface is how SuperTag meets people in an external work tool, such as
 Slack, GitHub, Lark/Feishu, Linear, or Microsoft Teams: it receives events at a [Tag](#configuration-resources)'s locations and
-replies there. A location is a place on a collaboration surface, such as a channel or repository. The API
-Server also exposes the **Worklet API** used by Worker Hosts. The API Server and Gateway are internal subsystems, not additional
-resources or separately deployed services. Worker Hosts supply execution capacity through [Worklets](glossary.md#worklet),
-[Workers](glossary.md#worker), [harnesses](glossary.md#harness), and
-[execution environments](glossary.md#execution-environment).
+replies there. A location is a place on a collaboration surface, such as a channel or repository. The Control
+Plane serves one API to operator clients, Worker Hosts, and Gateways. Worker Hosts supply execution
+capacity through [harness adapters](glossary.md#harness-adapter), [harnesses](glossary.md#harness),
+and [execution environments](glossary.md#execution-environment).
 
 ## Configuration resources
 
@@ -50,8 +49,6 @@ resources or separately deployed services. Worker Hosts supply execution capacit
 - **Workspace** — a named repository that [Objectives](#operational-resources) may work in, with an optional git `source`,
   a base `ref`, one `setup` command, and a `delivery` mode. Worker Hosts declare local checkouts
   of it or clone its source; see [Workspaces](#workspaces).
-- **Worker Profile** — a versioned execution configuration implemented by a
-  [Worker](glossary.md#worker).
 - **Surface Account** — an enrolled external workspace or account; credentials remain in the
   credential vault. `supertag setup surface` enrolls one interactively, and a SurfaceAccount
   manifest declares one; see [Declared Surface Accounts](#declared-surface-accounts).
@@ -92,7 +89,7 @@ hosts. None of these resources becomes a separate actor.
   separate resource.
 - **Task Attempt** records one Worker execution or retry.
 - An **approval request** records one ask for a decision on a gated action, with its scope and
-  decider. It is operational state listed with `supertag list approval`, not an applied resource.
+  decider. It is operational state listed with `supertag get approval`, not an applied resource.
   See [Approval requests](coordination.md#approval-requests).
 - **Worker Host** is the durable enrolled identity and latest observed capacity, capability,
   health, and scheduling state of one execution location.
@@ -102,16 +99,15 @@ hosts. None of these resources becomes a separate actor.
   teammate or machine. SuperTag records the changes it makes under its name. See
   [Operator Tokens](#operator-tokens).
 
-A **Worklet** runs on each Worker Host and reports that state to the Control Plane through the
-API Server's Worklet API. It is a supervisor and transport participant, not a separate operational
-resource. A per-host credential binds its Worklet connection to that Worker Host. Rotation and
+Each Worker Host reports that state to the Control Plane over its own connection. A per-host
+credential binds the connection to that Worker Host. Rotation and
 revocation block older connections without exposing credentials through ordinary resource reads.
 A **connection generation** is the increasing number that identifies the current connection.
 
 Most of these records are inspectable but not declaratively applied. An Objective, with the Team
 it names, may also be declared in a manifest; see [Declared Objectives](#declared-objectives).
-Otherwise an Objective comes from `supertag create objective` or an `@SuperTag objective` command,
-and a Team from `supertag create team`. A Team's Workstream exists with the Team. Status is never
+Otherwise an Objective comes from `supertag objective create` or an `@SuperTag objective` command,
+and a Team from `supertag team create`. A Team's Workstream exists with the Team. Status is never
 declared: owners and operators record it explicitly. The execution records report what the service
 did.
 
@@ -224,7 +220,7 @@ The rules:
 
 An ephemeral Worker Host suits a CI job or a short-lived container. Its `status.ephemeral` is
 `true`. After it stays disconnected for 30 seconds, the Control Plane removes it: the host is
-revoked, unbound from its Tags, and hidden from `supertag list worker-host`. `supertag get
+revoked, unbound from its Tags, and hidden from `supertag get host`. `supertag get
 worker-host ID` still shows it. A host that joined but never connected is removed after ten
 minutes.
 
@@ -255,10 +251,9 @@ SuperTag shows this rather than refusing it:
 
 | Command | What it says |
 | --- | --- |
-| `supertag ps`, `supertag describe worker-host` | "Ephemeral storage: Task files and artifacts on this host are lost if it stops." A host whose Tasks run in remote sandboxes says its Task files there are lost when each sandbox stops. `describe worker-host` says `Storage: persistent` only when its inspected execution records show local storage. |
+| `supertag ps`, `supertag describe host` | "Ephemeral storage: Task files and artifacts on this host are lost if it stops." A host whose Tasks run in remote sandboxes says its Task files there are lost when each sandbox stops. `describe worker-host` says `Storage: persistent` only when its inspected execution records show local storage. |
 | `supertag describe task` | Under `Storage:`, where the Task files, delivered branch, and each output and artifact live, flagging an artifact held only on ephemeral storage. See [artifacts](artifacts.md#where-describe-task-places-a-file) for how it decides. |
-| `supertag up`, `supertag up --dry-run` | A warning for each host service that joined as an ephemeral host or runs Tasks in remote sandboxes. A host service keeps the artifacts its Tasks capture on its own host, and the Control Plane keeps no copy. A sandbox loses only its Task files. |
-| `supertag connect worklet` | The ephemeral storage line on an ephemeral host, and a warning that it would hold the only copy of the artifacts its Tasks capture. |
+| `supertag up` | A warning for each host service that joined as an ephemeral host or runs Tasks in remote sandboxes. A host service keeps the artifacts its Tasks capture on its own host, and the Control Plane keeps no copy. A sandbox loses only its Task files. |
 
 ## Operator Tokens
 
@@ -293,7 +288,7 @@ The admin token and Operator Tokens differ in one way:
 | --- | --- |
 | Admin token (`SUPERTAG_ADMIN_TOKEN`) | Everything, including creating, listing, and revoking Operator Tokens. Changes are recorded as `control-plane-break-glass`. |
 | Operator Token | Everything else the admin token can: apply and delete resources, create Auth Keys, create and direct Objectives, decide approvals, message, cancel, and read. Changes are recorded as `token:NAME`. |
-| Scoped coordination credential | Only the named coordination commands, Objectives, and Teams. See [scoped operator credentials](../operations/control-plane.md#scoped-coordination-credentials). |
+| Scoped coordination credential | Only the named coordination commands, Objectives, and Teams. See [scoped operator credentials](../operations/control-plane.md#identities-and-access). |
 
 The rules:
 
@@ -333,8 +328,8 @@ language. A host carries three kinds of label:
 
 | Kind | Labels | Set by |
 | --- | --- | --- |
-| Automatic | `linux`, `macos`, or `windows`; `x64` or `arm64`; `harness:NAME` for each harness; `workspace:NAME` for each declared checkout; `mcp:NAME` for each [MCP server a host service provides](supertag-yaml.md#host-mcp-servers) | The Worklet |
-| Declared | Any label, such as `gpu` | `supertag connect worklet --label LABEL` |
+| Automatic | `linux`, `macos`, or `windows`; `x64` or `arm64`; `harness:NAME` for each harness; `workspace:NAME` for each declared checkout; `mcp:NAME` for each [MCP server a host service provides](../surfaces/worker-tools.md) | The Worker Host |
+| Declared | Any label, such as `gpu` | `supertag worker-host --label LABEL` |
 | Granted | The Auth Key's `spec.labels` | The Auth Key the host joined with |
 
 `status.labels` on a Worker Host lists all of its labels. `status.grantedLabels` lists those its
@@ -359,7 +354,7 @@ Otherwise it runs on another Worker, such as Codex, or waits; its scheduling rec
 requirement `allow-unsandboxed-commands:HOST`, and `supertag describe task` explains it. See
 [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).
 
-`runsOn` is set in a Tag manifest; `supertag update tag` has no flag for it. Each label is its own
+`runsOn` is set in a Tag manifest or with `supertag placement runs-on TAG LABEL...`. Each label is its own
 entry under the [field manager rules](#field-managers-and-apply-sets), so a label that one apply
 set adds survives another set's apply. Per-Objective and per-Task labels are not supported yet.
 
@@ -407,8 +402,8 @@ Tag's own range. See
 [Scheduling and recovery](scheduling-and-recovery.md#placement-by-harness-and-model).
 
 `execution` is one field under the [field manager rules](#field-managers-and-apply-sets): one
-manager owns all three settings together. `supertag get role NAME --output yaml` and
-`supertag get tag NAME --output yaml` export it. Tags and Roles without `execution` run on
+manager owns all three settings together. `supertag get role NAME` and `supertag get tag NAME`
+print it as JSON. Tags and Roles without `execution` run on
 whatever harness and model their Worker Hosts offer, starting at low effort.
 
 ## Workspaces
@@ -459,7 +454,7 @@ when SuperTag accepts it; `Task.spec.workspace` reports the name, branch, ref, a
 `number`, `url`, and `state`: `draft`, `ready`, or `closed`. `lastError` appears when the Control
 Plane could not mark it ready or close it. See
 [Work in a repository with Workspaces](../guides/workspaces.md) and
-[Workspace staging](worker.md#workspace-staging).
+[Workspace staging](worker.md#workspaces).
 
 `strategy: mount` requests live data, such as a dataset too large to copy. Placement requires a
 provider that advertises native mounts and never substitutes `copy`. Local and e2b
@@ -568,13 +563,13 @@ Endpoint checks also refuse the metadata addresses `fd20:ce::254`, `fd00:ec2::23
 `192.0.0.192`, and `168.63.129.16`, including the supported embedded IPv4 forms above.
 
 These settings are public catalog data; keep credentials in the host's
-[Volume credential secret](supertag-yaml.md#volume-credential-secrets).
+[Volume credential secret](../guides/workspaces.md#attach-data-outside-the-repository).
 
 `spec.credential` is a name, never a secret value. The Control Plane stores only the name. Each
 Worker Host that serves the Volume keeps the secret itself. Apply rejects a value that looks like a
 key or token, such as an access key ID, so a secret pasted by mistake is not stored.
 
-`supertag get volume NAME`, `supertag list volume`, and `supertag describe volume NAME` show a
+`supertag get volume NAME`, `supertag get volume`, and `supertag describe volume NAME` show a
 Volume. `apply` creates or replaces one; a credential a later manifest omits is cleared.
 
 For what a Volume keeps when a sandbox or host dies, see
@@ -583,7 +578,7 @@ For what a Volume keeps when a sandbox or host dies, see
 Copy mounts have a fixed combined limit of 20 GiB per Task Attempt, in addition to each mount's
 `maxBytes`. SuperTag checks all listings before copying any files. A `file://` source refuses files
 with more than one hard link and rechecks home-directory consent during copying. See
-[copy mount behavior](../guides/workspaces.md#what-a-copy-mount-does) for the source and destination
+[copy mount behavior](../guides/workspaces.md#attach-data-outside-the-repository) for the source and destination
 restrictions.
 
 ### Native source settings
@@ -655,7 +650,7 @@ the environment comes only from host configuration.
 
 ## Field managers and apply sets
 
-A manifest from version control, an operator running `supertag update tag`, and a second team's
+A manifest from version control, an operator running `supertag tag put`, and a second team's
 manifest may all change one Tag. SuperTag records which writer last set each field, so one writer
 does not silently undo another.
 
@@ -691,7 +686,7 @@ Apply follows four rules for each field:
 
 1. **Omitted and yours: removed.** A field this manager set that the manifest now omits is removed.
    A single value returns to its default.
-2. **Omitted and someone else's: kept.** A location added with `supertag update tag` survives.
+2. **Omitted and someone else's: kept.** A field set with `supertag tag put` survives.
 3. **Changed and someone else's: conflict.** Apply refuses and names the field and its manager.
    `--force-conflicts` applies the change and moves the field to the applying manager.
 4. **Same value: no conflict.** Setting the value another manager already set moves the field to
@@ -760,8 +755,8 @@ The rules:
 - `--prune` cancels a set member the input no longer declares; it is never deleted. A completed
   member leaves the set unchanged. A cancelled Objective cannot run again, so apply leaves a
   cancelled declaration as it is and says so.
-- A manifest has no `status`. `supertag get objective ID --output yaml` exports the declarable
-  fields; JSON reads return the full Objective record.
+- A manifest has no `status`. `supertag get objective ID` returns the full Objective record as
+  JSON.
 
 ## Declared Surface Accounts
 
@@ -790,7 +785,7 @@ spec:
 | `spec.configuration` | The provider's non-secret options, with defaults filled in. | Changes; identity options, such as a Teams `tenantId`, may not name another account |
 | `spec.secrets` | Secret name to exactly one of `{ secretRef: NAME }`, `{ env: VARIABLE }`, or `{ file: PATH }`. | Changes |
 
-The [collaboration surface guides](../surfaces/README.md#declare-a-surface-account-in-a-manifest) list each
+The [collaboration surface guides](../surfaces/README.md#declare-accounts-and-locations-in-manifests) list each
 provider's options and secrets, and the
 [SurfaceAccount schema](../../spec/manifests/surface-account.schema.json) gives the exact shape.
 
@@ -811,8 +806,7 @@ The rules:
 - A name stays bound to the provider account it first named. Credentials for another account, or a
   second manifest for the same one, are refused. Applying a manifest for an account that setup
   created names that account and keeps its ID.
-- `supertag get surface NAME --output yaml` exports the declarable fields and references. An
-  account setup created has no references to export.
+- `supertag get surface-account NAME` returns the account as JSON.
 
 ## Deletion
 
@@ -832,7 +826,7 @@ A Volume has no `supertag delete` form; `apply --set NAME --prune` deletes a Vol
 set no longer declares.
 
 A Surface Account is named by its manifest name, or, when setup created it, by
-`PROVIDER:EXTERNAL_ID` as `supertag list surface` shows. A **retired** account keeps its row for
+`PROVIDER:EXTERNAL_ID` as `supertag get surface-account` shows. A **retired** account keeps its row for
 delivery history, frees its name, matches no inbound event, and is omitted from `list` and `get`.
 Setting up or applying the same provider account again reconnects it.
 
