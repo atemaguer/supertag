@@ -12,7 +12,6 @@ use serde::Deserialize;
 use std::{io::SeekFrom, time::SystemTime};
 use supertag_protocol::volumes::s3_volume_source;
 use tokio::io::AsyncSeekExt;
-use tokio_util::io::ReaderStream;
 
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(25);
@@ -262,17 +261,30 @@ impl S3Mapping {
                     .is_none_or(|length| length == blob.byte_length),
             "S3 Volume read did not return the exact object"
         );
-        let mut staged = StagedBlob::transient(blob.clone())?;
+        // An unnamed temporary file: nothing of it outlives this process, even after a crash.
+        let mut snapshot = tokio::fs::File::from_std(tempfile::tempfile()?);
+        let mut digest = Sha256::new();
+        let mut length = 0u64;
         while let Some(bytes) = response
             .chunk()
             .await
             .map_err(|_| anyhow::anyhow!("S3 Volume object read failed"))?
         {
-            for chunk in bytes.chunks(CHECKPOINT_CHUNK_BYTES) {
-                staged.append(chunk).await?;
-            }
+            length += bytes.len() as u64;
+            ensure!(
+                length <= blob.byte_length,
+                "S3 Volume object exceeds its receipt"
+            );
+            digest.update(&bytes);
+            snapshot.write_all(&bytes).await?;
         }
-        Ok(Some(verified_file(staged).await?))
+        ensure!(
+            length == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
+            "S3 Volume object differs from its receipt"
+        );
+        snapshot.flush().await?;
+        snapshot.seek(SeekFrom::Start(0)).await?;
+        Ok(Some(snapshot))
     }
 
     /// Writes relayed `bytes` unless the exact object is already there. Without `bytes`, only an
@@ -296,16 +308,9 @@ impl S3Mapping {
             "verified artifact Volume copy is missing"
         );
         let bytes = bytes.ok_or(super::SourceUnavailable)?;
-        let mut staged = StagedBlob::transient(blob.clone())?;
-        for chunk in bytes.chunks(CHECKPOINT_CHUNK_BYTES) {
-            staged.append(chunk).await?;
-        }
-        let file = verified_file(staged).await?;
-        let body = if blob.byte_length == 0 {
-            Body::from(Vec::new())
-        } else {
-            Body::wrap_stream(ReaderStream::with_capacity(file, CHECKPOINT_CHUNK_BYTES))
-        };
+        // The relayed bytes are already in memory; they go to the bucket from there.
+        super::verify_bytes(&bytes, blob)?;
+        let body = Body::from(bytes);
         let result = self
             .request(Method::PUT, key, blob, true)?
             .body(body)
@@ -333,12 +338,6 @@ impl S3Mapping {
 
 fn signing_error() -> anyhow::Error {
     anyhow::anyhow!("could not sign S3 Volume request")
-}
-
-async fn verified_file(mut staged: StagedBlob) -> Result<tokio::fs::File> {
-    staged.verify().await?;
-    staged.handle.seek(SeekFrom::Start(0)).await?;
-    Ok(staged.handle)
 }
 
 #[cfg(test)]

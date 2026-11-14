@@ -780,14 +780,6 @@ struct StagedBlob {
 }
 
 impl StagedBlob {
-    /// Stages in the system temporary directory; the file is deleted when it is dropped.
-    fn transient(expected: BlobReference) -> Result<Self, Status> {
-        Self::staged(
-            tempfile::NamedTempFile::new().map_err(storage_error)?,
-            expected,
-        )
-    }
-
     fn new(directory: &Path, expected: BlobReference) -> Result<Self, Status> {
         Self::staged(
             tempfile::NamedTempFile::new_in(directory).map_err(storage_error)?,

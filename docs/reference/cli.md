@@ -1910,7 +1910,7 @@ Options:
           Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Control Plane reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto.
 
       --github-workspace-directory <GITHUB_WORKSPACE_DIRECTORY>
-          Private scratch for GitHub source and publication bundles, using the GitHub account in the `SUPERTAG_GITHUB_*` variables. Each bundle is deleted once its read or publication ends
+          Private scratch for GitHub source and publication bundles, using the GitHub account in the `SUPERTAG_GITHUB_*` variables. Each bundle is deleted once its read or publication ends; publication scratch a stopped Control Plane left is removed when it starts
 
       --audit-log <stderr|PATH>
           Also write each committed audit entry as one JSON line to `stderr` or to this absolute file path, created owner-only. The database keeps every entry either way

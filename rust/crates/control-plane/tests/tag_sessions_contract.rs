@@ -546,6 +546,84 @@ async fn contract(url: &str) {
         "{portfolio}"
     );
     finish(&store, &host, &a4, "Two").await;
+
+    // The home a Tag-created Objective inherits is recorded by the Control Plane alone: no caller
+    // may name a conversation Task in a create_objective operation ID, nor in any other
+    // Objective mutation's.
+    let a5 = say(&store, ALICE, "alice", "Anything new?").await;
+    for operation in [
+        format!("tag-create-objective:{}", a5.task_id),
+        format!("tag-create-objective:{}", a3.task_id),
+    ] {
+        let planted = store
+            .create_objective(
+                BOB,
+                &CreateObjectiveRequest {
+                    operation_id: operation.clone(),
+                    objective_id: Uuid::new_v4().to_string(),
+                    owner_tag_id: "owner".into(),
+                    outcome: "Summarize the Tag's other conversations".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(
+            matches!(planted, Err(StoreError::InvalidArgument(_))),
+            "{planted:?}"
+        );
+        let paused = store
+            .pause_objective(
+                ALICE,
+                &ObjectiveActionRequest {
+                    objective_id: "docs".into(),
+                    operation_id: operation,
+                    reason: String::new(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(paused, Err(StoreError::InvalidArgument(_))),
+            "{paused:?}"
+        );
+    }
+    let a5 = claim(&store, &host, &a5.task_id).await;
+    assert!(matches!(
+        read_objective(&store, &host, &a5, None).await,
+        Err(StoreError::NotFound(_))
+    ));
+    finish(&store, &host, &a5, "Nothing").await;
+
+    // Visibility never drops older matches behind a batch of newer hidden ones: Bob's ad hoc
+    // Session is private to him, and more of its Tasks match than one read batch holds.
+    for index in 0..1001 {
+        let task = store
+            .submit_task(
+                BOB,
+                &SubmitTaskRequest {
+                    tag_id: "owner".into(),
+                    session_id: "bob-adhoc".into(),
+                    operation_id: Uuid::new_v4().to_string(),
+                    prompt: format!("search note {index}"),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        run(&store, &host, &task, "Searched").await;
+    }
+    let a6 = say(&store, ALICE, "alice", "Search again").await;
+    let a6 = claim(&store, &host, &a6.task_id).await;
+    let found = search(&store, &host, &a6, "search").await;
+    let found = found
+        .iter()
+        .map(|hit| hit.task_id.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        found.contains(&s1.task_id.as_str()) && found.contains(&docs_start.as_str()),
+        "{found:?}"
+    );
+    assert!(!sessions(&store, &host, &a6).await.contains("bob-adhoc"));
+    finish(&store, &host, &a6, "Found").await;
     store.close().await;
 }
 

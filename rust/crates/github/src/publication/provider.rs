@@ -87,6 +87,30 @@ pub(super) fn receipt(job: &GithubPublication, value: &PullRequest) -> GithubPul
         body: value.body.clone(),
     }
 }
+/// Names a publication's scratch directory, which holds its relayed delivery bundle and the
+/// repository made from it until the publication ends.
+const SCRATCH_PREFIX: &str = ".publication-";
+
+/// Removes the scratch an interrupted publication left, so a delivery's bytes do not outlive it
+/// on the Control Plane. Only this process publishes from `directory`, and it has not started.
+fn sweep_scratch(directory: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(SCRATCH_PREFIX))
+        {
+            if entry.file_type()?.is_dir() {
+                std::fs::remove_dir_all(entry.path())?;
+            } else {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Provider {
     pub fn new(
         config: GithubWorkspaceAccount,
@@ -106,6 +130,7 @@ impl Provider {
             meta.is_dir() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o077 == 0,
             "publication storage must be private"
         );
+        sweep_scratch(directory)?;
         let repository = config.repository.to_ascii_lowercase();
         Ok(Self {
             account: config.account_id,
@@ -179,7 +204,9 @@ impl Provider {
         let delivery = job.delivery.as_ref().context("delivery required")?;
         let bundle = delivery.bundle.as_ref().context("bundle required")?;
         let holder = holder.context("delivery has no holding Worker Host")?;
-        let directory = TempDir::new_in(&self.directory)?;
+        let directory = tempfile::Builder::new()
+            .prefix(SCRATCH_PREFIX)
+            .tempdir_in(&self.directory)?;
         let relayed = directory.path().join("bundle");
         self.bundles.read(holder, bundle, &relayed).await?;
         let repository = source::materialize(
@@ -462,4 +489,26 @@ fn parse(value: &Value) -> Result<PullRequest> {
             .as_bool()
             .context("pull request draft state missing")?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_removes_only_interrupted_publication_scratch() {
+        let root = tempfile::tempdir().unwrap();
+        let left = tempfile::Builder::new()
+            .prefix(SCRATCH_PREFIX)
+            .tempdir_in(root.path())
+            .unwrap()
+            .keep();
+        std::fs::write(left.join("bundle"), b"delivery bytes").unwrap();
+        std::fs::create_dir(left.join("verified")).unwrap();
+        let source = root.path().join(".tmp-source");
+        std::fs::create_dir(&source).unwrap();
+        sweep_scratch(root.path()).unwrap();
+        assert!(!left.exists());
+        assert!(source.exists());
+    }
 }

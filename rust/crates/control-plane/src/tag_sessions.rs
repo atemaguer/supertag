@@ -12,13 +12,13 @@
 //! requester is visible only to itself. Neither widens what TypeScript showed.
 use std::collections::HashMap;
 
-use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use tonic::{Request, Response, Status};
 
 use crate::{
     ControlPlane, HostAuthority, Store, StoreError,
+    objectives::TAG_CREATE_OPERATION,
     store::{Result, invalid, lease_is_live, name, owned, task_row},
     work_sessions::{REPORT, task_scope_in},
 };
@@ -31,8 +31,9 @@ const FIRST_REQUEST_CHARS: usize = 200;
 const EXCERPT_CHARS: usize = 240;
 const REQUEST_CHARS: usize = 2_000;
 const RESULT_CHARS: usize = 4_000;
-/// Sessions, Tasks, or Objectives one read considers before visibility is applied.
-const SCAN: i64 = 1_000;
+/// Sessions or Tasks one query reads; a read continues with the next batch until it has a full
+/// page of visible ones or none are left, so visibility never drops older matches.
+const BATCH: i64 = 500;
 const PORTFOLIO_MAX_CHARS: usize = 3_800;
 const PORTFOLIO_OUTCOME_CHARS: usize = 160;
 /// Work Sessions have their parent's audience; parents are root Sessions.
@@ -165,19 +166,12 @@ async fn audience_at(
         // An Objective a conversation created with `create_objective` has that conversation's
         // audience (TS `surfaceSessionId`), and one whose notices go to an operator-chosen
         // thread has that thread's (TS `notificationTaskId`).
-        let created_in: Option<String> = sqlx::query_scalar(
-            "SELECT operation_id FROM supertag_v2_objective_operations WHERE objective_id=$1 AND operation_id LIKE 'tag-create-objective:%'",
-        )
-        .bind(&objective_id)
-        .fetch_optional(&mut **tx)
-        .await?;
-        let home = created_in
-            .and_then(|operation| {
-                operation
-                    .strip_prefix("tag-create-objective:")
-                    .map(str::to_owned)
-            })
-            .or(objective.try_get("notification_task_id")?);
+        let home = match created_home_in(tx, &objective_id, &tag).await? {
+            Some(Some(task)) => Some(task),
+            // A receipt whose Task does not verify widens nothing.
+            Some(None) => return Ok(Audience::Private(None)),
+            None => objective.try_get("notification_task_id")?,
+        };
         if let Some(home) = home {
             let home = sqlx::query("SELECT tag_id,session_id FROM supertag_v2_tasks WHERE task_id=$1")
                 .bind(&home)
@@ -203,6 +197,39 @@ async fn audience_at(
         return Ok(Audience::Shared);
     }
     surface_audience_in(tx, &tag, &session).await
+}
+
+/// The conversation Task a Tag's `create_objective` tool created `objective` from (TS
+/// `Objective.surfaceTaskId`). Only the Control Plane writes a [`TAG_CREATE_OPERATION`] receipt,
+/// and the Task must be a turn of the Objective's own Tag in a conversation of the receipt's
+/// principal, carrying that principal's own message. `None` without such a receipt, and
+/// `Some(None)` when its Task does not verify.
+async fn created_home_in(
+    tx: &mut Transaction<'_, Any>,
+    objective: &str,
+    tag: &str,
+) -> Result<Option<Option<String>>> {
+    let Some(receipt) = sqlx::query(
+        "SELECT principal,operation_id FROM supertag_v2_objective_operations WHERE objective_id=$1 AND operation_id LIKE 'tag-create-objective:%'",
+    )
+    .bind(objective)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let operation: String = receipt.try_get("operation_id")?;
+    let Some(task) = operation.strip_prefix(TAG_CREATE_OPERATION) else {
+        return Ok(Some(None));
+    };
+    Ok(Some(sqlx::query_scalar(
+        "SELECT t.task_id FROM supertag_v2_tasks t JOIN supertag_v2_conversation_messages m ON m.task_id=t.task_id AND m.session_id=t.session_id JOIN supertag_v2_conversations c ON c.session_id=t.session_id AND c.tag_id=t.tag_id AND c.principal=m.principal WHERE t.task_id=$1 AND t.tag_id=$2 AND m.principal=$3",
+    )
+    .bind(task)
+    .bind(tag)
+    .bind(receipt.try_get::<String, _>("principal")?)
+    .fetch_optional(&mut **tx)
+    .await?))
 }
 
 /// A surface thread is shared unless it is a direct chat with one person; any other Session is
@@ -446,21 +473,26 @@ async fn summary_in(
     })
 }
 
+/// Leaves out, in SQL, the conversations private to someone other than the viewer's requester
+/// (`$5`, empty when it has none), so a read does not derive their audience one by one. The rest
+/// of the rule is [`Viewer::sees`].
+const HIDDEN_CONVERSATIONS: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_conversations c WHERE c.session_id=supertag_v2_tasks.session_id AND c.tag_id=$1 AND (c.principal IS NULL OR c.principal<>$5))";
+
 const SESSION_GROUP: &str = "SELECT session_id,MIN(accepted_order) AS first_order,MAX(accepted_order) AS last_order,MAX(accepted_at_ms) AS accepted_ms,MAX(completed_at_ms) AS completed_ms FROM supertag_v2_tasks";
 
 /// Open Objectives the viewer's Tag owns whose Session it may see, newest update first, and
-/// how many there are (TS `listVisibleOpenObjectives`).
+/// how many there are (TS `listVisibleOpenObjectives`). Every open Objective is considered, so
+/// the count is exact.
 async fn open_objectives_in(
     tx: &mut Transaction<'_, Any>,
     viewer: &Viewer,
     limit: i64,
     offset: i64,
 ) -> Result<(Vec<TagObjectiveSummary>, u32)> {
-    let rows = sqlx::query("SELECT objective_id,status,outcome,deadline_ms,updated_at_ms,session_id,starting_task_id,notification_task_id FROM supertag_v2_objectives WHERE owner_tag_id=$1 AND status NOT IN ($2,$3) ORDER BY updated_at_ms DESC, objective_id DESC LIMIT $4")
+    let rows = sqlx::query("SELECT objective_id,status,outcome,deadline_ms,updated_at_ms,session_id,starting_task_id,notification_task_id FROM supertag_v2_objectives WHERE owner_tag_id=$1 AND status NOT IN ($2,$3) ORDER BY updated_at_ms DESC, objective_id DESC")
         .bind(viewer.tag())
         .bind(ObjectiveStatus::Completed as i64)
         .bind(ObjectiveStatus::Cancelled as i64)
-        .bind(SCAN)
         .fetch_all(&mut **tx)
         .await?;
     let mut audiences = Audiences::new();
@@ -594,16 +626,6 @@ pub(crate) async fn portfolio_in(tx: &mut Transaction<'_, Any>, viewer: &Viewer)
     Ok(lines.join("\n"))
 }
 
-/// The Objective a `create_objective` call of this Task makes: one per Task.
-fn created_objective_id(task_id: &str) -> String {
-    let digest = Sha256::digest(format!("tag-create-objective:{task_id}").as_bytes());
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    uuid::Builder::from_random_bytes(bytes)
-        .into_uuid()
-        .to_string()
-}
-
 impl Store {
     /// The live running Attempt's root turn, refused for a Work Session's own Task.
     async fn tag_viewer_in(
@@ -649,26 +671,36 @@ impl Store {
         let viewer = self
             .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
             .await?;
-        let rows = sqlx::query(&format!("{SESSION_GROUP} WHERE tag_id=$1 AND session_id<>$2 GROUP BY session_id ORDER BY MAX(accepted_order) DESC LIMIT $3"))
-            .bind(viewer.tag())
-            .bind(viewer.session())
-            .bind(SCAN)
-            .fetch_all(&mut *tx)
-            .await?;
         let mut audiences = Audiences::new();
         let mut sessions = Vec::new();
         let mut skipped = 0;
-        for row in rows {
-            let session: String = row.try_get("session_id")?;
-            let Some(audience) = audiences.visible(&mut tx, &viewer, &session).await? else {
-                continue;
-            };
-            if skipped < offset {
-                skipped += 1;
-                continue;
+        let mut read = 0;
+        'batches: loop {
+            let rows = sqlx::query(&format!("{SESSION_GROUP} WHERE tag_id=$1 AND session_id<>$2 AND {HIDDEN_CONVERSATIONS} GROUP BY session_id ORDER BY MAX(accepted_order) DESC LIMIT $3 OFFSET $4"))
+                .bind(viewer.tag())
+                .bind(viewer.session())
+                .bind(BATCH)
+                .bind(read)
+                .bind(viewer.requester.as_deref().unwrap_or_default())
+                .fetch_all(&mut *tx)
+                .await?;
+            let last = (rows.len() as i64) < BATCH;
+            read += rows.len() as i64;
+            for row in rows {
+                let session: String = row.try_get("session_id")?;
+                let Some(audience) = audiences.visible(&mut tx, &viewer, &session).await? else {
+                    continue;
+                };
+                if skipped < offset {
+                    skipped += 1;
+                    continue;
+                }
+                sessions.push(summary_in(&mut tx, &row, &audience).await?);
+                if sessions.len() as i64 == limit {
+                    break 'batches;
+                }
             }
-            sessions.push(summary_in(&mut tx, &row, &audience).await?);
-            if sessions.len() as i64 == limit {
+            if last {
                 break;
             }
         }
@@ -705,50 +737,60 @@ impl Store {
         let viewer = self
             .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
             .await?;
-        let rows = sqlx::query("SELECT task_id,session_id,prompt,result,completed_at_ms,accepted_order FROM supertag_v2_tasks WHERE tag_id=$1 AND state=$2 AND result IS NOT NULL AND session_id<>$3 AND (LOWER(prompt) LIKE $4 ESCAPE '!' OR LOWER(result) LIKE $4 ESCAPE '!') ORDER BY accepted_order DESC LIMIT $5")
-            .bind(viewer.tag())
-            .bind(TaskState::Succeeded as i64)
-            .bind(viewer.session())
-            .bind(&pattern)
-            .bind(SCAN)
-            .fetch_all(&mut *tx)
-            .await?;
         let mut audiences = Audiences::new();
         let mut firsts: HashMap<String, (String, String)> = HashMap::new();
         let mut matches = Vec::new();
-        for row in rows {
-            let session: String = row.try_get("session_id")?;
-            if audiences
-                .visible(&mut tx, &viewer, &session)
-                .await?
-                .is_none()
-            {
-                continue;
-            }
-            let (provider, scope) = match firsts.get(&session) {
-                Some(location) => location.clone(),
-                None => {
-                    let first: i64 = sqlx::query_scalar("SELECT MIN(accepted_order) FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2")
-                        .bind(viewer.tag()).bind(&session).fetch_one(&mut *tx).await?;
-                    let location = origin(&task_by_order_in(&mut tx, first).await?);
-                    firsts.insert(session.clone(), location.clone());
-                    location
+        let mut before = i64::MAX;
+        'batches: loop {
+            let rows = sqlx::query(&format!("SELECT task_id,session_id,prompt,result,completed_at_ms,accepted_order FROM supertag_v2_tasks WHERE tag_id=$1 AND state=$2 AND result IS NOT NULL AND session_id<>$3 AND (LOWER(prompt) LIKE $4 ESCAPE '!' OR LOWER(result) LIKE $4 ESCAPE '!') AND accepted_order<$6 AND {HIDDEN_CONVERSATIONS} ORDER BY accepted_order DESC LIMIT $7"))
+                .bind(viewer.tag())
+                .bind(TaskState::Succeeded as i64)
+                .bind(viewer.session())
+                .bind(&pattern)
+                .bind(viewer.requester.as_deref().unwrap_or_default())
+                .bind(before)
+                .bind(BATCH)
+                .fetch_all(&mut *tx)
+                .await?;
+            let last = (rows.len() as i64) < BATCH;
+            for row in rows {
+                let session: String = row.try_get("session_id")?;
+                before = row.try_get("accepted_order")?;
+                if audiences
+                    .visible(&mut tx, &viewer, &session)
+                    .await?
+                    .is_none()
+                {
+                    continue;
                 }
-            };
-            let prompt: String = row.try_get("prompt")?;
-            let result: Option<String> = row.try_get("result")?;
-            matches.push(TagSessionSearchHit {
-                session_id: session,
-                task_id: row.try_get("task_id")?,
-                completed_at_ms: row.try_get("completed_at_ms")?,
-                provider,
-                scope,
-                request_excerpt: excerpt(&prompt, &needle),
-                result_excerpt: result
-                    .map(|result| excerpt(&result, &needle))
-                    .unwrap_or_default(),
-            });
-            if matches.len() as i64 == limit {
+                let (provider, scope) = match firsts.get(&session) {
+                    Some(location) => location.clone(),
+                    None => {
+                        let first: i64 = sqlx::query_scalar("SELECT MIN(accepted_order) FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2")
+                            .bind(viewer.tag()).bind(&session).fetch_one(&mut *tx).await?;
+                        let location = origin(&task_by_order_in(&mut tx, first).await?);
+                        firsts.insert(session.clone(), location.clone());
+                        location
+                    }
+                };
+                let prompt: String = row.try_get("prompt")?;
+                let result: Option<String> = row.try_get("result")?;
+                matches.push(TagSessionSearchHit {
+                    session_id: session,
+                    task_id: row.try_get("task_id")?,
+                    completed_at_ms: row.try_get("completed_at_ms")?,
+                    provider,
+                    scope,
+                    request_excerpt: excerpt(&prompt, &needle),
+                    result_excerpt: result
+                        .map(|result| excerpt(&result, &needle))
+                        .unwrap_or_default(),
+                });
+                if matches.len() as i64 == limit {
+                    break 'batches;
+                }
+            }
+            if last {
                 break;
             }
         }
@@ -876,15 +918,16 @@ impl Store {
             }
             _ if viewer.objective.is_some() => viewer.objective.clone(),
             _ => {
-                let created = created_objective_id(&viewer.task.task_id);
-                let exists: Option<String> = sqlx::query_scalar(
-                    "SELECT objective_id FROM supertag_v2_objectives WHERE objective_id=$1 AND owner_tag_id=$2",
+                // Only the Control Plane writes this receipt, so no caller can plant the
+                // Objective this conversation created.
+                let created: Option<String> = sqlx::query_scalar(
+                    "SELECT o.objective_id FROM supertag_v2_objective_operations r JOIN supertag_v2_objectives o ON o.objective_id=r.objective_id WHERE r.operation_id=$1 AND o.owner_tag_id=$2",
                 )
-                .bind(&created)
+                .bind(format!("{TAG_CREATE_OPERATION}{}", viewer.task.task_id))
                 .bind(viewer.tag())
                 .fetch_optional(&mut *tx)
                 .await?;
-                exists
+                created
             }
         };
         let objective_id = match (&input.objective_id, bound) {
@@ -949,7 +992,7 @@ impl Store {
         host: &HostAuthority,
         input: &CreateTagObjectiveRequest,
     ) -> Result<CreateTagObjectiveResponse> {
-        let (principal, task) = {
+        let (principal, task, created) = {
             let mut tx = self.pool.begin().await?;
             let viewer = self
                 .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
@@ -961,8 +1004,16 @@ impl Store {
                         "Creating an Objective requires an explicit objective command".into(),
                     )
                 })?;
+            // A retried call replays the Objective this Task already created.
+            let created: Option<String> = sqlx::query_scalar(
+                "SELECT objective_id FROM supertag_v2_objective_operations WHERE principal=$1 AND operation_id=$2",
+            )
+            .bind(&principal)
+            .bind(format!("{TAG_CREATE_OPERATION}{}", viewer.task.task_id))
+            .fetch_optional(&mut *tx)
+            .await?;
             tx.commit().await?;
-            (principal, viewer.task)
+            (principal, viewer.task, created)
         };
         let actions = task
             .policy_snapshot
@@ -973,8 +1024,9 @@ impl Store {
                 |authority| authority.actions.clone(),
             );
         let request = CreateObjectiveRequest {
-            operation_id: format!("tag-create-objective:{}", task.task_id),
-            objective_id: created_objective_id(&task.task_id),
+            operation_id: format!("{TAG_CREATE_OPERATION}{}", task.task_id),
+            // Random, so no caller can take the ID before this Task creates it.
+            objective_id: created.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             owner_tag_id: task.tag_id.clone(),
             outcome: input.outcome.trim().to_owned(),
             ongoing: false,
@@ -988,7 +1040,9 @@ impl Store {
         if request.outcome.is_empty() {
             return Err(invalid("outcome is required"));
         }
-        let objective = self.create_objective(&principal, &request).await?;
+        let objective = self
+            .create_objective_unchecked(&principal, &request)
+            .await?;
         Ok(CreateTagObjectiveResponse {
             started_task_id: objective.starting_task_id.clone(),
             objective: Some(objective),
@@ -1100,13 +1154,6 @@ mod tests {
         assert_eq!(truncate("abc", 3), "abc");
         assert_eq!(truncate("abcd", 3), "abc\n[truncated]");
         assert_eq!(shorten("abcd", 3), "ab…");
-    }
-
-    #[test]
-    fn a_task_creates_one_objective_identity() {
-        assert_eq!(created_objective_id("t1"), created_objective_id("t1"));
-        assert_ne!(created_objective_id("t1"), created_objective_id("t2"));
-        assert!(name("Objective ID", &created_objective_id("t1")).is_ok());
     }
 
     #[test]

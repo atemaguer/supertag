@@ -374,7 +374,7 @@ enum Command {
         artifact_s3_volumes: Option<PathBuf>,
         /// Private scratch for GitHub source and publication bundles, using the GitHub account in
         /// the `SUPERTAG_GITHUB_*` variables. Each bundle is deleted once its read or publication
-        /// ends.
+        /// ends; publication scratch a stopped Control Plane left is removed when it starts.
         #[arg(long)]
         github_workspace_directory: Option<PathBuf>,
         /// Also write each committed audit entry as one JSON line to `stderr` or to this absolute

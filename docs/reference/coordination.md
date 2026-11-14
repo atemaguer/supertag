@@ -99,7 +99,9 @@ reaches the Tag as a turn, and only that turn may call `create_objective {outcom
 budgetLimitMinor?, budgetCurrency?}`. The Tag owns the Objective, the person who wrote the command
 creates it with their own authority, its runtime actions are what that turn may use, and its
 first turn starts at once. One turn creates at most one Objective; a repeated call returns it. The
-Objective has the conversation's audience: only that person's turns see it.
+Objective has the conversation's audience: only that person's turns see it. The Control Plane
+alone records which conversation created an Objective: Objective commands and API calls refuse
+operation IDs that start with `tag-create-objective:`.
 
 ### Objective runtime actions
 
@@ -477,8 +479,8 @@ portfolio is state, not instructions, and is bounded to about 3,800 characters.
 - `read_objective` without `objectiveId` reads the Objective this turn works for. An Objective's
   own turn reads only its own Objective; another turn reads an Objective the Tag owns whose
   Session it may see. It returns no turn prompts, results, or failure text.
-- Each read considers the 1,000 most recent Sessions, matching turns, or open Objectives of the
-  Tag.
+- Each read looks past Sessions it may not see until it has a full page, so older visible
+  Sessions and turns are never left out, and `list_objectives` counts every open Objective.
 
 ### Identity and preconditions
 

@@ -3,6 +3,10 @@
 //! can no longer run work: it never enrolled, or it is revoked or gone. Until then the state,
 //! including its credential, is kept and `up` names the command that retires it. Revoking stays
 //! an explicit operator step because a revoked Worker Host ID is never enrolled again.
+//!
+//! A host's `artifacts` directory is never removed while it holds bytes: it is the only copy of
+//! the artifacts and Workspace deliveries the host produced, which the Control Plane does not
+//! store. `up` keeps it, says so each time, and leaves deleting it to the operator.
 use std::{
     collections::BTreeSet,
     fs,
@@ -69,6 +73,57 @@ fn removed(state: &Path, configured: &BTreeSet<String>) -> Result<Vec<(String, P
     Ok(removed)
 }
 
+/// Whether a host's artifact storage holds any Task Attempt's bytes.
+fn holds_bytes(artifacts: &Path) -> Result<bool> {
+    let entries = match fs::read_dir(artifacts) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => return Ok(false),
+        entries => entries?,
+    };
+    for entry in entries {
+        if entry?.file_name().to_string_lossy().starts_with("attempt-") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Removes a retired host's state except an artifact storage that holds bytes, and returns that
+/// kept storage.
+fn remove_state(directory: &Path) -> Result<Option<PathBuf>> {
+    let artifacts = directory.join("artifacts");
+    if !holds_bytes(&artifacts)? {
+        fs::remove_dir_all(directory)?;
+        return Ok(None);
+    }
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        if entry.file_name() == "artifacts" {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(entry.path())?;
+        } else {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(Some(artifacts))
+}
+
+/// The line for a retired host's removed state.
+fn removed_line(name: &str, directory: &Path, reason: &str, kept: Option<PathBuf>) -> String {
+    let shown = directory.display();
+    match kept {
+        None => format!(
+            "Removed host service {name}'s state ({shown}), since supertag.yaml no longer names it{reason}."
+        ),
+        Some(artifacts) => format!(
+            "Removed host service {name}'s state ({shown}), since supertag.yaml no longer names it{reason}, but kept its artifact storage ({}). It holds the only copy of the artifacts and Workspace deliveries that host produced, which no Worker Host can serve any more; delete that directory once nothing needs them.",
+            artifacts.display()
+        ),
+    }
+}
+
 /// Removes the state of every host service the file no longer names whose Worker Host cannot
 /// run work, and returns a line for each removed or kept one. `local` is the local Control Plane
 /// this state directory's supervisor runs; `check` asks it about a Worker Host.
@@ -81,27 +136,40 @@ pub(crate) async fn retire(
     let mut lines = Vec::new();
     for (name, directory) in removed(state, configured)? {
         let shown = directory.display();
-        let gone = |reason: &str| {
-            format!(
-                "Removed host service {name}'s state ({shown}), since supertag.yaml no longer names it{reason}."
-            )
-        };
+        let artifacts = directory.join("artifacts");
+        if fs::read_dir(&directory)?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<std::io::Result<Vec<_>>>()?
+            == ["artifacts"]
+            && holds_bytes(&artifacts)?
+        {
+            // An earlier `up` removed the rest of this retired host's state.
+            lines.push(crate::terminal::text(&format!(
+                "Kept removed host service {name}'s artifact storage ({}). It holds the only copy of the artifacts and Workspace deliveries that host produced; delete that directory once nothing needs them.",
+                artifacts.display()
+            )));
+            continue;
+        }
         let line = match enrollment(&directory) {
             Err(error) => format!(
                 "Could not read host service {name}'s Worker Host enrollment ({error:#}), so its state ({shown}) was kept. Fix or remove that directory."
             ),
-            Ok(None) => {
-                fs::remove_dir_all(&directory)?;
-                gone(" and it never enrolled")
-            }
+            Ok(None) => removed_line(
+                &name,
+                &directory,
+                " and it never enrolled",
+                remove_state(&directory)?,
+            ),
             Ok(Some(enrolled))
                 if local.is_some_and(|local| same_origin(local, &enrolled.control_plane)) =>
             {
                 match check(&enrolled.host_id).await {
-                    Ok(Registration::Retired) => {
-                        fs::remove_dir_all(&directory)?;
-                        gone(&format!(" and Worker Host {} is revoked", enrolled.host_id))
-                    }
+                    Ok(Registration::Retired) => removed_line(
+                        &name,
+                        &directory,
+                        &format!(" and Worker Host {} is revoked", enrolled.host_id),
+                        remove_state(&directory)?,
+                    ),
                     Ok(Registration::Active) => format!(
                         "Host service {name} is no longer in supertag.yaml, but Worker Host {} is still enrolled. Retire it with supertag host revoke {} --state-directory {}; the next supertag up then removes its state ({shown}).",
                         enrolled.host_id,
@@ -208,6 +276,46 @@ mod tests {
         let lines = run(state.path(), Ok(Registration::Retired)).await;
         assert!(!old.exists());
         assert!(lines[0].contains("Worker Host old is revoked"), "{lines:?}");
+    }
+
+    #[tokio::test]
+    async fn keeps_the_artifact_storage_of_a_retired_host() {
+        let state = tempfile::tempdir().unwrap();
+        let old = host(state.path(), "old", Some((&enrolled(LOCAL), 0o600)));
+        let held = old.join("artifacts").join("attempt-1");
+        fs::create_dir_all(&held).unwrap();
+        fs::write(held.join("0".repeat(64)), b"the only copy").unwrap();
+        let lines = run(state.path(), Ok(Registration::Retired)).await;
+        assert!(held.join("0".repeat(64)).exists());
+        assert!(!old.join("enrollment.json").exists() && !old.join("lanes").exists());
+        assert!(
+            lines[0].contains("Worker Host old is revoked")
+                && lines[0].contains("kept its artifact storage")
+                && lines[0].contains("only copy of the artifacts and Workspace deliveries"),
+            "{lines:?}"
+        );
+        // Later runs keep saying so, and never remove it.
+        let configured = BTreeSet::new();
+        let lines = retire(state.path(), &configured, Some(LOCAL), async |_: &str| {
+            panic!("a host with only artifact storage left is never checked")
+        })
+        .await
+        .unwrap();
+        assert!(held.join("0".repeat(64)).exists());
+        assert!(
+            lines[0].contains("Kept removed host service old's artifact storage"),
+            "{lines:?}"
+        );
+        // Storage that holds no bytes is removed with the rest.
+        let empty = host(state.path(), "empty", None);
+        fs::create_dir_all(empty.join("artifacts")).unwrap();
+        fs::write(empty.join("artifacts").join("storage-id"), b"id").unwrap();
+        retire(state.path(), &configured, Some(LOCAL), async |_: &str| {
+            panic!("never enrolled")
+        })
+        .await
+        .unwrap();
+        assert!(!empty.exists());
     }
 
     #[tokio::test]

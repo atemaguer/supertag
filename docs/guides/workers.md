@@ -253,6 +253,15 @@ supertag host rotate-credential build-1 --control-plane team --out build-1.crede
 A draining host finishes its running Task Attempts and claims no new ones. Revoking a host refuses
 its credential at once. `supertag down` drains this machine's hosts before stopping them.
 
+A host keeps the only copy of the artifacts and Workspace deliveries it produced, so once it is
+revoked they cannot be read, fetched, or continued from. Copy the artifacts you need to a Volume
+with `supertag volume copy` first; Workspace deliveries have no Volume copy. When you remove a
+host service from `supertag.yaml` and revoke it, `supertag up` removes its state but keeps its
+`artifacts` directory, and names it on every run until you delete it.
+
+A host reads a few relayed files at once and queues the rest. When too many reads wait for one
+host, a new read fails as busy rather than as offline; retry it.
+
 ## Recover an interrupted Task Attempt
 
 A host restarted after it was killed checks the processes it recorded for an interrupted Task

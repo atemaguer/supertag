@@ -7,16 +7,20 @@
 //! stream verifies their length and digest before it ends successfully.
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use super::*;
 use tokio::sync::oneshot;
 
-/// How long a holding host has to start answering a relay request.
+/// How long a holding host has to acknowledge a relay request. A host acknowledges at once and
+/// then waits for a free read slot, so this measures whether it is reachable, not how busy it is.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
-/// Relay requests one host may have waiting at once.
-const MAX_PENDING_PER_HOST: usize = 32;
+/// Relayed reads of one host, waiting or under way, at once.
+const MAX_RELAYS_PER_HOST: usize = 32;
 
 #[derive(Default)]
 pub(crate) struct RelayHub {
@@ -31,7 +35,11 @@ struct HubState {
     /// so any of them can answer.
     links: HashMap<String, Vec<Link>>,
     pending: HashMap<String, Pending>,
+    /// Each host's relayed reads, waiting or under way.
+    active: HashMap<String, Arc<AtomicUsize>>,
     next_link: u64,
+    /// Turns requests across a host's lanes, which each answer a few reads at once.
+    next_pick: usize,
 }
 
 struct Link {
@@ -57,12 +65,28 @@ pub(crate) enum RelayError {
 }
 
 /// Chunks arriving from the holding host.
-pub(crate) struct Incoming(mpsc::Receiver<Result<Vec<u8>, Status>>);
+pub(crate) struct Incoming {
+    chunks: mpsc::Receiver<Result<Vec<u8>, Status>>,
+    _active: Active,
+}
+
+/// Counts one relayed read of a host until the reader is done with it.
+struct Active(Arc<AtomicUsize>);
+
+impl Drop for Active {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 impl Incoming {
     pub(crate) async fn next(&mut self) -> Result<Option<Vec<u8>>, Status> {
-        self.0.recv().await.transpose()
+        self.chunks.recv().await.transpose()
     }
+}
+
+fn busy() -> Status {
+    Status::resource_exhausted("too many relayed reads are waiting for this Worker Host")
 }
 
 /// Removes an unanswered request when the reader gives up.
@@ -89,7 +113,7 @@ impl RelayHub {
         host_id: String,
         generation: u64,
     ) -> ReceiverStream<Result<RelayRequest, Status>> {
-        let (send, receive) = mpsc::channel(MAX_PENDING_PER_HOST);
+        let (send, receive) = mpsc::channel(MAX_RELAYS_PER_HOST);
         if self.closed.is_cancelled() {
             return ReceiverStream::new(receive);
         }
@@ -168,26 +192,31 @@ impl RelayHub {
             attempt_id: holder.attempt_id.clone(),
             blob: Some(blob.clone()),
         };
-        let link = {
+        let (link, active) = {
             let mut state = self.state.lock().expect("relay state");
-            let link = state
+            let state = &mut *state;
+            let open: Vec<_> = state
                 .links
                 .get(&holder.host_id)
-                .and_then(|links| links.iter().rev().find(|link| !link.requests.is_closed()))
-                .map(|link| (link.id, link.generation, link.requests.clone()));
-            let Some((link, generation, requests)) = link else {
+                .map(|links| {
+                    links
+                        .iter()
+                        .filter(|link| !link.requests.is_closed())
+                        .collect()
+                })
+                .unwrap_or_default();
+            if open.is_empty() {
                 return Err(RelayError::Offline);
-            };
-            let waiting = state
-                .pending
-                .values()
-                .filter(|pending| pending.host_id == holder.host_id)
-                .count();
-            if waiting >= MAX_PENDING_PER_HOST {
-                return Err(RelayError::Failed(Status::resource_exhausted(
-                    "too many relayed reads are waiting for this Worker Host",
-                )));
             }
+            state.next_pick = state.next_pick.wrapping_add(1);
+            let link = open[state.next_pick % open.len()];
+            let (link, generation, requests) = (link.id, link.generation, link.requests.clone());
+            let count = state.active.entry(holder.host_id.clone()).or_default();
+            if count.load(Ordering::SeqCst) >= MAX_RELAYS_PER_HOST {
+                return Err(RelayError::Failed(busy()));
+            }
+            count.fetch_add(1, Ordering::SeqCst);
+            let active = Active(count.clone());
             state.pending.insert(
                 relay_id.clone(),
                 Pending {
@@ -199,19 +228,24 @@ impl RelayHub {
                     attached,
                 },
             );
-            requests
+            (requests, active)
         };
         let guard = PendingGuard {
             hub: self,
             relay_id,
         };
-        if link.try_send(Ok(request)).is_err() {
-            return Err(RelayError::Offline);
+        match link.try_send(Ok(request)) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => return Err(RelayError::Failed(busy())),
+            Err(mpsc::error::TrySendError::Closed(_)) => return Err(RelayError::Offline),
         }
         match timeout(ANSWER_TIMEOUT, answered).await {
             Ok(Ok(())) => {
                 drop(guard);
-                Ok(Incoming(incoming))
+                Ok(Incoming {
+                    chunks: incoming,
+                    _active: active,
+                })
             }
             Ok(Err(_)) => Err(RelayError::Offline),
             Err(_) => Err(RelayError::Failed(Status::unavailable(format!(
@@ -351,5 +385,67 @@ mod tests {
         drop(new);
         assert!(!opened.await.unwrap());
         assert!(hub.state.lock().unwrap().pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn lanes_share_requests_and_a_busy_host_is_not_offline() {
+        use tokio_stream::StreamExt;
+        let hub = Arc::new(RelayHub::default());
+        let mut lanes = [
+            hub.connect("laptop".into(), 1),
+            hub.connect("laptop".into(), 1),
+        ];
+        let blob = BlobReference {
+            sha256: "0".repeat(64),
+            byte_length: 1,
+        };
+        let mut readers = Vec::new();
+        for index in 0..MAX_RELAYS_PER_HOST {
+            let hub = hub.clone();
+            let blob = blob.clone();
+            readers.push(tokio::spawn(async move {
+                let holder = BlobHolder {
+                    host_id: "laptop".into(),
+                    attempt_id: format!("attempt-{index}"),
+                };
+                hub.open(&holder, &blob).await.is_ok()
+            }));
+        }
+        // Every lane gets a share of the requests.
+        for lane in &mut lanes {
+            let request = timeout(Duration::from_secs(2), lane.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(request.attempt_id.starts_with("attempt-"));
+        }
+        let holder = BlobHolder {
+            host_id: "laptop".into(),
+            attempt_id: "one too many".into(),
+        };
+        match hub.open(&holder, &blob).await {
+            Err(RelayError::Failed(status)) => {
+                assert_eq!(status.code(), tonic::Code::ResourceExhausted)
+            }
+            _ => panic!("a busy host's extra read must be refused as busy"),
+        }
+        drop(lanes);
+        for reader in readers {
+            assert!(!reader.await.unwrap());
+        }
+        // Finished reads free their slots.
+        let lane = hub.connect("laptop".into(), 1);
+        let opened = {
+            let hub = hub.clone();
+            let blob = blob.clone();
+            tokio::spawn(async move { hub.open(&holder, &blob).await.is_ok() })
+        };
+        drop(lane);
+        assert!(!opened.await.unwrap());
+        assert_eq!(
+            hub.state.lock().unwrap().active["laptop"].load(Ordering::SeqCst),
+            0
+        );
     }
 }

@@ -67,7 +67,8 @@ offered: a write through one would bypass the Worker Host's bounded, recorded wr
 The Control Plane keeps the artifact catalog: what each artifact is, who made it, who may use it,
 and where each copy lives. It never stores the files. The Worker Host whose Task captured them
 keeps them in its own artifact storage. When another Task or an operator reads a file, the Control
-Plane fetches it from that Worker Host and passes it along without writing it down.
+Plane fetches it from that Worker Host and passes it along without writing it down. A GitHub
+publication is the exception: it keeps the delivery in private scratch until it has pushed it.
 
 So an artifact is readable only while its Worker Host is running and connected, unless it also has
 a Volume copy. For example, a laptop's artifacts are unreachable while the laptop sleeps, and the

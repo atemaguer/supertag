@@ -49,6 +49,22 @@ impl Record {
 /// The completion report posted once to an Objective's home thread.
 const COMPLETION_REPORT_SUMMARY_CHARS: usize = 1500;
 
+/// The operation ID prefix of the Objective a Tag's `create_objective` tool makes from one
+/// conversation Task. Only the Control Plane writes it: its receipt records that Task as the
+/// Objective's home (TS `Objective.surfaceTaskId`), so a caller may not choose it.
+pub(crate) const TAG_CREATE_OPERATION: &str = "tag-create-objective:";
+
+/// A caller's Objective mutation operation ID.
+fn operation(id: &str) -> Result<()> {
+    name("operation ID", id)?;
+    if id.starts_with(TAG_CREATE_OPERATION) {
+        return Err(invalid(
+            "operation IDs starting with tag-create-objective: are reserved for the Control Plane",
+        ));
+    }
+    Ok(())
+}
+
 fn completion_report(objective_id: &str, summary: Option<&str>) -> String {
     let summary = summary.map(str::trim).unwrap_or_default();
     if summary.is_empty() {
@@ -452,6 +468,17 @@ impl Store {
         principal: &str,
         input: &CreateObjectiveRequest,
     ) -> Result<Objective> {
+        operation(&input.operation_id)?;
+        self.create_objective_unchecked(principal, input).await
+    }
+
+    /// Creates an Objective under any operation ID, including the reserved
+    /// [`TAG_CREATE_OPERATION`] one the Tag's `create_objective` tool records its home with.
+    pub(crate) async fn create_objective_unchecked(
+        &self,
+        principal: &str,
+        input: &CreateObjectiveRequest,
+    ) -> Result<Objective> {
         actor(principal)?;
         name("operation ID", &input.operation_id)?;
         validate_manifest_objective(input)?;
@@ -604,7 +631,7 @@ impl Store {
         input: &SetObjectiveRuntimeActionsRequest,
     ) -> Result<Objective> {
         operator(principal)?;
-        name("operation ID", &input.operation_id)?;
+        operation(&input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         if input.expected_revision == 0 || input.expected_revision > i64::MAX as u64 {
             return Err(invalid("a valid expected Objective revision is required"));
@@ -666,7 +693,7 @@ impl Store {
         input: &SetObjectiveLimitsRequest,
     ) -> Result<Objective> {
         operator(principal)?;
-        name("operation ID", &input.operation_id)?;
+        operation(&input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         if input.clear_deadline && input.deadline_ms.is_some() {
             return Err(invalid("set or clear the deadline, not both"));
@@ -817,7 +844,7 @@ impl Store {
         action: &str,
     ) -> Result<Objective> {
         actor(principal)?;
-        name("operation ID", &input.operation_id)?;
+        operation(&input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         text("reason", &input.reason, 16_384)?;
         let fingerprint = digest(action, input);
@@ -841,7 +868,7 @@ impl Store {
         input: &ReviewObjectiveRequest,
     ) -> Result<Objective> {
         actor(principal)?;
-        name("operation ID", &input.operation_id)?;
+        operation(&input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         text("feedback", &input.feedback, 65_536)?;
         let fingerprint = digest("review", input);
@@ -867,7 +894,7 @@ impl Store {
         input: &CompleteObjectiveRequest,
     ) -> Result<Objective> {
         actor(principal)?;
-        name("operation ID", &input.operation_id)?;
+        operation(&input.operation_id)?;
         name("Objective ID", &input.objective_id)?;
         text("summary", &input.summary, 65_536)?;
         let summary = input.summary.trim();
