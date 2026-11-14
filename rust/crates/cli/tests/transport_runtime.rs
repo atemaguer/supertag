@@ -2736,6 +2736,7 @@ async fn postgres_mutual_tls_connects_all_three_service_roles() -> Result<()> {
 // Protocol version negotiation
 
 const OLD_EPOCH: &[u32] = &[1];
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Result<()> {
@@ -2764,7 +2765,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
     let mut refused = Service::spawn(command, root, "gateway-old-control-plane")?;
     let failure = refused.failure().await?;
     ensure!(
-        failure.contains("Error: the SuperTag Control Plane refused this Gateway: incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [1], but the connecting Gateway (SuperTag 0.1.0) offered [2]; run the same SuperTag release on both services"),
+        failure.contains(&format!("Error: the SuperTag Control Plane refused this Gateway: incompatible SuperTag protocol: this Control Plane (SuperTag {VERSION}) speaks protocol versions [1], but the connecting Gateway (SuperTag {VERSION}) offered [2]; run the same SuperTag release on both services")),
         "unclear Gateway failure: {failure}"
     );
     old_server.abort();
@@ -2784,11 +2785,11 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
     for (target, expected) in [
         (
             old_plane,
-            "the SuperTag Control Plane refused this Worker Host: incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [1], but the connecting Worker Host (SuperTag 0.1.0) offered [2]",
+            format!("the SuperTag Control Plane refused this Worker Host: incompatible SuperTag protocol: this Control Plane (SuperTag {VERSION}) speaks protocol versions [1], but the connecting Worker Host (SuperTag {VERSION}) offered [2]"),
         ),
         (
             foreign,
-            "incompatible SuperTag protocol: the peer does not offer SuperTag protocol negotiation, so it is not a SuperTag Control Plane this Worker Host can use",
+            "incompatible SuperTag protocol: the peer does not offer SuperTag protocol negotiation, so it is not a SuperTag Control Plane this Worker Host can use".to_owned(),
         ),
     ] {
         let mut host = binary(&[
@@ -2808,7 +2809,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         let output = run(host).await?;
         let stderr = String::from_utf8_lossy(&output.stderr);
         ensure!(
-            !output.status.success() && stderr.contains(expected),
+            !output.status.success() && stderr.contains(&expected),
             "unclear Worker Host failure: {stderr}"
         );
         let mut enroll = binary(&[
@@ -2826,7 +2827,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
         let output = run(enroll).await?;
         let stderr = String::from_utf8_lossy(&output.stderr);
         ensure!(
-            !output.status.success() && stderr.contains(expected),
+            !output.status.success() && stderr.contains(&expected),
             "unclear enrollment failure: {stderr}"
         );
     }
@@ -2860,7 +2861,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
     .to_string();
     assert!(
         old_host.starts_with(
-            "the SuperTag Control Plane refused this Worker Host: incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [2], but the connecting Worker Host (SuperTag 0.1.0) offered [1]"
+            &format!("the SuperTag Control Plane refused this Worker Host: incompatible SuperTag protocol: this Control Plane (SuperTag {VERSION}) speaks protocol versions [2], but the connecting Worker Host (SuperTag {VERSION}) offered [1]")
         ),
         "{old_host}"
     );
@@ -2874,7 +2875,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
     .unwrap_err()
     .to_string();
     assert!(
-        old_gateway.contains("this Control Plane (SuperTag 0.1.0) speaks protocol versions [2], but the connecting Gateway (SuperTag 0.1.0) offered [1]"),
+        old_gateway.contains(&format!("this Control Plane (SuperTag {VERSION}) speaks protocol versions [2], but the connecting Gateway (SuperTag {VERSION}) offered [1]")),
         "{old_gateway}"
     );
     let wrong_role = negotiate(plane, ServiceRole::ControlPlane, ServiceRole::ControlPlane)
@@ -2937,7 +2938,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
     ensure!(
         refused.code() == tonic::Code::FailedPrecondition
             && refused.message().starts_with(
-                "incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [2], but the call names protocol 1"
+                &format!("incompatible SuperTag protocol: this Control Plane (SuperTag {VERSION}) speaks protocol versions [2], but the call names protocol 1")
             ),
         "{refused:?}"
     );
@@ -3003,7 +3004,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
     let stderr = String::from_utf8_lossy(&refused.stderr);
     ensure!(
         !refused.status.success()
-            && stderr.contains("the SuperTag Control Plane refused this operator client: incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag 0.1.0) offered [2]"),
+            && stderr.contains(&format!("the SuperTag Control Plane refused this operator client: incompatible SuperTag protocol: this Control Plane (SuperTag {VERSION}) speaks protocol versions [1], but the connecting operator client (SuperTag {VERSION}) offered [2]")),
         "unclear operator failure: {stderr}"
     );
     old_server.abort();

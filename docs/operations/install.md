@@ -60,13 +60,39 @@ Then [install a release archive](#install-a-release-archive) and run `supertag i
 ## Install a release archive
 
 A SuperTag release is one archive per platform: `linux-amd64`, `linux-arm64`, `darwin-amd64`, or
-`darwin-arm64`. The installer verifies the archive and its checksum, checks the Node.js it will
-use, installs the release under `~/.local/share/supertag`, and links `supertag` into
-`~/.local/bin`. It never starts services or reads existing SuperTag state.
+`darwin-arm64`, attached to its GitHub Release with a `SHA256SUMS` file and an installer script.
+The installer script works on macOS and Linux:
 
-Release archives are not published yet. Until they are, build the archive for your machine from
-a clean checkout. The build needs the Rust toolchain pinned in `rust/rust-toolchain.toml`, Go,
-Node.js with pnpm, Python 3.13, and [uv](https://docs.astral.sh/uv/):
+```sh
+curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+supertag --version
+```
+
+It downloads your platform's archive and checks it against the release's `SHA256SUMS` before
+unpacking it. It checks that `supertag` and the terminal UI report the release's version, then
+installs the release under `~/.local/share/supertag` and links `supertag` into `~/.local/bin`.
+It never starts services or reads existing SuperTag state. Add the `export` line to your shell
+startup file to use the command in new terminals.
+
+To choose the locations or a version, set these before `sh`:
+
+| Variable | Default |
+| --- | --- |
+| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.0-alpha.1`, to install that release. Releases before the native CLI have no archive, so the script refuses them |
+| `SUPERTAG_INSTALL_ROOT` | `~/.local/share/supertag` |
+| `SUPERTAG_BIN_DIR` | `~/.local/bin` |
+
+Installing a newer release keeps the older one beside it and switches the `supertag` link only
+after the new release passes its checks. The script replaces a symbolic link at
+`~/.local/bin/supertag`, such as the earlier runtime's, and refuses to replace any other file
+there.
+
+### Build an archive from a checkout
+
+To install a commit that has no release, build the archive for your machine from a clean
+checkout. The build needs the Rust toolchain pinned in `rust/rust-toolchain.toml`, Go, Node.js
+with pnpm, Python 3.13, and [uv](https://docs.astral.sh/uv/):
 
 ```sh
 git clone https://github.com/atemaguer/supertag.git
@@ -74,20 +100,10 @@ cd supertag
 uv run rust/scripts/native_release.py package --repo . --commit "$(git rev-parse HEAD)" \
   --output "$HOME/supertag-build"
 uv run rust/scripts/install_native_release.py "$HOME"/supertag-build/supertag-*-complete.tar.gz
-export PATH="$HOME/.local/bin:$PATH"
-supertag --version
 ```
 
-Add the `export` line to your shell startup file to use the command in new terminals. To choose
-other locations, set these before running the installer:
-
-| Variable | Default |
-| --- | --- |
-| `SUPERTAG_INSTALL_ROOT` | `~/.local/share/supertag` |
-| `SUPERTAG_BIN_DIR` | `~/.local/bin` |
-
-Installing a newer archive keeps the older release beside it and switches the `supertag` link
-only after the new release passes its checks.
+`install_native_release.py` checks and installs the archive as the installer script does, and
+reads the same `SUPERTAG_INSTALL_ROOT` and `SUPERTAG_BIN_DIR`.
 
 ## Build only the CLI
 
@@ -105,13 +121,27 @@ with `--harness-entrypoint`. Container images for hosted platforms are described
 
 ## Client libraries
 
-Applications call the Control Plane's gRPC API. Generated Go, TypeScript, and Python bindings
-live in [`rust/bindings`](../../rust/bindings/README.md). See
+Applications call the Control Plane's gRPC API. The TypeScript SDK is `supertag-ai` on npm:
+
+```sh
+npm install supertag-ai
+```
+
+The Python SDK is `supertag` on PyPI, in Python 3.10 or newer. Install the version that matches
+your CLI; the explicit version selects this prerelease, which Python spells `0.3.0a1`:
+
+```sh
+python -m pip install 'supertag==0.3.0a1'
+```
+
+Each SDK connects to a Control Plane and lets a custom harness adapter talk to its Worker Host;
+see [API stability](../reference/api-stability.md#package-entry-points). Generated Go,
+TypeScript, and Python bindings live in [`rust/bindings`](../../rust/bindings/README.md). See
 [Control Plane API](../reference/control-plane-api.md) for how to connect.
 
 ## Upgrade
 
-Install the newer archive the same way. Then restart this machine's services with
+Run the installer script again, or install a newer archive the same way. Then restart this machine's services with
 `supertag up`, which waits for running Task Attempts before replacing a service. For a hosted
 deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-deployment).
 

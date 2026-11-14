@@ -58,8 +58,7 @@ context — it is precise, and guessing produces wrong configuration.
 
 ## Conventions
 
-The CLI is `supertag`; see [installation](../docs/operations/install.md). Check
-[Requirements](../docs/operations/requirements.md) for system tools and harness sign-in.
+The CLI is `supertag`, installed with the installer script from a GitHub Release; see [installation](../docs/operations/install.md). Check [Requirements](../docs/operations/requirements.md) for system tools and harness sign-in.
 
 Local state and credentials live in `~/.supertag`; override with `SUPERTAG_STATE_DIR`.
 `~/.supertag/supertag.yaml` lists the services `supertag up` runs on a machine, like a compose

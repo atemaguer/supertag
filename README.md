@@ -86,6 +86,8 @@ at least one commit. If this machine ran the earlier TypeScript runtime,
 [retire it](docs/operations/install.md#retire-the-earlier-typescript-runtime) before installing.
 
 ```sh
+curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 supertag init
 supertag
 ```
@@ -167,6 +169,14 @@ bindings come with the repository. [Explore the API](docs/reference/control-plan
 To bring your own execution system, write a **harness adapter**: a program that a Worker Host
 starts for each Task Attempt and that drives your agent through the harness protocol. Python and
 TypeScript adapters ship with SuperTag as examples.
+
+The TypeScript SDK, `supertag-ai` on npm, and the Python SDK, `supertag` on PyPI, connect an
+application to a Control Plane and a harness adapter to its Worker Host:
+
+```sh
+npm install supertag-ai
+python -m pip install 'supertag==0.3.0a1'
+```
 
 [Write a harness adapter](docs/guides/harness-adapters.md) · [Connect your own collaboration surface](docs/reference/connector-contract.md) · [Check API stability](docs/reference/api-stability.md)
 

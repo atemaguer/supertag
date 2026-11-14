@@ -11,17 +11,23 @@ Check this page before [installing SuperTag](install.md).
 
 ## System and tools
 
-- **Node.js 22.13.0 or newer, in the 22 line**. The installer checks it and tests the bundled
-  harness bridges with it, and the Claude Code, Cursor, and OpenCode adapters run on it. Building a
-  release archive needs it too.
+- **Node.js 22.13.0 or a later 22.x release** on `PATH` for Claude Code, Cursor, OpenCode, E2B,
+  and Modal Tasks, which run through bridges in the release. Codex Tasks don't need it. The
+  TypeScript SDK's [package](../../packages/supertag-ai/package.json) states its own supported
+  runtime in `engines.node`.
+- **npm**, included with Node.js, to install the TypeScript SDK. Source-development tools are
+  listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - **git**, available on `PATH`, and a repository for your first Task.
-- **macOS or Linux**, on arm64 or amd64. Restarting background services uses launchd on macOS and
-  systemd user services on Linux. Native Windows is not supported; use a Linux host.
-- **Disk space for your work.** Allow space for the installed release, repositories, Task
-  checkouts, captured artifacts, and logs.
+- **macOS or Linux, on arm64 or amd64.** Linux needs glibc 2.36 or newer, as in Debian 12 or
+  Ubuntu 24.04. Restarting background services uses launchd on macOS and systemd user services on
+  Linux. Native Windows is not supported; use a Linux host.
+- **Disk space for the release and your work.** Allow about 1 GB for each installed release, plus
+  space for repositories, Task checkouts, captured artifacts, and logs. The
+  [installer script](install.md#install-a-release-archive) keeps earlier releases under
+  `~/.local/share/supertag/versions`; remove ones you no longer use.
 - **To build a release archive from a checkout**: the Rust toolchain pinned in
   `rust/rust-toolchain.toml`, Go, pnpm, Python 3.13, and uv. See
-  [Install SuperTag](install.md#install-a-release-archive).
+  [Build an archive from a checkout](install.md#build-an-archive-from-a-checkout).
 
 ## Choose and sign in to a harness
 

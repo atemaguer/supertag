@@ -78,6 +78,9 @@ pnpm supertag tui
 `go test ./...` in `apps/tui` runs its tests. The Rust CLI's `operator_runtime.rs` tests drive a
 built binary under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
 
+Releases ship the terminal UI inside each platform's native archive, next to the `supertag`
+command; see [Test an installable release](#test-an-installable-release).
+
 ### Protobuf contracts
 
 The protobuf contract lives in `rust/proto`; see [binding generation](rust/bindings/README.md).
@@ -305,8 +308,113 @@ Record user-facing changes in `CHANGELOG.md` under `## [Unreleased]`, in the `Ad
 Task or feature branch, so parallel branches don't conflict on the file. Keep each entry to one
 concise bullet.
 
-At release time, rename `[Unreleased]` to the version and date, add an empty `[Unreleased]` above
-it, and set the package versions in the same release commit.
+`workspace.package.version` in `rust/Cargo.toml` is the single source of truth for the release
+version. At release time, rename `[Unreleased]` to the version and date, add an empty
+`[Unreleased]` above it, set the version in `rust/Cargo.toml`, and in the same release commit
+rewrite every other manifest from it, refresh the lockfiles, and run the version checks:
+
+```sh
+python3 rust/scripts/release_version.py --sync
+(cd rust && cargo metadata --format-version 1 > /dev/null)
+(cd apps/desktop/src-tauri && cargo metadata --format-version 1 > /dev/null)
+(cd sdks/python && uv lock)
+python3 rust/scripts/release_version.py vVERSION
+pnpm exec vitest run tests/release-version.test.ts
+```
+
+`--sync` rewrites every `package.json`, the Python SDK, and the desktop app. CI runs
+`release_version.py --check` through the `rust/scripts`
+tests on every pull request, so any file that drifts from `rust/Cargo.toml` fails the build. The
+documentation check reads the same version: docs may name only the current release.
+
+## Test an installable release
+
+Users install SuperTag with `install.sh`, which downloads a native archive from a GitHub
+Release, the Python SDK from PyPI, and the TypeScript SDK, `supertag-ai`, from npm (see
+[Install SuperTag](docs/operations/install.md)). Each archive holds the `supertag` command, the terminal UI, the
+shared execution provider, and the Node.js bridges; the
+[native release platform checks](tests/native-release/README.md) build one. To install a local
+build the way users do, put the archive and a `SHA256SUMS` in one directory and point the
+installer at it:
+
+```sh
+mkdir /tmp/supertag-assets
+cp /tmp/supertag-macos-verification/supertag-*-complete.tar.gz /tmp/supertag-assets/
+(cd /tmp/supertag-assets && shasum -a 256 supertag-*-complete.tar.gz > SHA256SUMS)
+SUPERTAG_DOWNLOAD_URL=file:///tmp/supertag-assets HOME=$(mktemp -d) sh install.sh
+```
+
+`rust/scripts/test_install_script.py` runs the installer against fixture archives; CI runs it
+with the other `rust/scripts` tests on every pull request.
+`scripts/smoke-installed-supertag.sh PATH_TO_SUPERTAG` starts an installed command's local
+services with a temporary state directory, lists Tags, and stops them.
+
+Before updating installation instructions for a release, publish the release and verify the
+installer, checksums, the PyPI package, and documentation. Release tooling in this repository
+does not mean a release has been published.
+
+The version in `rust/Cargo.toml` is the release version: the tag must be `v` followed by it, and
+every manifest and lockfile must carry the same version. The release and SDK publish workflows run
+`release_version.py` on the tag before they build or publish anything.
+A release takes three steps, so the README's `releases/latest` installer URL never points at a
+release without its archives:
+
+1. Push the release tag, for example `git push origin v0.3.0-alpha.1`. **Release SuperTag**
+   (`release.yml`) builds and verifies the four archives with `native-release-check.yml`, checks
+   the pinned installer against them, and attaches them with their `SHA256SUMS` and an
+   `install.sh` pinned to the release to a draft GitHub Release for the tag. It never changes a
+   published release.
+2. Review the draft's notes and assets, then publish it. Don't mark an alpha as a prerelease:
+   `releases/latest` skips prereleases.
+3. Publishing runs **Verify public installer** (`verify-installer.yml`), which installs from the
+   README's URL on each platform in a clean home, checks the CLI and terminal UI versions, and
+   starts and stops local services. It also runs **Publish Python SDK** (`publish-python.yml`) and
+   **Publish supertag-ai** (`publish.yml`). Each checks that the release carries every archive
+   before it publishes, because registry versions cannot be replaced.
+
+If a build fails, delete the draft, fix the problem on a new commit, and tag a new version. To
+rebuild the archives for an existing tag without attaching them, dispatch the workflow with that
+tag:
+
+```sh
+gh workflow run release.yml -f release_tag=v0.3.0-alpha.1
+```
+
+Set `upload_assets` to true to replace the assets on that tag's draft release. To check a
+published release, dispatch **Verify public installer** with its tag:
+
+```sh
+gh workflow run verify-installer.yml -f release_tag=v0.3.0-alpha.1
+```
+
+Select `check_latest` to check the README's installer URL for the current release.
+
+### Sign and notarize the macOS binaries
+
+The release workflow signs the `supertag`, `supertag-tui`, and `supertag-shared-execution`
+binaries of each macOS archive with a Developer ID Application certificate and the hardened
+runtime, before the archive records their digests. It submits them to Apple in a single ZIP and
+checks that Apple issued a ticket for each binary. Gatekeeper looks up tickets for standalone
+executables online. See [Apple's notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
+
+Set these GitHub Actions secrets on the release repository:
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_DEVELOPER_ID_P12` | Base64-encoded PKCS#12 export of the Developer ID Application certificate and its private key |
+| `APPLE_DEVELOPER_ID_P12_PASSWORD` | Password for that PKCS#12 export |
+| `APPLE_NOTARY_KEY` | Contents of the App Store Connect Team API key's `.p8` file |
+| `APPLE_NOTARY_KEY_ID` | Key ID shown in App Store Connect |
+| `APPLE_NOTARY_ISSUER_ID` | Issuer ID shown on the App Store Connect Team Keys page |
+
+Create the certificate and Team key under the same Apple Developer team. When all five
+secrets are absent, the workflow warns and produces unsigned builds. An incomplete
+configuration or failed notarization stops publication.
+
+To test the signing credentials without publishing, dispatch **Release SuperTag** for an
+existing tag with `upload_assets` false; the archives remain workflow artifacts for seven days.
+Only the signing release run passes the Apple secrets to the build; pull request and manual
+checks of `native-release-check.yml` build unsigned archives without them.
 
 ## Live Modal native mounts
 

@@ -17,6 +17,10 @@ This package is the TypeScript SDK. It has two entry points:
   harness adapter's standard input and connects to the Worker Host's private harness service for
   that one Task, including Worker-managed effect receipts.
 
+```sh
+npm install supertag-ai
+```
+
 ```ts
 import { createControlPlaneClient } from "supertag-ai/control-plane-client";
 

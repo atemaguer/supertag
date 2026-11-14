@@ -9,7 +9,7 @@ import { checkDocumentationNodeVersions } from "./check-docs-node.mjs";
 import { checkCommand, checkProseFlag, commandsIn, parseReference } from "./docs-commands.mjs";
 import { deprecatedDocProblems } from "./docs-deprecations.mjs";
 import { checkLinks, checkOrphans } from "./docs-links.mjs";
-import { versionProblems } from "./docs-versions.mjs";
+import { versionProblems, workspaceVersion } from "./docs-versions.mjs";
 import { checkDocumentationVocabulary } from "./docs-vocabulary.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,7 +29,7 @@ execFileSync(
   ],
   { stdio: "inherit" },
 );
-const release = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+const release = workspaceVersion(readFileSync(join(root, "rust/Cargo.toml"), "utf8"));
 // Keep the Objective-writing entry point available from the documentation index.
 const objectiveGuide = "guides/write-an-objective.md";
 if (!existsSync(join(root, "docs", objectiveGuide)))

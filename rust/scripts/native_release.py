@@ -7,7 +7,7 @@
 Builds happen in disposable source, HOME, Cargo target, and Go cache directories.
 The output includes CLI, matching Go TUI, shared execution provider, and all five private Node runtime helpers.
 Node 22.13+ (22.x), Git, and optional provider credentials remain external.
-No installer, registry publication, signing, or state migration is performed.
+macOS binaries are signed only with --sign-command. No upload, registry publication, or state migration is performed.
 """
 import argparse
 import json
@@ -24,7 +24,7 @@ import tomllib
 from native_archive import (ArchiveError, REPO, build_binaries, check_versions, copy_bounded,
                             digest, native_platform, publish_files, require, version_from_repo, MAX_BINARY_BYTES, PLATFORMS)
 from node_bridges import PACKAGES, stage_workspace
-from release_archive import check_provider_version, create_release, extract_release, validate_release
+from release_archive import BINARIES, check_provider_version, create_release, extract_release, validate_release
 
 
 def snapshot(repo, commit, scratch):
@@ -97,9 +97,25 @@ def tool_versions(source, env, platform):
             "python": sys.version.split()[0]}
 
 
-def assemble(repo, commit, output, profile="release", *, smoke=False, install_smoke=False, expected_platform=None):
+SIGNING_VARIABLES = ("APPLE_DEVELOPER_ID_P12", "APPLE_DEVELOPER_ID_P12_PASSWORD", "APPLE_NOTARY_KEY",
+                     "APPLE_NOTARY_KEY_ID", "APPLE_NOTARY_ISSUER_ID")
+
+
+def sign_binaries(command, stage, version):
+    """Sign and notarize the staged macOS binaries before the archive records their digests."""
+    # Only the signing credentials and the runner's tool locations pass through.
+    env = {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR", "RUNNER_TEMP", *SIGNING_VARIABLES)
+           if name in os.environ}
+    subprocess.run([str(command), str(stage), *BINARIES], env=env, check=True)
+    check_versions(stage / "supertag", stage / "supertag-tui", version)
+    check_provider_version(stage / "supertag-shared-execution", version)
+
+
+def assemble(repo, commit, output, profile="release", *, smoke=False, install_smoke=False, expected_platform=None,
+             sign_command=None):
     platform = native_platform()
     require(expected_platform is None or platform == expected_platform, "builder does not match the expected platform")
+    require(sign_command is None or platform.startswith("darwin-"), "only macOS binaries are signed")
     output = output.resolve()
     with tempfile.TemporaryDirectory(prefix="supertag-release-build-") as temporary:
         scratch = Path(temporary)
@@ -117,6 +133,8 @@ def assemble(repo, commit, output, profile="release", *, smoke=False, install_sm
         for name, path in (("supertag", cli), ("supertag-tui", tui), ("supertag-shared-execution", provider)):
             copy_bounded(path, stage / name, MAX_BINARY_BYTES)
             (stage / name).chmod(0o755)
+        if sign_command is not None:
+            sign_binaries(sign_command, stage, version)
         for name in ("LICENSE", "NOTICE"):
             copy_bounded(source / name, stage / name, 1024 * 1024)
             (stage / name).chmod(0o644)
@@ -217,6 +235,7 @@ def main():
     package.add_argument("--expect-platform", choices=sorted(PLATFORMS), help="require the builder and runtime tools to match this platform")
     package.add_argument("--install-smoke", action="store_true", help="also verify fresh install/reinstall before publishing local output; implies --smoke")
     package.add_argument("--smoke", action="store_true", help="also build test equipment and verify extracted CLI/TUI/helpers")
+    package.add_argument("--sign-command", type=Path, help="macOS only: run COMMAND STAGE BINARY... to sign and notarize the binaries before archiving")
     verify = commands.add_parser("verify")
     verify.add_argument("archive", type=Path)
     extract = commands.add_parser("extract")
@@ -226,7 +245,8 @@ def main():
     try:
         if args.command == "package":
             print(assemble(args.repo.resolve(), args.commit, args.output, args.profile, smoke=args.smoke, install_smoke=args.install_smoke,
-                           expected_platform=args.expect_platform))
+                           expected_platform=args.expect_platform,
+                           sign_command=args.sign_command.resolve(strict=True) if args.sign_command else None))
         elif args.command == "verify":
             manifest = validate_release(args.archive)
             print(json.dumps({key: value for key, value in manifest.items() if key != "entries"}, indent=2))

@@ -29,6 +29,7 @@ published, it builds one from a checkout and installs it with
 `rust/scripts/install_native_release.py`. Then:
 
 ```sh
+curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```

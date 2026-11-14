@@ -22,9 +22,11 @@ link every doc — a page reachable only from a sibling is invisible.
 
 ## CLI form
 
-Write `supertag`, never `pnpm supertag`. Readers install the native release archive; see
-`docs/operations/install.md`. `pnpm supertag` runs the checkout's Rust CLI through `cargo run`
-and works only in a checkout; repository build commands belong in `CONTRIBUTING.md`.
+Write `supertag`, never `pnpm supertag`. Readers install the CLI with the installer script from a
+GitHub Release (`docs/operations/install.md`). `pnpm supertag` runs the checkout's Rust CLI through
+`cargo run` and works only in a checkout; repository build commands belong in `CONTRIBUTING.md`.
+User installation instructions use the installer script for the CLI, and PyPI and npm for the
+SDKs; Python prereleases need an explicit version pin.
 
 Two intentional exceptions to the CLI form:
 

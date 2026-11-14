@@ -7,6 +7,15 @@ const illustrativeVersions = new Set([
 // Contributors pack and install the package to test it.
 const archiveAllowed = new Set(["CONTRIBUTING.md"]);
 
+/** The release version: rust/Cargo.toml's workspace.package version. */
+export function workspaceVersion(cargoToml) {
+  const version = /^\[workspace\.package\]\n(?:[^[\n].*\n)*?version = "([^"]+)"/mu.exec(
+    cargoToml,
+  )?.[1];
+  if (version === undefined) throw new Error("rust/Cargo.toml names no workspace version");
+  return version;
+}
+
 /** Python spells a prerelease such as 0.2.0-alpha.2 as 0.2.0a2. */
 export function pythonVersion(version) {
   return version.replace(

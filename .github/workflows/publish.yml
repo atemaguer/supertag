@@ -1,0 +1,64 @@
+name: Publish supertag-ai
+
+# supertag-ai is the TypeScript SDK. The supertag CLI installs from the GitHub Release's
+# native archives with install.sh; this package is not a way to install it.
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing published release tag whose version should be published
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-supertag-ai
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'atemaguer/supertag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check the tag names the release version
+        run: python rust/scripts/release_version.py "$RELEASE_TAG"
+      - name: Check the release carries its native archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-release-assets.sh "$RELEASE_TAG"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: npm install --global npm@11
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter supertag-ai build
+      - run: pnpm --filter supertag-ai typecheck
+      - name: Publish with npm trusted publishing
+        working-directory: packages/supertag-ai
+        run: |
+          # Until a stable 1.0 exists, each alpha is the release users should get by default.
+          # npm adds provenance automatically when the source repository is public.
+          npm publish --access public --tag latest

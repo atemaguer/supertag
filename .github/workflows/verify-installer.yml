@@ -1,0 +1,39 @@
+name: Verify public installer
+
+# Publishing a GitHub Release checks its installer through the README's latest URL.
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published tag to verify (for example, v0.3.0-alpha.1)
+        required: true
+        type: string
+      check_latest:
+        description: Verify the README's latest URL instead of the versioned URL
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install, check versions, and start and stop local services in a clean home
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+          # GitHub's latest URL skips prereleases, so a prerelease is checked at its own URL.
+          CHECK_LATEST: ${{ inputs.check_latest || (github.event_name == 'release' && !github.event.release.prerelease) }}
+        run: bash scripts/verify-public-installer.sh "$RELEASE_TAG" "$CHECK_LATEST"

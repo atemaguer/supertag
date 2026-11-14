@@ -85,7 +85,8 @@ Evidence was gathered with `git grep` over `rust/`, `apps/tui`, `apps/desktop`, 
 | `scripts/install-harness-clis.mjs` | Keep, reduced | Installs Claude Code for the kept harness tests; the Codex part read the removed Codex package |
 | `scripts/with-test-postgres*.mjs`, `test-verify*.mjs`, `check-migration-journals*.mjs` | Remove | Served the TypeScript store and its PostgreSQL suites |
 | `scripts/harness-conformance.ts`, `server-harness-conformance.ts`, `codex-*`, `session-*`, `sandbox-conformance.ts`, `manager-isolation-probe*.ts`, `cli-operator-live.ts`, `check-cli-deployment.ts`, `hosted-render-validation*.ts`, `artifact-*`, `*-organization-*`, `coordination-grpc-live.ts`, `worklet-*`, `test-mixed-harness-grpc-live.mjs`, `proto-python-conformance.mjs`, `scripts/fixtures/` | Remove | Live and conformance runners for the TypeScript runtime; each imports a removed package or drives the TypeScript CLI |
-| `scripts/stage-cli-release.sh`, `verify-public-installer.sh`, `notarize-release-tui.sh`, `install.sh` | Remove | The npm `supertag-ai` release and installer chain |
+| `scripts/stage-cli-release.sh` | Remove | Staged the npm `supertag-ai` CLI release |
+| `install.sh`, `scripts/verify-public-installer.sh`, `scripts/notarize-macos-binaries.sh` (was `notarize-release-tui.sh`) | Keep, rewritten | The native release channel: `install.sh` installs a GitHub Release's native archive; the verifier runs it; notarization signs the native macOS binaries |
 | `examples/organizations/` | Keep | Manifests only |
 | `examples/custom-worker/*.py` | Keep | `sdks/python/tests/test_custom_worker_example.py` runs `verify.py` in process |
 | `examples/custom-worker/*.mjs`, `package.json` | Remove | Used `supertag-ai` |
@@ -98,9 +99,10 @@ Evidence was gathered with `git grep` over `rust/`, `apps/tui`, `apps/desktop`, 
 | `ci.yml` | Keep, updated | Dropped the TypeScript `verify` job (store migrations, `pnpm test` over the TypeScript runtime, `supertag-ai` packaging, CLI deployment check) and `compatibility`. Added `typescript` (Node 22.13.0 and 24: install, Claude Code CLI, `pnpm check`, `pnpm build`, `pnpm test`, and `node --test scripts/*.test.mjs`, with full history so the ledger check can confirm its committed lists). `protocol-conformance` is removed with `spec/proto` (2026-11-14). The `typescript` job also typechecks `supertag-ai`. `rust-harness-interop`, `python-sdk`, and `tui` are unchanged |
 | `rust-port.yml` | Keep, updated | Builds the five bridges and the TUI and runs the Rust, Linux-root, desktop, crash-durability, and bindings jobs. The `runtime` job runs `supertag-ai`'s `test:package` with the built CLI; the operator API Go module is gone from its path filters |
 | `native-release-check.yml` | Keep | Native archives; header comment no longer names the removed workflows |
-| `publish-python.yml` | Keep, manual only | No longer runs on `release: published`: with the npm workflows removed, a GitHub Release would otherwise publish only the Python SDK. See decision 4 |
+| `publish-python.yml` | Keep, updated | Runs on `release: published` after `scripts/check-release-assets.sh` confirms the release carries its native archives, and checks the generated `runtime.v2` bindings |
 | `publish-worker-base.yml` | Keep | Workspace base image; unchanged |
-| `publish.yml`, `release-cli.yml`, `verify-installer.yml` | Remove | Published `supertag-ai` to npm, uploaded `install.sh`, and verified the npm installer |
+| `release-cli.yml` | Remove | Released the npm CLI; replaced by `release.yml`, which builds the native archives into a draft GitHub Release with `SHA256SUMS` and a pinned `install.sh` |
+| `publish.yml`, `verify-installer.yml` | Keep, rewritten | `publish.yml` publishes the `supertag-ai` SDK once the release carries its native archives; `verify-installer.yml` runs the native `install.sh` on four platforms |
 
 ## Root configuration
 
@@ -196,11 +198,10 @@ semantic pass over the long reference pages.
 
 ## Decisions for the operator
 
-1. **npm package and installer.** Partly decided on 2026-11-14: `supertag-ai` stays as the npm
-   TypeScript SDK with `control-plane-client` and `harness`. `install.sh` and the npm release
-   workflows stay removed, and no workflow publishes `supertag-ai` or native archives. Choose the
-   native distribution channel (GitHub Release assets with a new curl installer, an npm launcher,
-   or both) and how `supertag-ai` is published before the next release.
+1. **npm package and installer.** Decided on 2026-11-14: `supertag-ai` stays as the npm
+   TypeScript SDK with `control-plane-client` and `harness`. The CLI ships as native archives on
+   a GitHub Release with a curl installer (`install.sh`), and publishing the release publishes
+   the npm and Python SDKs after their archives are attached.
 2. **Ledger rows this removal puts into effect.** Removing the TypeScript code makes each row
    below final in this checkout, though the ledger still records it as awaiting approval. Approve
    them, or keep the code, before the removal merges. The code remains at `6c934be8`.
@@ -226,10 +227,8 @@ semantic pass over the long reference pages.
      pass". After the removal its TypeScript reference exists only at `6c934be8`.
    - Partial: the 53 Partial rows keep their recorded gaps; their TypeScript reference
      implementation now exists only at `6c934be8`.
-3. **User documentation rewrite.** 50 pages still describe the TypeScript CLI, npm installation,
-   `supertag-ai` custom Workers, and Docker Compose with the removed `deploy/compose.yaml`
-   (`docs/operations/control-plane.md`, `skills/deploy-supertag`). Approve rewriting them against
-   the Rust CLI, which removes the pending list.
+3. **User documentation rewrite.** Done on 2026-11-14: README, `docs/`, and `skills/` were
+   rewritten against the Rust CLI, and the pending-page list is removed.
 4. **Legacy protocol definitions.** Decided and done on 2026-11-14; see
    [Legacy protocols](#legacy-protocols). Before that, `spec/proto` still held `supertag.worklet.v1`,
    `environment.v1`, `session.v1`, `artifact.v1`, and `coordination.v1`, which no kept code uses,
@@ -238,20 +237,16 @@ semantic pass over the long reference pages.
    `supertag/operator/v1` bindings come from the same era. Decide whether to delete them (an
    accepted breaking change for `proto:breaking`) and move the TUI to the `runtime.v2` Go bindings.
    No file under `rust/crates` serves `supertag.operator.v1`, so the Python SDK's operator client
-   cannot reach a Rust Control Plane. `publish-python.yml` stays manual only; decide what the next
-   Python SDK release contains before running it.
+   cannot reach a Rust Control Plane.
 5. **Pruning inside kept packages.** Decided and done on 2026-11-14 for the TypeScript packages;
    see [Bridge package pruning](#bridge-package-pruning). The Python SDK keeps its in-process Worker
    composition (`create_worker`, `LocalWorklet`, the Codex harness, conformance helpers) because
    the OpenAI Agents adapter is built on part of it; pruning it to the adapter is open.
 6. **Existing npm installations.** `rust/scripts/install_native_release.py` recognizes the npm
    `install.sh` layout so a native install can replace it. Keep or remove that recognition.
-7. **Version numbering.** The root `package.json` and the Python SDK say `0.2.0-alpha.9`, which
-   mirrored the removed `supertag-ai`; `scripts/check-docs.mjs` and the Python pin test read
-   "the release" from the root `package.json`. The Rust workspace, the native archive, and the
-   terminal UI build say `0.1.0` (`rust/Cargo.toml`). Choose the next release's version and its
-   single source. Picking a release number is a release decision, so it was not done on this
-   branch.
+7. **Version numbering.** Decided on 2026-11-14: `workspace.package.version` in
+   `rust/Cargo.toml` is the single source, now `0.3.0-alpha.1`. `rust/scripts/release_version.py
+   --check` fails when any package manifest, the Python SDK, or the desktop app differs.
 
 ## Follow-ups not done here
 

@@ -4623,7 +4623,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "supertag-api"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4653,7 +4653,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-control-plane"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4682,7 +4682,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-desktop"
-version = "0.2.0-alpha.9"
+version = "0.3.0-alpha.1"
 dependencies = [
  "libc",
  "serde",
@@ -4703,7 +4703,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-protocol"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "http 1.5.0",
  "icu_properties",
@@ -4726,7 +4726,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-transport"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4745,7 +4745,7 @@ dependencies = [
 
 [[package]]
 name = "supertag-workspaces"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "anyhow",
  "libc",
