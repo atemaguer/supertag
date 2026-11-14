@@ -167,14 +167,18 @@ left. Copies are removed when the Task Attempt ends.
 
 A Cursor Worker Host with an E2B or Modal Workspace stages each copy on the host first, exactly as
 above. It then uploads only the copy's files into the sandbox, at
-`volumes/<digest>/<name>` inside the checkout, and tells the Task those paths. The Volume
-credential and the Volume's location never reach the sandbox or the provider. A read-only copy is
-sealed in the sandbox, and the file tools refuse writes there. Copies never return in the
-Workspace delivery. After a successful Task Attempt, the Worker Host lists each read-write copy in
-the sandbox and brings back only changed and created files, which it then writes back as below.
+`volumes/<digest>/<name>` inside the checkout, with its empty directories, and tells the Task
+those paths. The Volume credential and the Volume's location never reach the sandbox or the
+provider. A read-only copy is sealed in the sandbox, and the file tools refuse writes there.
+Copies never return in the Workspace delivery. After a successful Task Attempt, the Worker Host
+lists each read-write copy in the sandbox and brings back only changed and created files, which it
+then writes back as below. The listing refuses a change it could not write back before reading it,
+so it reads at most what the copy staged plus its `maxBytes`.
 
-Remote copies need `python3` in the sandbox image. An upload or capture waits one second per MiB
-beyond its base timeout, and the sandbox lifetime still bounds the Task Attempt.
+Remote copies need `python3` in the sandbox image. Each upload, listing, and capture step waits
+one second per MiB beyond its base timeout. A sandbox lives at most one hour, so the Worker Host
+keeps part of it after the Task for capturing read-write copies: about 96 seconds for a 1 GiB copy
+and 32 minutes for a 20 GiB copy, taken from the Task's time when the hour runs out.
 
 Read-only provider-native Modal Volume mounts are on the backlog. Today every Volume reaches a
 Task as a copy.

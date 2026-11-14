@@ -385,7 +385,7 @@ fn endpoint_url(value: &str) -> Result<Url> {
     let invalid =
         || anyhow::anyhow!("S3 Workspace Volume endpoint must be a canonical HTTPS origin");
     let parsed = Url::parse(value).map_err(|_| invalid())?;
-    let loopback_http = cfg!(test)
+    let loopback_http = cfg!(any(test, feature = "test-fixtures"))
         && parsed.scheme() == "http"
         && parsed.host_str().is_some_and(|host| {
             host.trim_matches(['[', ']'])

@@ -423,6 +423,7 @@ impl WorkspaceMounts {
                 cancel,
                 writable: mount.read_write,
                 copied: Vec::new(),
+                empty: Vec::new(),
             };
             match &mapping.source {
                 Source::File(path) => {
@@ -454,6 +455,7 @@ impl WorkspaceMounts {
                 read_write: mount.read_write,
                 max_bytes: mount.max_bytes,
                 files: std::mem::take(&mut budget.copied),
+                empty: std::mem::take(&mut budget.empty),
             });
             if mount.read_write {
                 writable.push(destination);
@@ -966,6 +968,8 @@ struct CopyBudget<'a> {
     writable: bool,
     /// Every file staged, for write-back and a remote Workspace's upload.
     copied: Vec<Copied>,
+    /// Every empty directory staged, which a remote Workspace's upload recreates.
+    empty: Vec<String>,
 }
 
 impl CopyBudget<'_> {
@@ -1045,6 +1049,9 @@ impl CopyBudget<'_> {
             "Workspace Volume reaches another filesystem or protected storage"
         );
         let names = directory_names(source, self.entries)?;
+        if names.is_empty() && !prefix.is_empty() {
+            self.empty.push(prefix.to_owned());
+        }
         for name in names {
             ensure!(
                 !self.cancel.is_cancelled() && !name.starts_with(".supertag-") && name != ".git",

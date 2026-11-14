@@ -6,6 +6,10 @@ license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[features]
+# Accepts loopback HTTP S3 endpoints for Workspace Volume fixtures.
+test-fixtures = []
+
 [dependencies]
 anyhow.workspace = true
 aws-credential-types = "1.2.14"

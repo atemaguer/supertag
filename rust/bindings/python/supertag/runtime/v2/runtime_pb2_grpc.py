@@ -6086,8 +6086,9 @@ class RemoteWorkspaceProviderServicer:
 
     def StageCopy(self, request_iterator, context):
         """One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
-        Harness starts: the header, then for each file its record and exactly its bytes. The
-        provider seals a read-only copy, and Capture leaves every copy out of the returned tree.
+        Harness starts: the header, then for each file its record and exactly its bytes, and each
+        empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+        the returned tree.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

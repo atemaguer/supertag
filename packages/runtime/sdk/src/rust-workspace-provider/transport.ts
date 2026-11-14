@@ -22,9 +22,9 @@ const MAX_BOOTSTRAP_BYTES = 4096;
 const MAX_STREAM_MESSAGES = 65_536;
 /**
  * A Workspace copy stream carries up to 20 GiB in 256 KiB chunks, with a record for each of up
- * to 20,000 files.
+ * to 20,000 files listed or 40,000 entries staged.
  */
-const COPY_STREAM = { bytes: 20 * 1024 ** 3, messages: 20 * 4096 + 2 * 20_000 + 16 };
+const COPY_STREAM = { bytes: 20 * 1024 ** 3, messages: 20 * 4096 + 2 * 20_000 + 40_000 + 16 };
 const MAXIMUM = {
   messageBytes: 1024 * 1024,
   chunkBytes: 256 * 1024,

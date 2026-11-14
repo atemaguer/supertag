@@ -4616,8 +4616,9 @@ type RemoteWorkspaceProviderClient interface {
 	// Ending or cancelling the call stops the server process, never the sandbox.
 	RunMcpServer(context.Context) *connect.BidiStreamForClient[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]
 	// One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
-	// Harness starts: the header, then for each file its record and exactly its bytes. The
-	// provider seals a read-only copy, and Capture leaves every copy out of the returned tree.
+	// Harness starts: the header, then for each file its record and exactly its bytes, and each
+	// empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+	// the returned tree.
 	StageCopy(context.Context) *connect.ClientStreamForClient[runtimev2.RemoteWorkspaceCopyUpload, runtimev2.RemoteWorkspaceCopyStaged]
 	// After a successful Capture, a read-write copy's changed and created regular files: each
 	// record, then the summary, then each recorded file's bytes in record order.
@@ -4739,8 +4740,9 @@ type RemoteWorkspaceProviderHandler interface {
 	// Ending or cancelling the call stops the server process, never the sandbox.
 	RunMcpServer(context.Context, *connect.BidiStream[runtimev2.RemoteMcpServerInput, runtimev2.RemoteMcpServerOutput]) error
 	// One Workspace Volume copy the Worker Host staged, uploaded after Stage and before the
-	// Harness starts: the header, then for each file its record and exactly its bytes. The
-	// provider seals a read-only copy, and Capture leaves every copy out of the returned tree.
+	// Harness starts: the header, then for each file its record and exactly its bytes, and each
+	// empty directory. The provider seals a read-only copy, and Capture leaves every copy out of
+	// the returned tree.
 	StageCopy(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceCopyUpload]) (*connect.Response[runtimev2.RemoteWorkspaceCopyStaged], error)
 	// After a successful Capture, a read-write copy's changed and created regular files: each
 	// record, then the summary, then each recorded file's bytes in record order.

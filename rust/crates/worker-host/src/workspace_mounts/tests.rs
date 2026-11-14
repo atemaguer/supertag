@@ -769,6 +769,101 @@ fn remote_listings_replace_the_walk_and_captured_files_are_written_back() {
     assert!(fixture.root_names().is_empty());
 }
 
+#[test]
+fn a_remote_copy_reshaped_in_the_sandbox_writes_back_as_a_local_copy_would() {
+    let fixture = fixture();
+    fs::create_dir(fixture.source.join("empty")).unwrap();
+    let file = |key: &str, body: &[u8]| Copied {
+        key: key.into(),
+        size: body.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(body)),
+    };
+    // The Task turns the directory `nested` into a file and the file
+    // `rows.csv` into a directory.
+    let changed = [
+        file("nested", b"flat\n"),
+        file("rows.csv/inner.txt", b"inner\n"),
+    ];
+
+    let local = {
+        fixture
+            .stage("local", &[fixture.writable("data", 1024 * 1024)])
+            .unwrap();
+        let copy = fixture.root.join("data");
+        fs::remove_dir_all(copy.join("nested")).unwrap();
+        fs::write(copy.join("nested"), "flat\n").unwrap();
+        fs::remove_file(copy.join("rows.csv")).unwrap();
+        fs::create_dir(copy.join("rows.csv")).unwrap();
+        fs::write(copy.join("rows.csv/inner.txt"), "inner\n").unwrap();
+        let writes = write_back(
+            &fixture.mounts,
+            &fixture.state,
+            "local",
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        cleanup(&fixture.state, "local").unwrap();
+        writes
+    };
+
+    let mounted = fixture
+        .stage("remote", &[fixture.writable("data", 1024 * 1024)])
+        .unwrap();
+    let [copy] = mounted.copies() else {
+        panic!("one copy staged")
+    };
+    // Only files carry their parents, so the upload names empty directories.
+    assert_eq!(copy.empty, ["empty"]);
+    for (file, body) in changed.iter().zip([&b"flat\n"[..], b"inner\n"]) {
+        let writer = remote_writer(&fixture.mounts, &fixture.state, "remote", copy.index).unwrap();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+        sender.try_send(body.to_vec()).unwrap();
+        drop(sender);
+        writer.write(file, &mut receiver).unwrap();
+    }
+    let host_copy = fixture.root.join("data");
+    assert_eq!(
+        fs::read_to_string(host_copy.join("nested")).unwrap(),
+        "flat\n"
+    );
+    assert_eq!(
+        fs::read_to_string(host_copy.join("rows.csv/inner.txt")).unwrap(),
+        "inner\n"
+    );
+    record_remote(
+        &fixture.state,
+        "remote",
+        copy.index,
+        &RemoteListing {
+            files: changed.to_vec(),
+            skipped: 0,
+            refusal: None,
+        },
+    )
+    .unwrap();
+    let remote = write_back(
+        &fixture.mounts,
+        &fixture.state,
+        "remote",
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    cleanup(&fixture.state, "remote").unwrap();
+
+    // The Volume still holds the directory `nested`, so both stop there with
+    // the same summary instead of failing the Task.
+    assert_eq!(status(&local[0]), WorkspaceMountWriteStatus::Partial);
+    assert_eq!(local[0].error_key, "nested");
+    for field in [
+        |write: &WorkspaceMountWrite| format!("{} {}", write.status, write.error_key),
+        |write: &WorkspaceMountWrite| write.error_reason.clone(),
+        |write: &WorkspaceMountWrite| format!("{:?} {:?}", keys(write), write.not_attempted),
+    ] {
+        assert_eq!(field(&local[0]), field(&remote[0]));
+    }
+    assert!(fixture.root_names().is_empty());
+}
+
 fn status(write: &WorkspaceMountWrite) -> WorkspaceMountWriteStatus {
     WorkspaceMountWriteStatus::try_from(write.status).unwrap()
 }

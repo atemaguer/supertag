@@ -47,7 +47,8 @@ const MAX_ENDPOINT_BYTES: usize = 512;
 /// The slowest Workspace copy transfer a remote Workspace waits for, in bytes per second.
 const MIN_COPY_RATE: u64 = 1024 * 1024;
 
-/// A copy transfer may take the transfer timeout plus one second per MiB.
+/// A copy transfer may take the transfer timeout plus one second per MiB it
+/// moves or the sandbox hashes.
 fn copy_deadline(bytes: u64) -> Duration {
     TRANSFER_TIMEOUT + Duration::from_secs(bytes / MIN_COPY_RATE)
 }
@@ -517,10 +518,12 @@ impl RemoteProvider {
         cancel: &CancellationToken,
     ) -> Result<()> {
         let total = copy.files.iter().map(|file| file.size).sum::<u64>();
-        let deadline = copy_deadline(total);
+        // The sandbox hashes each file again once all of its bytes arrive.
+        let deadline = copy_deadline(total.saturating_mul(2));
         let path = copy.sandbox_path(attempt);
         let reader = copy.reader()?;
         let files = copy.files.clone();
+        let empty = copy.empty.clone();
         let header = RemoteWorkspaceCopyHeader {
             path,
             read_write: copy.read_write,
@@ -537,6 +540,9 @@ impl RemoteProvider {
                         .map_err(|_| anyhow!("provider closed the Workspace copy upload"))
                 };
                 send(remote_workspace_copy_upload::Part::Header(header))?;
+                for directory in empty {
+                    send(remote_workspace_copy_upload::Part::Directory(directory))?;
+                }
                 let mut buffer = vec![0; CHECKPOINT_CHUNK_BYTES];
                 for file in files {
                     let mut input = reader.open(&file)?;
@@ -596,12 +602,20 @@ impl RemoteProvider {
     ) -> Result<crate::workspace_mounts::RemoteListing> {
         use crate::workspace_mounts::{Copied, RemoteListing};
         use supertag_protocol::workspace_mounts::{MAX_WORKSPACE_MOUNT_FILES, volume_key};
-        let deadline = copy_deadline(copy.max_bytes);
+        // The listing hashes at most the staged bytes and the copy's limit,
+        // and the transfer moves at most the limit.
+        let deadline = copy_deadline(copy.max_bytes.saturating_mul(3));
         let path = copy.sandbox_path(attempt);
         bounded(deadline, cancel, async {
             let mut stream = self
                 .client()
-                .capture_copy(self.request(RemoteWorkspaceCaptureCopyRequest { path }, deadline)?)
+                .capture_copy(self.request(
+                    RemoteWorkspaceCaptureCopyRequest {
+                        path,
+                        max_bytes: copy.max_bytes,
+                    },
+                    deadline,
+                )?)
                 .await?
                 .into_inner();
             let mut listing = RemoteListing::default();

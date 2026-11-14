@@ -7961,6 +7961,7 @@ type RemoteWorkspaceCopyUpload struct {
 	//	*RemoteWorkspaceCopyUpload_Header
 	//	*RemoteWorkspaceCopyUpload_File
 	//	*RemoteWorkspaceCopyUpload_Payload
+	//	*RemoteWorkspaceCopyUpload_Directory
 	Part          isRemoteWorkspaceCopyUpload_Part `protobuf_oneof:"part"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -8030,6 +8031,15 @@ func (x *RemoteWorkspaceCopyUpload) GetPayload() []byte {
 	return nil
 }
 
+func (x *RemoteWorkspaceCopyUpload) GetDirectory() string {
+	if x != nil {
+		if x, ok := x.Part.(*RemoteWorkspaceCopyUpload_Directory); ok {
+			return x.Directory
+		}
+	}
+	return ""
+}
+
 type isRemoteWorkspaceCopyUpload_Part interface {
 	isRemoteWorkspaceCopyUpload_Part()
 }
@@ -8046,11 +8056,18 @@ type RemoteWorkspaceCopyUpload_Payload struct {
 	Payload []byte `protobuf:"bytes,3,opt,name=payload,proto3,oneof"`
 }
 
+type RemoteWorkspaceCopyUpload_Directory struct {
+	// An empty directory of the copy, by its Volume-relative path.
+	Directory string `protobuf:"bytes,4,opt,name=directory,proto3,oneof"`
+}
+
 func (*RemoteWorkspaceCopyUpload_Header) isRemoteWorkspaceCopyUpload_Part() {}
 
 func (*RemoteWorkspaceCopyUpload_File) isRemoteWorkspaceCopyUpload_Part() {}
 
 func (*RemoteWorkspaceCopyUpload_Payload) isRemoteWorkspaceCopyUpload_Part() {}
+
+func (*RemoteWorkspaceCopyUpload_Directory) isRemoteWorkspaceCopyUpload_Part() {}
 
 type RemoteWorkspaceCopyStaged struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -8097,8 +8114,11 @@ func (x *RemoteWorkspaceCopyStaged) GetFiles() uint64 {
 }
 
 type RemoteWorkspaceCaptureCopyRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Path  string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// The copy's byte limit. Listing refuses a change set over it, or a changed file over it or
+	// 5 GiB, before reading that file, so it hashes at most the staged bytes and this limit.
+	MaxBytes      uint64 `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8140,13 +8160,21 @@ func (x *RemoteWorkspaceCaptureCopyRequest) GetPath() string {
 	return ""
 }
 
+func (x *RemoteWorkspaceCaptureCopyRequest) GetMaxBytes() uint64 {
+	if x != nil {
+		return x.MaxBytes
+	}
+	return 0
+}
+
 // What the provider found in a read-write copy, after its changed and created file records.
 type RemoteWorkspaceCopyListed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Unchanged files, links, and other entries that are never written back.
 	Skipped uint64 `protobuf:"varint,1,opt,name=skipped,proto3" json:"skipped,omitempty"`
 	// The first entry that refuses the copy: an unwritable name, a hard link, a directory
-	// nested too deeply, or too many entries. No bytes follow a refusal.
+	// nested too deeply, too many entries, or a change over the copy's byte limits. No bytes
+	// follow a refusal.
 	ErrorKey      string `protobuf:"bytes,2,opt,name=error_key,json=errorKey,proto3" json:"error_key,omitempty"`
 	ErrorReason   string `protobuf:"bytes,3,opt,name=error_reason,json=errorReason,proto3" json:"error_reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -22559,16 +22587,18 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x19RemoteWorkspaceCopyHeader\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1d\n" +
 	"\n" +
-	"read_write\x18\x02 \x01(\bR\treadWrite\"\xcd\x01\n" +
+	"read_write\x18\x02 \x01(\bR\treadWrite\"\xed\x01\n" +
 	"\x19RemoteWorkspaceCopyUpload\x12H\n" +
 	"\x06header\x18\x01 \x01(\v2..supertag.runtime.v2.RemoteWorkspaceCopyHeaderH\x00R\x06header\x12B\n" +
 	"\x04file\x18\x02 \x01(\v2,.supertag.runtime.v2.RemoteWorkspaceCopyFileH\x00R\x04file\x12\x1a\n" +
-	"\apayload\x18\x03 \x01(\fH\x00R\apayloadB\x06\n" +
+	"\apayload\x18\x03 \x01(\fH\x00R\apayload\x12\x1e\n" +
+	"\tdirectory\x18\x04 \x01(\tH\x00R\tdirectoryB\x06\n" +
 	"\x04part\"1\n" +
 	"\x19RemoteWorkspaceCopyStaged\x12\x14\n" +
-	"\x05files\x18\x01 \x01(\x04R\x05files\"7\n" +
+	"\x05files\x18\x01 \x01(\x04R\x05files\"T\n" +
 	"!RemoteWorkspaceCaptureCopyRequest\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"u\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1b\n" +
+	"\tmax_bytes\x18\x02 \x01(\x04R\bmaxBytes\"u\n" +
 	"\x19RemoteWorkspaceCopyListed\x12\x18\n" +
 	"\askipped\x18\x01 \x01(\x04R\askipped\x12\x1b\n" +
 	"\terror_key\x18\x02 \x01(\tR\berrorKey\x12!\n" +
@@ -25105,6 +25135,7 @@ func file_supertag_runtime_v2_runtime_proto_init() {
 		(*RemoteWorkspaceCopyUpload_Header)(nil),
 		(*RemoteWorkspaceCopyUpload_File)(nil),
 		(*RemoteWorkspaceCopyUpload_Payload)(nil),
+		(*RemoteWorkspaceCopyUpload_Directory)(nil),
 	}
 	file_supertag_runtime_v2_runtime_proto_msgTypes[88].OneofWrappers = []any{
 		(*RemoteWorkspaceCopyDownload_File)(nil),

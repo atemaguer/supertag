@@ -295,8 +295,6 @@ impl WorkspaceMounts {
     }
 }
 
-/// Stream one file to its object. The request is signed with the SHA-256 the walk recorded,
-/// so a file that changed since is refused by the store and by the body's own check.
 /// The first bound a change set exceeds, checked before anything is written:
 /// a file over the copy's limit or 5 GiB, the copy's limit in total, 1000
 /// files, or the summary's size.
@@ -332,6 +330,8 @@ pub(super) fn bounds(changed: &[Copied], max_bytes: u64) -> Option<(String, Stri
     Some((key, reason.into()))
 }
 
+/// Stream one file to its object. The request is signed with the SHA-256 the walk recorded,
+/// so a file that changed since is refused by the store and by the body's own check.
 fn write_object(source: &s3::S3Source, copy: &File, file: &Copied) -> Result<()> {
     let input = open_copied(copy, file)?;
     tokio::runtime::Handle::current().block_on(source.write(

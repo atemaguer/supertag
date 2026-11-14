@@ -1,17 +1,19 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { posix } from "node:path";
 import type { ExecutionEnvironment, ProcessHandle } from "../index.js";
+import {
+  type CopyDownloadPart,
+  type CopyUploadPart,
+  cleanCommand,
+  createWorkspaceCopies,
+  digest,
+  readTransfer,
+  type WorkspaceCopies,
+} from "./copies.js";
 import { type InputFile, inputManifest, inputRoot } from "./input-files.js";
 import { createWorkspaceOperations, type WorkspaceOperation } from "./operations.js";
 
 export const MAX_TRANSFER = 256 * 1024 * 1024;
-/** Bytes one Workspace copy transfer step writes into or reads from the sandbox. */
-const COPY_PART = 8 * 1024 * 1024;
-/** One copy's limits, as the Worker Host's: 20 GiB, 10,000 files staged, 20,000 listed. */
-const MAX_COPY_BYTES = 20 * 1024 ** 3;
-const MAX_COPY_FILES = 10_000;
-const MAX_COPY_LISTED = 2 * MAX_COPY_FILES;
-const MAX_COPY_SCAN = 32 * 1024 * 1024;
 const API_TIMEOUT_MS = 15_000;
 const ALLOCATE_TIMEOUT_MS = 60_000;
 const TRANSFER_TIMEOUT_MS = 120_000;
@@ -93,10 +95,6 @@ export interface SandboxWorkspaceProvider {
     environment?: SandboxEnvironment,
   ): Promise<SandboxWorkspace>;
   stop(owner: SandboxOwner, sandboxId?: string): Promise<SandboxStopResult>;
-}
-
-function cleanCommand(...args: string[]): string[] {
-  return ["/usr/bin/env", "-i", "PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", ...args];
 }
 
 interface StageHeader {
@@ -226,45 +224,6 @@ interface CapturedTree {
   readonly bytes: Uint8Array;
 }
 
-function digest(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-/** A file of a Workspace copy: its Volume-relative key, exact length and SHA-256. */
-export interface CopyFile {
-  readonly key: string;
-  readonly size: bigint;
-  readonly sha256: string;
-}
-
-export type CopyUploadPart =
-  | { readonly case: "file"; readonly value: CopyFile }
-  | { readonly case: "payload"; readonly value: Uint8Array };
-
-export type CopyDownloadPart =
-  | { readonly case: "file"; readonly value: CopyFile }
-  | {
-      readonly case: "listed";
-      readonly value: { skipped: bigint; errorKey: string; errorReason: string };
-    }
-  | { readonly case: "payload"; readonly value: Uint8Array };
-
-/** The Worker Host's Volume key rules: what a Volume can hold and a checkout can name. */
-export function volumeKey(key: string): boolean {
-  return (
-    key.length > 0 &&
-    Buffer.byteLength(key) <= 1024 &&
-    !/[\\\p{Cc}]/u.test(key) &&
-    key
-      .split("/")
-      .every((part) => !["", ".", "..", ".git"].includes(part) && !part.startsWith(".supertag-"))
-  );
-}
-
-function copyRoot(attemptId: string): string {
-  return `volumes/${createHash("sha256").update(attemptId).digest("hex")}`;
-}
-
 function exactOwner(left: SandboxOwner, right: SandboxOwner): boolean {
   return (
     left.hostId === right.hostId &&
@@ -273,40 +232,6 @@ function exactOwner(left: SandboxOwner, right: SandboxOwner): boolean {
     left.attemptId === right.attemptId &&
     left.allocationId === right.allocationId
   );
-}
-
-async function readTransfer(
-  sandbox: SandboxWorkspace,
-  path: string,
-  byteLength: number,
-  signal: AbortSignal,
-): Promise<Uint8Array> {
-  const stream = await sandbox.readTransfer(path, signal);
-  const reader = stream.getReader();
-  const abort = () => {
-    void reader.cancel().catch(() => undefined);
-  };
-  signal.addEventListener("abort", abort, { once: true });
-  const bytes = new Uint8Array(byteLength);
-  try {
-    let offset = 0;
-    while (true) {
-      signal.throwIfAborted();
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value.byteLength > byteLength - offset)
-        throw new Error("Workspace tree exceeds its receipt");
-      bytes.set(value, offset);
-      offset += value.byteLength;
-    }
-    signal.throwIfAborted();
-    if (offset !== byteLength) throw new Error("Workspace tree is shorter than its receipt");
-    return bytes;
-  } finally {
-    signal.removeEventListener("abort", abort);
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
 }
 
 function observedEnvironment(
@@ -372,13 +297,8 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
   let tools: ReturnType<typeof createWorkspaceOperations> | undefined;
   let captured: CapturedTree | undefined;
   let mcpStaged = false;
-  /** Each staged Workspace copy by checkout path, with the files it holds. */
-  const copies = new Map<
-    string,
-    { readonly readWrite: boolean; readonly files: ReadonlyMap<string, CopyFile> }
-  >();
-  let copyInFlight = false;
-  let copyIndex = 0;
+  /** This Attempt's Workspace copies, once the first is staged. */
+  let copies: WorkspaceCopies | undefined;
   const mcpServers = new Set<ProcessHandle>();
   const mcpStops = new WeakMap<ProcessHandle, Promise<boolean>>();
   let uncertain = false;
@@ -478,236 +398,40 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
       workspaceRoot: "checkout",
       readOnlyRoots: [
         ...(stagedInputRoot ? [`checkout/${stagedInputRoot}`] : []),
-        ...[...copies].filter(([, copy]) => !copy.readWrite).map(([path]) => `checkout/${path}`),
+        ...(copies?.readOnly() ?? []).map((path) => `checkout/${path}`),
       ],
       allowedActions,
     });
   }
 
-  async function runCopy(args: string[], signal: AbortSignal, maximum = 256) {
-    if (!sandbox || !root) throw workspaceError("allocation is unavailable");
-    const result = await sandbox.run(
-      cleanCommand(
-        "python3",
-        "-I",
-        "-S",
-        "-c",
-        COPY_PROGRAM,
-        args[0] as string,
-        root,
-        ...args.slice(1),
-      ),
-      TRANSFER_TIMEOUT_MS,
-      signal,
-    );
-    const stdout = result.stdout.trim();
-    if (result.exitCode !== 0 || stdout.length > maximum)
-      throw workspaceError("copy transfer failed in the sandbox");
-    return stdout;
-  }
-
-  function copyPath(path: string): string {
-    if (!owner) throw workspaceError("owner is unavailable");
-    const prefix = `${copyRoot(owner.attemptId)}/`;
-    const name = path.startsWith(prefix) ? path.slice(prefix.length) : "";
-    if (
-      !name ||
-      name.includes("/") ||
-      name.startsWith(".") ||
-      Buffer.byteLength(name) > 255 ||
-      /[\\\p{Cc}]/u.test(name)
-    )
-      throw workspaceError("copy path is invalid");
-    return path;
-  }
-
   return {
-    /**
-     * Stages one Workspace copy the Worker Host uploads: each file's bytes go into a private
-     * directory beside the checkout in bounded parts, every file is checked against its SHA-256,
-     * and only then is the copy sealed and moved to its path in the checkout.
-     */
+    /** Stages one Workspace copy the Worker Host uploads, beside the checkout. */
     async stageCopy(
       header: { path: string; readWrite: boolean },
       parts: AsyncIterable<CopyUploadPart>,
       caller?: AbortSignal,
     ): Promise<{ files: bigint }> {
-      if (phase !== "staged" || !sandbox || !root || copyInFlight)
+      if (phase !== "staged" || !sandbox || !root || !owner)
         throw workspaceError("must be staged before a copy");
-      const path = copyPath(header.path);
-      if (copies.has(path)) throw workspaceError("copy is already staged");
-      copyInFlight = true;
-      // A failed copy may leave a staging directory; each attempt stages into its own.
-      const index = String(copyIndex++);
-      const files = new Map<string, CopyFile>();
-      try {
-        let buffer: Uint8Array[] = [];
-        let buffered = 0;
-        let batch: { key: string; size: number; sha256: string; offset: number; length: number }[] =
-          [];
-        let current: { file: CopyFile; offset: number; size: number } | undefined;
-        let total = 0;
-        let sequence = 0;
-        const flush = async () => {
-          if (!batch.length) return;
-          const signal = signalFor(caller);
-          // Each part has its own names, so a failed part leaves nothing a later one reuses.
-          const part = String(sequence++);
-          await sandbox?.writeTransfer(
-            `${root}/copy-${index}-${part}.part`,
-            Buffer.concat(buffer),
-            signal,
-          );
-          await sandbox?.writeTransfer(
-            `${root}/copy-${index}-${part}.json`,
-            Buffer.from(JSON.stringify(batch)),
-            signal,
-          );
-          if ((await runCopy(["copy-append", index, part], signal)) !== "appended")
-            throw workspaceError("copy part could not be written");
-          buffer = [];
-          buffered = 0;
-          batch = [];
-        };
-        const record = (length: number) => {
-          if (!current) throw workspaceError("copy bytes precede their file");
-          const last = batch.at(-1);
-          if (last && last.key === current.file.key) last.length += length;
-          else
-            batch.push({
-              key: current.file.key,
-              size: current.size,
-              sha256: current.file.sha256,
-              offset: current.offset,
-              length,
-            });
-          current.offset += length;
-        };
-        for await (const part of parts) {
-          (caller ?? lifetime.signal).throwIfAborted();
-          if (part.case === "file") {
-            if (current && current.offset !== current.size)
-              throw workspaceError("copy file is shorter than its record");
-            const { key, size, sha256 } = part.value;
-            total += Number(size);
-            if (
-              !volumeKey(key) ||
-              files.has(key) ||
-              size < 0n ||
-              size > BigInt(MAX_COPY_BYTES) ||
-              total > MAX_COPY_BYTES ||
-              files.size >= MAX_COPY_FILES ||
-              !/^[0-9a-f]{64}$/u.test(sha256)
-            )
-              throw workspaceError("copy file record is invalid");
-            files.set(key, part.value);
-            current = { file: part.value, offset: 0, size: Number(size) };
-            // An empty file is complete as soon as it is recorded.
-            if (current.size === 0) record(0);
-          } else {
-            const bytes = part.value;
-            if (!current || !bytes.byteLength || bytes.byteLength > current.size - current.offset)
-              throw workspaceError("copy bytes differ from their record");
-            buffer.push(bytes);
-            buffered += bytes.byteLength;
-            record(bytes.byteLength);
-            if (buffered >= COPY_PART) await flush();
-          }
-        }
-        if (current && current.offset !== current.size)
-          throw workspaceError("copy file is shorter than its record");
-        await flush();
-        const signal = signalFor(caller);
-        if (
-          (await runCopy(["copy-seal", index, path, header.readWrite ? "1" : "0"], signal)) !==
-          "sealed"
-        )
-          throw workspaceError("copy could not be sealed");
-        copies.set(path, { readWrite: header.readWrite, files });
-        tools = createTools();
-        return { files: BigInt(files.size) };
-      } catch (error) {
-        throw error instanceof Error && error.message.startsWith(provider.label)
-          ? error
-          : workspaceError("copy could not be staged");
-      } finally {
-        copyInFlight = false;
-      }
+      copies ??= createWorkspaceCopies({
+        sandbox,
+        root,
+        attemptId: owner.attemptId,
+        label: provider.label,
+        lifetime: lifetime.signal,
+      });
+      const staged = await copies.stage(header, parts, caller);
+      tools = createTools();
+      return staged;
     },
-    /**
-     * After capture, lists a read-write copy in the sandbox and streams its changed and created
-     * regular files: their records, the summary, then their bytes in record order. A refusal
-     * the listing found ends the stream after the summary.
-     */
-    async *captureCopy(path: string, caller?: AbortSignal): AsyncGenerator<CopyDownloadPart> {
-      if (phase !== "captured" || !sandbox || !root || copyInFlight)
+    /** After capture, a read-write copy's changed and created files. */
+    async *captureCopy(
+      request: { path: string; maxBytes: bigint },
+      caller?: AbortSignal,
+    ): AsyncGenerator<CopyDownloadPart> {
+      if (phase !== "captured" || !copies)
         throw workspaceError("must be captured before its copies");
-      const copy = copies.get(copyPath(path));
-      if (!copy?.readWrite) throw workspaceError("copy is not a staged read-write copy");
-      copyInFlight = true;
-      try {
-        const signal = signalFor(caller);
-        const receipt = /^([0-9]{1,9}) ([0-9a-f]{64})$/u.exec(
-          await runCopy(["copy-scan", path], signal),
-        );
-        const length = Number(receipt?.[1]);
-        if (!receipt || length < 2 || length > MAX_COPY_SCAN)
-          throw workspaceError("copy listing has no receipt");
-        const bytes = await readTransfer(sandbox, `${root}/copy-scan.json`, length, signal);
-        if (digest(bytes) !== receipt[2]) throw workspaceError("copy listing differs");
-        const scan = JSON.parse(Buffer.from(bytes).toString("utf8")) as {
-          files: { key: string; size: number; sha256: string }[];
-          others: number;
-          refusal: [string, string] | null;
-        };
-        if (
-          !Array.isArray(scan.files) ||
-          scan.files.length > MAX_COPY_LISTED ||
-          !Number.isSafeInteger(scan.others) ||
-          scan.others < 0
-        )
-          throw workspaceError("copy listing is invalid");
-        let skipped = BigInt(scan.others);
-        const changed: CopyFile[] = [];
-        for (const file of scan.files) {
-          if (
-            !volumeKey(file.key) ||
-            !Number.isSafeInteger(file.size) ||
-            file.size < 0 ||
-            !/^[0-9a-f]{64}$/u.test(file.sha256)
-          )
-            throw workspaceError("copy listing is invalid");
-          const staged = copy.files.get(file.key);
-          if (staged && staged.size === BigInt(file.size) && staged.sha256 === file.sha256)
-            skipped++;
-          else changed.push({ key: file.key, size: BigInt(file.size), sha256: file.sha256 });
-        }
-        changed.sort((left, right) =>
-          Buffer.compare(Buffer.from(left.key), Buffer.from(right.key)),
-        );
-        for (const file of changed) yield { case: "file", value: file };
-        const [errorKey, errorReason] = scan.refusal ?? ["", ""];
-        yield { case: "listed", value: { skipped, errorKey, errorReason } };
-        if (scan.refusal) return;
-        for (const file of changed) {
-          for (let offset = 0n; offset < file.size; ) {
-            const step =
-              file.size - offset < BigInt(COPY_PART) ? file.size - offset : BigInt(COPY_PART);
-            const partSignal = signalFor(caller);
-            const read = await runCopy(
-              ["copy-read", path, file.key, String(offset), String(step)],
-              partSignal,
-            );
-            if (read !== String(step)) throw workspaceError("copy file changed");
-            const part = await readTransfer(sandbox, `${root}/copy-out`, Number(step), partSignal);
-            for (let start = 0; start < part.byteLength; start += 256 * 1024)
-              yield { case: "payload", value: part.subarray(start, start + 256 * 1024) };
-            offset += step;
-          }
-        }
-      } finally {
-        copyInFlight = false;
-      }
+      yield* copies.capture(request, caller);
     },
     async allocate(
       request: {
@@ -965,7 +689,7 @@ export function createSandboxWorkspaceSession(provider: SandboxWorkspaceProvider
         // Staged inputs and Workspace copies never return in the tree.
         const result = await runTransfer(
           "capture",
-          [stagedInputRoot, ...(copies.size && owner ? [copyRoot(owner.attemptId)] : [])],
+          [stagedInputRoot, ...(copies?.root() ? [copies.root() as string] : [])],
           signal,
         );
         const receipt = /^([1-9][0-9]{0,8}) ([0-9a-f]{64})$/u.exec(result.stdout.trim());
@@ -1300,257 +1024,5 @@ try:
         capture(*sys.argv[3:])
     else:
         raise ValueError("unknown transfer")
-except Exception:
-    sys.exit(1)`;
-
-// Run only trusted copy code in the sandbox. Copies live beside the checkout until sealed, are
-// written without following links, and every completed file is checked against its SHA-256.
-const COPY_PROGRAM = String.raw`import hashlib, json, os, stat, sys, unicodedata
-
-CHUNK = 65536
-PART = ${COPY_PART}
-MAX_DEPTH = 32
-MAX_WALK = 80000
-MAX_FILES = 20000
-DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-FILE_FLAGS = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
-UNNAMEABLE = "a file name cannot be written to the Volume"
-os.umask(0o077)
-mode, root = sys.argv[1:3]
-checkout = os.path.join(root, "checkout")
-
-def check(condition):
-    if not condition:
-        raise ValueError("invalid Workspace copy transfer")
-
-def volume_key(key):
-    return (0 < len(key.encode("utf-8")) <= 1024 and "\\" not in key and
-            not any(unicodedata.category(c) == "Cc" for c in key) and
-            all(part not in ("", ".", "..", ".git") and not part.startswith(".supertag-")
-                for part in key.split("/")))
-
-def copy_path(path):
-    parts = path.split("/")
-    check(len(parts) == 3 and parts[0] == "volumes" and len(parts[1]) == 64 and
-          all(c in "0123456789abcdef" for c in parts[1]) and parts[2] and
-          not parts[2].startswith(".") and volume_key(parts[2]))
-    return parts
-
-def open_dirs(fd, parts, create):
-    fd = os.dup(fd)
-    try:
-        for part in parts:
-            if create:
-                try:
-                    os.mkdir(part, 0o700, dir_fd=fd)
-                except FileExistsError:
-                    pass
-            child = os.open(part, DIR_FLAGS, dir_fd=fd)
-            os.close(fd)
-            fd = child
-        return fd
-    except BaseException:
-        os.close(fd)
-        raise
-
-def file_hash(fd):
-    digest = hashlib.sha256()
-    length = 0
-    while data := os.read(fd, CHUNK):
-        length += len(data)
-        digest.update(data)
-    return length, digest.hexdigest()
-
-def staging(index):
-    check(index.isdigit() and len(index) <= 4)
-    return os.path.join(root, "copies", index)
-
-def append(index, sequence):
-    os.makedirs(staging(index), mode=0o700, exist_ok=True)
-    check(sequence.isdigit() and len(sequence) <= 6)
-    batch_path = os.path.join(root, "copy-%s-%s.json" % (index, sequence))
-    part_path = os.path.join(root, "copy-%s-%s.part" % (index, sequence))
-    with open(batch_path, "rb") as source:
-        raw = source.read(4 * 1024 * 1024 + 1)
-    check(len(raw) <= 4 * 1024 * 1024)
-    batch = json.loads(raw)
-    base = os.open(staging(index), DIR_FLAGS)
-    try:
-        with open(part_path, "rb") as part:
-            for record in batch:
-                key, size, offset, length = record["key"], record["size"], record["offset"], record["length"]
-                check(volume_key(key) and all(type(value) is int and value >= 0
-                                              for value in (size, offset, length)))
-                check(offset + length <= size)
-                *parents, name = key.split("/")
-                check(len(parents) <= MAX_DEPTH)
-                directory = open_dirs(base, parents, True)
-                try:
-                    # Read and write: a completed file is hashed through the same descriptor.
-                    flags = os.O_RDWR | os.O_NOFOLLOW
-                    flags |= os.O_CREAT | os.O_EXCL if offset == 0 else os.O_APPEND
-                    fd = os.open(name, flags, 0o600, dir_fd=directory)
-                finally:
-                    os.close(directory)
-                try:
-                    info = os.fstat(fd)
-                    check(stat.S_ISREG(info.st_mode) and info.st_size == offset)
-                    remaining = length
-                    while remaining:
-                        data = part.read(min(CHUNK, remaining))
-                        check(bool(data))
-                        os.write(fd, data)
-                        remaining -= len(data)
-                    if offset + length == size:
-                        os.lseek(fd, 0, os.SEEK_SET)
-                        check(file_hash(fd) == (size, record["sha256"]))
-                finally:
-                    os.close(fd)
-            check(not part.read(1))
-    finally:
-        os.close(base)
-    os.unlink(part_path)
-    os.unlink(batch_path)
-    print("appended")
-
-def seal(index, path, writable):
-    _, digest, name = copy_path(path)
-    source = staging(index)
-    os.makedirs(source, mode=0o700, exist_ok=True)
-    file_mode, directory_mode = (0o600, 0o700) if writable == "1" else (0o400, 0o500)
-    # The staging tree holds only what append wrote: directories and regular files.
-    for directory, names, files in os.walk(source, topdown=False):
-        for file in files:
-            os.chmod(os.path.join(directory, file), file_mode)
-        if directory != source:
-            os.chmod(directory, directory_mode)
-    checkout_fd = os.open(checkout, DIR_FLAGS)
-    try:
-        parent = open_dirs(checkout_fd, ("volumes", digest), True)
-        try:
-            check(name not in os.listdir(parent))
-            # Moving a directory to another parent needs write access to it, so the copy root
-            # is sealed last.
-            os.rename(source, name, dst_dir_fd=parent)
-            os.chmod(name, directory_mode, dir_fd=parent)
-        finally:
-            os.close(parent)
-    finally:
-        os.close(checkout_fd)
-    print("sealed")
-
-def scan(path):
-    files = []
-    others = 0
-    visited = 0
-    refusal = None
-
-    def refuse(key, reason):
-        nonlocal refusal
-        if refusal is None:
-            refusal = [key, reason]
-
-    def walk(fd, prefix, depth):
-        nonlocal others, visited
-        for raw in sorted(os.fsencode(name) for name in os.listdir(fd)):
-            if refusal is not None:
-                return
-            try:
-                name = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                refuse(prefix, UNNAMEABLE)
-                return
-            key = name if not prefix else prefix + "/" + name
-            if not volume_key(key):
-                refuse(prefix, UNNAMEABLE)
-                return
-            visited += 1
-            if visited > MAX_WALK:
-                refuse(key, "the copy holds too many entries to write back")
-                return
-            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
-            if stat.S_ISDIR(info.st_mode):
-                if depth >= MAX_DEPTH:
-                    refuse(key, "the copy nests directories too deeply")
-                    return
-                child = os.open(name, DIR_FLAGS, dir_fd=fd)
-                try:
-                    walk(child, key, depth + 1)
-                finally:
-                    os.close(child)
-            elif stat.S_ISREG(info.st_mode):
-                if info.st_nlink != 1:
-                    refuse(key, "a file has another link or changed")
-                    return
-                if len(files) >= MAX_FILES:
-                    refuse(key, "the copy holds too many files to write back")
-                    return
-                fd_file = os.open(name, FILE_FLAGS, dir_fd=fd)
-                try:
-                    size, sha256 = file_hash(fd_file)
-                finally:
-                    os.close(fd_file)
-                files.append({"key": key, "size": size, "sha256": sha256})
-            else:
-                others += 1
-
-    copy_path(path)
-    base = os.open(checkout, DIR_FLAGS)
-    try:
-        fd = open_dirs(base, path.split("/"), False)
-    finally:
-        os.close(base)
-    try:
-        walk(fd, "", 0)
-    finally:
-        os.close(fd)
-    body = json.dumps({"files": files, "others": others, "refusal": refusal},
-                      ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    destination = os.path.join(root, "copy-scan.json")
-    with open(destination, "wb") as output:
-        output.write(body)
-    print(len(body), hashlib.sha256(body).hexdigest())
-
-def read(path, key, offset, length):
-    copy_path(path)
-    check(volume_key(key))
-    offset, length = int(offset), int(length)
-    check(0 <= offset and 0 < length <= PART)
-    *parents, name = key.split("/")
-    base = os.open(checkout, DIR_FLAGS)
-    try:
-        directory = open_dirs(base, path.split("/") + parents, False)
-    finally:
-        os.close(base)
-    try:
-        fd = os.open(name, FILE_FLAGS, dir_fd=directory)
-    finally:
-        os.close(directory)
-    try:
-        info = os.fstat(fd)
-        check(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and offset + length <= info.st_size)
-        os.lseek(fd, offset, os.SEEK_SET)
-        with open(os.path.join(root, "copy-out"), "wb") as output:
-            remaining = length
-            while remaining:
-                data = os.read(fd, min(CHUNK, remaining))
-                check(bool(data))
-                output.write(data)
-                remaining -= len(data)
-    finally:
-        os.close(fd)
-    print(length)
-
-try:
-    if mode == "copy-append":
-        append(*sys.argv[3:])
-    elif mode == "copy-seal":
-        seal(*sys.argv[3:])
-    elif mode == "copy-scan":
-        scan(*sys.argv[3:])
-    elif mode == "copy-read":
-        read(*sys.argv[3:])
-    else:
-        raise ValueError("unknown copy transfer")
 except Exception:
     sys.exit(1)`;

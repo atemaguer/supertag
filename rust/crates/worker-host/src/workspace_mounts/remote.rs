@@ -16,6 +16,8 @@ pub(crate) struct RemoteCopy {
     pub(crate) read_write: bool,
     pub(crate) max_bytes: u64,
     pub(crate) files: Vec<Copied>,
+    /// Empty directories, by key: the upload sends them, as only files carry their parents.
+    pub(crate) empty: Vec<String>,
 }
 
 impl RemoteCopy {
@@ -149,7 +151,10 @@ pub(crate) fn remote_writer(
 
 impl RemoteWriter {
     /// Replace or create `file` with exactly its bytes from `chunks`, checked
-    /// against its SHA-256 before it is renamed into place.
+    /// against its SHA-256 before it is renamed into place. The host copy
+    /// follows the sandbox's: an entry where the sandbox has a directory, or a
+    /// directory where it has this file, is removed first. Deletions are never
+    /// written back, so write-back then meets the Volume as a local copy would.
     pub(crate) fn write(&self, file: &Copied, chunks: &mut Receiver<Vec<u8>>) -> Result<()> {
         ensure!(
             volume_key(&file.key),
@@ -163,14 +168,15 @@ impl RemoteWriter {
         );
         let mut directory = self.copy.try_clone()?;
         for part in parents {
-            directory = match open_dir_at(&directory, part) {
-                Ok(next) => next,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match stat_at(&directory, part)? {
+                Some(mode) if is_directory(mode) => {}
+                Some(_) => {
+                    unlink_at(&directory, part, 0)?;
                     mkdir_at(&directory, part)?;
-                    open_dir_at(&directory, part)?
                 }
-                Err(error) => return Err(error.into()),
-            };
+                None => mkdir_at(&directory, part)?,
+            }
+            directory = open_dir_at(&directory, part)?;
         }
         let temp = format!("{STAGING_PREFIX}capture");
         unlink_at(&directory, &temp, 0)?;
@@ -196,7 +202,7 @@ impl RemoteWriter {
             );
             flush(&output)?;
             match stat_at(&directory, name)? {
-                Some(mode) if is_directory(mode) => bail!("a directory is in the way"),
+                Some(mode) if is_directory(mode) => remove_tree_at(&directory, &c_name(name)?, 0)?,
                 Some(_) => unlink_at(&directory, name, 0)?,
                 None => {}
             }

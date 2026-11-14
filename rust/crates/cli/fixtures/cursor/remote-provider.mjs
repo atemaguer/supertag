@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import {
   access,
   appendFile,
@@ -12,6 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -39,6 +41,11 @@ process.on("uncaughtException", async (error) => {
 });
 const { providerTransport } = JSON.parse(await readFile(join(root, "modules.json"), "utf8"));
 const { runRemoteWorkspaceTransport } = await import(pathToFileURL(providerTransport).href);
+// Copies run the provider SDK's own staging and listing code, with its sandbox
+// program executed here as the sandbox would.
+const { createWorkspaceCopies } = await import(
+  new URL("./copies.js", pathToFileURL(providerTransport)).href
+);
 const expected =
   provider === "modal"
     ? {
@@ -79,8 +86,23 @@ let staged = false;
 let mcpStaged = false;
 const mcpServers = new Set();
 const inputPaths = [];
-// Each staged Workspace copy by checkout path: its access and the files the Host uploaded.
+// Each staged Workspace copy by checkout path and its access, for the fixture's file tools.
 const copies = new Map();
+let workspaceCopies;
+const sandbox = {
+  async run(argv, timeoutMs, signal) {
+    return new Promise((resolve) => {
+      execFile(
+        argv[0],
+        argv.slice(1),
+        { timeout: timeoutMs, signal, maxBuffer: 1024 * 1024 },
+        (error, stdout) => resolve({ exitCode: error ? (error.code ?? 1) : 0, stdout }),
+      );
+    });
+  },
+  writeTransfer: (path, bytes) => writeFile(path, bytes, { flag: "wx", mode: 0o600 }),
+  readTransfer: async (path) => Readable.toWeb(createReadStream(path)),
+};
 let captured = false;
 const copyRoot = () => `volumes/${hash(allocation.owner.attemptId)}`;
 const enabled = (name) =>
@@ -260,8 +282,8 @@ const implementation = {
           if (entry.name === ".git") continue;
           const path = prefix + entry.name;
           if (inputPaths.includes(path) && !(await enabled("return-private-input"))) continue;
-          // Workspace copies never return in the tree.
-          if (copies.size && path === copyRoot()) continue;
+          // Workspace copies never return in the tree, unless a fault returns them.
+          if (copies.size && path === copyRoot() && !(await enabled("return-copy"))) continue;
           const physical = join(folder, entry.name);
           if (entry.isDirectory()) await files(physical, `${path}/`);
           else {
@@ -298,90 +320,64 @@ const implementation = {
       };
       yield { part: { case: "payload", value: tree } };
     },
-    async stageCopy(stream) {
+    async stageCopy(stream, context) {
       assert.ok(staged && !allocation.stopped && !captured);
-      let header;
-      let current;
-      const files = new Map();
-      const contents = new Map();
-      const finish = () => {
-        if (!current) return;
-        const bytes = Buffer.concat(current.chunks);
-        assert.equal(BigInt(bytes.length), current.size);
-        assert.equal(hash(bytes), current.sha256);
-        contents.set(current.key, bytes);
-      };
-      for await (const { part } of stream) {
-        if (!header) {
-          assert.equal(part.case, "header");
-          header = part.value;
-          assert.match(header.path, new RegExp(`^${copyRoot()}/[a-z-]+$`, "u"));
-          assert.ok(!copies.has(header.path));
-        } else if (part.case === "file") {
-          finish();
-          current = { ...part.value, chunks: [] };
-          files.set(part.value.key, { size: part.value.size, sha256: part.value.sha256 });
-        } else {
-          assert.equal(part.case, "payload");
-          assert.ok(current && part.value.length <= 256 * 1024);
-          current.chunks.push(part.value);
+      const inputs = stream[Symbol.asyncIterator]();
+      const first = await inputs.next();
+      assert.equal(first.value?.part.case, "header");
+      const header = first.value.part.value;
+      const keys = [];
+      const directories = [];
+      async function* parts() {
+        for (;;) {
+          const next = await inputs.next();
+          if (next.done) return;
+          const { part } = next.value;
+          assert.ok(["file", "payload", "directory"].includes(part.case));
+          if (part.case === "file") keys.push(part.value.key);
+          if (part.case === "directory") directories.push(part.value);
+          yield part;
         }
       }
-      finish();
-      const base = join(directory, "checkout", header.path);
-      for (const [key, bytes] of contents) {
-        await mkdir(dirname(join(base, key)), { recursive: true, mode: 0o700 });
-        await writeFile(join(base, key), bytes, { mode: header.readWrite ? 0o600 : 0o400 });
-      }
-      copies.set(header.path, { readWrite: header.readWrite, files });
+      workspaceCopies ??= createWorkspaceCopies({
+        sandbox,
+        root: directory,
+        attemptId: allocation.owner.attemptId,
+        label: "Fixture",
+        lifetime: new AbortController().signal,
+      });
+      const result = await workspaceCopies.stage(header, parts(), context.signal);
+      copies.set(header.path, { readWrite: header.readWrite });
       await trace({
         type: "stage-copy",
         path: header.path,
         readWrite: header.readWrite,
-        keys: [...files.keys()].sort(),
+        keys: keys.sort(),
+        directories: directories.sort(),
       });
-      return { files: BigInt(files.size) };
+      return result;
     },
-    async *captureCopy({ path }) {
+    async *captureCopy(request, context) {
       assert.ok(captured && !allocation.stopped);
-      const copy = copies.get(path);
-      assert.ok(copy?.readWrite, "only read-write copies are captured");
-      const found = [];
-      async function walk(folder, prefix = "") {
-        for (const entry of await readdir(folder, { withFileTypes: true })) {
-          const key = prefix + entry.name;
-          if (entry.isDirectory()) await walk(join(folder, entry.name), `${key}/`);
-          else if (entry.isFile())
-            found.push({ key, data: await readFile(join(folder, entry.name)) });
+      const keys = [];
+      try {
+        for await (const part of workspaceCopies.capture(request, context.signal)) {
+          if (part.case === "file") keys.push(part.value.key);
+          if (part.case === "listed")
+            await trace({
+              type: "capture-copy",
+              path: request.path,
+              maxBytes: String(request.maxBytes),
+              keys,
+              skipped: String(part.value.skipped),
+              refusal: part.value.errorReason,
+            });
+          yield { part };
         }
+      } catch (error) {
+        await trace({ type: "fixture-error", operation: "captureCopy", message: error.message });
+        throw error;
       }
-      await walk(join(directory, "checkout", path));
-      let skipped = 0n;
-      const changed = [];
-      for (const { key, data } of found) {
-        const staged = copy.files.get(key);
-        if (staged && staged.size === BigInt(data.length) && staged.sha256 === hash(data))
-          skipped++;
-        else changed.push({ key, data });
-      }
-      changed.sort((a, b) => Buffer.compare(Buffer.from(a.key), Buffer.from(b.key)));
-      await trace({
-        type: "capture-copy",
-        path,
-        keys: changed.map(({ key }) => key),
-        skipped: String(skipped),
-      });
-      for (const { key, data } of changed)
-        yield {
-          part: {
-            case: "file",
-            value: { key, size: BigInt(data.length), sha256: hash(data) },
-          },
-        };
-      yield { part: { case: "listed", value: { skipped, errorKey: "", errorReason: "" } } };
-      for (const { data } of changed)
-        for (let offset = 0; offset < data.length; offset += 256 * 1024)
-          yield { part: { case: "payload", value: data.subarray(offset, offset + 256 * 1024) } };
     },
     async *runMcpServer(stream, context) {
       assert.ok(staged && mcpStaged && !allocation.stopped);

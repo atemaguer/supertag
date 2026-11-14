@@ -1480,14 +1480,16 @@ class RemoteWorkspaceCopyHeader(_message.Message):
     def __init__(self, path: _Optional[str] = ..., read_write: _Optional[bool] = ...) -> None: ...
 
 class RemoteWorkspaceCopyUpload(_message.Message):
-    __slots__ = ("header", "file", "payload")
+    __slots__ = ("header", "file", "payload", "directory")
     HEADER_FIELD_NUMBER: _ClassVar[int]
     FILE_FIELD_NUMBER: _ClassVar[int]
     PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    DIRECTORY_FIELD_NUMBER: _ClassVar[int]
     header: RemoteWorkspaceCopyHeader
     file: RemoteWorkspaceCopyFile
     payload: bytes
-    def __init__(self, header: _Optional[_Union[RemoteWorkspaceCopyHeader, _Mapping]] = ..., file: _Optional[_Union[RemoteWorkspaceCopyFile, _Mapping]] = ..., payload: _Optional[bytes] = ...) -> None: ...
+    directory: str
+    def __init__(self, header: _Optional[_Union[RemoteWorkspaceCopyHeader, _Mapping]] = ..., file: _Optional[_Union[RemoteWorkspaceCopyFile, _Mapping]] = ..., payload: _Optional[bytes] = ..., directory: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceCopyStaged(_message.Message):
     __slots__ = ("files",)
@@ -1496,10 +1498,12 @@ class RemoteWorkspaceCopyStaged(_message.Message):
     def __init__(self, files: _Optional[int] = ...) -> None: ...
 
 class RemoteWorkspaceCaptureCopyRequest(_message.Message):
-    __slots__ = ("path",)
+    __slots__ = ("path", "max_bytes")
     PATH_FIELD_NUMBER: _ClassVar[int]
+    MAX_BYTES_FIELD_NUMBER: _ClassVar[int]
     path: str
-    def __init__(self, path: _Optional[str] = ...) -> None: ...
+    max_bytes: int
+    def __init__(self, path: _Optional[str] = ..., max_bytes: _Optional[int] = ...) -> None: ...
 
 class RemoteWorkspaceCopyListed(_message.Message):
     __slots__ = ("skipped", "error_key", "error_reason")

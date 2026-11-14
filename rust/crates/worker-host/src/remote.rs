@@ -26,6 +26,19 @@ use crate::{
 pub(crate) const MAX_SANDBOX_LIFETIME: Duration = Duration::from_secs(3600);
 /// Sandbox life kept after the harness stops, for capture and cleanup.
 const SANDBOX_CLEANUP_MARGIN: Duration = Duration::from_secs(180);
+/// The rate, in bytes per second, at which sandbox life is kept for capturing
+/// read-write copies: the sandbox hashes what each copy staged and up to its
+/// limit, then returns up to its limit.
+const COPY_CAPTURE_RATE: u64 = 32 * 1024 * 1024;
+
+/// Sandbox life kept after the harness stops to capture read-write copies,
+/// each given as its staged bytes and its byte limit.
+fn copy_capture_margin(read_write: impl Iterator<Item = (u64, u64)>) -> Duration {
+    let bytes = read_write
+        .map(|(staged, max_bytes)| staged.saturating_add(max_bytes.saturating_mul(2)))
+        .fold(0u64, u64::saturating_add);
+    Duration::from_secs(bytes.div_ceil(COPY_CAPTURE_RATE))
+}
 
 /// The Attempt time limit must be positive, and a remote sandbox must outlive it.
 pub(crate) fn validate_time_limit(limit: Duration, remote: bool) -> Result<()> {
@@ -88,13 +101,31 @@ pub(crate) async fn prepare(
         registration.generation,
         config.authority_fingerprint(),
     )?;
+    let read_write = mounted.into_iter().flat_map(|mounted| {
+        mounted
+            .copies()
+            .iter()
+            .filter(|copy| copy.read_write)
+            .map(|copy| {
+                (
+                    copy.files.iter().map(|file| file.size).sum(),
+                    copy.max_bytes,
+                )
+            })
+    });
+    let margin = SANDBOX_CLEANUP_MARGIN.saturating_add(copy_capture_margin(read_write));
     let timeout = options
         .attempt_timeout
-        .saturating_add(SANDBOX_CLEANUP_MARGIN)
+        .saturating_add(margin)
         .min(MAX_SANDBOX_LIFETIME);
+    ensure!(
+        timeout > margin,
+        "Workspace copies leave a remote sandbox no time for the Harness; lower their byte limits"
+    );
     // The sandbox's clock starts no earlier than this request, so the harness stops in time
-    // to leave the cleanup margin even when preparation took part of the lifetime.
-    let execution_ends = Instant::now() + timeout - SANDBOX_CLEANUP_MARGIN;
+    // to leave the cleanup margin, and time to capture read-write copies, even when
+    // preparation took part of the lifetime.
+    let execution_ends = Instant::now() + timeout - margin;
     let environment = environment.map(|environment| RemoteWorkspaceEnvironment {
         image: environment.image,
         dockerfile_commands: environment.dockerfile_commands,
@@ -281,5 +312,20 @@ mod tests {
         assert!(validate_time_limit(Duration::from_secs(86_400), false).is_ok());
         assert!(validate_time_limit(MAX_SANDBOX_LIFETIME, true).is_ok());
         assert!(validate_time_limit(MAX_SANDBOX_LIFETIME + Duration::from_secs(1), true).is_err());
+    }
+
+    #[test]
+    fn read_write_copies_keep_sandbox_life_for_their_capture() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        assert_eq!(copy_capture_margin(std::iter::empty()), Duration::ZERO);
+        // A default 1 GiB copy that staged 1 GiB: listing 2 GiB, returning 1 GiB.
+        assert_eq!(
+            copy_capture_margin([(GIB, GIB)].into_iter()),
+            Duration::from_secs(96)
+        );
+        // The largest copy still leaves the Harness most of a sandbox's hour.
+        let largest = copy_capture_margin([(20 * GIB, 20 * GIB)].into_iter());
+        assert_eq!(largest, Duration::from_secs(1920));
+        assert!(largest + SANDBOX_CLEANUP_MARGIN < MAX_SANDBOX_LIFETIME);
     }
 }
