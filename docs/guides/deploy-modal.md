@@ -39,11 +39,8 @@ See [Run a Worker in Modal](modal-workers.md).
 
 ## Before you start
 
-- The native `supertag` CLI, from the release you deploy. No native release archive is published
-  yet, so build it from that release's checkout with
-  `cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`
-  and put `rust/target/release/supertag` first on your `PATH`. The `supertag-ai` npm package
-  installs the TypeScript CLI, which cannot set up or verify this deployment.
+- The `supertag` CLI from the release you deploy. [Install it](../operations/install.md) with the
+  installer script, setting `SUPERTAG_VERSION` to that release.
 - The Modal CLI, authenticated, at the version in
   [`requirements.txt`](../../deploy/modal/requirements.txt).
 - The `hosted` service image for `linux/amd64` in a registry Modal can pull, with its digest. See

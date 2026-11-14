@@ -27,8 +27,8 @@ a second Control Plane after init has started one.
 Read [the operator guide](https://github.com/atemaguer/supertag/blob/main/docs/guides/coding-agent-operator.md)
 for setup and the worked loop, and
 [Write an Objective](https://github.com/atemaguer/supertag/blob/main/docs/guides/write-an-objective.md)
-for statement guidance. The installed npm package also includes these guides under `dist/docs/`;
-use its documentation when operating a different release from the repository's current version.
+for statement guidance. When you operate a release other than the repository's current version,
+read these guides at that release's tag.
 
 ## Turn a goal into an Objective
 

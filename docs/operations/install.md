@@ -35,12 +35,13 @@ To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
 | --- | --- |
-| `SUPERTAG_VERSION` | The release the script came from; for example, `0.2.0-alpha.9` installs that release |
+| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.0`, to install that release. Releases before the native CLI have no archive, so the script refuses them |
 | `SUPERTAG_INSTALL_ROOT` | `~/.local/share/supertag` |
 | `SUPERTAG_BIN_DIR` | `~/.local/bin` |
 
-The script replaces a `supertag` command that it or an earlier installer script linked. It
-refuses to replace any other file at that path.
+The script replaces a symbolic link at `~/.local/bin/supertag`, such as one an earlier install
+created. It refuses to replace any other file at that path; remove a `supertag` command installed
+another way, for example with `npm uninstall -g supertag-ai`, before you run it.
 
 ## Install the Python SDK from PyPI
 
@@ -58,10 +59,26 @@ for optional Codex and OpenAI Agents integrations.
 ## Upgrade
 
 Run the installer script again, and install the matching Python SDK with pip. Earlier versions
-stay under `~/.local/share/supertag/versions`. For a Compose deployment,
+stay under `~/.local/share/supertag/versions`. Reinstalling the same release keeps its installed
+files in place. For a Compose deployment,
 follow the [upgrade procedure](control-plane.md#upgrade-a-compose-deployment) to back up state
 and coordinate the connected Worker Hosts. Source contributors can use
 [CONTRIBUTING.md](../../CONTRIBUTING.md) to build and link uncommitted changes.
+
+### Upgrade from a release before the native CLI
+
+SuperTag releases before the native CLI ran on Node.js and stored their state in a format the
+native release does not read. The native release starts with new state; it does not import the
+earlier organization. Keep the earlier state as an archive:
+
+1. Stop the earlier services with the earlier CLI: `supertag down`.
+2. Move the state aside, so the native release starts empty and the archive stays intact:
+   `mv ~/.supertag ~/.supertag-archive`.
+3. Install the native release with the installer script, then run `supertag init` in your
+   repository and recreate your Tags.
+
+The archive keeps the earlier database, settings, and credentials. Read your earlier settings
+from `~/.supertag-archive/supertag.yaml` when you recreate the configuration.
 
 ## Match the CLI and the Control Plane
 
@@ -72,26 +89,25 @@ Plane** is the service that stores your organization and accepts work. Your CLI 
 shared Control Plane can run a different SuperTag version from your CLI, for example after a
 teammate upgrades one but not the other. Commands can then fail in confusing ways.
 
-Check both versions:
+Check the CLI and the local services that `supertag up` runs:
 
 ```sh
 supertag version
 ```
 
 ```text
-CLI version: 0.2.0-alpha.9
-Control Plane: https://supertag.example.com
-Control Plane version: 0.2.0-alpha.9
-Compatibility: supported (same version)
+supertag 0.3.0
+Local services: 0.3.0 (process 41872)
 ```
 
-It reports the Control Plane other commands would use: the selected one, or the local Control
-Plane that `supertag up` runs. Reading the version needs no credential. Add `--output json` for scripts.
-If no Control Plane answers, it still prints the CLI version.
+When the local services run a different version, it says so; restart them with `supertag down`
+and `supertag up`. Add `--output json` for scripts. `supertag --version` prints only the CLI
+version.
 
-Keep both on the same version when you can. Other commands print one warning to stderr when the
-versions differ. Upgrade the older side; `supertag --version` prints only the CLI version. The
-supported pairs are listed in [CLI and Control Plane versions](../reference/api-stability.md#cli-and-control-plane-versions).
+Every client, Gateway, and Worker Host agrees on a protocol version with the Control Plane when it
+connects. When they share none, the Control Plane refuses the connection with an error that names
+both SuperTag versions; run the same release on both sides. The supported pairs are listed in
+[CLI and Control Plane versions](../reference/api-stability.md#cli-and-control-plane-versions).
 
 ## Optional: find the collaboration surface guides
 
@@ -106,14 +122,16 @@ The [collaboration surface guides](../surfaces/README.md) list them all.
 ## If something goes wrong
 
 - **`supertag` is not found.** Add `~/.local/bin` to your `PATH`.
-- **Plain `supertag` prints help instead of the terminal UI.** The terminal UI is not installed.
-  Run the installer script again on macOS or Linux; it prints why if it still cannot install it.
+- **The installer script says the binary reports no version.** The release's Linux builds need
+  glibc 2.36 or newer, as in Debian 12 or Ubuntu 24.04. Check yours with `ldd --version`.
+- **The installer script refuses to replace `supertag`.** Another installation owns that path;
+  remove it, or set `SUPERTAG_BIN_DIR`.
 - **`supertag` says the terminal UI and the CLI versions must match.** Run the installer script
   again, so both come from the same release.
 - **The version or commands differ from these docs.** Run `supertag --version`, then install
   the version named by these docs with `SUPERTAG_VERSION`.
-- **A command warns that the CLI and Control Plane versions differ.** Run `supertag version`, then
-  upgrade the older side. See [Troubleshoot](../guides/troubleshooting.md#the-cli-warns-that-versions-differ).
+- **The Control Plane refuses the CLI with an incompatible protocol error.** Install the
+  release the Control Plane runs with `SUPERTAG_VERSION`, or upgrade the Control Plane.
 
 ## Run it in a repository
 

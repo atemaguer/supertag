@@ -29,11 +29,8 @@ supertag-gateway (background worker, optional) ── wss:// ──┘
 
 ## Before you start
 
-- The native `supertag` CLI, from the release you deploy. No native release archive is published
-  yet, so build it from that release's checkout with
-  `cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`
-  and put `rust/target/release/supertag` first on your `PATH`. The `supertag-ai` npm package
-  installs the TypeScript CLI, which cannot set up or verify this deployment.
+- The `supertag` CLI from the release you deploy. [Install it](../operations/install.md) with the
+  installer script, setting `SUPERTAG_VERSION` to that release.
 - The `hosted` service image pushed to a registry Render can pull, with its digest. See
   [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image).
 - `openssl`, to issue certificates from your own CA.

@@ -66,9 +66,9 @@ the rest of this skill:
   `https://127.0.0.1:3434`, so the certificate also names `IP:127.0.0.1`. It runs only the
   connectors its flags name (Render's `dockerCommand`, `SUPERTAG_GATEWAY_FLAGS`, or
   `SUPERTAG_MODAL_GATEWAY_FLAGS`), and only outbound ones work: Lark and webhook notifications.
-- **Native CLI.** These guides need the native `supertag` CLI, built from the release's checkout
-  (`cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`);
-  the npm package is the TypeScript CLI.
+- **Native CLI.** These guides need the `supertag` CLI from the release you deploy; the
+  [installer script](../../docs/operations/install.md) installs it, with `SUPERTAG_VERSION` naming
+  that release.
 - **Health.** The tunnel listener answers plain `GET /healthz` with `200 ok`; it refuses requests
   with an `Origin` header and anything else that is not a WebSocket upgrade.
 - **Verify and join.** The native CLI's `verify deployment wss://HOST --env-file DIR/operator.env`,
@@ -79,7 +79,7 @@ the rest of this skill:
   no Slack: run a Gateway on another host for Slack, GitHub, Linear, or Microsoft Teams.
 
 Docker Compose and the native option need a checkout of the repository for `deploy/compose.yaml` and
-`deploy/.env.example`. You also need the CLI ([install from npm](../../docs/operations/install.md)) to manage the running
+`deploy/.env.example`. You also need the CLI ([install it](../../docs/operations/install.md)) to manage the running
 Control Plane — the checkout provides the deployment, the CLI provides management.
 
 Every option except Render, Modal, and Cloudflare starts the Control Plane with `supertag up`.

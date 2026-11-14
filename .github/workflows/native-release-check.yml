@@ -125,23 +125,27 @@ jobs:
           python rust/scripts/native_release_docker.py --repo "$GITHUB_WORKSPACE" \
             --commit "$SOURCE_COMMIT" --platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
             --output "$RUNNER_TEMP/native-release"
+      # Only a release run that signs receives the Apple credentials; pull requests and manual
+      # checks build unsigned archives without them.
       - name: Build and execute the native macOS archive
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && !inputs.sign_macos
+        run: |
+          python rust/scripts/native_release.py package --repo "$GITHUB_WORKSPACE" \
+            --commit "$SOURCE_COMMIT" --expect-platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
+            --output "$RUNNER_TEMP/native-release" --install-smoke
+      - name: Build, sign, notarize, and execute the native macOS archive
+        if: runner.os == 'macOS' && inputs.sign_macos
         env:
-          SIGN_MACOS: ${{ inputs.sign_macos && 'true' || 'false' }}
           APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
           APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
           APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
-          signing=()
-          if [ "$SIGN_MACOS" = true ]; then
-            signing=(--sign-command "$GITHUB_WORKSPACE/scripts/notarize-macos-binaries.sh")
-          fi
           python rust/scripts/native_release.py package --repo "$GITHUB_WORKSPACE" \
             --commit "$SOURCE_COMMIT" --expect-platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
-            --output "$RUNNER_TEMP/native-release" --install-smoke "${signing[@]}"
+            --output "$RUNNER_TEMP/native-release" --install-smoke \
+            --sign-command "$GITHUB_WORKSPACE/scripts/notarize-macos-binaries.sh"
       - name: Record verified local output
         run: |
           python - "$RUNNER_TEMP/native-release" <<'PY'

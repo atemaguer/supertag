@@ -159,15 +159,23 @@ tui_version=$("$PACKAGE/supertag-tui" --version 2>/dev/null || true)
 [ "$tui_version" = "$VERSION" ] || fail "the supertag-tui binary reports ${tui_version:-no version}, not $VERSION"
 
 # The layout and receipt of rust/scripts/install_native_release.py, so either can replace the other.
-commit=$(grep -o '"commit":"[0-9a-f]\{40\}"' "$PACKAGE/manifest.json" | head -n 1 | cut -d '"' -f 4)
+commit=$(grep -o '"commit"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' "$PACKAGE/manifest.json" |
+  head -n 1 | sed 's/.*"\([0-9a-f]\{40\}\)"$/\1/')
 [ -n "$commit" ] || fail "the release manifest names no source commit"
 printf '{"archive_sha256": "%s", "format": "supertag-native-install-v1", "source_commit": "%s"}\n' \
   "$ACTUAL" "$commit" > "$PACKAGE/$RECEIPT"
 chmod 600 "$PACKAGE/$RECEIPT"
 
+# The directory name carries the archive digest, so an installed directory with a receipt already
+# holds this exact release; reinstalling it leaves it in place for any running services.
 TARGET="$INSTALL_ROOT/versions/native-$VERSION-$PLATFORM-release-$ACTUAL"
-rm -rf "$TARGET"
-mv "$PACKAGE" "$TARGET"
+if [ ! -f "$TARGET/$RECEIPT" ] || [ ! -x "$TARGET/supertag" ]; then
+  # A directory without a receipt is incomplete; move it aside before replacing it.
+  if [ -e "$TARGET" ]; then
+    mv "$TARGET" "$STAGING/replaced"
+  fi
+  mv "$PACKAGE" "$TARGET"
+fi
 
 LINK_STAGING="$BIN_DIR/.supertag.install.$$"
 rm -f "$LINK_STAGING"

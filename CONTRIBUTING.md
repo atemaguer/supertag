@@ -508,8 +508,8 @@ python3 rust/scripts/release_version.py vVERSION
 ## Test an installable release
 
 Users install SuperTag with `install.sh`, which downloads a native archive from a GitHub
-Release, and the Python SDK from PyPI (see [Install SuperTag](docs/operations/install.md)).
-Nothing is published to npm. Each archive holds the `supertag` command, the terminal UI, the
+Release, the Python SDK from PyPI, and the TypeScript SDK, `supertag-ai`, from npm (see
+[Install SuperTag](docs/operations/install.md)). Each archive holds the `supertag` command, the terminal UI, the
 shared execution provider, and the Node.js bridges; the
 [native release platform checks](tests/native-release/README.md) build one. To install a local
 build the way users do, put the archive and a `SHA256SUMS` in one directory and point the
@@ -522,7 +522,8 @@ cp /tmp/supertag-macos-verification/supertag-*-complete.tar.gz /tmp/supertag-ass
 SUPERTAG_DOWNLOAD_URL=file:///tmp/supertag-assets HOME=$(mktemp -d) sh install.sh
 ```
 
-`rust/scripts/test_install_script.py` runs the installer against fixture archives.
+`rust/scripts/test_install_script.py` runs the installer against fixture archives; CI runs it
+with the other `rust/scripts` tests on every pull request.
 `scripts/smoke-installed-supertag.sh PATH_TO_SUPERTAG` starts an installed command's local
 services with a temporary state directory, lists Tags, and stops them.
 
@@ -531,28 +532,39 @@ installer, checksums, the PyPI package, and documentation. Release tooling in th
 does not mean a release has been published.
 
 The version in `rust/Cargo.toml` is the release version: the tag must be `v` followed by it, and
-`sdks/python/pyproject.toml` must carry the same version. Publishing a GitHub Release runs
-**Release SuperTag** (`release.yml`). It builds and verifies the four archives with
-`native-release-check.yml`, attaches them with their `SHA256SUMS` and an `install.sh` pinned to
-the release, and then runs the installer check. To build the archives for an existing tag
-without attaching them, dispatch it with that tag:
+`sdks/python/pyproject.toml` and `packages/supertag-ai/package.json` must carry the same version.
+A release takes three steps, so the README's `releases/latest` installer URL never points at a
+release without its archives:
+
+1. Push the release tag, for example `git push origin v0.3.0-alpha.1`. **Release SuperTag**
+   (`release.yml`) builds and verifies the four archives with `native-release-check.yml`, checks
+   the pinned installer against them, and attaches them with their `SHA256SUMS` and an
+   `install.sh` pinned to the release to a draft GitHub Release for the tag. It never changes a
+   published release.
+2. Review the draft's notes and assets, then publish it. Don't mark an alpha as a prerelease:
+   `releases/latest` skips prereleases.
+3. Publishing runs **Verify public installer** (`verify-installer.yml`), which installs from the
+   README's URL on each platform in a clean home, checks the CLI and terminal UI versions, and
+   starts and stops local services. It also runs **Publish Python SDK** (`publish-python.yml`) and
+   **Publish supertag-ai** (`publish.yml`). Each checks that the release carries every archive
+   before it publishes, because registry versions cannot be replaced.
+
+If a build fails, delete the draft, fix the problem on a new commit, and tag a new version. To
+rebuild the archives for an existing tag without attaching them, dispatch the workflow with that
+tag:
 
 ```sh
 gh workflow run release.yml -f release_tag=v0.3.0-alpha.1
 ```
 
-Set `upload_assets` to true to replace the assets on that release. The installer check runs the
-public installer on each platform in a clean home, checks the CLI and terminal UI versions, and
-starts and stops local services. To check an existing release, dispatch **Verify public
-installer** with its tag:
+Set `upload_assets` to true to replace the assets on that tag's draft release. To check a
+published release, dispatch **Verify public installer** with its tag:
 
 ```sh
 gh workflow run verify-installer.yml -f release_tag=v0.3.0-alpha.1
 ```
 
-Select `check_latest` to check the README's installer URL for the current release. When the
-installer check is the only failed job in a release run, **Re-run failed jobs** retries it
-on its own.
+Select `check_latest` to check the README's installer URL for the current release.
 
 ### Sign and notarize the macOS binaries
 
@@ -578,6 +590,8 @@ configuration or failed notarization stops publication.
 
 To test the signing credentials without publishing, dispatch **Release SuperTag** for an
 existing tag with `upload_assets` false; the archives remain workflow artifacts for seven days.
+Only the signing release run passes the Apple secrets to the build; pull request and manual
+checks of `native-release-check.yml` build unsigned archives without them.
 
 ## Live Modal native mounts
 

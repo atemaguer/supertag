@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing release tag whose version should be published
+        description: Existing published release tag whose version should be published
         required: true
         type: string
 
@@ -37,6 +37,11 @@ jobs:
           python-version: "3.13"
       - name: Check the tag names the release version
         run: python rust/scripts/release_version.py "$RELEASE_TAG"
+      # PyPI versions are immutable: publish only for a release users can install.
+      - name: Check the release carries its native archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-release-assets.sh "$RELEASE_TAG"
       # The SDK ships the generated supertag.runtime.v2 bindings in supertag._runtime_v2.
       - uses: pnpm/action-setup@v4
         with:

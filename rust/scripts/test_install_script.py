@@ -37,11 +37,12 @@ class InstallScript(unittest.TestCase):
         self.assets.mkdir()
         self.platform = native_platform()
 
-    def release(self, version="1.2.3", *, cli=None, tui=None, extra=(), root=None, sums=None):
+    def release(self, version="1.2.3", *, cli=None, tui=None, extra=(), root=None, sums=None, indent=None):
         root = root or f"supertag-{version}-{self.platform}-complete"
+        manifest = {"source": {"archive_sha256": "b" * 64, "commit": COMMIT}}
         files = {
-            "manifest.json": (json.dumps({"source": {"archive_sha256": "b" * 64, "commit": COMMIT}},
-                                         separators=(",", ":")).encode(), 0o644),
+            "manifest.json": (json.dumps(manifest, indent=indent,
+                                         separators=None if indent else (",", ":")).encode(), 0o644),
             "supertag": (script(cli or f'[ "$1" = --version ] && echo "supertag {version}"'), 0o755),
             "supertag-tui": (script(tui or f'[ "$1" = --version ] && echo "{version}"'), 0o755),
             "node-bridges/manifest.json": (b"{}\n", 0o644),
@@ -96,6 +97,19 @@ class InstallScript(unittest.TestCase):
         missing = self.run_installer(SUPERTAG_VERSION="9.9.9")
         self.assertNotEqual(missing.returncode, 0)
         self.assertIn(f"no 9.9.9 build for {self.platform}", missing.stderr)
+
+    def test_reinstalling_the_same_release_keeps_the_installed_directory(self):
+        digest = self.release(indent=2)
+        self.assertEqual(self.run_installer().returncode, 0)
+        target = self.home / f".local/share/supertag/versions/native-1.2.3-{self.platform}-release-{digest}"
+        receipt = json.loads((target / ".supertag-install.json").read_text())
+        self.assertEqual(receipt["source_commit"], COMMIT)
+        running = (target / "node-bridges").stat().st_ino
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((target / "node-bridges").stat().st_ino, running)
+        self.assertEqual(Path(os.readlink(self.installed())), target / "supertag")
+        self.assertEqual([p.name for p in target.parent.iterdir()], [target.name])
 
     def assert_refused(self, message, **env):
         result = self.run_installer(**env)

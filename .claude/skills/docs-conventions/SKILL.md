@@ -29,7 +29,8 @@ from a GitHub Release (`docs/operations/install.md`); `pnpm supertag` resolves t
 
 Repository installation commands (`pnpm install`, `pnpm install:cli`, and
 `pnpm uninstall:cli`) belong in `CONTRIBUTING.md`. User installation instructions use the
-installer script and PyPI; Python prereleases need an explicit version pin.
+installer script for the CLI, and PyPI and npm for the SDKs; Python prereleases need an explicit
+version pin.
 
 Two intentional exceptions to the CLI form:
 

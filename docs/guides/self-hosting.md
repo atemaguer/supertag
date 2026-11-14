@@ -37,7 +37,7 @@ connections) and **Gateway** (which carries collaboration surface traffic) are p
 - Credentials for at least one [collaboration surface](../surfaces/README.md): an external work
   tool, such as Slack or GitHub, where SuperTag meets people.
 - The SuperTag CLI and the [required system tools](../operations/requirements.md).
-  [Install SuperTag from npm](../operations/install.md).
+  [Install SuperTag](../operations/install.md) with the installer script.
 
 ## 1. Choose a deployment
 
@@ -240,8 +240,8 @@ Hosts that already joined keep working. See [Auth Keys](../reference/resource-mo
 ## 7. Connect a Worklet from the Worker Host
 
 On the Worker Host that owns the codebase and harness authentication,
-[install SuperTag from npm](../operations/install.md) at the same version as the Control Plane, and check that
-`supertag version` reports a supported pair.
+[install SuperTag](../operations/install.md) at the same version as the Control Plane: set
+`SUPERTAG_VERSION` to the Control Plane's release when you run the installer script.
 
 Set the key's secret in the environment. The Worklet redeems it on its first connection, joins as
 Worker Host `laptop`, and stores the host's credential under `~/.supertag/worker-hosts/`. Later

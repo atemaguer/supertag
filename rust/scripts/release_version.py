@@ -1,9 +1,10 @@
 """Check that a release tag names the version every released artifact reports.
 
 The Rust workspace version is the release version: the native archive, the supertag and
-supertag-tui binaries, and the Python SDK must all carry it. Prints the version on success.
+supertag-tui binaries, the Python SDK, and the TypeScript SDK must all carry it. Prints the version on success.
 """
 import argparse
+import json
 from pathlib import Path
 import re
 import sys
@@ -22,6 +23,9 @@ def release_version(tag, repo=REPO):
     python = tomllib.loads((repo / "sdks/python/pyproject.toml").read_text())["project"]["version"]
     if python != version:
         raise ValueError(f"sdks/python is {python} but the release is {version}")
+    typescript = json.loads((repo / "packages/supertag-ai/package.json").read_text())["version"]
+    if typescript != version:
+        raise ValueError(f"packages/supertag-ai is {typescript} but the release is {version}")
     return version
 
 

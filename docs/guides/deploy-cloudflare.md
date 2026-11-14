@@ -39,11 +39,8 @@ exits, the container stops, and the next request or cron run starts it again.
 
 ## Before you start
 
-- The native `supertag` CLI, from the release you deploy. No native release archive is published
-  yet, so build it from that release's checkout with
-  `cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag`
-  and put `rust/target/release/supertag` first on your `PATH`. The `supertag-ai` npm package
-  installs the TypeScript CLI, which cannot set up or verify this deployment.
+- The `supertag` CLI from the release you deploy. [Install it](../operations/install.md) with the
+  installer script, setting `SUPERTAG_VERSION` to that release.
 - The Workers Paid plan, which Containers require, and Wrangler authenticated with your account.
 - Docker, and the `hosted` service image for `linux/amd64` (see
   [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image)), tagged locally:

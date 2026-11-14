@@ -19,7 +19,7 @@ Python and TypeScript Workers follow the same Task lifecycle. See the
 ## Before you start
 
 - Python 3.10 or newer.
-- The [SuperTag CLI](../operations/install.md), installed from npm.
+- The [SuperTag CLI](../operations/install.md), installed with the installer script.
 - An enrolled Worker Host and its credential. Enroll one with `supertag enroll worker-host`; see
   [Run a Worker](workers.md). This guide assumes the ID `echo-worker-host`.
 - A Tag bound to that Worker Host, so it can receive Tasks:

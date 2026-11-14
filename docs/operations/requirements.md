@@ -11,20 +11,21 @@ Check this page before [installing SuperTag](install.md).
 
 ## System and tools
 
-- **Node.js 22.13.0 or newer.** The `engines.node` fields in the root
-  [package.json](../../package.json) and [SDK package](../../packages/supertag-ai/package.json)
-  define the supported runtime.
-- **npm**, included with Node.js, to install the published CLI and SDK. Source-development
-  tools are listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
+- **Node.js 22.13.0 or a later 22.x release** on `PATH` for Claude Code, Cursor, OpenCode, E2B,
+  and Modal Tasks, which run through bridges in the release. Codex Tasks don't need it. The
+  TypeScript SDK's [package](../../packages/supertag-ai/package.json) states its own supported
+  runtime in `engines.node`.
+- **npm**, included with Node.js, to install the TypeScript SDK. Source-development tools are
+  listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - **git**, available on `PATH`, and a repository for your first Task.
-- **macOS or Linux.** Restarting background services uses launchd on macOS and systemd user
+- **macOS or Linux, on arm64 or amd64.** Linux needs glibc 2.36 or newer, as in Debian 12 or
+  Ubuntu 24.04. Restarting background services uses launchd on macOS and systemd user
   services on Linux. Native Windows is not a supported alpha installation target; in particular,
   SuperTag does not implement a Windows service manager. Use a Linux host for that workflow.
-- **Disk space for dependencies and your work.** Allow about 1 GB for the installed package, plus
-  space for repositories, Task outputs, and logs. With `npm install -g`, npm also downloads the
-  Claude Code and Codex CLI copies that the vendor SDKs bundle, about 520 MB more on macOS arm64.
-  SuperTag doesn't use them, and the [installer script](install.md#1-install-the-cli-with-the-installer-script)
-  removes them.
+- **Disk space for the release and your work.** Allow about 1 GB for each installed release, plus
+  space for repositories, Task outputs, and logs. The
+  [installer script](install.md#1-install-the-cli-with-the-installer-script) keeps earlier
+  releases under `~/.local/share/supertag/versions`; remove ones you no longer use.
 
 The small bridge that runs MCP tools inside a sandbox has a separate runtime minimum, enforced
 when SuperTag prepares that sandbox. See [MCP tools](../guides/mcp-tools.md#5-connect-from-the-execution-environment-when-the-server-lives-there).

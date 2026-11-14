@@ -1,12 +1,15 @@
 name: Release SuperTag
 
-# Publishing a GitHub Release attaches the native archives for macOS and Linux (arm64, amd64),
-# their SHA256SUMS, and an install.sh pinned to the release. The archives hold the supertag CLI,
-# the supertag-tui terminal UI, the shared execution provider, and the Node.js bridges.
+# Pushing a release tag builds the native archives for macOS and Linux (arm64, amd64) and attaches
+# them, their SHA256SUMS, and an install.sh pinned to the release to a draft GitHub Release. The
+# archives hold the supertag CLI, the supertag-tui terminal UI, the shared execution provider, and
+# the Node.js bridges. A maintainer publishes the draft once every asset is attached; publishing
+# runs the installer check and the SDK publish workflows, so the README's latest installer URL
+# never points at a release without its archives.
 on:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -14,7 +17,7 @@ on:
         required: true
         type: string
       upload_assets:
-        description: Attach the archives and installer to that existing GitHub Release
+        description: Attach the archives and installer to that tag's draft GitHub Release
         type: boolean
         default: false
 
@@ -34,11 +37,11 @@ jobs:
       commit: ${{ steps.source.outputs.commit }}
       version: ${{ steps.source.outputs.version }}
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+          ref: ${{ inputs.release_tag || github.ref_name }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -67,14 +70,14 @@ jobs:
       APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
 
   publish:
-    if: github.event_name == 'release' || inputs.upload_assets
+    if: github.event_name == 'push' || inputs.upload_assets
     needs: [source, package]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
       VERSION: ${{ needs.source.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -108,15 +111,19 @@ jobs:
           env -i HOME="$home" PATH="$PATH" SUPERTAG_DOWNLOAD_URL="file://$GITHUB_WORKSPACE/release" \
             sh release/install.sh
           test "$("$home/.local/bin/supertag" --version)" = "supertag $VERSION"
-      - name: Attach the archives and installer to the release
+      - name: Attach the archives and installer to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         working-directory: release
-        run: gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber install.sh SHA256SUMS ./*-complete.tar.gz
-
-  verify-installer:
-    needs: publish
-    uses: ./.github/workflows/verify-installer.yml
-    with:
-      release_tag: ${{ github.event.release.tag_name || inputs.release_tag }}
-      check_latest: ${{ github.event_name == 'release' }}
+        run: |
+          # A published release is never changed; its archives are what users already installed.
+          draft=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select(.tag_name == env.RELEASE_TAG) | .draft')
+          case "$draft" in
+            '') gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+                  --title "$RELEASE_TAG" --generate-notes ;;
+            true) ;;
+            *) echo "::error::$RELEASE_TAG is already published; publish a new version instead"; exit 1 ;;
+          esac
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber install.sh SHA256SUMS ./*-complete.tar.gz
+          echo "Review the draft $RELEASE_TAG release notes, then publish it." >> "$GITHUB_STEP_SUMMARY"
