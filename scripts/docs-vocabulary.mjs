@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isContributorRecord } from "./docs-links.mjs";
 
 // Parallel Objectives own these pages. Remove exclusions when their vocabulary fixes land.
 export const deferredVocabularyPages = new Set([
@@ -21,7 +22,8 @@ export function vocabularyFiles(root) {
           /^(docs|skills)\/.*\.md$/u.test(name) ||
           /^(harnesses|sdks)\/.*\/README\.md$/u.test(name)) &&
         !/(architecture|product-brief)[^/]*\.md$/u.test(name) &&
-        !deferredVocabularyPages.has(name),
+        !deferredVocabularyPages.has(name) &&
+        !isContributorRecord(name),
     );
 }
 

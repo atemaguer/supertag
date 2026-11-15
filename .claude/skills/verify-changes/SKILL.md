@@ -33,6 +33,22 @@ After terminal UI changes, run `go vet ./...` and `go test ./...` in `apps/tui`.
 changes, run `pnpm --filter @supertag/desktop build` and `cargo clippy` with
 `--manifest-path apps/desktop/src-tauri/Cargo.toml`.
 
+After changes under `proto/` or `sdks/`, regenerate and check the bindings and run the round trip:
+
+```sh
+uv run --python 3.13 --script scripts/generate-bindings.py --check
+uv run --python 3.13 --script scripts/wire-roundtrip.py
+go -C sdks/go test ./...
+```
+
+After changes under `scripts/`, run the script tests and the release version gate:
+
+```sh
+node --test scripts/*.test.mjs
+uv run --with PyYAML==6.0.3 python -m unittest discover -s scripts -p 'test_*.py'
+python3 scripts/release_version.py --check
+```
+
 ## Notes
 
 - If a gate cannot run in your environment, say so explicitly and state what you verified

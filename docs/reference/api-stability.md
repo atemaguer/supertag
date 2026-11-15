@@ -7,7 +7,7 @@ adapters, and connectors can rely on, and how changes are communicated. Terms ar
 ## What counts as a public contract
 
 A contract is public only when this page lists it. Database tables, files in a state directory,
-the internals of the `rust/` crates, and undocumented fields are internal: depending on them may
+the internals of the Rust crates in `core/`, and undocumented fields are internal: depending on them may
 require changes at any time.
 
 ## Stability levels
@@ -31,7 +31,7 @@ require changes at any time.
 | The harness protocol: `AdapterBootstrap` and the `Harness` services | Experimental | [Write a harness adapter](../guides/harness-adapters.md) |
 | The connector protocol: `supertag.runtime.v2.Connector` | Experimental | [Connector contract](connector-contract.md) |
 | The shared execution protocol, `supertag.environment.v2` | Experimental | Used by `supertag-shared-execution` and Worker Hosts |
-| Generated Go, TypeScript, and Python bindings in `rust/bindings` | Experimental | Regenerated from the protos; not published as packages yet |
+| Generated Go, TypeScript, and Python bindings in `sdks/` (the `sdks/go` module, `sdks/typescript/gen`, `sdks/python/gen`) | Experimental | Regenerated from the protos; not published as packages yet |
 | Workspace Volumes (`workspace-volume put`, `get workspace-volume`), Tag `--workspace-mounts` copies, and Worker Host `--workspace-mount-mappings` | Experimental | `file://` and `s3://` sources; an `s3://` Volume holds a credential label, never a value, and each Worker Host pins its endpoint, region, and key variables. Copies only; read-only provider-native Modal Volume mounts are on the backlog |
 | `deploy/` definitions and the `hosted` image's environment | Beta | The role contract in [Configure a deployment](../guides/deployment-setup.md) |
 

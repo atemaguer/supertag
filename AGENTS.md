@@ -17,7 +17,7 @@ turn of it. **Context Sets** select reusable knowledge, and **Permission Sets** 
 actions. Each Task keeps the
 policy recorded when SuperTag accepted it.
 
-The runtime is the Rust workspace in `rust/`, one `supertag` binary. The **Control Plane** stores
+The runtime is the Rust workspace in `core/`, one `supertag` binary. The **Control Plane** stores
 the organization, accepts and schedules work, recovers interrupted work, and preserves audit
 history. It is the one public gRPC API (`supertag.runtime.v2`) for operator clients (the CLI, the
 Go terminal UI in `apps/tui`, the Tauri desktop app in `apps/desktop`, and SDK bindings), Worker
@@ -27,11 +27,12 @@ optional service that carries collaboration surface traffic as a client of the C
 **harness** such as Codex or Claude Code. Auth Keys enroll principals in one role: `host`,
 `gateway`, or `client`; operators use Operator Tokens.
 
-The services and CLI are Rust (`rust/`). The TypeScript that remains is the Node harness bridges
-and Workspace providers that Worker Hosts start (`packages/runtime`), the shared code they use
-(`packages/core`), and the desktop app's frontend (`apps/desktop`). The terminal UI is Go
-(`apps/tui`). [`docs/development/typescript-removal-inventory.md`](docs/development/typescript-removal-inventory.md)
-records why each remaining TypeScript package stays.
+The services and CLI are Rust (`core/`), built from the protobuf contract in `proto/`. The
+TypeScript that remains is the Node harness bridges and Workspace providers that Worker Hosts
+start, with the Worker SDK they share (`harnesses/`), the `supertag-ai` SDK (`sdks/typescript`),
+and the desktop app's frontend (`apps/desktop`). `sdks/` holds one directory per language, each
+with its hand-written SDK and generated bindings. The terminal UI is Go (`apps/tui`). The
+repo-orientation skill (`.claude/skills/repo-orientation/SKILL.md`) maps each directory.
 
 ## Rules that are easy to violate
 
@@ -44,7 +45,8 @@ and its tests run on both databases (`::sqlite` and `::postgres` cases).
 
 **`docs/` is for users and integrators.** Explain how to use SuperTag and how it works.
 Put contributor workflows, repository layout, testing, and simulation instructions in
-`CONTRIBUTING.md`; do not add internal progress or validation reports to public docs.
+`CONTRIBUTING.md`; do not add internal progress or validation reports to public docs. The
+exception is `docs/development/`, the Rust port's contributor records; user pages never link there.
 
 **Record user-facing changes in `CHANGELOG.md` at integration.** Whoever integrates a change onto
 `main` adds one concise bullet under `## [Unreleased]` in `Added`, `Changed`, `Fixed`, or `Removed`.

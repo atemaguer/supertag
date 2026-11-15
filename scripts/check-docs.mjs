@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { checkDocumentationNodeVersions } from "./check-docs-node.mjs";
 import { checkCommand, checkProseFlag, commandsIn, parseReference } from "./docs-commands.mjs";
 import { deprecatedDocProblems } from "./docs-deprecations.mjs";
-import { checkLinks, checkOrphans } from "./docs-links.mjs";
+import { checkLinks, checkOrphans, isContributorRecord } from "./docs-links.mjs";
 import { versionProblems, workspaceVersion } from "./docs-versions.mjs";
 import { checkDocumentationVocabulary } from "./docs-vocabulary.mjs";
 
@@ -147,6 +147,12 @@ let commandCount = 0;
 for (const file of files) {
   const name = relative(root, file);
   const text = readFileSync(file, "utf8");
+  // Contributor records describe the port and its cutover, including commands of the removed
+  // TypeScript CLI and earlier releases; only their links must resolve.
+  if (isContributorRecord(name)) {
+    problems.push(...checkLinks(root, file, text));
+    continue;
+  }
   problems.push(...deprecatedDocProblems(name, text));
   problems.push(...versionProblems(name, text, release));
   problems.push(...checkLinks(root, file, text));

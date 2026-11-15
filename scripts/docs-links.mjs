@@ -79,6 +79,9 @@ export function checkLinks(root, file, text) {
   return problems;
 }
 
+/** Contributor records of the Rust port: tracked, but not public docs, so no user page links them. */
+export const isContributorRecord = (name) => name.startsWith("docs/development/");
+
 export function checkOrphans(root, files) {
   const index = resolve(root, "docs/README.md");
   const text = readFileSync(index, "utf8");
@@ -88,6 +91,8 @@ export function checkOrphans(root, files) {
     ),
   );
   return files
-    .filter((file) => file !== index && !linked.has(file))
+    .filter(
+      (file) => file !== index && !linked.has(file) && !isContributorRecord(relative(root, file)),
+    )
     .map((file) => `${relative(root, file)}: not linked from docs/README.md`);
 }

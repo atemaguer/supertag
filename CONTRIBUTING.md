@@ -21,9 +21,12 @@ data, or local state.
 
 ## Development setup
 
-SuperTag's services and CLI are written in Rust (`rust/`). The Node.js harness bridges and
-Workspace providers that Worker Hosts start, the desktop app's frontend, and the repository checks
-are TypeScript; the terminal UI is Go. Install the tools listed in
+SuperTag's services and CLI are written in Rust, in the `core/` workspace, from the protobuf
+contract in `proto/`. The Node.js harness bridges and Workspace providers that Worker Hosts start
+(`harnesses/`), the TypeScript SDK (`sdks/typescript`), the desktop app's frontend, and the
+repository checks are TypeScript; the terminal UI is Go. `sdks/` holds one directory per language,
+each with its SDK and generated bindings, and `scripts/` holds the repository checks and the
+release, packaging, and install scripts. Install the tools listed in
 [Requirements](docs/operations/requirements.md), the Rust toolchain pinned by
 `core/rust-toolchain.toml`, Go 1.26 or later, and the pnpm version pinned by `packageManager` in the
 root `package.json`:
@@ -62,7 +65,7 @@ pnpm supertag up       # equivalent to: supertag up
 pnpm supertag get tag
 ```
 
-This builds and runs the Rust CLI from `rust/` with `cargo run`. Use it when exercising
+This builds and runs the Rust CLI from `core/` with `cargo run`. Use it when exercising
 uncommitted changes.
 
 ### Terminal UI (experimental)
@@ -89,7 +92,7 @@ protoc Go plugins pinned as tools in the `sdks/go` module, so it needs Go 1.26 o
 
 ## Rust runtime development
 
-The workspace in `rust/` builds the Control Plane, Gateway, Worker Host, and native CLI.
+The workspace in `core/` builds the Control Plane, Gateway, Worker Host, and native CLI.
 The `test-fixtures` Cargo feature builds a deterministic harness adapter for the process tests.
 Run the SQLite tests with the pinned Rust toolchain.
 
@@ -128,8 +131,8 @@ deterministic Codex subprocess.
 
 Regenerate the Go, TypeScript, and Python runtime bindings after changing the Rust protobuf
 contract. See [binding generation and conformance checks](sdks/README.md).
-The [capability ledger check](tests/rust-port-baseline/README.md) keeps the frozen port ledger's
-Rust citations current.
+The [capability ledger](docs/development/rust-port-capability-ledger.md) check beside it keeps the
+frozen port ledger's Rust citations current; it reads the freeze commit, so it needs full history.
 The [native split-service rehearsal](tests/native-deployment/README.md) checks the
 complete-archive images, TLS, gRPC health, and restart persistence on disposable PostgreSQL.
 The [native release platform checks](tests/native-release/README.md) build and execute
@@ -200,8 +203,11 @@ under those terms.
 
 `docs/` explains how to use, operate, integrate with, and understand SuperTag.
 Contributor workflows, test procedures, simulation reports, repository internals, and design
-proposals belong outside it. Keep contributor guidance in this file, protocol contracts
-in `spec/`, and generated test reports in the chosen output directory.
+proposals belong outside it. Keep contributor guidance in this file, the protocol contract in
+`proto/`, and generated test reports in the chosen output directory. The one exception is
+`docs/development/`: tracked contributor records of the Rust port (the cutover runbook, the
+capability ledger, the TypeScript removal inventory, and Control Plane replica notes), which no
+user page links to.
 
 The local `FakeS3` fixture uses verified HTTPS on the [supported Node.js runtime](docs/operations/requirements.md#system-and-tools). It supplies
 its CA only to HTTPS agents connecting to active fixture endpoints and restores agent
@@ -289,8 +295,8 @@ python3 -m unittest discover -s tests/fixtures/rust-harness-interop -p test_live
 
 #### SDK lifecycle and Python tests
 
-`spec/fixtures/harness-lifecycle.json` supplies shared behavioral cases for the
-TypeScript and Python SDKs. Run the repository execution, lifecycle fixture, and
+`sdks/python/tests/fixtures/harness-lifecycle.json` supplies language-neutral behavioral cases
+for the Python SDK's conformance validator. Run the repository execution, lifecycle fixture, and
 sandbox provider tests when changing harness/environment contracts. The repository
 suite pins a real Git revision, produces immutable artifacts, and checks them in a
 fresh reviewer environment without model-provider calls. Process tests include
@@ -323,8 +329,7 @@ pnpm exec vitest run tests/release-version.test.ts
 ```
 
 `--sync` rewrites every `package.json`, the Python SDK, and the desktop app. CI runs
-`release_version.py --check` through the `rust/scripts`
-tests on every pull request, so any file that drifts from `core/Cargo.toml` fails the build. The
+`release_version.py --check` and the `scripts/` Python tests on every pull request, so any file that drifts from `core/Cargo.toml` fails the build. The
 documentation check reads the same version: docs may name only the current release.
 
 ## Test an installable release
@@ -345,7 +350,7 @@ SUPERTAG_DOWNLOAD_URL=file:///tmp/supertag-assets HOME=$(mktemp -d) sh install.s
 ```
 
 `scripts/test_install_script.py` runs the installer against fixture archives; CI runs it
-with the other `rust/scripts` tests on every pull request.
+with the other `scripts/` Python tests on every pull request.
 `scripts/smoke-installed-supertag.sh PATH_TO_SUPERTAG` starts an installed command's local
 services with a temporary state directory, lists Tags, and stops them.
 

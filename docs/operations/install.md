@@ -136,7 +136,7 @@ python -m pip install 'supertag==0.3.0'
 
 Each SDK connects to a Control Plane and lets a custom harness adapter talk to its Worker Host;
 see [API stability](../reference/api-stability.md#package-entry-points). Generated Go,
-TypeScript, and Python bindings live in [`rust/bindings`](../../sdks/README.md). See
+TypeScript, and Python bindings live beside the SDKs in [`sdks/`](../../sdks/README.md). See
 [Control Plane API](../reference/control-plane-api.md) for how to connect.
 
 ## Upgrade

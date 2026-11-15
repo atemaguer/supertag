@@ -75,7 +75,7 @@ The other services in the package serve Worker Hosts, Gateways, and harness adap
 ## Call it from your application
 
 Generated bindings for Go, TypeScript, and Python live in
-[`rust/bindings`](../../sdks/README.md). The Go module exposes Connect clients; pass
+[`sdks/`](../../sdks/README.md). The Go module exposes Connect clients; pass
 `connect.WithGRPC()`. TypeScript exports protobuf-es messages and service descriptors, and Python
 exposes messages and gRPC stubs.
 

@@ -33,7 +33,7 @@ Never print the token or pass it to the agent. The messages are in
   and `supertag.harness_adapter.open_harness` for the connection.
 - TypeScript: the Claude Code, Cursor, and OpenCode bridges under
   `harnesses/*/src/rust-adapter/`.
-- Other languages: the generated bindings in [`rust/bindings`](../../sdks/README.md).
+- Other languages: the generated bindings in [`sdks/`](../../sdks/README.md).
 
 ## Run and verify
 

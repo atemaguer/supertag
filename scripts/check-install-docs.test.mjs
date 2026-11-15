@@ -26,8 +26,8 @@ for (const file of files) {
 test("the install guide installs a GitHub Release and can build an archive", () => {
   const install = read("docs/operations/install.md");
   assert.match(install, /releases\/latest\/download\/install\.sh \| sh/u);
-  assert.match(install, /rust\/scripts\/native_release\.py package/u);
-  assert.match(install, /rust\/scripts\/install_native_release\.py/u);
+  assert.match(install, /scripts\/native_release\.py package/u);
+  assert.match(install, /scripts\/install_native_release\.py/u);
 });
 
 test("application guides install the published TypeScript SDK", () => {

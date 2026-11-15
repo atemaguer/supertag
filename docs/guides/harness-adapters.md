@@ -82,7 +82,7 @@ Install its runtime extra, `supertag[runtime]`, from the [Python package](../../
 ## Write one in another language
 
 Generate a gRPC client from the protos, or use the generated Go, TypeScript, or Python bindings
-in [`rust/bindings`](../../sdks/README.md). Read the whole bootstrap from standard input,
+in [`sdks/`](../../sdks/README.md). Read the whole bootstrap from standard input,
 refuse an endpoint that is not loopback, and send `authorization: Bearer TOKEN` on each call.
 
 ## Run it

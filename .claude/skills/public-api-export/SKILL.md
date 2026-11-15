@@ -5,7 +5,7 @@ description: Add or change a supertag-ai public entry point under the stability 
 
 # Public API export
 
-`sdks/typescript` is the only public npm package: the TypeScript SDK for the native
+`sdks/typescript`, published as `supertag-ai`, is the only public npm package: the TypeScript SDK for the native
 services. Everything it exposes is a compatibility commitment at some stability level, so adding
 an export is a contract change, not a build tweak. Its entry points speak only the
 `supertag.runtime.v2` APIs of the Control Plane and Worker Host.

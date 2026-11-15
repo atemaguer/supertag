@@ -6,8 +6,22 @@ description: Decide which crate, package, or app a change belongs in. Read befor
 # Repo orientation
 
 The services and CLI are Rust. The terminal UI is Go. The TypeScript that remains runs under
-Worker Hosts or in the desktop app. `docs/development/typescript-removal-inventory.md` records why each
-TypeScript package stays.
+Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
+
+## Top-level layout
+
+| Directory | Holds |
+| --- | --- |
+| `core/` | The Rust workspace: `Cargo.toml`, `Cargo.lock`, the toolchain pin, `crates/*`, `test-support/` |
+| `proto/` | The `supertag.runtime.v2` protobuf contract every language uses |
+| `sdks/` | One directory per language: the hand-written SDK and its generated bindings |
+| `harnesses/` | Node harness bridges and Workspace providers a Worker Host starts, and their shared SDK |
+| `apps/` | The Go terminal UI and the Tauri desktop app |
+| `scripts/` | Repository checks, binding generation, and release, packaging, and install scripts |
+| `deploy/` | Container images and platform definitions for the native services |
+| `docs/` | User documentation; `docs/development/` holds contributor records |
+| `examples/`, `skills/` | Examples, and instructions for agents that use SuperTag |
+| `tests/` | Repository-level checks and native release and deployment smoke notes |
 
 ## Where code belongs
 
@@ -19,15 +33,15 @@ TypeScript package stays.
 | `core/crates/worker-host` | Execution supervision, journal, adapters, MCP, artifacts |
 | `core/crates/{protocol,api,transport}` | Wire types, gRPC services, tunnel and TLS transport |
 | `core/crates/{workspaces,github,shared-execution,credential-vault,codex-adapter}` | Workspaces, GitHub, shared execution, credential vault, native Codex adapter |
-| `proto`, `rust/bindings` | `supertag.runtime.v2` contract and generated Go, TypeScript, and Python bindings |
+| `proto/supertag/runtime/v2` | The public API contract; `scripts/generate-bindings.py` regenerates every binding from it |
+| `sdks/typescript` | The `supertag-ai` npm SDK (`src/`) and the generated TypeScript bindings (`gen/`) |
+| `sdks/python` | The `supertag` PyPI SDK (`src/supertag`, which ships its own `_runtime_v2` bindings) and the generated bindings (`gen/`) |
+| `sdks/go` | The Go module `github.com/atemaguer/supertag/sdks/go`: generated messages and Connect clients |
 | `harnesses/{claude-code,cursor,opencode}` | Node harness bridges a Worker Host starts |
 | `harnesses/environments/{e2b,modal}` | Node Workspace providers a Worker Host starts |
-| `harnesses/sdk`, `packages/core` | Shared code for those bridges |
-| `sdks/typescript` | The `supertag-ai` npm TypeScript SDK: Control Plane client and harness adapter client |
+| `harnesses/sdk` | `@supertag/worker-sdk`, the code those bridges share; its domain types are in `src/domain` |
 | `apps/tui` | Go terminal UI; runtime.v2 client in `client/`, presentation types in `views/` |
-| `apps/desktop` | Tauri desktop app |
-| `sdks/python` | Python SDK and harness adapters |
-| `deploy/` | Container images and platform definitions for the native services |
+| `apps/desktop` | Tauri desktop app; its crate depends on `core/crates` by path |
 
 ## Boundaries
 
