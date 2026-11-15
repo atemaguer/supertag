@@ -95,7 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The capability ledger check confirms its committed lists against the freeze commit.
+          # The capability ledger check reads the paths at its freeze commit.
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:

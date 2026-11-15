@@ -16,11 +16,19 @@ removed. Removed code remains available at `6c934be8`.
 Evidence was gathered with `git grep` over `rust/`, `apps/tui`, `apps/desktop`, `scripts/`,
 `.github/workflows/`, `deploy/`, and `sdks/`, and by building and testing what remains.
 
+**Later layout change.** Paths below are as they were when the inventory was written. A later
+reorganization split `rust/` into `core/` (the Rust workspace), `proto/`, `sdks/` (generated
+bindings beside each SDK), `scripts/`, and `docs/development/`; moved `packages/runtime` to
+`harnesses/` and `packages/supertag-ai` to `sdks/typescript`; folded `@supertag/core` into
+`harnesses/sdk/src/domain`; and removed `spec/`, `tests/spec/`, `tests/rust-port-cutover/`, and
+the capability ledger's freeze lists. The ledger check now reads the freeze commit from Git and
+sits beside the ledger in this directory.
+
 ## Packages and apps
 
 | Path | Package | Decision | Evidence |
 | --- | --- | --- | --- |
-| `packages/runtime/harnesses/claude-code` | `@supertag/worker-claude-code` | Keep, pruned | `core/crates/cli/src/node_bridges.rs` starts `dist/rust-adapter/entry.js`; `scripts/node_bridges.py` packages it; `language_runtime.rs`, `github_workspace_runtime.rs`, and `support/mcp_runtime.rs` start it and its `fixtures/*.mjs`; `worker-host/src/mcp/stdio.rs` uses `fixtures/rust-mcp-stdio-provider.mjs`; `rust-port.yml` builds it |
+| `packages/runtime/harnesses/claude-code` | `@supertag/worker-claude-code` | Keep, pruned | `rust/crates/cli/src/node_bridges.rs` starts `dist/rust-adapter/entry.js`; `rust/scripts/node_bridges.py` packages it; `language_runtime.rs`, `github_workspace_runtime.rs`, and `support/mcp_runtime.rs` start it and its `fixtures/*.mjs`; `worker-host/src/mcp/stdio.rs` uses `fixtures/rust-mcp-stdio-provider.mjs`; `rust-port.yml` builds it |
 | `packages/runtime/harnesses/cursor` | `@supertag/worker-cursor` | Keep, pruned | `node_bridges.rs` and `node_bridges.py`; `cursor_runtime.rs` starts `dist/rust-adapter/adapter.js`; `rust-port.yml` `runtime` and `linux-root` jobs build it |
 | `packages/runtime/harnesses/opencode` | `@supertag/worker-opencode` | Keep, pruned | `node_bridges.rs` and `node_bridges.py`; `opencode_runtime.rs` includes `fixtures/native-opencode.mjs` and starts `dist/rust-adapter/entry.js` |
 | `packages/runtime/environments/e2b` | `@supertag/worker-environment-e2b` | Keep, pruned | `node_bridges.py` packages `dist/rust-provider/main.js` as the E2B Workspace provider; `rust-port.yml` builds it |
@@ -29,26 +37,26 @@ Evidence was gathered with `git grep` over `rust/`, `apps/tui`, `apps/desktop`, 
 | `packages/core` | `@supertag/core` | Keep, pruned | Dependency of `@supertag/worker-sdk` and `@supertag/worker-cursor`; 13 of 49 source files remain |
 | `apps/desktop` | `@supertag/desktop` | Keep | Tauri app; `rust-port.yml` `desktop` job builds its frontend before `cargo clippy` |
 | `apps/tui` | Go module | Keep | Go terminal UI started by `supertag tui`; `rust-port.yml` builds it for `operator_runtime.rs` |
-| `packages/operator-api/go` | Go module | Remove (2026-11-14) | Generated `supertag.operator.v1` Go types and Connect clients. The TUI's presentation types moved to `apps/tui/views`; the protoc Go plugins it pinned moved to `sdks/go` |
+| `packages/operator-api/go` | Go module | Remove (2026-11-14) | Generated `supertag.operator.v1` Go types and Connect clients. The TUI's presentation types moved to `apps/tui/views`; the protoc Go plugins it pinned moved to `rust/bindings/go` |
 | `packages/operator-api` (TypeScript: `src`, `package.json`, tests) | `@supertag/operator-api` | Remove | Imported only by `apps/cli` and TypeScript tests |
 | `apps/cli` | `@supertag/cli` | Remove | The TypeScript CLI and runtime composition root; the Rust CLI replaces it |
 | `packages/control-plane` | `@supertag/control-plane` | Remove | TypeScript Control Plane; no import from kept code |
-| `packages/store` | `@supertag/store` | Remove | Drizzle store and migrations for the TypeScript Control Plane; Rust has its own migrations in `core/crates/control-plane/migrations` |
+| `packages/store` | `@supertag/store` | Remove | Drizzle store and migrations for the TypeScript Control Plane; Rust has its own migrations in `rust/crates/control-plane/migrations` |
 | `packages/surfaces/{sdk,slack,github,lark,linear,teams}` | `@supertag/surface-*` | Remove | TypeScript Gateway connectors; the Rust Gateway replaces them |
 | `packages/runtime/transport` | `@supertag/worker-transport` | Remove | TypeScript Worklet transport (`supertag.worklet.v1`); used only by `apps/cli`, `supertag-ai`, and tests |
 | `packages/runtime/harnesses/codex` | `@supertag/worker-codex` | Remove | No Node bridge for Codex: `node_bridges.rs` lists only Claude Code, Cursor, and OpenCode, and the Rust `codex-adapter` crate runs Codex natively |
 | `packages/runtime/resources/github` | `@supertag/worker-github` | Remove | TypeScript Worker resource; imported only by `apps/cli` |
-| `packages/runtime/environments/shared-execution` | `@supertag/worker-environment-shared-execution` | Remove | TypeScript shared execution; Rust has `core/crates/shared-execution`. No kept package depends on it |
+| `packages/runtime/environments/shared-execution` | `@supertag/worker-environment-shared-execution` | Remove | TypeScript shared execution; Rust has `rust/crates/shared-execution`. No kept package depends on it |
 | `packages/supertag-ai` | `supertag-ai` (npm) | Keep, reduced (2026-11-14) | The TypeScript SDK, as the approved design keeps it: only `control-plane-client` (`createControlPlaneClient`) and `harness` (`openHarness`, effect receipts), which speak `supertag.runtime.v2`. The CLI, Control Plane, store, transport, surfaces, Worker, and harness entry points stay removed. `scripts/verify-control-plane-client.mjs` runs against the native Control Plane and a Worker Host in `rust-port.yml` |
-| `deploy/shared` | `@supertag/deployment` | Remove | Served only `apps/cli`'s `setup deployment --platform railway|fly` and `deploy/generate.ts`; `core/crates/cli/src/deployment.rs` is the Rust port |
-| `deploy/cloudflare` | `supertag-cloudflare-deployment` (own npm lockfile) | Keep | Native-service tunnel Worker; `scripts/smoke_deployment_http_platforms.py` reads `src/routing.ts`; `tests/cloudflare-tunnel-worker.test.ts` tests it |
+| `deploy/shared` | `@supertag/deployment` | Remove | Served only `apps/cli`'s `setup deployment --platform railway|fly` and `deploy/generate.ts`; `rust/crates/cli/src/deployment.rs` is the Rust port |
+| `deploy/cloudflare` | `supertag-cloudflare-deployment` (own npm lockfile) | Keep | Native-service tunnel Worker; `rust/scripts/smoke_deployment_http_platforms.py` reads `src/routing.ts`; `tests/cloudflare-tunnel-worker.test.ts` tests it |
 
 ## Deployment definitions
 
 | Path | Decision | Evidence |
 | --- | --- | --- |
-| `deploy/docker/rust-service.Dockerfile`, `rust-release.Dockerfile`, `rust-hosted-entrypoint.sh`, `rust-hosted-pair.sh` | Keep | Used by `scripts/native_release_docker.py`, `smoke_deployment_http_platforms.py`, and `split_service_images.py` |
-| `deploy/compose.native.yaml`, `compose.native.ingress.yaml`, `deploy/native/`, `deploy/render/`, `deploy/modal/` | Keep | Named by `core/crates/cli/src/deployment.rs` and the Rust smoke scripts |
+| `deploy/docker/rust-service.Dockerfile`, `rust-release.Dockerfile`, `rust-hosted-entrypoint.sh`, `rust-hosted-pair.sh` | Keep | Used by `rust/scripts/native_release_docker.py`, `smoke_deployment_http_platforms.py`, and `split_service_images.py` |
+| `deploy/compose.native.yaml`, `compose.native.ingress.yaml`, `deploy/native/`, `deploy/render/`, `deploy/modal/` | Keep | Named by `rust/crates/cli/src/deployment.rs` and the Rust smoke scripts |
 | `deploy/docker/worker/Dockerfile` | Keep | Workspace sandbox base image, independent of the runtime language; `publish-worker-base.yml` |
 | `deploy/docker/Dockerfile`, `Dockerfile.dockerignore`, `entrypoint.sh`, root `.dockerignore` | Remove | Built the TypeScript CLI image (`pnpm --filter @supertag/cli deploy`); Rust images build from isolated contexts |
 | `deploy/compose.yaml`, `deploy/.env.example` | Remove | Started the TypeScript Control Plane |
@@ -80,7 +88,7 @@ Evidence was gathered with `git grep` over `rust/`, `apps/tui`, `apps/desktop`, 
 | Path | Decision | Evidence |
 | --- | --- | --- |
 | `scripts/check-docs*.mjs`, `docs-*.mjs`, `*.test.mjs` | Keep, updated | `pnpm docs:check`; now checks every command and flag against `docs/reference/cli.md`. The install test requires the native install; the first-run and freed-page tests were removed with the pages they checked. The `typescript` CI job runs `node --test scripts/*.test.mjs`, which no job ran before |
-| `scripts/check-proto-generation.mjs`, `check-proto-breaking.mjs`, `protoc-gen-manifest-schema.mjs`, `protoc-gen-operator-docs.mjs` | Remove (2026-11-14) | Generated and checked outputs of `spec/proto`, which is deleted; `scripts/generate-bindings.py --check` checks the remaining bindings |
+| `scripts/check-proto-generation.mjs`, `check-proto-breaking.mjs`, `protoc-gen-manifest-schema.mjs`, `protoc-gen-operator-docs.mjs` | Remove (2026-11-14) | Generated and checked outputs of `spec/proto`, which is deleted; `rust/scripts/generate-bindings.py --check` checks the remaining bindings |
 | `scripts/check-docs-node.mjs` | Keep, updated | No longer reads the sandbox MCP bridge's Node minimum from the removed `sandbox-workspace-environment.ts`; every page must name the package's Node requirement |
 | `scripts/install-harness-clis.mjs` | Keep, reduced | Installs Claude Code for the kept harness tests; the Codex part read the removed Codex package |
 | `scripts/with-test-postgres*.mjs`, `test-verify*.mjs`, `check-migration-journals*.mjs` | Remove | Served the TypeScript store and its PostgreSQL suites |
@@ -117,7 +125,7 @@ scripts, and `pnpm check`'s protobuf step, and drops `better-sqlite3`.
 ## Legacy protocols
 
 Approved on 2026-11-14 (decision 4 below). The native services speak only `supertag.runtime.v2`
-from `proto`; nothing served the older contracts.
+from `rust/proto`; nothing served the older contracts.
 
 | Removed | What it was |
 | --- | --- |
@@ -136,8 +144,8 @@ tests for the `operator.v1` fake (30) are removed; the `runtime.v2` client tests
 package's fake Control Plane now serves `runtime.v2` Tags, Worker Hosts, Teams, and Workstream
 posts; 36 tests whose fixtures needed `operator.v1` conversation history, follow streams,
 Objectives, inbox items, or creation are removed, and `operator_runtime.rs` drives the built TUI
-against a real Control Plane. The protoc Go plugins that `scripts/generate-bindings.py` runs
-are now pinned in the `sdks/go` module. The remaining `spec/` schemas (resource envelope,
+against a real Control Plane. The protoc Go plugins that `rust/scripts/generate-bindings.py` runs
+are now pinned in the `rust/bindings/go` module. The remaining `spec/` schemas (resource envelope,
 `supertag.yaml`, Objective, Team, Workstream post) keep their tests.
 
 ## Bridge package pruning
@@ -186,7 +194,7 @@ kept packages.
 
 `scripts/check-docs.mjs` previously read command help from the built TypeScript CLI. It now checks
 every page against `docs/reference/cli.md`, the reference generated from the Rust CLI's help
-(moved from `docs/development/cli-reference.md`), including plain `supertag`, which opens the terminal UI.
+(moved from `rust/docs/cli-reference.md`), including plain `supertag`, which opens the terminal UI.
 The documentation pass rewrote README, every page under `docs/`, and `skills/` for the Rust system,
 including `docs/guides/deployment-setup.md`, the Fly.io and Railway guides (against
 `deploy/native`), and a harness adapter guide that replaced the Python Worker, custom Worker, MCP
@@ -240,21 +248,21 @@ semantic pass over the long reference pages.
    `spec/*.schema.json` wire schemas, `docs/reference/operator-api`, and the Python SDK's
    `supertag/operator/v1` bindings come from the same era. Decide whether to delete them (an
    accepted breaking change for `proto:breaking`) and move the TUI to the `runtime.v2` Go bindings.
-   No file under `core/crates` serves `supertag.operator.v1`, so the Python SDK's operator client
+   No file under `rust/crates` serves `supertag.operator.v1`, so the Python SDK's operator client
    cannot reach a Rust Control Plane.
 5. **Pruning inside kept packages.** Decided and done on 2026-11-14 for the TypeScript packages;
    see [Bridge package pruning](#bridge-package-pruning). The Python SDK keeps its in-process Worker
    composition (`create_worker`, `LocalWorklet`, the Codex harness, conformance helpers) because
    the OpenAI Agents adapter is built on part of it; pruning it to the adapter is open.
-6. **Existing npm installations.** `scripts/install_native_release.py` recognizes the npm
+6. **Existing npm installations.** `rust/scripts/install_native_release.py` recognizes the npm
    `install.sh` layout so a native install can replace it. Keep or remove that recognition.
 7. **Version numbering.** Decided on 2026-11-14: `workspace.package.version` in
-   `core/Cargo.toml` is the single source, now `0.3.0`. `scripts/release_version.py
+   `rust/Cargo.toml` is the single source, now `0.3.0`. `rust/scripts/release_version.py
    --check` fails when any package manifest, the Python SDK, or the desktop app differs.
 
 ## Follow-ups not done here
 
 - Rust source comments that cite removed TypeScript files as the origin of a port (45 files
-  under `core/crates`) were left unchanged to keep this branch mergeable with concurrent
+  under `rust/crates`) were left unchanged to keep this branch mergeable with concurrent
   Rust work.
 - `CHANGELOG.md` gets its entry at integration, per `AGENTS.md`.
