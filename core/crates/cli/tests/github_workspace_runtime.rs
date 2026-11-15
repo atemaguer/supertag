@@ -546,21 +546,19 @@ async fn scenario(
         wait_source_pin(&cli, first_id, &commit).await?;
         assert_eq!(source_lookups.load(Ordering::SeqCst), 1);
     }
-    // After each `--once` host exits, an unmapped host, which claims no Workspace Task, keeps the
-    // deliveries reachable for the publisher and readers. It registers a new generation, so it
-    // stops before the next host runs.
+    // Each Task runs on a mapped host that keeps running afterwards, so its delivery stays
+    // reachable for the publisher and readers from the moment the Task finishes. A `--once` host
+    // followed by a holding host left a gap between the two: a publisher that claimed the
+    // publication then found no host holding the bundle and put it back for a minute. Every host
+    // presents the same credential and registers a new generation, so the holder stops before
+    // the next Task is submitted, which it would otherwise claim.
     let mut holding: Option<tokio::process::Child> = None;
-    let mut holders = 0;
-    let mut run = async |state: &str| -> Result<()> {
-        holding = None;
-        success(worker(state, true)).await?;
-        holders += 1;
-        holding = Some(
-            holding_host::serve(host_command(&format!("holder-{holders}"), false, false)).await?,
-        );
-        Ok(())
+    let run = async |holding: &mut Option<tokio::process::Child>, state: &str, task: &str| {
+        *holding = None;
+        *holding = Some(holding_host::serve(host_command(state, true, false)).await?);
+        wait_finished(&cli, task).await
     };
-    run("host-one").await?;
+    run(&mut holding, "host-one", first_id).await?;
     let first = json(cli(&["get", "task", first_id])).await?;
     assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
     assert!(fs::read_to_string(root.join("setup-runs"))?.lines().count() >= 1);
@@ -647,6 +645,7 @@ async fn scenario(
     } else {
         None
     };
+    holding = None;
     let second = json(cli(&[
         "task",
         "submit",
@@ -658,7 +657,7 @@ async fn scenario(
     ]))
     .await?;
     let second_id = field(&second, "task_id")?;
-    run("host-two").await?;
+    run(&mut holding, "host-two", second_id).await?;
     let second = json(cli(&["get", "task", second_id])).await?;
     assert_eq!(second["state"], "TASK_STATE_SUCCEEDED", "{second}");
     assert_eq!(second["workspace_delivery"]["start_commit"], first_head);
@@ -686,6 +685,7 @@ async fn scenario(
             "later Session turns must not re-resolve a moving ref"
         );
         assert_eq!(second["workspace"]["base_commit"], commit);
+        holding = None;
         let fresh = json(cli(&[
             "task",
             "submit",
@@ -698,7 +698,7 @@ async fn scenario(
         .await?;
         let fresh_id = field(&fresh, "task_id")?;
         wait_source_pin(&cli, fresh_id, &next_commit).await?;
-        run("host-new-session").await?;
+        run(&mut holding, "host-new-session", fresh_id).await?;
         let fresh = json(cli(&["get", "task", fresh_id])).await?;
         assert_eq!(fresh["state"], "TASK_STATE_SUCCEEDED", "{fresh}");
         assert_eq!(
@@ -962,6 +962,32 @@ where
     })
     .await??;
     Ok(())
+}
+
+/// Waits until `task` reaches an outcome.
+async fn wait_finished<F>(cli: &F, task: &str) -> Result<()>
+where
+    F: Fn(&[&str]) -> Command,
+{
+    timeout(WAIT, async {
+        loop {
+            let value = json(cli(&["get", "task", task])).await?;
+            let state = value["state"].as_str().unwrap_or_default();
+            if [
+                "TASK_STATE_SUCCEEDED",
+                "TASK_STATE_FAILED",
+                "TASK_STATE_CANCELLED",
+                "TASK_STATE_UNCERTAIN",
+            ]
+            .contains(&state)
+            {
+                return Ok::<_, anyhow::Error>(());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("Task did not finish")?
 }
 
 async fn wait_publication<F>(cli: &F, task: &str, state: &str) -> Result<Value>
