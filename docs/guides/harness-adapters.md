@@ -53,7 +53,7 @@ read the Tag's other Sessions and Objectives or create an Objective a person ask
 The run's capabilities say which of these the Task may use. When the Task reads the Tag's
 Sessions, its capabilities also carry `tag_portfolio`, the Tag's open Objectives, which an adapter
 adds to the turn's context. The messages are defined in
-[`runtime.proto`](../../rust/proto/supertag/runtime/v2/runtime.proto) and its siblings.
+[`runtime.proto`](../../proto/supertag/runtime/v2/runtime.proto) and its siblings.
 
 ## Write one in Python
 
@@ -82,7 +82,7 @@ Install its runtime extra, `supertag[runtime]`, from the [Python package](../../
 ## Write one in another language
 
 Generate a gRPC client from the protos, or use the generated Go, TypeScript, or Python bindings
-in [`rust/bindings`](../../rust/bindings/README.md). Read the whole bootstrap from standard input,
+in [`rust/bindings`](../../sdks/README.md). Read the whole bootstrap from standard input,
 refuse an endpoint that is not loopback, and send `authorization: Bearer TOKEN` on each call.
 
 ## Run it

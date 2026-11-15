@@ -44,7 +44,7 @@ test("flags an old release and an archive inside a file name", () => {
   ]);
 });
 
-test("the release version is rust/Cargo.toml's workspace version", () => {
+test("the release version is core/Cargo.toml's workspace version", () => {
   assert.equal(
     workspaceVersion(
       '[package]\nversion = "9.9.9"\n\n[workspace.package]\nedition = "2024"\nversion = "0.3.0-alpha.1"\n',

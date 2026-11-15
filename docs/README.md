@@ -159,7 +159,7 @@ Use these pages when you are implementing an integration, protocol, or Control P
 - [Control Plane API](reference/control-plane-api.md) — connecting, negotiation, authentication, services, and streams
 - [Reliable external actions](reference/action-effects.md) — retries, receipts, and uncertain outcomes
 - [API stability](reference/api-stability.md) — compatibility levels and change policy
-- [Protocol definitions](../rust/proto/supertag/runtime/v2/runtime.proto) — the `supertag.runtime.v2` protobuf package
+- [Protocol definitions](../proto/supertag/runtime/v2/runtime.proto) — the `supertag.runtime.v2` protobuf package
 
 The [contribution guide](../CONTRIBUTING.md) and [security policy](../SECURITY.md) live at the
 repository root.

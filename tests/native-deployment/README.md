@@ -11,15 +11,15 @@ change an installation, import old state, publish images, or perform a productio
 
 ## Build and verify
 
-Use a Linux complete archive assembled by `rust/scripts/native_release.py` and its
+Use a Linux complete archive assembled by `scripts/native_release.py` and its
 matching fixture adapter. The normal release CLI contains no test-only adapter; build
 that separately from the same source with the `test-fixtures` feature. Docker must support
 the archive's architecture, and Docker Compose must support `up --wait`.
 
 ```sh
-uv run rust/scripts/split_service_images.py /path/to/supertag-complete.tar.gz \
+uv run scripts/split_service_images.py /path/to/supertag-complete.tar.gz \
   --repository supertag-rehearsal --tag local
-python3 rust/scripts/smoke_native_compose.py \
+python3 scripts/smoke_native_compose.py \
   --control-image supertag-rehearsal-control-plane:local \
   --gateway-image supertag-rehearsal-gateway:local \
   --fixture-adapter /path/to/supertag-fixture-adapter \

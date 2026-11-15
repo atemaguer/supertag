@@ -15,7 +15,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
 )
 
 const maxArtifactFileBytes = 32 * 1024 * 1024

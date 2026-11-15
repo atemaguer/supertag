@@ -15,8 +15,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
-	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
+	rpc "github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
 
 func runtimeWorkSession() *v2.WorkSession {

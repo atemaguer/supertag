@@ -18,8 +18,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"connectrpc.com/connect"
 	"github.com/atemaguer/supertag/apps/tui/client"
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
-	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
+	rpc "github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
 
 func profileStore(t *testing.T) *controlPlaneStore {

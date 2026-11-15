@@ -19,7 +19,7 @@ version, lockfile, configuration, and quiescence evidence. The archive and outpu
 restricted permissions. The report contains hashes, not credential-file contents. Verification
 rejects tampering, unlisted paths, links, and special files before restoration. This deliberately
 limited fixture format is **not a general production backup tool**; real state is archived with
-`rust/scripts/legacy_archive.py`, following `rust/docs/cutover-runbook.md`.
+`scripts/legacy_archive.py`, following `docs/development/cutover-runbook.md`.
 
 The fresh runtime comes from a verified complete native release archive. Both SQLite and PostgreSQL
 must start with an empty Tag roster and no old Task. The rehearsal recreates the reviewed synthetic

@@ -8,9 +8,9 @@ const read = (path: string) => readFileSync(`${root}/${path}`, "utf8");
 const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
   .split("\0")
   .filter(Boolean);
-// rust/Cargo.toml's workspace version is the single source of truth for the release version.
+// core/Cargo.toml's workspace version is the single source of truth for the release version.
 const workspaceVersion = /^\[workspace\.package\]\n(?:[^[\n].*\n)*?version = "([^"]+)"/m.exec(
-  read("rust/Cargo.toml"),
+  read("core/Cargo.toml"),
 )?.[1];
 const newestVersion = /^## \[(\d+\.\d+\.\d+[^\]]*)\]/m.exec(read("CHANGELOG.md"))?.[1];
 

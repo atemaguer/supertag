@@ -7,7 +7,7 @@ in [Objective coordination](../docs/reference/coordination.md#objectives).
 ## Operator API
 
 Operators create and manage Objectives with the `supertag.runtime.v2.Objectives` RPCs defined in
-[`runtime.proto`](../rust/proto/supertag/runtime/v2/runtime.proto): `CreateObjective`,
+[`runtime.proto`](../proto/supertag/runtime/v2/runtime.proto): `CreateObjective`,
 `GetObjective`, `ListObjectives`, `ListCommitReviews`, `SetLimits`, `SetRuntimeActions`,
 `PauseObjective`, `ResumeObjective`, `CancelObjective`, `ReviewObjective`, and
 `CompleteObjective`. The proto comments are the reference for each request and response.

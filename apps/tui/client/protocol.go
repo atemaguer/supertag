@@ -12,8 +12,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
-	"github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
+	"github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
 
 // protocolHeader names, on every call, the protocol version this client negotiated with the

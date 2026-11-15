@@ -158,7 +158,7 @@ cli_version=$("$PACKAGE/supertag" --version 2>/dev/null || true)
 tui_version=$("$PACKAGE/supertag-tui" --version 2>/dev/null || true)
 [ "$tui_version" = "$VERSION" ] || fail "the supertag-tui binary reports ${tui_version:-no version}, not $VERSION"
 
-# The layout and receipt of rust/scripts/install_native_release.py, so either can replace the other.
+# The layout and receipt of scripts/install_native_release.py, so either can replace the other.
 commit=$(grep -o '"commit"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' "$PACKAGE/manifest.json" |
   head -n 1 | sed 's/.*"\([0-9a-f]\{40\}\)"$/\1/')
 [ -n "$commit" ] || fail "the release manifest names no source commit"

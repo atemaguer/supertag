@@ -11,7 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
 )
 
 // Secret prefixes: an Auth Key enrolls this device once; an enrolled client credential is what a

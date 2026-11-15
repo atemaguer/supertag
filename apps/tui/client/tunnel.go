@@ -24,7 +24,7 @@ import (
 // A `wss://` or `ws://` Control Plane URL carries the same gRPC connection inside a WebSocket, for
 // platforms whose proxy forwards only HTTP/1.1. The tunnel is a byte pipe: SuperTag's own TLS,
 // with any client certificate, runs end to end inside it, so a proxy that terminates the outer
-// `wss://` TLS sees only ciphertext. This matches the Rust transport (rust/crates/transport).
+// `wss://` TLS sees only ciphertext. This matches the Rust transport (core/crates/transport).
 
 // tunnelMaxMessage is the largest WebSocket message either side sends or accepts.
 const tunnelMaxMessage = 256 * 1024

@@ -1,5 +1,5 @@
 // Validates `supertag` commands and flags written in documentation against the generated CLI
-// reference (docs/reference/cli.md). rust/crates/cli/tests/cli_help.rs keeps that reference equal
+// reference (docs/reference/cli.md). core/crates/cli/tests/cli_help.rs keeps that reference equal
 // to the CLI's help, so a command that passes here is one the CLI accepts.
 
 // Flags of other programs that documentation names in prose, such as `codex login` options.

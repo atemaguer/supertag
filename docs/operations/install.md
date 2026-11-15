@@ -91,15 +91,15 @@ there.
 ### Build an archive from a checkout
 
 To install a commit that has no release, build the archive for your machine from a clean
-checkout. The build needs the Rust toolchain pinned in `rust/rust-toolchain.toml`, Go, Node.js
+checkout. The build needs the Rust toolchain pinned in `core/rust-toolchain.toml`, Go, Node.js
 with pnpm, Python 3.13, and [uv](https://docs.astral.sh/uv/):
 
 ```sh
 git clone https://github.com/atemaguer/supertag.git
 cd supertag
-uv run rust/scripts/native_release.py package --repo . --commit "$(git rev-parse HEAD)" \
+uv run scripts/native_release.py package --repo . --commit "$(git rev-parse HEAD)" \
   --output "$HOME/supertag-build"
-uv run rust/scripts/install_native_release.py "$HOME"/supertag-build/supertag-*-complete.tar.gz
+uv run scripts/install_native_release.py "$HOME"/supertag-build/supertag-*-complete.tar.gz
 ```
 
 `install_native_release.py` checks and installs the archive as the installer script does, and
@@ -111,10 +111,10 @@ For a server or container that runs only the Control Plane or a Gateway, the CLI
 enough. It also runs Codex Tasks:
 
 ```sh
-cargo build --release --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag
+cargo build --release --locked --manifest-path core/Cargo.toml -p supertag-cli --bin supertag
 ```
 
-Put `rust/target/release/supertag` on your `PATH`. Without the release archive's Node bridges, a
+Put `core/target/release/supertag` on your `PATH`. Without the release archive's Node bridges, a
 Worker Host runs Claude Code, Cursor, or OpenCode only when you name a built adapter entrypoint
 with `--harness-entrypoint`. Container images for hosted platforms are described in
 [Self-host SuperTag](../guides/self-hosting.md).
@@ -136,7 +136,7 @@ python -m pip install 'supertag==0.3.0'
 
 Each SDK connects to a Control Plane and lets a custom harness adapter talk to its Worker Host;
 see [API stability](../reference/api-stability.md#package-entry-points). Generated Go,
-TypeScript, and Python bindings live in [`rust/bindings`](../../rust/bindings/README.md). See
+TypeScript, and Python bindings live in [`rust/bindings`](../../sdks/README.md). See
 [Control Plane API](../reference/control-plane-api.md) for how to connect.
 
 ## Upgrade

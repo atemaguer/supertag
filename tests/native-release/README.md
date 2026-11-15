@@ -19,7 +19,7 @@ image, checksum-pinned Node and Go archives, and the repository's pinned pnpm ve
 Docker must support the requested architecture, natively or through emulation.
 
 ```sh
-uv run rust/scripts/native_release_docker.py --repo . --commit FULL_COMMIT_SHA \
+uv run scripts/native_release_docker.py --repo . --commit FULL_COMMIT_SHA \
   --platform linux-amd64 --output /tmp/supertag-linux-amd64-verification
 ```
 
@@ -33,10 +33,10 @@ remains as a reusable cache. Its identity is recorded in the builder receipt.
 
 Use native tools on an Intel Mac for `darwin-amd64` and an Apple Silicon Mac for
 `darwin-arm64`. Select Node 22.13 or later in the 22.x line, pnpm 11.18.0, Go 1.26.1,
-Python 3.13, tmux, and the Rust toolchain pinned in `rust/rust-toolchain.toml`.
+Python 3.13, tmux, and the Rust toolchain pinned in `core/rust-toolchain.toml`.
 
 ```sh
-uv run rust/scripts/native_release.py package --repo . --commit FULL_COMMIT_SHA \
+uv run scripts/native_release.py package --repo . --commit FULL_COMMIT_SHA \
   --expect-platform darwin-arm64 --output /tmp/supertag-macos-verification --install-smoke
 ```
 
@@ -45,7 +45,7 @@ The following command downloads checksum-pinned Node/Go, Python 3.13.9, and the 
 Intel Rust toolchain into a disposable directory. It does not change your system tools.
 
 ```sh
-uv run rust/scripts/native_release_macos_x64.py --repo . --commit FULL_COMMIT_SHA \
+uv run scripts/native_release_macos_x64.py --repo . --commit FULL_COMMIT_SHA \
   --output /tmp/supertag-macos-amd64-verification
 ```
 

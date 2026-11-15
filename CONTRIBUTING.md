@@ -25,7 +25,7 @@ SuperTag's services and CLI are written in Rust (`rust/`). The Node.js harness b
 Workspace providers that Worker Hosts start, the desktop app's frontend, and the repository checks
 are TypeScript; the terminal UI is Go. Install the tools listed in
 [Requirements](docs/operations/requirements.md), the Rust toolchain pinned by
-`rust/rust-toolchain.toml`, Go 1.26 or later, and the pnpm version pinned by `packageManager` in the
+`core/rust-toolchain.toml`, Go 1.26 or later, and the pnpm version pinned by `packageManager` in the
 root `package.json`:
 
 ```sh
@@ -83,9 +83,9 @@ command; see [Test an installable release](#test-an-installable-release).
 
 ### Protobuf contracts
 
-The protobuf contract lives in `rust/proto`; see [binding generation](rust/bindings/README.md).
-`rust/scripts/generate-bindings.py` writes the Go, TypeScript, and Python bindings, using the
-protoc Go plugins pinned as tools in the `rust/bindings/go` module, so it needs Go 1.26 or later.
+The protobuf contract lives in `proto`; see [binding generation](sdks/README.md).
+`scripts/generate-bindings.py` writes the Go, TypeScript, and Python bindings, using the
+protoc Go plugins pinned as tools in the `sdks/go` module, so it needs Go 1.26 or later.
 
 ## Rust runtime development
 
@@ -94,7 +94,7 @@ The `test-fixtures` Cargo feature builds a deterministic harness adapter for the
 Run the SQLite tests with the pinned Rust toolchain.
 
 ```sh
-cargo test --manifest-path rust/Cargo.toml --locked --workspace --all-features
+cargo test --manifest-path core/Cargo.toml --locked --workspace --all-features
 ```
 
 For PostgreSQL coverage, put the disposable test server URL in a private file and set
@@ -118,7 +118,7 @@ For a live read-only smoke test, use the built-in Codex adapter with an installe
 version 0.163.0 or newer. Start the services with a separate development state directory.
 
 ```sh
-cargo run --manifest-path rust/Cargo.toml -p supertag-cli -- \
+cargo run --manifest-path core/Cargo.toml -p supertag-cli -- \
   up --state-directory .supertag/rust-dev --harness codex
 ```
 
@@ -127,7 +127,7 @@ and submit a short text Task. The integration suite exercises the same launch pa
 deterministic Codex subprocess.
 
 Regenerate the Go, TypeScript, and Python runtime bindings after changing the Rust protobuf
-contract. See [binding generation and conformance checks](rust/bindings/README.md).
+contract. See [binding generation and conformance checks](sdks/README.md).
 The [capability ledger check](tests/rust-port-baseline/README.md) keeps the frozen port ledger's
 Rust citations current.
 The [native split-service rehearsal](tests/native-deployment/README.md) checks the
@@ -308,23 +308,23 @@ Record user-facing changes in `CHANGELOG.md` under `## [Unreleased]`, in the `Ad
 Task or feature branch, so parallel branches don't conflict on the file. Keep each entry to one
 concise bullet.
 
-`workspace.package.version` in `rust/Cargo.toml` is the single source of truth for the release
+`workspace.package.version` in `core/Cargo.toml` is the single source of truth for the release
 version. At release time, rename `[Unreleased]` to the version and date, add an empty
-`[Unreleased]` above it, set the version in `rust/Cargo.toml`, and in the same release commit
+`[Unreleased]` above it, set the version in `core/Cargo.toml`, and in the same release commit
 rewrite every other manifest from it, refresh the lockfiles, and run the version checks:
 
 ```sh
-python3 rust/scripts/release_version.py --sync
-(cd rust && cargo metadata --format-version 1 > /dev/null)
+python3 scripts/release_version.py --sync
+(cd core && cargo metadata --format-version 1 > /dev/null)
 (cd apps/desktop/src-tauri && cargo metadata --format-version 1 > /dev/null)
 (cd sdks/python && uv lock)
-python3 rust/scripts/release_version.py vVERSION
+python3 scripts/release_version.py vVERSION
 pnpm exec vitest run tests/release-version.test.ts
 ```
 
 `--sync` rewrites every `package.json`, the Python SDK, and the desktop app. CI runs
 `release_version.py --check` through the `rust/scripts`
-tests on every pull request, so any file that drifts from `rust/Cargo.toml` fails the build. The
+tests on every pull request, so any file that drifts from `core/Cargo.toml` fails the build. The
 documentation check reads the same version: docs may name only the current release.
 
 ## Test an installable release
@@ -344,7 +344,7 @@ cp /tmp/supertag-macos-verification/supertag-*-complete.tar.gz /tmp/supertag-ass
 SUPERTAG_DOWNLOAD_URL=file:///tmp/supertag-assets HOME=$(mktemp -d) sh install.sh
 ```
 
-`rust/scripts/test_install_script.py` runs the installer against fixture archives; CI runs it
+`scripts/test_install_script.py` runs the installer against fixture archives; CI runs it
 with the other `rust/scripts` tests on every pull request.
 `scripts/smoke-installed-supertag.sh PATH_TO_SUPERTAG` starts an installed command's local
 services with a temporary state directory, lists Tags, and stops them.
@@ -353,7 +353,7 @@ Before updating installation instructions for a release, publish the release and
 installer, checksums, the PyPI package, and documentation. Release tooling in this repository
 does not mean a release has been published.
 
-The version in `rust/Cargo.toml` is the release version: the tag must be `v` followed by it, and
+The version in `core/Cargo.toml` is the release version: the tag must be `v` followed by it, and
 every manifest and lockfile must carry the same version. The release and SDK publish workflows run
 `release_version.py` on the tag before they build or publish anything.
 A release takes three steps, so the README's `releases/latest` installer URL never points at a

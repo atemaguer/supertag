@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
 )
 
 // maxHostPages bounds ListWorkerHosts, so an organization with very many Worker Hosts still gets

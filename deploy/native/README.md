@@ -148,10 +148,10 @@ build the binary for Linux from a checkout of the release you deploy, in the Rus
 Debian release matches the runtime image:
 
 ```sh
-docker run --rm --platform linux/amd64 -v "$PWD":/src -w /src/rust \
-  -e CARGO_TARGET_DIR=/src/rust/target/linux-amd64 rust:1.93.1-bookworm \
+docker run --rm --platform linux/amd64 -v "$PWD":/src -w /src/core \
+  -e CARGO_TARGET_DIR=/src/core/target/linux-amd64 rust:1.93.1-bookworm \
   cargo build --release --locked -p supertag-cli --bin supertag
-mkdir hosted && cp rust/target/linux-amd64/release/supertag hosted/
+mkdir hosted && cp core/target/linux-amd64/release/supertag hosted/
 cp deploy/docker/rust-hosted-entrypoint.sh deploy/docker/rust-hosted-pair.sh hosted/
 docker build --platform linux/amd64 --file deploy/docker/rust-service.Dockerfile \
   --target hosted --tag REGISTRY/supertag-hosted:VERSION hosted
@@ -261,7 +261,7 @@ through one replica is downloaded through another. A Worker Host's relay stream 
 so only that replica relays the host's artifacts and Workspace deliveries; a read through another
 replica fails as if the host were offline. A SQLite
 database serves one Control Plane process; a second one on the same file refuses to start. See
-[Control Plane replicas](../../rust/docs/control-plane-replicas.md) for the concurrency audit.
+[Control Plane replicas](../../docs/development/control-plane-replicas.md) for the concurrency audit.
 
 ## Render
 
@@ -387,12 +387,12 @@ reconnects, instead of waiting for a call's deadline. That is within the Control
 
 ## Rehearsal
 
-[`../../rust/scripts/smoke_deployment_compose.py`](../../rust/scripts/smoke_deployment_compose.py)
+[`../../scripts/smoke_deployment_compose.py`](../../scripts/smoke_deployment_compose.py)
 rehearses this topology on disposable containers: setup's files, the published Control Plane with
 client certificates, the Gateway profile, two outbound Worker Hosts, a full restart, and every Fly
 and Railway service command in the `hosted` image. Fly.io and Railway themselves are not exercised.
 
-[`../../rust/scripts/smoke_deployment_http_platforms.py`](../../rust/scripts/smoke_deployment_http_platforms.py)
+[`../../scripts/smoke_deployment_http_platforms.py`](../../scripts/smoke_deployment_http_platforms.py)
 rehearses the Render, Cloudflare, and Modal shapes behind an nginx edge that terminates TLS and
 forwards only WebSocket upgrades and `/healthz`, running the service commands read from their
 definitions in the `hosted` image: the platform health check, `verify deployment` over `wss://`, a

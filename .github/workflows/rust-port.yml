@@ -3,13 +3,14 @@ name: Rust runtime
 on:
   pull_request:
     paths:
-      - 'rust/**'
+      - 'core/**'
+      - 'proto/**'
+      - 'sdks/**'
+      - 'harnesses/**'
+      - 'scripts/**'
       - 'docs/reference/cli.md'
-      - 'packages/runtime/**'
-      - 'packages/core/**'
       - 'apps/tui/**'
       - 'apps/desktop/**'
-      - 'sdks/python/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -18,13 +19,14 @@ on:
   push:
     branches: [main]
     paths:
-      - 'rust/**'
+      - 'core/**'
+      - 'proto/**'
+      - 'sdks/**'
+      - 'harnesses/**'
+      - 'scripts/**'
       - 'docs/reference/cli.md'
-      - 'packages/runtime/**'
-      - 'packages/core/**'
       - 'apps/tui/**'
       - 'apps/desktop/**'
-      - 'sdks/python/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -53,7 +55,7 @@ jobs:
           --health-retries 15
     defaults:
       run:
-        working-directory: rust
+        working-directory: core
     env:
       SUPERTAG_RUST_TEST_DATABASE_URL: postgresql://supertag:rust-port-ci-database@localhost:5432/supertag_test
       # Required lane: a missing PostgreSQL, Node, Python agents, or terminal UI fixture fails the
@@ -74,7 +76,7 @@ jobs:
           go-version-file: apps/tui/go.mod
           cache-dependency-path: |
             apps/tui/go.sum
-            rust/bindings/go/go.sum
+            sdks/go/go.sum
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -121,8 +123,8 @@ jobs:
       - name: Verify the supertag-ai package against the native Control Plane and Worker Host
         working-directory: .
         run: |
-          cargo build --locked --manifest-path rust/Cargo.toml -p supertag-cli --bin supertag
-          SUPERTAG_RUST_TEST_CLI="$GITHUB_WORKSPACE/rust/target/debug/supertag" \
+          cargo build --locked --manifest-path core/Cargo.toml -p supertag-cli --bin supertag
+          SUPERTAG_RUST_TEST_CLI="$GITHUB_WORKSPACE/core/target/debug/supertag" \
             pnpm --filter supertag-ai test:package
 
   # Shared execution switches workloads to a distinct UID, so these cases need real root. The
@@ -148,7 +150,7 @@ jobs:
           --health-retries 15
     defaults:
       run:
-        working-directory: rust
+        working-directory: core
     env:
       SUPERTAG_RUST_TEST_REQUIRE: linux-root,postgres
     steps:
@@ -205,12 +207,12 @@ jobs:
   # Small hard-crash lane with production PostgreSQL durability settings. The runtime job's
   # PostgreSQL proves logical behavior; this job proves the crash matrix with fsync,
   # synchronous_commit, and full_page_writes on. Run locally with
-  # rust/scripts/durable-postgres-crash-lane.sh.
+  # scripts/durable-postgres-crash-lane.sh.
   crash-durability:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: rust
+        working-directory: core
     steps:
       - uses: actions/checkout@v4
       - name: Start PostgreSQL with production durability settings
@@ -232,7 +234,7 @@ jobs:
           umask 077
           export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE="$RUNNER_TEMP/supertag-durable-postgres-url"
           printf '%s' 'postgresql://supertag:rust-port-durable-database@127.0.0.1:5433/supertag_test' > "$SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
-          sh scripts/durable-postgres-crash-lane.sh
+          sh ../scripts/durable-postgres-crash-lane.sh
 
   bindings:
     runs-on: ubuntu-latest
@@ -248,13 +250,13 @@ jobs:
           cache: pnpm
       - uses: actions/setup-go@v5
         with:
-          go-version-file: rust/bindings/go/go.mod
-          cache-dependency-path: rust/bindings/go/go.sum
+          go-version-file: sdks/go/go.mod
+          cache-dependency-path: sdks/go/go.sum
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: python -m pip install uv==0.9.5
       - run: pnpm install --frozen-lockfile
-      - run: uv run --python 3.13 --script rust/scripts/generate-bindings.py --check
-      - run: uv run --python 3.13 --script rust/bindings/wire-roundtrip.py
-      - run: go -C rust/bindings/go test ./...
+      - run: uv run --python 3.13 --script scripts/generate-bindings.py --check
+      - run: uv run --python 3.13 --script scripts/wire-roundtrip.py
+      - run: go -C sdks/go test ./...

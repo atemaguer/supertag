@@ -120,7 +120,7 @@ Every text from the server, an agent or a diff is filtered for the terminal, so 
 shows as text.
 
 It talks to the Control Plane through the generated runtime v2 Go client in
-`rust/bindings/go`. `Conversations` sends messages, lists your conversations and their history,
+`sdks/go`. `Conversations` sends messages, lists your conversations and their history,
 and pages each reply's Task events. `Objectives` lists the open Objectives, describes the selected
 one, and creates Objectives. `Inbox` lists the inbox, answers questions and decides approval
 requests. `WorkSessions` reads a work Session's delivery and activity. `Teams` lists and reads the
@@ -133,7 +133,7 @@ lists the Tags. The replies are projected into the TUI's own presentation types 
 
 Build with `./build.sh`, which cross-compiles static binaries for macOS and Linux (arm64 and
 amd64) into `dist/supertag-tui-GOOS-GOARCH`. It uses the Rust workspace version from
-`rust/Cargo.toml` by default. Set `SUPERTAG_TUI_VERSION` when building for a launcher with a
+`core/Cargo.toml` by default. Set `SUPERTAG_TUI_VERSION` when building for a launcher with a
 different version.
 Run the tests with `go test ./...`. The Rust CLI's `operator_runtime.rs` tests drive a built
 binary end to end under tmux when `SUPERTAG_RUST_TEST_TUI` names it.

@@ -49,7 +49,7 @@ jobs:
       - name: Check the tag names the release version
         id: source
         run: |
-          version=$(python rust/scripts/release_version.py "$RELEASE_TAG")
+          version=$(python scripts/release_version.py "$RELEASE_TAG")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 

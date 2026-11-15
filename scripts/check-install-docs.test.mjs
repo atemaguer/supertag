@@ -36,7 +36,7 @@ test("application guides install the published TypeScript SDK", () => {
 });
 
 test("Python installation pins the matching PyPI release", () => {
-  const version = pythonVersion(workspaceVersion(read("rust/Cargo.toml")));
+  const version = pythonVersion(workspaceVersion(read("core/Cargo.toml")));
   for (const file of ["README.md", "docs/operations/install.md", "sdks/python/README.md"]) {
     assert.ok(read(file).includes(`python -m pip install 'supertag==${version}'`), file);
     assert.doesNotMatch(read(file), /pip install .*sdks\/python|preview is unpublished/u);

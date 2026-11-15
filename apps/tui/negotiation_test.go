@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect"
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
-	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
+	rpc "github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
 
 // handleNegotiation answers protocol negotiation as a current Control Plane. The TUI negotiates

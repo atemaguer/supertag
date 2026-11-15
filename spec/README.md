@@ -2,8 +2,8 @@
 
 This directory holds language-neutral JSON Schemas for SuperTag resources and configuration. The
 gRPC services that the Control Plane, Gateway, and Worker Hosts speak are defined by the
-`supertag.runtime.v2` protos in [`rust/proto`](../rust/proto); their generated Go, TypeScript, and
-Python bindings are in [`rust/bindings`](../rust/bindings/README.md).
+`supertag.runtime.v2` protos in [`proto`](../proto); their generated Go, TypeScript, and
+Python bindings are in [`rust/bindings`](../sdks/README.md).
 
 The schemas use [JSON Schema 2020-12](https://json-schema.org/draft/2020-12/schema). Consumers should resolve the relative references within this directory as one bundle.
 Schema IDs identify files in this repository; validation does not depend on a separately hosted

@@ -15,8 +15,8 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
-	"github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
+	"github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
 
 // runtimeClient projects runtime v2 replies into the Go UI's existing presentation types.

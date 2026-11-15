@@ -7,7 +7,7 @@ connectors for Slack, GitHub, Linear, Lark, and Microsoft Teams run inside a
 contract.
 
 This page is the exact contract. The messages are defined in
-[`rust/proto/supertag/runtime/v2/runtime.proto`](../../rust/proto/supertag/runtime/v2/runtime.proto),
+[`proto/supertag/runtime/v2/runtime.proto`](../../proto/supertag/runtime/v2/runtime.proto),
 service `supertag.runtime.v2.Connector`.
 
 ## Where a connector connects
@@ -105,9 +105,9 @@ resolves it with evidence from the surface.
 
 ## Example
 
-[`rust/crates/cli/fixtures/example_connector.rs`](../../rust/crates/cli/fixtures/example_connector.rs)
+[`core/crates/cli/fixtures/example_connector.rs`](../../core/crates/cli/fixtures/example_connector.rs)
 is a complete connector in one file. It depends only on the protocol crate.
-`rust/crates/cli/tests/external_connector_runtime.rs` runs it as a separate process against a real
+`core/crates/cli/tests/external_connector_runtime.rs` runs it as a separate process against a real
 Control Plane on SQLite and PostgreSQL: it admits an event, replays it, delivers the reply once,
 and releases the account.
 

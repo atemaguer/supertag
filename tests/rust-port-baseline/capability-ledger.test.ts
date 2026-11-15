@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
  * commit is present, the last test confirms the lists against it.
  */
 const root = resolve(import.meta.dirname, "../..");
-const ledger = await readFile(join(root, "rust/docs/rust-port-capability-ledger.md"), "utf8");
+const ledger = await readFile(join(root, "docs/development/rust-port-capability-ledger.md"), "utf8");
 const FROZEN_AT = "6c934be8c25a60226fa43c7bdc87d312bae495a7";
 
 const list = async (name: string) =>
@@ -56,7 +56,7 @@ async function rustSources(directory: string): Promise<string[]> {
     .map((entry) => join(entry.parentPath, entry.name));
 }
 
-const crates = join(root, "rust/crates");
+const crates = join(root, "core/crates");
 const rustFiles = new Map(
   await Promise.all(
     (await rustSources(crates)).map(
@@ -106,7 +106,7 @@ function tableRows(...header: string[]): string[][] {
 const capabilities = tableRows("Capability", "TypeScript tests", "Rust tests", "Status", "Gap");
 const exempt = tableRows("TypeScript tests", "Reason");
 
-/** A cited Rust file: a crate-relative path, or a file name that is unique under rust/crates. */
+/** A cited Rust file: a crate-relative path, or a file name that is unique under core/crates. */
 function rustFile(citation: string): string | undefined {
   const matches = [...rustFiles.keys()].filter(
     (path) => path === citation || path.endsWith(`/${citation}`),
@@ -196,8 +196,8 @@ describe("Rust port capability ledger", () => {
     const missing = paths.filter(
       (path) =>
         !existsSync(join(root, path)) &&
-        !existsSync(join(root, "rust/crates", path)) &&
-        !existsSync(join(root, "rust/crates/cli/tests", path)) &&
+        !existsSync(join(root, "core/crates", path)) &&
+        !existsSync(join(root, "core/crates/cli/tests", path)) &&
         !removedByCutover(path),
     );
     // Design documents live in the gitignored contributing/ directory.

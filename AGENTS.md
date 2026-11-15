@@ -30,7 +30,7 @@ optional service that carries collaboration surface traffic as a client of the C
 The services and CLI are Rust (`rust/`). The TypeScript that remains is the Node harness bridges
 and Workspace providers that Worker Hosts start (`packages/runtime`), the shared code they use
 (`packages/core`), and the desktop app's frontend (`apps/desktop`). The terminal UI is Go
-(`apps/tui`). [`rust/docs/typescript-removal-inventory.md`](rust/docs/typescript-removal-inventory.md)
+(`apps/tui`). [`docs/development/typescript-removal-inventory.md`](docs/development/typescript-removal-inventory.md)
 records why each remaining TypeScript package stays.
 
 ## Rules that are easy to violate
@@ -39,7 +39,7 @@ records why each remaining TypeScript package stays.
 and carry no compatibility promise; never tell users to depend on them.
 
 **Two databases, always.** Every schema change adds a migration to both
-`rust/crates/control-plane/migrations/sqlite` and `rust/crates/control-plane/migrations/postgresql`,
+`core/crates/control-plane/migrations/sqlite` and `core/crates/control-plane/migrations/postgresql`,
 and its tests run on both databases (`::sqlite` and `::postgres` cases).
 
 **`docs/` is for users and integrators.** Explain how to use SuperTag and how it works.
@@ -85,7 +85,7 @@ Never link to them from tracked files, and don't treat their commands or fields 
 `supertag worker pair`, for example, appears there but is not implemented.
 
 **`docs/reference/cli.md` is the command inventory.** It is generated from the Rust CLI's help and
-checked by `rust/crates/cli/tests/cli_help.rs`; regenerate it with
+checked by `core/crates/cli/tests/cli_help.rs`; regenerate it with
 `SUPERTAG_UPDATE_CLI_REFERENCE=1` when a command changes. `pnpm docs:check` validates every
 documented `supertag` command and flag against it.
 
@@ -95,7 +95,7 @@ documented `supertag` command and flag against it.
 pnpm check   # biome + protobuf generation + typecheck + docs
 pnpm test    # vitest
 pnpm build   # tsc --build
-cargo test --manifest-path rust/Cargo.toml --locked --workspace --all-features
+cargo test --manifest-path core/Cargo.toml --locked --workspace --all-features
 ```
 
 Run `go test ./...` in `apps/tui` after terminal UI changes. PostgreSQL and fixture-dependent Rust

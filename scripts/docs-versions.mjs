@@ -7,12 +7,12 @@ const illustrativeVersions = new Set([
 // Contributors pack and install the package to test it.
 const archiveAllowed = new Set(["CONTRIBUTING.md"]);
 
-/** The release version: rust/Cargo.toml's workspace.package version. */
+/** The release version: core/Cargo.toml's workspace.package version. */
 export function workspaceVersion(cargoToml) {
   const version = /^\[workspace\.package\]\n(?:[^[\n].*\n)*?version = "([^"]+)"/mu.exec(
     cargoToml,
   )?.[1];
-  if (version === undefined) throw new Error("rust/Cargo.toml names no workspace version");
+  if (version === undefined) throw new Error("core/Cargo.toml names no workspace version");
   return version;
 }
 

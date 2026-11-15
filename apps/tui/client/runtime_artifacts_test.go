@@ -13,8 +13,8 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
-	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
+	rpc "github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
 
 func TestRuntimeReplyMakesAcceptedTaskFilesDiscoverable(t *testing.T) {

@@ -13,7 +13,7 @@
     "check:fix": "biome check --write .",
     "clean": "tsc --build --clean",
     "docs:check": "node scripts/check-docs.mjs",
-    "supertag": "cargo run --quiet --manifest-path rust/Cargo.toml --locked -p supertag-cli --bin supertag --",
+    "supertag": "cargo run --quiet --manifest-path core/Cargo.toml --locked -p supertag-cli --bin supertag --",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --build --pretty false"

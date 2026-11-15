@@ -8,7 +8,7 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	connectrpc.com/connect v1.21.1
-	github.com/atemaguer/supertag/rust/bindings/go v0.0.0
+	github.com/atemaguer/supertag/sdks/go v0.0.0
 	github.com/charmbracelet/x/ansi v0.11.9
 	golang.org/x/sys v0.47.0
 	google.golang.org/protobuf v1.36.12
@@ -41,4 +41,4 @@ require (
 	golang.org/x/text v0.24.0 // indirect
 )
 
-replace github.com/atemaguer/supertag/rust/bindings/go => ../../rust/bindings/go
+replace github.com/atemaguer/supertag/sdks/go => ../../sdks/go

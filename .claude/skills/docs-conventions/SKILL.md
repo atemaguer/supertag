@@ -34,7 +34,7 @@ Two intentional exceptions to the CLI form:
 - `docs/operations/control-plane.md` may contrast invocation forms.
 
 `docs/reference/cli.md` is the command inventory. It is generated from the Rust CLI's help and
-checked by `rust/crates/cli/tests/cli_help.rs`; regenerate it with
+checked by `core/crates/cli/tests/cli_help.rs`; regenerate it with
 `SUPERTAG_UPDATE_CLI_REFERENCE=1`. Before documenting a command or flag, confirm it there.
 `pnpm docs:check` validates every documented `supertag` command and flag against it. Operator
 commands find the local services on their own, so examples for a local setup name no Control

@@ -29,7 +29,7 @@ execFileSync(
   ],
   { stdio: "inherit" },
 );
-const release = workspaceVersion(readFileSync(join(root, "rust/Cargo.toml"), "utf8"));
+const release = workspaceVersion(readFileSync(join(root, "core/Cargo.toml"), "utf8"));
 // Keep the Objective-writing entry point available from the documentation index.
 const objectiveGuide = "guides/write-an-objective.md";
 if (!existsSync(join(root, "docs", objectiveGuide)))
@@ -63,7 +63,7 @@ const files = [
 
 // --- Command inventory from the CLI reference ----------------------------------------------
 // docs/reference/cli.md is generated from the help of every visible command, and
-// rust/crates/cli/tests/cli_help.rs fails when the CLI's help no longer matches it.
+// core/crates/cli/tests/cli_help.rs fails when the CLI's help no longer matches it.
 const reference = "docs/reference/cli.md";
 const cli = parseReference(readFileSync(join(root, reference), "utf8"));
 

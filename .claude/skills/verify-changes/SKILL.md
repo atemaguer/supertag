@@ -13,8 +13,8 @@ Run from the repository root after `pnpm install`.
 pnpm check   # biome, typecheck, docs
 pnpm test    # vitest: Node bridges, Worker SDK, repository checks
 pnpm build   # tsc --build
-cargo test --manifest-path rust/Cargo.toml --locked --workspace --all-features
-cargo clippy --manifest-path rust/Cargo.toml --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --manifest-path core/Cargo.toml --locked --workspace --all-features
+cargo clippy --manifest-path core/Cargo.toml --locked --workspace --all-targets --all-features -- -D warnings
 ```
 
 `pnpm docs:check` checks every documented `supertag` command and flag against

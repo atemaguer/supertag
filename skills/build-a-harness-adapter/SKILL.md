@@ -25,7 +25,7 @@ Do not build one when Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents fit
 4. End with `Harness.Complete`: `result`, `succeeded`, and a `checkpoint` if the agent can resume.
 
 Never print the token or pass it to the agent. The messages are in
-[`rust/proto/supertag/runtime/v2/runtime.proto`](../../rust/proto/supertag/runtime/v2/runtime.proto).
+[`proto/supertag/runtime/v2/runtime.proto`](../../proto/supertag/runtime/v2/runtime.proto).
 
 ## Start from an existing adapter
 
@@ -33,7 +33,7 @@ Never print the token or pass it to the agent. The messages are in
   and `supertag.harness_adapter.open_harness` for the connection.
 - TypeScript: the Claude Code, Cursor, and OpenCode bridges under
   `packages/runtime/harnesses/*/src/rust-adapter/`.
-- Other languages: the generated bindings in [`rust/bindings`](../../rust/bindings/README.md).
+- Other languages: the generated bindings in [`rust/bindings`](../../sdks/README.md).
 
 ## Run and verify
 

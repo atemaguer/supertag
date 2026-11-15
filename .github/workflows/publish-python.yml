@@ -36,7 +36,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Check the tag names the release version
-        run: python rust/scripts/release_version.py "$RELEASE_TAG"
+        run: python scripts/release_version.py "$RELEASE_TAG"
       # PyPI versions are immutable: publish only for a release users can install.
       - name: Check the release carries its native archives
         env:
@@ -53,12 +53,12 @@ jobs:
           cache: pnpm
       - uses: actions/setup-go@v5
         with:
-          go-version-file: rust/bindings/go/go.mod
-          cache-dependency-path: rust/bindings/go/go.sum
+          go-version-file: sdks/go/go.mod
+          cache-dependency-path: sdks/go/go.sum
       - run: python -m pip install --upgrade build twine uv==0.9.5
       - run: pnpm install --frozen-lockfile
       - name: Check the generated bindings match the protobuf source
-        run: uv run --python 3.13 --script rust/scripts/generate-bindings.py --check
+        run: uv run --python 3.13 --script scripts/generate-bindings.py --check
       - run: python -m build sdks/python --outdir dist
       - run: python -m twine check dist/*
       - name: Check the wheel carries the generated bindings

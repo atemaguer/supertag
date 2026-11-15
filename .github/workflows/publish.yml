@@ -39,7 +39,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Check the tag names the release version
-        run: python rust/scripts/release_version.py "$RELEASE_TAG"
+        run: python scripts/release_version.py "$RELEASE_TAG"
       - name: Check the release carries its native archives
         env:
           GH_TOKEN: ${{ github.token }}

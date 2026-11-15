@@ -13,8 +13,8 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
-	rpc "github.com/atemaguer/supertag/rust/bindings/go/runtimev2/runtimev2connect"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
+	rpc "github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
 
 // fakeControlPlane serves the Control Plane's runtime.v2 operator services from the presentation

@@ -1,6 +1,6 @@
 ---
 name: add-a-migration
-description: Change the database schema across both SQLite and PostgreSQL with matching migrations. Read before editing rust/crates/control-plane/migrations or the store.
+description: Change the database schema across both SQLite and PostgreSQL with matching migrations. Read before editing core/crates/control-plane/migrations or the store.
 ---
 
 # Add a migration
@@ -12,9 +12,9 @@ production and replicas. **Both are first-class.** Every schema change touches b
 
 | File | Purpose |
 | --- | --- |
-| `rust/crates/control-plane/migrations/sqlite/NNNN_name.sql` | SQLite migration |
-| `rust/crates/control-plane/migrations/postgresql/NNNN_name.sql` | PostgreSQL migration with the same number and name |
-| `rust/crates/control-plane/src/store.rs` | The ordered `include_str!` lists, one per dialect |
+| `core/crates/control-plane/migrations/sqlite/NNNN_name.sql` | SQLite migration |
+| `core/crates/control-plane/migrations/postgresql/NNNN_name.sql` | PostgreSQL migration with the same number and name |
+| `core/crates/control-plane/src/store.rs` | The ordered `include_str!` lists, one per dialect |
 
 ## Procedure
 
@@ -26,7 +26,7 @@ production and replicas. **Both are first-class.** Every schema change touches b
 
    ```sh
    export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE=/path/to/private-url-file
-   SUPERTAG_RUST_TEST_REQUIRE=postgres cargo test --manifest-path rust/Cargo.toml --locked \
+   SUPERTAG_RUST_TEST_REQUIRE=postgres cargo test --manifest-path core/Cargo.toml --locked \
      -p supertag-control-plane -- --include-ignored
    ```
 

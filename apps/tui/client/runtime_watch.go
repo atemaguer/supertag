@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
-	v2 "github.com/atemaguer/supertag/rust/bindings/go/runtimev2"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
 )
 
 func (w *Watcher) watchRuntime(ctx context.Context, token *string, send func(WatchUpdate) bool) (bool, error) {

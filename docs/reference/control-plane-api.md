@@ -7,7 +7,7 @@ connect collaboration surfaces). This page is the contract for calling it. See t
 [glossary](glossary.md) for terms.
 
 The API is the protobuf package `supertag.runtime.v2`, defined in
-[`rust/proto/supertag/runtime/v2/`](../../rust/proto/supertag/runtime/v2/runtime.proto). Its
+[`proto/supertag/runtime/v2/`](../../proto/supertag/runtime/v2/runtime.proto). Its
 comments are the field-level reference.
 
 ## Connect
@@ -75,7 +75,7 @@ The other services in the package serve Worker Hosts, Gateways, and harness adap
 ## Call it from your application
 
 Generated bindings for Go, TypeScript, and Python live in
-[`rust/bindings`](../../rust/bindings/README.md). The Go module exposes Connect clients; pass
+[`rust/bindings`](../../sdks/README.md). The Go module exposes Connect clients; pass
 `connect.WithGRPC()`. TypeScript exports protobuf-es messages and service descriptors, and Python
 exposes messages and gRPC stubs.
 

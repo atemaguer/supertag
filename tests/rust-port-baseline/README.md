@@ -1,6 +1,6 @@
 # Rust port capability ledger check
 
-`capability-ledger.test.ts` checks `rust/docs/rust-port-capability-ledger.md`, which is frozen at
+`capability-ledger.test.ts` checks `docs/development/rust-port-capability-ledger.md`, which is frozen at
 `6c934be8`, the last commit that contained the TypeScript runtime:
 
 - each Rust test it cites still exists in the Rust file cited before it;

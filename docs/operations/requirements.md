@@ -26,7 +26,7 @@ Check this page before [installing SuperTag](install.md).
   [installer script](install.md#install-a-release-archive) keeps earlier releases under
   `~/.local/share/supertag/versions`; remove ones you no longer use.
 - **To build a release archive from a checkout**: the Rust toolchain pinned in
-  `rust/rust-toolchain.toml`, Go, pnpm, Python 3.13, and uv. See
+  `core/rust-toolchain.toml`, Go, pnpm, Python 3.13, and uv. See
   [Build an archive from a checkout](install.md#build-an-archive-from-a-checkout).
 
 ## Choose and sign in to a harness
