@@ -393,7 +393,7 @@ database_tests! {
     #[tokio::test]
     opencode_recovers_missing_terminal_from_credential_free_local_export;
     #[tokio::test]
-    opencode_leaves_unsupported_limits_and_unapproved_commands_queued;
+    opencode_refuses_unsupported_limits_and_queues_unapproved_commands;
     #[tokio::test]
     opencode_claims_and_runs_the_accepted_role_model;
     #[tokio::test]
@@ -711,7 +711,7 @@ async fn opencode_recovers_missing_terminal_from_credential_free_local_export(
     Ok(())
 }
 
-async fn opencode_leaves_unsupported_limits_and_unapproved_commands_queued(
+async fn opencode_refuses_unsupported_limits_and_queues_unapproved_commands(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
@@ -719,7 +719,9 @@ async fn opencode_leaves_unsupported_limits_and_unapproved_commands_queued(
     runtime
         .tag("native", HarnessKind::Opencode, &["files:read"])
         .await?;
-    let limited = runtime
+    // A Tag fixes its harness, so a limit OpenCode cannot enforce is refused at submission
+    // instead of waiting for a host that can never claim it.
+    let refused = runtime
         .submit(
             "native",
             "limited",
@@ -729,22 +731,18 @@ async fn opencode_leaves_unsupported_limits_and_unapproved_commands_queued(
                 ..Default::default()
             }),
         )
-        .await?;
-    let mut host = runtime.host(directory.path())?;
-    host.success().await?;
-    let task = runtime.task(&limited.task_id).await?;
+        .await
+        .err()
+        .context("OpenCode accepted a native agent limit it cannot enforce")?;
+    let status = refused
+        .downcast_ref::<tonic::Status>()
+        .context("submission failed without a gRPC status")?;
     ensure!(
-        task.state() == TaskState::Queued,
-        "unsupported bound was assigned to OpenCode: {:?}",
-        task.state()
-    );
-    ensure!(
-        task.attempt_id.is_none(),
-        "unsupported bound gained execution authority"
-    );
-    ensure!(
-        runtime.calls()?.is_empty(),
-        "native process started with an unenforceable bound"
+        status.code() == tonic::Code::FailedPrecondition
+            && status
+                .message()
+                .starts_with("OpenCode cannot enforce a native agent limit"),
+        "unexpected refusal: {status:?}"
     );
     runtime
         .tag(
