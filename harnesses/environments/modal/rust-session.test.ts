@@ -285,34 +285,49 @@ async function forkingMcpServer() {
     }
     throw new Error("the forked child never started");
   };
-  const exited = async (pid: number) => {
-    for (let attempt = 0; attempt < 100; attempt++) {
-      try {
-        process.kill(pid, 0);
-      } catch {
-        return true;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    return false;
-  };
-  return { start: { name: "tools", command: "sh", args: ["-c", script] }, childPid, exited };
+  return { start: { name: "tools", command: "sh", args: ["-c", script] }, childPid };
 }
+
+/**
+ * Milliseconds from `since` until `pid` is gone, or undefined after 15 seconds. Poll it alongside
+ * the call that stops the process, so the time covers the stop alone.
+ */
+async function goneAfter(pid: number, since: number): Promise<number | undefined> {
+  while (Date.now() - since < 15_000) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return Date.now() - since;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return undefined;
+}
+
+/**
+ * The supervisor's stop schedule: half a second after a server's input ends, SIGTERM; two seconds
+ * later, SIGKILL to its group; plus margin. Only that stop is timed. The Git work capture does
+ * afterwards takes as long as the machine makes it, so it is not timed.
+ */
+const MCP_STOP_BOUND_MS = 4_500;
 
 it("stops a Workspace MCP server's process group before capture without ending the sandbox", async () => {
   const f = await fixture();
   const { header, bytes } = await bundle();
   await f.session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
   await f.session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
-  const { start, childPid, exited } = await forkingMcpServer();
+  const { start, childPid } = await forkingMcpServer();
   const server = await f.session.startMcpServer(start);
   const pid = await childPid();
   const started = Date.now();
+  const gone = goneAfter(pid, started);
   // On Modal a process's terminate is the sandbox's, so the stop goes through the input.
   const captured = await f.session.capture();
-  expect(Date.now() - started).toBeLessThan(4_500);
   expect(captured.tree.byteLength).toBeGreaterThan(0n);
-  expect(await exited(pid)).toBe(true);
+  // The child ignored SIGTERM, so only the group's SIGKILL ends it.
+  const stoppedAfter = await gone;
+  expect(stoppedAfter).toBeDefined();
+  expect(stoppedAfter).toBeLessThan(MCP_STOP_BOUND_MS);
   await expect(server.wait()).resolves.toBeDefined();
   expect(f.terminate).not.toHaveBeenCalled();
   expect(f.inventory.terminate).not.toHaveBeenCalled();
@@ -332,9 +347,10 @@ it("stops a Workspace MCP server that is not reading its input before capture", 
   // More input than a pipe holds, which a server busy elsewhere never takes.
   await server.write?.(new Uint8Array(256 * 1024));
   const started = Date.now();
+  const stopped = server.wait().then(() => Date.now() - started);
   const captured = await session.capture();
-  expect(Date.now() - started).toBeLessThan(4_500);
   expect(captured.tree.byteLength).toBeGreaterThan(0n);
+  expect(await stopped).toBeLessThan(MCP_STOP_BOUND_MS);
   await expect(server.wait()).resolves.toBeDefined();
   expect(f.terminate).not.toHaveBeenCalled();
 }, 20_000);

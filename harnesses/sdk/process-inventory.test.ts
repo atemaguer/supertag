@@ -81,7 +81,17 @@ async function fakeProc(
   const root = await temporary("fake-proc-");
   await writeFile(join(root, "uptime"), "1 1\n");
   await mkdir(join(root, "self"));
-  for (const entry of entries) {
+  // Each entry is several small files. Written one at a time, a large fixture spends seconds
+  // waiting on file creation on a busy machine, so write a few entries at once.
+  const pending = [...entries];
+  await Promise.all(
+    Array.from({ length: Math.min(16, pending.length) }, async () => {
+      for (let entry = pending.shift(); entry; entry = pending.shift()) await writeEntry(entry);
+    }),
+  );
+  return root;
+
+  async function writeEntry(entry: (typeof entries)[number]): Promise<void> {
     const base = join(root, String(entry.pid));
     await mkdir(base);
     await writeFile(
@@ -97,7 +107,6 @@ async function fakeProc(
     }
     if (entry.cwd) await symlink(entry.cwd, join(base, "cwd"));
   }
-  return root;
 }
 
 describe("parseProcStat", () => {
@@ -316,11 +325,12 @@ describe("Linux /proc inventory", () => {
   );
 
   it("reads concurrently without opening every entry at once", async () => {
+    // Three times the inventory's 32 concurrent reads, so it must reuse its readers.
     const root = await fakeProc(
-      Array.from({ length: 200 }, (_, index) => ({ pid: 10 + index, parent: 1, started: index })),
+      Array.from({ length: 96 }, (_, index) => ({ pid: 10 + index, parent: 1, started: index })),
     );
     const snapshot = await procInventory({ root, selfPid: 10 }).snapshot({});
-    expect(snapshot.entries).toHaveLength(200);
+    expect(snapshot.entries).toHaveLength(96);
   });
 
   it("reads one PID's start time for the signal-time identity check", async () => {
