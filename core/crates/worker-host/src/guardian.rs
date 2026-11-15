@@ -207,6 +207,9 @@ fn stop_group(
     descendants: &mut Descendants,
     group: i32,
 ) -> Result<()> {
+    // Record the adapter's processes while it still parents them. A tool that detached since
+    // the last periodic scan is otherwise orphaned by stop_adapter before the sweep can find it.
+    let _ = descendants.observe();
     let reaped = stop_adapter(child);
     // Stop processes that left the group too, while this guardian can still adopt them.
     let swept = if reaped.is_ok() {

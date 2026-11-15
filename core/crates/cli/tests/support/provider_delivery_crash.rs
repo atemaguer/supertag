@@ -587,16 +587,28 @@ pub(crate) async fn exercise_delivery(
     )?;
     gateway.endpoints(case.provider.endpoints()).await?;
 
-    let mut operator = OperatorClient::new(protocol::dial(format!("http://{private}")).await?);
-    operator
-        .put_tag(credentials.request(PutTagRequest {
-            tag_id: TAG_ID.into(),
-            instructions: INSTRUCTIONS.into(),
-            allowed_actions: vec!["files:read".into()],
-            ..Default::default()
-        })?)
-        .await?;
-    let task = case.provider.admit(private, &credentials).await?;
+    let operator = OperatorClient::new(protocol::dial(format!("http://{private}")).await?);
+    let credentials = &credentials;
+    retry("put the Tag", || {
+        let mut operator = operator.clone();
+        async move {
+            operator
+                .put_tag(credentials.request(PutTagRequest {
+                    tag_id: TAG_ID.into(),
+                    instructions: INSTRUCTIONS.into(),
+                    allowed_actions: vec!["files:read".into()],
+                    ..Default::default()
+                })?)
+                .await?;
+            Ok(())
+        }
+    })
+    .await?;
+    // The provider's delivery ID makes a repeated admission resolve to the same Task.
+    let task = retry("admit the provider event", || {
+        case.provider.admit(private, credentials)
+    })
+    .await?;
 
     // The Task finishes on a host that the crash never touches.
     let mut host = credentials.command();
@@ -629,23 +641,29 @@ pub(crate) async fn exercise_delivery(
     // Restart only the Gateway, on the same delivery journal.
     let mut gateway = case
         .provider
-        .gateway(&credentials, directory, private, &mock, None)?;
+        .gateway(credentials, directory, private, &mock, None)?;
     gateway.endpoints(case.provider.endpoints()).await?;
     let deadline = Instant::now() + WAIT;
     let reply = loop {
-        let reply = operator
-            .list_reply_deliveries(credentials.request(ListReplyDeliveriesRequest {
-                account_id: case.provider.principal().replacen("connector:", "", 1),
-                state: 0,
-                limit: 10,
-                before_order: 0,
-            })?)
-            .await?
-            .into_inner()
-            .deliveries
-            .into_iter()
-            .filter_map(|delivery| delivery.reply)
-            .find(|reply| reply.task_id == task.task_id);
+        let reply = retry("list the replies", || {
+            let mut operator = operator.clone();
+            async move {
+                Ok(operator
+                    .list_reply_deliveries(credentials.request(ListReplyDeliveriesRequest {
+                        account_id: case.provider.principal().replacen("connector:", "", 1),
+                        state: 0,
+                        limit: 10,
+                        before_order: 0,
+                    })?)
+                    .await?
+                    .into_inner()
+                    .deliveries)
+            }
+        })
+        .await?
+        .into_iter()
+        .filter_map(|delivery| delivery.reply)
+        .find(|reply| reply.task_id == task.task_id);
         if let Some(reply) = reply
             && matches!(
                 reply.state(),
@@ -684,12 +702,17 @@ pub(crate) async fn exercise_delivery(
             );
         }
     }
-    let task = operator
-        .get_task(credentials.request(GetTaskRequest {
-            task_id: task.task_id.clone(),
-        })?)
-        .await?
-        .into_inner();
+    let task = retry("get the Task", || {
+        let mut operator = operator.clone();
+        let task_id = task.task_id.clone();
+        async move {
+            Ok(operator
+                .get_task(credentials.request(GetTaskRequest { task_id })?)
+                .await?
+                .into_inner())
+        }
+    })
+    .await?;
     ensure!(task.state() == TaskState::Succeeded, "{task:?}");
     ensure!(control_plane.child.try_wait()?.is_none());
     Ok(())

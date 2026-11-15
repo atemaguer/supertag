@@ -123,7 +123,7 @@ impl Owner<'_> {
                 None => Ok(false),
             },
             Ok(Err(error)) if error.code() == tonic::Code::FailedPrecondition => Ok(false),
-            Ok(Err(error)) if retryable(error.code()) => Ok(true),
+            Ok(Err(error)) if retryable(&error) => Ok(true),
             Err(_) => Ok(true),
             Ok(Err(error)) => anyhow::bail!(
                 "renew connector ownership rejected by Control Plane ({})",
@@ -241,17 +241,19 @@ async fn pause(shutdown: &CancellationToken, wait: Duration) {
     }
 }
 
-fn retryable(code: tonic::Code) -> bool {
+/// An outcome the Control Plane did not decide, such as its restart cutting the call off: keep the
+/// lease until it expires, or claim again, instead of stopping the Gateway.
+fn retryable(error: &tonic::Status) -> bool {
     matches!(
-        code,
+        error.code(),
         tonic::Code::Unavailable | tonic::Code::DeadlineExceeded | tonic::Code::Cancelled
-    )
+    ) || supertag_protocol::local_transport_failure(error)
 }
 
 async fn transient<T>(call: impl Future<Output = Result<T, tonic::Status>>) -> Result<Option<T>> {
     match time::timeout(CALL_TIMEOUT, call).await {
         Ok(Ok(value)) => Ok(Some(value)),
-        Ok(Err(error)) if retryable(error.code()) => Ok(None),
+        Ok(Err(error)) if retryable(&error) => Ok(None),
         Ok(Err(error)) => anyhow::bail!(
             "claim connector ownership rejected by Control Plane ({})",
             error.code()
@@ -263,6 +265,29 @@ async fn transient<T>(call: impl Future<Output = Result<T, tonic::Status>>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_control_plane_that_dies_mid_call_does_not_stop_ownership() -> Result<()> {
+        // How tonic reports a call the Control Plane's crash cut off: `Unknown` with the local
+        // I/O cause. A renewal or claim in flight then is retried, not fatal to the Gateway.
+        let reset = || {
+            tonic::Status::from_error(Box::new(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "connection reset",
+            )))
+        };
+        assert_eq!(reset().code(), tonic::Code::Unknown);
+        assert!(retryable(&reset()));
+        assert!(transient(async { Err::<(), _>(reset()) }).await?.is_none());
+        // A status the Control Plane itself sent is still definitive.
+        assert!(!retryable(&tonic::Status::unknown("rejected")));
+        assert!(
+            transient(async { Err::<(), _>(tonic::Status::unknown("rejected")) })
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
 
     #[test]
     fn drain_finishes_an_unanswered_claim_only_while_owning_the_account() {

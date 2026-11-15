@@ -219,18 +219,25 @@ impl BoundSource {
         token: &str,
         shutdown: &CancellationToken,
     ) -> Result<Serving> {
-        let mut request = authenticated_request(
-            RegisterArtifactSourceRequest {
-                storage_id: self.storage.id.clone(),
-            },
-            token,
-            None,
-        )?;
-        request.set_timeout(AUTHORIZATION_BUDGET);
-        let receipt = authority
-            .register_artifact_source(request)
-            .await?
-            .into_inner();
+        // Registration names the same storage every time, so a try the Control Plane did not
+        // answer in time, as while it restarts or is starved, is repeated rather than fatal.
+        let receipt = loop {
+            let mut request = authenticated_request(
+                RegisterArtifactSourceRequest {
+                    storage_id: self.storage.id.clone(),
+                },
+                token,
+                None,
+            )?;
+            request.set_timeout(AUTHORIZATION_BUDGET);
+            match authority.register_artifact_source(request).await {
+                Ok(receipt) => break receipt.into_inner(),
+                Err(error) if crate::retryable(&error) && !shutdown.is_cancelled() => {
+                    crate::wait_for_work(shutdown).await;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        };
         ensure!(
             receipt.storage_id == self.storage.id,
             "artifact source registration changed"

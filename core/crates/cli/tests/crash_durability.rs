@@ -75,6 +75,41 @@ const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
 const WAIT: Duration = Duration::from_secs(45);
 const POLL: Duration = Duration::from_millis(25);
 
+/// Whether a call failed before the Control Plane decided it: a try that missed its short
+/// deadline while the parallel run starved the services, a connection a restart refused or cut
+/// off, or a channel that could not connect yet. A status the Control Plane sent is not transient.
+fn transient(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.downcast_ref::<tonic::transport::Error>().is_some()
+            || cause.downcast_ref::<tonic::Status>().is_some_and(|status| {
+                matches!(
+                    status.code(),
+                    tonic::Code::Unavailable
+                        | tonic::Code::DeadlineExceeded
+                        | tonic::Code::Cancelled
+                ) || supertag_protocol::local_transport_failure(status)
+            })
+    })
+}
+
+/// Repeat an idempotent call until it succeeds, it fails for good, or `WAIT` passes. Each try
+/// keeps its own short deadline, so a try against a dead service ends quickly and a later one
+/// reaches its replacement; only the whole wait bounds a slow but live service.
+async fn retry<T, F, Fut>(what: &str, mut call: F) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    let deadline = Instant::now() + WAIT;
+    loop {
+        match call().await {
+            Ok(value) => return Ok(value),
+            Err(error) if transient(&error) && Instant::now() < deadline => sleep(POLL).await,
+            Err(error) => return Err(error.context(format!("{what} did not succeed"))),
+        }
+    }
+}
+
 const TAG: &str = "crash-engineer";
 const INSTRUCTIONS: &str = "Respond carefully";
 const PROMPT: &str = "inspect the crash fixture";
@@ -185,6 +220,7 @@ impl Credentials {
 /// Owns and reaps each service, including when an assertion or RPC fails.
 struct Process {
     child: Child,
+    name: String,
     log: PathBuf,
 }
 
@@ -199,6 +235,7 @@ impl Process {
         }
         Ok(Self {
             child: command.spawn().context("spawn SuperTag process")?,
+            name: name.into(),
             log,
         })
     }
@@ -260,7 +297,8 @@ impl Process {
             }
             ensure!(
                 Instant::now() < deadline,
-                "process did not exit: {}",
+                "{} did not exit: {}",
+                self.name,
                 self.logs()
             );
             sleep(Duration::from_millis(10)).await;
@@ -514,21 +552,34 @@ impl<'a> System<'a> {
         Ok(OperatorClient::new(channel))
     }
 
+    /// Each put sets the same desired state again or repeats its operation ID, so a try whose
+    /// answer was lost is safe to repeat.
     async fn configure(&self) -> Result<()> {
-        let mut operator = self.operator().await?;
-        operator
-            .put_tag(self.credentials.request(PutTagRequest {
-                name: None,
-                expected_revision: None,
-                approval_rules: vec![],
-                harness_kind: 0,
-                workspace: None,
-                tag_id: TAG.into(),
-                instructions: INSTRUCTIONS.into(),
-                execution: None,
-                allowed_actions: vec!["files:read".into()],
-            })?)
-            .await?;
+        retry("put the Tag", || async {
+            self.operator()
+                .await?
+                .put_tag(self.credentials.request(PutTagRequest {
+                    name: None,
+                    expected_revision: None,
+                    approval_rules: vec![],
+                    harness_kind: 0,
+                    workspace: None,
+                    tag_id: TAG.into(),
+                    instructions: INSTRUCTIONS.into(),
+                    execution: None,
+                    allowed_actions: vec!["files:read".into()],
+                })?)
+                .await?;
+            Ok(())
+        })
+        .await?;
+        retry("put the Surface Account and location", || {
+            self.put_surface_policy()
+        })
+        .await
+    }
+
+    async fn put_surface_policy(&self) -> Result<()> {
         let mut policy = SurfacePolicyCatalogClient::new(
             protocol::dial(format!("http://{}", self.private)).await?,
         );
@@ -839,11 +890,12 @@ impl<'a> System<'a> {
             if self.crashed && self.settled(id).await? {
                 return Ok(());
             }
-            // A host that fails is never a recovered outcome.
-            let killed = !self.crashed && self.case.target == Target::WorkerHost;
-            if !killed
-                && let Some(status) = self.host_exit()?
+            // A host that fails is never a recovered outcome. Only the host chosen to crash may
+            // die, by SIGKILL at its crash point, before recover() sees the marker.
+            let crashing = !self.crashed && self.case.target == Target::WorkerHost;
+            if let Some(status) = self.host_exit()?
                 && !status.success()
+                && !(crashing && status.signal() == Some(libc::SIGKILL))
             {
                 bail!(
                     "host exited with {status} (crashed={}) at {}: {}",
@@ -877,34 +929,56 @@ impl<'a> System<'a> {
         ensure!(self.crashed, "crash point {} was never reached", case.point);
         // Exactly one Task: redelivering the same request resolves to the original.
         match case.ingress {
-            Ingress::Slack => ensure!(
-                post_slack_event(self.http).await? == Some(reqwest::StatusCode::OK),
-                "redelivered Slack event was not acknowledged"
-            ),
+            // Slack redelivers an event the webhook did not acknowledge, so the test does too.
+            Ingress::Slack => {
+                let deadline = Instant::now() + WAIT;
+                let status = loop {
+                    if let Some(status) = post_slack_event(self.http).await? {
+                        break status;
+                    }
+                    ensure!(
+                        Instant::now() < deadline,
+                        "redelivered Slack event was never acknowledged: {}",
+                        self.gateway.logs()
+                    );
+                    sleep(POLL).await;
+                };
+                ensure!(
+                    status == reqwest::StatusCode::OK,
+                    "redelivered Slack event returned {status}"
+                );
+            }
             Ingress::Operator => ensure!(
-                self.submit().await?.task_id == id,
+                retry("retry the submission", || self.submit())
+                    .await?
+                    .task_id
+                    == id,
                 "retried submission created another Task"
             ),
         }
         let ids = self.task_ids().await?;
         ensure!(ids == [id], "expected exactly Task {id}, found {ids:?}");
 
-        let task = self.task(id).await?;
-        let mut operator = self.operator().await?;
-        let events = operator
-            .list_events(self.credentials.request(ListEventsRequest {
-                task_id: id.into(),
-                after_sequence: 0,
-                limit: 100,
-            })?)
-            .await?
-            .into_inner()
-            .events;
+        let task = retry("get the Task", || self.task(id)).await?;
+        let events = retry("list the Task's events", || async {
+            Ok(self
+                .operator()
+                .await?
+                .list_events(self.credentials.request(ListEventsRequest {
+                    task_id: id.into(),
+                    after_sequence: 0,
+                    limit: 100,
+                })?)
+                .await?
+                .into_inner()
+                .events)
+        })
+        .await?;
         let sequences = events
             .iter()
             .map(|event| event.sequence)
             .collect::<Vec<_>>();
-        let replies = self.replies().await?;
+        let replies = retry("list the replies", || self.replies()).await?;
         let posts = self.mock.requests.lock().await.clone();
         let provider_requests = posts.len();
         // Provider posts carrying the Task's result, as opposed to its acknowledgement or

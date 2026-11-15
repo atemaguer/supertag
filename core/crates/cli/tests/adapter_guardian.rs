@@ -5,16 +5,39 @@ use std::{
     os::unix::process::CommandExt,
     path::Path,
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
+    sync::Once,
     thread,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, ensure};
 
+/// How long a fixture may take to reach a state it is polled for. It only bounds a hang: every
+/// wait returns as soon as its condition holds. The guardian's own limits (a 2 s stop grace, then
+/// a 2 s sweep) fit well inside it even when a parallel test run starves these processes.
+const WAIT: Duration = Duration::from_secs(30);
+
+/// Run the freshly built `supertag` once before any test times it. macOS checks a new binary on
+/// its first exec, which takes seconds for this one and longer while a parallel build or test run
+/// is checking others. Without this, that one-time check landed inside every test's deadline.
+fn warm_up() {
+    static WARM: Once = Once::new();
+    WARM.call_once(|| {
+        // Without a bootstrap frame the guardian exits at once; only the exec matters.
+        let _ = Command::new(env!("CARGO_BIN_EXE_supertag"))
+            .args(["__adapter-guardian", "--adapter", "/bin/true"])
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    });
+}
+
 struct Guardian(Child);
 
 impl Guardian {
     fn launch(script: &str, marker: &Path) -> Result<(Self, ChildStdin)> {
+        warm_up();
         let mut guardian = Self(
             Command::new(env!("CARGO_BIN_EXE_supertag"))
                 .args([
@@ -37,7 +60,7 @@ impl Guardian {
     }
 
     fn wait_for_exit(&mut self) -> Result<ExitStatus> {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + WAIT;
         loop {
             if let Some(status) = self.0.try_wait()? {
                 return Ok(status);
@@ -77,7 +100,7 @@ fn closing_the_host_pipe_stops_and_reaps_the_adapter() -> Result<()> {
     )?;
     write_frame(&mut pipe, u64::MAX)?;
 
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + WAIT;
     let pid: i32 = loop {
         if let Ok(contents) = std::fs::read_to_string(&pid_file)
             && let Ok(pid) = contents.trim().parse()
@@ -123,7 +146,7 @@ fn closing_the_host_pipe_allows_the_adapter_to_reap_its_native_child() -> Result
         &pid_file,
     )?;
     write_frame(&mut pipe, u64::MAX)?;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + WAIT;
     let pid: i32 = loop {
         if let Ok(contents) = std::fs::read_to_string(&pid_file)
             && let Ok(pid) = contents.trim().parse()
@@ -156,7 +179,7 @@ fn an_adapter_that_ignores_termination_is_forcibly_reaped() -> Result<()> {
         &pid_file,
     )?;
     write_frame(&mut pipe, u64::MAX)?;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + WAIT;
     let pid: i32 = loop {
         if let Ok(contents) = std::fs::read_to_string(&pid_file)
             && let Ok(pid) = contents.trim().parse()
@@ -184,7 +207,7 @@ fn a_stopped_guardian_cannot_launch_after_its_host_pipe_closes() -> Result<()> {
     let pid = i32::try_from(guardian.0.id())?;
     // SAFETY: pid is the positive PID of this test's guardian child.
     assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + WAIT;
     loop {
         let mut status = 0;
         // SAFETY: status is a valid out pointer and pid is this test's child.
@@ -211,7 +234,7 @@ fn a_stopped_guardian_cannot_launch_after_its_host_pipe_closes() -> Result<()> {
 const DETACHED_SLEEP: &str = r#"perl -MPOSIX -e 'POSIX::setsid() >= 0 or die; open(my $f, ">", "$ARGV[0].tmp") or die; print $f "$$\n"; close($f); rename("$ARGV[0].tmp", $ARGV[0]) or die; exec("sleep", "60")' "$1""#;
 
 fn read_pid(path: &Path) -> Result<i32> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + WAIT;
     loop {
         if let Ok(contents) = std::fs::read_to_string(path)
             && let Ok(pid) = contents.trim().parse()
@@ -228,7 +251,7 @@ fn read_pid(path: &Path) -> Result<i32> {
 
 /// Waits until `pid` no longer exists. Its new parent may need a moment to reap it.
 fn assert_gone(pid: i32) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + WAIT;
     loop {
         // Signal 0 checks the PID without changing process state.
         if unsafe { libc::kill(pid, 0) } == -1
@@ -251,7 +274,11 @@ fn a_descendant_that_left_the_group_is_stopped_after_the_adapter_succeeds() -> R
     let pid_file = directory.path().join("detached-pid");
     // The adapter outlives several scans, as a harness does that spawns a detached tool.
     let (mut guardian, mut pipe) = Guardian::launch(
-        &format!("cat >/dev/null; {DETACHED_SLEEP} & sleep 1; exit 0"),
+        // It exits only after the tool has left the group, however slowly the tool starts, so the
+        // guardian sees a detached process rather than a group member left running.
+        &format!(
+            "cat >/dev/null; {DETACHED_SLEEP} & while [ ! -s \"$1\" ]; do sleep 0.01; done; sleep 1; exit 0"
+        ),
         &pid_file,
     )?;
     write_frame(&mut pipe, u64::MAX)?;
@@ -270,8 +297,9 @@ fn a_descendant_that_left_the_group_is_stopped_when_the_host_pipe_closes() -> Re
         &pid_file,
     )?;
     write_frame(&mut pipe, u64::MAX)?;
+    // No pause for a periodic scan: the guardian records the adapter's processes before it
+    // stops the adapter, so a tool that detached just before the Host left is still found.
     let pid = read_pid(&pid_file)?;
-    thread::sleep(Duration::from_millis(300));
     drop(pipe);
     assert!(!guardian.wait_for_exit()?.success());
     assert_gone(pid)
