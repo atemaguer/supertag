@@ -293,6 +293,10 @@ confirm a reply.
 - **The host stops with a sign-in error.** Run `supertag sign-in HARNESS` as the host's user.
 - **A Claude Code, Cursor, or OpenCode Task that may run commands stays queued.** Add the
   harness to `allow-unsandboxed-commands`, or run Tasks that do not need commands.
+- **A Codex Task fails because it runs commands only through Codex code mode.** Grant the Tag
+  `web:fetch` as well as `commands:execute`. `allow-unsandboxed-commands` does not apply to Codex.
+- **A Cursor Task fails.** The result gives Cursor's reason, such as a model outside the
+  account's plan. Choose a model the plan includes in `models`, or add credits.
 
 See [Troubleshoot the first reply](troubleshooting.md).
 

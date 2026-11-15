@@ -206,6 +206,8 @@ for line in sys.stdin:
         root.joinpath("prompt").write_text(request["params"]["input"][0]["text"])
         if question_mode == "early": ask_native()
         reply(request, {"turn": {"id": turn, "status": "inProgress", "items": []}})
+        if root.joinpath("code-mode-warning").exists():
+            notify("warning", {"threadId": thread, "message": "Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed; enable `features.code_mode_host` and install `codex-code-mode-host`."})
         if late_baseline is not None:
             notify("thread/tokenUsage/updated", {"threadId": thread, "turnId": "prior-turn", "tokenUsage": {"total": late_baseline, "last": late_baseline}})
         if question_mode:

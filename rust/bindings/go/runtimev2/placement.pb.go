@@ -1152,10 +1152,12 @@ type TaskPlacementDiagnosis struct {
 	// Labels no bound host carries; every required label when each exists on
 	// some bound host but none carries them all.
 	MissingLabels []string `protobuf:"bytes,5,rep,name=missing_labels,json=missingLabels,proto3" json:"missing_labels,omitempty"`
-	// A scheduling requirement such as labels:macos,gpu. Empty when a bound
-	// host carries every required label.
+	// A scheduling requirement such as labels:macos,gpu. execution-limits,
+	// runtime-actions, or context when the Task's harness cannot enforce its
+	// accepted limits or actions, or load its required Skills.
+	// Empty when nothing found keeps a bound host from taking the Task.
 	Requirement string `protobuf:"bytes,6,opt,name=requirement,proto3" json:"requirement,omitempty"`
-	// A readable explanation, or empty when a bound host carries every label.
+	// A readable explanation, or empty when requirement is empty.
 	Summary string `protobuf:"bytes,7,opt,name=summary,proto3" json:"summary,omitempty"`
 	// Bound, unrevoked Worker Hosts in host ID order.
 	Hosts         []*HostPlacement `protobuf:"bytes,8,rep,name=hosts,proto3" json:"hosts,omitempty"`

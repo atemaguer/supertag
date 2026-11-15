@@ -192,10 +192,12 @@ message TaskPlacementDiagnosis {
   // Labels no bound host carries; every required label when each exists on
   // some bound host but none carries them all.
   repeated string missing_labels = 5;
-  // A scheduling requirement such as labels:macos,gpu. Empty when a bound
-  // host carries every required label.
+  // A scheduling requirement such as labels:macos,gpu. execution-limits,
+  // runtime-actions, or context when the Task's harness cannot enforce its
+  // accepted limits or actions, or load its required Skills.
+  // Empty when nothing found keeps a bound host from taking the Task.
   string requirement = 6;
-  // A readable explanation, or empty when a bound host carries every label.
+  // A readable explanation, or empty when requirement is empty.
   string summary = 7;
   // Bound, unrevoked Worker Hosts in host ID order.
   repeated HostPlacement hosts = 8;

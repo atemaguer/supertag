@@ -277,11 +277,20 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let explained = json(op(&["placement"], &["explain", trainer_id])).await?;
     assert_eq!(explained["requirement"], "labels:gpu");
     assert_eq!(explained["summary"], "No bound Worker Host has labels: gpu");
+    // Reading a queued Task names what it waits for.
+    assert_eq!(
+        json(state(trainer_id)).await?["waiting_for"],
+        json!({
+            "requirement": "labels:gpu",
+            "summary": "No bound Worker Host has labels: gpu",
+        })
+    );
 
     // The GPU host takes the trainer Task; the researcher Task still needs tpu.
     run_once(&public, &gpu_state, &["GPU"]).await?;
     let done = json(state(trainer_id)).await?;
     assert_eq!(done["state"], "TASK_STATE_SUCCEEDED", "{done}");
+    assert!(done.get("waiting_for").is_none(), "{done}");
     assert_eq!(
         json(state(research_id)).await?["state"],
         "TASK_STATE_QUEUED"

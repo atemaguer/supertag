@@ -196,22 +196,26 @@ async fn contract(url: &str) {
             },
         ),
     ] {
-        blocked.push(
-            store
-                .submit_task(
-                    OP,
-                    &SubmitTaskRequest {
-                        output_policy: None,
-                        tag_id: "direct".into(),
-                        session_id: name.into(),
-                        operation_id: name.into(),
-                        prompt: "Keep unsupported limit queued".into(),
-                        execution_limits: Some(limits),
-                        input_artifacts: vec![],
-                    },
-                )
-                .await
-                .unwrap(),
+        // A limit the harness cannot enforce is refused at admission instead of waiting forever.
+        let refused = store
+            .submit_task(
+                OP,
+                &SubmitTaskRequest {
+                    output_policy: None,
+                    tag_id: "direct".into(),
+                    session_id: name.into(),
+                    operation_id: name.into(),
+                    prompt: "Refuse unsupported limit".into(),
+                    execution_limits: Some(limits),
+                    input_artifacts: vec![],
+                },
+            )
+            .await;
+        assert!(
+            matches!(&refused, Err(StoreError::FailedPrecondition(reason))
+                if reason.starts_with("Cursor cannot enforce a ")
+                    && reason.contains("it supports no execution limits")),
+            "{refused:?}"
         );
     }
     store
@@ -401,11 +405,33 @@ async fn contract(url: &str) {
             .await,
         Err(StoreError::Conflict(_))
     ));
-    for task in blocked {
+    // Placement names what keeps each queued Task from the bound Cursor host.
+    let expected = [
+        (
+            "context",
+            "Cursor loads no Skills, and the Task requires one",
+        ),
+        (
+            "runtime-actions",
+            "Cursor cannot run accepted actions: network:connect",
+        ),
+        (
+            "runtime-actions",
+            "Cursor commands:execute also requires files:write",
+        ),
+    ];
+    assert_eq!(blocked.len(), expected.len());
+    for (task, (requirement, summary)) in blocked.iter().zip(expected) {
         assert_eq!(
             store.get_task(&task.task_id).await.unwrap().state(),
             TaskState::Queued
         );
+        let diagnosis = store.diagnose_task_placement(&task.task_id).await.unwrap();
+        assert_eq!(
+            (diagnosis.requirement.as_str(), diagnosis.summary.as_str()),
+            (requirement, summary)
+        );
+        assert!(diagnosis.hosts.iter().all(|host| host.eligible));
     }
     let task = store
         .start_task(

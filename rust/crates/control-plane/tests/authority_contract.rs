@@ -9,8 +9,8 @@ use sqlx::{Connection, Executor};
 use supertag_control_plane::{Store, StoreError};
 use supertag_protocol::v2::{
     AppendEventRequest, Assignment, AttemptDecision, ExecutionLimits, FinishTaskRequest,
-    HarnessKind, InspectAttemptRequest, ObjectiveSignal, ReportedCostLimit, ResolveAttemptRequest,
-    StartTaskRequest, SubmitTaskRequest, TaskState,
+    HarnessKind, InspectAttemptRequest, ObjectiveSignal, PutTagRequest, ReportedCostLimit,
+    ResolveAttemptRequest, StartTaskRequest, SubmitTaskRequest, TaskState,
 };
 use uuid::Uuid;
 
@@ -228,6 +228,61 @@ async fn route_execution_limits(store: &Store) {
     assert_eq!(claim.task.unwrap().task_id, tokens.task_id);
     store.cancel_task(&cost.task_id).await.unwrap();
     store.cancel_task(&tokens.task_id).await.unwrap();
+
+    // A Tag fixes its harness, so a limit that harness cannot enforce is refused at admission
+    // rather than left queued with no lane able to claim it.
+    let token_limit = || ExecutionLimits {
+        max_reported_tokens: Some(200_000),
+        ..Default::default()
+    };
+    for (tag, harness) in [
+        ("claude-bounded", HarnessKind::ClaudeCode),
+        ("codex-bounded", HarnessKind::Codex),
+    ] {
+        store
+            .put_tag_spec(PutTagRequest {
+                tag_id: tag.into(),
+                instructions: "Bounded work".into(),
+                harness_kind: harness.into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+    }
+    let refused = store
+        .submit_task(
+            "operator:alice",
+            &SubmitTaskRequest {
+                tag_id: "claude-bounded".into(),
+                execution_limits: Some(token_limit()),
+                ..turn("claude-tokens", "claude-tokens")
+            },
+        )
+        .await;
+    assert!(
+        matches!(&refused, Err(StoreError::FailedPrecondition(reason)) if reason
+            == "Claude Code cannot enforce a reported token limit; it supports only a reported \
+                cost limit in USD. Submit it without that limit, or to a Tag whose harness \
+                enforces it"),
+        "{refused:?}"
+    );
+    let accepted = store
+        .submit_task(
+            "operator:alice",
+            &SubmitTaskRequest {
+                tag_id: "codex-bounded".into(),
+                execution_limits: Some(token_limit()),
+                ..turn("codex-tokens", "codex-tokens")
+            },
+        )
+        .await
+        .unwrap();
+    let diagnosis = store
+        .diagnose_task_placement(&accepted.task_id)
+        .await
+        .unwrap();
+    assert_eq!(diagnosis.requirement, "");
+    store.cancel_task(&accepted.task_id).await.unwrap();
 }
 
 async fn authority_contract(url: &str) {

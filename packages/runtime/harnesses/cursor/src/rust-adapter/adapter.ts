@@ -15,7 +15,12 @@ import {
   TaskState,
   tagPortfolio,
 } from "@supertag/worker-sdk/internal/rust-harness";
-import { CURSOR_WORKER_POLICY, cursorToolsForSplit, runCursor } from "../index.js";
+import {
+  CURSOR_WORKER_POLICY,
+  CursorProtocolError,
+  cursorToolsForSplit,
+  runCursor,
+} from "../index.js";
 import {
   capturePortableCursorSessionState,
   restorePortableCursorSessionState,
@@ -130,6 +135,8 @@ export async function runAdapter(
   let active = true;
   let phase = "configuration";
   let outcome: CursorOutcome;
+  // Every credential this Attempt holds, so a failure detail can be reported without them.
+  const secrets = [bootstrap.token];
   try {
     cancellation.throwIfAborted();
     const shared = task.attemptExecution?.sharedExecution;
@@ -188,7 +195,7 @@ export async function runAdapter(
       : admittedModels.length > 0 && !admittedModels.includes(model);
     if (invalidModel) throw new Error("Cursor model is outside the accepted policy");
 
-    const secrets = [bootstrap.token, apiKey];
+    secrets.push(apiKey);
     const context = await createWorkspace(
       task.allowedActions,
       configuration.timeoutMs,
@@ -376,10 +383,18 @@ export async function runAdapter(
     }
   } catch (error) {
     if (error instanceof ExecutionCleanupError) throw error;
-    // Provider failures may contain credentials, provider output, or private paths.
+    // A CursorProtocolError carries the runner's or provider's reason, already stripped of
+    // terminal controls, redacted and bounded; it is redacted again with this Attempt's own
+    // credentials. Any other failure may contain credentials, provider output, or private paths.
+    const detail =
+      error instanceof CursorProtocolError ? safeText(error.message, secrets).slice(0, 600) : "";
     outcome = {
       succeeded: false,
-      result: cancellation.aborted ? "Cursor execution stopped." : `Cursor ${phase} failed.`,
+      result: cancellation.aborted
+        ? "Cursor execution stopped."
+        : detail
+          ? `Cursor ${phase} failed: ${detail}`
+          : `Cursor ${phase} failed.`,
     };
   }
   if (outcome.succeeded) cancellation.throwIfAborted();

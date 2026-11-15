@@ -10,9 +10,10 @@ use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        AttemptDecision, CancelTaskRequest, ExecutionLimits, GetTaskRequest, ListEventsRequest,
-        ListNativeUsageRequest, ReportedCostLimit, ResolveAttemptRequest, SubmitTaskRequest,
-        operator_client::OperatorClient,
+        AttemptDecision, CancelTaskRequest, DiagnoseTaskPlacementRequest, ExecutionLimits,
+        GetTaskRequest, ListEventsRequest, ListNativeUsageRequest, ReportedCostLimit,
+        ResolveAttemptRequest, SubmitTaskRequest, TaskState, operator_client::OperatorClient,
+        placement_client::PlacementClient,
     },
 };
 use uuid::Uuid;
@@ -282,11 +283,33 @@ pub async fn run(connection: Connection, command: TaskCommand) -> Result<()> {
     Ok(())
 }
 
+/// A queued Task also names what keeps every bound Worker Host from taking it, as
+/// `supertag placement explain` does, when the caller may read placement.
 pub(crate) async fn fetch(channel: ProtocolChannel, token: &str, task_id: String) -> Result<Value> {
-    Ok(task_json(
-        &client(channel)
-            .get_task(request(GetTaskRequest { task_id }, token)?)
-            .await?
-            .into_inner(),
-    ))
+    let task = client(channel.clone())
+        .get_task(request(GetTaskRequest { task_id }, token)?)
+        .await?
+        .into_inner();
+    let mut value = task_json(&task);
+    if task.state() == TaskState::Queued
+        && let Ok(diagnosis) = PlacementClient::new(channel)
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+            .diagnose_task(request(
+                DiagnoseTaskPlacementRequest {
+                    task_id: task.task_id.clone(),
+                },
+                token,
+            )?)
+            .await
+    {
+        let diagnosis = diagnosis.into_inner();
+        if !diagnosis.requirement.is_empty() {
+            value["waiting_for"] = json!({
+                "requirement": diagnosis.requirement,
+                "summary": diagnosis.summary,
+            });
+        }
+    }
+    Ok(value)
 }

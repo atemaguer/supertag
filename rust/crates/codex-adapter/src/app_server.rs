@@ -201,6 +201,8 @@ struct Stream {
     turn_requested: bool,
     resumed: bool,
     inventory: crate::questions::Tools,
+    /// Commands are admitted, but the code-mode host stays off; see `config::code_mode_host`.
+    commands_without_code_mode: bool,
 }
 
 impl Stream {
@@ -214,6 +216,7 @@ impl Stream {
         configured_model: Option<String>,
     ) -> Result<Self> {
         let resumed = expected_thread.is_some();
+        let commands_without_code_mode = policy.commands && !crate::config::code_mode_host(&policy);
         let mut native = events::Stream::new(policy, expected_thread);
         native.accept(&serde_json::to_vec(
             &json!({"type":"thread.started","thread_id":thread}),
@@ -234,6 +237,7 @@ impl Stream {
             turn_requested: false,
             resumed,
             inventory,
+            commands_without_code_mode,
         })
     }
 
@@ -552,6 +556,25 @@ impl Stream {
                 }
             }
             "error" => bail!("Codex reported a failed turn"),
+            // A code-mode-only model has no other command tool, so it would answer that commands
+            // are disabled and the Task would succeed without them.
+            "warning"
+                if self.commands_without_code_mode
+                    && params["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains("code-mode host is disabled")) =>
+            {
+                bail!(
+                    "Codex model {} runs commands only through Codex code mode, which SuperTag \
+                     enables only when the Task also admits web:fetch: code-mode commands can \
+                     reach the network that the commands:execute sandbox otherwise blocks. Grant \
+                     web:fetch to run commands with this model",
+                    self.configured_model
+                        .as_deref()
+                        .or(self.observed_model.as_deref())
+                        .unwrap_or("default")
+                )
+            }
             // Output deltas are represented by the authoritative completed item.
             method if method.starts_with("item/") && method.ends_with("/delta") => {}
             method

@@ -418,44 +418,13 @@ pub(crate) fn lease_is_live(row: &AnyRow, now: i64) -> Result<bool> {
 }
 
 fn supports_execution_limits(harness: HarnessKind, task: &Task) -> bool {
-    let Some(limits) = &task.execution_limits else {
-        return true;
-    };
-    match harness {
-        // Custom Harnesses confirm the applied limits on the local bridge before running.
-        HarnessKind::Unspecified => true,
-        HarnessKind::Codex => {
-            limits.max_reported_cost.is_none()
-                && limits.max_native_agents.is_none_or(|limit| limit == 0)
-        }
-        HarnessKind::ClaudeCode => {
-            limits.max_reported_tokens.is_none()
-                && limits.max_native_agents.is_none()
-                && limits
-                    .max_reported_cost
-                    .as_ref()
-                    .is_none_or(|limit| limit.currency == "USD")
-        }
-        HarnessKind::OpenaiAgents | HarnessKind::Opencode | HarnessKind::Cursor => false,
-    }
+    task.execution_limits.as_ref().is_none_or(|limits| {
+        crate::placement::unsupported_execution_limits(harness, limits).is_none()
+    })
 }
 
-// Cursor's local SDK bridge exposes only these scoped tools. Keep work requiring
-// another native capability queued instead of claiming it and weakening policy.
 fn supports_runtime_actions(harness: HarnessKind, task: &Task) -> bool {
-    harness != HarnessKind::Cursor
-        || (task.allowed_actions.iter().all(|action| {
-            matches!(
-                action.as_str(),
-                "files:read"
-                    | "files:write"
-                    | "commands:execute"
-                    | "web:search"
-                    | "workstream:post"
-                    | "mailbox:send"
-            )
-        }) && (!task.allowed_actions.iter().any(|a| a == "commands:execute")
-            || task.allowed_actions.iter().any(|a| a == "files:write")))
+    crate::placement::unsupported_runtime_actions(harness, &task.allowed_actions).is_none()
 }
 
 pub(super) async fn claim_candidate(

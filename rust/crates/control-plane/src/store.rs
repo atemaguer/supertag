@@ -1493,6 +1493,17 @@ async fn insert_task_options(
             return Err(StoreError::FailedPrecondition("workspace or harness changed; start a new Session".into()));
         }
     }
+    // A requested limit the Tag's harness cannot enforce would leave the Task queued forever.
+    if let Some(reason) = options.execution_limits.and_then(|limits| {
+        crate::placement::unsupported_execution_limits(
+            HarnessKind::try_from(accepted.policy.harness_kind).unwrap_or_default(),
+            limits,
+        )
+    }) {
+        return Err(StoreError::FailedPrecondition(format!(
+            "{reason}. Submit it without that limit, or to a Tag whose harness enforces it"
+        )));
+    }
     let limits = crate::budget_pool::root_in(
         transaction,
         tag_id,

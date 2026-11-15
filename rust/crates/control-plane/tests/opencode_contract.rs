@@ -192,22 +192,26 @@ async fn contract(url: &str) {
             },
         ),
     ] {
-        blocked.push(
-            store
-                .submit_task(
-                    OP,
-                    &SubmitTaskRequest {
-                        output_policy: None,
-                        tag_id: "direct".into(),
-                        session_id: name.into(),
-                        operation_id: name.into(),
-                        prompt: "Keep unsupported limit queued".into(),
-                        execution_limits: Some(limits),
-                        input_artifacts: vec![],
-                    },
-                )
-                .await
-                .unwrap(),
+        // A limit the harness cannot enforce is refused at admission instead of waiting forever.
+        let refused = store
+            .submit_task(
+                OP,
+                &SubmitTaskRequest {
+                    output_policy: None,
+                    tag_id: "direct".into(),
+                    session_id: name.into(),
+                    operation_id: name.into(),
+                    prompt: "Refuse unsupported limit".into(),
+                    execution_limits: Some(limits),
+                    input_artifacts: vec![],
+                },
+            )
+            .await;
+        assert!(
+            matches!(&refused, Err(StoreError::FailedPrecondition(reason))
+                if reason.starts_with("OpenCode cannot enforce a ")
+                    && reason.contains("it supports no execution limits")),
+            "{refused:?}"
         );
     }
     store

@@ -585,15 +585,17 @@ export type TaskPlacementDiagnosis = Message<"supertag.runtime.v2.TaskPlacementD
   missingLabels: string[];
 
   /**
-   * A scheduling requirement such as labels:macos,gpu. Empty when a bound
-   * host carries every required label.
+   * A scheduling requirement such as labels:macos,gpu. execution-limits,
+   * runtime-actions, or context when the Task's harness cannot enforce its
+   * accepted limits or actions, or load its required Skills.
+   * Empty when nothing found keeps a bound host from taking the Task.
    *
    * @generated from field: string requirement = 6;
    */
   requirement: string;
 
   /**
-   * A readable explanation, or empty when a bound host carries every label.
+   * A readable explanation, or empty when requirement is empty.
    *
    * @generated from field: string summary = 7;
    */

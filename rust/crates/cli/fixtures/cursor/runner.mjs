@@ -119,8 +119,18 @@ async function runFixture() {
         "baseline",
         "cancel",
         "after-cancel",
+        "provider-failure",
       ].includes(mode),
     );
+    if (mode === "provider-failure") {
+      // A provider refusal, as Cursor reports a model outside the account's plan.
+      emit({
+        type: "result",
+        status: "error",
+        error: `fixture-model is not included in your weekly usage (${key})`,
+      });
+      return;
+    }
     const shared = mode.startsWith("shared-");
     const sharedCommand = mode === "shared-command";
     const output = mode.startsWith("remote-output-");

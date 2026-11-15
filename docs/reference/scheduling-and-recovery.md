@@ -20,7 +20,9 @@ a queued Task only to a host that:
 5. is ready, not draining, and has a free slot for that harness.
 
 `supertag placement explain TASK_ID` reports which condition keeps a Task queued, and
-`supertag describe task TASK_ID` includes the same explanation.
+`supertag describe task TASK_ID` includes the same explanation as `waiting_for`. Its
+`requirement` is `worker-host`, `labels:NAMES`, or, when the Task's harness cannot run what the
+Task accepted, `execution-limits`, `runtime-actions`, or `context` (a required Skill).
 
 ## Placement by harness and model
 

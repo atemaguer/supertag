@@ -646,6 +646,8 @@ database_tests! {
     #[tokio::test]
     cursor_cancellation_reaps_native_descendant_and_keeps_prior_checkpoint;
     #[tokio::test]
+    cursor_provider_failure_reaches_the_task_result_redacted;
+    #[tokio::test]
     cursor_remote_lost_allocation_ack_keeps_work_fenced_until_absence_is_confirmed;
     #[tokio::test]
     cursor_e2b_workspace_runs_stdio_mcp_in_the_sandbox_from_the_trusted_copy;
@@ -1825,6 +1827,32 @@ async fn cursor_streams_scoped_tools_and_resumes_after_services_restart(
     assert_eq!(
         std::fs::read_to_string(fixture.source.join("workspace.txt"))?,
         "initial-content\n"
+    );
+    runtime.stop().await
+}
+
+async fn cursor_provider_failure_reaches_the_task_result_redacted(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(&fixture, TAG, HarnessKind::Cursor, &["files:read"])
+        .await?;
+    let task = runtime.submit(TAG, "provider-failure").await?;
+    worker_finished(
+        runtime.worker(&fixture, "provider-failure", false)?,
+        &fixture,
+    )
+    .await?;
+    let failed = runtime.task(&task.task_id).await?;
+    assert_eq!(failed.state(), TaskState::Failed);
+    assert_eq!(
+        failed.result.as_deref(),
+        Some(
+            "Cursor execution failed: Cursor run failed: fixture-model is not included in your \
+             weekly usage ([REDACTED])"
+        )
     );
     runtime.stop().await
 }

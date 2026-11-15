@@ -97,6 +97,139 @@ pub(crate) fn harness_label(harness: HarnessKind) -> Option<&'static str> {
     }
 }
 
+fn harness_name(harness: HarnessKind) -> &'static str {
+    match harness {
+        HarnessKind::Unspecified => "A custom harness",
+        HarnessKind::Codex => "Codex",
+        HarnessKind::ClaudeCode => "Claude Code",
+        HarnessKind::OpenaiAgents => "OpenAI Agents",
+        HarnessKind::Opencode => "OpenCode",
+        HarnessKind::Cursor => "Cursor",
+    }
+}
+
+/// Why `harness` cannot enforce these execution limits, or `None` when it can. Each built-in
+/// harness enforces only some limits, and a lane never claims a Task whose limits it would
+/// weaken. Custom harnesses confirm the applied limits on the local bridge before running.
+pub(crate) fn unsupported_execution_limits(
+    harness: HarnessKind,
+    limits: &ExecutionLimits,
+) -> Option<String> {
+    let tokens = limits.max_reported_tokens.is_some();
+    let cost = limits.max_reported_cost.as_ref();
+    let agents = limits.max_native_agents;
+    let (unsupported, supported): (Vec<&str>, &str) = match harness {
+        HarnessKind::Unspecified => return None,
+        HarnessKind::Codex => (
+            [
+                cost.map(|_| "a reported cost limit"),
+                agents
+                    .filter(|limit| *limit != 0)
+                    .map(|_| "a native agent limit above 0"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+            "a reported token limit and a native agent limit of 0",
+        ),
+        HarnessKind::ClaudeCode => (
+            [
+                tokens.then_some("a reported token limit"),
+                agents.map(|_| "a native agent limit"),
+                cost.filter(|limit| limit.currency != "USD")
+                    .map(|_| "a reported cost limit outside USD"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+            "only a reported cost limit in USD",
+        ),
+        HarnessKind::OpenaiAgents | HarnessKind::Opencode | HarnessKind::Cursor => (
+            [
+                tokens.then_some("a reported token limit"),
+                cost.map(|_| "a reported cost limit"),
+                agents.map(|_| "a native agent limit"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+            "no execution limits",
+        ),
+    };
+    (!unsupported.is_empty()).then(|| {
+        format!(
+            "{} cannot enforce {}; it supports {supported}",
+            harness_name(harness),
+            unsupported.join(" or ")
+        )
+    })
+}
+
+/// Runtime actions the Cursor bridge exposes through its scoped tools.
+const CURSOR_ACTIONS: &[&str] = &[
+    "files:read",
+    "files:write",
+    "commands:execute",
+    "web:search",
+    "workstream:post",
+    "mailbox:send",
+];
+
+/// Why `harness` cannot run a Task with these accepted actions, or `None` when it can. Cursor's
+/// local SDK bridge exposes only scoped tools; work needing another native capability stays
+/// queued instead of being claimed with weakened policy.
+pub(crate) fn unsupported_runtime_actions(
+    harness: HarnessKind,
+    actions: &[String],
+) -> Option<String> {
+    if harness != HarnessKind::Cursor {
+        return None;
+    }
+    let unsupported: Vec<&str> = actions
+        .iter()
+        .map(String::as_str)
+        .filter(|action| !CURSOR_ACTIONS.contains(action))
+        .collect();
+    if !unsupported.is_empty() {
+        return Some(format!(
+            "Cursor cannot run accepted actions: {}",
+            unsupported.join(", ")
+        ));
+    }
+    let has = |name: &str| actions.iter().any(|action| action == name);
+    (has("commands:execute") && !has("files:write"))
+        .then(|| "Cursor commands:execute also requires files:write".to_owned())
+}
+
+/// What keeps the Task's own harness from claiming it, as `(requirement, summary)`.
+fn unsupported_by_harness(task: &Task) -> Option<(String, String)> {
+    let harness = task.harness_kind();
+    if let Some(reason) = task
+        .execution_limits
+        .as_ref()
+        .and_then(|limits| unsupported_execution_limits(harness, limits))
+    {
+        return Some(("execution-limits".into(), reason));
+    }
+    if let Some(reason) = unsupported_runtime_actions(harness, &task.allowed_actions) {
+        return Some(("runtime-actions".into(), reason));
+    }
+    // These harnesses load no Skills, so their lanes claim with no context contracts.
+    (matches!(
+        harness,
+        HarnessKind::Opencode | HarnessKind::OpenaiAgents | HarnessKind::Cursor
+    ) && !crate::context::task_supported(task, &[]))
+    .then(|| {
+        (
+            "context".into(),
+            format!(
+                "{} loads no Skills, and the Task requires one",
+                harness_name(harness)
+            ),
+        )
+    })
+}
+
 /// Labels the Control Plane derives from what a host reports or claims with:
 /// `harness:NAME`, `workspace:NAME` for each checkout, and `mcp:NAME` for each
 /// MCP server its host service provides. Names that are not valid labels are skipped.
@@ -276,6 +409,7 @@ impl Store {
         .fetch_all(&mut *transaction)
         .await?;
         let now = self.execution_now_ms();
+        let unsupported = unsupported_by_harness(&task);
         let mut hosts = Vec::with_capacity(ids.len());
         let mut carried = Vec::with_capacity(ids.len());
         for id in ids {
@@ -302,6 +436,8 @@ impl Store {
                 "worker-host".to_owned(),
                 format!("No Worker Host is bound to Tag {}", task.tag_id),
             )
+        } else if let Some(unsupported) = unsupported {
+            unsupported
         } else if missing.is_empty() {
             (String::new(), String::new())
         } else {

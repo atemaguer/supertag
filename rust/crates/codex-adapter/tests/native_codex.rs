@@ -1980,7 +1980,7 @@ async fn unsupported_authorities_are_rejected_before_any_native_process_runs() -
         vec!["files:read", "browser:use"],
         vec!["files:read", "files:write"],
         vec!["files:read", "web:fetch"],
-        vec!["commands:execute"],
+        vec!["web:search"],
         vec!["files:read", "mcp:anything"],
     ] {
         let fixture = NativeFixture::new(&successful("should never run"), "exit 0")?;
@@ -1993,6 +1993,53 @@ async fn unsupported_authorities_are_rejected_before_any_native_process_runs() -
         let observed = server.observed.lock().await;
         assert!(!observed.outcome.as_ref().unwrap().succeeded);
         assert!(observed.events.is_empty());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn code_mode_commands_run_only_with_web_fetch_and_fail_clearly_without_it() -> Result<()> {
+    // Current Codex models run commands only through the code-mode host. Without web:fetch it
+    // stays off, and the Attempt fails naming why instead of succeeding without commands.
+    for (actions, code_mode_host, succeeds) in [
+        (
+            &["files:read", "files:write", "commands:execute"][..],
+            false,
+            false,
+        ),
+        (&["commands:execute"], false, false),
+        (
+            &["files:read", "files:write", "commands:execute", "web:fetch"],
+            true,
+            true,
+        ),
+        // A Task without commands needs no command tool, so the warning is harmless.
+        (&["files:read"], false, true),
+    ] {
+        let fixture = NativeFixture::new(&successful("fixture answer"), "exit 0")?;
+        std::fs::write(fixture.directory.path().join("code-mode-warning"), "")?;
+        let mut options = fixture.options();
+        options.allow_workspace_write = true;
+        let server = HarnessProcess::start(actions).await?;
+        run(options, server.bootstrap.clone()).await?;
+        let setting = format!("features.code_mode_host={code_mode_host}");
+        assert!(fixture.args()?.contains(&setting), "{actions:?}");
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().unwrap();
+        assert_eq!(
+            outcome.succeeded, succeeds,
+            "{actions:?}: {}",
+            outcome.result
+        );
+        if !succeeds {
+            assert_eq!(
+                outcome.result,
+                "Codex model gpt-fixture-exact runs commands only through Codex code mode, which \
+                 SuperTag enables only when the Task also admits web:fetch: code-mode commands \
+                 can reach the network that the commands:execute sandbox otherwise blocks. Grant \
+                 web:fetch to run commands with this model"
+            );
+        }
     }
     Ok(())
 }
@@ -2022,6 +2069,7 @@ async fn disposable_write_and_commands_select_legacy_loopback_profile_and_protec
         "permissions.supertag.network.allow_local_binding=true",
         "features.network_proxy.enabled=true",
         "features.shell_tool=true",
+        "features.code_mode_host=false",
     ] {
         assert!(args.iter().any(|value| value == setting));
     }

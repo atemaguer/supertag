@@ -28,9 +28,11 @@ impl Policy {
             "Codex adapter cannot enforce the requested allowed actions"
         );
         let has = |name| actions.iter().any(|action| action == name);
+        // Codex reads the Workspace in every sandbox mode, so it needs file access. Writing a file
+        // or running a command already reads it, so either implies read, as in TypeScript.
         ensure!(
-            has("files:read"),
-            "Codex requires admitted files:read access"
+            has("files:read") || has("files:write") || has("commands:execute"),
+            "Codex requires admitted files:read, files:write, or commands:execute access"
         );
         let policy = Self {
             write: has("files:write"),
@@ -49,6 +51,14 @@ impl Policy {
         );
         Ok(policy)
     }
+}
+
+/// Whether Codex may start its code-mode host. Code-mode-only models, every current Codex model,
+/// run commands only through it. Native code-mode commands reached a non-loopback endpoint under
+/// the limited network profile in the Codex 0.163.0 macOS integration probe, so it runs only when
+/// the Task also admits web:fetch and the sandbox allows the network anyway.
+pub(crate) fn code_mode_host(policy: &Policy) -> bool {
+    policy.commands && policy.network
 }
 
 pub(crate) fn arguments(
@@ -109,14 +119,15 @@ pub(crate) fn arguments(
         "hooks",
         "code_mode_only",
         "code_mode_only_strict_3p_tools",
-        // Native code-mode commands reached a non-loopback endpoint under the
-        // limited network profile in the Codex 0.163.0 macOS integration probe.
-        "code_mode_host",
         "memories",
         "image_generation",
     ] {
         configuration.push(format!("features.{feature}=false"));
     }
+    configuration.push(format!(
+        "features.code_mode_host={}",
+        code_mode_host(policy)
+    ));
     configuration.push(format!("features.shell_tool={}", policy.commands));
     configuration.push(format!("features.unified_exec={}", policy.commands));
     configuration.push(format!(
@@ -313,6 +324,22 @@ mod tests {
                 .iter()
                 .any(|arg| arg.starts_with("permissions.supertag.filesystem"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn writing_or_running_commands_implies_reading() -> Result<()> {
+        for granted in [
+            &["files:write"][..],
+            &["commands:execute"],
+            &["files:write", "commands:execute"],
+        ] {
+            let policy = Policy::from_actions(&actions(granted), true)?;
+            assert_eq!(policy.write, granted.contains(&"files:write"));
+            assert_eq!(policy.commands, granted.contains(&"commands:execute"));
+        }
+        // Codex cannot run without reading the Workspace, so it refuses a Task with no file access.
+        assert!(Policy::from_actions(&actions(&["web:search"]), true).is_err());
         Ok(())
     }
 }
