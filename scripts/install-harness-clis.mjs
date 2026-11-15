@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 // The harness package links its SDK under its own node_modules; read the SDK's manifest there.
 const manifest = fileURLToPath(
   new URL(
-    "../packages/runtime/harnesses/claude-code/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
+    "../harnesses/claude-code/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
     import.meta.url,
   ),
 );

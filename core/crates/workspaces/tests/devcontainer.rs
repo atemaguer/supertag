@@ -1,4 +1,4 @@
-//! Ports `packages/runtime/sdk/devcontainer-subset.test.ts` against real Git repositories.
+//! Ports `harnesses/sdk/devcontainer-subset.test.ts` against real Git repositories.
 use std::{collections::BTreeMap, os::unix::fs::PermissionsExt as _, path::Path, process::Command};
 
 use serde_json::json;

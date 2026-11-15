@@ -33,7 +33,7 @@ export function checkDocumentationNodeVersions(root) {
       (path) => !/(architecture|product-brief)[^/]*\.md$/u.test(path),
     ),
     ...walk(join(root, "skills")),
-    ...walk(join(root, "packages")).filter((path) => path.endsWith("/README.md")),
+    ...walk(join(root, "harnesses")).filter((path) => path.endsWith("/README.md")),
     ...walk(join(root, "sdks")).filter((path) => path.endsWith("/README.md")),
   ];
   for (const file of files)

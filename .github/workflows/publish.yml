@@ -57,7 +57,7 @@ jobs:
       - run: pnpm --filter supertag-ai build
       - run: pnpm --filter supertag-ai typecheck
       - name: Publish with npm trusted publishing
-        working-directory: packages/supertag-ai
+        working-directory: sdks/typescript
         run: |
           # Every published release is the one users should get by default.
           # npm adds provenance automatically when the source repository is public.

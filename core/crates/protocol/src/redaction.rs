@@ -1,7 +1,7 @@
 //! The shared secret-redaction rules for text a harness produces: Task events, results, questions,
 //! Workstream posts, and Mailbox messages.
 //!
-//! Ported from `packages/runtime/sdk/src/redaction.ts`. Two kinds of secret are hidden:
+//! Ported from `harnesses/sdk/src/redaction.ts`. Two kinds of secret are hidden:
 //!
 //! - Explicit credentials found in the text itself: URL userinfo (`scheme://user:password@host`),
 //!   credential query parameters (`?access_token=...`), and `Basic` authorization values.
@@ -679,7 +679,7 @@ mod tests {
         redact_text(text, &[], false)
     }
 
-    // packages/runtime/sdk/redaction.test.ts
+    // harnesses/sdk/redaction.test.ts
     #[test]
     fn ignores_tiny_boolean_and_short_numeric_host_hints() {
         assert_eq!(

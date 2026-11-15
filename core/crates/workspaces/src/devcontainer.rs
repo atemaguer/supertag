@@ -1,6 +1,6 @@
 //! The supported `devcontainer.json` subset, read as data from a trusted Git commit.
 //!
-//! Ports TypeScript `packages/runtime/sdk/src/devcontainer-subset.ts` and
+//! Ports TypeScript `harnesses/sdk/src/devcontainer-subset.ts` and
 //! `devcontainerCommands` in `sandbox-workspace-environment.ts`. Nothing here checks out
 //! repository content or runs a repository command on the Worker Host; translation into a
 //! sandbox image and lifecycle script happens inside the sandbox provider.

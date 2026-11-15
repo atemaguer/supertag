@@ -1,7 +1,7 @@
 //! Prepared remote Workspace artifacts: a provider snapshot of a preparation sandbox that holds
 //! only the trusted commit and its devcontainer setup, which later Task sandboxes start from.
 //!
-//! TypeScript parity: `PreparedWorkspaceCache` (`packages/runtime/sdk/src/workspace-environment.ts`)
+//! TypeScript parity: `PreparedWorkspaceCache` (`harnesses/sdk/src/workspace-environment.ts`)
 //! and `SandboxWorkspaceEnvironment.prepare` (`sandbox-workspace-environment.ts`). One artifact
 //! serves every Attempt whose prepared digest matches: the provider authority, the Workspace,
 //! the devcontainer translation, and the trusted commit. On a miss, the newest artifact with the

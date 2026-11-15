@@ -44,7 +44,7 @@
   "files": {
     "includes": [
       "**",
-      "!packages/runtime/sdk/src/rust-harness/gen",
+      "!harnesses/sdk/src/rust-harness/gen",
       "!sdks/typescript/gen/supertag/runtime/v2"
     ]
   }

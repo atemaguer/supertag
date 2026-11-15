@@ -1,7 +1,7 @@
 //! Worker-managed effect receipts for harnesses that perform external writes themselves.
 //!
 //! TypeScript parity: `ReliableToolInvokerRegistry`, `ToolEffectJournal` and
-//! `ToolEffectInDoubtError` in `packages/runtime/sdk/src/index.ts`, tested by
+//! `ToolEffectInDoubtError` in `harnesses/sdk/src/index.ts`, tested by
 //! `tests/runtime/tool-adapter.test.ts` and `sdks/python/tests/test_tools.py`. A completed receipt
 //! replays its result; reusing a key for different arguments fails closed; a receipt that was
 //! begun and never settled is in doubt and is never acquired again; a failed provider call may be

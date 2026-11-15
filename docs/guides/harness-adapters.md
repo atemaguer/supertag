@@ -11,9 +11,9 @@ The built-in harnesses are adapters too. Read one before you start:
 | Adapter | Language | Source |
 | --- | --- | --- |
 | OpenAI Agents | Python | [`sdks/python/src/supertag/openai_agents_adapter.py`](../../sdks/python/src/supertag/openai_agents_adapter.py) |
-| Claude Code | TypeScript | [`packages/runtime/harnesses/claude-code/src/rust-adapter/`](../../packages/runtime/harnesses/claude-code/src/rust-adapter/entry.ts) |
-| Cursor | TypeScript | [`packages/runtime/harnesses/cursor/src/rust-adapter/`](../../packages/runtime/harnesses/cursor/src/rust-adapter/entry.ts) |
-| OpenCode | TypeScript | [`packages/runtime/harnesses/opencode/src/rust-adapter/`](../../packages/runtime/harnesses/opencode/src/rust-adapter/entry.ts) |
+| Claude Code | TypeScript | [`harnesses/claude-code/src/rust-adapter/`](../../harnesses/claude-code/src/rust-adapter/entry.ts) |
+| Cursor | TypeScript | [`harnesses/cursor/src/rust-adapter/`](../../harnesses/cursor/src/rust-adapter/entry.ts) |
+| OpenCode | TypeScript | [`harnesses/opencode/src/rust-adapter/`](../../harnesses/opencode/src/rust-adapter/entry.ts) |
 
 ## How an adapter runs
 

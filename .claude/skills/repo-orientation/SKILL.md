@@ -20,10 +20,10 @@ TypeScript package stays.
 | `core/crates/{protocol,api,transport}` | Wire types, gRPC services, tunnel and TLS transport |
 | `core/crates/{workspaces,github,shared-execution,credential-vault,codex-adapter}` | Workspaces, GitHub, shared execution, credential vault, native Codex adapter |
 | `proto`, `rust/bindings` | `supertag.runtime.v2` contract and generated Go, TypeScript, and Python bindings |
-| `packages/runtime/harnesses/{claude-code,cursor,opencode}` | Node harness bridges a Worker Host starts |
-| `packages/runtime/environments/{e2b,modal}` | Node Workspace providers a Worker Host starts |
-| `packages/runtime/sdk`, `packages/core` | Shared code for those bridges |
-| `packages/supertag-ai` | The `supertag-ai` npm TypeScript SDK: Control Plane client and harness adapter client |
+| `harnesses/{claude-code,cursor,opencode}` | Node harness bridges a Worker Host starts |
+| `harnesses/environments/{e2b,modal}` | Node Workspace providers a Worker Host starts |
+| `harnesses/sdk`, `packages/core` | Shared code for those bridges |
+| `sdks/typescript` | The `supertag-ai` npm TypeScript SDK: Control Plane client and harness adapter client |
 | `apps/tui` | Go terminal UI; runtime.v2 client in `client/`, presentation types in `views/` |
 | `apps/desktop` | Tauri desktop app |
 | `sdks/python` | Python SDK and harness adapters |

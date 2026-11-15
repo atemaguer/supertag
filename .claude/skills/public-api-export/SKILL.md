@@ -1,11 +1,11 @@
 ---
 name: public-api-export
-description: Add or change a supertag-ai public entry point under the stability policy. Read before touching packages/supertag-ai exports, tsup config, or the api-stability table.
+description: Add or change a supertag-ai public entry point under the stability policy. Read before touching sdks/typescript exports, tsup config, or the api-stability table.
 ---
 
 # Public API export
 
-`packages/supertag-ai` is the only public npm package: the TypeScript SDK for the native
+`sdks/typescript` is the only public npm package: the TypeScript SDK for the native
 services. Everything it exposes is a compatibility commitment at some stability level, so adding
 an export is a contract change, not a build tweak. Its entry points speak only the
 `supertag.runtime.v2` APIs of the Control Plane and Worker Host.
@@ -14,16 +14,16 @@ an export is a contract change, not a build tweak. Its entry points speak only t
 
 Adding an entry point `supertag-ai/thing` means editing all four:
 
-1. **`packages/supertag-ai/src/thing.ts`** — the entry module. Keep it a thin, deliberate
+1. **`sdks/typescript/src/thing.ts`** — the entry module. Keep it a thin, deliberate
    surface over the generated `supertag.runtime.v2` bindings and the Worker SDK's
    `rust-harness` client.
-2. **`packages/supertag-ai/tsup.config.ts`** — add `thing: "src/thing.ts"` to `entry`.
-3. **`packages/supertag-ai/package.json`** — add `./thing` to `exports` with `types` and
+2. **`sdks/typescript/tsup.config.ts`** — add `thing: "src/thing.ts"` to `entry`.
+3. **`sdks/typescript/package.json`** — add `./thing` to `exports` with `types` and
    `import` conditions. ESM only.
 4. **`docs/reference/api-stability.md`** — add a row to the package entry point table with its
    level and compatibility boundary.
 
-Also update `packages/supertag-ai/README.md`, which npm renders.
+Also update `sdks/typescript/README.md`, which npm renders.
 
 ## Verify
 

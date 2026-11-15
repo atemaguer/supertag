@@ -92,7 +92,7 @@ class NativeReleaseContracts(unittest.TestCase):
     def test_provider_entries_come_from_private_environment_packages(self):
         for kind in ("modal", "e2b"):
             self.assertEqual(entry_for(kind).as_posix(), "dist/rust-provider/main.js")
-            self.assertEqual(source_for(Path("source"), kind), Path("source/packages/runtime/environments") / kind)
+            self.assertEqual(source_for(Path("source"), kind), Path("source/harnesses/environments") / kind)
         self.assertEqual(entry_for("cursor").as_posix(), "dist/rust-adapter/entry.js")
 
     def test_missing_provider_entry_fails_before_publication(self):

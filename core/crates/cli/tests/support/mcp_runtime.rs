@@ -84,7 +84,7 @@ async fn exercise_workspace_mcp(directory: &Path, database: &str) -> Result<()> 
     let node =
         std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
     let node = Path::new(&node).to_str().context("Node path")?.to_owned();
-    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let native = claude_fixture(directory)?;
     let source = directory.join("source");
     std::fs::create_dir(&source)?;
@@ -105,7 +105,7 @@ async fn exercise_workspace_mcp(directory: &Path, database: &str) -> Result<()> 
     };
     success(git(&["init", "--quiet"])).await?;
     std::fs::copy(
-        repo_path("packages/runtime/harnesses/claude-code/fixtures/rust-mcp-workspace-server.mjs")?,
+        repo_path("harnesses/claude-code/fixtures/rust-mcp-workspace-server.mjs")?,
         source.join("server.mjs"),
     )?;
     std::fs::write(
@@ -236,13 +236,13 @@ fn write_login(store: &Path, login: &Value) -> Result<()> {
 async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     let node =
         std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
-    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let native = claude_fixture(directory)?;
     let journal = directory.join("oauth-provider.jsonl");
     let mut provider = Command::new(&node);
     provider
         .arg(repo_path(
-            "packages/runtime/harnesses/claude-code/fixtures/rust-mcp-oauth-provider.mjs",
+            "harnesses/claude-code/fixtures/rust-mcp-oauth-provider.mjs",
         )?)
         .arg(&journal)
         .env_clear()

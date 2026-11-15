@@ -36,7 +36,7 @@ pnpm install
 ```
 
 `pnpm build` compiles the TypeScript packages. Rust Worker Hosts start the built bridges from
-`packages/runtime/harnesses/*/dist` and `packages/runtime/environments/*/dist`.
+`harnesses/*/dist` and `harnesses/environments/*/dist`.
 
 ## Write documentation
 
@@ -437,7 +437,7 @@ Authenticate with Modal's usual host credentials. Set these Experimental inputs:
 - `SUPERTAG_MODAL_MOUNTS_VOLUME`: the full `modal-volume://NAME/PREFIX/` source URL (no query). The suite consents to this exact name in the host's Modal environment.
 
 ```sh
-SUPERTAG_MODAL_MOUNTS_LIVE=1 pnpm exec vitest run packages/runtime/environments/modal/modal-mounts-live.test.ts
+SUPERTAG_MODAL_MOUNTS_LIVE=1 pnpm exec vitest run harnesses/environments/modal/modal-mounts-live.test.ts
 ```
 
 The suite skips unless the gate equals `1`, and always skips in CI. It costs real Modal usage.

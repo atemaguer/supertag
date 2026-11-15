@@ -53,7 +53,7 @@ const files = [
   ...["README.md", "SECURITY.md", "CONTRIBUTING.md"].map((name) => join(root, name)),
   ...markdownFiles(join(root, "docs")),
   ...markdownFiles(join(root, "skills")),
-  ...["packages", "sdks"].flatMap((directory) =>
+  ...["harnesses", "sdks"].flatMap((directory) =>
     readdirSync(join(root, directory), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => join(root, directory, entry.name, "README.md"))

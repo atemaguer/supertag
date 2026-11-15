@@ -19,7 +19,7 @@ export function vocabularyFiles(root) {
         (name === "README.md" ||
           name === "SECURITY.md" ||
           /^(docs|skills)\/.*\.md$/u.test(name) ||
-          /^(packages|sdks)\/.*\/README\.md$/u.test(name)) &&
+          /^(harnesses|sdks)\/.*\/README\.md$/u.test(name)) &&
         !/(architecture|product-brief)[^/]*\.md$/u.test(name) &&
         !deferredVocabularyPages.has(name),
     );

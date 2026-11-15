@@ -13,7 +13,7 @@ Check this page before [installing SuperTag](install.md).
 
 - **Node.js 22.13.0 or a later 22.x release** on `PATH` for Claude Code, Cursor, OpenCode, E2B,
   and Modal Tasks, which run through bridges in the release. Codex Tasks don't need it. The
-  TypeScript SDK's [package](../../packages/supertag-ai/package.json) states its own supported
+  TypeScript SDK's [package](../../sdks/typescript/package.json) states its own supported
   runtime in `engines.node`.
 - **npm**, included with Node.js, to install the TypeScript SDK. Source-development tools are
   listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).

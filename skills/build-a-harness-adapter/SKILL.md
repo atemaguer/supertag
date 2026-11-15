@@ -32,7 +32,7 @@ Never print the token or pass it to the agent. The messages are in
 - Python: [`openai_agents_adapter.py`](../../sdks/python/src/supertag/openai_agents_adapter.py),
   and `supertag.harness_adapter.open_harness` for the connection.
 - TypeScript: the Claude Code, Cursor, and OpenCode bridges under
-  `packages/runtime/harnesses/*/src/rust-adapter/`.
+  `harnesses/*/src/rust-adapter/`.
 - Other languages: the generated bindings in [`rust/bindings`](../../sdks/README.md).
 
 ## Run and verify

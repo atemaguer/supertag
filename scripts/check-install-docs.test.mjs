@@ -31,7 +31,7 @@ test("the install guide installs a GitHub Release and can build an archive", () 
 });
 
 test("application guides install the published TypeScript SDK", () => {
-  for (const file of ["README.md", "docs/operations/install.md", "packages/supertag-ai/README.md"])
+  for (const file of ["README.md", "docs/operations/install.md", "sdks/typescript/README.md"])
     assert.match(read(file), /npm install supertag-ai\b/u, file);
 });
 

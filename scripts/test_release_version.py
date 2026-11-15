@@ -21,8 +21,8 @@ class ReleaseVersion(unittest.TestCase):
         (root / "sdks/python/pyproject.toml").write_text(f'[project]\nversion = "{python}"\n')
         (root / "sdks/python/uv.lock").write_text(
             f'[[package]]\nname = "supertag"\nversion = "{python_version(python)}"\n')
-        (root / "packages/supertag-ai").mkdir(parents=True)
-        (root / "packages/supertag-ai/package.json").write_text(
+        (root / "sdks/typescript").mkdir(parents=True)
+        (root / "sdks/typescript/package.json").write_text(
             json.dumps({"name": "supertag-ai", "version": typescript or python}, indent=2) + "\n")
         (root / "node_modules/x").mkdir(parents=True)
         (root / "node_modules/x/package.json").write_text('{\n  "version": "1.0.0"\n}\n')
@@ -36,7 +36,7 @@ class ReleaseVersion(unittest.TestCase):
             release_version("v0.3.0", self.repo("0.3.0-alpha.1", "0.3.0-alpha.1"))
         with self.assertRaisesRegex(ValueError, "sdks/python/pyproject.toml is 0.2.0"):
             release_version("v0.3.0", self.repo("0.3.0", "0.2.0"))
-        with self.assertRaisesRegex(ValueError, "packages/supertag-ai/package.json is 0.2.0"):
+        with self.assertRaisesRegex(ValueError, "sdks/typescript/package.json is 0.2.0"):
             release_version("v0.3.0", self.repo("0.3.0", "0.3.0", "0.2.0"))
 
     def test_reports_drift_in_lockfiles(self):
@@ -58,7 +58,7 @@ class ReleaseVersion(unittest.TestCase):
 
     def test_sync_rewrites_manifests_but_not_lockfiles(self):
         root = self.repo("0.3.0-alpha.1", "0.2.0-alpha.9")
-        self.assertEqual(sorted(sync(root)), ["packages/supertag-ai/package.json", "sdks/python/pyproject.toml"])
+        self.assertEqual(sorted(sync(root)), ["sdks/python/pyproject.toml", "sdks/typescript/package.json"])
         self.assertEqual(drift(root), ["sdks/python/uv.lock is 0.2.0a9 but the Python SDK is 0.3.0a1; run uv lock"])
 
     def test_the_checkout_carries_one_version(self):

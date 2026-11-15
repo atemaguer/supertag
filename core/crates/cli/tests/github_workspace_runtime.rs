@@ -844,7 +844,7 @@ async fn verify_github_output(
     let node =
         std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
     let harness = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../packages/runtime/harnesses/claude-code")
+        .join("../../../harnesses/claude-code")
         .canonicalize()?;
     let native = root.join("native-claude-fixture.mjs");
     fs::copy(harness.join("fixtures/rust-native-claude.mjs"), &native)?;

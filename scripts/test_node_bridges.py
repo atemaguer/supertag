@@ -15,12 +15,12 @@ class NodeBridgeContracts(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
 
     def test_exact_snapshot_pin_and_known_private_workspace_dependency(self):
-        workspace = self.root / "packages/sdk"
+        workspace = self.root / "harnesses/sdk"
         workspace.mkdir(parents=True)
         (workspace / "package.json").write_text(json.dumps({"name": "@supertag/sdk", "private": True}))
         source = {"packages": {"foo@1.0.0": {"resolution": {"integrity": "pinned"}}},
-                  "snapshots": {"foo@1.0.0": {}}, "importers": {"packages/sdk": {}}}
-        deployed = {"packages": {**source["packages"], "@supertag/sdk@file:packages/sdk": {}},
+                  "snapshots": {"foo@1.0.0": {}}, "importers": {"harnesses/sdk": {}}}
+        deployed = {"packages": {**source["packages"], "@supertag/sdk@file:harnesses/sdk": {}},
                     "snapshots": dict(source["snapshots"])}
         verify_deploy_lock(source, deployed, self.root)
         deployed["snapshots"]["foo@1.0.0"] = {"dependencies": {"bar": "2.0.0"}}

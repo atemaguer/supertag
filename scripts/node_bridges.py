@@ -46,8 +46,7 @@ def entry_for(kind):
 
 
 def source_for(repo, kind):
-    category = "harnesses" if kind in HARNESS_BRIDGES else "environments"
-    return repo / "packages/runtime" / category / kind
+    return repo / "harnesses" / kind if kind in HARNESS_BRIDGES else repo / "harnesses/environments" / kind
 
 
 def lockfile(path):
@@ -65,7 +64,7 @@ def verify_deploy_lock(source, deployed, repo=REPO):
                 require(value == pinned[key], f"staged dependency differs from the lockfile: {key}")
                 continue
             # pnpm deploy rewrites linked private packages to local file dependencies.
-            match = re.fullmatch(r"(@supertag/[a-z0-9-]+)@file:(packages/[a-z0-9/-]+)(?:\(.+\))?", key)
+            match = re.fullmatch(r"(@supertag/[a-z0-9-]+)@file:(harnesses/[a-z0-9/-]+)(?:\(.+\))?", key)
             require(match and match[2] in source["importers"], f"staged dependency is unlocked: {key}")
             package = json.loads((repo / match[2] / "package.json").read_text())
             require(package.get("private") is True and package.get("name") == match[1], f"unrecognized workspace dependency: {key}")

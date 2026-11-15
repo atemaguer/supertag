@@ -62,7 +62,7 @@ impl HarnessArtifacts for Bridge {
         validate_capture_request(&input)?;
         // The description is harness text the Control Plane stores and shows, so it is redacted
         // like every other text a harness sends upstream (`redactDiagnostics` on
-        // `artifact.created` in packages/runtime/sdk/src/event-redaction.ts). Redaction can lengthen
+        // `artifact.created` in harnesses/sdk/src/event-redaction.ts). Redaction can lengthen
         // a short secret, so each field is kept within the limit the harness was held to.
         if let Some(description) = input.description.as_mut() {
             description.title = bounded(self.redact(&description.title), 200);

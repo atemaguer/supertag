@@ -1,12 +1,11 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/core" },
-    { "path": "packages/runtime/sdk" },
-    { "path": "packages/runtime/harnesses/claude-code" },
-    { "path": "packages/runtime/harnesses/cursor" },
-    { "path": "packages/runtime/harnesses/opencode" },
-    { "path": "packages/runtime/environments/e2b" },
-    { "path": "packages/runtime/environments/modal" }
+    { "path": "harnesses/sdk" },
+    { "path": "harnesses/claude-code" },
+    { "path": "harnesses/cursor" },
+    { "path": "harnesses/opencode" },
+    { "path": "harnesses/environments/e2b" },
+    { "path": "harnesses/environments/modal" }
   ]
 }

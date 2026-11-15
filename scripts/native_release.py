@@ -199,7 +199,7 @@ def smoke_built_release(archive, source, env, profile, node, *, install_smoke=Fa
     retained = {}
     for name, path, limit in (
         ("fixture", fixture, MAX_BINARY_BYTES), ("node", Path(node), MAX_BINARY_BYTES),
-        ("native-opencode.mjs", source / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs", 1024 * 1024),
+        ("native-opencode.mjs", source / "harnesses/opencode/fixtures/native-opencode.mjs", 1024 * 1024),
         ("environment.proto", source / "proto/supertag/environment/v2/environment.proto", 4 * 1024 * 1024),
     ):
         retained[name] = equipment / name

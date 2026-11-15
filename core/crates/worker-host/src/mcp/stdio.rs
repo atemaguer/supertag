@@ -386,9 +386,8 @@ mod tests {
 
     fn fixture() -> Option<(PathBuf, PathBuf)> {
         let node = std::env::var_os("SUPERTAG_RUST_TEST_NODE")?;
-        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-            "../../../packages/runtime/harnesses/claude-code/fixtures/rust-mcp-stdio-provider.mjs",
-        );
+        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../harnesses/claude-code/fixtures/rust-mcp-stdio-provider.mjs");
         Some((PathBuf::from(node), script))
     }
 

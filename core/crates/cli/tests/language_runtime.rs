@@ -344,7 +344,7 @@ fn repo_path(relative: &str) -> Result<std::path::PathBuf> {
 fn claude_fixture(directory: &Path) -> Result<std::path::PathBuf> {
     let native = directory.join("claude-fixture.mjs");
     std::fs::copy(
-        repo_path("packages/runtime/harnesses/claude-code/fixtures/rust-native-claude.mjs")?,
+        repo_path("harnesses/claude-code/fixtures/rust-native-claude.mjs")?,
         &native,
     )?;
     std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o700))?;
@@ -373,7 +373,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     let Some(node) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -381,7 +381,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     let mut provider = Command::new(&node);
     provider
         .arg(repo_path(
-            "packages/runtime/harnesses/claude-code/fixtures/rust-mcp-provider.mjs",
+            "harnesses/claude-code/fixtures/rust-mcp-provider.mjs",
         )?)
         .arg(&journal)
         .env_clear()
@@ -586,7 +586,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_stdio_mcp_tool(database: String
 async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
     let node =
         std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
-    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let native = claude_fixture(directory)?;
     let services = LanguageServices::start(directory, database).await?;
     let journal = directory.join("mcp-stdio.jsonl");
@@ -599,7 +599,7 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
         "name":"catalog",
         "command":[
             Path::new(&node).to_str().context("Node path")?,
-            repo_path("packages/runtime/harnesses/claude-code/fixtures/rust-mcp-stdio-provider.mjs")?
+            repo_path("harnesses/claude-code/fixtures/rust-mcp-stdio-provider.mjs")?
                 .to_str()
                 .context("fixture path")?,
             journal.to_str().context("journal path")?,
@@ -897,7 +897,7 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> R
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -960,7 +960,7 @@ async fn claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -1021,7 +1021,7 @@ async fn claude_captures_selected_workspace_files_for_the_operator(database: Str
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let source = directory.path().join("source");
@@ -1456,7 +1456,7 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
@@ -1624,7 +1624,7 @@ async fn claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage(
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
-    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;

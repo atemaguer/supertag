@@ -71,7 +71,7 @@ test("first-reply diagnostic keeps init services and the bound host running", ()
   }
 });
 test("links to this repository's files by GitHub URL resolve", () => {
-  const file = resolve(root, "packages/supertag-ai/README.md");
+  const file = resolve(root, "sdks/typescript/README.md");
   const base = "https://github.com/atemaguer/supertag/blob/main";
   assert.deepEqual(checkLinks(root, file, `[ok](${base}/docs/README.md)`), []);
   assert.equal(checkLinks(root, file, `[gone](${base}/docs/guides/removed.md)`).length, 1);

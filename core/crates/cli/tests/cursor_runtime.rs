@@ -85,11 +85,10 @@ impl Fixture {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .canonicalize()?;
-        let adapter_module =
-            repository.join("packages/runtime/harnesses/cursor/dist/rust-adapter/adapter.js");
-        let bridge_module = repository.join("packages/runtime/sdk/dist/rust-harness/index.js");
+        let adapter_module = repository.join("harnesses/cursor/dist/rust-adapter/adapter.js");
+        let bridge_module = repository.join("harnesses/sdk/dist/rust-harness/index.js");
         let provider_transport =
-            repository.join("packages/runtime/sdk/dist/rust-workspace-provider/transport.js");
+            repository.join("harnesses/sdk/dist/rust-workspace-provider/transport.js");
         ensure!(
             adapter_module.is_file() && bridge_module.is_file(),
             "build Cursor first: pnpm --filter @supertag/worker-cursor build"

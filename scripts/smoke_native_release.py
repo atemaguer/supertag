@@ -72,7 +72,7 @@ def installed_bridge(package, node, fixture_source, scratch, *, cli_override=Non
 
 
 def smoke_release(archive, fixture, node, opencode_fixture=None, provider_proto=PROTO):
-    opencode_fixture = opencode_fixture or REPO / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs"
+    opencode_fixture = opencode_fixture or REPO / "harnesses/opencode/fixtures/native-opencode.mjs"
     verify_node(node)
     with tempfile.TemporaryDirectory(prefix="supertag-complete-smoke-") as temporary:
         scratch = Path(temporary).resolve(strict=True)

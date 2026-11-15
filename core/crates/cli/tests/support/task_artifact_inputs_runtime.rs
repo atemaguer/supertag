@@ -120,7 +120,7 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
         r#"{"directory":"outputs","include":["evidence.txt"],"required":["evidence.txt"],"git":"capture"}"#,
     )?;
     let native = claude_fixture(root.path())?;
-    let claude = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let claude = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let volume = root.path().canonicalize()?.join("volume");
     std::fs::create_dir(&volume)?;
     std::fs::set_permissions(&volume, std::fs::Permissions::from_mode(0o700))?;

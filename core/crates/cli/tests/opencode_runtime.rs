@@ -38,8 +38,7 @@ use uuid::Uuid;
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const WAIT: Duration = Duration::from_secs(25);
 const FIXTURE_MODEL: &str = "openai/fixture-model";
-const NATIVE: &str =
-    include_str!("../../../../packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs");
+const NATIVE: &str = include_str!("../../../../harnesses/opencode/fixtures/native-opencode.mjs");
 
 struct Process {
     child: Child,
@@ -195,7 +194,7 @@ impl Runtime {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .canonicalize()?;
-        let entry = root.join("packages/runtime/harnesses/opencode/dist/rust-adapter/entry.js");
+        let entry = root.join("harnesses/opencode/dist/rust-adapter/entry.js");
         ensure!(
             entry.is_file(),
             "build OpenCode first: pnpm --filter @supertag/worker-opencode build"
