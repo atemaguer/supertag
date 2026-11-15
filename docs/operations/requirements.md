@@ -18,8 +18,9 @@ Check this page before [installing SuperTag](install.md).
 - **npm**, included with Node.js, to install the TypeScript SDK. Source-development tools are
   listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - **git**, available on `PATH`, and a repository for your first Task.
-- **macOS or Linux, on arm64 or amd64.** Linux needs glibc 2.36 or newer, as in Debian 12 or
-  Ubuntu 24.04. Restarting background services uses launchd on macOS and systemd user services on
+- **macOS on Apple silicon, or Linux on arm64 or amd64.** Linux needs glibc 2.36 or newer, as in
+  Debian 12 or Ubuntu 24.04. Intel Macs have no release; [build the CLI](install.md#build-only-the-cli)
+  there instead. Restarting background services uses launchd on macOS and systemd user services on
   Linux. Native Windows is not supported; use a Linux host.
 - **Disk space for the release and your work.** Allow about 1 GB for each installed release, plus
   space for repositories, Task checkouts, captured artifacts, and logs. The

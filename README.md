@@ -79,7 +79,7 @@ thread, and the same Tag keeps the responsibilities you assigned it. [Connect a 
 
 ## Run your first Tag
 
-On macOS or Linux, install Git, Node.js, and a [supported coding agent](#works-with). [Check requirements and sign-in](docs/operations/requirements.md)
+On an Apple silicon Mac or Linux, install Git, Node.js, and a [supported coding agent](#works-with). [Check requirements and sign-in](docs/operations/requirements.md)
 
 [Install SuperTag](docs/operations/install.md), then run this from an existing Git repository with
 at least one commit. If this machine ran the earlier TypeScript runtime,

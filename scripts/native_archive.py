@@ -29,7 +29,7 @@ FORMAT = "supertag-native-archive-v1"
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
 MAX_MANIFEST_BYTES = 16 * 1024
-PLATFORMS = {"linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64"}
+PLATFORMS = {"linux-arm64", "linux-amd64", "darwin-arm64"}
 BINARIES = ("supertag", "supertag-tui")
 REPO = Path(__file__).resolve().parents[1]
 
@@ -47,7 +47,7 @@ def native_platform():
     system = host_platform.system().lower()
     machine = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64", "amd64": "amd64"}.get(host_platform.machine())
     name = f"{system}-{machine}"
-    require(name in PLATFORMS, "native packaging supports Linux or macOS on arm64/amd64")
+    require(name in PLATFORMS, "native packaging supports Linux on arm64/amd64 and macOS on arm64")
     return name
 
 
@@ -84,7 +84,7 @@ def check_architecture(header, platform):
         expected = 183 if arch == "arm64" else 62
         valid = header[:6] == b"\x7fELF\x02\x01" and int.from_bytes(header[18:20], "little") == expected
     else:
-        expected = 0x100000C if arch == "arm64" else 0x1000007
+        expected = 0x100000C  # CPU_TYPE_ARM64; macOS releases are Apple silicon only
         valid = header[:4] == b"\xcf\xfa\xed\xfe" and int.from_bytes(header[4:8], "little") == expected
     require(len(header) >= 32 and valid, "binary architecture does not match the package platform")
 

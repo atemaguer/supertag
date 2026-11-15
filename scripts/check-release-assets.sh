@@ -14,8 +14,8 @@ if [[ $assets == draft ]]; then
 fi
 missing=0
 for name in install.sh SHA256SUMS \
-  "supertag-$version-darwin-arm64-complete.tar.gz" "supertag-$version-darwin-amd64-complete.tar.gz" \
-  "supertag-$version-linux-arm64-complete.tar.gz" "supertag-$version-linux-amd64-complete.tar.gz"; do
+  "supertag-$version-darwin-arm64-complete.tar.gz" "supertag-$version-linux-arm64-complete.tar.gz" \
+  "supertag-$version-linux-amd64-complete.tar.gz"; do
   if ! grep -Fxq -- "$name" <<<"$assets"; then
     printf '%s has no %s asset\n' "$release_tag" "$name" >&2
     missing=1

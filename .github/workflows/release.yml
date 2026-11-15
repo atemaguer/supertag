@@ -1,9 +1,9 @@
 name: Release SuperTag
 
-# Pushing a release tag builds the native archives for macOS and Linux (arm64, amd64) and attaches
-# them, their SHA256SUMS, and an install.sh pinned to the release to a draft GitHub Release. The
-# archives hold the supertag CLI, the supertag-tui terminal UI, the shared execution provider, and
-# the Node.js bridges. A maintainer publishes the draft once every asset is attached; publishing
+# Pushing a release tag builds the native archives for macOS on Apple silicon and Linux (arm64,
+# amd64) and attaches them, their SHA256SUMS, and an install.sh pinned to the release to a draft
+# GitHub Release. The archives hold the supertag CLI, the supertag-tui terminal UI, the shared
+# execution provider, and the Node.js bridges. A maintainer publishes the draft once every asset is attached; publishing
 # runs the installer check and the SDK publish workflows, so the README's latest installer URL
 # never points at a release without its archives.
 on:
@@ -93,12 +93,12 @@ jobs:
         working-directory: release
         run: |
           : > SHA256SUMS
-          for platform in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
+          for platform in darwin-arm64 linux-arm64 linux-amd64; do
             archive="supertag-$VERSION-$platform-complete.tar.gz"
             sha256sum --check "$archive.sha256"
             cat "$archive.sha256" >> SHA256SUMS
           done
-          test "$(wc -l < SHA256SUMS)" -eq 4
+          test "$(wc -l < SHA256SUMS)" -eq 3
       - name: Pin the installer to this release
         run: |
           sed -i "s/^RELEASE_DEFAULT_VERSION=\"latest\"$/RELEASE_DEFAULT_VERSION=\"$VERSION\"/" install.sh

@@ -365,7 +365,7 @@ A release takes three steps, so the README's `releases/latest` installer URL nev
 release without its archives:
 
 1. Push the release tag, for example `git push origin v0.3.0`. **Release SuperTag**
-   (`release.yml`) builds and verifies the four archives with `native-release-check.yml`, checks
+   (`release.yml`) builds and verifies the three archives with `native-release-check.yml`, checks
    the pinned installer against them, and attaches them with their `SHA256SUMS` and an
    `install.sh` pinned to the release to a draft GitHub Release for the tag. It never changes a
    published release.

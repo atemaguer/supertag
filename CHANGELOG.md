@@ -9,6 +9,12 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Removed
+
+- Releases no longer include an Intel Mac (`darwin-amd64`) archive, and the installer script
+  refuses Intel Macs. Build the CLI from source there, as
+  [Install SuperTag](docs/operations/install.md#build-only-the-cli) describes.
+
 ### Fixed
 
 - The example organizations in `examples/organizations/` apply with the 0.3.0 CLI. Their Tags bind

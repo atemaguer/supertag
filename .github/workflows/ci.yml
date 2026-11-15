@@ -37,13 +37,13 @@ jobs:
         run: |
           rustup toolchain install 1.93.1 --profile minimal --component rustfmt --component clippy
           rustup default 1.93.1
-      - uses: actions/cache@v4
+      # Restores the registry and third-party dependency builds; workspace crates are never cached.
+      # Only main saves, so pull requests reuse main's cache without evicting it.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            tests/fixtures/rust-harness-interop/target
-          key: rust-harness-${{ runner.os }}-${{ runner.arch }}-1.93.1-${{ hashFiles('tests/fixtures/rust-harness-interop/Cargo.lock') }}
+          shared-key: rust-harness-interop
+          workspaces: tests/fixtures/rust-harness-interop -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Deterministic adapters exercise the real process and gRPC boundary without credentials.
       # Live Codex runs remain an explicit local opt-in and never run in PR CI.
       - run: bash run.sh

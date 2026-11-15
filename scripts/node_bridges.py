@@ -180,9 +180,13 @@ def stage_workspace(output, kinds, repo, env=None):
     require(node.is_absolute() and node.is_file(), "workspace Node interpreter is unavailable")
     verify_node(node)
     selected = sorted(set(kinds))
+    # "PACKAGE..." also selects the workspace packages each bridge depends on, so pnpm builds
+    # @supertag/worker-sdk to completion before the bridges. Selecting only the bridges ran their
+    # `tsc --build` processes concurrently, each rebuilding the shared SDK reference, so one could
+    # read the SDK's declarations while another was still writing them.
     command = ["pnpm"]
     for kind in selected:
-        command.extend(["--filter", PACKAGES[kind]])
+        command.extend(["--filter", f"{PACKAGES[kind]}..."])
     subprocess.run([*command, "build"], cwd=repo, env=env, check=True)
     platform = native_platform()
     with tempfile.TemporaryDirectory(prefix=".supertag-node-bridges-", dir=output.parent) as temporary:

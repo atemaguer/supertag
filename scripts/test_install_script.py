@@ -140,6 +140,30 @@ class InstallScript(unittest.TestCase):
         (self.assets / "SHA256SUMS").write_text(f"{'1' * 64}  supertag-1.2.3-plan9-amd64-complete.tar.gz\n")
         self.assert_refused(f"build for {self.platform}")
 
+    def mac_tools(self, translated):
+        # uname and sysctl as an Intel Mac, or as a Rosetta shell on Apple silicon, report them.
+        tools = self.root / "fake-mac"
+        tools.mkdir()
+        (tools / "uname").write_bytes(script('case "$1" in -s) echo Darwin ;; -m) echo x86_64 ;; esac'))
+        (tools / "sysctl").write_bytes(script(f"echo {translated}"))
+        for tool in tools.iterdir():
+            tool.chmod(0o755)
+        return f"{tools}:{os.defpath}"
+
+    def test_refuses_an_intel_mac_and_points_to_a_source_build(self):
+        self.release()
+        self.assert_refused("SuperTag releases do not support Intel Macs. Build the CLI from source instead: "
+                            "https://github.com/atemaguer/supertag/blob/main/docs/operations/install.md#build-only-the-cli",
+                            PATH=self.mac_tools(0))
+
+    @unittest.skipUnless(host.system() == "Darwin", "the macOS install path runs only on macOS")
+    def test_a_rosetta_shell_installs_the_apple_silicon_release(self):
+        self.platform = "darwin-arm64"
+        self.release()
+        result = self.run_installer(PATH=self.mac_tools(1))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("darwin-arm64", self.installed().resolve().as_posix())
+
     def test_never_replaces_a_command_it_did_not_install(self):
         self.release()
         self.installed().parent.mkdir(parents=True)

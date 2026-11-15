@@ -3,9 +3,11 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from native_archive import ArchiveError
-from node_bridges import prepare_workspace, relocate_self_alias, verify_deploy_lock, verify_relocatable_tree
+import node_bridges
+from node_bridges import PACKAGES, prepare_workspace, relocate_self_alias, verify_deploy_lock, verify_relocatable_tree
 
 
 class NodeBridgeContracts(unittest.TestCase):
@@ -92,6 +94,29 @@ class NodeBridgeContracts(unittest.TestCase):
         self.assertEqual((source / "manifest").read_text(), "committed")
         self.assertFalse((source / "node_modules").exists())
         self.assertEqual((repo / "node_modules/state").read_text(), "development")
+
+
+    def test_bridges_build_after_the_workspace_packages_they_depend_on(self):
+        # Each bridge's own tsc --build would otherwise rebuild the shared SDK concurrently.
+        (self.root / "package.json").write_text(json.dumps({"packageManager": "pnpm@11.18.0"}))
+        node = self.root / "node"
+        node.write_text("")
+        builds = []
+
+        def run(command, **_kwargs):
+            if command[-1] == "build":
+                builds.append(command)
+                raise subprocess.CalledProcessError(1, command)
+
+        probes = {"--version": "11.18.0\n", "exec": f"{node}\n"}
+        with patch.object(node_bridges, "lockfile"), patch.object(node_bridges, "verify_node"), \
+             patch.object(node_bridges.subprocess, "run", side_effect=run), \
+             patch.object(node_bridges.subprocess, "check_output",
+                          side_effect=lambda command, **_kwargs: probes[command[1] if command[1] == "--version" else "exec"]):
+            with self.assertRaises(subprocess.CalledProcessError):
+                node_bridges.stage_workspace(self.root / "out", PACKAGES, self.root)
+        filters = [builds[0][index + 1] for index, word in enumerate(builds[0]) if word == "--filter"]
+        self.assertEqual(filters, [f"{PACKAGES[kind]}..." for kind in sorted(PACKAGES)])
 
 
 if __name__ == "__main__":

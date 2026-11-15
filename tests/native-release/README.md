@@ -5,8 +5,8 @@ execution provider, and all five private Node helpers. These contributor command
 and execute local archives without publishing them or changing an installed command.
 Optional model credentials remain external and are not used by these checks.
 
-The supported archive platforms are `linux-amd64`, `linux-arm64`, `darwin-amd64`, and
-`darwin-arm64`. Each build records its exact source commit and lockfile digests. A separate
+The supported archive platforms are `linux-amd64`, `linux-arm64`, and `darwin-arm64`. Intel
+Macs have no archive. Each build records its exact source commit and lockfile digests. A separate
 build receipt records the Rust, Cargo, Go, Node, pnpm, and Python versions. The CLI, TUI,
 provider, and native helper assets must match the selected platform. A cross-compiled
 binary alone is not a completed platform verification.
@@ -26,37 +26,33 @@ uv run scripts/native_release_docker.py --repo . --commit FULL_COMMIT_SHA \
 Choose `linux-arm64` for ARM64. Add `--profile dev` for a faster development verification.
 The source bundle is read-only, the container uses your UID, execution is limited to two
 CPUs and 6 GiB, and only the output directory persists. No host credential directory or
-Docker socket is mounted. The owned build container is removed; the local builder image
+Docker socket is mounted. `--cargo-cache DIR` also mounts `DIR` writable as the build's Cargo
+registry and target directory; see [Reuse dependency builds](#reuse-dependency-builds). The owned build container is removed; the local builder image
 remains as a reusable cache. Its identity is recorded in the builder receipt.
 
-## macOS, including Intel execution through Rosetta
+## macOS
 
-Use native tools on an Intel Mac for `darwin-amd64` and an Apple Silicon Mac for
-`darwin-arm64`. Select Node 22.13 or later in the 22.x line, pnpm 11.18.0, Go 1.26.1,
-Python 3.13, tmux, and the Rust toolchain pinned in `core/rust-toolchain.toml`.
+Use native tools on an Apple silicon Mac. Select Node 22.13 or later in the 22.x line, pnpm
+11.18.0, Go 1.26.1, Python 3.13, tmux, and the Rust toolchain pinned in
+`core/rust-toolchain.toml`.
 
 ```sh
 uv run scripts/native_release.py package --repo . --commit FULL_COMMIT_SHA \
   --expect-platform darwin-arm64 --output /tmp/supertag-macos-verification --install-smoke
 ```
 
-For a repeatable Intel verification on Apple Silicon, Rosetta must already be available.
-The following command downloads checksum-pinned Node/Go, Python 3.13.9, and the pinned
-Intel Rust toolchain into a disposable directory. It does not change your system tools.
+The preflight refuses x86_64 Python, Node, or Rust, such as tools running under Rosetta, before a
+build; it does not silently relabel their output.
 
-```sh
-uv run scripts/native_release_macos_x64.py --repo . --commit FULL_COMMIT_SHA \
-  --output /tmp/supertag-macos-amd64-verification
-```
+## Reuse dependency builds
 
-Use `--tools-directory /path/to/new-private-directory` to retain downloaded tools for
-inspection. Without it, they are removed after the run. For manual tool provisioning, run the
-packaging Python interpreter and Node as x86_64 binaries, and put the pinned x86_64 Rust
-toolchain's actual `bin` directory first in `PATH`. Keep downloaded tools and Rustup/Cargo
-homes in a disposable directory. Use `--expect-platform darwin-amd64`. The preflight refuses
-mixed Python/Node/Rust architectures before a build; it does not silently relabel ARM64
-output. Go can cross-compile the TUI, whose architecture and actual execution are then
-checked. Do not install or change system Rosetta as part of a release verification.
+`native_release.py package` and `native_release_docker.py` take `--cargo-cache DIR`, which keeps
+Cargo's registry in `DIR/home` and its target directory in `DIR/target` instead of disposable
+scratch, so a later build reuses compiled third-party crates. The build still starts from the
+exact commit: every snapshot file is stamped newer than any cached output, so Cargo rebuilds all
+of SuperTag's own crates, and a cache holding Cargo configuration or credentials is refused. The
+build receipt records `cargo_cache`. The release workflow restores and saves `DIR` with
+`Swatinem/rust-cache`, which saves only dependency builds.
 
 ## What a successful run proves
 
@@ -75,7 +71,7 @@ archive; only the exact fixture equipment is retained. Keep temporary paths belo
 parent; the installer intentionally refuses shared writable non-sticky ancestors.
 
 The `native-release-check.yml` workflow has a fast `contracts` mode and a full
-four-platform `package` mode. Run it manually, or add the `release-check` label to a pull request
+three-platform `package` mode. Run it manually, or add the `release-check` label to a pull request
 to run the full `package` mode on its head commit. Its explicit host labels follow the
 [GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). It uses read-only repository permissions and has no upload,
 registry, release, signing, or notarization step. No workflow publishes native releases yet.

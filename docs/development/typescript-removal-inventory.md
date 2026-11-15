@@ -110,7 +110,7 @@ sits beside the ledger in this directory.
 | `publish-python.yml` | Keep, updated | Runs on `release: published` after `scripts/check-release-assets.sh` confirms the release carries its native archives, and checks the generated `runtime.v2` bindings |
 | `publish-worker-base.yml` | Keep | Workspace base image; unchanged |
 | `release-cli.yml` | Remove | Released the npm CLI; replaced by `release.yml`, which builds the native archives into a draft GitHub Release with `SHA256SUMS` and a pinned `install.sh` |
-| `publish.yml`, `verify-installer.yml` | Keep, rewritten | `publish.yml` publishes the `supertag-ai` SDK once the release carries its native archives; `verify-installer.yml` runs the native `install.sh` on four platforms |
+| `publish.yml`, `verify-installer.yml` | Keep, rewritten | `publish.yml` publishes the `supertag-ai` SDK once the release carries its native archives; `verify-installer.yml` runs the native `install.sh` on three platforms |
 
 ## Root configuration
 

@@ -1,6 +1,6 @@
 name: Verify native releases
 
-# Builds and verifies the four native archives. On its own this uploads nothing.
+# Builds and verifies the three native archives. On its own this uploads nothing.
 # release.yml calls it with upload_artifacts and sign_macos to produce the
 # archives it attaches to a GitHub Release.
 on:
@@ -41,7 +41,7 @@ on:
         description: Full source commit (leave empty for the selected workflow revision)
         type: string
       mode:
-        description: Contract checks, or full four-platform package/extract/install verification
+        description: Contract checks, or full three-platform package/extract/install verification
         type: choice
         options: [contracts, package]
         default: contracts
@@ -83,8 +83,6 @@ jobs:
             runner: ubuntu-24.04
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
-          - platform: darwin-amd64
-            runner: macos-15-intel
           - platform: darwin-arm64
             runner: macos-15
     runs-on: ${{ matrix.runner }}
@@ -117,14 +115,34 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           npm install --global --ignore-scripts --no-audit --no-fund pnpm@11.18.0
-          rustup toolchain install 1.93.1 --profile minimal --no-self-update
           command -v tmux || brew install tmux
+      # Release builds restore Cargo's registry and third-party dependency builds from a cache
+      # with its own key prefix, kept under the checkout but outside the tracked files the build
+      # snapshots. rust-cache never saves workspace crates, and --cargo-cache stamps every
+      # snapshot file as newer than any cached output, so Cargo rebuilds all of SuperTag's own
+      # crates from the exact commit. The Linux build mounts the same directory into its
+      # container. The host toolchain builds on macOS and lets rust-cache read the workspace when
+      # it saves; without it rust-cache keeps no dependency builds, which is slower but safe.
+      - name: Use the release Cargo cache
+        run: |
+          if [ "$RUNNER_OS" = macOS ] || command -v rustup > /dev/null; then
+            rustup toolchain install 1.93.1 --profile minimal --no-self-update
+          fi
+          echo "CARGO_HOME=$GITHUB_WORKSPACE/.release-cargo/home" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v0-release
+          shared-key: native-${{ matrix.platform }}-${{ inputs.profile || 'release' }}
+          workspaces: core -> ../.release-cargo/target
+          cache-bin: false
+          # Pull requests labelled release-check reuse the cache without adding their own.
+          save-if: ${{ github.event_name != 'pull_request' }}
       - name: Build and execute the Linux archive in Debian 12
         if: runner.os == 'Linux'
         run: |
           python scripts/native_release_docker.py --repo "$GITHUB_WORKSPACE" \
             --commit "$SOURCE_COMMIT" --platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
-            --output "$RUNNER_TEMP/native-release"
+            --output "$RUNNER_TEMP/native-release" --cargo-cache "$GITHUB_WORKSPACE/.release-cargo"
       # Only a release run that signs receives the Apple credentials; pull requests and manual
       # checks build unsigned archives without them.
       - name: Build and execute the native macOS archive
@@ -132,7 +150,8 @@ jobs:
         run: |
           python scripts/native_release.py package --repo "$GITHUB_WORKSPACE" \
             --commit "$SOURCE_COMMIT" --expect-platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
-            --output "$RUNNER_TEMP/native-release" --install-smoke
+            --output "$RUNNER_TEMP/native-release" --install-smoke \
+            --cargo-cache "$GITHUB_WORKSPACE/.release-cargo"
       - name: Build, sign, notarize, and execute the native macOS archive
         if: runner.os == 'macOS' && inputs.sign_macos
         env:
@@ -145,6 +164,7 @@ jobs:
           python scripts/native_release.py package --repo "$GITHUB_WORKSPACE" \
             --commit "$SOURCE_COMMIT" --expect-platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
             --output "$RUNNER_TEMP/native-release" --install-smoke \
+            --cargo-cache "$GITHUB_WORKSPACE/.release-cargo" \
             --sign-command "$GITHUB_WORKSPACE/scripts/notarize-macos-binaries.sh"
       - name: Record verified local output
         run: |

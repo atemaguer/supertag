@@ -59,9 +59,10 @@ Then [install a release archive](#install-a-release-archive) and run `supertag i
 
 ## Install a release archive
 
-A SuperTag release is one archive per platform: `linux-amd64`, `linux-arm64`, `darwin-amd64`, or
-`darwin-arm64`, attached to its GitHub Release with a `SHA256SUMS` file and an installer script.
-The installer script works on macOS and Linux:
+A SuperTag release is one archive per platform: `linux-amd64`, `linux-arm64`, or `darwin-arm64`,
+attached to its GitHub Release with a `SHA256SUMS` file and an installer script. The installer
+script works on Linux and on Apple silicon Macs; Intel Macs have no release, so
+[build the CLI](#build-only-the-cli) there instead:
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
@@ -107,8 +108,8 @@ reads the same `SUPERTAG_INSTALL_ROOT` and `SUPERTAG_BIN_DIR`.
 
 ## Build only the CLI
 
-For a server or container that runs only the Control Plane or a Gateway, the CLI alone is
-enough. It also runs Codex Tasks:
+For a server or container that runs only the Control Plane or a Gateway, or on an Intel Mac,
+which has no release archive, build the CLI alone. It also runs Codex Tasks:
 
 ```sh
 cargo build --release --locked --manifest-path core/Cargo.toml -p supertag-cli --bin supertag

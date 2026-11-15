@@ -4,7 +4,9 @@
 # ///
 """Assemble a complete unpublished native release from an exact clean commit.
 
-Builds happen in disposable source, HOME, Cargo target, and Go cache directories.
+Builds happen in disposable source, HOME, Cargo target, and Go cache directories. With
+--cargo-cache, Cargo's registry and target directory live in that directory instead, so CI can
+restore third-party dependency builds; every workspace crate is still rebuilt from the snapshot.
 The output includes CLI, matching Go TUI, shared execution provider, and all five private Node runtime helpers.
 Node 22.13+ (22.x), Git, and optional provider credentials remain external.
 macOS binaries are signed only with --sign-command. No upload, registry publication, or state migration is performed.
@@ -19,6 +21,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import tomllib
 
 from native_archive import (ArchiveError, REPO, build_binaries, check_versions, copy_bounded,
@@ -44,15 +47,24 @@ def snapshot(repo, commit, scratch):
     return source, identity
 
 
-def build_environment(scratch):
+def build_environment(scratch, cargo_cache=None):
     home = scratch / "home"
     home.mkdir(mode=0o700)
-    # Build tools can use caches only below the disposable HOME. Do not inherit
-    # npm config, Node injection hooks, compiler flags, Git config, or credentials.
+    # Build tools can use caches only below the disposable HOME, or the named Cargo cache. Do not
+    # inherit npm config, Node injection hooks, compiler flags, Git config, or credentials.
     env = {"PATH": os.environ.get("PATH", os.defpath), "HOME": str(home), "LANG": "C.UTF-8",
            "CI": "true", "CARGO_BUILD_JOBS": "2", "GOMAXPROCS": "2",
            "CARGO_TARGET_DIR": str(scratch / "cargo-target"), "GOCACHE": str(scratch / "go-cache"),
            "GOPATH": str(scratch / "go"), "NODE_OPTIONS": "--max-old-space-size=4096"}
+    if cargo_cache is not None:
+        cargo_home, target = cargo_cache / "home", cargo_cache / "target"
+        for directory in (cargo_home, target):
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            require(directory.is_dir() and not directory.is_symlink(), "Cargo cache must be a real directory")
+        # The cache supplies downloaded crates and compiled dependencies, never Cargo configuration.
+        for name in ("config", "config.toml", "credentials", "credentials.toml"):
+            require(not (cargo_home / name).exists(), f"Cargo cache must not carry {name}")
+        env["CARGO_HOME"], env["CARGO_TARGET_DIR"] = str(cargo_home), str(target)
     # rustup is a toolchain selector. Its installation may live outside HOME;
     # Cargo's package/config directory intentionally does not pass through.
     rustup = os.environ.get("RUSTUP_HOME") or str(Path.home() / ".rustup")
@@ -77,7 +89,7 @@ def tool_versions(source, env, platform):
     rust_output = probe(["rustc", "-vV"])
     rust = dict(line.split(": ", 1) for line in rust_output.splitlines() if ": " in line)
     expected_host = {"linux-arm64": "aarch64-unknown-linux-gnu", "linux-amd64": "x86_64-unknown-linux-gnu",
-                     "darwin-arm64": "aarch64-apple-darwin", "darwin-amd64": "x86_64-apple-darwin"}[platform]
+                     "darwin-arm64": "aarch64-apple-darwin"}[platform]
     pinned = tomllib.loads((source / "core/rust-toolchain.toml").read_text())["toolchain"]["channel"]
     require(rust.get("host") == expected_host, "Rust host does not match the expected platform")
     require(rust.get("release") == pinned, "Rust version differs from the source pin")
@@ -111,8 +123,23 @@ def sign_binaries(command, stage, version):
     check_provider_version(stage / "supertag-shared-execution", version)
 
 
+def mark_sources_changed(source):
+    """Give every snapshot file a modification time after any cached build output.
+
+    git archive stamps files with the commit time, which can predate a cached output built from
+    another commit. Cargo compares workspace crates by modification time, so a cached target could
+    otherwise pass off an older crate build as current.
+    """
+    now = time.time()
+    for parent, _directories, files in os.walk(source, followlinks=False):
+        for name in files:
+            path = Path(parent) / name
+            if not path.is_symlink():
+                os.utime(path, (now, now))
+
+
 def assemble(repo, commit, output, profile="release", *, smoke=False, install_smoke=False, expected_platform=None,
-             sign_command=None):
+             sign_command=None, cargo_cache=None):
     platform = native_platform()
     require(expected_platform is None or platform == expected_platform, "builder does not match the expected platform")
     require(sign_command is None or platform.startswith("darwin-"), "only macOS binaries are signed")
@@ -120,7 +147,9 @@ def assemble(repo, commit, output, profile="release", *, smoke=False, install_sm
     with tempfile.TemporaryDirectory(prefix="supertag-release-build-") as temporary:
         scratch = Path(temporary)
         source, identity = snapshot(repo, commit, scratch)
-        env = build_environment(scratch)
+        if cargo_cache is not None:
+            mark_sources_changed(source)
+        env = build_environment(scratch, cargo_cache)
         env["RUSTUP_TOOLCHAIN"] = tomllib.loads((source / "core/rust-toolchain.toml").read_text())["toolchain"]["channel"]
         tools = tool_versions(source, env, platform)
         stage = scratch / "release"
@@ -154,7 +183,7 @@ def assemble(repo, commit, output, profile="release", *, smoke=False, install_sm
             receipt = Path(str(archive) + ".build.json")
             receipt.write_text(json.dumps({"format": "supertag-native-build-v1", "source": identity,
                 "archive_sha256": digest(archive), "platform": platform, "profile": profile,
-                "tools": tools, "extracted_smoke": smoke or install_smoke,
+                "tools": tools, "cargo_cache": cargo_cache is not None, "extracted_smoke": smoke or install_smoke,
                 "installed_smoke": install_smoke}, indent=2, sort_keys=True) + "\n")
             files.append(receipt)
             final_archive = output / archive.name
@@ -192,8 +221,7 @@ def smoke_built_release(archive, source, env, profile, node, *, install_smoke=Fa
     subprocess.run(command, cwd=source, env=env, check=True)
     fixture = Path(env["CARGO_TARGET_DIR"]) / ("release" if profile == "release" else "debug") / "supertag-fixture-adapter"
     scratch = source.parent
-    require(source == scratch / "source" and Path(env["CARGO_TARGET_DIR"]) == scratch / "cargo-target",
-            "smoke requires the owned build scratch")
+    require(source == scratch / "source", "smoke requires the owned build scratch")
     equipment = scratch / "smoke-equipment"
     equipment.mkdir(mode=0o700)
     retained = {}
@@ -208,6 +236,7 @@ def smoke_built_release(archive, source, env, profile, node, *, install_smoke=Fa
     # The archive has already been validated and the exact smoke equipment is
     # retained. Keeping Cargo, Go, pnpm and unpacked helper trees here doubles
     # peak disk use without adding evidence to extracted/installed verification.
+    # A --cargo-cache directory is not scratch and stays for the caller to save.
     prune_build_scratch(scratch)
     fixture, node = retained["fixture"], retained["node"]
     native_fixture, provider_proto = retained["native-opencode.mjs"], retained["environment.proto"]
@@ -235,6 +264,7 @@ def main():
     package.add_argument("--expect-platform", choices=sorted(PLATFORMS), help="require the builder and runtime tools to match this platform")
     package.add_argument("--install-smoke", action="store_true", help="also verify fresh install/reinstall before publishing local output; implies --smoke")
     package.add_argument("--smoke", action="store_true", help="also build test equipment and verify extracted CLI/TUI/helpers")
+    package.add_argument("--cargo-cache", type=Path, help="keep Cargo's registry and target directory in DIR (home/, target/) so third-party dependency builds can be reused; workspace crates are always rebuilt")
     package.add_argument("--sign-command", type=Path, help="macOS only: run COMMAND STAGE BINARY... to sign and notarize the binaries before archiving")
     verify = commands.add_parser("verify")
     verify.add_argument("archive", type=Path)
@@ -246,7 +276,8 @@ def main():
         if args.command == "package":
             print(assemble(args.repo.resolve(), args.commit, args.output, args.profile, smoke=args.smoke, install_smoke=args.install_smoke,
                            expected_platform=args.expect_platform,
-                           sign_command=args.sign_command.resolve(strict=True) if args.sign_command else None))
+                           sign_command=args.sign_command.resolve(strict=True) if args.sign_command else None,
+                           cargo_cache=args.cargo_cache.resolve() if args.cargo_cache else None))
         elif args.command == "verify":
             manifest = validate_release(args.archive)
             print(json.dumps({key: value for key, value in manifest.items() if key != "entries"}, indent=2))

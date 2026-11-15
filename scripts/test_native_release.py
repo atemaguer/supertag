@@ -7,11 +7,12 @@ import subprocess
 import shutil
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
 from native_archive import ArchiveError, write_checksum
-from native_release import build_environment, snapshot
+from native_release import build_environment, mark_sources_changed, snapshot
 import native_release as assembly
 from node_bridges import PACKAGES, entry_for, source_for
 import release_archive as release
@@ -194,6 +195,30 @@ class NativeReleaseContracts(unittest.TestCase):
         self.assertFalse(any(key in env for key in ("OPENAI_API_KEY", "MODAL_TOKEN_SECRET", "RUSTFLAGS", "NPM_CONFIG_USERCONFIG", "CARGO_HOME")))
         self.assertEqual(env["HOME"], str(self.root / "home"))
         self.assertNotIn("sensitive", env["NODE_OPTIONS"])
+
+    def test_cargo_cache_supplies_only_the_registry_and_target(self):
+        cache = self.root / "cargo-cache"
+        scratch = self.root / "scratch"
+        scratch.mkdir()
+        with patch.dict(os.environ, {"CARGO_HOME": "/sensitive"}):
+            env = build_environment(scratch, cache)
+        self.assertEqual((env["CARGO_HOME"], env["CARGO_TARGET_DIR"]), (str(cache / "home"), str(cache / "target")))
+        self.assertTrue((cache / "target").is_dir())
+        (cache / "home/config.toml").write_text("[build]\nrustflags = ['injected']\n")
+        (scratch / "home").rmdir()
+        with self.assertRaisesRegex(ArchiveError, "must not carry config.toml"):
+            build_environment(scratch, cache)
+
+    def test_snapshot_files_are_newer_than_any_cached_build(self):
+        source = self.root / "source"
+        (source / "core/src").mkdir(parents=True)
+        crate = source / "core/src/lib.rs"
+        crate.write_text("// committed")
+        os.utime(crate, (1_000_000, 1_000_000))
+        (source / "link").symlink_to(self.root / "outside")
+        cached_output = time.time() - 1
+        mark_sources_changed(source)
+        self.assertGreater(crate.stat().st_mtime, cached_output)
 
     def test_smoke_prunes_only_owned_build_trees_and_keeps_equipment(self):
         with tempfile.TemporaryDirectory(prefix="supertag-release-build-") as temporary:

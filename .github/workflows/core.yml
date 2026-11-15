@@ -63,6 +63,13 @@ jobs:
       SUPERTAG_RUST_TEST_REQUIRE: postgres,node,agents-python,tui
     steps:
       - uses: actions/checkout@v4
+      # Restores the registry and third-party dependency builds; workspace crates are never cached.
+      # Only main saves, so pull requests reuse main's cache without evicting it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: core-runtime
+          workspaces: core -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.18.0
@@ -155,6 +162,13 @@ jobs:
       SUPERTAG_RUST_TEST_REQUIRE: linux-root,postgres
     steps:
       - uses: actions/checkout@v4
+      # Restores the registry and third-party dependency builds; workspace crates are never cached.
+      # Only main saves, so pull requests reuse main's cache without evicting it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: core-linux-root
+          workspaces: core -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.18.0
@@ -185,6 +199,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Restores the registry and third-party dependency builds; workspace crates are never cached.
+      # Only main saves, so pull requests reuse main's cache without evicting it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop
+          workspaces: apps/desktop/src-tauri -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.18.0
@@ -215,6 +236,13 @@ jobs:
         working-directory: core
     steps:
       - uses: actions/checkout@v4
+      # Restores the registry and third-party dependency builds; workspace crates are never cached.
+      # Only main saves, so pull requests reuse main's cache without evicting it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: core-crash-durability
+          workspaces: core -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Start PostgreSQL with production durability settings
         run: |
           docker run --detach --name supertag-durable-postgres \

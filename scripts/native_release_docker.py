@@ -7,6 +7,8 @@
 Accepts a clean exact source HEAD. Nothing is uploaded, installed on the host, or
 published. Docker may emulate the selected architecture; the binaries and all
 runtime helpers are executed under that architecture before output is accepted.
+With --cargo-cache, that host directory is also mounted writable as the build's Cargo
+registry and target directory (see native_release.py --cargo-cache).
 """
 import argparse
 import json
@@ -30,13 +32,19 @@ def verify_source(repo, commit):
             "source has tracked changes")
 
 
-def package(repo, commit, output, platform, profile="release"):
+def package(repo, commit, output, platform, profile="release", cargo_cache=None):
     require(platform in ("linux-amd64", "linux-arm64"), "Docker release platform must be Linux amd64 or arm64")
     require(profile in ("dev", "release"), "unknown release profile")
     verify_source(repo, commit)
     output = output.resolve()
     require(not output.exists(), "release output directory already exists")
     output.mkdir(mode=0o700, parents=True)
+    cache_mount = []
+    if cargo_cache is not None:
+        cargo_cache = cargo_cache.resolve()
+        cargo_cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+        cache_mount = ["--mount", f"type=bind,src={cargo_cache},dst=/cargo-cache",
+                       "--env", "SUPERTAG_BUILD_CARGO_CACHE=/cargo-cache"]
     identifier = "supertag-release-" + uuid.uuid4().hex[:12]
     target = "linux/" + platform.removeprefix("linux-")
     with tempfile.TemporaryDirectory(prefix=identifier + "-") as temporary:
@@ -57,7 +65,7 @@ def package(repo, commit, output, platform, profile="release"):
                 "--label", f"org.supertag.release-rehearsal={identifier}",
                 "--user", f"{os.getuid()}:{os.getgid()}",
                 "--mount", f"type=bind,src={bundle},dst=/input/source.bundle,readonly",
-                "--mount", f"type=bind,src={output},dst=/output",
+                "--mount", f"type=bind,src={output},dst=/output", *cache_mount,
                 "--env", f"SUPERTAG_BUILD_COMMIT={commit}", "--env", f"SUPERTAG_BUILD_PLATFORM={platform}",
                 "--env", f"SUPERTAG_BUILD_PROFILE={profile}", image_id], check=True)
         finally:
@@ -92,9 +100,10 @@ def main():
     parser.add_argument("--platform", choices=("linux-amd64", "linux-arm64"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", choices=("dev", "release"), default="release")
+    parser.add_argument("--cargo-cache", type=Path, help="host directory mounted as the build's Cargo registry and target directory")
     args = parser.parse_args()
     try:
-        print(package(args.repo.resolve(), args.commit, args.output, args.platform, args.profile))
+        print(package(args.repo.resolve(), args.commit, args.output, args.platform, args.profile, args.cargo_cache))
     except (ArchiveError, OSError, ValueError, subprocess.SubprocessError) as error:
         parser.exit(1, f"container release: {error}\n")
 
