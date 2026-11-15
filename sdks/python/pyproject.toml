@@ -49,6 +49,11 @@ Issues = "https://github.com/atemaguer/supertag/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/supertag"]
 
+# gen/ holds the supertag.runtime.v2 bindings for the cross-language checks; the package ships
+# its own copy in supertag._runtime_v2.
+[tool.hatch.build.targets.sdist]
+exclude = ["/gen"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 asyncio_mode = "auto"
@@ -57,7 +62,7 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-extend-exclude = ["src/supertag/_runtime_v2"]
+extend-exclude = ["gen", "src/supertag/_runtime_v2"]
 
 [tool.ruff.lint]
 select = ["B", "C4", "E", "F", "I"]
