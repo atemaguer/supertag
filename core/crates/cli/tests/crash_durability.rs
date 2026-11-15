@@ -20,7 +20,7 @@
 //! The SQLite cases run by default. The PostgreSQL cases are ignored unless
 //! `SUPERTAG_RUST_TEST_POSTGRES_URL_FILE` names an isolated server. The durable
 //! lane (`scripts/durable-postgres-crash-lane.sh`, and the `crash-durability`
-//! job in `.github/workflows/rust-port.yml`) runs the PostgreSQL cases against a
+//! job in `.github/workflows/core.yml`) runs the PostgreSQL cases against a
 //! server with `fsync`, `synchronous_commit`, and `full_page_writes` on, and sets
 //! `SUPERTAG_RUST_TEST_REQUIRE_DURABLE_POSTGRES=1` so each case refuses a server
 //! with test durability settings.

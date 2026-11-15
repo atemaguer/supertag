@@ -115,7 +115,7 @@ or `all`; a listed prerequisite that is missing then fails the test. The prerequ
 `docker` (`SUPERTAG_RUST_TEST_DOCKER`, the `docker` executable; the WebSocket tunnel's nginx case
 pulls `nginx:1.27-alpine`), and `linux-root`. The `linux-root` shared execution cases need root in a disposable Linux VM or
 container, util-linux `setsid`, and `SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY` set to a built
-`supertag-shared-execution`. The `linux-root` job in `.github/workflows/rust-port.yml` runs them.
+`supertag-shared-execution`. The `linux-root` job in `.github/workflows/core.yml` runs them.
 
 For a live read-only smoke test, use the built-in Codex adapter with an installed Codex CLI
 version 0.163.0 or newer. Start the services with a separate development state directory.

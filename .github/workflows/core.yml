@@ -1,4 +1,4 @@
-name: Rust runtime
+name: Core
 
 on:
   pull_request:
@@ -15,7 +15,7 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'tsconfig.base.json'
-      - '.github/workflows/rust-port.yml'
+      - '.github/workflows/core.yml'
   push:
     branches: [main]
     paths:
@@ -31,7 +31,7 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'tsconfig.base.json'
-      - '.github/workflows/rust-port.yml'
+      - '.github/workflows/core.yml'
 
 permissions:
   contents: read
