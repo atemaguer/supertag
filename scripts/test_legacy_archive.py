@@ -495,6 +495,43 @@ class LegacyArchiveTests(unittest.TestCase):
         self.assertEqual([change["resource"] for change in result["changes"]], ["Workspace/repo", "Tag/lead", "Tag/lead", "Tag/lead"])
         [tag] = list(yaml.safe_load_all((self.root / "rust.yaml").read_text()))
         self.assertEqual(tag["spec"], {"roles": ["Lead"], "execution": {"harness": "codex", "models": ["m"], "efforts": ["low"]}})
+        workspace, *_ = result["changes"]
+        # The Workspace's ref becomes the Tag binding that follows the same branch.
+        self.assertIn("workspace: {id: repo, ref: main} follows the branch main", workspace["change"])
+        self.assertIn("workspace: {id: repo, baseCommit: SHA}", workspace["change"])
+        hosts = next(change["change"] for change in result["changes"] if "workerHosts" in change["change"])
+        self.assertIn("labels in supertag.yaml", hosts)
+        self.assertIn("runsOn", hosts)
+
+    def test_manifests_name_codex_tags_that_run_commands_without_web_fetch(self):
+        try:
+            import yaml  # noqa: F401
+        except ImportError:
+            self.skipTest("PyYAML is not installed")
+        source = self.root / "org.yaml"
+        source.write_text(
+            "apiVersion: supertag/v1\nkind: PermissionSet\nmetadata: {name: tools}\n"
+            "spec: {permissions: [{target: runtime, action: 'commands:execute'}]}\n"
+            "---\napiVersion: supertag/v1\nkind: PermissionSet\nmetadata: {name: web}\n"
+            "spec: {permissions: [{target: runtime, action: 'web:fetch'}]}\n"
+            "---\napiVersion: supertag/v1\nkind: Role\nmetadata: {name: Builder}\n"
+            "spec: {purpose: p, permissionSets: [tools], execution: {harness: codex}}\n"
+            "---\napiVersion: supertag/v1\nkind: Role\nmetadata: {name: Researcher}\n"
+            "spec: {purpose: p, permissionSets: [tools, web], execution: {harness: codex}}\n"
+            "---\napiVersion: supertag/v1\nkind: Role\nmetadata: {name: Plain}\n"
+            "spec: {purpose: p, permissionSets: [tools]}\n"
+            "---\napiVersion: supertag/v1\nkind: Tag\nmetadata: {name: builder}\nspec: {roles: [Builder]}\n"
+            "---\napiVersion: supertag/v1\nkind: Tag\nmetadata: {name: researcher}\nspec: {roles: [Researcher]}\n"
+            "---\napiVersion: supertag/v1\nkind: Tag\nmetadata: {name: switched}\n"
+            "spec: {roles: [Plain], execution: {harness: codex}}\n"
+            "---\napiVersion: supertag/v1\nkind: Tag\nmetadata: {name: claude}\n"
+            "spec: {roles: [Builder], execution: {harness: claude-code}}\n")
+        result = translate_manifests(source, None)
+        noted = sorted(change["resource"] for change in result["changes"]
+                       if change["change"].startswith("check commands:execute"))
+        self.assertEqual(noted, ["Role/Builder", "Tag/builder", "Tag/switched"])
+        self.assertTrue(all("web:fetch" in change["change"] for change in result["changes"]))
+        self.assertEqual(result["documents"], 9)
 
     def test_manifests_drop_what_rust_refuses_and_rename_what_it_renamed(self):
         try:

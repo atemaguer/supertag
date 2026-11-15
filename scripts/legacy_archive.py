@@ -1041,12 +1041,55 @@ RUST_EXECUTION = {"harness", "sharedExecutionEnvironmentId", "models", "efforts"
 RUST_GRANT = {"target", "action", "surfaceAccountId", "scope", "reference", "resource", "approvalRequired"}
 RUST_CONTEXT_ITEM = {"itemKey", "type", "version", "required", "config"}
 MANIFEST_GUIDANCE = {
-    ("Tag", "workerHosts"): "local Worker Hosts serve every Tag; route remote hosts with Auth Key labels and runsOn",
+    ("Tag", "workerHosts"): "give those hosts a label with the host service's labels in supertag.yaml (or the "
+                            "Auth Key's labels for a remote host) and name it in the Tag's runsOn; local Worker "
+                            "Hosts may run every Tag",
     ("Tag", "locations"): "bind each location with a SurfaceLocation document or `supertag surface-location`, "
                           "after `supertag setup surface` connects its account",
     ("Volume", "credential"): "the Control Plane supplies storage credentials; register with `supertag volume put`",
-    ("Objective", "workspaces"): "bind the owner Tag's Workspace with workspace: {id: NAME, baseCommit: SHA}",
+    ("Objective", "workspaces"): "bind the owner Tag's Workspace with workspace: {id: NAME, ref: BRANCH} "
+                                 "or workspace: {id: NAME, baseCommit: SHA}",
 }
+CODEX_COMMANDS = ("Codex runs commands on code-mode-only models, such as gpt-6-sol, only with web:fetch, which "
+                  "also opens the network to its commands; grant web:fetch as well or choose a model that is not "
+                  "code-mode-only (docs/operations/requirements.md, Codex commands and models)")
+
+
+def workspace_binding(name, spec):
+    ref = spec.get("ref")
+    follow = (f"workspace: {{id: {name}, ref: {ref}}} follows the branch {ref}" if isinstance(ref, str) and ref
+              else f"workspace: {{id: {name}, ref: BRANCH}} follows a branch")
+    return f"Bind Tags with {follow}, or workspace: {{id: {name}, baseCommit: SHA}} pins one commit"
+
+
+def codex_without_fetch(documents):
+    """Name the Roles and Tags whose Codex Tasks may run commands but not fetch the web."""
+    def documents_of(kind):
+        return {(document.get("metadata") or {}).get("name"): document.get("spec") or {}
+                for document in documents if isinstance(document, dict) and document.get("kind") == kind}
+
+    sets, roles = documents_of("PermissionSet"), documents_of("Role")
+
+    def actions(set_names):
+        return {grant.get("action") for name in set_names or [] if isinstance(sets.get(name), dict)
+                for grant in sets[name].get("permissions") or [] if isinstance(grant, dict)}
+
+    def harness(spec):
+        execution = spec.get("execution")
+        return execution.get("harness") if isinstance(execution, dict) else None
+
+    found = set()
+    for name, spec in roles.items():
+        granted = actions(spec.get("permissionSets"))
+        if harness(spec) == "codex" and "commands:execute" in granted and "web:fetch" not in granted:
+            found.add(f"Role/{name}")
+    for name, spec in documents_of("Tag").items():
+        tag_roles = [roles.get(role) or {} for role in spec.get("roles") or []]
+        granted = set().union(*(actions(role.get("permissionSets")) for role in tag_roles))
+        harnesses = {harness(spec)} if harness(spec) else {harness(role) for role in tag_roles}
+        if "codex" in harnesses and "commands:execute" in granted and "web:fetch" not in granted:
+            found.add(f"Tag/{name}")
+    return found
 
 
 def translate_manifests(source, destination):
@@ -1055,6 +1098,7 @@ def translate_manifests(source, destination):
 
     documents = [document for document in yaml.safe_load_all(Path(source).read_text()) if document is not None]
     changes, kept = [], []
+    codex_notes = codex_without_fetch(documents)
     for index, document in enumerate(documents, 1):
         require(isinstance(document, dict) and "kind" in document, f"document {index} is not a manifest")
         kind, spec = document["kind"], document.get("spec") or {}
@@ -1077,8 +1121,7 @@ def translate_manifests(source, destination):
             else:
                 guidance = ("a local repository is a host's workspaces entry in supertag.yaml; move "
                             f"{ {key: spec[key] for key in ('delivery', 'setup') if key in spec} or 'nothing'} there")
-            change(f"removed the document: {guidance}. Bind Tags with workspace: {{id: NAME, baseCommit: SHA}}",
-                   spec)
+            change(f"removed the document: {guidance}. {workspace_binding(name.split('/', 1)[1], spec)}", spec)
             continue
         if kind == "SurfaceAccount":
             change("removed the document: connect the account again with `supertag setup surface "
@@ -1132,6 +1175,8 @@ def translate_manifests(source, destination):
                 drop(spec, "team", "team", "declare the Team as a Team document and name it in team")
         for key in [key for key in spec if key not in RUST_SPEC[kind]]:
             drop(spec, key, key)
+        if name in codex_notes:
+            change(f"check commands:execute: {CODEX_COMMANDS}")
         document["spec"] = spec
         kept.append(document)
     if destination:

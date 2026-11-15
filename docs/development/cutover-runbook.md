@@ -280,14 +280,16 @@ supertag get tag
 | TypeScript manifest | Rust |
 | --- | --- |
 | `execution: {model, effort}` on Tags and Roles | `execution: {models: [...], efforts: [...]}` |
-| Tag `workerHosts` | Removed. Local Worker Hosts serve every Tag. Route remote hosts with Auth Key labels and the Tag's `runsOn` |
+| Tag `workerHosts` | Removed. Give the hosts a label with the host service's `labels` in `supertag.yaml`, or the Auth Key's labels for a remote host, and name it in the Tag's `runsOn`. Local Worker Hosts may run every Tag |
 | Tag `locations` | Removed. Bind each location with a `SurfaceLocation` document or `supertag surface-location`, after its account is connected |
 | Every `Workspace` | Removed. A local repository is a host's `workspaces` entry in `supertag.yaml`; move `delivery` and `setup` there. Recreate a GitHub `source` with `supertag workspace put --account ACCOUNT --repository-id ID --repository OWNER/REPO NAME` |
-| `Workspace` `ref`, `skills` | No Rust counterpart. A Tag binds a local repository at a commit with `workspace: {id: NAME, baseCommit: SHA}`. Skills come from the host's `skills` catalog |
+| `Workspace` `ref` | The Tag's `workspace: {id: NAME, ref: BRANCH}`, which starts each new Session from the branch's current commit. Pin one commit with `workspace: {id: NAME, baseCommit: SHA}` instead |
+| `Workspace` `skills` | Removed. Skills come from the host's `skills` catalog in `supertag.yaml` |
 | `SurfaceAccount` | Removed. Connect the account again with `supertag setup surface PROVIDER` (step 6) |
 | Volume `credential` | Removed. The Control Plane supplies storage credentials |
-| PermissionSet `surfaceAccountId`, `approval: required` | `surface_account_id`, `approval_required: true` |
+| PermissionSet `approval: required` | `approvalRequired: true`. `surfaceAccountId` is unchanged |
 | Objective `owner`, `budget: {minor, currency}` | `ownerTagId`, `budgetLimitMinor`, `budgetCurrency`. `workspaces` and an inline `team` are removed; declare the Team as a `Team` document |
+| A Codex Role or Tag granted `commands:execute` without `web:fetch` | Unchanged, and listed. Codex runs commands on code-mode-only models, such as gpt-6-sol, only with `web:fetch`; grant it or pick another model. See [Codex commands and models](../operations/requirements.md#codex-commands-and-models) |
 | Any other field Rust does not accept, such as extra `metadata` | Removed and listed |
 
 `manifests` prints each change and what replaces a removed field. It checks every field name
