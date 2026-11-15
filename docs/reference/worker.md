@@ -88,7 +88,7 @@ are not a billing cap. See [Budgets and allocation](coordination.md#budgets-and-
 
 | Harness | Adapter | Credentials it receives | Commands |
 | --- | --- | --- | --- |
-| `codex` | Built into `supertag`; drives Codex's app-server | `CODEX_API_KEY`, `OPENAI_API_KEY`, and a copy of a file-backed sign-in | In Codex's sandbox, writable only in the checkout and read-write Workspace Volume copies. Current Codex models run commands only through Codex code mode, which runs only when the Task also has `web:fetch`; without it the Task Attempt fails and says so |
+| `codex` | Built into `supertag`; drives Codex's app-server | `CODEX_API_KEY`, `OPENAI_API_KEY`, and a copy of a file-backed sign-in | In Codex's sandbox, writable only in the checkout and read-write Workspace Volume copies. A code-mode-only model, such as gpt-6-sol, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) |
 | `claude-code` | Node bridge on the Claude Agent SDK | `ANTHROPIC_API_KEY` or the host user's sign-in | Without a sandbox, only with `--allow-unsandboxed-commands`; a permission hook keeps file tools in the Task's roots |
 | `cursor` | Node bridge on the Cursor SDK | `CURSOR_API_KEY` | Without a sandbox, only with `--allow-unsandboxed-commands`; or in an E2B, Modal, or shared execution environment |
 | `opencode` | Node bridge | The selected provider's API key, or `--opencode-auth-file` | Without a sandbox, only with `--allow-unsandboxed-commands` |

@@ -54,6 +54,24 @@ the file `--opencode-auth-file` names, and needs an explicit `provider/model`. S
 [Run Worker Hosts](../guides/workers.md) for
 remote hosts and [credential storage](../reference/credential-storage.md) for secret handling.
 
+### Codex commands and models
+
+Codex marks most current models, gpt-6-sol among them, as code-mode-only: they run commands only
+through Codex code mode. Code-mode commands can reach the network that the `commands:execute`
+sandbox otherwise blocks, so SuperTag starts code mode only for a Task that also has `web:fetch`.
+A Codex Task with `commands:execute` but without `web:fetch` on such a model fails when its turn
+starts, naming the model. To let it run commands, do one of these:
+
+- grant the Tag `web:fetch` as well, which also opens the network to its commands; or
+- select a Codex model that is not code-mode-only in the Tag's or Role's `execution.models`.
+
+SuperTag cannot tell a model's mode before the Task Attempt starts: Codex does not report it, so
+`supertag placement explain` cannot name it, and `supertag describe task` shows the failure as the
+Task's result. `allow-unsandboxed-commands` does not apply to Codex, which always runs commands in
+its own sandbox. `files:write` or `commands:execute` gives a Codex Task read access too; a Task
+with none of `files:read`, `files:write`, and `commands:execute` is refused, because Codex reads
+the Workspace in every sandbox mode.
+
 ### Cursor setup and limits
 
 Cursor runs on macOS and Linux Worker Hosts. SuperTag drives Cursor through its TypeScript SDK,

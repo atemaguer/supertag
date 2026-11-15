@@ -2034,10 +2034,11 @@ async fn code_mode_commands_run_only_with_web_fetch_and_fail_clearly_without_it(
         if !succeeds {
             assert_eq!(
                 outcome.result,
-                "Codex model gpt-fixture-exact runs commands only through Codex code mode, which \
-                 SuperTag enables only when the Task also admits web:fetch: code-mode commands \
-                 can reach the network that the commands:execute sandbox otherwise blocks. Grant \
-                 web:fetch to run commands with this model"
+                "Codex model gpt-fixture-exact needs Codex code mode to run commands, and \
+                 SuperTag starts code mode only when the Task also has web:fetch, because \
+                 code-mode commands can reach the network that the commands:execute sandbox \
+                 otherwise blocks. Grant the Tag web:fetch, or select a Codex model that is not \
+                 code-mode-only"
             );
         }
     }

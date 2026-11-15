@@ -557,7 +557,9 @@ impl Stream {
             }
             "error" => bail!("Codex reported a failed turn"),
             // A code-mode-only model has no other command tool, so it would answer that commands
-            // are disabled and the Task would succeed without them.
+            // are disabled and the Task would succeed without them. Neither the Control Plane nor
+            // `model/list` exposes a model's tool mode, so the earliest sign is this warning, sent
+            // when the turn starts and before the model acts.
             "warning"
                 if self.commands_without_code_mode
                     && params["message"]
@@ -565,10 +567,10 @@ impl Stream {
                         .is_some_and(|message| message.contains("code-mode host is disabled")) =>
             {
                 bail!(
-                    "Codex model {} runs commands only through Codex code mode, which SuperTag \
-                     enables only when the Task also admits web:fetch: code-mode commands can \
-                     reach the network that the commands:execute sandbox otherwise blocks. Grant \
-                     web:fetch to run commands with this model",
+                    "Codex model {} needs Codex code mode to run commands, and SuperTag starts \
+                     code mode only when the Task also has web:fetch, because code-mode commands \
+                     can reach the network that the commands:execute sandbox otherwise blocks. \
+                     Grant the Tag web:fetch, or select a Codex model that is not code-mode-only",
                     self.configured_model
                         .as_deref()
                         .or(self.observed_model.as_deref())
