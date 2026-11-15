@@ -9,6 +9,14 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Fixed
+
+- The example organizations in `examples/organizations/` apply with the 0.3.0 CLI. Their Tags bind
+  the Workspace with `workspace: {id, ref}`, the `review-team` verifier is placed with `runsOn` and
+  host labels instead of `workerHosts`, Roles and Tags use `execution: {harness, models, efforts}`,
+  each example declares its Team, and the Codex builders in `mixed-harnesses` get `web:fetch` so
+  they can run commands on gpt-6-sol.
+
 ## [0.3.0] - 2026-11-14
 
 ### Added

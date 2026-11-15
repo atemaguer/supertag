@@ -1,16 +1,17 @@
 # One team across three coding agents: a Claude Code lead, Codex builders, a Cursor builder,
 # and a reviewer on a different model from the builders, so reviews get a second opinion.
 #
-# The host must serve every harness and model named here, for example in supertag.yaml:
+# The host must serve every harness and model named here, and the repository as the Workspace
+# `app`. In its supertag.yaml host service:
 #   harnesses: [claude-code, codex, cursor]
 #   allow-unsandboxed-commands: [claude-code, cursor]
 #   models: { claude-code: [claude-opus-5-5], codex: [gpt-6-sol], cursor: [claude-sonnet-5-5] }
+#   workspaces:
+#     app: { path: ~/code/app, delivery: branch }   # add `setup: npm ci` to prepare each checkout
 # Cursor also needs CURSOR_API_KEY in ~/.supertag/.env.
 #
-# Before applying, replace:
-#   my-laptop  with your Worker Host ID (`supertag ps`)
-#   app        with your Workspace name (`supertag list workspace`)
-# Then run: supertag apply -f organization.yaml
+# Before applying, replace `app` with your Workspace name and `main` with the branch new Sessions
+# start from. Then run: supertag apply -f organization.yaml
 apiVersion: supertag/v1
 kind: PermissionSet
 metadata: { name: local-tools }
@@ -19,13 +20,14 @@ spec:
     - { target: runtime, action: commands:execute }
     - { target: runtime, action: files:write }
 ---
+# gpt-6-sol runs commands only in Codex code mode, which SuperTag starts only for Tasks that may
+# also fetch from the web. This also opens the network to the Codex builders' commands.
 apiVersion: supertag/v1
-kind: Workspace
-metadata: { name: app }
+kind: PermissionSet
+metadata: { name: web-fetch }
 spec:
-  ref: main
-  delivery: branch
-  # setup: npm ci
+  permissions:
+    - { target: runtime, action: web:fetch }
 ---
 apiVersion: supertag/v1
 kind: Role
@@ -40,7 +42,7 @@ spec:
     configuration (.git/config, .git/info, hooks): SuperTag refuses to run Tasks in a repository
     whose git configuration changed.
   permissionSets: [local-tools]
-  execution: { harness: claude-code, model: claude-opus-5-5, effort: [low, medium, high] }
+  execution: { harness: claude-code, models: [claude-opus-5-5], efforts: [low, medium, high] }
 ---
 apiVersion: supertag/v1
 kind: Role
@@ -57,6 +59,13 @@ spec:
 ---
 apiVersion: supertag/v1
 kind: Role
+metadata: { name: Codex Commands }
+spec:
+  purpose: Let Codex run commands on code-mode-only models such as gpt-6-sol.
+  permissionSets: [web-fetch]
+---
+apiVersion: supertag/v1
+kind: Role
 metadata: { name: Reviewer }
 spec:
   purpose: Review proposed changes for correctness, test coverage, and consistency with the repository's conventions.
@@ -64,42 +73,49 @@ spec:
     Read the diff and run the tests yourself. Report each defect as a finding with a severity and
     a file and line. Say plainly when a change is ready. Don't rewrite the change yourself.
   permissionSets: [local-tools]
-  execution: { harness: claude-code, model: claude-opus-5-5, effort: [medium, high] }
+  execution: { harness: claude-code, models: [claude-opus-5-5], efforts: [medium, high] }
 ---
 apiVersion: supertag/v1
 kind: Tag
 metadata: { name: lead }
 spec:
   roles: [Lead]
-  workerHosts: [my-laptop]
+  workspace: { id: app, ref: main }
 ---
 apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder-codex-1 }
 spec:
-  roles: [Builder]
-  workerHosts: [my-laptop]
-  execution: { harness: codex, model: gpt-6-sol, effort: [low, medium, high] }
+  roles: [Builder, Codex Commands]
+  workspace: { id: app, ref: main }
+  execution: { harness: codex, models: [gpt-6-sol], efforts: [low, medium, high] }
 ---
 apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder-codex-2 }
 spec:
-  roles: [Builder]
-  workerHosts: [my-laptop]
-  execution: { harness: codex, model: gpt-6-sol, effort: [low, medium, high] }
+  roles: [Builder, Codex Commands]
+  workspace: { id: app, ref: main }
+  execution: { harness: codex, models: [gpt-6-sol], efforts: [low, medium, high] }
 ---
 apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder-cursor }
 spec:
   roles: [Builder]
-  workerHosts: [my-laptop]
-  execution: { harness: cursor, model: claude-sonnet-5-5 }
+  workspace: { id: app, ref: main }
+  execution: { harness: cursor, models: [claude-sonnet-5-5] }
 ---
 apiVersion: supertag/v1
 kind: Tag
 metadata: { name: reviewer }
 spec:
   roles: [Reviewer]
-  workerHosts: [my-laptop]
+  workspace: { id: app, ref: main }
+---
+# Name this Team in an Objective's `team` so the lead may hand its work to the others.
+apiVersion: supertag/v1
+kind: Team
+metadata: { name: app-team }
+spec:
+  members: [lead, builder-codex-1, builder-codex-2, builder-cursor, reviewer]

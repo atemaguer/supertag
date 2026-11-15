@@ -1,9 +1,14 @@
 # A lead and two builders on one machine, all on Claude Code.
 #
-# Before applying, replace:
-#   my-laptop  with your Worker Host ID (the host name `supertag ps` shows)
-#   app        with your Workspace name (`supertag list workspace`)
-# Then run: supertag apply -f organization.yaml
+# The Worker Host serves the repository as the Workspace `app`. In its supertag.yaml host service:
+#   harnesses: [claude-code]
+#   allow-unsandboxed-commands: [claude-code]
+#   workspaces:
+#     app: { path: ~/code/app, delivery: branch }   # add `setup: npm ci` to prepare each checkout
+# A host in the same supertag.yaml as its Control Plane may run every Tag.
+#
+# Before applying, replace `app` with your Workspace name and `main` with the branch new Sessions
+# start from. Then run: supertag apply -f organization.yaml
 apiVersion: supertag/v1
 kind: PermissionSet
 metadata: { name: local-tools }
@@ -12,14 +17,6 @@ spec:
   permissions:
     - { target: runtime, action: commands:execute }
     - { target: runtime, action: files:write }
----
-apiVersion: supertag/v1
-kind: Workspace
-metadata: { name: app }
-spec:
-  ref: main # Task branches start here
-  delivery: branch # each Task's work lands on its own branch
-  # setup: npm ci   # runs in each new worktree before the Task starts
 ---
 apiVersion: supertag/v1
 kind: Role
@@ -36,7 +33,7 @@ spec:
     SuperTag refuses to run Tasks in a repository whose git configuration changed. Resolve merge
     conflicts by editing the files and committing.
   permissionSets: [local-tools]
-  execution: { harness: claude-code, model: claude-opus-5-5, effort: [low, medium, high] }
+  execution: { harness: claude-code, models: [claude-opus-5-5], efforts: [low, medium, high] }
 ---
 apiVersion: supertag/v1
 kind: Role
@@ -49,25 +46,32 @@ spec:
     results as evidence. Never change the repository's git configuration. Resolve merge conflicts
     by editing the files and committing.
   permissionSets: [local-tools]
-  execution: { harness: claude-code, model: claude-sonnet-5-5, effort: [low, medium, high] }
+  execution: { harness: claude-code, models: [claude-sonnet-5-5], efforts: [low, medium, high] }
 ---
 apiVersion: supertag/v1
 kind: Tag
 metadata: { name: lead }
 spec:
   roles: [Lead]
-  workerHosts: [my-laptop]
+  workspace: { id: app, ref: main } # each new Session starts from main's current commit
 ---
 apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder-1 }
 spec:
   roles: [Builder]
-  workerHosts: [my-laptop]
+  workspace: { id: app, ref: main }
 ---
 apiVersion: supertag/v1
 kind: Tag
 metadata: { name: builder-2 }
 spec:
   roles: [Builder]
-  workerHosts: [my-laptop]
+  workspace: { id: app, ref: main }
+---
+# Name this Team in an Objective's `team` so the lead may hand its work to the builders.
+apiVersion: supertag/v1
+kind: Team
+metadata: { name: app-team }
+spec:
+  members: [lead, builder-1, builder-2]
