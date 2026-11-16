@@ -3,7 +3,13 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Tag } from "../control-plane";
-import { isSidebarShortcut, orderTags, relativeTime, type SidebarMode } from "./sidebar";
+import {
+  isSidebarShortcut,
+  orderTags,
+  relativeTime,
+  type SidebarMode,
+  tagShortcut,
+} from "./sidebar";
 import { WorkspaceShell } from "./workspace";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -163,4 +169,45 @@ it("recognises the sidebar shortcut and orders and times rows", () => {
   const now = new Date(2026, 10, 16, 15, 0).getTime();
   expect(relativeTime(now - 25 * 3_600_000, now)).toBe("Yesterday");
   expect(relativeTime(now - 30 * 86_400_000, now)).toMatch(/Oct/);
+});
+
+it("opens Tags with Ctrl+1…9 and Ctrl+↑/↓, and New Tag with Ctrl+N", () => {
+  const onNewTag = vi.fn();
+  const { onSelectTag } = render({ onNewTag });
+  const press = (key: string) =>
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: true }));
+    });
+  press("1");
+  expect(onSelectTag).toHaveBeenLastCalledWith("lead");
+  press("3");
+  expect(onSelectTag).toHaveBeenLastCalledWith("moss");
+  press("ArrowDown");
+  expect(onSelectTag).toHaveBeenLastCalledWith("moss");
+  press("ArrowUp");
+  expect(onSelectTag).toHaveBeenLastCalledWith("lead");
+  press("n");
+  expect(onNewTag).toHaveBeenCalledOnce();
+  press("f");
+  expect(document.activeElement).toBe(host.querySelector(".sidebar-search input"));
+
+  const key = (init: Partial<KeyboardEvent>) => ({
+    key: "1",
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    isComposing: false,
+    target: null,
+    ...init,
+  });
+  expect(tagShortcut(key({ metaKey: true }), true)).toEqual({ kind: "nth", index: 0 });
+  expect(tagShortcut(key({ ctrlKey: true }), true)).toBeUndefined();
+  // In a field with text, ⌘↑ moves the cursor instead.
+  const field = { value: "draft" } as unknown as EventTarget;
+  expect(tagShortcut(key({ key: "ArrowUp", metaKey: true, target: field }), true)).toBeUndefined();
+  expect(tagShortcut(key({ key: "ArrowUp", metaKey: true }), true)).toEqual({
+    kind: "step",
+    by: -1,
+  });
 });

@@ -170,6 +170,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           controlPlane={connection.controlPlane}
           initialTags={connection.tags}
           selector={selector}
+          draftScope={connection.origin ?? "preview"}
           tagAdmin={connection.tagAdmin}
           newTagRefusal={tagAdminRefusal(connection.principal)}
           switching={switching}

@@ -164,3 +164,52 @@ it("gives each message its own bubble with a copy action, and no avatar or name 
   expect(html).not.toContain('class="avatar');
   expect(html).toContain("Completed · View Task activity");
 });
+
+it("gives only the last bubble of each group a tail, and shows the operator's delivery", () => {
+  const html = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: { conversation: "planning", task: { ...task, prompt: "Check the update." } },
+      events: [{ sequence: 1, kind: "message", text: "Looking at the lockfile now." }],
+      delivery: "Seen",
+      divider: Date.now(),
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(html.match(/class="[^"]*\bbubble prompt-text tail\b/g)).toHaveLength(1);
+  expect(html.match(/class="[^"]*\bbubble tag-message"/g)).toHaveLength(1);
+  expect(html.match(/class="[^"]*\bbubble result-text tail\b/g)).toHaveLength(1);
+  expect(html).toMatch(/class="delivery" data-delivery="Seen">Seen</);
+  expect(html).toMatch(/class="time-divider"[^>]*>Today /);
+});
+
+it("shows the Tag typing until it writes, then its activity line instead", () => {
+  const running = { ...task, state: "running", result: undefined };
+  const typing = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: { conversation: "planning", task: running },
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(typing).toContain("typing-bubble");
+  expect(typing).toContain('aria-label="engineer is working"');
+  const active = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: { conversation: "planning", task: running },
+      events: [{ sequence: 1, kind: "activity", text: "Running pnpm test" }],
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(active).not.toContain("typing-bubble");
+  expect(active).toContain("Running pnpm test");
+  const done = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: { conversation: "planning", task },
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(done).not.toContain("typing-bubble");
+});

@@ -749,8 +749,15 @@ button:disabled {
   outline-offset: -3px;
 }
 .scroll-latest {
-  width: 32px;
-  height: 32px;
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  gap: 5px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 9px;
+  border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--text);
@@ -758,6 +765,23 @@ button:disabled {
 }
 .scroll-latest:hover {
   background: var(--hover);
+}
+.unseen-count {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #251b17;
+  font-size: 11px;
+  font-weight: 700;
+}
+/* A centred, muted time where a conversation resumes after a pause. */
+.time-divider {
+  align-self: center;
+  margin-bottom: -12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 560;
 }
 .empty {
   margin: auto;
@@ -816,9 +840,13 @@ button:disabled {
 .user-turn {
   align-items: flex-end;
 }
+/* A group of messages from one sender sits close together; only its last bubble has a tail. */
+.tag-turn,
+.user-turn {
+  gap: 3px;
+}
 .tag-turn {
   align-items: flex-start;
-  gap: 5px;
 }
 .bubble-row {
   display: flex;
@@ -836,6 +864,52 @@ button:disabled {
   border-radius: 20px;
   font-size: 14px;
   line-height: 1.55;
+}
+.tag-turn .bubble.tail {
+  border-bottom-left-radius: 6px;
+}
+.user-turn .bubble.tail {
+  border-bottom-right-radius: 6px;
+}
+.typing-bubble {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  color: var(--muted);
+}
+.typing-bubble .working-dots > span {
+  width: 7px;
+  height: 7px;
+}
+/* Under the operator's last message: Sending…, Sent, Seen, or Not delivered with a retry. */
+.delivery {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.delivery[data-delivery="Not delivered"],
+.delivery[data-delivery="Delivery uncertain"] {
+  color: #ffb7a9;
+}
+.delivery-action {
+  height: auto;
+  padding: 0;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.delivery-error {
+  max-width: 65%;
+  margin: 0;
+  padding-right: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 .tag-turn .bubble {
   background: var(--bubble);

@@ -57,6 +57,46 @@ export function isSidebarShortcut(
   return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
+/** Whether the platform's command key is held alone: ⌘ on macOS, Ctrl elsewhere. */
+function commandKey(
+  event: Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "isComposing">,
+  mac: boolean,
+) {
+  if (event.altKey || event.shiftKey || event.isComposing) return false;
+  return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}
+
+/** What a Tag shortcut does: open the nth Tag, the previous or next one, New Tag, or search. */
+export type TagShortcut =
+  | { kind: "nth"; index: number }
+  | { kind: "step"; by: 1 | -1 }
+  | { kind: "new" }
+  | { kind: "search" };
+
+/**
+ * The messaging-app shortcuts: ⌘1…⌘9 open the nth Tag (the lead is ⌘1), ⌘↑ and ⌘↓ the previous and
+ * next, ⌘N New Tag, and ⌘F search; Ctrl in place of ⌘ outside macOS. ⌘↑ and ⌘↓ move the cursor in
+ * a field with text, so they are left to it there.
+ */
+export function tagShortcut(
+  event: Pick<
+    KeyboardEvent,
+    "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "isComposing" | "target"
+  >,
+  mac: boolean,
+): TagShortcut | undefined {
+  if (!commandKey(event, mac)) return undefined;
+  if (/^[1-9]$/.test(event.key)) return { kind: "nth", index: Number(event.key) - 1 };
+  if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    const target = event.target as { value?: unknown } | null;
+    if (typeof target?.value === "string" && target.value) return undefined;
+    return { kind: "step", by: event.key === "ArrowUp" ? -1 : 1 };
+  }
+  if (event.key.toLowerCase() === "n") return { kind: "new" };
+  if (event.key.toLowerCase() === "f") return { kind: "search" };
+  return undefined;
+}
+
 /**
  * What the Tag list shows about a Tag beyond its name. The cached Tag list fills these in; until
  * then a row shows just the name.
@@ -115,6 +155,37 @@ export function Sidebar({
   const expanded = mode === "expanded";
   const { lead, others } = orderTags(tags, summaries);
   const query = search?.trim().toLowerCase();
+  const ordered = [...(lead ? [lead] : []), ...others];
+  const shortcuts = useRef({ ordered, tag, onSelectTag, onNewTag });
+  shortcuts.current = { ordered, tag, onSelectTag, onNewTag };
+  useEffect(() => {
+    const mac = onMac();
+    function onKey(event: KeyboardEvent) {
+      const shortcut = tagShortcut(event, mac);
+      if (!shortcut) return;
+      const { ordered, tag, onSelectTag, onNewTag } = shortcuts.current;
+      if (shortcut.kind === "nth") {
+        const target = ordered[shortcut.index];
+        if (!target) return;
+        onSelectTag?.(target.tagId);
+      } else if (shortcut.kind === "step") {
+        const at = ordered.findIndex((entry) => entry.tagId === tag?.tagId);
+        const target = ordered[Math.min(Math.max(at + shortcut.by, 0), ordered.length - 1)];
+        if (!target || target.tagId === tag?.tagId) return;
+        onSelectTag?.(target.tagId);
+      } else if (shortcut.kind === "new") {
+        if (!onNewTag) return;
+        onNewTag();
+      } else {
+        if (sidebarMode() === "rail") setSidebarMode("expanded");
+        setSearch((current) => current ?? "");
+        searchField.current?.focus();
+      }
+      event.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const shown =
     expanded && query
       ? others.filter((entry) => `${tagName(entry)} ${entry.tagId}`.toLowerCase().includes(query))

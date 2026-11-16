@@ -1,4 +1,4 @@
-import { type MouseEvent, type ReactNode, useCallback, useState } from "react";
+import { type MouseEvent, type ReactNode, useCallback, useEffect, useState } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
 import { shownConversation, useConversationPrefetch } from "../lib/conversation-cache";
@@ -165,6 +165,8 @@ interface WorkspaceProps {
   controlPlane: ControlPlane;
   initialTags: Tag[];
   selector(mode: SidebarMode): ReactNode;
+  /** Which Control Plane the drafts are kept for across restarts. */
+  draftScope: string;
   /** Creates Tags, when this connection may. */
   tagAdmin?: TagAdmin;
   /** Why this connection cannot create Tags. */
@@ -179,6 +181,7 @@ export function Workspace({
   controlPlane,
   initialTags,
   selector,
+  draftScope,
   tagAdmin,
   newTagRefusal,
   switching,
@@ -188,7 +191,15 @@ export function Workspace({
   const [tags, setTags] = useState(initialTags);
   const [creatingTag, setCreatingTag] = useState(false);
   const [selectedTag, setSelectedTag] = useState(initialTags[0]?.tagId);
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [drafts, updateDraft] = useDrafts(draftScope);
+  // What the sidebar knows of each conversation opened here. Only the open one is current, so
+  // only it can show as working.
+  const [summaries, setSummaries] = useState<Record<string, TagSummary>>({});
+  const reportSummary = useCallback(
+    (tagId: string, summary: TagSummary) =>
+      setSummaries((prior) => ({ ...prior, [tagId]: summary })),
+    [],
+  );
   const [error, setError] = useState("");
   const watch = useControlPlaneWatch(connectionId);
   const tag = tags.find((entry) => entry.tagId === selectedTag) ?? tags[0];
@@ -222,6 +233,12 @@ export function Workspace({
     switching,
     connected: true,
     onSelectTag: setSelectedTag,
+    summaries: Object.fromEntries(
+      Object.entries(summaries).map(([tagId, summary]) => [
+        tagId,
+        tagId === tag?.tagId ? summary : { ...summary, working: undefined },
+      ]),
+    ),
     onNewTag: tagAdmin ? () => setCreatingTag(true) : undefined,
     newTagRefusal,
     error: connectionError || error,
@@ -233,8 +250,9 @@ export function Workspace({
       watch={watch}
       tag={tag}
       shell={shell}
-      drafts={drafts}
-      setDraft={(key, draft) => setDrafts((prior) => ({ ...prior, [key]: draft }))}
+      draft={drafts[tag.tagId] ?? { text: "" }}
+      updateDraft={(update) => updateDraft(tag.tagId, update)}
+      onSummary={reportSummary}
       onWriteChange={onWriteChange}
     />
   ) : (
@@ -262,6 +280,47 @@ export function Workspace({
   );
 }
 
+const DRAFTS_KEY = "supertag.desktop.drafts.";
+
+/**
+ * What the operator is writing to each Tag, kept across Tag switches. Unsent text is also kept
+ * across restarts, per Control Plane; a message on its way is not.
+ */
+function useDrafts(scope: string) {
+  const key = DRAFTS_KEY + scope;
+  const [drafts, setDrafts] = useState<Record<string, Draft>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.entries(saved)
+          .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+          .map(([tagId, text]) => [tagId, { text }]),
+      );
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    const texts = Object.fromEntries(
+      Object.entries(drafts)
+        .filter(([, draft]) => draft.text.trim())
+        .map(([tagId, draft]) => [tagId, draft.text]),
+    );
+    try {
+      if (Object.keys(texts).length) localStorage.setItem(key, JSON.stringify(texts));
+      else localStorage.removeItem(key);
+    } catch {
+      // Without storage, drafts last until the window closes.
+    }
+  }, [key, drafts]);
+  const update = useCallback(
+    (tagId: string, change: (draft: Draft) => Draft) =>
+      setDrafts((prior) => ({ ...prior, [tagId]: change(prior[tagId] ?? { text: "" }) })),
+    [],
+  );
+  return [drafts, update] as const;
+}
+
 const rosterChanged = (update: WatchUpdate) => update.kind === "tag";
 
 function TagWorkspace({
@@ -269,16 +328,18 @@ function TagWorkspace({
   watch,
   tag,
   shell,
-  drafts,
-  setDraft,
+  draft,
+  updateDraft,
+  onSummary,
   onWriteChange,
 }: {
   controlPlane: ControlPlane;
   watch?: WatchFeed;
   tag: Tag;
   shell: Omit<ShellProps, "children">;
-  drafts: Record<string, Draft>;
-  setDraft(key: string, draft: Draft): void;
+  draft: Draft;
+  updateDraft(update: (draft: Draft) => Draft): void;
+  onSummary(tagId: string, summary: TagSummary): void;
   onWriteChange(delta: 1 | -1): void;
 }) {
   const tagId = tag.tagId;
@@ -316,8 +377,9 @@ function TagWorkspace({
           watch={watch}
           tag={tag}
           name={conversation}
-          draft={drafts[key] ?? { text: "" }}
-          setDraft={(draft) => setDraft(key, draft)}
+          draft={draft}
+          updateDraft={updateDraft}
+          onSummary={(summary) => onSummary(tagId, summary)}
           onWriteChange={onWriteChange}
         />
       ) : (

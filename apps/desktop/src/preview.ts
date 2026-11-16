@@ -26,11 +26,19 @@ const tags: Tag[] = [
   },
 ];
 
-function sample(taskId: string, conversation: string, prompt: string, result?: string): Message {
+function sample(
+  taskId: string,
+  conversation: string,
+  prompt: string,
+  result?: string,
+  minutesAgo?: number,
+  tagId = "finch",
+): Message {
   const state = result === undefined ? "running" : "succeeded";
+  const createdAtMs = minutesAgo === undefined ? undefined : Date.now() - minutesAgo * 60_000;
   return {
     conversation,
-    task: { taskId, tagId: "finch", sessionId: conversation, prompt, state, result },
+    task: { taskId, tagId, sessionId: conversation, prompt, state, result, createdAtMs },
   };
 }
 
@@ -46,24 +54,33 @@ const messages = new Map<string, Map<string, Message[]>>([
             "CI-health",
             "Can you look at the PostgreSQL deadline test? It counted two aborts in the last CI run.",
             "I traced both aborts to the same Objective. Its deadline and the worker’s cancellation path each recorded an abort. The fix is to make the terminal transition atomic so only the first writer can record it.",
+            26 * 60,
           ),
           sample(
             "ci-health-2",
             "CI-health",
             "Check whether the same race can affect SQLite.",
             "SQLite uses the same cancellation path. I’d cover both databases with one test:\n\n1. Release the deadline and cancellation paths together.\n2. Check that **one** abort was recorded in `objective_events`.",
+            26 * 60 - 8,
           ),
-          sample("ci-health-3", "CI-health", "Write that test for both databases."),
+          sample("ci-health-3", "CI-health", "Write that test for both databases.", undefined, 3),
         ],
       ],
+    ]),
+  ],
+  [
+    "moss",
+    new Map([
       [
-        "release-checks",
+        "default",
         [
           sample(
-            "release-checks-1",
-            "release-checks",
-            "What should we verify before cutting the release?",
-            "Build the installers, test a fresh setup, and run a conversation through both the desktop app and Go TUI.",
+            "moss-1",
+            "default",
+            "Review the deadline fix for missing coverage.",
+            undefined,
+            1,
+            "moss",
           ),
         ],
       ],
@@ -137,6 +154,8 @@ export const previewControlPlane: ControlPlane = {
 };
 
 function previewEvents(taskId: string): TaskEvent[] {
+  // Moss has not written anything yet, so it shows as typing.
+  if (taskId.startsWith("moss")) return [];
   return [
     {
       sequence: 1,

@@ -27,7 +27,7 @@ few seconds.
 
 If there is no local setup or the Control Plane has no Tags, SuperTag shows how to get started
 with `supertag init`. For a shared Control Plane, ask its operator to set up a Tag. An operator can
-also create one in the desktop app with **+** at the bottom of its rail.
+also create one in the desktop app with **+** in its sidebar, or ⌘N.
 
 | Key | Action |
 | --- | --- |
@@ -45,6 +45,14 @@ to open its progress view. Enter `/goal` on its own to choose a Team or budget b
 `/goal` works the same way in the desktop app, which keeps one conversation with each Tag:
 selecting a Tag opens it. A currency budget requires a
 [harness](../concepts/workers.md) that can enforce a reported cost limit.
+
+The desktop app reads like a messaging app. The lead Tag sits at the top of the sidebar, and
+under your last message it shows **Sent** once the Control Plane has it and **Seen** once a
+Worker Host has taken it up. A message that is not delivered stays in the conversation with
+**Retry**, which sends it at most once, and **Edit**. What you have not sent stays with each Tag
+until you come back, even after a restart. ⌘B folds the sidebar into a rail of avatars, ⌘1 to
+⌘9 open the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘F searches them by name; use
+Ctrl in place of ⌘ outside macOS.
 
 ## Continue a conversation
 

@@ -24,6 +24,8 @@ export interface Task {
   state: string;
   result?: string;
   artifacts?: ResultArtifact[];
+  /** When the operator sent it, in milliseconds since the epoch, once the Control Plane says. */
+  createdAtMs?: number;
 }
 
 export interface Message {
