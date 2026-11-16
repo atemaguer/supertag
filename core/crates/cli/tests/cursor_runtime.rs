@@ -647,6 +647,8 @@ database_tests! {
     #[tokio::test]
     cursor_provider_failure_reaches_the_task_result_redacted;
     #[tokio::test]
+    cursor_rides_out_a_stalled_control_plane;
+    #[tokio::test]
     cursor_remote_lost_allocation_ack_keeps_work_fenced_until_absence_is_confirmed;
     #[tokio::test]
     cursor_e2b_workspace_runs_stdio_mcp_in_the_sandbox_from_the_trusted_copy;
@@ -1827,6 +1829,43 @@ async fn cursor_streams_scoped_tools_and_resumes_after_services_restart(
         std::fs::read_to_string(fixture.source.join("workspace.txt"))?,
         "initial-content\n"
     );
+    runtime.stop().await
+}
+
+/// A Control Plane that answers nothing for a while, as a starved one under load does, delays
+/// the Attempt but does not fail it. The Worker Host holds each harness call while it retries
+/// upstream within execution authority (30 s, renewed every few seconds), so the adapter waits
+/// for it. The adapter used to give up after three 5 s tries and fail the Task with only
+/// "Cursor execution failed.".
+async fn cursor_rides_out_a_stalled_control_plane(database: String) -> Result<()> {
+    /// Longer than the adapter's old three 5 s tries, and well within execution authority.
+    const STALL: Duration = Duration::from_secs(18);
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(&fixture, TAG, HarnessKind::Cursor, &["files:read"])
+        .await?;
+    let task = runtime.submit(TAG, "baseline").await?;
+    let worker = runtime.worker(&fixture, "baseline", false)?;
+    timeout(WAIT, async {
+        while fixture.started("baseline").is_err() {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .context("the Cursor runner never started")?;
+    // The runner has started, so the adapter's output and completion reach the Worker Host
+    // while the Control Plane is stopped.
+    let control = i32::try_from(runtime.control.id().context("Control Plane PID")?)?;
+    // SAFETY: control is this test's own Control Plane child.
+    ensure!(unsafe { libc::kill(control, libc::SIGSTOP) } == 0);
+    sleep(STALL).await;
+    // SAFETY: as above; the stopped child is still this test's own process.
+    ensure!(unsafe { libc::kill(control, libc::SIGCONT) } == 0);
+    worker_finished(worker, &fixture).await?;
+    runtime.assert_success(&task.task_id, "baseline").await?;
     runtime.stop().await
 }
 

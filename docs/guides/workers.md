@@ -301,7 +301,8 @@ confirm a reply.
   `allow-unsandboxed-commands` does not apply to Codex. See
   [Codex commands and models](../operations/requirements.md#codex-commands-and-models).
 - **A Cursor Task fails.** The result gives Cursor's reason, such as a model outside the
-  account's plan. Choose a model the plan includes in `models`, or add credits.
+  account's plan. Choose a model the plan includes in `models`, or add credits. A result naming
+  a failed `Worker Host call` means the harness lost its own Worker Host; check that host's log.
 
 See [Troubleshoot the first reply](troubleshooting.md).
 

@@ -90,15 +90,36 @@ export function harnessClient(endpoint: string, token: string) {
   };
 }
 
-/** Retry the identical receipt only; callers allocate a sequence before entering this function. */
+/**
+ * Retry the identical receipt only; callers allocate a sequence before entering this function.
+ *
+ * Each try keeps its own deadline, so a lost connection is retried promptly, but the receipt
+ * itself is retried for as long as the Worker Host stays unavailable or slow. The Worker Host
+ * holds a call while it rides out a slow or restarting Control Plane, within the Attempt's
+ * execution authority, and stops this adapter when that authority ends; a dead Worker Host
+ * closes the adapter's guardian pipe. Giving up sooner would fail an Attempt that its Worker
+ * Host could still complete.
+ */
 export async function receipt<T>(call: () => Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await call();
     } catch (error) {
       const code = ConnectError.from(error).code;
-      if (attempt >= 2 || ![Code.Unavailable, Code.DeadlineExceeded].includes(code)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+      if (![Code.Unavailable, Code.DeadlineExceeded].includes(code)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(50 * (attempt + 1), 1_000)));
     }
   }
+}
+
+/**
+ * The reason a call to the supervising Worker Host failed, such as `[deadline_exceeded] the
+ * operation timed out`, or undefined for an error that did not come from that call. The text
+ * is the Worker Host's own status or the transport's; redact it with the Attempt's credentials
+ * before it leaves the adapter.
+ */
+export function workerHostFailure(error: unknown): string | undefined {
+  return error instanceof ConnectError
+    ? `Worker Host call failed: ${error.message.replace(/\p{Cc}/gu, " ")}`
+    : undefined;
 }

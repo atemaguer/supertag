@@ -22,6 +22,12 @@ within the pre-1.0 compatibility policy described in
   host labels instead of `workerHosts`, Roles and Tags use `execution: {harness, models, efforts}`,
   each example declares its Team, and the Codex builders in `mixed-harnesses` get `web:fetch` so
   they can run commands on gpt-6-sol.
+- A Claude Code, Cursor, or OpenCode Task no longer fails when its Control Plane is slow to answer
+  for more than about 15 seconds, as a busy SQLite Control Plane can be. The harness waits for its
+  Worker Host, which keeps retrying until the Attempt's execution authority ends.
+- A Cursor Task that fails because a call to its Worker Host failed names that call's status in
+  its result, such as `Cursor execution failed: Worker Host call failed: [deadline_exceeded] the
+  operation timed out`, rather than only `Cursor execution failed.`
 
 ## [0.3.0] - 2026-11-14
 

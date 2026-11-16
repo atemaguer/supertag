@@ -14,6 +14,7 @@ import {
   startTaskMcpHttp,
   TaskState,
   tagPortfolio,
+  workerHostFailure,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import {
   CURSOR_WORKER_POLICY,
@@ -384,10 +385,11 @@ export async function runAdapter(
   } catch (error) {
     if (error instanceof ExecutionCleanupError) throw error;
     // A CursorProtocolError carries the runner's or provider's reason, already stripped of
-    // terminal controls, redacted and bounded; it is redacted again with this Attempt's own
-    // credentials. Any other failure may contain credentials, provider output, or private paths.
-    const detail =
-      error instanceof CursorProtocolError ? safeText(error.message, secrets).slice(0, 600) : "";
+    // terminal controls, redacted and bounded, and a failed Worker Host call carries that
+    // host's status. Both are redacted again with this Attempt's own credentials. Any other
+    // failure may contain credentials, provider output, or private paths.
+    const reason = error instanceof CursorProtocolError ? error.message : workerHostFailure(error);
+    const detail = reason ? safeText(reason, secrets).slice(0, 600) : "";
     outcome = {
       succeeded: false,
       result: cancellation.aborted
