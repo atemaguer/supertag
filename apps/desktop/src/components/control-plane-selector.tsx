@@ -1,6 +1,11 @@
-import { Check, ChevronRight, ChevronsUpDown, Pencil, Plus, Unplug } from "lucide-react";
+import { Check, ChevronRight, Pencil, Plus, Server, Unplug } from "lucide-react";
 import type { RefObject } from "react";
-import { Button } from "@/components/ui/button";
+import {
+  type ControlPlaneProfile,
+  LOCAL_CONTROL_PLANE,
+  type LocalControlPlane,
+} from "../control-plane";
+import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,12 +18,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  type ControlPlaneProfile,
-  LOCAL_CONTROL_PLANE,
-  type LocalControlPlane,
-} from "../control-plane";
+} from "./ui/dropdown-menu";
 
 interface ControlPlaneSelectorProps {
   active?: string;
@@ -90,16 +90,20 @@ export function ControlPlaneSelector({
               ? `Current Control Plane is ${selected.name}${client ? `, connected as ${client}` : ""}`
               : undefined
           }
-          title={client ? `${selected?.address} · connected as ${client}` : selected?.address}
+          title={client ? `${name} · ${selected?.address} · connected as ${client}` : name}
           disabled={busy || switching}
         >
+          <Server size={17} aria-hidden />
           <span className="connection-dot" aria-hidden />
-          <span className="row-title">{name}</span>
-          {client && <small className="connection-principal">{client}</small>}
-          <ChevronsUpDown className="connection-arrow" size={15} aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="control-plane-menu" side="top" align="start" sideOffset={6}>
+      <DropdownMenuContent className="control-plane-menu" side="right" align="end" sideOffset={24}>
+        <div className="control-plane-current">
+          <span>{name}</span>
+          {selected && selected.name !== selected.address && <small>{selected.address}</small>}
+          {client && <small>Connected as {client}</small>}
+        </div>
+        <DropdownMenuSeparator className="control-plane-separator" />
         {!localChoice && local?.problem && (
           <>
             <DropdownMenuItem className="control-plane-choice" disabled>

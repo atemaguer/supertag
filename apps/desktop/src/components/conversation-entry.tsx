@@ -1,9 +1,10 @@
+import { Check, Copy } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ControlPlane, Message as TagMessage, TaskEvent } from "../control-plane";
 import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import { Shimmer } from "./ai-elements/shimmer";
 import { ResultFiles } from "./result-files";
-import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
 function statusText(taskState: string, inputState?: string) {
@@ -74,49 +75,90 @@ export function ConversationEntry({
       {!report && (
         <Message from="user" className="user-turn">
           <span className="visually-hidden">You</span>
-          <MessageContent className="prompt-text">{task.prompt}</MessageContent>
+          <Bubble text={task.prompt ?? ""} className="prompt-text" />
         </Message>
       )}
       <Message from="assistant" className="tag-turn">
-        <TagAvatar tagId={task.tagId} />
-        <div className="reply-body">
-          <div className="reply-heading">
-            <strong>{task.tagId}</strong>
-            {report && <span className="report-label">Work Session report</span>}
-            <Button
-              variant="outline"
-              className="task-status"
-              data-state={task.state}
-              aria-label={`${status} · View Task activity`}
-              aria-expanded={activeTask === activityTask}
-              aria-controls={activeTask ? "activity" : undefined}
-              onClick={(event) => onActivity(activityTask, event.currentTarget)}
-            >
-              {status}
-            </Button>
+        <span className="visually-hidden">{task.tagId}</span>
+        {turn.messages.map((text, index) => (
+          // Messages are append-only, so their position is their identity.
+          // biome-ignore lint/suspicious/noArrayIndexKey: see above.
+          <Bubble key={index} text={text} markdown className="tag-message" />
+        ))}
+        {task.result && !joined && <Bubble text={task.result} markdown className="result-text" />}
+        {!joined && task.artifacts && task.artifacts.length > 0 && (
+          <ResultFiles artifacts={task.artifacts} onSave={onSaveArtifact} />
+        )}
+        {turn.status && (
+          <div className="turn-status" role="status">
+            {working ? <Shimmer as="span">{turn.status}</Shimmer> : turn.status}
           </div>
-          <MessageContent className="reply-content">
-            {turn.messages.map((text, index) => (
-              // Messages are append-only, so their position is their identity.
-              // biome-ignore lint/suspicious/noArrayIndexKey: see above.
-              <MessageResponse key={index} className="markdown tag-message">
-                {text}
-              </MessageResponse>
-            ))}
-            {turn.status && (
-              <div className="turn-status" role="status">
-                {working ? <Shimmer as="span">{turn.status}</Shimmer> : turn.status}
-              </div>
-            )}
-            {task.result && !joined && (
-              <MessageResponse className="markdown result-text">{task.result}</MessageResponse>
-            )}
-          </MessageContent>
-          {!joined && task.artifacts && task.artifacts.length > 0 && (
-            <ResultFiles artifacts={task.artifacts} onSave={onSaveArtifact} />
-          )}
+        )}
+        <div className="turn-meta">
+          {report && <span className="report-label">Work Session report</span>}
+          <Button
+            variant="ghost"
+            className="task-status"
+            data-state={task.state}
+            aria-label={`${status} · View Task activity`}
+            aria-expanded={activeTask === activityTask}
+            aria-controls={activeTask ? "activity" : undefined}
+            onClick={(event) => onActivity(activityTask, event.currentTarget)}
+          >
+            <span className="status-dot" aria-hidden />
+            {status}
+          </Button>
         </div>
       </Message>
     </article>
+  );
+}
+
+/** One message bubble, with a copy action beside it on hover. */
+function Bubble({
+  text,
+  markdown,
+  className,
+}: {
+  text: string;
+  /** The Tag writes markdown; the operator's text shows as typed. */
+  markdown?: boolean;
+  className: string;
+}) {
+  return (
+    <div className="bubble-row">
+      <MessageContent className={`bubble ${className}`}>
+        {markdown ? <MessageResponse className="markdown">{text}</MessageResponse> : text}
+      </MessageContent>
+      <CopyText text={text} />
+    </div>
+  );
+}
+
+function CopyText({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1_500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  return (
+    <div className="bubble-actions">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="icon-button"
+        aria-label={copied ? "Copied" : "Copy message"}
+        title={copied ? "Copied" : "Copy message"}
+        onClick={() =>
+          navigator.clipboard.writeText(text).then(
+            () => setCopied(true),
+            () => {},
+          )
+        }
+      >
+        {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+      </Button>
+    </div>
   );
 }

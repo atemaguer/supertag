@@ -3,7 +3,7 @@ import { cn } from "cn";
 import { XIcon } from "lucide-react";
 import type * as React from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "./button";
 
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;

@@ -1,8 +1,6 @@
 import { ArrowUp, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import type { ControlPlane, Tag, TaskEvent, WatchUpdate } from "../control-plane";
 import {
   earlierHistory,
@@ -22,6 +20,8 @@ import {
 } from "./ai-elements/conversation";
 import { LiveConversationEntry } from "./conversation-entry";
 import { TagAvatar } from "./tag-avatar";
+import { Button } from "./ui/button";
+import { Textarea } from "./ui/textarea";
 
 const interval = 2_500;
 
@@ -123,6 +123,15 @@ export function ConversationPane({
     region.scrollTop = Math.max(0, top + region.scrollHeight - height);
     scrollOffset.current = undefined;
   }, [history]);
+
+  // The composer grows with its text up to its maximum height, then scrolls.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: measures each new draft.
+  useLayoutEffect(() => {
+    const field = composer.current;
+    if (!field) return;
+    field.style.height = "auto";
+    field.style.height = `${field.scrollHeight}px`;
+  }, [draft.text]);
 
   async function loadEarlier() {
     const expected = currentHistory.current;
@@ -242,12 +251,12 @@ export function ConversationPane({
             <div className="composer-box">
               <Textarea
                 ref={composer}
-                rows={2}
+                rows={1}
                 required
                 aria-label="Message"
                 value={draft.text}
                 readOnly={draft.sending}
-                placeholder={`Message ${tag.name ?? tagId}…`}
+                placeholder={`Message ${tag.name ?? tagId}`}
                 onChange={(event) => {
                   const text = event.target.value;
                   setDraft({

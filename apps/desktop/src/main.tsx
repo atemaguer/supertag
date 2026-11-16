@@ -211,6 +211,10 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
 }
 
 async function start() {
+  // On macOS the title bar overlays the window (tauri.conf.json), so the rail leaves room for the
+  // window controls. Other platforms keep their native title bar.
+  if (navigator.userAgent.includes("Macintosh"))
+    document.documentElement.dataset.titlebar = "overlay";
   const target = document.getElementById("app");
   if (!target) throw new Error("Desktop root is missing");
   let initialConnection: Connection | undefined;

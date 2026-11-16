@@ -144,3 +144,23 @@ it("animates the activity line only while the Task runs", () => {
   expect(failed).toContain("Running pnpm test");
   expect(failed).not.toContain("bg-clip-text");
 });
+
+it("gives each message its own bubble with a copy action, and no avatar or name header", () => {
+  const html = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: { conversation: "planning", task: { ...task, prompt: "Check the update." } },
+      events: [
+        { sequence: 1, kind: "message", text: "Looking at the lockfile now." },
+        { sequence: 2, kind: "message", text: "The lockfile is current." },
+      ],
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(html.match(/class="[^"]*\bbubble tag-message\b/g)).toHaveLength(2);
+  expect(html.match(/class="[^"]*\bbubble result-text\b/g)).toHaveLength(1);
+  expect(html.match(/class="[^"]*\bbubble prompt-text\b/g)).toHaveLength(1);
+  expect(html.match(/aria-label="Copy message"/g)).toHaveLength(4);
+  expect(html).not.toContain('class="avatar');
+  expect(html).toContain("Completed · View Task activity");
+});

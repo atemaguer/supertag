@@ -1,6 +1,7 @@
 import type { FormEvent, RefObject } from "react";
 import { useRef } from "react";
-import { Button } from "@/components/ui/button";
+import type { ControlPlaneProfile } from "../control-plane";
+import { Button } from "./ui/button";
 import {
   Dialog,
   DialogContent,
@@ -8,9 +9,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import type { ControlPlaneProfile } from "../control-plane";
+} from "./ui/dialog";
+import { Input } from "./ui/input";
 
 interface ConnectionDialogProps {
   profile?: ControlPlaneProfile;

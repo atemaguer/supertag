@@ -1,6 +1,12 @@
-import { Menu, MessageSquare, Plus } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
 import { type MouseEvent, type ReactNode, useCallback, useState } from "react";
-import { Button } from "@/components/ui/button";
+import mascot from "../../../../assets/images/supertag-mascot-round.png";
+import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
+import { describe } from "../lib/polling";
+import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
+import { ConversationPane, type Draft } from "./conversation";
+import { TagAvatar } from "./tag-avatar";
+import { Button } from "./ui/button";
 import {
   Dialog,
   DialogContent,
@@ -8,15 +14,18 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import mascot from "../../../../assets/images/supertag-mascot-round.png";
-import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
-import { describe } from "../lib/polling";
-import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
-import { ConversationPane, type Draft } from "./conversation";
-import { TagAvatar } from "./tag-avatar";
+} from "./ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuItemIndicator,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { Input } from "./ui/input";
 
 const rosterInterval = 15_000;
 const conversationInterval = 2_500;
@@ -41,9 +50,13 @@ interface ShellProps {
   error?: string;
   onSelectTag?(tagId: string): void;
   onSelectConversation?(name: string): void;
-  children: ReactNode;
+  children?: ReactNode;
 }
 
+/**
+ * The window: a full-height rail of Tags on the left, and the conversation reaching the top of
+ * the window, with the Tag and conversation in a floating pill over it.
+ */
 export function WorkspaceShell({
   tags,
   tag,
@@ -57,140 +70,165 @@ export function WorkspaceShell({
   onSelectConversation,
   children,
 }: ShellProps) {
-  const [railOpen, setRailOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const provider = tag && harness(tag.harnessKind);
   const threadNames =
     conversation && !names?.includes(conversation)
       ? [conversation, ...(names ?? [])]
       : (names ?? []);
 
-  function chooseConversation(name: string) {
-    onSelectConversation?.(name);
-    setRailOpen(false);
-  }
-
   return (
-    <div className={railOpen ? "workspace-shell" : "workspace-shell rail-closed"}>
-      <div className="shell">
-        <aside className="rail" aria-label="Workspace">
-          <div className="brand">
-            <img src={mascot} alt="" width={31} height={31} />
-            <strong>SuperTag</strong>
-          </div>
-          <div className="rail-content">
-            <nav aria-label="Tags">
-              <div className="rail-heading">
-                <h2>Tags</h2>
-              </div>
-              <div className="rail-list">
-                {tags.length === 0 && (
-                  <p className="rail-empty">
-                    {connected ? "No Tags available" : "Connect to see your Tags"}
-                  </p>
-                )}
-                {tags.map((entry) => (
-                  <Button
-                    key={entry.tagId}
-                    variant="ghost"
-                    className="rail-row tag-row"
-                    aria-current={tag?.tagId === entry.tagId}
-                    onClick={() => {
-                      onSelectTag?.(entry.tagId);
-                      setRailOpen(false);
-                    }}
-                  >
-                    <TagAvatar tagId={entry.tagId} />
-                    <span className="row-title">{entry.name ?? entry.tagId}</span>
-                  </Button>
-                ))}
-              </div>
-            </nav>
-            {tag && (
-              <nav aria-label="Conversations">
-                <div className="rail-heading">
-                  <h2>Conversations</h2>
-                  <NewConversation onChoose={chooseConversation} />
-                </div>
-                <div className="rail-list">
-                  {threadNames.map((name) => (
-                    <Button
-                      key={name}
-                      variant="ghost"
-                      className="rail-row thread-row"
-                      title={name}
-                      aria-current={conversation === name}
-                      onClick={() => chooseConversation(name)}
-                    >
-                      <MessageSquare size={13} aria-hidden />
-                      <span className="row-title">{label(name)}</span>
-                    </Button>
-                  ))}
-                </div>
-              </nav>
-            )}
-          </div>
-          {selector}
-        </aside>
-        <main className="main" aria-label="Conversation" aria-busy={switching}>
-          <header className="topbar">
+    <div className="shell">
+      <nav className="rail" aria-label="Tags">
+        <div className="rail-top" data-tauri-drag-region>
+          <img
+            className="rail-mascot"
+            src={mascot}
+            alt="SuperTag"
+            width={36}
+            height={36}
+            data-tauri-drag-region
+          />
+        </div>
+        <div className="rail-divider" aria-hidden />
+        <div className="rail-tags">
+          {tags.length === 0 && (
+            <p className="visually-hidden">
+              {connected ? "No Tags available" : "Connect to see your Tags"}
+            </p>
+          )}
+          {tags.map((entry) => {
+            const name = entry.name ?? entry.tagId;
+            return (
+              <Button
+                key={entry.tagId}
+                variant="ghost"
+                className="rail-tag"
+                aria-label={name}
+                title={name}
+                aria-current={tag?.tagId === entry.tagId}
+                onClick={() => onSelectTag?.(entry.tagId)}
+              >
+                <TagAvatar tagId={entry.tagId} />
+              </Button>
+            );
+          })}
+        </div>
+        <div className="rail-bottom">
+          {tag && (
             <Button
               variant="ghost"
-              size="icon"
-              className="icon-button mobile-toggle"
-              aria-label="Toggle workspace"
-              aria-expanded={railOpen}
-              onClick={() => setRailOpen(!railOpen)}
+              className="rail-action"
+              aria-label="New conversation"
+              title="New conversation"
+              onClick={() => setCreating(true)}
             >
-              <Menu size={17} aria-hidden />
+              <Plus size={18} aria-hidden />
             </Button>
-            <div id="identity">
-              {tag ? (
-                <>
-                  <TagAvatar tagId={tag.tagId} />
-                  <div className="identity-heading">
-                    <strong className="tag-name">{tag.name ?? tag.tagId}</strong>
-                    {conversation && (
-                      <h1 className="thread-title" title={conversation}>
-                        {label(conversation)}
-                      </h1>
-                    )}
-                  </div>
-                  {provider && <span className="harness">{provider}</span>}
-                </>
-              ) : (
-                <h1 className="workspace-title">Workspace</h1>
-              )}
-            </div>
-          </header>
-          {error && (
-            <div className="sync-error" role="status">
-              {error}
-            </div>
           )}
-          <div className="workspace-body" inert={switching}>
-            {children}
+          {selector}
+        </div>
+      </nav>
+      <main className="main" aria-label="Conversation" aria-busy={switching}>
+        <header className="topstrip" data-tauri-drag-region>
+          {tag && conversation && (
+            <ConversationSwitcher
+              tag={tag}
+              conversation={conversation}
+              names={threadNames}
+              onSelect={(name) => onSelectConversation?.(name)}
+              onCreate={() => setCreating(true)}
+            />
+          )}
+          {provider && <span className="harness">{provider}</span>}
+        </header>
+        {error && (
+          <div className="sync-error" role="status">
+            {error}
           </div>
-        </main>
-      </div>
+        )}
+        <div className="workspace-body" inert={switching}>
+          {children}
+        </div>
+      </main>
+      <NewConversation
+        open={creating}
+        onOpenChange={setCreating}
+        onChoose={(name) => onSelectConversation?.(name)}
+      />
     </div>
   );
 }
 
-function NewConversation({ onChoose }: { onChoose(name: string): void }) {
-  const [open, setOpen] = useState(false);
+/** The floating pill naming the Tag and conversation, which switches between conversations. */
+function ConversationSwitcher({
+  tag,
+  conversation,
+  names,
+  onSelect,
+  onCreate,
+}: {
+  tag: Tag;
+  conversation: string;
+  names: string[];
+  onSelect(name: string): void;
+  onCreate(): void;
+}) {
+  const name = tag.name ?? tag.tagId;
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
         <Button
-          variant="ghost"
-          size="icon"
-          className="icon-button"
-          aria-label="New conversation"
-          title="New conversation"
+          variant="outline"
+          className="identity-pill"
+          aria-label={`${name}, ${label(conversation)}. Switch conversation`}
         >
-          <Plus size={16} aria-hidden />
+          <TagAvatar tagId={tag.tagId} />
+          <span className="tag-name">{name}</span>
+          <span className="thread-title" title={conversation}>
+            {label(conversation)}
+          </span>
+          <ChevronDown size={14} className="identity-arrow" aria-hidden />
         </Button>
-      </DialogTrigger>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="conversation-menu" align="center" sideOffset={6}>
+        <DropdownMenuRadioGroup value={conversation} onValueChange={onSelect}>
+          {names.map((entry) => (
+            <DropdownMenuRadioItem
+              key={entry}
+              className="control-plane-choice"
+              value={entry}
+              title={entry}
+            >
+              <span className="control-plane-indicator" aria-hidden>
+                <DropdownMenuItemIndicator>
+                  <Check size={14} />
+                </DropdownMenuItemIndicator>
+              </span>
+              <span className="row-title">{label(entry)}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator className="control-plane-separator" />
+        <DropdownMenuItem className="control-plane-action" onSelect={onCreate}>
+          <Plus size={15} aria-hidden /> New conversation
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function NewConversation({
+  open,
+  onOpenChange,
+  onChoose,
+}: {
+  open: boolean;
+  onOpenChange(open: boolean): void;
+  onChoose(name: string): void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="workspace-dialog">
         <DialogHeader>
           <DialogTitle>New conversation</DialogTitle>
@@ -204,7 +242,7 @@ function NewConversation({ onChoose }: { onChoose(name: string): void }) {
             const name = new FormData(event.currentTarget).get("name");
             if (typeof name !== "string") return;
             onChoose(name);
-            setOpen(false);
+            onOpenChange(false);
           }}
         >
           <label htmlFor="thread-name">Conversation name</label>
