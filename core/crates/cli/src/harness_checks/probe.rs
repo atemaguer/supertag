@@ -400,8 +400,19 @@ pub(super) mod tests {
 
     /// An executable shell script in `directory`.
     pub fn script(directory: &Path, name: &str, body: &str) -> PathBuf {
+        // Another test thread that forks while this process holds the script open for writing
+        // gives its child that descriptor until the child execs, and Linux refuses to run a file
+        // open for writing ("Text file busy"). So this process writes only a source file it never
+        // runs, and a separate `cp` process creates the script.
         let path = directory.join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        let source = directory.join(format!("{name}.source"));
+        std::fs::write(&source, format!("#!/bin/sh\n{body}\n")).unwrap();
+        let copied = std::process::Command::new("/bin/cp")
+            .arg(&source)
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(copied.success(), "could not create {}", path.display());
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
         path
     }
