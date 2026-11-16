@@ -266,11 +266,14 @@ func (m *model) runtimeFollow(msg followMsg) tea.Cmd {
 	if turn == nil {
 		return nil
 	}
-	cmd := m.applyRuntimeTurn(h, turn, msg.event)
+	cmds := []tea.Cmd{m.applyRuntimeTurn(h, turn, msg.event)}
+	for _, event := range msg.more {
+		cmds = append(cmds, m.applyRuntimeTurn(h, turn, event))
+	}
 	if m.showsConversation(msg.tag, msg.conversation) {
 		m.refresh()
 	}
-	return cmd
+	return tea.Batch(cmds...)
 }
 
 func (m *model) runtimeFollowDone(msg followDoneMsg) tea.Cmd {

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
 
@@ -59,6 +60,7 @@ func (m model) paneWidth() int { return max(m.width-railWidth-2, 10) }
 func (m *model) layout() {
 	m.viewport.SetWidth(m.paneWidth())
 	m.viewport.SetHeight(max(m.height-3, 1))
+	m.shownContent.id = 0
 	m.input.SetWidth(m.paneWidth() - 3)
 	if m.form != nil {
 		for i := range m.form.fields {
@@ -73,20 +75,20 @@ func (m *model) layout() {
 func (m *model) refresh() {
 	switch m.pane {
 	case paneObjective:
-		m.viewport.SetContent(m.renderObjective())
+		m.setContent(m.renderObjective())
 	case paneInbox:
-		m.viewport.SetContent(m.renderItem())
+		m.setContent(m.renderItem())
 	case paneDiff:
-		m.viewport.SetContent(m.renderDiffPane())
+		m.setContent(m.renderDiffPane())
 	case paneConversations:
-		m.viewport.SetContent(m.renderPicker())
+		m.setContent(m.renderPicker())
 	case paneTeam:
-		m.viewport.SetContent(m.renderTeam())
+		m.setContent(m.renderTeam())
 	case paneNewObjective:
-		m.viewport.SetContent(m.renderObjectiveForm())
+		m.setContent(m.renderObjectiveForm())
 	default:
 		atBottom := m.viewport.AtBottom()
-		m.viewport.SetContent(m.renderConversation())
+		m.setContent(m.renderConversation())
 		c := m.shown()
 		switch {
 		case c != nil && c.selected != nil:
@@ -196,7 +198,10 @@ const railContent = railWidth - 2
 
 // renderRail lists the Tags, the open Objectives and what waits on you, one row each, cut to
 // fit, scrolled so the row under the cursor shows.
-func (m model) renderRail(height int) string {
+func (m model) renderRail(height int) string { return m.railBlock(height).text }
+
+// railLines are the rail's rows at height, before the rail's border and padding.
+func (m model) railLines(height int) string {
 	paneKey := m.paneKey()
 	var lines []string
 	cursorLine := 0
@@ -260,7 +265,7 @@ func (m model) renderRail(height int) string {
 
 	first := max(cursorLine-height+1, 0)
 	lines = lines[first:min(first+height, len(lines))]
-	return railStyle.Width(railWidth).Height(height).MaxHeight(height).Render(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
 }
 
 // tagName is a Tag's name.
@@ -321,10 +326,7 @@ func (m model) View() tea.View {
 	case !m.inputShown():
 		bottom = faint.Render(truncate(m.paneHint(), m.paneWidth()))
 	}
-	pane := lipgloss.JoinVertical(lipgloss.Left, header, m.viewport.View(), bottom)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, m.renderRail(bodyHeight), " ", pane)
-	body = lipgloss.NewStyle().Height(bodyHeight).MaxHeight(bodyHeight).Render(body)
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatus()))
+	v := tea.NewView(composeScreen(m.railBlock(bodyHeight), m.viewportBlock(), header, bottom, m.renderStatus(), bodyHeight))
 	v.AltScreen = true
 	return v
 }
@@ -428,9 +430,7 @@ func truncate(s string, width int) string {
 	if width < 1 {
 		return ""
 	}
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + "…"
+	// One pass over s: cutting a rune at a time and measuring again is quadratic in a long label,
+	// such as a 500-character question in the rail, and the rail truncates every row each frame.
+	return ansi.Truncate(s, width, "…")
 }

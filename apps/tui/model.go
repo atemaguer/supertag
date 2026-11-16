@@ -166,7 +166,9 @@ type (
 	followMsg struct {
 		tag, conversation, taskID string
 		event                     client.FollowEvent
-		events                    <-chan client.FollowEvent
+		// more are the events that were already waiting behind event, in order.
+		more   []client.FollowEvent
+		events <-chan client.FollowEvent
 	}
 	followDoneMsg struct{ tag, conversation, taskID string }
 	watchMsg      struct {
@@ -310,6 +312,9 @@ type model struct {
 	width    int
 	height   int
 	md       *markdown
+	frame    *frame
+	// shownContent is what viewport was last given, so the same content again is not set anew.
+	shownContent shownContent
 
 	// hosts are the Worker Hosts as last read; hostsKnown is false until a read succeeds and
 	// after one fails.
@@ -362,6 +367,7 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 		input:             input,
 		viewport:          viewport.New(),
 		md:                &markdown{},
+		frame:             &frame{},
 		polling:           true,
 		status:            "connecting",
 	}
@@ -437,13 +443,32 @@ func waitFor(tag, name string, events <-chan client.FollowEvent) tea.Cmd {
 	return waitForTask(tag, name, "", events)
 }
 
+// followBatch is the most events one followMsg carries.
+const followBatch = 64
+
+// waitForTask delivers the next event of a follow, with the events already waiting behind it. A
+// poll of the Control Plane emits a page of events at once, and each message redraws the whole
+// conversation, so one message for the page keeps a streaming reply from holding up the keys.
 func waitForTask(tag, name, taskID string, events <-chan client.FollowEvent) tea.Cmd {
 	return func() tea.Msg {
 		event, ok := <-events
 		if !ok {
 			return followDoneMsg{tag: tag, conversation: name, taskID: taskID}
 		}
-		return followMsg{tag: tag, conversation: name, taskID: taskID, event: event, events: events}
+		msg := followMsg{tag: tag, conversation: name, taskID: taskID, event: event, events: events}
+		for len(msg.more) < followBatch {
+			select {
+			case next, ok := <-events:
+				if !ok {
+					// The next wait reads the closed channel again and reports the follow done.
+					return msg
+				}
+				msg.more = append(msg.more, next)
+			default:
+				return msg
+			}
+		}
+		return msg
 	}
 }
 
@@ -713,7 +738,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.runtimeFollow(msg)
 			return m, tea.Batch(cmd, waitForTask(msg.tag, msg.conversation, msg.taskID, msg.events))
 		}
-		cmd := m.apply(msg.tag, msg.conversation, msg.event)
+		cmd := m.apply(msg.tag, msg.conversation, msg.event, msg.more...)
 		return m, tea.Batch(cmd, waitFor(msg.tag, msg.conversation, msg.events))
 
 	case followDoneMsg:
@@ -1391,15 +1416,19 @@ func (m *model) choose() tea.Cmd {
 	return tea.Batch(focusCmd, cmd)
 }
 
-// apply adds one follow event to its conversation and
+// apply adds follow events to their conversation, redrawing it once for all of them, and
 // rereads a work Session that reported or whose shown activity grew. Every field from the server
 // or an agent is filtered for the terminal, as the CLI does.
-func (m *model) apply(tag, name string, event client.FollowEvent) tea.Cmd {
-	cmd := m.applyTranscript(&m.conversation(tag, name).transcript, event)
+func (m *model) apply(tag, name string, event client.FollowEvent, more ...client.FollowEvent) tea.Cmd {
+	t := &m.conversation(tag, name).transcript
+	cmds := []tea.Cmd{m.applyTranscript(t, event)}
+	for _, next := range more {
+		cmds = append(cmds, m.applyTranscript(t, next))
+	}
 	if m.showsConversation(tag, name) {
 		m.refresh()
 	}
-	return cmd
+	return tea.Batch(cmds...)
 }
 
 func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd {
