@@ -7,6 +7,8 @@ export interface Tag {
   allowedActions: string[];
   revision: number;
   harnessKind: string;
+  /** Whether this is the Control Plane's lead Tag, the one `supertag init` creates. */
+  lead?: boolean;
 }
 
 export interface ResultArtifact {

@@ -3,12 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConnectionDialog } from "./components/connection";
 import { ControlPlaneSelector } from "./components/control-plane-selector";
-import {
-  EmptyWorkspace,
-  type SelectorPlacement,
-  Workspace,
-  WorkspaceShell,
-} from "./components/workspace";
+import type { SidebarMode } from "./components/sidebar";
+import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
 import {
   type ControlPlane,
   type ControlPlaneActivation,
@@ -134,9 +130,9 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     });
   }
 
-  const selector = (placement: SelectorPlacement) => (
+  const selector = (mode: SidebarMode) => (
     <ControlPlaneSelector
-      side={placement === "rail" ? "right" : "bottom"}
+      wide={mode === "expanded"}
       active={connection?.origin}
       principal={connection?.principal}
       profiles={controlPlanes.profiles}
@@ -232,7 +228,9 @@ async function start() {
   if (!target) throw new Error("Desktop root is missing");
   let initialConnection: Connection | undefined;
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("preview")) {
-    const { previewControlPlane, previewTagAdmin } = await import("./preview");
+    const { previewControlPlane, previewTagAdmin, withoutLead } = await import("./preview");
+    // `?preview&nolead` shows a Control Plane without a lead Tag.
+    if (new URLSearchParams(location.search).has("nolead")) withoutLead();
     initialConnection = {
       controlPlane: previewControlPlane,
       tags: await previewControlPlane.tags(),

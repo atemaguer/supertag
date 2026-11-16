@@ -14,7 +14,8 @@
   --muted: #aba6ae;
   --accent: #f1b291;
   --mint: #a9cbb4;
-  --rail-width: 80px;
+  --rail-width: 84px;
+  --sidebar-width: 256px;
   --bubble: #2a292d;
   --strip-height: 56px;
 }
@@ -57,17 +58,12 @@ button:disabled {
 .shell {
   position: relative;
   display: grid;
-  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   height: 100%;
   transition: grid-template-columns 180ms ease;
 }
-
-.rail {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--rail);
-  border-right: 1px solid var(--line);
+.shell[data-sidebar="rail"] {
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
 }
 
 .row-title {
@@ -159,138 +155,305 @@ button:disabled {
   font-size: 26px;
 }
 
-/* The rail: full height, its separator running to the top of the window. */
-.shell[data-sidebar="collapsed"] {
-  grid-template-columns: 0 minmax(0, 1fr);
-}
-.rail {
+/* The sidebar: full height, its separator running to the top of the window. Expanded, it lists
+   each Tag in a row; as a rail, it shows their avatars. */
+.sidebar {
   display: flex;
   flex-direction: column;
-  align-items: center;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  transition:
-    opacity 180ms ease,
-    visibility 0s;
   padding-bottom: 14px;
   background: var(--rail);
   border-right: 1px solid var(--line);
 }
-/* Room above the mascot for the sidebar toggle, or for the macOS window controls. */
-.shell[data-sidebar="collapsed"] .rail {
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 180ms ease,
-    visibility 0s linear 180ms;
-}
-.rail > * {
+.sidebar > * {
   flex-shrink: 0;
 }
 @media (prefers-reduced-motion: reduce) {
-  .shell,
-  .rail,
-  .shell[data-sidebar="collapsed"] .rail {
+  .shell {
     transition: none;
   }
 }
-/* The sidebar toggle: at the top left, or just right of the macOS window controls. */
+/* The top row holds the toggle, or the macOS window controls and the toggle, and the actions. */
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 56px;
+  padding: 0 12px;
+}
+.sidebar-top-actions {
+  display: flex;
+  gap: 6px;
+}
 .window-controls {
   position: absolute;
   z-index: 5;
   top: 12px;
-  left: 24px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  left: 26px;
 }
 [data-titlebar="overlay"] .window-controls {
   top: 13px;
   left: 84px;
 }
-.sidebar-toggle {
+.sidebar-toggle,
+.sidebar-button {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  padding: 0;
+  border-radius: 50%;
   background: transparent;
   color: var(--muted);
 }
-.sidebar-toggle:hover {
-  background: var(--hover);
-  color: var(--text);
+.sidebar-button {
+  border: 1px solid var(--line);
 }
-.rail-top {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  width: 100%;
-  flex-shrink: 0;
-  padding: 52px 0 14px;
-}
-.rail-mascot {
-  border-radius: 50%;
-}
-.rail-divider {
-  flex-shrink: 0;
-  width: 30px;
-  height: 1px;
-  margin-bottom: 12px;
-  background: var(--line);
-}
-.rail-tags {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 0 12px;
-  scrollbar-width: none;
-}
-.rail-tag {
-  width: 50px;
-  height: 50px;
-  flex-shrink: 0;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 15px;
-  background: transparent;
-}
-.rail-tag .avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 11px;
-}
-.rail-tag:hover,
-.rail-action:hover,
+.sidebar-toggle:hover,
+.sidebar-button:hover,
+.tag-row:hover,
+.lead-tag:hover,
 .connection:hover,
 .icon-button:hover {
   background: var(--hover);
   color: var(--text);
 }
-.rail-tag[aria-current="true"] {
-  background: var(--selected);
-  border-color: #494045;
-}
-.rail-action[aria-disabled="true"] {
+.sidebar-button[aria-disabled="true"] {
   opacity: 0.46;
   cursor: default;
 }
-.rail-action[aria-disabled="true"]:hover {
+.sidebar-button[aria-disabled="true"]:hover {
   background: transparent;
   color: var(--muted);
 }
-.rail-bottom {
+.sidebar-button[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--text);
+}
+/* The lead Tag, in the slot the SuperTag mascot takes when there is none. */
+.sidebar-lead {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 14px;
+}
+.lead-tag {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--text);
+}
+.lead-tag[aria-current="true"],
+.tag-row[aria-current="true"] {
+  background: var(--selected);
+  border-color: #494045;
+}
+.lead-avatar {
+  position: relative;
+  display: block;
+}
+.lead-avatar .avatar.large {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+}
+.lead-avatar .avatar.large .mark {
+  font-size: 20px;
+}
+.lead-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--rail);
+  border-radius: 50%;
+  background: var(--accent);
+  color: #3a2418;
+}
+.lead-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 650;
+}
+.sidebar-mascot {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+.sidebar-divider {
+  align-self: center;
+  width: 30px;
+  height: 1px;
+  margin-bottom: 10px;
+  background: var(--line);
+}
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 12px 8px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+}
+.sidebar-search input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+.sidebar-empty {
+  margin: 6px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.sidebar-tags {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 10px 12px;
+  scrollbar-width: none;
+}
+.tag-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 11px;
+  width: 100%;
+  height: auto;
+  min-height: 56px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.tag-row-avatar {
+  position: relative;
+  flex-shrink: 0;
+}
+.tag-row-avatar .avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+.tag-row-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+.tag-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 650;
+}
+.tag-row-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 450;
+}
+.tag-row[data-status="unread"] .tag-row-preview {
+  color: var(--text);
+  font-weight: 600;
+}
+.tag-row-time {
+  align-self: flex-start;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.tag-row-unread,
+.tag-row-badge {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.tag-row-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  border: 2px solid var(--rail);
+  width: 12px;
+  height: 12px;
+}
+.tag-row[data-status="working"] .tag-row-badge {
+  background: #efd4a0;
+}
+/* Three dots that rise in turn, as a messaging app shows someone typing. */
+.working-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  height: 16px;
+}
+.working-dots > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+  animation: working-dot 1.2s infinite ease-in-out;
+}
+.working-dots > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.working-dots > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes working-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.4;
+    transform: none;
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .working-dots > span {
+    animation: none;
+  }
+}
+.sidebar-bottom {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  padding-top: 12px;
+  padding: 10px 12px 0;
 }
-.rail-action,
 .connection {
   position: relative;
   width: 42px;
@@ -300,6 +463,27 @@ button:disabled {
   border-radius: 50%;
   background: transparent;
   color: var(--muted);
+}
+.connection.wide {
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 999px;
+  text-align: left;
+}
+.connection-text {
+  display: grid;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.connection-text small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 450;
 }
 .connection-dot {
   position: absolute;
@@ -311,8 +495,66 @@ button:disabled {
   border-radius: 50%;
   background: #89838e;
 }
+.connection.wide .connection-dot {
+  left: 30px;
+  right: auto;
+  bottom: 9px;
+}
 .connection[data-connected="true"] .connection-dot {
   background: var(--mint);
+}
+/* The rail: the toggle sits beside the window controls, so the lead Tag starts below them. */
+.shell[data-sidebar="rail"] .sidebar-top {
+  height: 52px;
+}
+.shell[data-sidebar="rail"] .sidebar-lead {
+  padding-bottom: 12px;
+}
+.shell[data-sidebar="rail"] .lead-tag {
+  padding: 6px;
+}
+.shell[data-sidebar="rail"] .sidebar-tags {
+  align-items: center;
+  padding-inline: 0;
+  gap: 8px;
+}
+.shell[data-sidebar="rail"] .tag-row {
+  justify-content: center;
+  width: 52px;
+  min-height: 52px;
+  padding: 0;
+}
+.shell[data-sidebar="rail"] .tag-row-avatar .avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+.shell[data-sidebar="rail"] .sidebar-bottom {
+  padding-inline: 0;
+}
+/* Expanded, the lead Tag is large and named. */
+.shell[data-sidebar="expanded"] .lead-avatar .avatar.large {
+  width: 84px;
+  height: 84px;
+  border-radius: 26px;
+}
+.shell[data-sidebar="expanded"] .lead-avatar .avatar.large .mark {
+  font-size: 36px;
+}
+.shell[data-sidebar="expanded"] .lead-badge {
+  width: 26px;
+  height: 26px;
+  border-width: 3px;
+}
+.shell[data-sidebar="expanded"] .lead-tag {
+  padding: 10px 18px;
+}
+.shell[data-sidebar="expanded"] .sidebar-mascot {
+  width: 72px;
+  height: 72px;
+}
+.shell[data-sidebar="expanded"] .sidebar-divider {
+  width: calc(100% - 28px);
 }
 .control-plane-menu {
   z-index: 40;
@@ -341,25 +583,6 @@ button:disabled {
 .control-plane-current small {
   color: var(--muted);
   font-size: 11px;
-}
-.menu-tag .avatar {
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
-}
-.menu-tag-check {
-  margin-left: auto;
-}
-.tag-menu {
-  z-index: 40;
-  min-width: 220px;
-  max-width: 320px;
-  max-height: var(--radix-dropdown-menu-content-available-height);
-  overflow: auto;
-  padding: 4px;
-  border-color: var(--line);
-  background: var(--panel);
-  font-size: 12px;
 }
 .control-plane-edit-menu {
   z-index: 40;
@@ -426,12 +649,6 @@ button:disabled {
 }
 
 .main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-.main {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -464,10 +681,6 @@ button:disabled {
   box-shadow: 0 6px 20px rgb(0 0 0 / 30%);
   color: var(--text);
 }
-button.identity-pill:hover,
-.identity-pill[data-state="open"] {
-  background: var(--hover);
-}
 .identity-pill .avatar {
   width: 28px;
   height: 28px;
@@ -477,10 +690,6 @@ button.identity-pill:hover,
   flex-shrink: 0;
   font-size: 13px;
   font-weight: 650;
-}
-.identity-arrow {
-  flex-shrink: 0;
-  color: var(--muted);
 }
 .harness {
   position: absolute;
@@ -1003,24 +1212,4 @@ button.identity-pill:hover,
   .composer-footer {
     display: none;
   }
-}
-
-/* The Control Plane button beside the toggle while the sidebar is collapsed. */
-.window-controls .connection {
-  width: 32px;
-  height: 32px;
-}
-.window-controls .connection-dot {
-  width: 9px;
-  height: 9px;
-  right: -1px;
-  bottom: -1px;
-  border-color: var(--background);
-}
-/* While collapsed, the top strip leaves the toggle and Control Plane button their corner. */
-.shell[data-sidebar="collapsed"] .topstrip {
-  padding-left: 110px;
-}
-[data-titlebar="overlay"] .shell[data-sidebar="collapsed"] .topstrip {
-  padding-left: 170px;
 }

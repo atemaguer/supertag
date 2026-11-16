@@ -16,7 +16,7 @@ const tags: Tag[] = [
   },
 ];
 
-it("puts each Tag in the rail and the selected Tag, with no conversation controls, in the pill", () => {
+it("lists each Tag in the sidebar and puts just the selected Tag in the pill", () => {
   const html = renderToStaticMarkup(
     createElement(
       WorkspaceShell,
@@ -29,21 +29,21 @@ it("puts each Tag in the rail and the selected Tag, with no conversation control
       null,
     ),
   );
-  expect(html).toMatch(/<nav id="sidebar" class="rail" aria-label="Tags">/);
-  expect(html).toMatch(/aria-label="finch" title="finch" aria-current="false"/);
-  expect(html).toMatch(/aria-label="Moss" title="Moss" aria-current="true"/);
+  expect(html).toMatch(/<nav id="sidebar" class="sidebar" data-mode="expanded" aria-label="Tags">/);
+  expect(html).toMatch(/aria-label="finch" aria-current="false"/);
+  expect(html).toMatch(/aria-label="Moss" aria-current="true"/);
   expect(html).toMatch(/<div class="identity-pill">.*<span class="tag-name">Moss<\/span><\/div>/);
   expect(html).not.toContain("conversation-menu");
   expect(html).not.toContain("New conversation");
   expect(html).not.toContain("Release checks");
   expect(html).toContain("Claude Code");
-  // The rail's top and the conversation's top strip drag the window.
-  expect(html).toMatch(/class="rail-top" data-tauri-drag-region/);
+  // The sidebar's top and the conversation's top strip drag the window.
+  expect(html).toMatch(/class="sidebar-top" data-tauri-drag-region/);
   expect(html).toMatch(/class="topstrip" data-tauri-drag-region/);
   expect(html).not.toContain('<header class="topbar"');
 });
 
-it("shows an empty rail and no Tag pill before a Control Plane connects", () => {
+it("shows an empty sidebar and no Tag pill before a Control Plane connects", () => {
   const html = renderToStaticMarkup(
     createElement(
       WorkspaceShell,
@@ -59,7 +59,7 @@ it("shows an empty rail and no Tag pill before a Control Plane connects", () => 
   expect(html).not.toContain("identity-pill");
 });
 
-it("offers New Tag in the rail only to a connection that may create Tags", () => {
+it("offers New Tag in the sidebar only to a connection that may create Tags", () => {
   const render = (props: Partial<Parameters<typeof WorkspaceShell>[0]>) =>
     renderToStaticMarkup(
       createElement(

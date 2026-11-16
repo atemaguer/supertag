@@ -1,12 +1,4 @@
-import { Check, ChevronDown, PanelLeft, PanelLeftClose, Plus } from "lucide-react";
-import {
-  type MouseEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { type MouseEvent, type ReactNode, useCallback, useState } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
 import { shownConversation, useConversationPrefetch } from "../lib/conversation-cache";
@@ -15,68 +7,18 @@ import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/wa
 import { harnessLabel, type TagAdmin } from "../tag-admin";
 import { ConversationPane, type Draft } from "./conversation";
 import { NewTagDialog } from "./new-tag";
+import {
+  Sidebar,
+  type SidebarMode,
+  SidebarToggle,
+  type TagSummary,
+  useSidebarMode,
+} from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuItemIndicator,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
 
 const rosterInterval = 15_000;
 const conversationInterval = 2_500;
-
-const SIDEBAR_KEY = "supertag.desktop.sidebar";
-const sidebarListeners = new Set<() => void>();
-
-/** Whether the sidebar is open: the one saved preference, open unless collapsed. */
-export function sidebarOpen(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_KEY) !== "collapsed";
-  } catch {
-    return true;
-  }
-}
-
-/** Opens or collapses the sidebar in every shell, and remembers it across restarts. */
-export function setSidebarOpen(open: boolean) {
-  try {
-    localStorage.setItem(SIDEBAR_KEY, open ? "open" : "collapsed");
-  } catch {
-    // Without storage the choice lasts until the window closes.
-  }
-  for (const listener of sidebarListeners) listener();
-}
-
-function subscribeSidebar(listener: () => void) {
-  sidebarListeners.add(listener);
-  return () => {
-    sidebarListeners.delete(listener);
-  };
-}
-
-const mac = () => typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh");
-
-/**
- * Whether a key press toggles the sidebar: ⌘B on macOS, Ctrl+B elsewhere. The composer is plain
- * text, so the shortcut has nothing to make bold there and applies everywhere in the window.
- */
-export function isSidebarShortcut(
-  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "isComposing">,
-  onMac: boolean,
-) {
-  if (event.key.toLowerCase() !== "b" || event.altKey || event.shiftKey || event.isComposing)
-    return false;
-  return onMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-}
-
-/** Where the Control Plane selector shows: in the rail, or beside the toggle when it is collapsed. */
-export type SelectorPlacement = "rail" | "top";
 
 export type SettingsAction = (event: MouseEvent<HTMLButtonElement>) => void;
 interface ShellProps {
@@ -84,7 +26,10 @@ interface ShellProps {
   tag?: Tag;
   connected: boolean;
   switching?: boolean;
-  selector(placement: SelectorPlacement): ReactNode;
+  /** What the sidebar shows about each Tag beyond its name, by Tag ID. */
+  summaries?: Record<string, TagSummary>;
+  /** The Control Plane button, round in the rail and wide in the expanded sidebar. */
+  selector(mode: SidebarMode): ReactNode;
   error?: string;
   onSelectTag?(tagId: string): void;
   /** Opens the New Tag dialog, when this connection may create Tags. */
@@ -95,15 +40,16 @@ interface ShellProps {
 }
 
 /**
- * The window: a full-height rail of Tags on the left, and the conversation with the selected Tag
- * reaching the top of the window, with the Tag in a floating pill over it. A person has one
- * conversation with each Tag here, so selecting a Tag opens it.
+ * The window: the sidebar of Tags on the left, expanded or as a rail, and the conversation with
+ * the selected Tag reaching the top of the window, with the Tag in a floating pill over it. A
+ * person has one conversation with each Tag here, so selecting a Tag opens it.
  */
 export function WorkspaceShell({
   tags,
   tag,
   connected,
   switching,
+  summaries,
   selector,
   error,
   onSelectTag,
@@ -111,99 +57,31 @@ export function WorkspaceShell({
   newTagRefusal,
   children,
 }: ShellProps) {
-  const open = useSyncExternalStore(subscribeSidebar, sidebarOpen, () => true);
-  const onMac = mac();
-  const toggle = `${open ? "Hide" : "Show"} sidebar (${onMac ? "⌘B" : "Ctrl+B"})`;
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if (!isSidebarShortcut(event, onMac)) return;
-      event.preventDefault();
-      setSidebarOpen(!sidebarOpen());
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onMac]);
+  const mode = useSidebarMode();
   const provider = tag && harnessLabel(tag.harnessKind);
-
   return (
-    <div className="shell" data-sidebar={open ? "open" : "collapsed"}>
-      {/* The toggle stays in one place, beside the macOS window controls, in both states. */}
+    <div className="shell" data-sidebar={mode}>
       <div className="window-controls">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="sidebar-toggle"
-          aria-label={toggle}
-          title={toggle}
-          aria-expanded={open}
-          aria-controls="sidebar"
-          onClick={() => setSidebarOpen(!open)}
-        >
-          {open ? <PanelLeftClose size={17} aria-hidden /> : <PanelLeft size={17} aria-hidden />}
-        </Button>
-        {!open && selector("top")}
+        <SidebarToggle mode={mode} />
       </div>
-      <nav id="sidebar" className="rail" aria-label="Tags" inert={!open}>
-        <div className="rail-top" data-tauri-drag-region>
-          <img
-            className="rail-mascot"
-            src={mascot}
-            alt="SuperTag"
-            width={36}
-            height={36}
-            data-tauri-drag-region
-          />
-        </div>
-        <div className="rail-divider" aria-hidden />
-        <div className="rail-tags">
-          {tags.length === 0 && (
-            <p className="visually-hidden">
-              {connected ? "No Tags available" : "Connect to see your Tags"}
-            </p>
-          )}
-          {tags.map((entry) => {
-            const name = entry.name ?? entry.tagId;
-            return (
-              <Button
-                key={entry.tagId}
-                variant="ghost"
-                className="rail-tag"
-                aria-label={name}
-                title={name}
-                aria-current={tag?.tagId === entry.tagId}
-                onClick={() => onSelectTag?.(entry.tagId)}
-              >
-                <TagAvatar tagId={entry.tagId} />
-              </Button>
-            );
-          })}
-        </div>
-        <div className="rail-bottom">
-          {(onNewTag || newTagRefusal) && (
-            <Button
-              variant="ghost"
-              className="rail-action"
-              aria-label="New Tag"
-              aria-description={newTagRefusal}
-              aria-disabled={!onNewTag}
-              title={newTagRefusal ?? "New Tag"}
-              onClick={() => onNewTag?.()}
-            >
-              <Plus size={18} aria-hidden />
-            </Button>
-          )}
-          {open && selector("rail")}
-        </div>
-      </nav>
+      <Sidebar
+        mode={mode}
+        tags={tags}
+        tag={tag}
+        connected={connected}
+        summaries={summaries}
+        selector={selector(mode)}
+        onSelectTag={onSelectTag}
+        onNewTag={onNewTag}
+        newTagRefusal={newTagRefusal}
+      />
       <main className="main" aria-label="Conversation" aria-busy={switching}>
         <header className="topstrip" data-tauri-drag-region>
           {tag && (
-            <TagPill
-              tag={tag}
-              tags={open ? undefined : tags}
-              onSelectTag={(tagId) => onSelectTag?.(tagId)}
-              onNewTag={onNewTag}
-            />
+            <div className="identity-pill">
+              <TagAvatar tagId={tag.tagId} />
+              <span className="tag-name">{tag.name ?? tag.tagId}</span>
+            </div>
           )}
           {provider && <span className="harness">{provider}</span>}
         </header>
@@ -217,69 +95,6 @@ export function WorkspaceShell({
         </div>
       </main>
     </div>
-  );
-}
-
-/**
- * The floating pill naming the selected Tag. While the sidebar is collapsed it also switches
- * between Tags.
- */
-function TagPill({
-  tag,
-  tags,
-  onSelectTag,
-  onNewTag,
-}: {
-  tag: Tag;
-  /** The Tags to switch between, when the sidebar does not show them. */
-  tags?: Tag[];
-  onSelectTag(tagId: string): void;
-  onNewTag?(): void;
-}) {
-  const name = tag.name ?? tag.tagId;
-  const identity = (
-    <>
-      <TagAvatar tagId={tag.tagId} />
-      <span className="tag-name">{name}</span>
-    </>
-  );
-  if (!tags) return <div className="identity-pill">{identity}</div>;
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="identity-pill" aria-label={`${name}. Switch Tag`}>
-          {identity}
-          <ChevronDown size={14} className="identity-arrow" aria-hidden />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="tag-menu" align="center" sideOffset={6}>
-        <DropdownMenuRadioGroup value={tag.tagId} onValueChange={onSelectTag}>
-          {tags.map((entry) => (
-            <DropdownMenuRadioItem
-              key={entry.tagId}
-              className="control-plane-choice menu-tag"
-              value={entry.tagId}
-            >
-              <TagAvatar tagId={entry.tagId} />
-              <span className="row-title">{entry.name ?? entry.tagId}</span>
-              <span className="control-plane-indicator menu-tag-check" aria-hidden>
-                <DropdownMenuItemIndicator>
-                  <Check size={14} />
-                </DropdownMenuItemIndicator>
-              </span>
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-        {onNewTag && (
-          <>
-            <DropdownMenuSeparator className="control-plane-separator" />
-            <DropdownMenuItem className="control-plane-action" onSelect={onNewTag}>
-              <Plus size={15} aria-hidden /> New Tag
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
@@ -349,7 +164,7 @@ interface WorkspaceProps {
   connectionId?: string;
   controlPlane: ControlPlane;
   initialTags: Tag[];
-  selector(placement: SelectorPlacement): ReactNode;
+  selector(mode: SidebarMode): ReactNode;
   /** Creates Tags, when this connection may. */
   tagAdmin?: TagAdmin;
   /** Why this connection cannot create Tags. */

@@ -28,8 +28,8 @@ interface ControlPlaneSelectorProps {
   /** The local Control Plane: listed first while it runs, otherwise why it is unavailable. */
   local?: LocalControlPlane;
   preview?: boolean;
-  /** Where the menu opens: beside the rail, or below the button at the top of the window. */
-  side: "right" | "bottom";
+  /** A wide button naming the Control Plane, in the expanded sidebar, or a round one in the rail. */
+  wide: boolean;
   busy: boolean;
   switching: boolean;
   trigger: RefObject<HTMLButtonElement | null>;
@@ -51,7 +51,7 @@ export function ControlPlaneSelector({
   profiles,
   local,
   preview,
-  side,
+  wide,
   busy,
   switching,
   trigger,
@@ -85,7 +85,7 @@ export function ControlPlaneSelector({
         <Button
           variant="outline"
           ref={trigger}
-          className="connection"
+          className={wide ? "connection wide" : "connection"}
           data-connected={connected}
           aria-label={connected ? "Switch Control Plane" : "Select Control Plane"}
           aria-description={
@@ -98,13 +98,19 @@ export function ControlPlaneSelector({
         >
           <Server size={17} aria-hidden />
           <span className="connection-dot" aria-hidden />
+          {wide && (
+            <span className="connection-text">
+              <span className="row-title">{name}</span>
+              <small>{connected ? (client ?? "Connected") : "Not connected"}</small>
+            </span>
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         className="control-plane-menu"
-        side={side}
-        align={side === "right" ? "end" : "start"}
-        sideOffset={side === "right" ? 24 : 8}
+        side={wide ? "top" : "right"}
+        align={wide ? "start" : "end"}
+        sideOffset={wide ? 8 : 24}
       >
         <div className="control-plane-current">
           <span>{name}</span>

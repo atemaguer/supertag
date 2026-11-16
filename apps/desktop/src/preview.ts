@@ -4,6 +4,7 @@ import type { TagAdmin } from "./tag-admin";
 const tags: Tag[] = [
   {
     tagId: "finch",
+    lead: true,
     instructions: "Own CI health and investigate flaky builds.",
     allowedActions: ["Read build logs", "Inspect repositories"],
     revision: 1,
@@ -174,3 +175,8 @@ export const previewTagAdmin: TagAdmin = {
     return tag;
   },
 };
+
+/** Clears the preview's lead Tag, to show the sidebar without one. */
+export function withoutLead() {
+  for (const tag of tags) tag.lead = false;
+}
