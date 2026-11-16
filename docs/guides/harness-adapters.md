@@ -39,7 +39,7 @@ Worker Host ── claims Task ── starts adapter ── writes bootstrap to 
      it is about to do. People see each as its own message at once, so publish it as soon as it
      is complete, not word by word. The last message is usually the result too.
    - `TASK_EVENT_KIND_ACTIVITY`: one line saying what the agent is doing, such as
-     `Running pnpm test`. People see the latest in a status line. Build it from a tool call's
+     `Running make test`. People see the latest in a status line. Build it from a tool call's
      input, never its output.
    - `TASK_EVENT_KIND_PROGRESS`: a plan, as `progress.updated` JSON with a `summary` and `items`.
 6. A message that arrives while the Task runs can be taken with `TakeLiveInput` and settled with

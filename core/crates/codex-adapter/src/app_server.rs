@@ -170,7 +170,7 @@ impl Transport {
                     "Codex returned an unexpected response identity"
                 );
                 if let Some(error) = value.get("error") {
-                    // Standard error reaches only the Worker Host log, which redacts it.
+                    // terminal-safe: standard error reaches only the Worker Host log, which redacts it.
                     eprintln!("Codex rejected {method}: {error}");
                     bail!("Codex rejected an execution request");
                 }
@@ -568,9 +568,11 @@ impl Stream {
             // goes to standard error, which only the redacting Worker Host log reads, because
             // provider errors can quote credentials.
             "error" if params["willRetry"] == true => {
+                // terminal-safe: read only by the redacting Worker Host log.
                 eprintln!("Codex is retrying after an error: {}", params["error"]);
             }
             "error" => {
+                // terminal-safe: read only by the redacting Worker Host log.
                 eprintln!("Codex reported a failed turn: {}", params["error"]);
                 bail!("Codex reported a failed turn")
             }
