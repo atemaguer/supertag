@@ -133,8 +133,9 @@ command fails and names the host.
 ## Build on earlier work in the same Session
 
 Every Task of a Session continues the Session's branch. Ask for a revision in the same
-conversation, and the next Task starts from the earlier commits, even on another host. Start a
-new conversation for independent work; it gets its own branch.
+conversation, and the next Task starts from the earlier commits, even on another host. Submit
+independent work in a new Session with `supertag task submit --session NAME`; it gets its own
+branch.
 
 ## Use a GitHub repository
 

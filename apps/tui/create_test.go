@@ -43,7 +43,7 @@ func TestGoalIsSentToTheConversation(t *testing.T) {
 	m.tags, m.selected = runtimeTestTags(), 0
 	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.pane = paneConversation
-	conv := m.conversation("lead", m.currentConversation("lead"))
+	conv := m.conversation("lead")
 	conv.loaded = true
 
 	m.input.SetValue("/goal Ship the release notes")

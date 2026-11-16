@@ -4,11 +4,18 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
-import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
-import { shownConversation, useConversationPrefetch } from "../lib/conversation-cache";
+import type { ControlPlane, Conversation, Tag, WatchUpdate } from "../control-plane";
+import {
+  cachedRoster,
+  cacheRoster,
+  storedRoster,
+  useConversationList,
+  useConversationPrefetch,
+} from "../lib/conversation-cache";
 import { describe } from "../lib/polling";
 import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { harnessLabel, type TagAdmin } from "../tag-admin";
@@ -25,7 +32,6 @@ import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
 const rosterInterval = 15_000;
-const conversationInterval = 2_500;
 
 export type SettingsAction = (event: MouseEvent<HTMLButtonElement>) => void;
 interface ShellProps {
@@ -201,10 +207,26 @@ export function Workspace({
 }: WorkspaceProps) {
   const [tags, setTags] = useState(initialTags);
   const [creatingTag, setCreatingTag] = useState(false);
-  const [selectedTag, setSelectedTag] = useState(initialTags[0]?.tagId);
+  // The app opens on the Tag it showed last on this Control Plane.
+  const [selectedTag, setSelectedTag] = useState(
+    () => cachedRoster(controlPlane)?.selectedTag ?? initialTags[0]?.tagId,
+  );
+  const chosen = useRef(false);
+  useEffect(() => {
+    void storedRoster(controlPlane).then((roster) => {
+      if (roster?.selectedTag && !chosen.current) setSelectedTag(roster.selectedTag);
+    });
+  }, [controlPlane]);
+  const selectTag = useCallback(
+    (tagId: string) => {
+      chosen.current = true;
+      setSelectedTag(tagId);
+      cacheRoster(controlPlane, { selectedTag: tagId });
+    },
+    [controlPlane],
+  );
   const [drafts, updateDraft] = useDrafts(draftScope);
-  // What the sidebar knows of each conversation opened here. Only the open one is current, so
-  // only it can show as working.
+  // What the open conversation's own history says of it, the freshest for its row.
   const [summaries, setSummaries] = useState<Record<string, TagSummary>>({});
   const reportSummary = useCallback(
     (tagId: string, summary: TagSummary) =>
@@ -213,6 +235,9 @@ export function Workspace({
   );
   const [error, setError] = useState("");
   const watch = useControlPlaneWatch(connectionId);
+  // Every conversation's row, from the cached list at once and then the Control Plane, kept
+  // current through the watch.
+  const { conversations } = useConversationList(controlPlane, watch);
   const tag = tags.find((entry) => entry.tagId === selectedTag) ?? tags[0];
   useConversationPrefetch(
     controlPlane,
@@ -243,11 +268,16 @@ export function Workspace({
     selector,
     switching,
     connected: true,
-    onSelectTag: setSelectedTag,
+    onSelectTag: selectTag,
     summaries: Object.fromEntries(
-      Object.entries(summaries).map(([tagId, summary]) => [
-        tagId,
-        tagId === tag?.tagId ? summary : { ...summary, working: undefined },
+      conversations.map((conversation) => [
+        conversation.tagId,
+        {
+          ...rowSummary(conversation),
+          ...(conversation.tagId === tag?.tagId ? summaries[conversation.tagId] : {}),
+          // The open conversation is read as it is shown.
+          unread: conversation.tagId !== tag?.tagId && conversation.unreadCount > 0,
+        },
       ]),
     ),
     onNewTag: tagAdmin ? () => setCreatingTag(true) : undefined,
@@ -283,7 +313,7 @@ export function Workspace({
             setTags((prior) =>
               prior.some((entry) => entry.tagId === created.tagId) ? prior : [...prior, created],
             );
-            setSelectedTag(created.tagId);
+            selectTag(created.tagId);
           }}
         />
       )}
@@ -334,6 +364,17 @@ function useDrafts(scope: string) {
 
 const rosterChanged = (update: WatchUpdate) => update.kind === "tag";
 
+/** What the sidebar shows for a conversation the Control Plane lists. */
+export function rowSummary(conversation: Conversation): TagSummary {
+  const line = conversation.preview.split("\n")[0]?.trim();
+  return {
+    ...(line ? { preview: conversation.previewFromTag ? line : `You: ${line}` } : {}),
+    ...(conversation.lastActivityAtMs ? { lastActivityMs: conversation.lastActivityAtMs } : {}),
+    ...(conversation.unreadCount > 0 ? { unread: true } : {}),
+    ...(conversation.working ? { working: true } : {}),
+  };
+}
+
 function TagWorkspace({
   controlPlane,
   watch,
@@ -354,52 +395,18 @@ function TagWorkspace({
   onWriteChange(delta: 1 | -1): void;
 }) {
   const tagId = tag.tagId;
-  // A Tag shown before opens its conversation at once, while its list revalidates.
-  const [conversation, setConversation] = useState(() => shownConversation(controlPlane, tagId));
-  const [error, setError] = useState("");
-  const refreshThreads = useCallback(
-    async (signal: AbortSignal) => {
-      try {
-        const entries = await controlPlane.conversations(tagId);
-        if (!signal.aborted) {
-          setConversation((prior) => prior ?? entries[0]?.name ?? "default");
-          setError("");
-        }
-      } catch (error) {
-        if (!signal.aborted) setError(describe(error));
-        return false;
-      }
-    },
-    [controlPlane, tagId],
-  );
-  const threadsChanged = useCallback(
-    (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
-    [tagId],
-  );
-  useWatchRefresh(refreshThreads, conversationInterval, watch, threadsChanged);
-
-  const key = JSON.stringify([tagId, conversation]);
   return (
-    <WorkspaceShell {...shell} tag={tag} error={shell.error || error}>
-      {conversation ? (
-        <ConversationPane
-          key={key}
-          controlPlane={controlPlane}
-          watch={watch}
-          tag={tag}
-          name={conversation}
-          draft={draft}
-          updateDraft={updateDraft}
-          onSummary={(summary) => onSummary(tagId, summary)}
-          onWriteChange={onWriteChange}
-        />
-      ) : (
-        <div className="work-area">
-          <div className="empty" role="status">
-            Loading conversations…
-          </div>
-        </div>
-      )}
+    <WorkspaceShell {...shell} tag={tag}>
+      <ConversationPane
+        key={tagId}
+        controlPlane={controlPlane}
+        watch={watch}
+        tag={tag}
+        draft={draft}
+        updateDraft={updateDraft}
+        onSummary={(summary) => onSummary(tagId, summary)}
+        onWriteChange={onWriteChange}
+      />
     </WorkspaceShell>
   );
 }

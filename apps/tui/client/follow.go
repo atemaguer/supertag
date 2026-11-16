@@ -69,11 +69,11 @@ type FollowEvent struct {
 // Shown is what has been shown of one message, so a resumed stream, which may send the
 // current state again, and a message first shown from history add only what changed.
 type Shown struct {
-	tag, conversation string
-	joined            bool
-	joinedOnPage      string
-	replied           bool
-	waiting           map[string]bool
+	tag          string
+	joined       bool
+	joinedOnPage string
+	replied      bool
+	waiting      map[string]bool
 	// sessions holds the latest snapshot of each work Session, in the order first seen.
 	sessions []*views.WorkSession
 	// tasks is the Task each work Session was last shown working on.
@@ -81,8 +81,8 @@ type Shown struct {
 	keys  map[string]bool
 }
 
-func newShown(tag, conversation string) *Shown {
-	return &Shown{tag: tag, conversation: conversation, waiting: map[string]bool{}, tasks: map[string]string{}, keys: map[string]bool{}}
+func newShown(tag string) *Shown {
+	return &Shown{tag: tag, waiting: map[string]bool{}, tasks: map[string]string{}, keys: map[string]bool{}}
 }
 
 // once reports whether key is new, and records it.
@@ -255,7 +255,7 @@ func History(tag string, page []*views.Message, displayedTaskIDs ...string) []Hi
 	workEvents := map[string]bool{}
 	for i := len(page) - 1; i >= 0; i-- {
 		message := page[i]
-		shown := newShown(tag, message.GetConversation())
+		shown := newShown(tag)
 		item := HistoryItem{Message: message, Shown: shown}
 		if joined := message.GetJoinedTaskId(); joined != "" {
 			item.Events = shown.join()
@@ -349,7 +349,7 @@ func (f *Follower) FollowObjective(ctx context.Context, tag string, message *vie
 
 func (f *Follower) followMessage(ctx context.Context, tag string, message *views.Message, shown *Shown, objective bool) <-chan FollowEvent {
 	if shown == nil {
-		shown = newShown(tag, message.GetConversation())
+		shown = newShown(tag)
 	}
 	release := f.register(tag, message.GetTaskId())
 	events := make(chan FollowEvent, 16)

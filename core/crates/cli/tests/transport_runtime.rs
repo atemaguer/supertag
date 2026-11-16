@@ -2126,7 +2126,6 @@ async fn exercise_work_session_calls_through_partition(database: String) -> Resu
         output_policy: None,
         execution_limits: None,
         tag_id: tag.into(),
-        conversation: "private".into(),
         text: text.into(),
         operation_id: operation.into(),
     };

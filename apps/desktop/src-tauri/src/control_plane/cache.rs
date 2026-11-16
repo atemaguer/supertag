@@ -1,7 +1,7 @@
-//! Recent conversations kept on disk so the app shows one immediately, before the Control Plane
-//! answers. Each Control Plane and principal has its own directory, named by digests, under the
-//! app's data directory; the files hold only what the Control Plane returned, never a
-//! credential, and only this user can read them.
+//! What the app keeps on disk to show at once on launch, before the Control Plane answers: the
+//! Tag list, recent conversations, and messages not yet sent. Each Control Plane and principal
+//! has its own directory, named by digests, under the app's data directory. The files hold only
+//! what the app read or wrote, never a credential, and only this user can read them.
 
 use std::{
     fs::{self, OpenOptions},
@@ -13,10 +13,10 @@ use sha2::{Digest, Sha256};
 
 use super::{ControlPlaneState, Result};
 
-/// The most one conversation's cached transcript may take.
+/// The most one entry may take.
 const MAX_ENTRY_BYTES: u64 = 4 * 1024 * 1024;
-/// How many conversations each Control Plane and principal keep; the least recently written
-/// are removed first.
+/// How many entries each Control Plane and principal keep; the least recently written are
+/// removed first.
 const MAX_ENTRIES: usize = 64;
 const CACHE_ERROR: &str = "Could not use the conversation cache.";
 
@@ -42,10 +42,23 @@ pub(super) struct CacheScope {
 }
 
 impl CacheScope {
-    fn entry(&self, root: &Path, tag_id: &str, conversation: &str) -> PathBuf {
+    fn entry(&self, root: &Path, key: &str) -> PathBuf {
         control_plane_directory(root, &self.control_plane)
             .join(digest(&[&self.principal]))
-            .join(format!("{}.json", digest(&[tag_id, conversation])))
+            .join(format!("{}.json", digest(&[key])))
+    }
+}
+
+/// An entry's key: `roster`, `outbox`, or `tag:` and a Tag ID.
+fn valid_key(key: &str) -> Result<()> {
+    let valid = matches!(key, "roster" | "outbox")
+        || key.strip_prefix("tag:").is_some_and(|tag| {
+            !tag.is_empty() && tag.len() <= 256 && !tag.chars().any(char::is_control)
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(CACHE_ERROR.into())
     }
 }
 
@@ -150,34 +163,33 @@ pub fn forget(root: &Path, control_plane: &str) {
 }
 
 impl ControlPlaneState {
-    /// The transcript last cached for this conversation on the current connection's Control
-    /// Plane and principal, if there is one.
-    pub async fn cached_conversation(
+    /// The entry last cached under `key` for the current connection's Control Plane and
+    /// principal, if there is one.
+    pub async fn cached(
         &self,
         connection_id: &str,
         root: PathBuf,
-        tag_id: String,
-        conversation: String,
+        key: String,
     ) -> Result<Option<serde_json::Value>> {
+        valid_key(&key)?;
         let scope = self.cache_scope(connection_id).await?;
-        let path = scope.entry(&root, &tag_id, &conversation);
+        let path = scope.entry(&root, &key);
         tokio::task::spawn_blocking(move || read_entry(&path))
             .await
             .map_err(|_| CACHE_ERROR.into())
     }
 
-    /// Replaces this conversation's cached transcript on the current connection's Control Plane
-    /// and principal.
-    pub async fn cache_conversation(
+    /// Replaces the entry under `key` for the current connection's Control Plane and principal.
+    pub async fn cache(
         &self,
         connection_id: &str,
         root: PathBuf,
-        tag_id: String,
-        conversation: String,
+        key: String,
         value: serde_json::Value,
     ) -> Result<()> {
+        valid_key(&key)?;
         let scope = self.cache_scope(connection_id).await?;
-        let path = scope.entry(&root, &tag_id, &conversation);
+        let path = scope.entry(&root, &key);
         tokio::task::spawn_blocking(move || write_entry(&path, &value))
             .await
             .map_err(|_| CACHE_ERROR)?
@@ -215,18 +227,19 @@ mod tests {
             ..alice.clone()
         };
         let value = serde_json::json!({ "messages": [{ "task": { "taskId": "one" } }] });
-        let path = alice.entry(root.path(), "engineer", "planning");
+        let path = alice.entry(root.path(), "tag:engineer");
         write_entry(&path, &value).unwrap();
         assert_eq!(read_entry(&path), Some(value));
         for scope in [&bob, &other] {
-            assert_ne!(scope.entry(root.path(), "engineer", "planning"), path);
-            assert!(read_entry(&scope.entry(root.path(), "engineer", "planning")).is_none());
+            assert_ne!(scope.entry(root.path(), "tag:engineer"), path);
+            assert!(read_entry(&scope.entry(root.path(), "tag:engineer")).is_none());
         }
-        // Names cannot be confused by moving a separator between the Tag and the conversation.
-        assert_ne!(
-            alice.entry(root.path(), "a", "bc"),
-            alice.entry(root.path(), "ab", "c")
-        );
+        for key in ["roster", "outbox", "tag:engineer"] {
+            assert!(valid_key(key).is_ok());
+        }
+        for key in ["", "tag:", "other", "tag:a\nb", "../roster"] {
+            assert!(valid_key(key).is_err(), "{key}");
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -239,7 +252,7 @@ mod tests {
 
         for index in 0..MAX_ENTRIES + 3 {
             write_entry(
-                &alice.entry(root.path(), "engineer", &format!("c{index}")),
+                &alice.entry(root.path(), &format!("tag:t{index}")),
                 &serde_json::json!(index),
             )
             .unwrap();
@@ -249,7 +262,7 @@ mod tests {
             MAX_ENTRIES
         );
         let large = serde_json::json!("x".repeat(MAX_ENTRY_BYTES as usize));
-        let latest = alice.entry(root.path(), "engineer", &format!("c{}", MAX_ENTRIES + 2));
+        let latest = alice.entry(root.path(), &format!("tag:t{}", MAX_ENTRIES + 2));
         write_entry(&latest, &large).unwrap();
         assert!(read_entry(&latest).is_none());
 

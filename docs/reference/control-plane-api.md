@@ -51,7 +51,7 @@ name in `supertag audit`.
 | Service | For |
 | --- | --- |
 | `Operator` | Tags, Tasks, Worker Hosts, Auth Keys, Task events and usage, reply deliveries, and recovery decisions |
-| `Conversations` | A Tag's conversations and their messages, and sending a message |
+| `Conversations` | Your conversation with each Tag: its messages, sending one, and how far you have read |
 | `OperatorEvents` | `Watch`: change notices with a resume token |
 | `Objectives` | Create an Objective, read and list them, change limits, pause, resume, cancel, review, and complete |
 | `ObjectiveOverviews` | The readable progress overview that `describe objective` prints |
@@ -97,10 +97,23 @@ exposes messages and gRPC stubs.
 
 ## Read a conversation
 
-`Conversations.ListMessages` returns a page of a conversation, newest first. Each message carries
-its Task and the events its turn shows: every message the Tag wrote while it worked, and its
-latest activity or plan. One call renders a page; a client needs no read per message. When a
-turn's messages exceed the page's share, the oldest are left out and `events_truncated` is set.
+An operator or client has one conversation with each Tag. `Conversations.ListMessages` returns a
+page of it, newest first. Each message carries its Task, its `order` in the conversation, when it
+was sent and finished, and the events its turn shows: every message the Tag wrote while it
+worked, and its latest activity or plan. One call renders a page; a client needs no read per
+message. When a turn's messages exceed the page's share, the oldest are left out and
+`events_truncated` is set.
+
+A client that keeps a copy reads only what changed: it passes the `conversation_id` the copy came
+from, the latest `order` it holds as `after`, and its unfinished turns as `refresh_task_ids`. The
+response then sets `incremental` and holds the newer messages and those turns. When the
+conversation was replaced, or more than a page arrived since, the response is the newest page
+instead, which replaces the copy.
+
+`Conversations.ListConversations` lists your conversations, one per Tag, the latest active first.
+Each has a preview of its latest message, when it was active, how many finished replies you have
+not read, and whether one of its Tasks is queued or running. `MarkConversationRead` records the
+latest finished turn you have read.
 
 The last event of a message is its turn's latest. To follow a running turn, call
 `Operator.ListEvents` with that sequence as `after_sequence`. `ListEvents` also returns every
@@ -108,8 +121,8 @@ event of a turn, including the activity a conversation page leaves out.
 
 ## Watch for changes
 
-`OperatorEvents.Watch` streams change notices for Tags, Tasks, conversation messages, Objectives,
-Teams, and Workstream posts. Each notice carries a resume token; reconnect with the last one to
+`OperatorEvents.Watch` streams change notices for Tags, Tasks, conversation messages and read
+marks, Objectives, Teams, and Workstream posts. Each notice carries a resume token; reconnect with the last one to
 continue without a gap. A notice says what changed, not its new contents: read the resource.
 
 ## Stability

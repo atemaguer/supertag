@@ -30,7 +30,10 @@ export interface Task {
 
 export interface Message {
   task: Task;
-  conversation: string;
+  /** The message's place in its conversation. Later messages have larger orders. */
+  order: number;
+  /** When its turn finished, if the Control Plane recorded it. */
+  completedAtMs?: number;
   liveInput?: { taskId: string; state: string };
   workSessionReportId?: string;
   /**
@@ -42,16 +45,42 @@ export interface Message {
   eventsTruncated?: boolean;
 }
 
+/** The caller's one conversation with a Tag, as a conversation list shows it. */
 export interface Conversation {
   tagId: string;
-  name: string;
-  sessionId: string;
-  latestTask?: Task;
+  conversationId: string;
+  /** The latest message: the Tag's reply when it finished, otherwise the caller's message. */
+  preview: string;
+  previewFromTag: boolean;
+  lastActivityAtMs: number;
+  latestOrder: number;
+  /** How far the caller has read, as a message order. */
+  readOrder: number;
+  /** Finished replies after `readOrder`. */
+  unreadCount: number;
+  /** A Task of the conversation is queued or running. */
+  working: boolean;
 }
 
 export interface MessagePage {
   messages: Message[];
   nextCursor?: string;
+  /** Empty before the caller's first message to the Tag. */
+  conversationId: string;
+  /** The page holds only what changed after the request's `after`; otherwise it is the newest. */
+  incremental?: boolean;
+}
+
+/**
+ * A page of the caller's conversation with a Tag before `cursor`, or the changes after `after`
+ * to a copy of conversation `conversationId`, with the current state of `refreshTaskIds`.
+ */
+export interface ReadMessages {
+  tagId: string;
+  cursor?: string;
+  after?: number;
+  conversationId?: string;
+  refreshTaskIds?: string[];
 }
 
 export interface TaskEvent {
@@ -66,25 +95,34 @@ export interface TaskEvent {
 
 export interface ControlPlane {
   tags(): Promise<Tag[]>;
-  conversations(tagId: string): Promise<Conversation[]>;
-  messages(tagId: string, conversation: string, cursor?: string): Promise<MessagePage>;
-  send(tagId: string, conversation: string, text: string, operationId: string): Promise<Message>;
+  /** The caller's conversation with each Tag it has talked to, the latest active first. */
+  conversations(): Promise<Conversation[]>;
+  messages(read: ReadMessages): Promise<MessagePage>;
+  send(tagId: string, text: string, operationId: string): Promise<Message>;
+  /** Records that the caller read its conversation with a Tag up to a finished turn. */
+  markRead(tagId: string, order: number): Promise<Conversation>;
   /** All of a Task's events after a sequence, oldest first. */
   events(taskId: string, afterSequence: number): Promise<TaskEvent[]>;
   saveArtifact(artifactId: string, path: string): Promise<boolean>;
   /**
-   * The Control Plane and principal this connection acts as. Conversations cached under one
-   * scope are never shown under another.
+   * The Control Plane and principal this connection acts as. What is cached under one scope is
+   * never shown under another.
    */
   readonly scope: string;
-  /** The conversation this connection's Control Plane and principal last cached, if any. */
-  readCache(tagId: string, conversation: string): Promise<unknown>;
-  writeCache(tagId: string, conversation: string, value: unknown): Promise<void>;
+  /**
+   * What the app last cached for this connection's Control Plane and principal under `key`:
+   * `roster`, `outbox`, or `tag:` and a Tag ID.
+   */
+  readCache(key: CacheKey): Promise<unknown>;
+  writeCache(key: CacheKey, value: unknown): Promise<void>;
 }
+
+export type CacheKey = "roster" | "outbox" | `tag:${string}`;
 
 export type WatchUpdate =
   | { kind: "ready" | "resync" | "lost" | "tag" }
-  | { kind: "conversation"; tagId: string; conversation: string };
+  /** The caller's conversation with the Tag changed, or was marked read. */
+  | { kind: "conversation"; tagId: string };
 
 export interface ControlPlaneProfile {
   name: string;
@@ -128,19 +166,17 @@ export function controlPlaneSession(connectionId: string, scope: string): Contro
   return {
     scope,
     tags: () => invoke("list_tags", { connectionId }),
-    conversations: (tagId) => invoke("list_conversations", { connectionId, tagId }),
-    messages: (tagId, conversation, cursor) =>
-      invoke("list_messages", { connectionId, tagId, conversation, cursor }),
-    send: (tagId, conversation, text, operationId) =>
-      invoke("send_message", { connectionId, tagId, conversation, text, operationId }),
+    conversations: () => invoke("list_conversations", { connectionId }),
+    messages: (read) => invoke("list_messages", { connectionId, read }),
+    send: (tagId, text, operationId) =>
+      invoke("send_message", { connectionId, tagId, text, operationId }),
+    markRead: (tagId, order) => invoke("mark_conversation_read", { connectionId, tagId, order }),
     events: (taskId, afterSequence) =>
       invoke("list_task_events", { connectionId, taskId, afterSequence }),
     saveArtifact: (artifactId, path) =>
       invoke("save_result_artifact", { connectionId, artifactId, path }),
-    readCache: (tagId, conversation) =>
-      invoke("read_conversation_cache", { connectionId, tagId, conversation }),
-    writeCache: (tagId, conversation, value) =>
-      invoke("write_conversation_cache", { connectionId, tagId, conversation, value }),
+    readCache: (key) => invoke("read_cache", { connectionId, key }),
+    writeCache: (key, value) => invoke("write_cache", { connectionId, key, value }),
   };
 }
 

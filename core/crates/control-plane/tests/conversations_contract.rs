@@ -13,7 +13,6 @@ fn send(text: &str, operation: &str) -> SendMessageRequest {
         output_policy: None,
         execution_limits: None,
         tag_id: "engineer".into(),
-        conversation: "project".into(),
         text: text.into(),
         operation_id: operation.into(),
     }
@@ -22,9 +21,9 @@ fn send(text: &str, operation: &str) -> SendMessageRequest {
 fn history(cursor: String) -> ListMessagesRequest {
     ListMessagesRequest {
         tag_id: "engineer".into(),
-        conversation: "project".into(),
         limit: 1,
         cursor,
+        ..Default::default()
     }
 }
 
@@ -314,15 +313,161 @@ async fn exercise(database: &str) {
         Err(StoreError::InvalidArgument(_))
     ));
 
-    for (principal, task) in [(ALICE, alice), (BOB, bob)] {
-        let page = store
-            .list_conversations(principal, &ListConversationsRequest::default())
-            .await
-            .unwrap();
-        assert_eq!(page.conversations.len(), 1);
-        assert_eq!(page.conversations[0].session_id, task.session_id);
-        assert!(page.next_cursor.is_empty());
-    }
+    // One conversation per principal and Tag: every message continues it.
+    let all = store
+        .list_messages(
+            ALICE,
+            &ListMessagesRequest {
+                tag_id: "engineer".into(),
+                limit: 10,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(all.messages.len(), 3);
+    assert_eq!(all.conversation_id, alice.session_id);
+    assert!(!all.incremental);
+    assert!(
+        all.messages
+            .iter()
+            .all(|message| message.task.as_ref().unwrap().session_id == alice.session_id)
+    );
+    let orders: Vec<u64> = all.messages.iter().map(|message| message.order).collect();
+    assert!(
+        orders.windows(2).all(|pair| pair[0] > pair[1]),
+        "{orders:?}"
+    );
+    assert!(all.messages.iter().all(|message| message.sent_at_ms > 0));
+    let head_order = orders[0];
+
+    // A copy at the head reads only what changed: nothing new, and the unfinished turn it holds.
+    let since = |after: u64, conversation_id: &str, refresh: Vec<String>| ListMessagesRequest {
+        tag_id: "engineer".into(),
+        limit: 10,
+        after,
+        conversation_id: conversation_id.into(),
+        refresh_task_ids: refresh,
+        ..Default::default()
+    };
+    let changes = store
+        .list_messages(
+            ALICE,
+            &since(head_order, &alice.session_id, vec![alice.task_id.clone()]),
+        )
+        .await
+        .unwrap();
+    assert!(changes.incremental);
+    assert_eq!(
+        changes
+            .messages
+            .iter()
+            .map(|message| message.task.as_ref().unwrap().task_id.as_str())
+            .collect::<Vec<_>>(),
+        [alice.task_id.as_str()]
+    );
+    let newest = store
+        .send_message(ALICE, &send("Alice newest", "newest"))
+        .await
+        .unwrap();
+    let changes = store
+        .list_messages(ALICE, &since(head_order, &alice.session_id, vec![]))
+        .await
+        .unwrap();
+    assert!(changes.incremental);
+    assert_eq!(changes.messages.len(), 1);
+    assert_eq!(changes.messages[0].order, newest.order);
+    // A copy of another conversation, or one more than a page behind, gets the newest page.
+    let replaced = store
+        .list_messages(ALICE, &since(head_order, "conversation/other", vec![]))
+        .await
+        .unwrap();
+    assert!(!replaced.incremental);
+    assert_eq!(replaced.messages.len(), 4);
+    let behind = store
+        .list_messages(
+            ALICE,
+            &ListMessagesRequest {
+                limit: 1,
+                ..since(1, &alice.session_id, vec![])
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!behind.incremental);
+    assert!(!behind.next_cursor.is_empty());
+
+    // The conversation list: one row per Tag, its latest message, unread replies, and work.
+    let listed = store
+        .list_conversations(ALICE, &ListConversationsRequest {})
+        .await
+        .unwrap();
+    assert_eq!(listed.conversations.len(), 1);
+    let conversation = &listed.conversations[0];
+    assert_eq!(conversation.tag_id, "engineer");
+    assert_eq!(conversation.conversation_id, alice.session_id);
+    assert_eq!(conversation.session_id, alice.session_id);
+    assert_eq!(conversation.preview, "Alice newest");
+    assert!(!conversation.preview_from_tag);
+    assert_eq!(conversation.latest_order, newest.order);
+    assert!(conversation.last_activity_at_ms > 0);
+    assert!(conversation.working);
+    assert_eq!(conversation.read_order, 0);
+    let goal = store
+        .send_message(ALICE, &send("/goal", "goal-reply"))
+        .await
+        .unwrap();
+    let listed = store
+        .list_conversations(ALICE, &ListConversationsRequest {})
+        .await
+        .unwrap();
+    let conversation = &listed.conversations[0];
+    assert!(conversation.preview_from_tag, "{conversation:?}");
+    assert!(conversation.preview.starts_with("Say which outcome"));
+    assert!(conversation.unread_count >= 1, "{conversation:?}");
+    let read = store
+        .mark_conversation_read(
+            ALICE,
+            &MarkConversationReadRequest {
+                tag_id: "engineer".into(),
+                order: goal.order,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(read.read_order, goal.order);
+    assert_eq!(read.unread_count, 0);
+    // A mark never moves back, and another principal's list is its own.
+    let read = store
+        .mark_conversation_read(
+            ALICE,
+            &MarkConversationReadRequest {
+                tag_id: "engineer".into(),
+                order: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(read.read_order, goal.order);
+    let bobs = store
+        .list_conversations(BOB, &ListConversationsRequest {})
+        .await
+        .unwrap();
+    assert_eq!(bobs.conversations.len(), 1);
+    assert_eq!(bobs.conversations[0].session_id, bob.session_id);
+    assert_eq!(bobs.conversations[0].read_order, 0);
+    assert!(matches!(
+        store
+            .mark_conversation_read(
+                BOB,
+                &MarkConversationReadRequest {
+                    tag_id: "writer".into(),
+                    order: 1,
+                },
+            )
+            .await,
+        Err(StoreError::NotFound(_))
+    ));
     store.close().await;
 }
 

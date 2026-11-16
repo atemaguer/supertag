@@ -604,7 +604,6 @@ async fn policy_fence(url: &str, store: &Store, host: &HostAuthority) {
         output_policy: None,
         execution_limits: None,
         tag_id: "reviewer".into(),
-        conversation: "policy-fence".into(),
         operation_id: "private-active".into(),
         text: "Review and edit".into(),
     };

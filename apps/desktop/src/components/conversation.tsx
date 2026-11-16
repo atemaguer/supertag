@@ -9,12 +9,18 @@ import {
   useState,
 } from "react";
 import { type StickToBottomContext, useStickToBottomContext } from "use-stick-to-bottom";
-import type { ControlPlane, Tag, TaskEvent, WatchUpdate } from "../control-plane";
+import type {
+  ControlPlane,
+  Tag,
+  Message as TagMessage,
+  TaskEvent,
+  WatchUpdate,
+} from "../control-plane";
 import {
   cachedHistory,
   cacheHistory,
+  markShown,
   openConversation,
-  showConversation,
   storedHistory,
 } from "../lib/conversation-cache";
 import {
@@ -22,9 +28,17 @@ import {
   emptyHistory,
   type History,
   latestHistory,
-  readHistory,
   receivedMessage,
+  refreshRequest,
 } from "../lib/history";
+import {
+  discard,
+  type Outgoing,
+  send as queue,
+  resumeOutbox,
+  retry,
+  useOutbox,
+} from "../lib/outbox";
 import { describe, usePolling } from "../lib/polling";
 import { eventLine } from "../lib/turn";
 import { useWatchRefresh, type WatchFeed } from "../lib/watch";
@@ -49,25 +63,15 @@ const interval = 2_500;
 export const ACTIVITY_WIDTH = { initial: 320, min: 280, conversation: 420 };
 const ACTIVITY_WIDTH_KEY = "supertag.desktop.activity-width";
 
-/** A message on its way to the Control Plane: its text and the operation that sends it once. */
-export interface Outgoing {
-  text: string;
-  operationId: string;
-  /** Why it was not delivered. A retry reuses the operation, so it is sent at most once. */
-  error?: string;
-}
-
-/** What the operator is writing to a Tag, and the message they sent that has not arrived yet. */
+/** What the operator is writing to a Tag. A message sent waits in the outbox until it arrives. */
 export interface Draft {
   text: string;
-  outgoing?: Outgoing;
 }
 
 interface ConversationProps {
   controlPlane: ControlPlane;
   watch?: WatchFeed;
   tag: Tag;
-  name: string;
   draft: Draft;
   updateDraft(update: (draft: Draft) => Draft): void;
   onWriteChange(delta: 1 | -1): void;
@@ -75,16 +79,10 @@ interface ConversationProps {
   onSummary?(summary: TagSummary): void;
 }
 
-function newOperationId() {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 export function ConversationPane({
   controlPlane,
   watch,
   tag,
-  name,
   draft,
   updateDraft,
   onWriteChange,
@@ -93,14 +91,15 @@ export function ConversationPane({
   const tagId = tag.tagId;
   // A conversation shown before renders at once from the cache, then revalidates.
   const [history, renderHistory] = useState<History>(
-    () => cachedHistory(controlPlane, tagId, name) ?? emptyHistory,
+    () => cachedHistory(controlPlane, tagId) ?? emptyHistory,
   );
+  // The message sent that has not arrived yet, also after a restart.
+  const outgoing = useOutbox(controlPlane, tagId)[0];
   const currentHistory = useRef(history);
   const [error, setError] = useState("");
   const [paging, setPaging] = useState(false);
   const [activeTask, setActiveTask] = useState<string>();
   const revision = useRef(0);
-  const inFlight = useRef(false);
   const active = useRef(true);
   const scrollOffset = useRef<{ height: number; top: number } | undefined>(undefined);
   const transcript = useRef<StickToBottomContext>(null);
@@ -110,18 +109,21 @@ export function ConversationPane({
     (next: History) => {
       currentHistory.current = next;
       renderHistory(next);
-      cacheHistory(controlPlane, tagId, name, next);
+      cacheHistory(controlPlane, tagId, next);
+      // The latest finished turn on screen has been read.
+      if (next.read && !document.hidden) markShown(controlPlane, tagId, next);
     },
-    [controlPlane, tagId, name],
+    [controlPlane, tagId],
   );
 
   useEffect(() => {
     active.current = true;
-    showConversation(controlPlane, tagId, name);
-    const close = openConversation(controlPlane, tagId, name);
+    const close = openConversation(controlPlane, tagId);
+    // Messages a previous run could not send go out again.
+    void resumeOutbox(controlPlane);
     // Not in memory: the disk cache shows it until the Control Plane answers.
     if (!currentHistory.current.read)
-      void storedHistory(controlPlane, tagId, name).then((stored) => {
+      void storedHistory(controlPlane, tagId).then((stored) => {
         if (stored && active.current && !currentHistory.current.read) {
           currentHistory.current = stored;
           renderHistory(stored);
@@ -131,21 +133,19 @@ export function ConversationPane({
       active.current = false;
       close();
     };
-  }, [controlPlane, tagId, name]);
+  }, [controlPlane, tagId]);
 
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       const started = revision.current;
       try {
-        const page = await readHistory(
-          (cursor) => controlPlane.messages(tagId, name, cursor),
-          currentHistory.current,
-          signal,
-        );
+        // Only what changed since the copy shown, once there is one.
+        const page = await controlPlane.messages(refreshRequest(tagId, currentHistory.current));
         if (signal.aborted || revision.current !== started) return;
         const previous = currentHistory.current;
         const next = latestHistory(previous, page);
-        if (previous.sessionId && previous.sessionId !== next.sessionId) setActiveTask(undefined);
+        if (previous.conversationId && previous.conversationId !== next.conversationId)
+          setActiveTask(undefined);
         setHistory(next);
         setError("");
       } catch (error) {
@@ -156,12 +156,11 @@ export function ConversationPane({
         }
       }
     },
-    [controlPlane, tagId, name, setHistory],
+    [controlPlane, tagId, setHistory],
   );
   const historyChanged = useCallback(
-    (update: WatchUpdate) =>
-      update.kind === "conversation" && update.tagId === tagId && update.conversation === name,
-    [tagId, name],
+    (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
+    [tagId],
   );
   const requestHistory = useWatchRefresh(refresh, interval, watch, historyChanged);
 
@@ -190,7 +189,7 @@ export function ConversationPane({
     if (!expected.cursor || paging) return;
     setPaging(true);
     try {
-      const page = await controlPlane.messages(tagId, name, expected.cursor);
+      const page = await controlPlane.messages({ tagId, cursor: expected.cursor });
       if (!active.current) return;
       const previous = currentHistory.current;
       const next = earlierHistory(previous, expected, page);
@@ -205,25 +204,20 @@ export function ConversationPane({
     }
   }
 
-  async function deliver(outgoing: Outgoing) {
-    if (inFlight.current) return;
-    inFlight.current = true;
+  // The outbox keeps the message, across restarts, until the Control Plane has it. A retry
+  // reuses its operation, so it is sent at most once.
+  async function deliver(sending: Promise<TagMessage | undefined>) {
     onWriteChange(1);
-    updateDraft((current) => ({ ...current, outgoing: { ...outgoing, error: undefined } }));
     void transcript.current?.scrollToBottom();
     try {
-      const message = await controlPlane.send(tagId, name, outgoing.text, outgoing.operationId);
-      updateDraft((current) => ({ text: current.text }));
-      if (active.current) {
+      const message = await sending;
+      if (message && active.current) {
         revision.current++;
         setHistory(receivedMessage(currentHistory.current, message));
         void transcript.current?.scrollToBottom();
         requestHistory();
       }
-    } catch (error) {
-      updateDraft((current) => ({ ...current, outgoing: { ...outgoing, error: describe(error) } }));
     } finally {
-      inFlight.current = false;
       onWriteChange(-1);
     }
   }
@@ -232,15 +226,16 @@ export function ConversationPane({
   function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = draft.text.trim();
-    if (!text || draft.outgoing) return;
+    if (!text || outgoing) return;
     updateDraft(() => ({ text: "" }));
-    void deliver({ text, operationId: newOperationId() });
+    void deliver(queue(controlPlane, tagId, text));
     composer.current?.focus();
   }
 
   // A message that was not delivered goes back to the composer to change, if that is empty.
-  function edit(outgoing: Outgoing) {
-    updateDraft((current) => ({ text: current.text.trim() ? current.text : outgoing.text }));
+  function edit(failed: Outgoing) {
+    discard(controlPlane, failed.operationId);
+    updateDraft((current) => ({ text: current.text.trim() ? current.text : failed.text }));
     composer.current?.focus();
   }
 
@@ -271,10 +266,10 @@ export function ConversationPane({
   useEffect(() => {
     if (!history.loading) reportSummary.current?.(conversationSummary(messages));
   }, [history.loading, messages]);
-  const lastSent = draft.outgoing ? undefined : lastOperatorMessage(messages);
-  const blocked = draft.outgoing?.error
+  const lastSent = outgoing ? undefined : lastOperatorMessage(messages);
+  const blocked = outgoing?.error
     ? "Retry or edit the message that was not delivered"
-    : draft.outgoing
+    : outgoing
       ? "Sending…"
       : undefined;
   return (
@@ -330,10 +325,10 @@ export function ConversationPane({
                     onSaveArtifact={controlPlane.saveArtifact}
                   />
                 ))}
-                {draft.outgoing && (
+                {outgoing && (
                   <OutgoingMessage
-                    outgoing={draft.outgoing}
-                    onRetry={(outgoing) => void deliver(outgoing)}
+                    outgoing={outgoing}
+                    onRetry={(failed) => void deliver(retry(controlPlane, failed.operationId))}
                     onEdit={edit}
                   />
                 )}
@@ -358,8 +353,7 @@ export function ConversationPane({
                   if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing)
                     return;
                   event.preventDefault();
-                  if (draft.text.trim() && !draft.outgoing)
-                    event.currentTarget.form?.requestSubmit();
+                  if (draft.text.trim() && !outgoing) event.currentTarget.form?.requestSubmit();
                 }}
               />
               <Button
@@ -368,7 +362,7 @@ export function ConversationPane({
                 className="send"
                 aria-label="Send message"
                 title={blocked ?? "Send message"}
-                disabled={Boolean(draft.outgoing) || !draft.text.trim()}
+                disabled={Boolean(outgoing) || !draft.text.trim()}
               >
                 <ArrowUp size={18} aria-hidden />
               </Button>

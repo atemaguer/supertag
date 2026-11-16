@@ -24,7 +24,7 @@ func runtimeWorkSession() *v2.WorkSession {
 }
 
 func runtimeParentMessage(id string) *v2.ConversationMessage {
-	return &v2.ConversationMessage{Conversation: "default", Task: &v2.Task{TaskId: id, TagId: "lead", SessionId: "parent", Prompt: "Please check", State: v2.TaskState_TASK_STATE_SUCCEEDED, Result: proto.String("Started checking")}}
+	return &v2.ConversationMessage{Task: &v2.Task{TaskId: id, TagId: "lead", SessionId: "parent", Prompt: "Please check", State: v2.TaskState_TASK_STATE_SUCCEEDED, Result: proto.String("Started checking")}}
 }
 
 func TestRuntimeWorkSessionHistoryKeepsReportTaskAndCursorWithoutInternalPrompt(t *testing.T) {
@@ -35,7 +35,7 @@ func TestRuntimeWorkSessionHistoryKeepsReportTaskAndCursorWithoutInternalPrompt(
 	report.WorkSessionReportId = proto.String(work.WorkSessionId)
 	report.Task.Prompt, report.Task.Result = "INTERNAL REPORT INSTRUCTION", proto.String("Tests passed")
 	testRPC(mux, rpc.ConversationsListMessagesProcedure, func(_ context.Context, req *v2.ListMessagesRequest) (*v2.ListMessagesResponse, error) {
-		if req.GetCursor() != "original-cursor" || req.GetConversation() != "default" || req.GetTagId() != "lead" {
+		if req.GetCursor() != "original-cursor" || req.GetTagId() != "lead" {
 			t.Errorf("message scope: %v", req)
 		}
 		return &v2.ListMessagesResponse{Messages: []*v2.ConversationMessage{report, runtimeParentMessage("root")}, NextCursor: "unchanged-next"}, nil
@@ -59,9 +59,10 @@ func TestRuntimeWorkSessionHistoryKeepsReportTaskAndCursorWithoutInternalPrompt(
 		return report.Task, nil
 	})
 	c := testRuntime(t, mux, false)
-	page, cursor, err := c.ListMessages(t.Context(), "lead", "default", 10, "original-cursor")
-	if err != nil || cursor != "unchanged-next" || len(page) != 2 {
-		t.Fatalf("page = %v %q %v", page, cursor, err)
+	listed, err := c.ListMessages(t.Context(), "lead", 10, "original-cursor")
+	page := listed.Messages
+	if err != nil || listed.NextCursor != "unchanged-next" || len(page) != 2 {
+		t.Fatalf("page = %+v %v", listed, err)
 	}
 	if page[0].GetTaskId() != "report" || page[0].GetText() != "" {
 		t.Fatalf("report row = %v", page[0])
@@ -137,9 +138,10 @@ func TestRuntimeWorkSessionHistoryUsesExactChildTurnAfterContinuation(t *testing
 		return message(req.GetTaskId()).Task, nil
 	})
 	c := testRuntime(t, mux, false)
-	page, cursor, err := c.ListMessages(t.Context(), "lead", "default", 10, "")
-	if err != nil || len(page) != 4 || cursor != "historical-page" {
-		t.Fatalf("history = %v, %q, %v", page, cursor, err)
+	listed, err := c.ListMessages(t.Context(), "lead", 10, "")
+	page := listed.Messages
+	if err != nil || len(page) != 4 || listed.NextCursor != "historical-page" {
+		t.Fatalf("history = %+v, %v", listed, err)
 	}
 	if page[3].WorkSessions[0].TaskId != "child" || page[1].WorkSessions[0].TaskId != "child-second" {
 		t.Fatal("a continuation replaced the original child projection")
@@ -412,27 +414,6 @@ func TestRuntimeWorkSessionDetailAndRecordedActivity(t *testing.T) {
 	}
 	if runtimeWork(work).GetStatus() != views.WorkSessionStatus_WORK_SESSION_STATUS_PENDING {
 		t.Fatal("queued child must project as pending")
-	}
-}
-
-func TestRuntimeWorkSessionQueuedReportPreviewIsNotOperatorText(t *testing.T) {
-	mux := http.NewServeMux()
-	report := runtimeParentMessage("report")
-	report.WorkSessionReportId = proto.String("work/one")
-	report.Task.Prompt, report.Task.State = "INTERNAL REPORT INSTRUCTION", v2.TaskState_TASK_STATE_QUEUED
-	testRPC(mux, rpc.ConversationsListConversationsProcedure, func(_ context.Context, _ *v2.ListConversationsRequest) (*v2.ListConversationsResponse, error) {
-		return &v2.ListConversationsResponse{Conversations: []*v2.Conversation{{TagId: "lead", Name: "default", SessionId: "parent", LatestTask: report.Task}}}, nil
-	})
-	testRPC(mux, rpc.ConversationsGetMessageProcedure, func(_ context.Context, req *v2.GetMessageRequest) (*v2.ConversationMessage, error) {
-		if req.GetTaskId() != "report" || req.GetTagId() != "lead" {
-			t.Errorf("preview scope: %v", req)
-		}
-		return report, nil
-	})
-	c := testRuntime(t, mux, false)
-	conversations, err := c.ListConversations(t.Context(), "lead")
-	if err != nil || len(conversations) != 1 || conversations[0].GetLastMessageText() != "Work Session report pending." || conversations[0].GetLastMessageAuthor() != views.ConversationAuthor_CONVERSATION_AUTHOR_TAG {
-		t.Fatalf("preview: %v, %v", conversations, err)
 	}
 }
 

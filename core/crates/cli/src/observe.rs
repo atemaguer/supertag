@@ -864,7 +864,6 @@ fn print_event(event: &WatchEvent, output: Output, announced: &mut bool) -> Resu
                 "session_id": change.session_id,
                 "objective_id": change.objective_id,
                 "team_id": change.team_id,
-                "conversation": change.conversation,
                 "changed_at": Timestamp::from_millis(change.changed_at_ms).map(|at| at.to_string()),
                 "resume_token": event.resume_token,
             }))?;

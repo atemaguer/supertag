@@ -22,8 +22,11 @@ const tags: Tag[] = ["lead", "moss"].map((tagId) => ({
 const controlPlane: ControlPlane = {
   tags: async () => tags,
   conversations: async () => [],
-  messages: async () => ({ messages: [] }),
+  messages: async () => ({ conversationId: "", messages: [] }),
   send: async () => {
+    throw new Error("unused");
+  },
+  markRead: async () => {
     throw new Error("unused");
   },
   events: async () => [],

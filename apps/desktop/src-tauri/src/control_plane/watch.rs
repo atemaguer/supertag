@@ -24,10 +24,10 @@ pub enum WatchUpdate {
     Resync,
     Lost,
     Tag,
+    /// The caller's conversation with this Tag changed, or was marked read.
     Conversation {
         #[serde(rename = "tagId")]
         tag_id: String,
-        conversation: String,
     },
 }
 
@@ -193,19 +193,23 @@ fn invalidation(change: WatchChange) -> Option<WatchUpdate> {
     match change.kind() {
         WatchKind::Tag => return Some(WatchUpdate::Tag),
         WatchKind::ConversationMessage => {}
-        // Message creation has its own notice. Later Task changes carry
-        // the result and status invalidation for the private conversation.
-        WatchKind::Task if change.reason() != WatchReason::Created => {}
+        // Message creation has its own notice. Later changes to a conversation's Tasks carry
+        // the result and status invalidation for it.
+        WatchKind::Task
+            if change.reason() != WatchReason::Created
+                && change.session_id.starts_with(CONVERSATION_SESSION) => {}
         _ => return None,
     }
-    if change.tag_id.is_empty() || change.conversation.is_empty() {
+    if change.tag_id.is_empty() {
         return None;
     }
     Some(WatchUpdate::Conversation {
         tag_id: change.tag_id,
-        conversation: change.conversation,
     })
 }
+
+/// What every conversation Session ID starts with.
+const CONVERSATION_SESSION: &str = "conversation/";
 
 #[cfg(test)]
 mod tests;

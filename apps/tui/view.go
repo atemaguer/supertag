@@ -80,8 +80,6 @@ func (m *model) refresh() {
 		m.setContent(m.renderItem())
 	case paneDiff:
 		m.setContent(m.renderDiffPane())
-	case paneConversations:
-		m.setContent(m.renderPicker())
 	case paneTeam:
 		m.setContent(m.renderTeam())
 	case paneNewObjective:
@@ -119,8 +117,7 @@ func (m model) renderConversation() string {
 	}
 	name := terminalText(m.tagLabel(tag))
 	width := m.paneWidth()
-	conversation := m.currentConversation(tag)
-	c := m.conversations[convKey(tag, conversation)]
+	c := m.conversations[tag]
 
 	if c == nil || !c.loaded {
 		return faint.Render(wrap.Render("Reading the conversation…"))
@@ -130,10 +127,7 @@ func (m model) renderConversation() string {
 	}
 
 	if c == nil || (len(c.entries) == 0 && c.draft == "") {
-		if conversation == defaultConversation {
-			return faint.Render(wrap.Render("Say something to " + name + ". This is your default conversation with it."))
-		}
-		return faint.Render(wrap.Render("Say something to " + name + " to start the conversation " + terminalText(conversation) + "."))
+		return faint.Render(wrap.Render("Say something to " + name + ". You have one conversation with it."))
 	}
 	if c.cacheWidth != width {
 		c.cache, c.cacheWidth = nil, width
@@ -241,9 +235,11 @@ func (m model) railLines(height int) string {
 
 	section("Tags", "")
 	for i, tag := range m.tags {
-		reference := m.tagReference(tag)
-		open := m.open[convKey(reference, m.currentConversation(reference))]
-		add(row{rowTag, i}, terminalText(railTagName(tag)), terminalText(railState(tag, open)))
+		summary := m.summaries[m.tagReference(tag)]
+		add(row{rowTag, i}, terminalText(railTagName(tag)), railState(tag, summary))
+		if preview := railPreview(summary); preview != "" {
+			lines = append(lines, faint.Render(truncate("  "+preview, railContent)))
+		}
 	}
 	if len(m.objectives) > 0 || m.objectivesErr != "" {
 		section("Objectives", m.objectivesErr)
@@ -288,14 +284,33 @@ var tagPhases = map[views.TagPhase]string{
 	views.TagPhase_TAG_PHASE_RETIRED: "retired",
 }
 
-// railState is what the rail shows beside a Tag: its phase, or how many work Sessions of the
-// conversation it shows are still open while the Tag is active.
-func railState(tag *views.Tag, open int) string {
+// railState is what the rail shows beside a Tag: its phase, or, while it is active, that it works
+// in your conversation or how many of its replies there you have not read.
+func railState(tag *views.Tag, summary *views.Conversation) string {
 	phase := tag.GetStatus().GetPhase()
-	if open > 0 && phase == views.TagPhase_TAG_PHASE_ACTIVE {
-		return fmt.Sprintf("%d open", open)
+	if phase == views.TagPhase_TAG_PHASE_ACTIVE {
+		switch {
+		case summary.GetWorking():
+			return "working"
+		case summary.GetUnreadCount() > 0:
+			return fmt.Sprintf("%d new", summary.GetUnreadCount())
+		}
 	}
 	return tagPhases[phase]
+}
+
+// railPreview is the line under a Tag in the rail: the latest message of your conversation with
+// it, filtered for the terminal, or empty before you talk to it.
+func railPreview(summary *views.Conversation) string {
+	text := firstLine(summary.GetPreview())
+	switch {
+	case summary.GetLatestWorkSessionReportId() != "" && !summary.GetPreviewFromTag():
+		// A report turn has no message from you; its reply is the report.
+		text = "Work Session report pending."
+	case text != "" && !summary.GetPreviewFromTag():
+		text = "you: " + text
+	}
+	return terminalText(text)
 }
 
 // renderStatus is the status line: the Control Plane, its Worker Hosts, how to open the command
@@ -362,8 +377,6 @@ func (m model) paneTitle() string {
 		return title
 	case paneDiff:
 		return "Diff · " + m.diff.title
-	case paneConversations:
-		return terminalText(m.picker.tag) + " · conversations"
 	case paneTeam:
 		name := m.teamID
 		if view, ok := m.teamViews[m.teamID]; ok {
@@ -384,7 +397,7 @@ func (m model) paneTitle() string {
 		}
 		return "SuperTag"
 	}
-	return fmt.Sprintf("%s · %s", terminalText(m.tagLabel(tag)), terminalText(m.currentConversation(tag)))
+	return terminalText(m.tagLabel(tag))
 }
 
 // paneHint ends a pane that has no input line: the keys that act on it.
@@ -415,8 +428,6 @@ func (m model) paneHint() string {
 		return "Run the command above to act on it."
 	case paneDiff:
 		return m.diffHint()
-	case paneConversations:
-		return m.pickerHint()
 	case paneTeam:
 		return "Live · its Workstream updates as members post"
 	case paneNewObjective:

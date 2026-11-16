@@ -2,8 +2,8 @@
 
 Send a **Tag** a message from your terminal and get its reply, without Slack or another
 collaboration surface. A Tag is a persistent AI actor with its own responsibilities and
-permissions. Each named conversation is its own **Session**, a thread of work. A **Task** is one
-turn in that thread, so follow-ups continue where you left off.
+permissions. You have one conversation with each Tag. It continues a **Session**, a thread of
+work, and a **Task** is one turn in it, so follow-ups continue where you left off.
 
 Use this for questions and small requests. To give a Tag an outcome to own, create an
 [Objective](objectives.md).
@@ -32,7 +32,6 @@ also create one in the desktop app with **+** in its sidebar, or ⌘N.
 | Key | Action |
 | --- | --- |
 | Ctrl-K | Open the command palette. |
-| Ctrl-O | Open the selected Tag's conversations. |
 | Ctrl-P | Switch Control Planes. **Local** is the one `supertag up` runs on this machine. |
 | ↑ on empty input | Select a work Session. Enter expands it. |
 | `d` on a work Session or branch | Show the diff from this checkout. |
@@ -42,8 +41,8 @@ To give `lead` an **Objective**, an outcome it owns, type `/goal` followed by th
 to verify it, and press Enter. The message goes to the conversation like any other, and the Control
 Plane creates the Objective, answers with its ID, and starts its first turn. Select it in the rail
 to open its progress view. Enter `/goal` on its own to choose a Team or budget before starting.
-`/goal` works the same way in the desktop app, which keeps one conversation with each Tag:
-selecting a Tag opens it. A currency budget requires a
+`/goal` works the same way in the desktop app, where selecting a Tag opens your conversation with
+it. A currency budget requires a
 [harness](../concepts/workers.md) that can enforce a reported cost limit.
 
 The desktop app reads like a messaging app. The lead Tag sits at the top of the sidebar, and
@@ -58,9 +57,10 @@ Ctrl in place of ⌘ outside macOS.
 
 ## Continue a conversation
 
-Each Tag opens in your `default` conversation. To keep a topic separate, press Ctrl-O, then
-`n`, type a name such as `billing`, and press Enter. Use Ctrl-O and Enter to reopen an
-existing conversation. The Tag sees the earlier messages in that conversation.
+You have one conversation with each Tag, and selecting the Tag opens it where you left off. The
+terminal UI, the desktop app, and any other client with your credential show the same
+conversation. The Tag sees its earlier messages. For an independent topic, send it from a script
+in its own Session, or give the Tag an Objective.
 
 ## Follow longer work
 
@@ -116,15 +116,16 @@ For a coding agent that operates SuperTag from a separate conversation, see
 
 ## Check that it worked
 
-Your conversation appears in the terminal UI's conversation list, titled by your first message.
-An Objective's conversation is titled by the Objective. A work Session the Tag started appears
+Your conversation shows under its Tag with its latest message, and the desktop app marks replies
+you have not read. An Objective's conversation is titled by the Objective. A work Session the Tag started appears
 beneath the conversation that started it; `supertag get session --parent-session SESSION_ID`
 lists them, and `supertag describe session ID` shows one with its latest Task and report.
 
 ## Rules
 
 - **The conversation is private to you.** The admin operator, each Operator Token, and each
-  client device have their own conversations, even with the same name. Other people's conversations with the Tag can't read it.
+  client device have their own conversation with each Tag. Other people's conversations with the
+  Tag can't read it.
   See [shared and private Sessions](../concepts/multiplayer.md#shared-and-private-sessions).
 - **The Tag answers with its Roles' permissions only.** A terminal conversation has no location,
   so no location's Permission Sets or Context Sets apply.

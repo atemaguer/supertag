@@ -195,7 +195,6 @@ async fn private_harness_work_session_reports_once_after_service_restart(
                 output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
-                conversation: "private".into(),
                 text: "Investigate this privately".into(),
                 operation_id: "start-parent".into(),
             },
@@ -390,9 +389,8 @@ async fn private_harness_work_session_reports_once_after_service_restart(
         .list_messages(authenticated_request(
             ListMessagesRequest {
                 tag_id: "owner".into(),
-                conversation: "private".into(),
                 limit: 10,
-                cursor: String::new(),
+                ..Default::default()
             },
             &alice_token,
             None,
@@ -542,7 +540,6 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
                 output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
-                conversation: "private".into(),
                 text: "Inspect the region".into(),
                 operation_id: "initial-parent".into(),
             },
@@ -626,7 +623,6 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
                 output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
-                conversation: "private".into(),
                 text: "Use us-east-1".into(),
                 operation_id: "answer-parent".into(),
             },
@@ -787,9 +783,8 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports(
         .list_messages(authenticated_request(
             ListMessagesRequest {
                 tag_id: "owner".into(),
-                conversation: "private".into(),
                 limit: 10,
-                cursor: String::new(),
+                ..Default::default()
             },
             &operator_token,
             None,

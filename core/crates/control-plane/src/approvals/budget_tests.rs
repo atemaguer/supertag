@@ -44,7 +44,6 @@ async fn contract(url: &str) {
             &SendMessageRequest {
                 output_policy: None,
                 tag_id: "lead".into(),
-                conversation: "bounded-root".into(),
                 operation_id: "begin".into(),
                 text: "Request one reviewed action".into(),
                 execution_limits: Some(limits(10_000, 500)),
@@ -194,9 +193,8 @@ async fn contract(url: &str) {
             assert!(notice.allowed_actions.is_empty());
             let history = ListMessagesRequest {
                 tag_id: "lead".into(),
-                conversation: "bounded-root".into(),
                 limit: 100,
-                cursor: String::new(),
+                ..Default::default()
             };
             let visible = store.list_messages(OPERATOR, &history).await.unwrap();
             assert_eq!(

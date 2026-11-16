@@ -8,13 +8,12 @@ use uuid::Uuid;
 
 const OP: &str = "operator:artifact-reader";
 
-async fn message(store: &Store, operator: &str, conversation: &str, operation: &str) -> Task {
+async fn message(store: &Store, operator: &str, operation: &str) -> Task {
     store
         .send_message(
             operator,
             &SendMessageRequest {
                 tag_id: "writer".into(),
-                conversation: conversation.into(),
                 text: "Use evidence".into(),
                 operation_id: operation.into(),
                 ..Default::default()
@@ -114,13 +113,13 @@ async fn session_contract(url: &str) {
     support::hold_artifacts(&store, &host).await;
     let intruder = support::register_host(&store, "artifact-intruder").await;
     support::hold_artifacts(&store, &intruder).await;
-    let source = message(&store, OP, "same-session", "source").await;
+    let source = message(&store, OP, "source").await;
     let producing = claim(&store, &host, "source").await;
     assert_eq!(source.task_id, producing.task_id);
     let artifact = commit(&store, &host, &capture(&producing, "source")).await;
     let id = artifact.summary.as_ref().unwrap().artifact_id.clone();
     finish(&store, &host, &producing).await;
-    let consuming = message(&store, OP, "same-session", "consumer").await;
+    let consuming = message(&store, OP, "consumer").await;
     let attempt = claim(&store, &host, "consumer").await;
     assert_eq!(attempt.task_id, consuming.task_id);
     let inspect = InspectAttemptArtifactRequest {
@@ -291,7 +290,8 @@ async fn session_contract(url: &str) {
             .await
             .is_err()
     );
-    let unrelated = message(&store, OP, "unrelated", "unrelated").await;
+    // Another conversation, so another Session.
+    let unrelated = message(&store, "operator:unrelated", "unrelated").await;
     let other = claim(&store, &host, "unrelated").await;
     assert_eq!(other.task_id, unrelated.task_id);
     assert!(matches!(
@@ -321,7 +321,7 @@ async fn session_contract(url: &str) {
             .is_empty()
     );
     finish(&store, &host, &other).await;
-    let private = message(&store, "operator:other", "same-session", "private").await;
+    let private = message(&store, "operator:other", "private").await;
     let other = claim(&store, &host, "private").await;
     assert_eq!(other.task_id, private.task_id);
     assert!(matches!(

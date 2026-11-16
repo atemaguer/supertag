@@ -140,6 +140,9 @@ const (
 	// ConversationsGetMessageProcedure is the fully-qualified name of the Conversations's GetMessage
 	// RPC.
 	ConversationsGetMessageProcedure = "/supertag.runtime.v2.Conversations/GetMessage"
+	// ConversationsMarkConversationReadProcedure is the fully-qualified name of the Conversations's
+	// MarkConversationRead RPC.
+	ConversationsMarkConversationReadProcedure = "/supertag.runtime.v2.Conversations/MarkConversationRead"
 	// OperatorEventsWatchProcedure is the fully-qualified name of the OperatorEvents's Watch RPC.
 	OperatorEventsWatchProcedure = "/supertag.runtime.v2.OperatorEvents/Watch"
 	// ManifestRelationshipsReconcileTagProcedure is the fully-qualified name of the
@@ -983,10 +986,14 @@ func (UnimplementedOperatorHandler) ResolveReply(context.Context, *connect.Reque
 
 // ConversationsClient is a client for the supertag.runtime.v2.Conversations service.
 type ConversationsClient interface {
+	// The caller's conversations, one per Tag it has talked to, with what a conversation list
+	// shows: the latest message, when it was active, unread replies, and whether the Tag works.
 	ListConversations(context.Context, *connect.Request[runtimev2.ListConversationsRequest]) (*connect.Response[runtimev2.ListConversationsResponse], error)
 	ListMessages(context.Context, *connect.Request[runtimev2.ListMessagesRequest]) (*connect.Response[runtimev2.ListMessagesResponse], error)
 	SendMessage(context.Context, *connect.Request[runtimev2.SendMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
 	GetMessage(context.Context, *connect.Request[runtimev2.GetMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
+	// Records that the caller has read its conversation with a Tag up to a message.
+	MarkConversationRead(context.Context, *connect.Request[runtimev2.MarkConversationReadRequest]) (*connect.Response[runtimev2.Conversation], error)
 }
 
 // NewConversationsClient constructs a client for the supertag.runtime.v2.Conversations service. By
@@ -1024,15 +1031,22 @@ func NewConversationsClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(conversationsMethods.ByName("GetMessage")),
 			connect.WithClientOptions(opts...),
 		),
+		markConversationRead: connect.NewClient[runtimev2.MarkConversationReadRequest, runtimev2.Conversation](
+			httpClient,
+			baseURL+ConversationsMarkConversationReadProcedure,
+			connect.WithSchema(conversationsMethods.ByName("MarkConversationRead")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // conversationsClient implements ConversationsClient.
 type conversationsClient struct {
-	listConversations *connect.Client[runtimev2.ListConversationsRequest, runtimev2.ListConversationsResponse]
-	listMessages      *connect.Client[runtimev2.ListMessagesRequest, runtimev2.ListMessagesResponse]
-	sendMessage       *connect.Client[runtimev2.SendMessageRequest, runtimev2.ConversationMessage]
-	getMessage        *connect.Client[runtimev2.GetMessageRequest, runtimev2.ConversationMessage]
+	listConversations    *connect.Client[runtimev2.ListConversationsRequest, runtimev2.ListConversationsResponse]
+	listMessages         *connect.Client[runtimev2.ListMessagesRequest, runtimev2.ListMessagesResponse]
+	sendMessage          *connect.Client[runtimev2.SendMessageRequest, runtimev2.ConversationMessage]
+	getMessage           *connect.Client[runtimev2.GetMessageRequest, runtimev2.ConversationMessage]
+	markConversationRead *connect.Client[runtimev2.MarkConversationReadRequest, runtimev2.Conversation]
 }
 
 // ListConversations calls supertag.runtime.v2.Conversations.ListConversations.
@@ -1055,12 +1069,21 @@ func (c *conversationsClient) GetMessage(ctx context.Context, req *connect.Reque
 	return c.getMessage.CallUnary(ctx, req)
 }
 
+// MarkConversationRead calls supertag.runtime.v2.Conversations.MarkConversationRead.
+func (c *conversationsClient) MarkConversationRead(ctx context.Context, req *connect.Request[runtimev2.MarkConversationReadRequest]) (*connect.Response[runtimev2.Conversation], error) {
+	return c.markConversationRead.CallUnary(ctx, req)
+}
+
 // ConversationsHandler is an implementation of the supertag.runtime.v2.Conversations service.
 type ConversationsHandler interface {
+	// The caller's conversations, one per Tag it has talked to, with what a conversation list
+	// shows: the latest message, when it was active, unread replies, and whether the Tag works.
 	ListConversations(context.Context, *connect.Request[runtimev2.ListConversationsRequest]) (*connect.Response[runtimev2.ListConversationsResponse], error)
 	ListMessages(context.Context, *connect.Request[runtimev2.ListMessagesRequest]) (*connect.Response[runtimev2.ListMessagesResponse], error)
 	SendMessage(context.Context, *connect.Request[runtimev2.SendMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
 	GetMessage(context.Context, *connect.Request[runtimev2.GetMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
+	// Records that the caller has read its conversation with a Tag up to a message.
+	MarkConversationRead(context.Context, *connect.Request[runtimev2.MarkConversationReadRequest]) (*connect.Response[runtimev2.Conversation], error)
 }
 
 // NewConversationsHandler builds an HTTP handler from the service implementation. It returns the
@@ -1094,6 +1117,12 @@ func NewConversationsHandler(svc ConversationsHandler, opts ...connect.HandlerOp
 		connect.WithSchema(conversationsMethods.ByName("GetMessage")),
 		connect.WithHandlerOptions(opts...),
 	)
+	conversationsMarkConversationReadHandler := connect.NewUnaryHandler(
+		ConversationsMarkConversationReadProcedure,
+		svc.MarkConversationRead,
+		connect.WithSchema(conversationsMethods.ByName("MarkConversationRead")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Conversations/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConversationsListConversationsProcedure:
@@ -1104,6 +1133,8 @@ func NewConversationsHandler(svc ConversationsHandler, opts ...connect.HandlerOp
 			conversationsSendMessageHandler.ServeHTTP(w, r)
 		case ConversationsGetMessageProcedure:
 			conversationsGetMessageHandler.ServeHTTP(w, r)
+		case ConversationsMarkConversationReadProcedure:
+			conversationsMarkConversationReadHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1127,6 +1158,10 @@ func (UnimplementedConversationsHandler) SendMessage(context.Context, *connect.R
 
 func (UnimplementedConversationsHandler) GetMessage(context.Context, *connect.Request[runtimev2.GetMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.GetMessage is not implemented"))
+}
+
+func (UnimplementedConversationsHandler) MarkConversationRead(context.Context, *connect.Request[runtimev2.MarkConversationReadRequest]) (*connect.Response[runtimev2.Conversation], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.MarkConversationRead is not implemented"))
 }
 
 // OperatorEventsClient is a client for the supertag.runtime.v2.OperatorEvents service.

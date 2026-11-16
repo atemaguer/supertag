@@ -81,7 +81,7 @@ impl operator_events_server::OperatorEvents for WatchScript {
             ]
         );
         self.tokens.send(request.resume_token.clone()).unwrap();
-        let (send, receive) = mpsc::channel(4);
+        let (send, receive) = mpsc::channel(8);
         let frame = |resume_token: &str, update| {
             Ok(WatchEvent {
                 resume_token: resume_token.into(),
@@ -135,7 +135,7 @@ impl operator_events_server::OperatorEvents for WatchScript {
                         kind: WatchKind::Task as i32,
                         id: "created-task".into(),
                         tag_id: "engineer".into(),
-                        conversation: "creation-notice".into(),
+                        session_id: "conversation/creation-notice".into(),
                         reason: WatchReason::Created as i32,
                         ..Default::default()
                     }),
@@ -148,8 +148,21 @@ impl operator_events_server::OperatorEvents for WatchScript {
                         kind: WatchKind::ConversationMessage as i32,
                         id: "message".into(),
                         tag_id: "engineer".into(),
-                        conversation: "planning".into(),
                         reason: WatchReason::Created as i32,
+                        ..Default::default()
+                    }),
+                ))
+                .await
+                .unwrap();
+                // A surface thread's Task is not a conversation's.
+                send.send(frame(
+                    "thread-task",
+                    watch_event::Update::Change(WatchChange {
+                        kind: WatchKind::Task as i32,
+                        id: "thread".into(),
+                        tag_id: "engineer".into(),
+                        session_id: "slack:T1/C1/1.0".into(),
+                        reason: WatchReason::Changed as i32,
                         ..Default::default()
                     }),
                 ))
@@ -161,7 +174,7 @@ impl operator_events_server::OperatorEvents for WatchScript {
                         kind: WatchKind::Task as i32,
                         id: "message".into(),
                         tag_id: "engineer".into(),
-                        conversation: "planning".into(),
+                        session_id: "conversation/planning".into(),
                         reason: WatchReason::Changed as i32,
                         ..Default::default()
                     }),
@@ -219,8 +232,8 @@ async fn watch_resumes_and_stops_the_real_stream_without_a_unary_deadline() {
         json!({"kind":"tag"}),
         json!({"kind":"lost"}),
         json!({"kind":"resync"}),
-        json!({"kind":"conversation","tagId":"engineer","conversation":"planning"}),
-        json!({"kind":"conversation","tagId":"engineer","conversation":"planning"}),
+        json!({"kind":"conversation","tagId":"engineer"}),
+        json!({"kind":"conversation","tagId":"engineer"}),
     ] {
         assert_eq!(timeout(WAIT, receive.recv()).await.unwrap(), Some(expected));
     }

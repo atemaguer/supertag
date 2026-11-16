@@ -16,9 +16,7 @@ const paletteKey = "ctrl+k"
 type commandID int
 
 const (
-	commandNewConversation commandID = iota
-	commandSwitchConversation
-	commandCreateObjective
+	commandCreateObjective commandID = iota
 	commandSwitchControlPlane
 	commandOpenInbox
 	commandTaskFiles
@@ -63,10 +61,7 @@ func (a *app) commands() []paletteCommand {
 	tag := terminalText(a.inner.selectedTag())
 	var out []paletteCommand
 	if tag != "" {
-		out = append(out,
-			paletteCommand{commandNewConversation, "New conversation", "with " + tag},
-			paletteCommand{commandSwitchConversation, "Switch conversation", "with " + tag + " · ctrl+o"},
-			paletteCommand{commandCreateObjective, "/goal · Create Objective", "owned by " + tag})
+		out = append(out, paletteCommand{commandCreateObjective, "/goal · Create Objective", "owned by " + tag})
 	}
 	about := "Add a Control Plane"
 	if a.hasTarget {
@@ -160,10 +155,6 @@ func (a *app) run(id commandID) tea.Cmd {
 	case commandSwitchControlPlane:
 		a.choosing, a.choice, a.choiceErr = true, a.current, ""
 		return nil
-	case commandNewConversation:
-		cmd = a.inner.newConversation()
-	case commandSwitchConversation:
-		cmd = a.inner.openPicker()
 	case commandCreateObjective:
 		cmd = a.inner.openObjectiveForm("")
 	case commandTaskFiles:
@@ -172,18 +163,6 @@ func (a *app) run(id commandID) tea.Cmd {
 		cmd = a.inner.openInbox()
 	}
 	return a.scope(cmd)
-}
-
-// newConversation opens the selected Tag's conversation list, naming a new conversation.
-func (m *model) newConversation() tea.Cmd {
-	if m.selectedTag() == "" {
-		return nil
-	}
-	var load tea.Cmd
-	if m.pane != paneConversations {
-		load = m.openPicker()
-	}
-	return tea.Batch(load, m.startNaming())
 }
 
 // openInbox shows the first item waiting on you, with the rail focused on it to move through the

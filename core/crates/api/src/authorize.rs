@@ -172,6 +172,7 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("Conversations", "ListMessages", OC),
     ("Conversations", "SendMessage", OC),
     ("Conversations", "GetMessage", OC),
+    ("Conversations", "MarkConversationRead", OC),
     ("Objectives", "*", O),
     ("Objectives", "CreateObjective", OC),
     ("Objectives", "GetObjective", OC),

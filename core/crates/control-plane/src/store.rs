@@ -94,7 +94,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 82;
+        const SCHEMA_VERSION: i64 = 83;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -263,6 +263,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0080_objective_home_task.sql"),
                 include_str!("../migrations/sqlite/0081_task_event_kind.sql"),
                 include_str!("../migrations/sqlite/0082_lead_tag.sql"),
+                include_str!("../migrations/sqlite/0083_one_conversation_per_tag.sql"),
             ]
         } else {
             [
@@ -350,6 +351,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0080_objective_home_task.sql"),
                 include_str!("../migrations/postgresql/0081_task_event_kind.sql"),
                 include_str!("../migrations/postgresql/0082_lead_tag.sql"),
+                include_str!("../migrations/postgresql/0083_one_conversation_per_tag.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -2158,11 +2160,18 @@ pub(crate) fn placeholders(first: usize, count: usize) -> String {
         .join(",")
 }
 
+/// A Task and when it was accepted and completed, as the Control Plane recorded them.
+pub(crate) struct TaskRow {
+    pub(crate) task: Task,
+    pub(crate) accepted_at_ms: Option<i64>,
+    pub(crate) completed_at_ms: Option<i64>,
+}
+
 /// The Tasks with these IDs, by ID, in one query per [`ID_BATCH`]. A missing Task is absent.
 pub(crate) async fn tasks_in(
     transaction: &mut Transaction<'_, Any>,
     ids: &[&str],
-) -> Result<std::collections::HashMap<String, Task>> {
+) -> Result<std::collections::HashMap<String, TaskRow>> {
     let mut tasks = std::collections::HashMap::with_capacity(ids.len());
     for chunk in ids.chunks(ID_BATCH) {
         let sql = format!(
@@ -2175,7 +2184,14 @@ pub(crate) async fn tasks_in(
         }
         for row in query.fetch_all(&mut **transaction).await? {
             let task = task_row(&row)?;
-            tasks.insert(task.task_id.clone(), task);
+            tasks.insert(
+                task.task_id.clone(),
+                TaskRow {
+                    accepted_at_ms: row.try_get("accepted_at_ms")?,
+                    completed_at_ms: row.try_get("completed_at_ms")?,
+                    task,
+                },
+            );
         }
     }
     Ok(tasks)

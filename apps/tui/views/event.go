@@ -36,9 +36,8 @@ const (
 	// Objective when it has one.
 	WatchKind_WATCH_KIND_APPROVAL WatchKind = 6
 	// A message in one of the caller's conversations was sent, got its reply,
-	// or one of its work Sessions changed. `id` is the message's Task ID, as
-	// `Message.task_id`; `tag`, `conversation`, and `session_id` name its
-	// conversation. Reread it with `ConversationService.GetMessage`.
+	// or one of its work Sessions changed, or the caller marked the
+	// conversation read. `tag` names the conversation.
 	WatchKind_WATCH_KIND_CONVERSATION_MESSAGE WatchKind = 7
 	// A Team's Workstream got a post. `id` is the post's ID and `team_id` its
 	// Team's. Reread the Objectives the Team serves with
@@ -107,8 +106,6 @@ type WatchChange struct {
 	TaskId string
 	// The Objective it belongs to.
 	ObjectiveId string
-	// The caller's conversation it belongs to, by name.
-	Conversation string
 	// What happened, in a few words for logs and people, such as `created` or
 	// `status completed`. Clients do not parse it.
 	Reason string
@@ -156,13 +153,6 @@ func (x *WatchChange) GetTaskId() string {
 func (x *WatchChange) GetObjectiveId() string {
 	if x != nil {
 		return x.ObjectiveId
-	}
-	return ""
-}
-
-func (x *WatchChange) GetConversation() string {
-	if x != nil {
-		return x.Conversation
 	}
 	return ""
 }

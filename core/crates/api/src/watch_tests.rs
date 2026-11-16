@@ -47,7 +47,7 @@ impl OperatorEvents for EndlessWatch {
                 update: Some(Update::Change(WatchChange {
                     kind: WatchKind::Task as i32,
                     id: format!("task-{position}"),
-                    conversation: payload.clone(),
+                    session_id: payload.clone(),
                     ..Default::default()
                 })),
             })

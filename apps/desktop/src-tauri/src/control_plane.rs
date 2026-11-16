@@ -1,6 +1,6 @@
 use std::{net::IpAddr, path::PathBuf, sync::Arc, time::Duration};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     negotiation::{NegotiationError, ProtocolChannel, connect},
@@ -230,52 +230,57 @@ impl ControlPlaneState {
         self.current(&session, tags).await
     }
 
-    pub async fn conversations(
-        &self,
-        connection_id: &str,
-        tag_id: String,
-    ) -> Result<Vec<Conversation>> {
+    /// The caller's conversation with each Tag it has talked to, the latest active first.
+    pub async fn conversations(&self, connection_id: &str) -> Result<Vec<Conversation>> {
         let session = self.session(connection_id).await?;
-        let mut conversations = Vec::new();
-        let mut cursor = String::new();
-        for _ in 0..MAX_PAGES {
-            let page = session
-                .conversations()
-                .list_conversations(session.request(v2::ListConversationsRequest {
-                    tag_id: tag_id.clone(),
-                    limit: 100,
-                    cursor: cursor.clone(),
-                }))
-                .await
-                .map_err(rpc_error)?
-                .into_inner();
-            conversations.extend(page.conversations.into_iter().map(Conversation::from));
-            if page.next_cursor.is_empty() {
-                return self.current(&session, conversations).await;
-            }
-            if page.next_cursor == cursor {
-                break;
-            }
-            cursor = page.next_cursor;
-        }
-        Err("The conversation list is too large to load.".into())
+        let page = session
+            .conversations()
+            .list_conversations(session.request(v2::ListConversationsRequest {}))
+            .await
+            .map_err(rpc_error)?
+            .into_inner();
+        self.current(
+            &session,
+            page.conversations
+                .into_iter()
+                .map(Conversation::from)
+                .collect(),
+        )
+        .await
     }
 
-    pub async fn messages(
+    /// Records that the caller read its conversation with a Tag up to a finished turn.
+    pub async fn mark_read(
         &self,
         connection_id: &str,
         tag_id: String,
-        conversation: String,
-        cursor: Option<String>,
-    ) -> Result<Messages> {
+        order: u64,
+    ) -> Result<Conversation> {
+        let session = self.session(connection_id).await?;
+        let value = session
+            .conversations()
+            .mark_conversation_read(
+                session.request(v2::MarkConversationReadRequest { tag_id, order }),
+            )
+            .await
+            .map_err(rpc_error)?
+            .into_inner();
+        self.current(&session, Conversation::from(value)).await
+    }
+
+    /// A page of the caller's conversation with a Tag, or, given the `after` order and the
+    /// `conversation_id` of the copy the app keeps, only what changed since.
+    pub async fn messages(&self, connection_id: &str, read: ReadMessages) -> Result<Messages> {
         let session = self.session(connection_id).await?;
         let page = session
             .conversations()
             .list_messages(session.request(v2::ListMessagesRequest {
-                tag_id,
-                conversation,
+                tag_id: read.tag_id,
                 limit: 50,
-                cursor: cursor.unwrap_or_default(),
+                cursor: read.cursor.unwrap_or_default(),
+                after: read.after.unwrap_or_default(),
+                conversation_id: read.conversation_id.unwrap_or_default(),
+                refresh_task_ids: read.refresh_task_ids,
             }))
             .await
             .map_err(rpc_error)?
@@ -290,6 +295,8 @@ impl ControlPlaneState {
             Messages {
                 messages,
                 next_cursor: page.next_cursor,
+                conversation_id: page.conversation_id,
+                incremental: page.incremental,
             },
         )
         .await
@@ -299,7 +306,6 @@ impl ControlPlaneState {
         &self,
         connection_id: &str,
         tag_id: String,
-        conversation: String,
         text: String,
         operation_id: String,
     ) -> Result<Message> {
@@ -308,7 +314,6 @@ impl ControlPlaneState {
             .conversations()
             .send_message(session.request(v2::SendMessageRequest {
                 tag_id,
-                conversation,
                 text,
                 operation_id,
                 execution_limits: None,
@@ -555,6 +560,9 @@ pub struct Task {
     pub attempt_id: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<ResultArtifact>,
+    /// When the Control Plane accepted the message, for a conversation's Task.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at_ms: Option<i64>,
 }
 
 #[derive(Serialize, Debug)]
@@ -593,27 +601,38 @@ impl From<v2::Task> for Task {
                 .into_iter()
                 .map(ResultArtifact::from)
                 .collect(),
+            created_at_ms: None,
         }
     }
 }
 
+/// The caller's conversation with one Tag, as a conversation list shows it.
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
     pub tag_id: String,
-    pub name: String,
-    pub session_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_task: Option<Task>,
+    pub conversation_id: String,
+    pub preview: String,
+    pub preview_from_tag: bool,
+    pub last_activity_at_ms: i64,
+    pub latest_order: u64,
+    pub read_order: u64,
+    pub unread_count: u32,
+    pub working: bool,
 }
 
 impl From<v2::Conversation> for Conversation {
     fn from(value: v2::Conversation) -> Self {
         Self {
             tag_id: value.tag_id,
-            name: value.name,
-            session_id: value.session_id,
-            latest_task: value.latest_task.map(Task::from),
+            conversation_id: value.conversation_id,
+            preview: value.preview,
+            preview_from_tag: value.preview_from_tag,
+            last_activity_at_ms: value.last_activity_at_ms,
+            latest_order: value.latest_order,
+            read_order: value.read_order,
+            unread_count: value.unread_count,
+            working: value.working,
         }
     }
 }
@@ -653,7 +672,10 @@ impl From<v2::LiveInput> for LiveInput {
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     pub task: Task,
-    pub conversation: String,
+    /// The message's place in its conversation.
+    pub order: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live_input: Option<LiveInput>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -680,9 +702,11 @@ impl TryFrom<v2::ConversationMessage> for Message {
         } else {
             value.live_input.map(LiveInput::from)
         };
+        task.created_at_ms = (value.sent_at_ms > 0).then_some(value.sent_at_ms);
         Ok(Self {
             task,
-            conversation: value.conversation,
+            order: value.order,
+            completed_at_ms: value.completed_at_ms,
             live_input,
             work_session_report_id: value.work_session_report_id,
             events: value.events.into_iter().map(Event::from).collect(),
@@ -696,6 +720,22 @@ impl TryFrom<v2::ConversationMessage> for Message {
 pub struct Messages {
     pub messages: Vec<Message>,
     pub next_cursor: String,
+    pub conversation_id: String,
+    /// The page holds only what changed after the request's `after`.
+    pub incremental: bool,
+}
+
+/// What `messages` reads: a page before `cursor`, or the changes after `after` to the copy of
+/// conversation `conversation_id` the app keeps, with the current state of its unfinished turns.
+#[derive(Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadMessages {
+    pub tag_id: String,
+    pub cursor: Option<String>,
+    pub after: Option<u64>,
+    pub conversation_id: Option<String>,
+    #[serde(default)]
+    pub refresh_task_ids: Vec<String>,
 }
 
 /// One recorded event of a Task: a message its Tag wrote (`message`), one line saying what it is

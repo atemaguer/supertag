@@ -68,7 +68,6 @@ impl Store {
                     session_id: row.try_get("session_id")?,
                     objective_id: row.try_get("objective_id")?,
                     team_id: row.try_get("team_id")?,
-                    conversation: row.try_get("conversation")?,
                     changed_at_ms: row.try_get("changed_at_ms")?,
                 },
             });

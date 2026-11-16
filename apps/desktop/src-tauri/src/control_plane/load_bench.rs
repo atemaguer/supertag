@@ -94,7 +94,6 @@ async fn seed(database: &std::path::Path, turns: u64, events: u64) {
                 PRINCIPAL,
                 &v2::SendMessageRequest {
                     tag_id: "engineer".into(),
-                    conversation: "planning".into(),
                     text: format!("Turn {turn}: look at the failing build and fix it."),
                     operation_id: format!("bench-{turn}"),
                     ..Default::default()
@@ -183,7 +182,13 @@ async fn seed(database: &std::path::Path, turns: u64, events: u64) {
 async fn open(client: &Arc<ControlPlaneState>, id: &str) -> (Duration, usize, usize) {
     let started = Instant::now();
     let page = client
-        .messages(id, "engineer".into(), "planning".into(), None)
+        .messages(
+            id,
+            ReadMessages {
+                tag_id: "engineer".into(),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     let mut calls = 1;
@@ -235,9 +240,8 @@ async fn conversation_open_latency() {
                 PRINCIPAL,
                 &v2::ListMessagesRequest {
                     tag_id: "engineer".into(),
-                    conversation: "planning".into(),
                     limit: 50,
-                    cursor: String::new(),
+                    ..Default::default()
                 },
             )
             .await

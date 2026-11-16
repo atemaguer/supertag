@@ -39,7 +39,7 @@ func TestRuntimeWatchResumesAndMapsTypedChanges(t *testing.T) {
 				}
 				change := &v2.WatchChange{
 					Kind: v2.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE, Id: "message-1", TagId: "lead", SessionId: "session-1",
-					Conversation: "planning", ChangedAtMs: 123456, Reason: v2.WatchReason_WATCH_REASON_CREATED,
+					ChangedAtMs: 123456, Reason: v2.WatchReason_WATCH_REASON_CREATED,
 				}
 				if err := stream.Send(&v2.WatchEvent{ResumeToken: "message", Update: &v2.WatchEvent_Change{Change: change}}); err != nil {
 					return err
@@ -83,7 +83,7 @@ func TestRuntimeWatchResumesAndMapsTypedChanges(t *testing.T) {
 	}
 	first, last := got[1].Change, got[4].Change
 	if first.GetKind() != views.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE || first.GetTag() != "lead" ||
-		first.GetId() != "message-1" || first.GetSessionId() != "session-1" || first.GetConversation() != "planning" ||
+		first.GetId() != "message-1" || first.GetSessionId() != "session-1" ||
 		first.GetChangedAt().AsTime().UnixMilli() != 123456 || first.GetReason() != "created" {
 		t.Fatalf("conversation notice = %v", first)
 	}

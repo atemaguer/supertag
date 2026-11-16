@@ -9,21 +9,9 @@ import (
 	"testing"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
-	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
 const testPR = "https://github.com/acme/app/pull/7"
-
-// reportedHistory is one earlier message whose work Session s1 reported.
-func reportedHistory() func(*views.ListMessagesRequest) []*views.Message {
-	return func(req *views.ListMessagesRequest) []*views.Message {
-		if req.GetTag() != "lead" || req.GetConversation() != "default" {
-			return nil
-		}
-		return []*views.Message{{TaskId: "t1", Tag: "lead", Conversation: "default", Text: "Fix the discount", Status: views.ReplyStatus_REPLY_STATUS_REPLIED,
-			Reply: finalReply("Started."), WorkSessions: []*views.WorkSession{workSession("s1", "Fix", "w1", "Fixed it.")}}}
-	}
-}
 
 func closedUpdates() chan client.WatchUpdate {
 	updates := make(chan client.WatchUpdate)

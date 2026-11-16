@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -195,18 +196,18 @@ func (c *runtimeClient) listTags(ctx context.Context) ([]*views.Tag, error) {
 	return tags, nil
 }
 
-func (c *runtimeClient) sendMessage(ctx context.Context, tag, conversation, text string) (*views.Message, error) {
+func (c *runtimeClient) sendMessage(ctx context.Context, tag, text string) (*views.Message, error) {
 	key, err := idempotencyKey()
 	if err != nil {
 		return nil, err
 	}
-	body := &v2.SendMessageRequest{TagId: tag, Conversation: conversation, Text: text, OperationId: key}
+	body := &v2.SendMessageRequest{TagId: tag, Text: text, OperationId: key}
 	return retrying(ctx, func(ctx context.Context) (*views.Message, error) {
 		res, err := c.conversations.SendMessage(ctx, connect.NewRequest(body))
 		if err != nil {
 			return nil, err
 		}
-		if res.Msg.GetTask().GetTaskId() == "" || res.Msg.GetTask().GetTagId() != tag || res.Msg.GetConversation() != conversation {
+		if res.Msg.GetTask().GetTaskId() == "" || res.Msg.GetTask().GetTagId() != tag {
 			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different conversation message."}
 		}
 		return runtimeMessage(res.Msg), nil
@@ -229,19 +230,19 @@ func (c *runtimeClient) getMessage(ctx context.Context, tag, id string) (*v2.Con
 // How many messages of a history page read their Work Sessions at once.
 const projectConcurrency = 16
 
-func (c *runtimeClient) listMessages(ctx context.Context, tag, conversation string, size int32, cursor string) ([]*views.Message, string, error) {
+func (c *runtimeClient) listMessages(ctx context.Context, tag string, size int32, cursor string) (MessagePage, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	res, err := c.conversations.ListMessages(ctx, connect.NewRequest(&v2.ListMessagesRequest{
-		TagId: tag, Conversation: conversation, Limit: uint32(max(size, 0)), Cursor: cursor,
+		TagId: tag, Limit: uint32(max(size, 0)), Cursor: cursor,
 	}))
 	if err != nil {
-		return nil, "", apiError(err)
+		return MessagePage{}, apiError(err)
 	}
 	messages := res.Msg.GetMessages()
 	for _, message := range messages {
-		if message.GetTask().GetTagId() != tag || message.GetTask().GetTaskId() == "" || message.GetConversation() != conversation {
-			return nil, "", &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different conversation message."}
+		if message.GetTask().GetTagId() != tag || message.GetTask().GetTaskId() == "" {
+			return MessagePage{}, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different conversation message."}
 		}
 	}
 	// Each message reads its own Work Sessions. Read them together, so a page takes about one
@@ -257,72 +258,39 @@ func (c *runtimeClient) listMessages(ctx context.Context, tag, conversation stri
 		})
 	}
 	if err := group.Wait(); err != nil {
-		return nil, "", err
+		return MessagePage{}, err
 	}
-	return items, res.Msg.GetNextCursor(), nil
+	return MessagePage{Messages: items, NextCursor: res.Msg.GetNextCursor(), ConversationID: res.Msg.GetConversationId()}, nil
 }
 
-func (c *runtimeClient) listConversations(ctx context.Context, tag string) ([]*views.Conversation, error) {
+func (c *runtimeClient) listConversations(ctx context.Context) ([]*views.Conversation, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
-	var listed []*v2.Conversation
-	cursor := ""
-	for range maxConversationPages {
-		res, err := c.conversations.ListConversations(ctx, connect.NewRequest(&v2.ListConversationsRequest{
-			TagId: tag, Limit: 100, Cursor: cursor,
-		}))
-		if err != nil {
-			return nil, apiError(err)
-		}
-		listed = append(listed, res.Msg.GetConversations()...)
-		cursor = res.Msg.GetNextCursor()
-		if cursor == "" {
-			break
-		}
+	res, err := c.conversations.ListConversations(ctx, connect.NewRequest(&v2.ListConversationsRequest{}))
+	if err != nil {
+		return nil, apiError(err)
 	}
-	// Each preview reads its latest message; read them together.
-	conversations := make([]*views.Conversation, len(listed))
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.SetLimit(projectConcurrency)
-	for i, conv := range listed {
-		group.Go(func() error {
-			preview, err := c.conversationPreview(groupCtx, tag, conv)
-			conversations[i] = preview
-			return err
+	listed := res.Msg.GetConversations()
+	conversations := make([]*views.Conversation, 0, len(listed))
+	for _, conv := range listed {
+		if conv.GetTagId() == "" {
+			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a conversation without its Tag."}
+		}
+		conversations = append(conversations, &views.Conversation{
+			Tag: conv.GetTagId(), Preview: conv.GetPreview(), PreviewFromTag: conv.GetPreviewFromTag(),
+			UnreadCount: int32(min(conv.GetUnreadCount(), math.MaxInt32)), ReadOrder: conv.GetReadOrder(),
+			Working: conv.GetWorking(), LatestWorkSessionReportId: conv.GetLatestWorkSessionReportId(),
 		})
-	}
-	if err := group.Wait(); err != nil {
-		return nil, err
 	}
 	return conversations, nil
 }
 
-func (c *runtimeClient) conversationPreview(ctx context.Context, tag string, conv *v2.Conversation) (*views.Conversation, error) {
-	task := conv.GetLatestTask()
-	preview, author := task.GetPrompt(), views.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR
-	if task.GetTaskId() != "" {
-		message, err := c.getMessage(ctx, tag, task.GetTaskId())
-		if err != nil {
-			return nil, err
-		}
-		if message.GetConversation() != conv.GetName() || message.GetTask().GetSessionId() != conv.GetSessionId() {
-			return nil, workSessionDataLoss("Control Plane returned a different conversation preview.")
-		}
-		if message.GetWorkSessionReportId() != "" {
-			preview, author = "Work Session report pending.", views.ConversationAuthor_CONVERSATION_AUTHOR_TAG
-			if reply := runtimeReply(message.GetTask()); reply != nil {
-				preview = reply.GetText()
-			}
-		}
-	}
-	if task.GetState() == v2.TaskState_TASK_STATE_SUCCEEDED && task.GetAttemptId() != "" && task.GetResult() != "" {
-		preview, author = task.GetResult(), views.ConversationAuthor_CONVERSATION_AUTHOR_TAG
-	}
-	runes := []rune(preview)
-	return &views.Conversation{
-		Tag: conv.GetTagId(), Name: conv.GetName(), SessionId: conv.GetSessionId(),
-		LastMessageText: string(runes[:min(len(runes), 200)]), LastMessageAuthor: author,
-	}, nil
+// markConversationRead records that the caller read its conversation with tag up to order.
+func (c *runtimeClient) markConversationRead(ctx context.Context, tag string, order uint64) error {
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+	_, err := c.conversations.MarkConversationRead(ctx, connect.NewRequest(&v2.MarkConversationReadRequest{TagId: tag, Order: order}))
+	return apiError(err)
 }
 
 func runtimeMessage(message *v2.ConversationMessage) *views.Message {
@@ -331,8 +299,7 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 	}
 	task := message.GetTask()
 	out := &views.Message{
-		TaskId: task.GetTaskId(), Tag: task.GetTagId(), Conversation: message.GetConversation(),
-		SessionId: task.GetSessionId(), Text: task.GetPrompt(), Status: views.ReplyStatus_REPLY_STATUS_WAITING,
+		TaskId: task.GetTaskId(), Tag: task.GetTagId(), SessionId: task.GetSessionId(), Order: message.GetOrder(), Text: task.GetPrompt(), Status: views.ReplyStatus_REPLY_STATUS_WAITING,
 	}
 	if message.GetWorkSessionReportId() != "" {
 		// The prompt instructs the parent to report on child work. It was not

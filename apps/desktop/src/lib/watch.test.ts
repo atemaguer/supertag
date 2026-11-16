@@ -3,9 +3,8 @@ import type { WatchUpdate } from "../control-plane";
 import { attachWatch, watchFeed, watchReader } from "./watch";
 
 const visible = () => true;
-const changed = (update: WatchUpdate) =>
-  update.kind === "conversation" && update.tagId === "lead" && update.conversation === "planning";
-const planning = { kind: "conversation", tagId: "lead", conversation: "planning" } as const;
+const changed = (update: WatchUpdate) => update.kind === "conversation" && update.tagId === "lead";
+const planning = { kind: "conversation", tagId: "lead" } as const;
 
 afterEach(() => vi.useRealTimers());
 
@@ -51,7 +50,6 @@ describe("Control Plane Watch lifecycle", () => {
     finish?.(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(read).toHaveBeenCalledTimes(2);
-    feed.publish({ ...planning, conversation: "another" });
     feed.publish({ ...planning, tagId: "someone-else" });
     feed.publish({ kind: "tag" });
     await vi.advanceTimersByTimeAsync(300);

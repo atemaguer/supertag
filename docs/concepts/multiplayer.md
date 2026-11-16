@@ -101,7 +101,8 @@ Every Session has an audience, decided by the conversation it comes from. Nobody
 | private | a Lark direct chat, a person's conversation in the terminal UI, a Session an operator or client started with `supertag task submit`, a client's Objective |
 
 A turn sees the Tag's shared Sessions and the private Sessions of the same person: Alice's
-conversation in the terminal UI reads her other conversations, never Bob's. A turn in a shared
+conversation in the terminal UI reads the Sessions she started with `supertag task submit`, never
+Bob's. A turn in a shared
 thread sees only shared Sessions, because SuperTag does not record who wrote each message there.
 A work Session inherits its starting Session's audience. An Objective started in a private
 conversation reports only to the conversation it started in, and only that person's turns see it.

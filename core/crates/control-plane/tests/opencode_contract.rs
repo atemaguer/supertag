@@ -426,8 +426,12 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
     let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
     let mut eligible = vec![];
     for index in 0..11 {
-        let principal = if index == 7 { "operator:other" } else { OP };
-        let conversation = if index == 8 { "different" } else { "history" };
+        // Another principal's conversation with the Tag is a different Session.
+        let principal = match index {
+            7 => "operator:other",
+            8 => "operator:third",
+            _ => OP,
+        };
         let prompt = if index == 6 {
             "😀".repeat(1_100)
         } else {
@@ -438,7 +442,6 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
                 principal,
                 &SendMessageRequest {
                     tag_id: "history".into(),
-                    conversation: conversation.into(),
                     text: prompt.clone(),
                     operation_id: format!("history-{index}"),
                     ..Default::default()
@@ -490,7 +493,6 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
             OP,
             &SendMessageRequest {
                 tag_id: "history".into(),
-                conversation: "history".into(),
                 text: "Current turn".into(),
                 operation_id: "history-current".into(),
                 ..Default::default()
@@ -593,7 +595,6 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
             OP,
             &SendMessageRequest {
                 tag_id: "history".into(),
-                conversation: "history".into(),
                 text: "Later turn".into(),
                 operation_id: "history-later".into(),
                 ..Default::default()

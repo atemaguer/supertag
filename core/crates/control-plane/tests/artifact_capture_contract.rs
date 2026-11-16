@@ -5,6 +5,8 @@ use supertag_control_plane::{Store, StoreError};
 use supertag_protocol::v2::*;
 use uuid::Uuid;
 
+/// Submits from its own conversation with the Tag, so in another Session than the producer's.
+const SUBMITTER: &str = "operator:submitter";
 const PRODUCER: &str = "operator:alice";
 const OTHER: &str = "operator:bob";
 
@@ -19,7 +21,6 @@ async fn exercise(url: &str) {
             PRODUCER,
             &SendMessageRequest {
                 tag_id: "release".into(),
-                conversation: "release".into(),
                 text: "Capture the report".into(),
                 operation_id: "message".into(),
                 ..Default::default()
@@ -188,10 +189,9 @@ async fn exercise(url: &str) {
     let reopened = Store::open(url).await.unwrap();
     let submitted = reopened
         .list_messages(
-            PRODUCER,
+            SUBMITTER,
             &ListMessagesRequest {
                 tag_id: "release".into(),
-                conversation: "submitted-report".into(),
                 ..Default::default()
             },
         )
@@ -206,10 +206,9 @@ async fn exercise(url: &str) {
 async fn submission(store: &Store, host: &supertag_control_plane::HostAuthority, other_id: &str) {
     let task = store
         .send_message(
-            PRODUCER,
+            SUBMITTER,
             &SendMessageRequest {
                 tag_id: "release".into(),
-                conversation: "submitted-report".into(),
                 text: "Submit the verified deliverable".into(),
                 operation_id: "submit-report".into(),
                 ..Default::default()

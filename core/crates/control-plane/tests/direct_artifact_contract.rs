@@ -10,13 +10,12 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
-async fn message(store: &Store, operator: &str, conversation: &str, operation: &str) -> Task {
+async fn message(store: &Store, operator: &str, operation: &str) -> Task {
     store
         .send_message(
             operator,
             &SendMessageRequest {
                 tag_id: "writer".into(),
-                conversation: conversation.into(),
                 text: "Use evidence".into(),
                 operation_id: operation.into(),
                 ..Default::default()
@@ -134,7 +133,7 @@ async fn exercise(url: &str) {
             .await
             .is_err()
     );
-    let producing = message(&store, OP, "direct-artifacts", "direct-produce").await;
+    let producing = message(&store, OP, "direct-produce").await;
     let attempt = claim(&store, &source, "direct-produce").await;
     assert_eq!(attempt.task_id, producing.task_id);
     let mut request = capture(&attempt, "direct-capture");
@@ -157,7 +156,7 @@ async fn exercise(url: &str) {
     finish(&store, &source, &attempt).await;
     let id = capture.summary.as_ref().unwrap().artifact_id.clone();
 
-    let consuming = message(&store, OP, "direct-artifacts", "direct-consume").await;
+    let consuming = message(&store, OP, "direct-consume").await;
     let consumer = claim(&store, &reader, "direct-consume").await;
     assert_eq!(consuming.task_id, consumer.task_id);
     let acquisition = store

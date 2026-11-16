@@ -3,6 +3,8 @@ import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ControlPlane, Message, Tag } from "../control-plane";
+import { clearConversationCache } from "../lib/conversation-cache";
+import { clearOutbox } from "../lib/outbox";
 import { ConversationPane, type Draft } from "./conversation";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -24,6 +26,8 @@ const tag: Tag = {
 let root: Root;
 let host: HTMLElement;
 beforeEach(() => {
+  clearConversationCache();
+  clearOutbox();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -38,7 +42,6 @@ function Pane({ controlPlane }: { controlPlane: ControlPlane }) {
   return createElement(ConversationPane, {
     controlPlane,
     tag,
-    name: "default",
     draft,
     updateDraft: (update) => setDraft(update),
     onWriteChange: () => {},
@@ -55,7 +58,7 @@ function type(text: string) {
 
 it("shows a sent message at once, keeps it with a retry when it fails, and retries it once", async () => {
   const sent: Message = {
-    conversation: "default",
+    order: 1,
     task: { taskId: "t1", tagId: "lead", sessionId: "s", prompt: "Ship it", state: "queued" },
   };
   let accepted = false;
@@ -69,10 +72,13 @@ it("shows a sent message at once, keeps it with a retry when it fails, and retri
   const controlPlane: ControlPlane = {
     tags: async () => [tag],
     conversations: async () => [],
-    messages: async () => ({ messages: accepted ? [sent] : [] }),
+    messages: async () => ({ conversationId: "c1", messages: accepted ? [sent] : [] }),
     send,
     events: async () => [],
     saveArtifact: async () => false,
+    markRead: async () => {
+      throw new Error("not listed");
+    },
     scope: "test",
     readCache: async () => undefined,
     writeCache: async () => {},
@@ -90,14 +96,14 @@ it("shows a sent message at once, keeps it with a retry when it fails, and retri
     "Not delivered",
   );
   expect(host.querySelector(".prompt-text")?.textContent).toBe("Ship it");
-  const operation = send.mock.calls[0]?.[3];
+  const operation = send.mock.calls[0]?.[2];
 
   const retry = [...host.querySelectorAll("button")].find((b) => b.textContent === "Retry");
   await act(async () => retry?.click());
   await flush();
   expect(send).toHaveBeenCalledTimes(2);
   // The retry reuses the operation, so the Control Plane accepts the message at most once.
-  expect(send.mock.calls[1]).toEqual(["lead", "default", "Ship it", operation]);
+  expect(send.mock.calls[1]).toEqual(["lead", "Ship it", operation]);
   expect(host.querySelector('[data-delivery="Not delivered"]')).toBeNull();
   expect(host.querySelector('[data-delivery="Sent"]')?.textContent).toBe("Sent");
 });
@@ -106,12 +112,15 @@ it("moves a message that was not delivered back to the composer to edit", async 
   const controlPlane: ControlPlane = {
     tags: async () => [tag],
     conversations: async () => [],
-    messages: async () => ({ messages: [] }),
+    messages: async () => ({ conversationId: "c1", messages: [] }),
     send: async () => {
       throw new Error("refused");
     },
     events: async () => [],
     saveArtifact: async () => false,
+    markRead: async () => {
+      throw new Error("not listed");
+    },
     scope: "test",
     readCache: async () => undefined,
     writeCache: async () => {},
@@ -132,16 +141,19 @@ it("moves a message that was not delivered back to the composer to edit", async 
 it("resizes the Task activity pane between its limits, remembers it, and resets on double-click", async () => {
   localStorage.clear();
   const done: Message = {
-    conversation: "default",
+    order: 1,
     task: { taskId: "t1", tagId: "lead", sessionId: "s", prompt: "Ship it", state: "succeeded" },
   };
   const controlPlane: ControlPlane = {
     tags: async () => [tag],
     conversations: async () => [],
-    messages: async () => ({ messages: [done] }),
+    messages: async () => ({ conversationId: "c1", messages: [done] }),
     send: async () => done,
     events: async () => [],
     saveArtifact: async () => false,
+    markRead: async () => {
+      throw new Error("not listed");
+    },
     scope: "test",
     readCache: async () => undefined,
     writeCache: async () => {},

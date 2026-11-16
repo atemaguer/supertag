@@ -274,7 +274,6 @@ async fn contract(url: &str) {
                 output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
-                conversation: "private-approval".into(),
                 operation_id: "private-request".into(),
                 text: "A private update".into(),
             },
@@ -350,14 +349,16 @@ async fn contract(url: &str) {
         vec![private_request.approval_id.clone()],
     )
     .await;
+    // In Alice's conversation with another Tag: a later message in her conversation with the
+    // owner would expire the request.
+    store.put_tag("helper", "Help out", vec![]).await.unwrap();
     let collision = store
         .send_message(
             ALICE,
             &SendMessageRequest {
                 output_policy: None,
                 execution_limits: None,
-                tag_id: "owner".into(),
-                conversation: "another-conversation".into(),
+                tag_id: "helper".into(),
                 operation_id: format!("approval-continuation:{}", private.task_id),
                 text: "An unrelated message".into(),
             },
@@ -409,7 +410,6 @@ async fn contract(url: &str) {
                 output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
-                conversation: "excluded-owner".into(),
                 operation_id: "excluded-owner".into(),
                 text: "An undecidable private action".into(),
             },

@@ -839,7 +839,8 @@ class Operator:
 
 
 class ConversationsStub:
-    """An operator reads and sends messages in their personal conversations.
+    """An operator or client has one conversation with each Tag it may talk to, and reads and sends
+    its messages here.
     """
 
     def __init__(self, channel):
@@ -868,14 +869,22 @@ class ConversationsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetMessageRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConversationMessage.FromString,
                 _registered_method=True)
+        self.MarkConversationRead = channel.unary_unary(
+                '/supertag.runtime.v2.Conversations/MarkConversationRead',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.MarkConversationReadRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Conversation.FromString,
+                _registered_method=True)
 
 
 class ConversationsServicer:
-    """An operator reads and sends messages in their personal conversations.
+    """An operator or client has one conversation with each Tag it may talk to, and reads and sends
+    its messages here.
     """
 
     def ListConversations(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """The caller's conversations, one per Tag it has talked to, with what a conversation list
+        shows: the latest message, when it was active, unread replies, and whether the Tag works.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -894,6 +903,13 @@ class ConversationsServicer:
 
     def GetMessage(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def MarkConversationRead(self, request, context):
+        """Records that the caller has read its conversation with a Tag up to a message.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -921,6 +937,11 @@ def add_ConversationsServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetMessageRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConversationMessage.SerializeToString,
             ),
+            'MarkConversationRead': grpc.unary_unary_rpc_method_handler(
+                    servicer.MarkConversationRead,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.MarkConversationReadRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Conversation.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'supertag.runtime.v2.Conversations', rpc_method_handlers)
@@ -930,7 +951,8 @@ def add_ConversationsServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Conversations:
-    """An operator reads and sends messages in their personal conversations.
+    """An operator or client has one conversation with each Tag it may talk to, and reads and sends
+    its messages here.
     """
 
     @staticmethod
@@ -1031,6 +1053,33 @@ class Conversations:
             '/supertag.runtime.v2.Conversations/GetMessage',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetMessageRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConversationMessage.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def MarkConversationRead(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Conversations/MarkConversationRead',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.MarkConversationReadRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Conversation.FromString,
             options,
             channel_credentials,
             insecure,

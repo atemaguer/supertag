@@ -81,12 +81,11 @@ struct Operator {
 }
 
 impl Operator {
-    async fn say(&mut self, conversation: &str, text: &str) -> Result<Task> {
+    async fn say(&mut self, text: &str) -> Result<Task> {
         self.conversations
             .send_message(authenticated_request(
                 SendMessageRequest {
                     tag_id: "owner".into(),
-                    conversation: conversation.into(),
                     text: text.into(),
                     operation_id: Uuid::new_v4().to_string(),
                     ..Default::default()
@@ -98,6 +97,25 @@ impl Operator {
             .into_inner()
             .task
             .context("Task")
+    }
+
+    /// A turn in a Session of its own, as `supertag task submit` sends one.
+    async fn submit(&mut self, session: &str, text: &str) -> Result<Task> {
+        Ok(self
+            .operator
+            .submit_task(authenticated_request(
+                SubmitTaskRequest {
+                    tag_id: "owner".into(),
+                    session_id: session.into(),
+                    operation_id: Uuid::new_v4().to_string(),
+                    prompt: text.into(),
+                    ..Default::default()
+                },
+                &self.token,
+                None,
+            )?)
+            .await?
+            .into_inner())
     }
 
     async fn result(&mut self, task: &str) -> Result<String> {
@@ -191,15 +209,16 @@ async fn tag_reads_its_sessions_and_the_objective_its_goal_created(database: Str
         .await?;
     let host = directory.path().join("host");
 
-    let notes = alice.say("notes", "Draft release notes").await?;
+    // Alice drafted notes in a Session of her own; her conversation with the Tag recalls it.
+    let notes = alice.submit("notes", "Draft release notes").await?;
     run_host(&public, &host_token, &host).await?;
     alice.result(&notes.task_id).await?;
-    let hiring = bob.say("hiring", "Plan the release hiring").await?;
+    let hiring = bob.say("Plan the release hiring").await?;
     run_host(&public, &host_token, &host).await?;
     bob.result(&hiring.task_id).await?;
 
-    // Alice's turn sees her own conversation, never Bob's.
-    let recall = alice.say("recall", "recall release").await?;
+    // Alice's turn sees her own Sessions, never Bob's.
+    let recall = alice.say("recall release").await?;
     run_host(&public, &host_token, &host).await?;
     let summary: Value = serde_json::from_str(&alice.result(&recall.task_id).await?)?;
     assert_eq!(summary["mayRead"], true, "{summary}");
@@ -223,9 +242,7 @@ async fn tag_reads_its_sessions_and_the_objective_its_goal_created(database: Str
     );
 
     // `/goal` creates the Objective in the Control Plane, as Alice, and answers without a turn.
-    let command_turn = alice
-        .say("recall", "/goal Publish the v2 release notes")
-        .await?;
+    let command_turn = alice.say("/goal Publish the v2 release notes").await?;
     assert_eq!(command_turn.state(), TaskState::Succeeded);
     let answer = alice.result(&command_turn.task_id).await?;
     let objective = answer
@@ -277,7 +294,7 @@ async fn tag_reads_its_sessions_and_the_objective_its_goal_created(database: Str
         .await?;
 
     // Bob's turn sees neither Alice's conversations nor the Objective she created.
-    let bob_recall = bob.say("hiring", "recall release").await?;
+    let bob_recall = bob.say("recall release").await?;
     run_host(&public, &host_token, &host).await?;
     let summary: Value = serde_json::from_str(&bob.result(&bob_recall.task_id).await?)?;
     assert_eq!(summary["sessions"], json!([]), "{summary}");

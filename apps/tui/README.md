@@ -17,9 +17,9 @@ CLI does, with the Control Plane's TLS and any client certificate inside it; the
 certificate authority also checks the tunnel's outer certificate. Cleartext `http://` and `ws://`
 connections require a loopback IP address.
 
-The TUI lists Tags and named conversations, loads conversation history, sends messages, and
-follows replies. Watch keeps the rail and open conversation current across clients. The TUI
-resumes Watch after an interruption and polls while reconnecting. Each reply follows its own
+The TUI lists Tags with your one conversation with each, loads conversation history, sends
+messages, and follows replies. Watch keeps the rail and open conversation current across clients.
+The TUI resumes Watch after an interruption and polls while reconnecting. Each reply follows its own
 Task event sequence through `Operator.ListEvents`. A history page reads its messages' work
 Sessions concurrently, and each conversation stays in memory, so returning to it shows it at once.
 
@@ -73,9 +73,11 @@ The status bar shows which Control Plane it talks to, its Worker Hosts by phase
 reachable. The conversation opens after the Control Plane returns a Tag. An empty Tag list
 shows setup instructions. The rail on the left has four sections:
 
-- **Tags**, each with its state. The main pane holds your conversation with the selected Tag,
-  the `default` one at first: its recent history, then the reply streaming in, and work Sessions
-  as they run and report.
+- **Tags**, each with its state and, under it, the latest message of your conversation with it.
+  The state says `working` while a Task of that conversation is queued or running, and `N new`
+  for replies you have not read. The main pane holds your one conversation with the selected
+  Tag: its history across every Session, then the reply streaming in, and work Sessions as they
+  run and report. Showing a finished reply marks the conversation read.
 - **Objectives**, the open ones, each with its spend against a budget in a currency, or why it is
   held (`blocked`, `limited`, `review`, `paused`). Selecting one shows what
   `supertag describe objective` shows, kept current. Press `m` to message its owner. Enter sends
@@ -105,11 +107,6 @@ without a terminal, so a fetch that needs credentials fails instead of prompting
 cannot be computed, the pane says why and shows the pull request's address. The diff scrolls with
 up, down, page up and page down; esc goes back.
 
-Ctrl-O lists your conversations with the selected Tag, the most recent first, with their open
-work and latest entry. Enter switches to one. `n` starts a new conversation: type its name (1 to
-64 letters, digits, `.`, `_` or `-`, starting with a letter or digit) and press enter. The Tag's
-rail state counts the open work Sessions of the conversation it shows. Esc goes back.
-
 Ctrl-P lists the Control Planes you can switch to: Local while `supertag up` runs one on this
 machine, the one the CLI handed over, and each one saved in the terminal UI or with
 `supertag connect`. Enter switches to the one under the cursor, and esc goes back. Adding a Control Plane takes an
@@ -127,8 +124,6 @@ The Objective works in the Workspace configured on its owner Tag.
 Type to filter the palette commands, move with up and down, and press enter to run one. Esc goes
 back.
 
-- **New conversation** names a new conversation with the selected Tag, as `n` in the Ctrl-O list.
-- **Switch conversation** opens the Ctrl-O list.
 - **`/goal` · Create Objective** opens a form for an Objective owned by the selected Tag: its outcome, the
   Team its owner may hand work to (empty, it works alone), and a budget such as `300 USD` or
   `$12.50` (empty, no budget). Up and down move between the fields; enter moves to the next and,
@@ -146,8 +141,9 @@ Every text from the server, an agent or a diff is filtered for the terminal, so 
 shows as text.
 
 It talks to the Control Plane through the generated runtime v2 Go client in
-`sdks/go`. `Conversations` sends messages, lists your conversations and their history,
-and pages each reply's Task events. `Objectives` lists the open Objectives, describes the selected
+`sdks/go`. `Conversations` sends messages, lists your conversations with their previews and
+unread replies, reads their history, and marks them read. `Operator.ListEvents` pages each
+reply's Task events. `Objectives` lists the open Objectives, describes the selected
 one, and creates Objectives. `Inbox` lists the inbox, answers questions and decides approval
 requests. `WorkSessions` reads a work Session's delivery and activity. `Teams` lists and reads the
 Teams and the shown Team's Workstream. `OperatorEvents.Watch` keeps the rail, the Objective view,

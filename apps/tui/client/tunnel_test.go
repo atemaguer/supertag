@@ -205,7 +205,7 @@ func largeTagsHandler(name string) http.Handler {
 		return &v2.ListTagsResponse{Tags: []*v2.Tag{{TagId: "lead", Name: name}}}, nil
 	})
 	testRPC(mux, rpc.ConversationsSendMessageProcedure, func(_ context.Context, req *v2.SendMessageRequest) (*v2.ConversationMessage, error) {
-		return &v2.ConversationMessage{Task: &v2.Task{TaskId: "task", TagId: req.GetTagId(), Prompt: req.GetText(), State: v2.TaskState_TASK_STATE_QUEUED}, Conversation: req.GetConversation()}, nil
+		return &v2.ConversationMessage{Task: &v2.Task{TaskId: "task", TagId: req.GetTagId(), Prompt: req.GetText(), State: v2.TaskState_TASK_STATE_QUEUED}}, nil
 	})
 	return mux
 }
@@ -229,7 +229,7 @@ func TestRuntimeV2CrossesAWSSTunnelWithInnerTLS(t *testing.T) {
 		t.Fatalf("ListTags through the tunnel failed: %v", err)
 	}
 	text := strings.Repeat("t", 600*1024)
-	sent, err := c.SendMessage(ctx, "lead", "default", text)
+	sent, err := c.SendMessage(ctx, "lead", text)
 	if err != nil || sent.GetText() != text {
 		t.Fatalf("SendMessage through the tunnel failed: %v", err)
 	}

@@ -235,7 +235,6 @@ async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> R
         .send_message(authenticated_request(
             SendMessageRequest {
                 tag_id: "producer".into(),
-                conversation: if tui.is_some() { "default" } else { "private" }.into(),
                 operation_id: "request-evidence".into(),
                 text: "Capture two files".into(),
                 ..Default::default()
@@ -652,7 +651,6 @@ async fn conversation_scope_survives_api_forwards_and_task_reads(database: Strin
         output_policy: None,
         execution_limits: None,
         tag_id: "engineer".into(),
-        conversation: "personal".into(),
         text: "Alice's private message".into(),
         operation_id: "operation".into(),
     };
@@ -701,7 +699,6 @@ async fn conversation_scope_survives_api_forwards_and_task_reads(database: Strin
         .list_messages(authenticated_request(
             ListMessagesRequest {
                 tag_id: "engineer".into(),
-                conversation: "personal".into(),
                 ..Default::default()
             },
             &alice_token,
@@ -775,7 +772,6 @@ async fn conversation_scope_survives_api_forwards_and_task_reads(database: Strin
         .list_messages(authenticated_request(
             ListMessagesRequest {
                 tag_id: "engineer".into(),
-                conversation: "personal".into(),
                 ..Default::default()
             },
             &bob_token,
@@ -1113,10 +1109,7 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation(database: String) -> 
     let mut messages = conversations_client::ConversationsClient::new(channel(&endpoint).await?);
     let page = messages
         .list_conversations(authenticated_request(
-            ListConversationsRequest {
-                tag_id: "engineer".into(),
-                ..Default::default()
-            },
+            ListConversationsRequest {},
             token,
             None,
         )?)
@@ -1124,15 +1117,16 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation(database: String) -> 
         .into_inner();
     let thread = page
         .conversations
-        .first()
+        .iter()
+        .find(|conversation| conversation.tag_id == "engineer")
         .context("Go TUI conversation missing")?;
+    assert!(thread.preview.contains("Rust UI round trip"), "{thread:?}");
     messages
         .send_message(authenticated_request(
             SendMessageRequest {
                 output_policy: None,
                 execution_limits: None,
                 tag_id: "engineer".into(),
-                conversation: thread.name.clone(),
                 operation_id: "external-client".into(),
                 text: "Reply from another client".into(),
             },
@@ -1506,7 +1500,6 @@ async fn watch_replays_private_conversations_after_services_restart(
         output_policy: None,
         execution_limits: None,
         tag_id: "engineer".into(),
-        conversation: "private".into(),
         operation_id: "send-once".into(),
         text: text.to_owned(),
     };

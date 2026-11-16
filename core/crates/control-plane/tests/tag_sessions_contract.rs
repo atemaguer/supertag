@@ -81,13 +81,12 @@ async fn run(store: &Store, host: &HostAuthority, task: &Task, result: &str) {
     finish(store, host, &attempt, result).await;
 }
 
-async fn say(store: &Store, principal: &str, conversation: &str, text: &str) -> Task {
+async fn say(store: &Store, principal: &str, text: &str) -> Task {
     store
         .send_message(
             principal,
             &SendMessageRequest {
                 tag_id: "owner".into(),
-                conversation: conversation.into(),
                 text: text.into(),
                 operation_id: Uuid::new_v4().to_string(),
                 ..Default::default()
@@ -227,7 +226,7 @@ async fn contract(url: &str) {
 
     // Alice's and Bob's operator conversations are private to each; Alice's ad hoc Session is
     // private to Alice, who admitted it; an operator's Objective is shared.
-    let a1 = say(&store, ALICE, "alice", "Draft release notes for v2").await;
+    let a1 = say(&store, ALICE, "Draft release notes for v2").await;
     run(
         &store,
         &host,
@@ -236,7 +235,7 @@ async fn contract(url: &str) {
     )
     .await;
     let alice_session = a1.session_id.clone();
-    let b1 = say(&store, BOB, "bob", "Plan the Q3 hiring and the search team").await;
+    let b1 = say(&store, BOB, "Plan the Q3 hiring and the search team").await;
     run(&store, &host, &b1, "Hiring plan: two engineers").await;
     let bob_session = b1.session_id.clone();
     let s1 = submit(&store, "owner", "alice-adhoc", "Check the search index").await;
@@ -270,7 +269,7 @@ async fn contract(url: &str) {
     run(&store, &host, &other, "Other search result").await;
 
     // Alice's next turn.
-    let a2 = say(&store, ALICE, "alice", "What did we decide earlier?").await;
+    let a2 = say(&store, ALICE, "What did we decide earlier?").await;
     let a2 = claim(&store, &host, &a2.task_id).await;
     let caps = store.attempt_capabilities(&host, &a2).await.unwrap();
     assert!(caps.may_read_tag_sessions);
@@ -399,7 +398,7 @@ async fn contract(url: &str) {
     finish(&store, &host, &report, "Reported").await;
 
     // Bob sees the shared Objective, never Alice's Sessions or her Work Session.
-    let b2 = say(&store, BOB, "bob", "Anything on search?").await;
+    let b2 = say(&store, BOB, "Anything on search?").await;
     let b2 = claim(&store, &host, &b2.task_id).await;
     assert_eq!(
         sessions(&store, &host, &b2).await,
@@ -422,7 +421,6 @@ async fn contract(url: &str) {
     // `/goal` creates the Objective in the Control Plane, as Alice, and answers without a turn.
     let goal = SendMessageRequest {
         tag_id: "owner".into(),
-        conversation: "alice".into(),
         text: "/goal Publish the v2 release notes by Friday".into(),
         operation_id: Uuid::new_v4().to_string(),
         ..Default::default()
@@ -451,7 +449,7 @@ async fn contract(url: &str) {
         Err(StoreError::Conflict(_))
     ));
     // `/goal` without an outcome creates nothing.
-    let empty = say(&store, ALICE, "alice", "/goal").await;
+    let empty = say(&store, ALICE, "/goal").await;
     assert_eq!(empty.state(), TaskState::Succeeded);
     assert!(
         empty
@@ -493,7 +491,7 @@ async fn contract(url: &str) {
     pause(&store, &objective.objective_id).await;
 
     // Bob does not see Alice's Objective; Alice does.
-    let b3 = say(&store, BOB, "bob", "Which Objectives are open?").await;
+    let b3 = say(&store, BOB, "Which Objectives are open?").await;
     let b3 = claim(&store, &host, &b3.task_id).await;
     assert_eq!(objectives(&store, &host, &b3).await, ["docs"]);
     assert!(matches!(
@@ -501,7 +499,7 @@ async fn contract(url: &str) {
         Err(StoreError::NotFound(_))
     ));
     finish(&store, &host, &b3, "One").await;
-    let a4 = say(&store, ALICE, "alice", "Which Objectives are open?").await;
+    let a4 = say(&store, ALICE, "Which Objectives are open?").await;
     let a4 = claim(&store, &host, &a4.task_id).await;
     let mut open = objectives(&store, &host, &a4).await;
     open.sort();
@@ -521,7 +519,7 @@ async fn contract(url: &str) {
 
     // The home a `/goal` Objective inherits is recorded by the Control Plane alone: an
     // operation ID naming a conversation Task, or naming the Objective a Task made, plants none.
-    let a5 = say(&store, ALICE, "alice", "Anything new?").await;
+    let a5 = say(&store, ALICE, "Anything new?").await;
     let a5 = claim(&store, &host, &a5.task_id).await;
     for operation in [
         format!("tag-create-objective:{}", a5.task_id),
@@ -569,7 +567,7 @@ async fn contract(url: &str) {
             .unwrap();
         run(&store, &host, &task, "Searched").await;
     }
-    let a6 = say(&store, ALICE, "alice", "Search again").await;
+    let a6 = say(&store, ALICE, "Search again").await;
     let a6 = claim(&store, &host, &a6.task_id).await;
     let found = search(&store, &host, &a6, "search").await;
     let found = found

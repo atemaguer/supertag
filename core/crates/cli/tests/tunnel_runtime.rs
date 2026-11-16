@@ -43,8 +43,8 @@ use supertag_protocol::{
     authenticated_request,
     negotiation::ProtocolChannel,
     v2::{
-        ListConversationsRequest, ListTagsRequest, WatchChange, WatchEvent, WatchKind,
-        WatchRequest, conversations_client::ConversationsClient, operator_client::OperatorClient,
+        ListMessagesRequest, ListTagsRequest, WatchChange, WatchEvent, WatchKind, WatchRequest,
+        conversations_client::ConversationsClient, operator_client::OperatorClient,
         operator_events_client::OperatorEventsClient, watch_event::Update,
     },
 };
@@ -759,13 +759,7 @@ mod roles {
             ),
             admitted(
                 ConversationsClient::new(ch())
-                    .list_conversations(call(
-                        ListConversationsRequest {
-                            tag_id: "open".into(),
-                            ..Default::default()
-                        },
-                        secret,
-                    )?)
+                    .list_conversations(call(ListConversationsRequest {}, secret)?)
                     .await,
             ),
             admitted(
@@ -1091,7 +1085,6 @@ mod roles {
                 .send_message(call(
                     SendMessageRequest {
                         tag_id: "open".into(),
-                        conversation: "c".into(),
                         text: "hi".into(),
                         operation_id: "h".into(),
                         ..Default::default()
@@ -1177,7 +1170,6 @@ mod roles {
             .send_message(call(
                 SendMessageRequest {
                     tag_id: "open".into(),
-                    conversation: "secret".into(),
                     text: "Mine".into(),
                     operation_id: "alice-1".into(),
                     ..Default::default()
@@ -1193,7 +1185,6 @@ mod roles {
                 .send_message(call(
                     SendMessageRequest {
                         tag_id: "closed".into(),
-                        conversation: "secret".into(),
                         text: "Not mine".into(),
                         operation_id: "alice-2".into(),
                         ..Default::default()
@@ -2371,8 +2362,8 @@ async fn wait_for_prompt(
     let deadline = Instant::now() + STARTUP;
     loop {
         let page = conversations
-            .list_conversations(authenticated_request(
-                ListConversationsRequest {
+            .list_messages(authenticated_request(
+                ListMessagesRequest {
                     tag_id: "builder".into(),
                     ..Default::default()
                 },
@@ -2381,9 +2372,9 @@ async fn wait_for_prompt(
             )?)
             .await?
             .into_inner();
-        if page.conversations.iter().any(|conversation| {
-            conversation
-                .latest_task
+        if page.messages.iter().any(|message| {
+            message
+                .task
                 .as_ref()
                 .is_some_and(|task| task.prompt == prompt)
         }) {

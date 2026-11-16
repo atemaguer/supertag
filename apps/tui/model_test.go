@@ -117,7 +117,7 @@ func TestShowsSetupUntilATagExists(t *testing.T) {
 
 	fake.tags = tags("lead")
 	m = run(t, m, m.reloadTags())
-	if got := screen(m); !strings.Contains(got, "lead · default") ||
+	if got := screen(m); !strings.Contains(got, "lead") ||
 		!strings.Contains(got, conversationPlaceholder) || !m.input.Focused() {
 		t.Fatalf("screen after a Tag becomes available:\n%s", got)
 	}
@@ -127,7 +127,7 @@ func TestShowsSetupUntilATagExists(t *testing.T) {
 	if got := screen(m); !strings.Contains(got, "supertag tag put --help") || m.inputShown() || m.input.Focused() {
 		t.Fatalf("screen after the last Tag leaves:\n%s", got)
 	}
-	m = update(t, m, sentMsg{tag: "lead", conversation: "default", err: errors.New("Tag no longer exists")})
+	m = update(t, m, sentMsg{tag: "lead", err: errors.New("Tag no longer exists")})
 	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	if got := screen(m); !strings.Contains(got, "Set up SuperTag") || !strings.Contains(got, "supertag tag put --help") {
 		t.Fatalf("a late send error replaced setup guidance:\n%s", got)
@@ -141,7 +141,7 @@ func TestKeysMoveFocusAndSelection(t *testing.T) {
 		t.Fatal("tab should focus the rail")
 	}
 	m = update(t, m, key(tea.KeyDown))
-	if m.selectedTag() != "builder" || !strings.Contains(screen(m), "builder · default") {
+	if m.selectedTag() != "builder" || !strings.Contains(screen(m), "builder") {
 		t.Fatalf("selected %q", m.selectedTag())
 	}
 	m = update(t, m, key(tea.KeyRight))
@@ -249,10 +249,22 @@ func TestReadRuntimeV2Handover(t *testing.T) {
 	}
 }
 
+// followed shows events as the follow of the latest turn of the selected Tag's conversation,
+// starting a new turn after one that ended.
 func followed(t *testing.T, m model, events ...client.FollowEvent) model {
 	t.Helper()
+	tag := m.selectedTag()
+	h := &m.conversation(tag).runtime
+	if h.turns == nil {
+		h.turns = map[string]*runtimeTurn{}
+	}
 	for _, event := range events {
-		m = update(t, m, followMsg{tag: m.selectedTag(), conversation: m.currentConversation(m.selectedTag()), event: event})
+		if len(h.order) == 0 || h.turns[h.order[len(h.order)-1]].settled {
+			id := fmt.Sprintf("followed-%d", len(h.order))
+			h.turns[id] = &runtimeTurn{following: true}
+			h.order = append(h.order, id)
+		}
+		m = update(t, m, followMsg{tag: tag, taskID: h.order[len(h.order)-1], event: event})
 	}
 	return m
 }
@@ -267,7 +279,7 @@ func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
 		client.FollowEvent{Kind: client.EventTurnError, Text: "Tag lead could not answer: \x1b[2Jgone"},
 		client.FollowEvent{Kind: client.EventDelta, Text: "draft \x1bP1$r\x1b\\"},
 	)
-	m = update(t, m, followMsg{tag: m.selectedTag(), conversation: m.currentConversation(m.selectedTag()), event: client.FollowEvent{Kind: client.EventError, Text: "boom\x1b[8m hidden"}})
+	m = followed(t, m, client.FollowEvent{Kind: client.EventError, Text: "boom\x1b[8m hidden"})
 	view := m.View().Content
 	// Only the renderer's own SGR sequences may reach the terminal.
 	for _, raw := range []string{"\x1b[8m", "\x1b[28m", "\x1b[2J", "\x1bP", "\x1b_", "\x1b]", "\a"} {
@@ -318,7 +330,8 @@ func TestPastRepliesAreRenderedOncePerWidth(t *testing.T) {
 	for range 50 {
 		m = followed(t, m, client.FollowEvent{Kind: client.EventDelta, Text: "token "})
 	}
-	m = start(t, m)
+	// A reread that redraws the conversation renders no past reply again.
+	m = run(t, m, tea.Batch(m.reloadConversations(), m.reloadObjectives()))
 	if m.md.renders != before {
 		t.Fatalf("streaming re-rendered %d past replies", m.md.renders-before)
 	}

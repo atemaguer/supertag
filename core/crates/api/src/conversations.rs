@@ -53,6 +53,16 @@ impl conversations_server::Conversations for Api {
         })
         .await
     }
+
+    async fn mark_conversation_read(
+        &self,
+        request: Request<MarkConversationReadRequest>,
+    ) -> Result<Response<Conversation>, Status> {
+        self.forward(request, |channel, request| async move {
+            client(channel).mark_conversation_read(request).await
+        })
+        .await
+    }
 }
 
 fn client(channel: ProtocolChannel) -> conversations_client::ConversationsClient<ProtocolChannel> {

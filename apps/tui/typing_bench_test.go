@@ -50,14 +50,14 @@ func typingModel(tb testing.TB, turns int) model {
 	newestFirst := make([]*views.Message, 0, turns)
 	for i := turns - 1; i >= 0; i-- {
 		newestFirst = append(newestFirst, &views.Message{
-			TaskId: fmt.Sprintf("task-%d", i), Tag: tag, SessionId: "session", Conversation: defaultConversation,
+			TaskId: fmt.Sprintf("task-%d", i), Tag: tag, SessionId: "session",
 			Text:   fmt.Sprintf("Please look at step %d of the plan and tell me what breaks.", i),
 			Status: views.ReplyStatus_REPLY_STATUS_REPLIED, Reply: finalReply(fmt.Sprintf(benchReply, i, i)),
 		})
 	}
-	c := m.conversation(tag, defaultConversation)
+	c := m.conversation(tag)
 	c.historyReload.start()
-	next, _ = m.Update(historyMsg{tag: tag, conversation: defaultConversation,
+	next, _ = m.Update(historyMsg{tag: tag,
 		items: client.History(tag, newestFirst), revision: c.runtime.revision})
 	m = next.(model)
 	if !c.loaded || len(c.runtime.order) != turns {
@@ -106,7 +106,7 @@ func BenchmarkStreamingPage(b *testing.B) {
 			a := &app{inner: typingModel(b, turns), hasTarget: true, width: 160, height: 50}
 			tag := a.inner.selectedTag()
 			task := fmt.Sprintf("task-%d", turns-1)
-			turn := a.inner.conversation(tag, defaultConversation).runtime.turns[task]
+			turn := a.inner.conversation(tag).runtime.turns[task]
 			a.View()
 			b.ReportAllocs()
 			page := 0
@@ -118,7 +118,7 @@ func BenchmarkStreamingPage(b *testing.B) {
 					events <- client.FollowEvent{Kind: client.EventDelta, Text: fmt.Sprintf("page %d word %d ", page, i)}
 				}
 				close(events)
-				wait := waitForTask(tag, defaultConversation, task, events)
+				wait := waitForTask(tag, task, events)
 				for {
 					msg := wait()
 					if _, done := msg.(followDoneMsg); done {

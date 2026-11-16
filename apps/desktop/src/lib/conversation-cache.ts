@@ -1,34 +1,53 @@
-import { useEffect } from "react";
-import type { ControlPlane, Message, WatchUpdate } from "../control-plane";
-import { type History, latestHistory, readHistory } from "./history";
-import type { WatchFeed } from "./watch";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ControlPlane, Conversation, Message, WatchUpdate } from "../control-plane";
+import { type History, lastOf, latestHistory, refreshRequest, tail, unsettled } from "./history";
+import { describe } from "./polling";
+import { useWatchRefresh, type WatchFeed } from "./watch";
 
 /**
- * Conversations the app has shown, so opening one again renders it at once and then revalidates.
- * Each entry belongs to one Control Plane and principal (`ControlPlane.scope`), so another
- * connection never sees it. The most recent are kept in memory, and each is also written to disk
- * through the native app, which keeps it owner-only in the app's data directory.
+ * What the app shows at once, before the Control Plane answers: each Tag's conversation (its
+ * latest messages) and the conversation list with the selected Tag. Every entry belongs to one
+ * Control Plane and principal (`ControlPlane.scope`), so another connection never sees it. The
+ * most recent conversations stay in memory; each entry is also written to disk through the
+ * native app, which keeps it owner-only in the app's data directory.
  */
 
+/** What every disk entry records; an entry written with another schema is discarded. */
+export const SCHEMA_VERSION = 1;
 /** How many conversations stay in memory. */
 const MEMORY_ENTRIES = 32;
-/** How long a changed conversation waits before it is written to disk, to coalesce bursts. */
+/** How long a changed entry waits before it is written to disk, to coalesce bursts. */
 const WRITE_DELAY = 500;
 /** How many Tags have their conversation read ahead when the app connects. */
 const PREFETCH_TAGS = 16;
-/** What the disk cache records, so a newer app can tell an older entry apart. */
-const VERSION = 1;
+
+interface Stored<T> {
+  schemaVersion: number;
+  value: T;
+}
+
+/** The value of a disk entry written with this schema, if it is one. */
+export function storedValue(entry: unknown): unknown {
+  if (!entry || typeof entry !== "object") return undefined;
+  const value = entry as Partial<Stored<unknown>>;
+  return value.schemaVersion === SCHEMA_VERSION ? value.value : undefined;
+}
+
+export function stored<T>(value: T): Stored<T> {
+  return { schemaVersion: SCHEMA_VERSION, value };
+}
 
 const memory = new Map<string, History>();
-/** The conversation each Tag last showed, by scope and Tag. */
-const shownConversations = new Map<string, string>();
 /** Conversations a view shows now. A view keeps its own conversation current. */
 const open = new Map<string, number>();
 const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
 const warming = new Map<string, Promise<History | undefined>>();
+const rosters = new Map<string, Roster>();
+/** The latest read mark sent per scope and Tag, so one is sent once. */
+const marks = new Map<string, number>();
 
-function key(controlPlane: ControlPlane, tagId: string, conversation: string) {
-  return JSON.stringify([controlPlane.scope, tagId, conversation]);
+function key(controlPlane: ControlPlane, tagId: string) {
+  return JSON.stringify([controlPlane.scope, tagId]);
 }
 
 function remember(entry: string, history: History) {
@@ -40,70 +59,56 @@ function remember(entry: string, history: History) {
   }
 }
 
-/** The conversation as it was last shown, from memory. */
-export function cachedHistory(
-  controlPlane: ControlPlane,
-  tagId: string,
-  conversation: string,
-): History | undefined {
-  const entry = memory.get(key(controlPlane, tagId, conversation));
+function later(entry: string, write: () => void) {
+  clearTimeout(pendingWrites.get(entry));
+  pendingWrites.set(
+    entry,
+    setTimeout(() => {
+      pendingWrites.delete(entry);
+      write();
+    }, WRITE_DELAY),
+  );
+}
+
+/** The Tag's conversation as it was last shown, from memory. */
+export function cachedHistory(controlPlane: ControlPlane, tagId: string): History | undefined {
+  const entry = memory.get(key(controlPlane, tagId));
   return entry && { ...entry, loading: false };
 }
 
-/** The conversation as the disk cache holds it, if it holds a valid one. */
+/** The Tag's conversation as the disk holds it, if it holds a valid copy. */
 export async function storedHistory(
   controlPlane: ControlPlane,
   tagId: string,
-  conversation: string,
 ): Promise<History | undefined> {
   try {
-    const value = await controlPlane.readCache(tagId, conversation);
-    const history = parseStored(value, tagId, conversation);
-    if (history && !memory.has(key(controlPlane, tagId, conversation)))
-      remember(key(controlPlane, tagId, conversation), history);
+    const history = parseHistory(storedValue(await controlPlane.readCache(`tag:${tagId}`)), tagId);
+    if (history && !memory.has(key(controlPlane, tagId)))
+      remember(key(controlPlane, tagId), history);
     return history;
   } catch {
     return undefined;
   }
 }
 
-/** Records what a conversation shows now, in memory at once and on disk shortly after. */
-export function cacheHistory(
-  controlPlane: ControlPlane,
-  tagId: string,
-  conversation: string,
-  history: History,
-) {
+/** Records what the Tag's conversation shows now: in memory at once, its tail on disk soon. */
+export function cacheHistory(controlPlane: ControlPlane, tagId: string, history: History) {
   if (!history.read) return;
-  const entry = key(controlPlane, tagId, conversation);
+  const entry = key(controlPlane, tagId);
   remember(entry, history);
-  clearTimeout(pendingWrites.get(entry));
-  pendingWrites.set(
-    entry,
-    setTimeout(() => {
-      pendingWrites.delete(entry);
-      const latest = memory.get(entry);
-      if (!latest) return;
-      const { messages, cursor, sessionId, head } = latest;
-      void controlPlane
-        .writeCache(tagId, conversation, { version: VERSION, messages, cursor, sessionId, head })
-        .catch(() => {});
-    }, WRITE_DELAY),
-  );
+  later(entry, () => {
+    const latest = memory.get(entry);
+    if (!latest) return;
+    const { messages, cursor, conversationId } = tail(latest);
+    void controlPlane
+      .writeCache(`tag:${tagId}`, stored({ messages, cursor, conversationId }))
+      .catch(() => {});
+  });
 }
 
-/** The conversation a Tag showed last on this connection's Control Plane, if it showed one. */
-export function shownConversation(controlPlane: ControlPlane, tagId: string) {
-  return shownConversations.get(JSON.stringify([controlPlane.scope, tagId]));
-}
-
-export function showConversation(controlPlane: ControlPlane, tagId: string, conversation: string) {
-  shownConversations.set(JSON.stringify([controlPlane.scope, tagId]), conversation);
-}
-
-/** Marks a conversation as shown by a view until the returned function is called. */
-export function openConversation(controlPlane: ControlPlane, tagId: string, conversation: string) {
-  const entry = key(controlPlane, tagId, conversation);
+/** Marks the Tag's conversation as shown by a view until the returned function is called. */
+export function openConversation(controlPlane: ControlPlane, tagId: string) {
+  const entry = key(controlPlane, tagId);
   open.set(entry, (open.get(entry) ?? 0) + 1);
   return () => {
     const count = (open.get(entry) ?? 1) - 1;
@@ -113,31 +118,26 @@ export function openConversation(controlPlane: ControlPlane, tagId: string, conv
 }
 
 /**
- * Reads a conversation into the cache unless a view shows it, starting from what is cached, and
- * returns what it read. Concurrent calls for one conversation share a read.
+ * Brings the Tag's cached conversation up to date unless a view shows it, reading only what
+ * changed since the cached copy. Concurrent calls for one Tag share a read.
  */
 export function warmConversation(
   controlPlane: ControlPlane,
   tagId: string,
-  conversation: string,
 ): Promise<History | undefined> {
-  const entry = key(controlPlane, tagId, conversation);
+  const entry = key(controlPlane, tagId);
   if (open.has(entry)) return Promise.resolve(memory.get(entry));
   const running = warming.get(entry);
   if (running) return running;
   const read = (async () => {
     try {
-      const before = memory.get(entry) ?? (await storedHistory(controlPlane, tagId, conversation));
+      const before = memory.get(entry) ?? (await storedHistory(controlPlane, tagId));
       const start = before ?? { messages: [], loading: true, read: false };
-      const page = await readHistory(
-        (cursor) => controlPlane.messages(tagId, conversation, cursor),
-        start,
-        new AbortController().signal,
-      );
+      const page = await controlPlane.messages(refreshRequest(tagId, start));
       // A view that opened meanwhile has its own read, which is at least as recent.
       if (open.has(entry)) return memory.get(entry);
       const next = latestHistory(start, page);
-      cacheHistory(controlPlane, tagId, conversation, next);
+      cacheHistory(controlPlane, tagId, next);
       return next;
     } catch {
       return undefined;
@@ -150,36 +150,13 @@ export function warmConversation(
 }
 
 /**
- * Reads the conversation a Tag shows into the cache: the one it last showed, else its newest.
- * Returns that conversation's name.
- */
-export async function warmTag(
-  controlPlane: ControlPlane,
-  tagId: string,
-): Promise<string | undefined> {
-  let conversation = shownConversation(controlPlane, tagId);
-  if (!conversation) {
-    try {
-      conversation = (await controlPlane.conversations(tagId))[0]?.name;
-    } catch {
-      return undefined;
-    }
-    if (!conversation) return undefined;
-    showConversation(controlPlane, tagId, conversation);
-  }
-  await warmConversation(controlPlane, tagId, conversation);
-  return conversation;
-}
-
-/**
- * Keeps cached conversations current: when the watch reports a change to one no view shows, it is
- * read again, so opening it later shows its latest messages at once.
+ * Keeps cached conversations current: when the watch reports a change to one no view shows, only
+ * what changed is read, so opening it later shows its latest messages at once.
  */
 export function refreshCachedConversations(controlPlane: ControlPlane, feed: WatchFeed) {
   const unsubscribe = feed.subscribe((update: WatchUpdate) => {
-    if (update.kind !== "conversation") return;
-    if (memory.has(key(controlPlane, update.tagId, update.conversation)))
-      void warmConversation(controlPlane, update.tagId, update.conversation);
+    if (update.kind === "conversation" && memory.has(key(controlPlane, update.tagId)))
+      void warmConversation(controlPlane, update.tagId);
   });
   return () => {
     unsubscribe();
@@ -206,7 +183,7 @@ export function useConversationPrefetch(
     void (async () => {
       for (const tagId of others.split("\n")) {
         if (stopped || !tagId) return;
-        await warmTag(controlPlane, tagId);
+        await warmConversation(controlPlane, tagId);
       }
     })();
     return () => {
@@ -215,36 +192,146 @@ export function useConversationPrefetch(
   }, [controlPlane, others]);
 }
 
-function parseStored(value: unknown, tagId: string, conversation: string): History | undefined {
+/** The conversation list, and the Tag the app showed last. */
+export interface Roster {
+  conversations: Conversation[];
+  selectedTag?: string;
+}
+
+/** The roster as the app last showed it on this connection's Control Plane, from memory. */
+export function cachedRoster(controlPlane: ControlPlane): Roster | undefined {
+  return rosters.get(controlPlane.scope);
+}
+
+/** The roster as the disk holds it, if it holds a valid one. */
+export async function storedRoster(controlPlane: ControlPlane): Promise<Roster | undefined> {
+  try {
+    const roster = parseRoster(storedValue(await controlPlane.readCache("roster")));
+    if (roster && !rosters.has(controlPlane.scope)) rosters.set(controlPlane.scope, roster);
+    return rosters.get(controlPlane.scope);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Records a change to the roster, in memory at once and on disk soon. */
+export function cacheRoster(controlPlane: ControlPlane, change: Partial<Roster>) {
+  const roster = { conversations: [], ...rosters.get(controlPlane.scope), ...change };
+  rosters.set(controlPlane.scope, roster);
+  later(JSON.stringify([controlPlane.scope, "roster"]), () => {
+    const latest = rosters.get(controlPlane.scope);
+    if (latest) void controlPlane.writeCache("roster", stored(latest)).catch(() => {});
+  });
+}
+
+/** How often the conversation list is read while the watch is not live. */
+const LIST_INTERVAL = 5_000;
+const conversationChanged = (update: WatchUpdate) => update.kind === "conversation";
+
+/**
+ * The caller's conversation with each Tag: from the cache at once, then from the Control Plane,
+ * read again when the watch reports a conversation changed or was read.
+ */
+export function useConversationList(controlPlane: ControlPlane, feed: WatchFeed | undefined) {
+  const [conversations, setConversations] = useState(
+    () => cachedRoster(controlPlane)?.conversations ?? [],
+  );
+  const [error, setError] = useState("");
+  const read = useRef(false);
+  useEffect(() => {
+    read.current = false;
+    if (cachedRoster(controlPlane)) return;
+    void storedRoster(controlPlane).then((roster) => {
+      if (roster && !read.current) setConversations(roster.conversations);
+    });
+  }, [controlPlane]);
+  const refresh = useCallback(
+    async (signal: AbortSignal) => {
+      try {
+        const next = await controlPlane.conversations();
+        if (signal.aborted) return;
+        read.current = true;
+        setConversations(next);
+        setError("");
+        cacheRoster(controlPlane, { conversations: next });
+      } catch (error) {
+        if (!signal.aborted) setError(describe(error));
+        return false;
+      }
+    },
+    [controlPlane],
+  );
+  useWatchRefresh(refresh, LIST_INTERVAL, feed, conversationChanged);
+  return { conversations, error };
+}
+
+/**
+ * Records that the caller has read the Tag's conversation up to its latest finished turn, when
+ * that is later than the mark the Control Plane has.
+ */
+export function markShown(controlPlane: ControlPlane, tagId: string, history: History) {
+  const latest = lastOf(history.messages, (message) => message.order > 0 && !unsettled(message));
+  if (!latest) return;
+  const known = cachedRoster(controlPlane)?.conversations.find((entry) => entry.tagId === tagId);
+  const marked = JSON.stringify([controlPlane.scope, tagId]);
+  if (Math.max(known?.readOrder ?? 0, marks.get(marked) ?? 0) >= latest.order) return;
+  marks.set(marked, latest.order);
+  void controlPlane
+    .markRead(tagId, latest.order)
+    .then((conversation) => {
+      const roster = cachedRoster(controlPlane);
+      if (roster)
+        cacheRoster(controlPlane, {
+          conversations: roster.conversations.map((entry) =>
+            entry.tagId === tagId ? conversation : entry,
+          ),
+        });
+    })
+    .catch(() => marks.delete(marked));
+}
+
+function parseHistory(value: unknown, tagId: string): History | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const stored = value as Record<string, unknown>;
-  if (stored.version !== VERSION || !Array.isArray(stored.messages)) return undefined;
-  const messages = stored.messages as Message[];
+  const entry = value as Record<string, unknown>;
+  if (!Array.isArray(entry.messages) || typeof entry.conversationId !== "string") return undefined;
+  const messages = entry.messages as Message[];
   const valid = messages.every(
     (message) =>
       message &&
       typeof message === "object" &&
-      message.conversation === conversation &&
+      typeof message.order === "number" &&
       typeof message.task?.taskId === "string" &&
-      message.task.tagId === tagId &&
-      message.task.sessionId === stored.sessionId,
+      message.task.tagId === tagId,
   );
-  if (!valid || (messages.length > 0 && typeof stored.sessionId !== "string")) return undefined;
+  if (!valid) return undefined;
   return {
     messages,
-    cursor: typeof stored.cursor === "string" ? stored.cursor : undefined,
-    sessionId: typeof stored.sessionId === "string" ? stored.sessionId : undefined,
-    head: typeof stored.head === "string" ? stored.head : undefined,
+    cursor: typeof entry.cursor === "string" ? entry.cursor : undefined,
+    conversationId: entry.conversationId,
     loading: false,
     read: true,
+  };
+}
+
+function parseRoster(value: unknown): Roster | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const entry = value as Record<string, unknown>;
+  if (!Array.isArray(entry.conversations)) return undefined;
+  const conversations = entry.conversations as Conversation[];
+  if (!conversations.every((conversation) => typeof conversation?.tagId === "string"))
+    return undefined;
+  return {
+    conversations,
+    selectedTag: typeof entry.selectedTag === "string" ? entry.selectedTag : undefined,
   };
 }
 
 /** Forgets everything cached in memory. For tests. */
 export function clearConversationCache() {
   memory.clear();
-  shownConversations.clear();
   open.clear();
+  rosters.clear();
+  marks.clear();
   for (const timer of pendingWrites.values()) clearTimeout(timer);
   pendingWrites.clear();
   warming.clear();

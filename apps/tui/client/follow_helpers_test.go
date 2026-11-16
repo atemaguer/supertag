@@ -63,7 +63,7 @@ func expect(t *testing.T, got []FollowEvent, want ...string) {
 }
 
 func message(task string) *views.Message {
-	return &views.Message{TaskId: task, Tag: "lead", Conversation: "default", Status: views.ReplyStatus_REPLY_STATUS_WAITING}
+	return &views.Message{TaskId: task, Tag: "lead", Status: views.ReplyStatus_REPLY_STATUS_WAITING}
 }
 
 func TestActivityLine(t *testing.T) {

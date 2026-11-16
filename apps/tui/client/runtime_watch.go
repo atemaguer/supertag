@@ -49,7 +49,7 @@ func runtimeWatchFrame(event *v2.WatchEvent) (string, WatchUpdate, bool) {
 		update := &views.WatchChange{
 			Kind: views.WatchKind(kind), Id: change.GetId(), Tag: change.GetTagId(),
 			SessionId: change.GetSessionId(), ObjectiveId: change.GetObjectiveId(), TeamId: change.GetTeamId(),
-			Conversation: change.GetConversation(), Reason: reason,
+			Reason:    reason,
 			ChangedAt: timestamppb.New(time.UnixMilli(change.GetChangedAtMs())),
 		}
 		return token, WatchUpdate{Kind: WatchChanged, Change: update}, true

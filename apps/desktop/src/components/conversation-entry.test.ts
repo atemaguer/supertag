@@ -17,7 +17,7 @@ it("renders a Work Session report as Tag output with activity and no operator bu
   const html = renderToStaticMarkup(
     createElement(ConversationEntry, {
       message: {
-        conversation: "planning",
+        order: 1,
         task,
         workSessionReportId: "work/dependency",
         liveInput: { taskId: "unexpected", state: "accepted" },
@@ -40,7 +40,7 @@ it("keeps the operator prompt and joined Task activity on ordinary messages", ()
   const html = renderToStaticMarkup(
     createElement(ConversationEntry, {
       message: {
-        conversation: "planning",
+        order: 1,
         task: { ...task, prompt: "Check the update." },
         liveInput: { taskId: "running-task", state: "accepted" },
       },
@@ -61,7 +61,7 @@ it("offers the selected Task result files in the Tag reply", () => {
   const html = renderToStaticMarkup(
     createElement(ConversationEntry, {
       message: {
-        conversation: "planning",
+        order: 1,
         task: { ...task, artifacts: [{ artifactId: "capture", paths: ["outputs/report.md"] }] },
       },
       onActivity: () => {},
@@ -75,7 +75,7 @@ it("offers the selected Task result files in the Tag reply", () => {
 it("shows each message the Tag wrote, its current activity, and then its reply once", () => {
   const running = renderToStaticMarkup(
     createElement(ConversationEntry, {
-      message: { conversation: "planning", task: { ...task, state: "running", result: undefined } },
+      message: { order: 1, task: { ...task, state: "running", result: undefined } },
       events: [
         { sequence: 1, kind: "message", text: "I'll check the lockfile first." },
         { sequence: 2, kind: "activity", text: "Running pnpm install" },
@@ -88,7 +88,7 @@ it("shows each message the Tag wrote, its current activity, and then its reply o
   expect(running).toContain("Running pnpm install");
   const done = renderToStaticMarkup(
     createElement(ConversationEntry, {
-      message: { conversation: "planning", task },
+      message: { order: 1, task },
       events: [
         { sequence: 1, kind: "message", text: "I'll check the lockfile first." },
         { sequence: 2, kind: "activity", text: "Running pnpm install" },
@@ -107,7 +107,7 @@ it("renders the operator's prompt as written and the Tag's messages and result a
   const html = renderToStaticMarkup(
     createElement(ConversationEntry, {
       message: {
-        conversation: "planning",
+        order: 1,
         task: {
           ...task,
           prompt: "Ship **v2**",
@@ -131,7 +131,7 @@ it("animates the activity line only while the Task runs", () => {
   const render = (state: string) =>
     renderToStaticMarkup(
       createElement(ConversationEntry, {
-        message: { conversation: "planning", task: { ...task, state, result: undefined } },
+        message: { order: 1, task: { ...task, state, result: undefined } },
         events: [{ sequence: 1, kind: "activity", text: "Running pnpm test" }],
         onActivity: () => {},
         onSaveArtifact: async () => false,
@@ -148,7 +148,7 @@ it("animates the activity line only while the Task runs", () => {
 it("gives each message its own bubble with a copy action, and no avatar or name header", () => {
   const html = renderToStaticMarkup(
     createElement(ConversationEntry, {
-      message: { conversation: "planning", task: { ...task, prompt: "Check the update." } },
+      message: { order: 1, task: { ...task, prompt: "Check the update." } },
       events: [
         { sequence: 1, kind: "message", text: "Looking at the lockfile now." },
         { sequence: 2, kind: "message", text: "The lockfile is current." },
@@ -168,7 +168,7 @@ it("gives each message its own bubble with a copy action, and no avatar or name 
 it("gives only the last bubble of each group a tail, and shows the operator's delivery", () => {
   const html = renderToStaticMarkup(
     createElement(ConversationEntry, {
-      message: { conversation: "planning", task: { ...task, prompt: "Check the update." } },
+      message: { order: 1, task: { ...task, prompt: "Check the update." } },
       events: [{ sequence: 1, kind: "message", text: "Looking at the lockfile now." }],
       delivery: "Seen",
       divider: Date.now(),
@@ -187,7 +187,7 @@ it("shows the Tag typing until it writes, then its activity line instead", () =>
   const running = { ...task, state: "running", result: undefined };
   const typing = renderToStaticMarkup(
     createElement(ConversationEntry, {
-      message: { conversation: "planning", task: running },
+      message: { order: 1, task: running },
       onActivity: () => {},
       onSaveArtifact: async () => false,
     }),
@@ -196,7 +196,7 @@ it("shows the Tag typing until it writes, then its activity line instead", () =>
   expect(typing).toContain('aria-label="engineer is working"');
   const active = renderToStaticMarkup(
     createElement(ConversationEntry, {
-      message: { conversation: "planning", task: running },
+      message: { order: 1, task: running },
       events: [{ sequence: 1, kind: "activity", text: "Running pnpm test" }],
       onActivity: () => {},
       onSaveArtifact: async () => false,
@@ -206,7 +206,7 @@ it("shows the Tag typing until it writes, then its activity line instead", () =>
   expect(active).toContain("Running pnpm test");
   const done = renderToStaticMarkup(
     createElement(ConversationEntry, {
-      message: { conversation: "planning", task },
+      message: { order: 1, task },
       onActivity: () => {},
       onSaveArtifact: async () => false,
     }),

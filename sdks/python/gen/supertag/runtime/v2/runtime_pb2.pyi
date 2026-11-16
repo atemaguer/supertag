@@ -670,14 +670,13 @@ class WatchResync(_message.Message):
     def __init__(self) -> None: ...
 
 class WatchChange(_message.Message):
-    __slots__ = ("kind", "id", "tag_id", "session_id", "objective_id", "team_id", "conversation", "changed_at_ms", "reason")
+    __slots__ = ("kind", "id", "tag_id", "session_id", "objective_id", "team_id", "changed_at_ms", "reason")
     KIND_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
-    CONVERSATION_FIELD_NUMBER: _ClassVar[int]
     CHANGED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     REASON_FIELD_NUMBER: _ClassVar[int]
     kind: WatchKind
@@ -686,10 +685,9 @@ class WatchChange(_message.Message):
     session_id: str
     objective_id: str
     team_id: str
-    conversation: str
     changed_at_ms: int
     reason: WatchReason
-    def __init__(self, kind: _Optional[_Union[WatchKind, str]] = ..., id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., team_id: _Optional[str] = ..., conversation: _Optional[str] = ..., changed_at_ms: _Optional[int] = ..., reason: _Optional[_Union[WatchReason, str]] = ...) -> None: ...
+    def __init__(self, kind: _Optional[_Union[WatchKind, str]] = ..., id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., team_id: _Optional[str] = ..., changed_at_ms: _Optional[int] = ..., reason: _Optional[_Union[WatchReason, str]] = ...) -> None: ...
 
 class ListInboxItemsRequest(_message.Message):
     __slots__ = ("objective_id", "kind", "page_size", "cursor")
@@ -2126,86 +2124,110 @@ class RetireTagResponse(_message.Message):
     def __init__(self, tag: _Optional[_Union[Tag, _Mapping]] = ..., blockers: _Optional[_Iterable[str]] = ..., surface_locations: _Optional[int] = ..., host_bindings: _Optional[int] = ..., mailbox_grants: _Optional[int] = ..., role_assignments: _Optional[int] = ...) -> None: ...
 
 class Conversation(_message.Message):
-    __slots__ = ("tag_id", "name", "session_id", "latest_task")
+    __slots__ = ("tag_id", "conversation_id", "session_id", "preview", "preview_from_tag", "last_activity_at_ms", "latest_order", "read_order", "unread_count", "working", "latest_work_session_report_id")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
-    NAME_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
-    LATEST_TASK_FIELD_NUMBER: _ClassVar[int]
+    PREVIEW_FIELD_NUMBER: _ClassVar[int]
+    PREVIEW_FROM_TAG_FIELD_NUMBER: _ClassVar[int]
+    LAST_ACTIVITY_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    LATEST_ORDER_FIELD_NUMBER: _ClassVar[int]
+    READ_ORDER_FIELD_NUMBER: _ClassVar[int]
+    UNREAD_COUNT_FIELD_NUMBER: _ClassVar[int]
+    WORKING_FIELD_NUMBER: _ClassVar[int]
+    LATEST_WORK_SESSION_REPORT_ID_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
-    name: str
+    conversation_id: str
     session_id: str
-    latest_task: Task
-    def __init__(self, tag_id: _Optional[str] = ..., name: _Optional[str] = ..., session_id: _Optional[str] = ..., latest_task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
+    preview: str
+    preview_from_tag: bool
+    last_activity_at_ms: int
+    latest_order: int
+    read_order: int
+    unread_count: int
+    working: bool
+    latest_work_session_report_id: str
+    def __init__(self, tag_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., session_id: _Optional[str] = ..., preview: _Optional[str] = ..., preview_from_tag: _Optional[bool] = ..., last_activity_at_ms: _Optional[int] = ..., latest_order: _Optional[int] = ..., read_order: _Optional[int] = ..., unread_count: _Optional[int] = ..., working: _Optional[bool] = ..., latest_work_session_report_id: _Optional[str] = ...) -> None: ...
 
 class ConversationMessage(_message.Message):
-    __slots__ = ("task", "conversation", "live_input", "work_session_report_id", "events", "events_truncated")
+    __slots__ = ("task", "live_input", "work_session_report_id", "events", "events_truncated", "order", "sent_at_ms", "completed_at_ms")
     TASK_FIELD_NUMBER: _ClassVar[int]
-    CONVERSATION_FIELD_NUMBER: _ClassVar[int]
     LIVE_INPUT_FIELD_NUMBER: _ClassVar[int]
     WORK_SESSION_REPORT_ID_FIELD_NUMBER: _ClassVar[int]
     EVENTS_FIELD_NUMBER: _ClassVar[int]
     EVENTS_TRUNCATED_FIELD_NUMBER: _ClassVar[int]
+    ORDER_FIELD_NUMBER: _ClassVar[int]
+    SENT_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     task: Task
-    conversation: str
     live_input: LiveInput
     work_session_report_id: str
     events: _containers.RepeatedCompositeFieldContainer[TaskEvent]
     events_truncated: bool
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., conversation: _Optional[str] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ..., work_session_report_id: _Optional[str] = ..., events: _Optional[_Iterable[_Union[TaskEvent, _Mapping]]] = ..., events_truncated: _Optional[bool] = ...) -> None: ...
+    order: int
+    sent_at_ms: int
+    completed_at_ms: int
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ..., work_session_report_id: _Optional[str] = ..., events: _Optional[_Iterable[_Union[TaskEvent, _Mapping]]] = ..., events_truncated: _Optional[bool] = ..., order: _Optional[int] = ..., sent_at_ms: _Optional[int] = ..., completed_at_ms: _Optional[int] = ...) -> None: ...
 
 class ListConversationsRequest(_message.Message):
-    __slots__ = ("tag_id", "limit", "cursor")
-    TAG_ID_FIELD_NUMBER: _ClassVar[int]
-    LIMIT_FIELD_NUMBER: _ClassVar[int]
-    CURSOR_FIELD_NUMBER: _ClassVar[int]
-    tag_id: str
-    limit: int
-    cursor: str
-    def __init__(self, tag_id: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class ListConversationsResponse(_message.Message):
-    __slots__ = ("conversations", "next_cursor")
+    __slots__ = ("conversations",)
     CONVERSATIONS_FIELD_NUMBER: _ClassVar[int]
-    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
     conversations: _containers.RepeatedCompositeFieldContainer[Conversation]
-    next_cursor: str
-    def __init__(self, conversations: _Optional[_Iterable[_Union[Conversation, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+    def __init__(self, conversations: _Optional[_Iterable[_Union[Conversation, _Mapping]]] = ...) -> None: ...
 
 class ListMessagesRequest(_message.Message):
-    __slots__ = ("tag_id", "conversation", "limit", "cursor")
+    __slots__ = ("tag_id", "limit", "cursor", "after", "conversation_id", "refresh_task_ids")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
-    CONVERSATION_FIELD_NUMBER: _ClassVar[int]
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     CURSOR_FIELD_NUMBER: _ClassVar[int]
+    AFTER_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    REFRESH_TASK_IDS_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
-    conversation: str
     limit: int
     cursor: str
-    def __init__(self, tag_id: _Optional[str] = ..., conversation: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+    after: int
+    conversation_id: str
+    refresh_task_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, tag_id: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ..., after: _Optional[int] = ..., conversation_id: _Optional[str] = ..., refresh_task_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ListMessagesResponse(_message.Message):
-    __slots__ = ("messages", "next_cursor")
+    __slots__ = ("messages", "next_cursor", "conversation_id", "incremental")
     MESSAGES_FIELD_NUMBER: _ClassVar[int]
     NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    INCREMENTAL_FIELD_NUMBER: _ClassVar[int]
     messages: _containers.RepeatedCompositeFieldContainer[ConversationMessage]
     next_cursor: str
-    def __init__(self, messages: _Optional[_Iterable[_Union[ConversationMessage, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+    conversation_id: str
+    incremental: bool
+    def __init__(self, messages: _Optional[_Iterable[_Union[ConversationMessage, _Mapping]]] = ..., next_cursor: _Optional[str] = ..., conversation_id: _Optional[str] = ..., incremental: _Optional[bool] = ...) -> None: ...
 
 class SendMessageRequest(_message.Message):
-    __slots__ = ("tag_id", "conversation", "text", "operation_id", "execution_limits", "output_policy")
+    __slots__ = ("tag_id", "text", "operation_id", "execution_limits", "output_policy")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
-    CONVERSATION_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     OUTPUT_POLICY_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
-    conversation: str
     text: str
     operation_id: str
     execution_limits: ExecutionLimits
     output_policy: TaskOutputPolicy
-    def __init__(self, tag_id: _Optional[str] = ..., conversation: _Optional[str] = ..., text: _Optional[str] = ..., operation_id: _Optional[str] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ...) -> None: ...
+    def __init__(self, tag_id: _Optional[str] = ..., text: _Optional[str] = ..., operation_id: _Optional[str] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ...) -> None: ...
+
+class MarkConversationReadRequest(_message.Message):
+    __slots__ = ("tag_id", "order")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    ORDER_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    order: int
+    def __init__(self, tag_id: _Optional[str] = ..., order: _Optional[int] = ...) -> None: ...
 
 class GetMessageRequest(_message.Message):
     __slots__ = ("tag_id", "task_id")

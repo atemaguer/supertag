@@ -1,98 +1,99 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { Message } from "../control-plane";
 import {
   earlierHistory,
   emptyHistory,
   latestHistory,
-  readHistory,
   receivedMessage,
+  refreshRequest,
+  TAIL,
+  tail,
 } from "./history";
 
-function message(taskId: string, sessionId = "session"): Message {
+function message(taskId: string, order: number, state = "succeeded"): Message {
   return {
-    task: { taskId, sessionId, tagId: "lead", prompt: taskId, state: "succeeded" },
-    conversation: "planning",
+    order,
+    task: { taskId, sessionId: "conversation/one", tagId: "lead", prompt: taskId, state },
   };
 }
 
-describe("Watch history refresh", () => {
-  it("catches up across pages, preserves earlier history and deduplicates a local receipt", async () => {
+const ids = (messages: readonly Message[]) => messages.map(({ task }) => task.taskId);
+
+describe("conversation history", () => {
+  it("asks only for what changed once it holds a copy, and merges the changes", () => {
+    expect(refreshRequest("lead", emptyHistory)).toEqual({ tagId: "lead" });
     let history = latestHistory(emptyHistory, {
-      messages: [message("three")],
-      nextCursor: "earlier",
+      conversationId: "c1",
+      messages: [message("three", 3, "running"), message("two", 2)],
+      nextCursor: "2",
+    });
+    expect(ids(history.messages)).toEqual(["two", "three"]);
+    expect(history.cursor).toBe("2");
+    expect(refreshRequest("lead", history)).toEqual({
+      tagId: "lead",
+      after: 3,
+      conversationId: "c1",
+      refreshTaskIds: ["three"],
+    });
+    // The running turn finished and a new message arrived; earlier messages stay.
+    history = latestHistory(history, {
+      conversationId: "c1",
+      incremental: true,
+      messages: [message("four", 4), message("three", 3)],
+    });
+    expect(ids(history.messages)).toEqual(["two", "three", "four"]);
+    expect(history.messages[1]?.task.state).toBe("succeeded");
+    expect(history.cursor).toBe("2");
+  });
+
+  it("replaces its copy with a page of another conversation or a newest page", () => {
+    const old = latestHistory(emptyHistory, {
+      conversationId: "c1",
+      messages: [message("old", 1)],
+    });
+    const replaced = latestHistory(old, {
+      conversationId: "c2",
+      incremental: true,
+      messages: [message("new", 1)],
+      nextCursor: "1",
+    });
+    expect(ids(replaced.messages)).toEqual(["new"]);
+    expect(replaced.conversationId).toBe("c2");
+    // A page read for the replaced copy is not merged into the new one.
+    expect(earlierHistory(replaced, old, { conversationId: "c1", messages: [] })).toBe(replaced);
+    const newest = latestHistory(old, { conversationId: "c1", messages: [message("later", 9)] });
+    expect(ids(newest.messages)).toEqual(["later"]);
+  });
+
+  it("adds earlier pages and receipts in conversation order, once each", () => {
+    let history = latestHistory(emptyHistory, {
+      conversationId: "c1",
+      messages: [message("three", 3)],
+      nextCursor: "3",
     });
     history = earlierHistory(history, history, {
-      messages: [message("two")],
-      nextCursor: "load-one",
+      conversationId: "c1",
+      messages: [message("two", 2), message("one", 1)],
     });
-    history = receivedMessage(history, message("six"));
-    const report: Message = {
-      conversation: "planning",
-      task: { ...message("five").task, prompt: undefined, state: "running" },
-      workSessionReportId: "work/five",
-    };
-    const read = vi.fn(async (cursor?: string) => {
-      switch (cursor) {
-        case undefined:
-          return { messages: [message("six")], nextCursor: "first" };
-        case "first":
-          return { messages: [report, message("four")], nextCursor: "second" };
-        case "second":
-          return { messages: [message("three")], nextCursor: "earlier" };
-        default:
-          throw new Error("unexpected cursor");
-      }
-    });
-    const fresh = await readHistory(read, history, new AbortController().signal);
-    history = latestHistory(history, fresh);
-    expect(read.mock.calls).toEqual([[undefined], ["first"], ["second"]]);
-    expect(history.messages.map(({ task }) => task.taskId)).toEqual([
-      "two",
-      "three",
-      "four",
-      "five",
-      "six",
-    ]);
-    expect(history.cursor).toBe("load-one");
-    expect(receivedMessage(history, message("six"))).toBe(history);
-
-    const settled = {
-      ...report,
-      task: { ...report.task, state: "succeeded", result: "Work Session complete." },
-    };
-    const refreshed = latestHistory(history, { messages: [message("six"), settled] });
-    expect(refreshed.messages).toEqual([
-      message("two"),
-      message("three"),
-      message("four"),
-      settled,
-      message("six"),
-    ]);
-    expect(refreshed.cursor).toBe("load-one");
+    expect(ids(history.messages)).toEqual(["one", "two", "three"]);
+    expect(history.cursor).toBeUndefined();
+    history = receivedMessage(history, message("four", 4, "queued"));
+    expect(receivedMessage(history, message("four", 4))).toBe(history);
+    expect(ids(history.messages)).toEqual(["one", "two", "three", "four"]);
   });
 
-  it("does not mix Sessions or merge a delayed older page after replacement", async () => {
-    const old = latestHistory(emptyHistory, { messages: [message("old")], nextCursor: "prior" });
-    const read = vi.fn(async () => ({
-      messages: [message("new", "replacement")],
-      nextCursor: "new-page",
-    }));
-    const page = await readHistory(read, old, new AbortController().signal);
-    const current = latestHistory(old, page);
-    expect(read).toHaveBeenCalledOnce();
-    expect(current.messages).toEqual([message("new", "replacement")]);
-    expect(current.cursor).toBe("new-page");
-    expect(earlierHistory(current, old, { messages: [message("stale")] })).toBe(current);
-  });
-
-  it("stops paging if the view closes during a read", async () => {
-    const before = latestHistory(emptyHistory, { messages: [message("old")] });
-    const abort = new AbortController();
-    const read = vi.fn(async () => {
-      abort.abort();
-      return { messages: [message("new")], nextCursor: "more" };
+  it("keeps its latest messages as the cached tail, which still pages back", () => {
+    const messages = Array.from({ length: TAIL + 5 }, (_, index) =>
+      message(`m${index + 1}`, index + 1),
+    );
+    const full = latestHistory(emptyHistory, {
+      conversationId: "c1",
+      messages: [...messages].reverse(),
     });
-    await expect(readHistory(read, before, abort.signal)).rejects.toThrow();
-    expect(read).toHaveBeenCalledOnce();
+    const kept = tail(full);
+    expect(kept.messages).toHaveLength(TAIL);
+    expect(kept.messages[0]?.task.taskId).toBe("m6");
+    expect(kept.cursor).toBe("6");
+    expect(tail(kept)).toBe(kept);
   });
 });

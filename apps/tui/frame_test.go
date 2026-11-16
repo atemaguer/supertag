@@ -102,7 +102,7 @@ func TestFollowDeliversWaitingEventsTogether(t *testing.T) {
 		events <- client.FollowEvent{Kind: client.EventDelta, Text: text}
 	}
 	close(events)
-	msg, ok := waitForTask(tag, defaultConversation, "task-2", events)().(followMsg)
+	msg, ok := waitForTask(tag, "task-2", events)().(followMsg)
 	if !ok || msg.event.Text != "one " || len(msg.more) != 2 || msg.more[1].Text != "three" {
 		t.Fatalf("first message = %#v", msg)
 	}
@@ -111,7 +111,7 @@ func TestFollowDeliversWaitingEventsTogether(t *testing.T) {
 	if m.frame.contents != contents+1 || !strings.Contains(screen(m), "one two three") {
 		t.Fatalf("the events redrew the conversation %d times:\n%s", m.frame.contents-contents, screen(m))
 	}
-	if _, done := waitForTask(tag, defaultConversation, "task-2", events)().(followDoneMsg); !done {
+	if _, done := waitForTask(tag, "task-2", events)().(followDoneMsg); !done {
 		t.Fatal("the closed follow did not report done")
 	}
 }

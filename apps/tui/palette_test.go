@@ -85,8 +85,7 @@ func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
 	a := testApp(t, &fakeControlPlane{tags: tags("lead")}, nil)
 	pressApp(t, a, ctrlK)
 	s := appScreen(a)
-	for _, want := range []string{"Commands", "New conversation", "Switch conversation", "with lead · ctrl+o",
-		"/goal · Create Objective        owned by lead", "Open inbox", "0 waiting", "enter runs"} {
+	for _, want := range []string{"Commands", "/goal · Create Objective        owned by lead", "Open inbox", "0 waiting", "enter runs"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the palette lacks %q:\n%s", want, s)
 		}
@@ -94,14 +93,17 @@ func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
 	if !strings.Contains(s, "Control Planes · add or switch") {
 		t.Errorf("one Control Plane must still offer adding another:\n%s", s)
 	}
+	if strings.Contains(s, "conversation") {
+		t.Errorf("a Tag has one conversation, so the palette offers none to start or switch to:\n%s", s)
+	}
 	pressApp(t, a, key(tea.KeyEscape))
-	if a.palette != nil || !strings.Contains(appScreen(a), "lead · default") {
+	if a.palette != nil || !strings.Contains(appScreen(a), "Say something to lead") {
 		t.Fatalf("esc must close the palette:\n%s", appScreen(a))
 	}
 
 	empty := testApp(t, &fakeControlPlane{}, nil)
 	pressApp(t, empty, ctrlK)
-	if s := appScreen(empty); strings.Contains(s, "New conversation") || strings.Contains(s, "Create Objective") || !strings.Contains(s, "Open inbox") {
+	if s := appScreen(empty); strings.Contains(s, "Create Objective") || !strings.Contains(s, "Open inbox") {
 		t.Fatalf("without Tags only the inbox applies:\n%s", s)
 	}
 }
@@ -117,12 +119,12 @@ func TestSlashOpensThePaletteOnlyWhereItIsNotTyped(t *testing.T) {
 	if a.palette == nil || a.inner.input.Value() != "" {
 		t.Fatalf("/ on an empty input must open the palette: input=%q", a.inner.input.Value())
 	}
-	a.Update(tea.PasteMsg{Content: "conv"})
+	a.Update(tea.PasteMsg{Content: "goal"})
 	if a.inner.input.Value() != "" {
 		t.Fatalf("a paste into the palette reached the input: %q", a.inner.input.Value())
 	}
 	s := appScreen(a)
-	if !strings.Contains(s, "New conversation") || !strings.Contains(s, "Switch conversation") || strings.Contains(s, "Create Objective") {
+	if !strings.Contains(s, "Create Objective") || strings.Contains(s, "Open inbox") || strings.Contains(s, "Task files") {
 		t.Fatalf("the filter must keep only matching commands:\n%s", s)
 	}
 	typeApp(t, a, "zz")

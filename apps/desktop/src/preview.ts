@@ -26,9 +26,10 @@ const tags: Tag[] = [
   },
 ];
 
+let order = 0;
+
 function sample(
   taskId: string,
-  conversation: string,
   prompt: string,
   result?: string,
   minutesAgo?: number,
@@ -36,109 +37,107 @@ function sample(
 ): Message {
   const state = result === undefined ? "running" : "succeeded";
   const createdAtMs = minutesAgo === undefined ? undefined : Date.now() - minutesAgo * 60_000;
+  order += 1;
   return {
-    conversation,
-    task: { taskId, tagId, sessionId: conversation, prompt, state, result, createdAtMs },
+    order,
+    task: { taskId, tagId, sessionId: `preview/${tagId}`, prompt, state, result, createdAtMs },
   };
 }
 
-const messages = new Map<string, Map<string, Message[]>>([
+const messages = new Map<string, Message[]>([
   [
     "finch",
-    new Map([
-      [
-        "CI-health",
-        [
-          sample(
-            "ci-health-1",
-            "CI-health",
-            "Can you look at the PostgreSQL deadline test? It counted two aborts in the last CI run.",
-            "I traced both aborts to the same Objective. Its deadline and the worker’s cancellation path each recorded an abort. The fix is to make the terminal transition atomic so only the first writer can record it.",
-            26 * 60,
-          ),
-          sample(
-            "ci-health-2",
-            "CI-health",
-            "Check whether the same race can affect SQLite.",
-            "SQLite uses the same cancellation path. I’d cover both databases with one test:\n\n1. Release the deadline and cancellation paths together.\n2. Check that **one** abort was recorded in `objective_events`.",
-            26 * 60 - 8,
-          ),
-          sample("ci-health-3", "CI-health", "Write that test for both databases.", undefined, 3),
-        ],
-      ],
-    ]),
+    [
+      sample(
+        "ci-health-1",
+        "Can you look at the PostgreSQL deadline test? It counted two aborts in the last CI run.",
+        "I traced both aborts to the same Objective. Its deadline and the worker’s cancellation path each recorded an abort. The fix is to make the terminal transition atomic so only the first writer can record it.",
+        26 * 60,
+      ),
+      sample(
+        "ci-health-2",
+        "Check whether the same race can affect SQLite.",
+        "SQLite uses the same cancellation path. I’d cover both databases with one test:\n\n1. Release the deadline and cancellation paths together.\n2. Check that **one** abort was recorded in `objective_events`.",
+        26 * 60 - 8,
+      ),
+      sample("ci-health-3", "Write that test for both databases.", undefined, 3),
+    ],
   ],
   [
     "moss",
-    new Map([
-      [
-        "default",
-        [
-          sample(
-            "moss-1",
-            "default",
-            "Review the deadline fix for missing coverage.",
-            undefined,
-            1,
-            "moss",
-          ),
-        ],
-      ],
-    ]),
+    [sample("moss-1", "Review the deadline fix for missing coverage.", undefined, 1, "moss")],
   ],
 ]);
 
-function conversationsFor(tagId: string): Map<string, Message[]> {
-  let threads = messages.get(tagId);
-  if (!threads) {
-    threads = new Map();
-    messages.set(tagId, threads);
+function conversationFor(tagId: string): Message[] {
+  let entries = messages.get(tagId);
+  if (!entries) {
+    entries = [];
+    messages.set(tagId, entries);
   }
-  return threads;
+  return entries;
 }
 
 export const previewControlPlane: ControlPlane = {
   async tags() {
     return tags;
   },
-  async conversations(tagId) {
-    return [...conversationsFor(tagId)].map(
-      ([name, entries]): Conversation => ({
-        tagId,
-        name,
-        sessionId: name,
-        latestTask: entries.at(-1)?.task,
-      }),
-    );
+  async conversations() {
+    return [...messages].flatMap(([tagId, entries]): Conversation[] => {
+      const latest = entries.at(-1);
+      if (!latest) return [];
+      const reply = latest.task.result;
+      return [
+        {
+          tagId,
+          conversationId: `preview/${tagId}`,
+          preview: reply ?? latest.task.prompt ?? "",
+          previewFromTag: reply !== undefined,
+          lastActivityAtMs: latest.task.createdAtMs ?? 0,
+          latestOrder: latest.order,
+          readOrder: latest.order,
+          unreadCount: 0,
+          working: latest.task.state === "running",
+        },
+      ];
+    });
   },
-  async messages(tagId, name) {
-    const messages = [...(conversationsFor(tagId).get(name) ?? [])].reverse();
+  async messages({ tagId }) {
     return {
-      messages: messages.map((message) => {
+      conversationId: `preview/${tagId}`,
+      messages: [...conversationFor(tagId)].reverse().map((message) => {
         // As the Control Plane does: each message the Tag wrote, and its latest activity.
         const events = previewEvents(message.task.taskId);
         return { ...message, events: [events[0], events.at(-1)].filter((e) => e !== undefined) };
       }),
     };
   },
-  async send(tagId, name, text, operationId) {
-    const threads = conversationsFor(tagId);
-    const entries = threads.get(name) ?? [];
+  async send(tagId, text, operationId) {
+    const entries = conversationFor(tagId);
     const prior = entries.find(({ task }) => task.taskId === operationId);
     if (prior) return prior;
-    const message = {
-      conversation: name,
+    order += 1;
+    const message: Message = {
+      order,
       task: {
         taskId: operationId,
         tagId,
-        sessionId: name,
+        sessionId: `preview/${tagId}`,
         prompt: text,
         state: "succeeded",
         result: "This is a local preview. Connect a Control Plane to run Tasks with your Tags.",
+        createdAtMs: Date.now(),
       },
     };
-    threads.set(name, [...entries, message]);
+    entries.push(message);
     return message;
+  },
+  async markRead(tagId) {
+    const conversation = (await previewControlPlane.conversations()).find(
+      (entry) => entry.tagId === tagId,
+    );
+    if (!conversation) throw new Error("No conversation with that Tag yet.");
+    return conversation;
   },
   async saveArtifact() {
     return false;

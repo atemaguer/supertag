@@ -102,11 +102,11 @@ func (c *Client) ListTags(ctx context.Context) ([]*views.Tag, error) {
 	return c.runtime.listTags(ctx)
 }
 
-// SendMessage sends text to the Tag in the named conversation. A retry after a failure that may
-// not have reached the Control Plane reuses the same idempotency key, so the Tag gets the message
-// once.
-func (c *Client) SendMessage(ctx context.Context, tag, conversation, text string) (*views.Message, error) {
-	return c.runtime.sendMessage(ctx, tag, conversation, text)
+// SendMessage sends text to the caller's conversation with the Tag. A retry after a failure
+// that may not have reached the Control Plane reuses the same idempotency key, so the Tag gets
+// the message once.
+func (c *Client) SendMessage(ctx context.Context, tag, text string) (*views.Message, error) {
+	return c.runtime.sendMessage(ctx, tag, text)
 }
 
 // retrying makes an idempotent call, retrying it twice after a failure that may not have reached
@@ -135,20 +135,32 @@ func (c *Client) GetMessage(ctx context.Context, tag, taskID string) (*views.Mes
 	return c.runtime.projectMessage(ctx, message)
 }
 
-// ListMessages returns one page of the messages the caller sent in the conversation, newest
-// first, and the token of the next page.
-func (c *Client) ListMessages(ctx context.Context, tag, conversation string, pageSize int32, pageToken string) ([]*views.Message, string, error) {
-	return c.runtime.listMessages(ctx, tag, conversation, pageSize, pageToken)
+// MessagePage is one page of a conversation, newest first.
+type MessagePage struct {
+	Messages []*views.Message
+	// NextCursor reads the page before this one; empty on the oldest page.
+	NextCursor string
+	// ConversationID identifies the conversation. It changes only when the conversation is
+	// replaced, and is empty before the caller's first message to the Tag.
+	ConversationID string
 }
 
-// maxConversationPages bounds ListConversations, so a caller with very many conversations still
-// gets an answer.
-const maxConversationPages = 10
+// ListMessages returns one page of the caller's conversation with the Tag, newest first. Its
+// messages can belong to different Sessions of the conversation.
+func (c *Client) ListMessages(ctx context.Context, tag string, pageSize int32, pageToken string) (MessagePage, error) {
+	return c.runtime.listMessages(ctx, tag, pageSize, pageToken)
+}
 
-// ListConversations returns the caller's conversations with the named Tag, or with every Tag when
-// tag is empty, the most recent first.
-func (c *Client) ListConversations(ctx context.Context, tag string) ([]*views.Conversation, error) {
-	return c.runtime.listConversations(ctx, tag)
+// ListConversations returns the caller's conversations, one per Tag it has talked to, the latest
+// active first.
+func (c *Client) ListConversations(ctx context.Context) ([]*views.Conversation, error) {
+	return c.runtime.listConversations(ctx)
+}
+
+// MarkConversationRead records that the caller read its conversation with the Tag up to the
+// message with this order.
+func (c *Client) MarkConversationRead(ctx context.Context, tag string, order uint64) error {
+	return c.runtime.markConversationRead(ctx, tag, order)
 }
 
 func idempotencyKey() (string, error) {

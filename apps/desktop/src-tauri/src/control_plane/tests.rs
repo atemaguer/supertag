@@ -74,7 +74,6 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
             state: v2::TaskState::Queued as i32,
             ..Default::default()
         }),
-        conversation: "planning".into(),
         live_input: Some(v2::LiveInput {
             input_id: "input".into(),
             task_id: "running".into(),
@@ -90,6 +89,9 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
             kind: v2::TaskEventKind::Message as i32,
         }],
         events_truncated: true,
+        order: 9,
+        sent_at_ms: 1_000,
+        completed_at_ms: None,
     })
     .unwrap();
     let json = serde_json::to_value(message).unwrap();
@@ -103,6 +105,9 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
     assert_eq!(json["events"][0]["sequence"], 3);
     assert_eq!(json["events"][0]["kind"], "message");
     assert_eq!(json["eventsTruncated"], true);
+    assert_eq!(json["order"], 9);
+    assert_eq!(json["task"]["createdAtMs"], 1_000);
+    assert!(json.get("completedAtMs").is_none());
 }
 
 #[test]
@@ -122,7 +127,6 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
     };
     let message = Message::try_from(v2::ConversationMessage {
         task: Some(report.clone()),
-        conversation: "planning".into(),
         live_input: Some(v2::LiveInput {
             text: "Unexpected internal input".into(),
             ..Default::default()
@@ -130,6 +134,9 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
         work_session_report_id: Some("work/dependency".into()),
         events: vec![],
         events_truncated: false,
+        order: 10,
+        sent_at_ms: 1_000,
+        completed_at_ms: Some(2_000),
     })
     .unwrap();
     let json = serde_json::to_value(message).unwrap();
@@ -149,16 +156,21 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
     assert!(json.get("liveInput").is_none());
     assert!(json.get("eventsTruncated").is_none());
 
+    assert_eq!(json["completedAtMs"], 2_000);
+
     let summary = Conversation::from(v2::Conversation {
-        latest_task: Some(v2::Task {
-            prompt: String::new(),
-            ..report
-        }),
+        tag_id: "engineer".into(),
+        preview: "The dependency update passed verification.".into(),
+        preview_from_tag: true,
+        unread_count: 2,
+        working: true,
         ..Default::default()
     });
     let json = serde_json::to_value(summary).unwrap();
-    assert_eq!(json["latestTask"]["taskId"], "report-task");
-    assert!(json["latestTask"].get("prompt").is_none());
+    assert_eq!(json["tagId"], "engineer");
+    assert_eq!(json["previewFromTag"], true);
+    assert_eq!(json["unreadCount"], 2);
+    assert_eq!(json["working"], true);
 }
 
 /// A Control Plane's API tier in front of its state owner. With `tunnel`, the API tier also
@@ -300,7 +312,6 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
         .send(
             id,
             "engineer".into(),
-            "planning".into(),
             "Explain the change".into(),
             "desktop-operation".into(),
         )
@@ -310,7 +321,6 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
         .send(
             id,
             "engineer".into(),
-            "planning".into(),
             "Explain the change".into(),
             "desktop-operation".into(),
         )
@@ -323,25 +333,50 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
             .send(
                 id,
                 "engineer".into(),
-                "planning".into(),
                 "Different content".into(),
                 "desktop-operation".into()
             )
             .await
             .is_err()
     );
-    let conversations = client.conversations(id, "engineer".into()).await.unwrap();
+    let conversations = client.conversations(id).await.unwrap();
     assert_eq!(conversations.len(), 1);
-    assert_eq!(conversations[0].name, "planning");
-    let latest_task = conversations[0].latest_task.as_ref().unwrap();
-    assert_eq!(latest_task.task_id, first.task.task_id);
-    assert_eq!(latest_task.prompt.as_deref(), Some("Explain the change"));
+    assert_eq!(conversations[0].tag_id, "engineer");
+    assert_eq!(conversations[0].preview, "Explain the change");
+    assert!(conversations[0].working);
     let page = client
-        .messages(id, "engineer".into(), "planning".into(), None)
+        .messages(
+            id,
+            ReadMessages {
+                tag_id: "engineer".into(),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     assert_eq!(page.messages.len(), 1);
     assert!(page.next_cursor.is_empty());
+    assert_eq!(page.conversation_id, first.task.session_id);
+    // The copy the app keeps is current: nothing changed after its latest message.
+    let changes = client
+        .messages(
+            id,
+            ReadMessages {
+                tag_id: "engineer".into(),
+                after: Some(first.order),
+                conversation_id: Some(page.conversation_id.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(changes.incremental);
+    assert!(changes.messages.is_empty());
+    let read = client
+        .mark_read(id, "engineer".into(), first.order)
+        .await
+        .unwrap();
+    assert_eq!(read.read_order, first.order);
     assert_eq!(
         client
             .message(id, "engineer".into(), first.task.task_id.clone())
@@ -439,7 +474,6 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
             .send(
                 a.connection_id(),
                 "second-tag".into(),
-                "default".into(),
                 "Old workspace".into(),
                 "stale".into()
             )
@@ -449,7 +483,7 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
     );
     assert!(
         state
-            .conversations(b.connection_id(), "second-tag".into())
+            .conversations(b.connection_id())
             .await
             .unwrap()
             .is_empty()

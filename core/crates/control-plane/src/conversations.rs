@@ -154,7 +154,6 @@ impl Store {
         operator(principal)?;
         name("Tag ID", &input.tag_id)?;
         self.ensure_client_tag(principal, &input.tag_id).await?;
-        conversation_name(&input.conversation)?;
         name("operation ID", &input.operation_id)?;
         text("message", &input.text, crate::store::MAX_TASK_PROMPT_BYTES)?;
         if input.text.trim().is_empty() {
@@ -162,11 +161,7 @@ impl Store {
         }
         let mut digest = format!(
             "{:x}",
-            Sha256::digest(serde_json::to_vec(&(
-                &input.tag_id,
-                &input.conversation,
-                &input.text,
-            ))?)
+            Sha256::digest(serde_json::to_vec(&(&input.tag_id, &input.text))?)
         );
         if let Some(limits) = &execution_limits {
             digest = format!(
@@ -179,7 +174,7 @@ impl Store {
         }
         let digest = output_policy_digest(digest, output_policy.as_ref())?;
         let (mut tx, order) = self.write().await?;
-        let prior = sqlx::query("SELECT task_id,request_digest FROM supertag_v2_conversation_messages WHERE principal=$1 AND operation_id=$2")
+        let prior = sqlx::query("SELECT task_id,request_digest,accepted_order FROM supertag_v2_conversation_messages WHERE principal=$1 AND operation_id=$2")
             .bind(principal).bind(&input.operation_id).fetch_optional(&mut *tx).await?;
         if let Some(prior) = prior {
             if prior.try_get::<String, _>("request_digest")? != digest {
@@ -187,13 +182,17 @@ impl Store {
                     "operation ID was used with a different message".into(),
                 ));
             }
-            let task_id: String = prior.try_get("task_id")?;
-            let message = message_in(&mut tx, &input.conversation, &task_id, None).await?;
+            let entry = HistoryEntry {
+                task_id: prior.try_get("task_id")?,
+                report_id: None,
+                order: prior.try_get("accepted_order")?,
+            };
+            let message = message_in(&mut tx, entry).await?;
             tx.rollback().await?;
             return Ok(message);
         }
 
-        let previous = session_in(&mut tx, principal, &input.tag_id, &input.conversation).await?;
+        let previous = session_in(&mut tx, principal, &input.tag_id).await?;
         let session = previous
             .clone()
             .unwrap_or_else(|| format!("{SESSION_PREFIX}{}", Uuid::new_v4()));
@@ -210,11 +209,18 @@ impl Store {
         .await?;
         objective_link_task_in(&mut tx, &task).await?;
         if previous.is_none() {
-            sqlx::query("INSERT INTO supertag_v2_conversations (session_id,principal,tag_id,name,created_order) VALUES ($1,$2,$3,$4,$5)")
-                .bind(&session).bind(principal).bind(&input.tag_id).bind(&input.conversation)
+            sqlx::query("INSERT INTO supertag_v2_conversations (session_id,principal,tag_id,created_order) VALUES ($1,$2,$3,$4)")
+                .bind(&session).bind(principal).bind(&input.tag_id)
                 .bind(order).execute(&mut *tx).await?;
         }
 
+        // As recorded, so a replay of this send returns the same message.
+        let sent_at: Option<i64> =
+            sqlx::query_scalar("SELECT accepted_at_ms FROM supertag_v2_tasks WHERE task_id=$1")
+                .bind(&task.task_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        let sent_at = sent_at.unwrap_or_default();
         sqlx::query("INSERT INTO supertag_v2_conversation_messages (task_id,session_id,principal,operation_id,request_digest,accepted_order) VALUES ($1,$2,$3,$4,$5,$6)")
             .bind(&task.task_id).bind(&session).bind(principal).bind(&input.operation_id).bind(digest)
             .bind(order).execute(&mut *tx).await?;
@@ -222,17 +228,15 @@ impl Store {
         // home, and the Control Plane answers the message itself.
         if let Some(goal) = goal_command(&input.text) {
             let answer = goal_in(&mut tx, principal, &task, goal.as_deref(), now).await?;
-            let task =
-                crate::surface_objectives::settle_in(&mut tx, &task.task_id, &answer, now).await?;
+            crate::surface_objectives::settle_in(&mut tx, &task.task_id, &answer, now).await?;
+            let entry = HistoryEntry {
+                task_id: task.task_id,
+                report_id: None,
+                order,
+            };
+            let message = message_in(&mut tx, entry).await?;
             tx.commit().await?;
-            return Ok(ConversationMessage {
-                task: Some(task),
-                conversation: input.conversation.clone(),
-                live_input: None,
-                work_session_report_id: None,
-                events: Vec::new(),
-                events_truncated: false,
-            });
+            return Ok(message);
         }
         let active = if input.text.len() <= crate::inputs::MAX_INPUT_BYTES {
             sqlx::query("SELECT task_id,attempt_id FROM supertag_v2_tasks t WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND lease_expires_at_ms>$4 AND NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_tasks wt WHERE wt.task_id=t.task_id AND wt.kind=$5) ORDER BY accepted_order LIMIT 1")
@@ -253,69 +257,107 @@ impl Store {
             None
         };
         tx.commit().await?;
-        Ok(ConversationMessage {
-            task: Some(task),
-            conversation: input.conversation.clone(),
-            live_input,
-            work_session_report_id: None,
-            events: Vec::new(),
-            events_truncated: false,
-        })
+        Ok(sent(task, live_input, order, sent_at))
     }
 
+    /// The caller's conversations, the latest active first, in a fixed number of queries.
     pub async fn list_conversations(
         &self,
         principal: &str,
-        input: &ListConversationsRequest,
+        _input: &ListConversationsRequest,
     ) -> Result<ListConversationsResponse> {
         operator(principal)?;
-        if !input.tag_id.is_empty() {
-            name("Tag ID", &input.tag_id)?;
-        }
-        let limit = page_size(input.limit);
-        let cursor = order_cursor(&input.cursor)?;
+        let allowed = self.client_tags(principal).await?;
         let mut tx = self.pool.begin().await?;
-        let rows = sqlx::query(
-            "SELECT c.name,c.tag_id,c.session_id,c.created_order,latest.task_id,latest.work_session_report_id
-             FROM supertag_v2_conversations c JOIN supertag_v2_conversation_history latest
-               ON latest.task_id=(SELECT h.task_id FROM supertag_v2_conversation_history h
-                                   WHERE h.session_id=c.session_id ORDER BY h.accepted_order DESC LIMIT 1)
-             WHERE c.principal=$1 AND c.created_order<$2 AND ($3='' OR c.tag_id=$3)
-             ORDER BY c.created_order DESC LIMIT $4",
+        let sessions = sqlx::query(
+            "SELECT tag_id,session_id,created_order FROM supertag_v2_conversations
+             WHERE principal=$1 ORDER BY created_order",
         )
-            .bind(principal).bind(cursor).bind(&input.tag_id).bind(limit + 1).fetch_all(&mut *tx).await?;
-        let latest_ids = rows
-            .iter()
-            .map(|row| row.try_get::<String, _>("task_id"))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let ids: Vec<&str> = latest_ids.iter().map(String::as_str).collect();
-        let tasks = tasks_in(&mut tx, &ids).await?;
-        let mut page = Page::new(limit);
-        for row in rows {
-            let report_id: Option<String> = row.try_get("work_session_report_id")?;
-            let conversation = Conversation {
-                tag_id: row.try_get("tag_id")?,
-                name: row.try_get("name")?,
-                session_id: row.try_get("session_id")?,
-                latest_task: Some(conversation_task(
-                    &tasks,
-                    &row.try_get::<String, _>("task_id")?,
-                    report_id.is_some(),
-                )?),
-            };
-            if !page.push(
-                conversation,
-                row.try_get::<i64, _>("created_order")?.to_string(),
-            )? {
-                break;
+        .bind(principal)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut conversations: std::collections::BTreeMap<String, Conversation> =
+            Default::default();
+        for row in sessions {
+            let tag_id: String = row.try_get("tag_id")?;
+            if allowed
+                .as_ref()
+                .is_some_and(|allowed| !allowed.contains(&tag_id))
+            {
+                continue;
             }
+            let session_id: String = row.try_get("session_id")?;
+            conversations
+                .entry(tag_id.clone())
+                .or_insert_with(|| Conversation {
+                    tag_id,
+                    conversation_id: session_id,
+                    ..Default::default()
+                });
+        }
+        // Per conversation: its latest message, its unfinished Tasks, and its finished turns
+        // after the read mark.
+        let rows = sqlx::query(&format!(
+            "SELECT c.tag_id,MAX(h.accepted_order) AS latest_order,
+                    SUM(CASE WHEN t.state IN ({UNFINISHED}) THEN 1 ELSE 0 END) AS working,
+                    SUM(CASE WHEN t.state IN ({FINISHED}) AND h.accepted_order>COALESCE(r.read_order,0)
+                        THEN 1 ELSE 0 END) AS unread,
+                    COALESCE(MAX(r.read_order),0) AS read_order
+             FROM supertag_v2_conversations c
+             JOIN supertag_v2_conversation_history h ON h.session_id=c.session_id
+             JOIN supertag_v2_tasks t ON t.task_id=h.task_id
+             LEFT JOIN supertag_v2_conversation_reads r ON r.principal=c.principal AND r.tag_id=c.tag_id
+             WHERE c.principal=$1 GROUP BY c.tag_id"
+        ))
+        .bind(principal)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut latest_orders = Vec::with_capacity(rows.len());
+        for row in rows {
+            let Some(conversation) = conversations.get_mut(&row.try_get::<String, _>("tag_id")?)
+            else {
+                continue;
+            };
+            let latest: i64 = row.try_get("latest_order")?;
+            conversation.latest_order = latest as u64;
+            conversation.read_order = row.try_get::<i64, _>("read_order")? as u64;
+            conversation.working = row.try_get::<i64, _>("working")? > 0;
+            conversation.unread_count = row.try_get::<i64, _>("unread")?.try_into().unwrap_or(0);
+            latest_orders.push(latest);
+        }
+        let latest = history_at_orders_in(&mut tx, &latest_orders).await?;
+        let ids: Vec<&str> = latest.iter().map(|entry| entry.task_id.as_str()).collect();
+        let tasks = tasks_in(&mut tx, &ids).await?;
+        for entry in &latest {
+            let Some(row) = tasks.get(&entry.task_id) else {
+                continue;
+            };
+            let Some(conversation) = conversations.get_mut(&row.task.tag_id) else {
+                continue;
+            };
+            conversation.session_id = row.task.session_id.clone();
+            let reply = row
+                .task
+                .result
+                .as_deref()
+                .filter(|result| !result.is_empty() && finished(row.task.state()));
+            let (preview, from_tag) = match reply {
+                Some(reply) => (reply, true),
+                None if entry.report_id.is_some() => ("", true),
+                None => (row.task.prompt.as_str(), false),
+            };
+            conversation.preview = preview.chars().take(PREVIEW_CHARS).collect();
+            conversation.preview_from_tag = from_tag;
+            conversation.latest_work_session_report_id = entry.report_id.clone();
+            conversation.last_activity_at_ms = row
+                .completed_at_ms
+                .or(row.accepted_at_ms)
+                .unwrap_or_default();
         }
         tx.commit().await?;
-        let (conversations, next_cursor) = page.finish();
-        Ok(ListConversationsResponse {
-            conversations,
-            next_cursor,
-        })
+        let mut conversations: Vec<_> = conversations.into_values().collect();
+        conversations.sort_by(|a, b| b.latest_order.cmp(&a.latest_order));
+        Ok(ListConversationsResponse { conversations })
     }
 
     pub async fn list_messages(
@@ -326,37 +368,58 @@ impl Store {
         operator(principal)?;
         name("Tag ID", &input.tag_id)?;
         self.ensure_client_tag(principal, &input.tag_id).await?;
-        conversation_name(&input.conversation)?;
+        if input.refresh_task_ids.len() > 128 {
+            return Err(invalid("at most 128 Tasks can be refreshed"));
+        }
+        for id in &input.refresh_task_ids {
+            name("Task ID", id)?;
+        }
         let limit = page_size(input.limit);
         let cursor = order_cursor(&input.cursor)?;
+        let after = i64::try_from(input.after).map_err(|_| invalid("invalid message order"))?;
         let mut tx = self.pool.begin().await?;
-        let mut page = Page::new(limit);
-        if let Some(session) =
-            session_in(&mut tx, principal, &input.tag_id, &input.conversation).await?
+        let conversation_id = conversation_id_in(&mut tx, principal, &input.tag_id)
+            .await?
+            .unwrap_or_default();
+        if after > 0
+            && !conversation_id.is_empty()
+            && input.conversation_id == conversation_id
+            && let Some(messages) =
+                changes_in(&mut tx, principal, &input.tag_id, after, limit, input).await?
         {
-            let rows = sqlx::query("SELECT task_id,accepted_order,work_session_report_id FROM supertag_v2_conversation_history WHERE session_id=$1 AND accepted_order<$2 ORDER BY accepted_order DESC LIMIT $3")
-                .bind(session).bind(cursor).bind(limit + 1).fetch_all(&mut *tx).await?;
-            let mut entries = Vec::with_capacity(rows.len());
-            let mut orders = Vec::with_capacity(rows.len());
-            for row in rows {
-                entries.push((
-                    row.try_get::<String, _>("task_id")?,
-                    row.try_get::<Option<String>, _>("work_session_report_id")?,
-                ));
-                orders.push(row.try_get::<i64, _>("accepted_order")?);
-            }
-            let messages = messages_in(&mut tx, &input.conversation, entries).await?;
-            for (message, order) in messages.into_iter().zip(orders) {
-                if !page.push(message, order.to_string())? {
-                    break;
-                }
+            tx.commit().await?;
+            return Ok(ListMessagesResponse {
+                messages,
+                next_cursor: String::new(),
+                conversation_id,
+                incremental: true,
+            });
+        }
+        let rows = sqlx::query(&format!(
+            "{HISTORY} AND h.accepted_order<$3 ORDER BY h.accepted_order DESC LIMIT $4"
+        ))
+        .bind(principal)
+        .bind(&input.tag_id)
+        .bind(cursor)
+        .bind(limit + 1)
+        .fetch_all(&mut *tx)
+        .await?;
+        let entries = rows.iter().map(history_entry).collect::<Result<Vec<_>>>()?;
+        let messages = messages_in(&mut tx, entries).await?;
+        tx.commit().await?;
+        let mut page = Page::new(limit);
+        for message in messages {
+            let order = message.order.to_string();
+            if !page.push(message, order)? {
+                break;
             }
         }
-        tx.commit().await?;
         let (messages, next_cursor) = page.finish();
         Ok(ListMessagesResponse {
             messages,
             next_cursor,
+            conversation_id,
+            incremental: false,
         })
     }
 
@@ -370,19 +433,64 @@ impl Store {
         name("Tag ID", tag_id)?;
         name("Task ID", task_id)?;
         let mut tx = self.pool.begin().await?;
-        let entry = sqlx::query("SELECT c.name,h.work_session_report_id FROM supertag_v2_conversation_history h JOIN supertag_v2_conversations c ON c.session_id=h.session_id WHERE h.task_id=$1 AND c.principal=$2 AND c.tag_id=$3")
-            .bind(task_id).bind(principal).bind(tag_id).fetch_optional(&mut *tx).await?
+        let row = sqlx::query(&format!("{HISTORY} AND h.task_id=$3"))
+            .bind(principal)
+            .bind(tag_id)
+            .bind(task_id)
+            .fetch_optional(&mut *tx)
+            .await?
             .ok_or_else(|| StoreError::NotFound("Message was not found".into()))?;
-        let conversation: String = entry.try_get("name")?;
-        let message = message_in(
-            &mut tx,
-            &conversation,
-            task_id,
-            entry.try_get("work_session_report_id")?,
-        )
-        .await?;
+        let message = message_in(&mut tx, history_entry(&row)?).await?;
         tx.commit().await?;
         Ok(message)
+    }
+
+    /// Records that `principal` read its conversation with a Tag up to a finished turn. The mark
+    /// never moves back.
+    pub async fn mark_conversation_read(
+        &self,
+        principal: &str,
+        input: &MarkConversationReadRequest,
+    ) -> Result<Conversation> {
+        operator(principal)?;
+        name("Tag ID", &input.tag_id)?;
+        self.ensure_client_tag(principal, &input.tag_id).await?;
+        let order = i64::try_from(input.order).map_err(|_| invalid("invalid message order"))?;
+        let (mut tx, _) = self.write().await?;
+        if conversation_id_in(&mut tx, principal, &input.tag_id)
+            .await?
+            .is_none()
+        {
+            return Err(StoreError::NotFound("Conversation was not found".into()));
+        }
+        let now = self.execution_now_ms();
+        let prior: Option<i64> = sqlx::query_scalar(
+            "SELECT read_order FROM supertag_v2_conversation_reads WHERE principal=$1 AND tag_id=$2",
+        )
+        .bind(principal)
+        .bind(&input.tag_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        match prior {
+            None => {
+                sqlx::query("INSERT INTO supertag_v2_conversation_reads (principal,tag_id,read_order,read_at_ms) VALUES ($1,$2,$3,$4)")
+                    .bind(principal).bind(&input.tag_id).bind(order).bind(now)
+                    .execute(&mut *tx).await?;
+            }
+            Some(prior) if prior < order => {
+                sqlx::query("UPDATE supertag_v2_conversation_reads SET read_order=$1,read_at_ms=$2 WHERE principal=$3 AND tag_id=$4")
+                    .bind(order).bind(now).bind(principal).bind(&input.tag_id)
+                    .execute(&mut *tx).await?;
+            }
+            Some(_) => {}
+        }
+        tx.commit().await?;
+        self.list_conversations(principal, &ListConversationsRequest {})
+            .await?
+            .conversations
+            .into_iter()
+            .find(|conversation| conversation.tag_id == input.tag_id)
+            .ok_or_else(|| StoreError::NotFound("Conversation was not found".into()))
     }
 
     pub(crate) async fn ensure_task_access(&self, principal: &str, task_id: &str) -> Result<()> {
@@ -438,48 +546,185 @@ pub(crate) async fn task_access_in(
         .is_some_and(|owner| crate::store::sees_owner(principal, &owner)))
 }
 
+/// The conversation's history: the messages of every Session of `principal`'s conversation with
+/// the Tag in `$2`. Callers add conditions from `$3`.
+const HISTORY: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_id
+     FROM supertag_v2_conversation_history h
+     WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversations c
+                            WHERE c.principal=$1 AND c.tag_id=$2)";
+const UNFINISHED: &str = "1,2,6";
+const FINISHED: &str = "3,4,5";
+/// How much of the latest message a conversation list shows.
+const PREVIEW_CHARS: usize = 200;
+
+fn finished(state: TaskState) -> bool {
+    matches!(
+        state,
+        TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
+    )
+}
+
+/// A conversation history row: its Task, the report it carries, and its order.
+struct HistoryEntry {
+    task_id: String,
+    report_id: Option<String>,
+    order: i64,
+}
+
+fn history_entry(row: &sqlx::any::AnyRow) -> Result<HistoryEntry> {
+    Ok(HistoryEntry {
+        task_id: row.try_get("task_id")?,
+        report_id: row.try_get("work_session_report_id")?,
+        order: row.try_get("accepted_order")?,
+    })
+}
+
+async fn history_at_orders_in(
+    tx: &mut Transaction<'_, Any>,
+    orders: &[i64],
+) -> Result<Vec<HistoryEntry>> {
+    let mut entries = Vec::with_capacity(orders.len());
+    for chunk in orders.chunks(ID_BATCH) {
+        let sql = format!(
+            "SELECT task_id,accepted_order,work_session_report_id FROM supertag_v2_conversation_history
+             WHERE accepted_order IN ({})",
+            placeholders(1, chunk.len())
+        );
+        let mut query = sqlx::query(&sql);
+        for order in chunk {
+            query = query.bind(*order);
+        }
+        for row in query.fetch_all(&mut **tx).await? {
+            entries.push(history_entry(&row)?);
+        }
+    }
+    Ok(entries)
+}
+
+/// What changed in the conversation after `after`: its later messages and the current state of
+/// the requested ones, newest first. `None` when that is more than a page, so the caller reads the
+/// newest page instead.
+async fn changes_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    tag_id: &str,
+    after: i64,
+    limit: i64,
+    input: &ListMessagesRequest,
+) -> Result<Option<Vec<ConversationMessage>>> {
+    let rows = sqlx::query(&format!(
+        "{HISTORY} AND h.accepted_order>$3 ORDER BY h.accepted_order LIMIT $4"
+    ))
+    .bind(principal)
+    .bind(tag_id)
+    .bind(after)
+    .bind(limit + 1)
+    .fetch_all(&mut **tx)
+    .await?;
+    if rows.len() as i64 > limit {
+        return Ok(None);
+    }
+    let mut entries = rows.iter().map(history_entry).collect::<Result<Vec<_>>>()?;
+    if !input.refresh_task_ids.is_empty() {
+        let sql = format!(
+            "{HISTORY} AND h.accepted_order<=$3 AND h.task_id IN ({})",
+            placeholders(4, input.refresh_task_ids.len())
+        );
+        let mut query = sqlx::query(&sql).bind(principal).bind(tag_id).bind(after);
+        for id in &input.refresh_task_ids {
+            query = query.bind(id);
+        }
+        for row in query.fetch_all(&mut **tx).await? {
+            entries.push(history_entry(&row)?);
+        }
+    }
+    entries.sort_by(|a, b| b.order.cmp(&a.order));
+    let messages = messages_in(tx, entries).await?;
+    let bytes: usize = messages
+        .iter()
+        .map(|message| message.encoded_len() + 8)
+        .sum();
+    Ok((bytes <= PAGE_BYTES).then_some(messages))
+}
+
+/// The Session the conversation continues: the one its latest message is in.
 async fn session_in(
     tx: &mut Transaction<'_, Any>,
     principal: &str,
     tag: &str,
-    conversation: &str,
 ) -> Result<Option<String>> {
-    Ok(sqlx::query_scalar("SELECT session_id FROM supertag_v2_conversations WHERE principal=$1 AND tag_id=$2 AND name=$3")
-        .bind(principal).bind(tag).bind(conversation).fetch_optional(&mut **tx).await?)
+    Ok(sqlx::query_scalar(
+        "SELECT c.session_id FROM supertag_v2_conversations c
+         LEFT JOIN supertag_v2_conversation_messages m ON m.session_id=c.session_id
+         WHERE c.principal=$1 AND c.tag_id=$2
+         ORDER BY COALESCE(m.accepted_order,c.created_order) DESC LIMIT 1",
+    )
+    .bind(principal)
+    .bind(tag)
+    .fetch_optional(&mut **tx)
+    .await?)
+}
+
+/// The conversation's ID: its first Session's.
+async fn conversation_id_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    tag: &str,
+) -> Result<Option<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT session_id FROM supertag_v2_conversations WHERE principal=$1 AND tag_id=$2
+         ORDER BY created_order LIMIT 1",
+    )
+    .bind(principal)
+    .bind(tag)
+    .fetch_optional(&mut **tx)
+    .await?)
+}
+
+/// A message the Control Plane just accepted.
+fn sent(
+    task: Task,
+    live_input: Option<LiveInput>,
+    order: i64,
+    sent_at_ms: i64,
+) -> ConversationMessage {
+    ConversationMessage {
+        task: Some(task),
+        live_input,
+        work_session_report_id: None,
+        events: Vec::new(),
+        events_truncated: false,
+        order: order as u64,
+        sent_at_ms,
+        completed_at_ms: None,
+    }
 }
 
 async fn message_in(
     tx: &mut Transaction<'_, Any>,
-    conversation: &str,
-    task_id: &str,
-    work_session_report_id: Option<String>,
+    entry: HistoryEntry,
 ) -> Result<ConversationMessage> {
-    messages_in(
-        tx,
-        conversation,
-        vec![(task_id.to_owned(), work_session_report_id)],
-    )
-    .await?
-    .pop()
-    .ok_or_else(|| StoreError::NotFound("Task was not found".into()))
+    messages_in(tx, vec![entry])
+        .await?
+        .pop()
+        .ok_or_else(|| StoreError::NotFound("Task was not found".into()))
 }
 
-/// The messages of these history entries (Task ID, and report ID for a report turn), in their
-/// order. It takes the same few queries however many entries there are.
+/// The messages of these history entries, in their order. It takes the same few queries however
+/// many entries there are.
 async fn messages_in(
     tx: &mut Transaction<'_, Any>,
-    conversation: &str,
-    entries: Vec<(String, Option<String>)>,
+    entries: Vec<HistoryEntry>,
 ) -> Result<Vec<ConversationMessage>> {
     if entries.is_empty() {
         return Ok(Vec::new());
     }
-    let ids: Vec<&str> = entries.iter().map(|(id, _)| id.as_str()).collect();
+    let ids: Vec<&str> = entries.iter().map(|entry| entry.task_id.as_str()).collect();
     let tasks = tasks_in(tx, &ids).await?;
     let followers: Vec<&str> = entries
         .iter()
-        .filter(|(_, report)| report.is_none())
-        .map(|(id, _)| id.as_str())
+        .filter(|entry| entry.report_id.is_none())
+        .map(|entry| entry.task_id.as_str())
         .collect();
     let mut inputs = if followers.is_empty() {
         Default::default()
@@ -489,20 +734,30 @@ async fn messages_in(
     let mut events = message_events_in(tx, &ids).await?;
     entries
         .into_iter()
-        .map(|(task_id, report)| {
-            let is_report = report.is_some();
-            let (events, events_truncated) = events.remove(&task_id).unwrap_or_default();
+        .map(|entry| {
+            let is_report = entry.report_id.is_some();
+            let (events, events_truncated) = events.remove(&entry.task_id).unwrap_or_default();
+            let row = tasks
+                .get(&entry.task_id)
+                .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?;
+            let mut task = row.task.clone();
+            if is_report {
+                // Report input is execution data. The conversation only presents its reply.
+                task.prompt.clear();
+            }
             Ok(ConversationMessage {
-                task: Some(conversation_task(&tasks, &task_id, is_report)?),
-                conversation: conversation.to_owned(),
+                task: Some(task),
                 live_input: if is_report {
                     None
                 } else {
-                    inputs.remove(&task_id)
+                    inputs.remove(&entry.task_id)
                 },
-                work_session_report_id: report,
+                work_session_report_id: entry.report_id,
                 events,
                 events_truncated,
+                order: entry.order as u64,
+                sent_at_ms: row.accepted_at_ms.unwrap_or_default(),
+                completed_at_ms: row.completed_at_ms,
             })
         })
         .collect()
@@ -557,42 +812,9 @@ async fn message_events_in(
         .collect())
 }
 
-fn conversation_task(
-    tasks: &std::collections::HashMap<String, Task>,
-    task_id: &str,
-    report: bool,
-) -> Result<Task> {
-    let mut task = tasks
-        .get(task_id)
-        .cloned()
-        .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?;
-    if report {
-        // Report input is execution data. The conversation only presents its reply.
-        task.prompt.clear();
-    }
-    Ok(task)
-}
-
 /// Operators and clients converse; each sees only its own conversations.
 fn operator(principal: &str) -> Result<()> {
     crate::store::actor(principal)
-}
-
-fn conversation_name(value: &str) -> Result<()> {
-    if value.len() > 64
-        || !value
-            .as_bytes()
-            .first()
-            .is_some_and(u8::is_ascii_alphanumeric)
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
-    {
-        return Err(invalid(
-            "conversation name must start with a letter or digit and use at most 64 letters, digits, dots, underscores or hyphens",
-        ));
-    }
-    Ok(())
 }
 
 fn page_size(limit: u32) -> i64 {
@@ -706,6 +928,18 @@ impl conversations_server::Conversations for ControlPlane {
         Ok(Response::new(
             self.store
                 .get_message(&principal, &input.tag_id, &input.task_id)
+                .await?,
+        ))
+    }
+
+    async fn mark_conversation_read(
+        &self,
+        request: Request<MarkConversationReadRequest>,
+    ) -> std::result::Result<Response<Conversation>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .mark_conversation_read(&principal, &request.into_inner())
                 .await?,
         ))
     }

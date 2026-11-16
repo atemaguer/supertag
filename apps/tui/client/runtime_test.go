@@ -146,32 +146,25 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 			return nil, fmt.Errorf("unexpected Tag cursor %q", req.GetCursor())
 		}
 	})
-	testRPC(mux, rpc.ConversationsListConversationsProcedure, func(_ context.Context, req *v2.ListConversationsRequest) (*v2.ListConversationsResponse, error) {
-		if req.GetTagId() != "lead" {
-			t.Errorf("conversation Tag = %q", req.GetTagId())
-		}
-		switch req.GetCursor() {
-		case "":
-			return &v2.ListConversationsResponse{Conversations: []*v2.Conversation{{
-				TagId: "lead", Name: "billing", SessionId: "session-a", LatestTask: &v2.Task{
-					AttemptId: proto.String("attempt"), State: v2.TaskState_TASK_STATE_SUCCEEDED, Result: proto.String("Ship it"),
-				},
-			}}, NextCursor: "conversations-cursor"}, nil
-		case "conversations-cursor":
-			return &v2.ListConversationsResponse{Conversations: []*v2.Conversation{{
-				TagId: "lead", Name: "default", SessionId: "session-b", LatestTask: &v2.Task{
-					Prompt: "Check it", State: v2.TaskState_TASK_STATE_SUCCEEDED, Result: proto.String("Input accepted"),
-				},
-			}}}, nil
-		default:
-			return nil, fmt.Errorf("unexpected Conversation cursor %q", req.GetCursor())
-		}
+	var marked atomic.Pointer[v2.MarkConversationReadRequest]
+	testRPC(mux, rpc.ConversationsListConversationsProcedure, func(_ context.Context, _ *v2.ListConversationsRequest) (*v2.ListConversationsResponse, error) {
+		return &v2.ListConversationsResponse{Conversations: []*v2.Conversation{{
+			TagId: "lead", ConversationId: "conversation-lead", SessionId: "session-a", Preview: "Ship it", PreviewFromTag: true,
+			LatestOrder: 4, ReadOrder: 2, UnreadCount: 2, Working: true,
+		}, {
+			TagId: "build", ConversationId: "conversation-build", SessionId: "session-b", Preview: "Report",
+			LatestWorkSessionReportId: proto.String("report-1"),
+		}}}, nil
+	})
+	testRPC(mux, rpc.ConversationsMarkConversationReadProcedure, func(_ context.Context, req *v2.MarkConversationReadRequest) (*v2.Conversation, error) {
+		marked.Store(req)
+		return &v2.Conversation{TagId: req.GetTagId(), ReadOrder: req.GetOrder()}, nil
 	})
 	var operations []string
 	var mu sync.Mutex
 	task := &v2.Task{TaskId: "first", TagId: "lead", SessionId: "session-a", Prompt: "Verify SSO", State: v2.TaskState_TASK_STATE_QUEUED}
 	testRPC(mux, rpc.ConversationsSendMessageProcedure, func(_ context.Context, req *v2.SendMessageRequest) (*v2.ConversationMessage, error) {
-		if req.GetTagId() != "lead" || req.GetConversation() != "billing" || req.GetText() != task.GetPrompt() {
+		if req.GetTagId() != "lead" || req.GetText() != task.GetPrompt() {
 			t.Errorf("SendMessage request = %v", req)
 		}
 		mu.Lock()
@@ -180,15 +173,16 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 		if len(operations) == 1 {
 			return nil, connect.NewError(connect.CodeUnavailable, errors.New("first reply was lost"))
 		}
-		return &v2.ConversationMessage{Task: task, Conversation: "billing"}, nil
+		return &v2.ConversationMessage{Task: task, Order: 5}, nil
 	})
 	testRPC(mux, rpc.ConversationsListMessagesProcedure, func(_ context.Context, req *v2.ListMessagesRequest) (*v2.ListMessagesResponse, error) {
-		if req.GetTagId() != "lead" || req.GetConversation() != "billing" || req.GetCursor() != "message-cursor" || req.GetLimit() != 10 {
+		if req.GetTagId() != "lead" || req.GetCursor() != "message-cursor" || req.GetLimit() != 10 {
 			t.Errorf("ListMessages request = %v", req)
 		}
-		return &v2.ListMessagesResponse{Messages: []*v2.ConversationMessage{{
-			Task: task, Conversation: "billing",
-		}}, NextCursor: "more-messages"}, nil
+		// A conversation's history spans its Sessions.
+		older := &v2.Task{TaskId: "older", TagId: "lead", SessionId: "session-0", Prompt: "Start", State: v2.TaskState_TASK_STATE_QUEUED}
+		return &v2.ListMessagesResponse{Messages: []*v2.ConversationMessage{{Task: task, Order: 5}, {Task: older, Order: 1}},
+			NextCursor: "more-messages", ConversationId: "conversation-lead"}, nil
 	})
 	c := testRuntime(t, mux, false)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -200,14 +194,25 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 		!tags[0].GetSpec().GetLead() || tags[1].GetSpec().GetLead() {
 		t.Fatalf("ListTags = %v, %v", tags, err)
 	}
-	conversations, err := c.ListConversations(ctx, "lead")
-	if err != nil || len(conversations) != 2 || conversations[0].GetLastMessageText() != "Ship it" ||
-		conversations[1].GetLastMessageText() != "Check it" ||
-		conversations[1].GetLastMessageAuthor() != views.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR {
+	conversations, err := c.ListConversations(ctx)
+	if err != nil || len(conversations) != 2 {
 		t.Fatalf("ListConversations = %v, %v", conversations, err)
 	}
-	sent, err := c.SendMessage(ctx, "lead", "billing", "Verify SSO")
-	if err != nil || sent.GetTaskId() != "first" || sent.GetWaitingReason() != "Task queued." {
+	if lead := conversations[0]; lead.GetTag() != "lead" || lead.GetPreview() != "Ship it" || !lead.GetPreviewFromTag() ||
+		lead.GetUnreadCount() != 2 || lead.GetReadOrder() != 2 || !lead.GetWorking() || lead.GetLatestWorkSessionReportId() != "" {
+		t.Fatalf("lead conversation = %+v", lead)
+	}
+	if build := conversations[1]; build.GetTag() != "build" || build.GetPreviewFromTag() || build.GetLatestWorkSessionReportId() != "report-1" {
+		t.Fatalf("build conversation = %+v", build)
+	}
+	if err := c.MarkConversationRead(ctx, "lead", 4); err != nil {
+		t.Fatalf("MarkConversationRead = %v", err)
+	}
+	if req := marked.Load(); req.GetTagId() != "lead" || req.GetOrder() != 4 {
+		t.Fatalf("MarkConversationRead request = %v", req)
+	}
+	sent, err := c.SendMessage(ctx, "lead", "Verify SSO")
+	if err != nil || sent.GetTaskId() != "first" || sent.GetOrder() != 5 || sent.GetWaitingReason() != "Task queued." {
 		t.Fatalf("SendMessage = %v, %v", sent, err)
 	}
 	mu.Lock()
@@ -216,9 +221,10 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 	if len(keys) != 2 || keys[0] == "" || keys[0] != keys[1] {
 		t.Fatalf("send retry operation IDs = %v", keys)
 	}
-	page, next, err := c.ListMessages(ctx, "lead", "billing", 10, "message-cursor")
-	if err != nil || next != "more-messages" || len(page) != 1 || page[0].GetText() != "Verify SSO" {
-		t.Fatalf("ListMessages = %v, %q, %v", page, next, err)
+	page, err := c.ListMessages(ctx, "lead", 10, "message-cursor")
+	if err != nil || page.NextCursor != "more-messages" || page.ConversationID != "conversation-lead" || len(page.Messages) != 2 ||
+		page.Messages[0].GetText() != "Verify SSO" || page.Messages[1].GetSessionId() != "session-0" {
+		t.Fatalf("ListMessages = %+v, %v", page, err)
 	}
 }
 
@@ -233,7 +239,7 @@ func TestRuntimeV2FollowsEventPagesAfterTransientFailure(t *testing.T) {
 		if settled.Load() {
 			task.State, task.Result = v2.TaskState_TASK_STATE_SUCCEEDED, proto.String("done")
 		}
-		return &v2.ConversationMessage{Task: task, Conversation: "default"}, nil
+		return &v2.ConversationMessage{Task: task}, nil
 	})
 	var cursors []uint64
 	var mu sync.Mutex

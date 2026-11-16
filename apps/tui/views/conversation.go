@@ -9,45 +9,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Who wrote an entry in a conversation.
-type ConversationAuthor int32
-
-const (
-	ConversationAuthor_CONVERSATION_AUTHOR_UNSPECIFIED ConversationAuthor = 0
-	// The caller.
-	ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR ConversationAuthor = 1
-	// The Tag: a reply or a work Session's report.
-	ConversationAuthor_CONVERSATION_AUTHOR_TAG ConversationAuthor = 2
-)
-
-// Enum value maps for ConversationAuthor.
-var (
-	ConversationAuthor_name = map[int32]string{
-		0: "CONVERSATION_AUTHOR_UNSPECIFIED",
-		1: "CONVERSATION_AUTHOR_OPERATOR",
-		2: "CONVERSATION_AUTHOR_TAG",
-	}
-	ConversationAuthor_value = map[string]int32{
-		"CONVERSATION_AUTHOR_UNSPECIFIED": 0,
-		"CONVERSATION_AUTHOR_OPERATOR":    1,
-		"CONVERSATION_AUTHOR_TAG":         2,
-	}
-)
-
-func (x ConversationAuthor) Enum() *ConversationAuthor {
-	p := new(ConversationAuthor)
-	*p = x
-	return p
-}
-
-func (x ConversationAuthor) String() string {
-	if s, ok := ConversationAuthor_name[int32(x)]; ok {
-		return s
-	}
-	return strconv.
-		Itoa(int(x))
-}
-
 // Whether a reply or a report has been written.
 type ReplyStatus int32
 
@@ -232,60 +193,25 @@ func (x ActivityStatus) String() string {
 		Itoa(int(x))
 }
 
-type ListMessagesRequest struct {
-
-	// The Tag's name.
-	Tag string
-	// The conversation's name. Empty means `default`.
-	Conversation string
-	// At most this many messages; 0 means 50, and more than 100 means 100.
-	PageSize int32
-	// The `next_page_token` of the previous page.
-
-}
-
-func (x *ListMessagesRequest) GetTag() string {
-	if x != nil {
-		return x.Tag
-	}
-	return ""
-}
-
-func (x *ListMessagesRequest) GetConversation() string {
-	if x != nil {
-		return x.Conversation
-	}
-	return ""
-}
-
-func (x *ListMessagesRequest) GetPageSize() int32 {
-	if x != nil {
-		return x.PageSize
-	}
-	return 0
-}
-
-// One of the caller's conversations with a Tag.
+// The caller's conversation with a Tag, as a conversation list shows it. A caller has one
+// conversation with each Tag.
 type Conversation struct {
 
-	// The Tag's name.
+	// The Tag's ID.
 	Tag string
-	// The conversation's name, such as `default`.
-	Name string
-	// The conversation's Session.
-	SessionId string
-	// The start of the conversation's most recent entry, at most 200
-	// characters: the caller's latest message, the Tag's reply to it, or a work
-	// Session's report, whichever came last.
-	LastMessageText string
-	// Who wrote `last_message_text`.
-	LastMessageAuthor ConversationAuthor
-	// When the most recent entry was written.
-
-	// How many work Sessions the conversation's turns started are not finished:
-	// their status is `WORK_SESSION_STATUS_PENDING`,
-	// `WORK_SESSION_STATUS_RUNNING` or `WORK_SESSION_STATUS_WAITING`.
-	OpenWorkSessionCount int32
+	// The latest message's text, at most 200 characters: the Tag's reply when it has one,
+	// otherwise the caller's message.
+	Preview string
+	// `preview` is the Tag's reply.
+	PreviewFromTag bool
+	// Finished replies the caller has not read.
+	UnreadCount int32
+	// How far the caller has read, as a message order; zero when it never has.
+	ReadOrder uint64
+	// A Task of the conversation is queued or running.
+	Working bool
+	// Set when the latest message is a work Session's report turn, which has no caller message.
+	LatestWorkSessionReportId string
 }
 
 func (x *Conversation) GetTag() string {
@@ -295,39 +221,40 @@ func (x *Conversation) GetTag() string {
 	return ""
 }
 
-func (x *Conversation) GetName() string {
+func (x *Conversation) GetPreview() string {
 	if x != nil {
-		return x.Name
+		return x.Preview
 	}
 	return ""
 }
 
-func (x *Conversation) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
+func (x *Conversation) GetPreviewFromTag() bool {
+	return x != nil && x.PreviewFromTag
 }
 
-func (x *Conversation) GetLastMessageText() string {
+func (x *Conversation) GetUnreadCount() int32 {
 	if x != nil {
-		return x.LastMessageText
-	}
-	return ""
-}
-
-func (x *Conversation) GetLastMessageAuthor() ConversationAuthor {
-	if x != nil {
-		return x.LastMessageAuthor
-	}
-	return ConversationAuthor_CONVERSATION_AUTHOR_UNSPECIFIED
-}
-
-func (x *Conversation) GetOpenWorkSessionCount() int32 {
-	if x != nil {
-		return x.OpenWorkSessionCount
+		return x.UnreadCount
 	}
 	return 0
+}
+
+func (x *Conversation) GetReadOrder() uint64 {
+	if x != nil {
+		return x.ReadOrder
+	}
+	return 0
+}
+
+func (x *Conversation) GetWorking() bool {
+	return x != nil && x.Working
+}
+
+func (x *Conversation) GetLatestWorkSessionReportId() string {
+	if x != nil {
+		return x.LatestWorkSessionReportId
+	}
+	return ""
 }
 
 // One message in a conversation and what answered it.
@@ -342,11 +269,11 @@ type Message struct {
 	TaskId string
 	// The Tag's name.
 	Tag string
-	// The conversation's name. For an Objective turn without a home thread, it
-	// is `objective:` and the Objective's ID.
-	Conversation string
-	// The conversation's Session.
+	// The turn's Session. A conversation's turns can span several Sessions.
 	SessionId string
+	// The message's place in its conversation; later messages have larger orders. Zero for an
+	// Objective turn read outside a conversation.
+	Order uint64
 	// What the message said: the caller's text, or the text an Objective turn
 	// delivered.
 	Text string
@@ -384,11 +311,11 @@ func (x *Message) GetTag() string {
 	return ""
 }
 
-func (x *Message) GetConversation() string {
+func (x *Message) GetOrder() uint64 {
 	if x != nil {
-		return x.Conversation
+		return x.Order
 	}
-	return ""
+	return 0
 }
 
 func (x *Message) GetSessionId() string {

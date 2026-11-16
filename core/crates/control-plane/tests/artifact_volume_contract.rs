@@ -134,7 +134,6 @@ async fn exercise(url: &str) {
             OP,
             &SendMessageRequest {
                 tag_id: "writer".into(),
-                conversation: "private".into(),
                 text: "Evidence".into(),
                 operation_id: "source".into(),
                 ..Default::default()

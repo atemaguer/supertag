@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 
@@ -38,6 +39,9 @@ type fakeControlPlane struct {
 	// hostList answers ListHosts; hostErr, when set, refuses it.
 	hostList func() []*views.WorkerHost
 	hostErr  error
+	// conversations answers ListConversations; messages answers ListMessages for a Tag.
+	conversations func() []*v2.Conversation
+	messages      func(tag string) *v2.ListMessagesResponse
 
 	mu            sync.Mutex
 	postReads     map[string]int
@@ -46,6 +50,8 @@ type fakeControlPlane struct {
 	badAuth       int
 	tagReads      int
 	hostReads     int
+	// marks are the MarkConversationRead requests, in order.
+	marks []*v2.MarkConversationReadRequest
 }
 
 func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
@@ -137,11 +143,33 @@ func (f *fakeControlPlane) ListHosts(context.Context, *connect.Request[v2.ListHo
 }
 
 func (f *fakeControlPlane) ListConversations(context.Context, *connect.Request[v2.ListConversationsRequest]) (*connect.Response[v2.ListConversationsResponse], error) {
-	return connect.NewResponse(&v2.ListConversationsResponse{}), nil
+	res := &v2.ListConversationsResponse{}
+	if f.conversations != nil {
+		res.Conversations = f.conversations()
+	}
+	return connect.NewResponse(res), nil
 }
 
-func (f *fakeControlPlane) ListMessages(context.Context, *connect.Request[v2.ListMessagesRequest]) (*connect.Response[v2.ListMessagesResponse], error) {
+func (f *fakeControlPlane) ListMessages(_ context.Context, req *connect.Request[v2.ListMessagesRequest]) (*connect.Response[v2.ListMessagesResponse], error) {
+	if f.messages != nil {
+		if res := f.messages(req.Msg.GetTagId()); res != nil {
+			return connect.NewResponse(res), nil
+		}
+	}
 	return connect.NewResponse(&v2.ListMessagesResponse{}), nil
+}
+
+func (f *fakeControlPlane) MarkConversationRead(_ context.Context, req *connect.Request[v2.MarkConversationReadRequest]) (*connect.Response[v2.Conversation], error) {
+	f.mu.Lock()
+	f.marks = append(f.marks, req.Msg)
+	f.mu.Unlock()
+	return connect.NewResponse(&v2.Conversation{TagId: req.Msg.GetTagId(), ReadOrder: req.Msg.GetOrder()}), nil
+}
+
+func (f *fakeControlPlane) readMarks() []*v2.MarkConversationReadRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.marks)
 }
 
 func (f *fakeControlPlane) ListObjectives(context.Context, *connect.Request[v2.ListObjectivesRequest]) (*connect.Response[v2.ListObjectivesResponse], error) {
@@ -257,7 +285,7 @@ func finalReply(text string) *views.Reply {
 }
 
 func waitingMessage(task, text string) *views.Message {
-	return &views.Message{TaskId: task, Tag: "lead", Conversation: "default", SessionId: "ses-default", Text: text,
+	return &views.Message{TaskId: task, Tag: "lead", SessionId: "ses-default", Text: text,
 		Status: views.ReplyStatus_REPLY_STATUS_WAITING}
 }
 

@@ -59,7 +59,6 @@ async fn contract(url: &str) -> anyhow::Result<()> {
         output_policy: None,
         execution_limits: None,
         tag_id: "engineer".into(),
-        conversation: "secret".into(),
         text: "Hello".into(),
         operation_id: "one-send".into(),
     };
@@ -341,17 +340,17 @@ async fn private_work_sessions(
     );
     assert!(response.task.as_ref().unwrap().prompt.is_empty());
     let summaries = store
-        .list_conversations(
-            ALICE,
-            &ListConversationsRequest {
-                tag_id: parent.tag_id.clone(),
-                ..Default::default()
-            },
-        )
+        .list_conversations(ALICE, &ListConversationsRequest {})
         .await?;
-    let latest = summaries.conversations[0].latest_task.as_ref().unwrap();
-    assert_eq!(latest.task_id, report.task_id);
-    assert!(latest.prompt.is_empty());
+    let latest = &summaries.conversations[0];
+    assert_eq!(latest.tag_id, parent.tag_id);
+    // The report's input never shows as the conversation's preview.
+    assert!(latest.preview_from_tag);
+    assert_eq!(
+        latest.latest_work_session_report_id.as_deref(),
+        Some(work_session_id)
+    );
+    assert!(!latest.preview.contains("Internal report input"));
     assert_eq!(
         store.get_task(&report.task_id).await?.prompt,
         "Internal report input"
@@ -367,7 +366,6 @@ async fn private_work_sessions(
 
     let history = ListMessagesRequest {
         tag_id: parent.tag_id.clone(),
-        conversation: "secret".into(),
         limit: 1,
         ..Default::default()
     };
@@ -407,18 +405,33 @@ async fn private_work_sessions(
                 notice.owner.as_str(),
                 notice.change.kind(),
                 notice.change.id.as_str(),
-                notice.change.conversation.as_str(),
+                notice.change.tag_id.as_str(),
             ))
             .collect::<Vec<_>>(),
         [
-            (ALICE, WatchKind::Task, child.task_id.as_str(), "secret"),
-            (ALICE, WatchKind::Task, child.task_id.as_str(), "secret"),
-            (ALICE, WatchKind::Task, report.task_id.as_str(), "secret"),
+            (
+                ALICE,
+                WatchKind::Task,
+                child.task_id.as_str(),
+                child.tag_id.as_str()
+            ),
+            (
+                ALICE,
+                WatchKind::Task,
+                child.task_id.as_str(),
+                child.tag_id.as_str()
+            ),
+            (
+                ALICE,
+                WatchKind::Task,
+                report.task_id.as_str(),
+                parent.tag_id.as_str()
+            ),
             (
                 ALICE,
                 WatchKind::ConversationMessage,
                 report.task_id.as_str(),
-                "secret"
+                parent.tag_id.as_str()
             ),
         ]
     );
@@ -477,7 +490,6 @@ async fn private_work_sessions(
                 output_policy: None,
                 execution_limits: None,
                 tag_id: parent.tag_id,
-                conversation: "secret".into(),
                 text: "Keep going separately".into(),
                 operation_id: "report-follow-up".into(),
             },

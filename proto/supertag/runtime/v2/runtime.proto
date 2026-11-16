@@ -30,12 +30,17 @@ service Operator {
   rpc ResolveReply(ResolveReplyRequest) returns (ReplyDelivery);
 }
 
-// An operator reads and sends messages in their personal conversations.
+// An operator or client has one conversation with each Tag it may talk to, and reads and sends
+// its messages here.
 service Conversations {
+  // The caller's conversations, one per Tag it has talked to, with what a conversation list
+  // shows: the latest message, when it was active, unread replies, and whether the Tag works.
   rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
   rpc SendMessage(SendMessageRequest) returns (ConversationMessage);
   rpc GetMessage(GetMessageRequest) returns (ConversationMessage);
+  // Records that the caller has read its conversation with a Tag up to a message.
+  rpc MarkConversationRead(MarkConversationReadRequest) returns (Conversation);
 }
 
 // Operator-visible invalidation notices. Task event replay has its own cursor.
@@ -195,6 +200,8 @@ enum WatchKind {
   WATCH_KIND_UNSPECIFIED = 0;
   WATCH_KIND_TAG = 1;
   WATCH_KIND_TASK = 2;
+  // A message in a conversation, or its principal marking the conversation read. The change's
+  // tag_id names the conversation.
   WATCH_KIND_CONVERSATION_MESSAGE = 3;
   WATCH_KIND_OBJECTIVE = 4;
   WATCH_KIND_TEAM = 5;
@@ -232,7 +239,6 @@ message WatchChange {
   string session_id = 4;
   string objective_id = 5;
   string team_id = 6;
-  string conversation = 7;
   int64 changed_at_ms = 8;
   WatchReason reason = 9;
 }
@@ -1557,16 +1563,35 @@ message RetireTagResponse {
   uint64 role_assignments = 6;
 }
 
+// The caller's conversation with one Tag.
 message Conversation {
   string tag_id = 1;
-  string name = 2;
+  // Identifies the conversation. It changes only when the conversation is replaced, such as when
+  // the Control Plane's state is reset, so a client discards a copy kept under another ID.
+  string conversation_id = 2;
+  // The Session the next message continues.
   string session_id = 3;
-  Task latest_task = 4;
+  // The latest message's text, at most 200 characters: the Tag's reply when it has one,
+  // otherwise the caller's message.
+  string preview = 4;
+  // The preview is the Tag's reply.
+  bool preview_from_tag = 5;
+  // When the latest message was sent or answered.
+  int64 last_activity_at_ms = 6;
+  // The latest message's order.
+  uint64 latest_order = 7;
+  // How far the caller has read, as a message order; zero when it never has.
+  uint64 read_order = 8;
+  // Finished replies after `read_order`.
+  uint32 unread_count = 9;
+  // A Task of this conversation is queued or running.
+  bool working = 10;
+  // Set when the latest message is a Work Session's report turn, which has no caller message.
+  optional string latest_work_session_report_id = 11;
 }
 
 message ConversationMessage {
   Task task = 1;
-  string conversation = 2;
   LiveInput live_input = 3;
   // Set for a report turn in the conversation, which has no operator message.
   optional string work_session_report_id = 4;
@@ -1578,38 +1603,59 @@ message ConversationMessage {
   // Set when the turn's earliest messages were left out to keep the page within its size
   // limit. Operator.ListEvents reads them.
   bool events_truncated = 6;
+  // The message's place in its conversation. Later messages have larger orders.
+  uint64 order = 7;
+  // When the Control Plane accepted the message; zero when it did not record it.
+  int64 sent_at_ms = 8;
+  // When the turn finished, if it has.
+  optional int64 completed_at_ms = 9;
 }
 
-message ListConversationsRequest {
-  string tag_id = 1;
-  uint32 limit = 2;
-  string cursor = 3;
-}
+message ListConversationsRequest {}
 
 message ListConversationsResponse {
+  // The latest active first.
   repeated Conversation conversations = 1;
-  string next_cursor = 2;
 }
 
+// Without `after`, a page of the conversation, newest first, before `cursor`. With `after` and
+// the `conversation_id` the client's copy came from, only what changed since: messages after
+// that order, and the current state of `refresh_task_ids`, the turns the copy holds unfinished.
 message ListMessagesRequest {
   string tag_id = 1;
-  string conversation = 2;
   uint32 limit = 3;
   string cursor = 4;
+  uint64 after = 5;
+  string conversation_id = 6;
+  // At most 128.
+  repeated string refresh_task_ids = 7;
 }
 
 message ListMessagesResponse {
+  // Newest first.
   repeated ConversationMessage messages = 1;
   string next_cursor = 2;
+  // Empty before the caller's first message to the Tag.
+  string conversation_id = 3;
+  // The page holds only changes after the request's `after`. Otherwise it is the newest page,
+  // which replaces any copy the client kept: the conversation was replaced, or more than a page
+  // of messages arrived since.
+  bool incremental = 4;
 }
 
 message SendMessageRequest {
   string tag_id = 1;
-  string conversation = 2;
   string text = 3;
   string operation_id = 4;
   ExecutionLimits execution_limits = 5;
   TaskOutputPolicy output_policy = 6;
+}
+
+message MarkConversationReadRequest {
+  string tag_id = 1;
+  // The order of the latest message read. A smaller order than one recorded before changes
+  // nothing.
+  uint64 order = 2;
 }
 
 message GetMessageRequest {
