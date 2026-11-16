@@ -287,6 +287,7 @@ spec: {purpose: Observe releases.}
 "#,
     )?;
     command(&gateway, &["apply", "-f", external.to_str().unwrap()], true).await?;
+    lead_tag(root, &gateway).await?;
     command(
         &gateway,
         &["mailbox-grant", "allow", "observer", "builder"],
@@ -447,6 +448,81 @@ spec: {purpose: Observe releases.}
     field_managers(root, &gateway).await?;
     resume_apply_set(root, &gateway).await?;
     plane.kill().await?;
+    Ok(())
+}
+
+/// A manifest makes a Tag the lead; a second lead is refused, naming the first, and `tag put`
+/// keeps the lead unless told otherwise.
+async fn lead_tag(root: &Path, gateway: &str) -> Result<()> {
+    let manifest = |name: &str| {
+        let path = root.join(format!("lead-{name}.yaml"));
+        std::fs::write(
+            &path,
+            format!("apiVersion: supertag/v1\nkind: Tag\nmetadata: {{name: {name}}}\nspec: {{lead: true}}\n"),
+        )
+        .map(|()| path)
+    };
+    let observer = manifest("observer")?;
+    command(gateway, &["apply", "-f", observer.to_str().unwrap()], true).await?;
+    let tag: Value =
+        serde_json::from_str(&command(gateway, &["get", "tag", "observer"], true).await?)?;
+    ensure!(tag["lead"] == true, "{tag}");
+    let tags: Value = serde_json::from_str(&command(gateway, &["get", "tags"], true).await?)?;
+    let leads: Vec<_> = tags["tags"]
+        .as_array()
+        .context("tags")?
+        .iter()
+        .filter(|tag| tag["lead"] == true)
+        .map(|tag| tag["tag_id"].clone())
+        .collect();
+    ensure!(leads == ["observer"], "{tags}");
+    let reviewer = manifest("reviewer")?;
+    let refused = command(gateway, &["apply", "-f", reviewer.to_str().unwrap()], false).await?;
+    ensure!(
+        refused.contains("Tag observer is already the lead Tag"),
+        "{refused}"
+    );
+    let put = command(
+        gateway,
+        &[
+            "tag",
+            "put",
+            "observer",
+            "--instructions",
+            "Observe releases.",
+        ],
+        true,
+    )
+    .await?;
+    ensure!(put.contains("\"lead\":true"), "{put}");
+    command(
+        gateway,
+        &[
+            "tag",
+            "put",
+            "observer",
+            "--instructions",
+            "Observe releases.",
+            "--lead",
+            "false",
+        ],
+        true,
+    )
+    .await?;
+    command(gateway, &["apply", "-f", reviewer.to_str().unwrap()], true).await?;
+    command(
+        gateway,
+        &[
+            "tag",
+            "put",
+            "reviewer",
+            "--instructions",
+            "Review the release.",
+            "--lead=false",
+        ],
+        true,
+    )
+    .await?;
     Ok(())
 }
 

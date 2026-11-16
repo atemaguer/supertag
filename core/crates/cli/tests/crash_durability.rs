@@ -561,6 +561,7 @@ impl<'a> System<'a> {
                 .put_tag(self.credentials.request(PutTagRequest {
                     name: None,
                     expected_revision: None,
+                    lead: None,
                     approval_rules: vec![],
                     harness_kind: 0,
                     workspace: None,

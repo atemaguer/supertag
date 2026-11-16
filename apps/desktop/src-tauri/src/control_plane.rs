@@ -510,6 +510,8 @@ pub struct Tag {
     pub allowed_actions: Vec<String>,
     pub revision: u64,
     pub harness_kind: String,
+    /// Whether this is the Control Plane's lead Tag, which the app shows first.
+    pub lead: bool,
 }
 
 /// A harness as the app names it, such as `codex` or `claude_code`.
@@ -533,6 +535,7 @@ impl From<v2::Tag> for Tag {
             allowed_actions: tag.allowed_actions,
             revision: tag.revision,
             harness_kind,
+            lead: tag.lead,
         }
     }
 }

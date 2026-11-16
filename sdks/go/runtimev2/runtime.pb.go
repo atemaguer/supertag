@@ -11504,8 +11504,12 @@ type PutTagRequest struct {
 	Name *string `protobuf:"bytes,8,opt,name=name,proto3,oneof" json:"name,omitempty"`
 	// Zero requires a new identity; a positive value fences an existing revision.
 	ExpectedRevision *uint64 `protobuf:"varint,9,opt,name=expected_revision,json=expectedRevision,proto3,oneof" json:"expected_revision,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Makes this the Control Plane's lead Tag, or not. At most one active Tag is the lead, and
+	// `supertag init` makes the Tag it creates the lead. Omitted keeps the current value; a new
+	// Tag is not the lead.
+	Lead          *bool `protobuf:"varint,6600,opt,name=lead,proto3,oneof" json:"lead,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PutTagRequest) Reset() {
@@ -11601,6 +11605,13 @@ func (x *PutTagRequest) GetExpectedRevision() uint64 {
 	return 0
 }
 
+func (x *PutTagRequest) GetLead() bool {
+	if x != nil && x.Lead != nil {
+		return *x.Lead
+	}
+	return false
+}
+
 type Tag struct {
 	state          protoimpl.MessageState   `protogen:"open.v1"`
 	TagId          string                   `protobuf:"bytes,1,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`
@@ -11614,7 +11625,10 @@ type Tag struct {
 	Name           string                   `protobuf:"bytes,9,opt,name=name,proto3" json:"name,omitempty"`
 	RetiredAtMs    *int64                   `protobuf:"varint,10,opt,name=retired_at_ms,json=retiredAtMs,proto3,oneof" json:"retired_at_ms,omitempty"`
 	// Labels a bound Worker Host must carry to run this Tag's Tasks.
-	RunsOn        []string `protobuf:"bytes,1400,rep,name=runs_on,json=runsOn,proto3" json:"runs_on,omitempty"`
+	RunsOn []string `protobuf:"bytes,1400,rep,name=runs_on,json=runsOn,proto3" json:"runs_on,omitempty"`
+	// Whether this is the Control Plane's lead Tag: the default Tag `supertag init` creates, which
+	// clients show first. At most one active Tag is the lead.
+	Lead          bool `protobuf:"varint,6600,opt,name=lead,proto3" json:"lead,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11724,6 +11738,13 @@ func (x *Tag) GetRunsOn() []string {
 		return x.RunsOn
 	}
 	return nil
+}
+
+func (x *Tag) GetLead() bool {
+	if x != nil {
+		return x.Lead
+	}
+	return false
 }
 
 type ListTagsRequest struct {
@@ -23773,7 +23794,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\n" +
 	"generation\x18\x02 \x01(\x04R\n" +
 	"generation\x12\x18\n" +
-	"\arevoked\x18\x03 \x01(\bR\arevoked\"\xfa\x03\n" +
+	"\arevoked\x18\x03 \x01(\bR\arevoked\"\x9d\x04\n" +
 	"\rPutTagRequest\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +
@@ -23783,9 +23804,11 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x0eapproval_rules\x18\x06 \x03(\v2!.supertag.runtime.v2.ApprovalRuleR\rapprovalRules\x12J\n" +
 	"\texecution\x18\a \x01(\v2,.supertag.runtime.v2.PolicyExecutionSettingsR\texecution\x12\x17\n" +
 	"\x04name\x18\b \x01(\tH\x00R\x04name\x88\x01\x01\x120\n" +
-	"\x11expected_revision\x18\t \x01(\x04H\x01R\x10expectedRevision\x88\x01\x01B\a\n" +
+	"\x11expected_revision\x18\t \x01(\x04H\x01R\x10expectedRevision\x88\x01\x01\x12\x18\n" +
+	"\x04lead\x18\xc83 \x01(\bH\x02R\x04lead\x88\x01\x01B\a\n" +
 	"\x05_nameB\x14\n" +
-	"\x12_expected_revision\"\x8b\x04\n" +
+	"\x12_expected_revisionB\a\n" +
+	"\x05_lead\"\xa0\x04\n" +
 	"\x03Tag\x12\x15\n" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\"\n" +
 	"\finstructions\x18\x02 \x01(\tR\finstructions\x12'\n" +
@@ -23799,7 +23822,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\rretired_at_ms\x18\n" +
 	" \x01(\x03H\x00R\vretiredAtMs\x88\x01\x01\x12\x18\n" +
 	"\aruns_on\x18\xf8\n" +
-	" \x03(\tR\x06runsOnB\x10\n" +
+	" \x03(\tR\x06runsOn\x12\x13\n" +
+	"\x04lead\x18\xc83 \x01(\bR\x04leadB\x10\n" +
 	"\x0e_retired_at_ms\"h\n" +
 	"\x0fListTagsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x16\n" +

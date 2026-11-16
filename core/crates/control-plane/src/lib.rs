@@ -949,6 +949,7 @@ mod tests {
             tag_id: "tag".into(),
             instructions: String::new(),
             allowed_actions: vec![],
+            lead: None,
         };
         assert_eq!(
             cp.put_tag(Request::new(tag.clone()))

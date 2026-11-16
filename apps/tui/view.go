@@ -243,7 +243,7 @@ func (m model) railLines(height int) string {
 	for i, tag := range m.tags {
 		reference := m.tagReference(tag)
 		open := m.open[convKey(reference, m.currentConversation(reference))]
-		add(row{rowTag, i}, terminalText(tagName(tag)), terminalText(railState(tag, open)))
+		add(row{rowTag, i}, terminalText(railTagName(tag)), terminalText(railState(tag, open)))
 	}
 	if len(m.objectives) > 0 || m.objectivesErr != "" {
 		section("Objectives", m.objectivesErr)
@@ -273,6 +273,14 @@ func (m model) railLines(height int) string {
 
 // tagName is a Tag's name.
 func tagName(tag *views.Tag) string { return tag.GetMetadata().GetName() }
+
+// railTagName is a Tag's name in the rail, starred for the lead Tag.
+func railTagName(tag *views.Tag) string {
+	if tag.GetSpec().GetLead() {
+		return "★ " + tagName(tag)
+	}
+	return tagName(tag)
+}
 
 // tagPhases are the words the rail shows for a Tag's phase, as `supertag get tags` prints it.
 var tagPhases = map[views.TagPhase]string{

@@ -88,6 +88,10 @@ pub struct PutArgs {
     /// Require this fixed execution environment for new Cursor Sessions.
     #[arg(long, conflicts_with = "workspace_id")]
     shared_execution_environment: Option<String>,
+    /// Make this the Control Plane's lead Tag, or with false, stop it being the lead. Omit to keep
+    /// it as it is. At most one Tag is the lead.
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    lead: Option<bool>,
 }
 
 // Options for `supertag get tags`: active Tags, and optionally retired identities.
@@ -139,6 +143,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 models,
                 efforts,
                 shared_execution_environment,
+                lead,
             } = *args;
             let mounts = workspace_mounts
                 .as_deref()
@@ -184,6 +189,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                             as i32,
                         approval_rules,
                         expected_revision: None,
+                        lead,
                         execution: (!models.is_empty()
                             || !efforts.is_empty()
                             || shared_execution_environment.is_some())
@@ -198,7 +204,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
-            json!({ "tag_id": tag.tag_id, "name": tag.name, "revision": tag.revision })
+            json!({ "tag_id": tag.tag_id, "name": tag.name, "revision": tag.revision, "lead": tag.lead })
         }
         TagCommand::Retire { tag_id, dry_run } => {
             let response = operator

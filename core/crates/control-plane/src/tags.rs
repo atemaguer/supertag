@@ -83,7 +83,40 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         execution: crate::store::tag_execution_from_row(row)?,
         retired_at_ms: row.try_get("retired_at_ms")?,
         runs_on: serde_json::from_str(&row.try_get::<String, _>("runs_on")?)?,
+        lead: row.try_get::<i64, _>("lead")? != 0,
     })
+}
+
+/// Whether a Tag being written is the lead: as requested, else as it was. Refuses a second
+/// active lead, naming the current one.
+pub(crate) async fn lead_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    requested: Option<bool>,
+) -> Result<bool> {
+    let lead = match requested {
+        Some(lead) => lead,
+        None => sqlx::query_scalar::<_, i64>("SELECT lead FROM supertag_v2_tags WHERE tag_id=$1")
+            .bind(tag_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .is_some_and(|lead| lead != 0),
+    };
+    if lead {
+        let current: Option<String> = sqlx::query_scalar(
+            "SELECT tag_id FROM supertag_v2_tags
+             WHERE lead=1 AND retired_at_ms IS NULL AND tag_id<>$1",
+        )
+        .bind(tag_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some(current) = current {
+            return Err(StoreError::FailedPrecondition(format!(
+                "Tag {current} is already the lead Tag; clear its lead before making {tag_id} the lead"
+            )));
+        }
+    }
+    Ok(lead)
 }
 
 fn missing(tag_id: &str) -> StoreError {

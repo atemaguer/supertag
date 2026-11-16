@@ -141,7 +141,7 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 		case "":
 			return &v2.ListTagsResponse{Tags: []*v2.Tag{{TagId: "build"}}, NextCursor: "tags-cursor"}, nil
 		case "tags-cursor":
-			return &v2.ListTagsResponse{Tags: []*v2.Tag{{TagId: "lead", Name: "Engineering Lead"}}}, nil
+			return &v2.ListTagsResponse{Tags: []*v2.Tag{{TagId: "lead", Name: "Engineering Lead", Lead: true}}}, nil
 		default:
 			return nil, fmt.Errorf("unexpected Tag cursor %q", req.GetCursor())
 		}
@@ -194,8 +194,10 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	tags, err := c.ListTags(ctx)
-	if err != nil || len(tags) != 2 || tags[0].GetMetadata().GetName() != "build" ||
-		tags[1].GetMetadata().GetId() != "lead" || tags[1].GetMetadata().GetName() != "Engineering Lead" {
+	// The lead Tag comes first, whatever page it arrives on.
+	if err != nil || len(tags) != 2 || tags[1].GetMetadata().GetName() != "build" ||
+		tags[0].GetMetadata().GetId() != "lead" || tags[0].GetMetadata().GetName() != "Engineering Lead" ||
+		!tags[0].GetSpec().GetLead() || tags[1].GetSpec().GetLead() {
 		t.Fatalf("ListTags = %v, %v", tags, err)
 	}
 	conversations, err := c.ListConversations(ctx, "lead")

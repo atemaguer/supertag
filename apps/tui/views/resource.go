@@ -270,6 +270,15 @@ func (x *Tag) GetStatus() *TagStatus {
 // merges each list entry by entry: a Role name, a Worker Host ID, a label, a
 // location by provider and scope ID, and a sender Tag.
 type TagSpec struct {
+	// Whether this is the Control Plane's lead Tag, the one `supertag init` creates.
+	Lead bool
+}
+
+func (x *TagSpec) GetLead() bool {
+	if x != nil {
+		return x.Lead
+	}
+	return false
 }
 
 // What the Control Plane observes of a Tag.

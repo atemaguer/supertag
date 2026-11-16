@@ -124,6 +124,8 @@ struct TagSpec {
     accepts_messages_from: Vec<String>,
     /// Labels a bound Worker Host must carry. Omitted keeps the current labels.
     runs_on: Option<Vec<String>>,
+    /// Whether this is the Control Plane's lead Tag. Omitted keeps the current value.
+    lead: Option<bool>,
 }
 
 #[derive(Deserialize)]

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -178,6 +179,7 @@ func (c *runtimeClient) listTags(ctx context.Context) ([]*views.Tag, error) {
 			}
 			tags = append(tags, &views.Tag{
 				Metadata: &views.Metadata{Id: tag.GetTagId(), Name: name},
+				Spec:     &views.TagSpec{Lead: tag.GetLead()},
 				Status:   &views.TagStatus{Phase: views.TagPhase_TAG_PHASE_ACTIVE},
 			})
 		}
@@ -186,6 +188,10 @@ func (c *runtimeClient) listTags(ctx context.Context) ([]*views.Tag, error) {
 			break
 		}
 	}
+	// The lead Tag, the one `supertag init` creates, comes first.
+	sort.SliceStable(tags, func(i, j int) bool {
+		return tags[i].GetSpec().GetLead() && !tags[j].GetSpec().GetLead()
+	})
 	return tags, nil
 }
 

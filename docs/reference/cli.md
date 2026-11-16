@@ -2516,6 +2516,8 @@ Options:
           Allowed reasoning efforts, with the default first. May be repeated
       --shared-execution-environment <SHARED_EXECUTION_ENVIRONMENT>
           Require this fixed execution environment for new Cursor Sessions
+      --lead [<LEAD>]
+          Make this the Control Plane's lead Tag, or with false, stop it being the lead. Omit to keep it as it is. At most one Tag is the lead [possible values: true, false]
   -h, --help
           Print help
 ```

@@ -460,6 +460,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
         .put_tag(credentials.request(PutTagRequest {
             name: None,
             expected_revision: None,
+            lead: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -823,6 +824,7 @@ async fn attempt_time_limit_stops_the_adapter_and_fails_the_task(database: Strin
         .put_tag(credentials.request(PutTagRequest {
             name: None,
             expected_revision: None,
+            lead: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -891,6 +893,7 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
         .put_tag(credentials.request(PutTagRequest {
             name: None,
             expected_revision: None,
+            lead: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -1140,6 +1143,7 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint(
         .put_tag(credentials.request(PutTagRequest {
             name: None,
             expected_revision: None,
+            lead: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -1176,6 +1180,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
         .put_tag(credentials.request(PutTagRequest {
             name: None,
             expected_revision: None,
+            lead: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -1690,6 +1695,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         .put_tag(credentials.request(PutTagRequest {
             name: None,
             expected_revision: None,
+            lead: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -2019,6 +2025,7 @@ async fn configure_slack_surface(services: &Services, credentials: &Credentials)
         .put_tag(credentials.request(PutTagRequest {
             name: None,
             expected_revision: None,
+            lead: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
@@ -2594,6 +2601,7 @@ async fn control_plane_partition_expires_execution_and_requires_audited_retry_be
         .put_tag(credentials.request(PutTagRequest {
             name: None,
             expected_revision: None,
+            lead: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,

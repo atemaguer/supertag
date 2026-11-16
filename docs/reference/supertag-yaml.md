@@ -30,7 +30,8 @@ repositories.
 ### On your own
 
 `supertag init` writes a file like this for the repository you run it in. It provisions a
-`local-tools` Permission Set, a `Lead` Role, and a Tag that follows the current branch. The host
+`local-tools` Permission Set, a `Lead` Role, and the Control Plane's lead Tag, which follows the
+current branch. The host
 service is named after the machine:
 
 ```yaml
@@ -58,6 +59,7 @@ services:
         kind: Tag
         metadata: { name: lead }
         spec:
+          lead: true
           roles: [Lead]
           execution: { harness: codex }
           workspace: { id: app, ref: main }

@@ -720,6 +720,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
                         "kind": "Tag",
                         "metadata": { "name": answers.tag },
                         "spec": {
+                            "lead": true,
                             "roles": [ROLE],
                             "execution": execution,
                             "workspace": repository.start.binding(&answers.workspace),
@@ -793,6 +794,8 @@ mod tests {
                 .unwrap()
                 .clone();
             assert_eq!(provision[2]["spec"]["workspace"], binding);
+            // The Tag init creates is the Control Plane's lead Tag.
+            assert_eq!(provision[2]["spec"]["lead"], true);
             let sources = provision
                 .into_iter()
                 .map(crate::manifests::ProvisionSource::Inline)

@@ -240,6 +240,7 @@ pub(super) async fn control_plane_fixture(
                     instructions: "Help with engineering".into(),
                     allowed_actions: vec!["files:read".into()],
                     harness_kind: v2::HarnessKind::Codex as i32,
+                    lead: Some(true),
                     ..Default::default()
                 },
                 token,
@@ -294,6 +295,7 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
     assert_eq!(tags.len(), 1);
     assert_eq!(tags[0].tag_id, "engineer");
     assert_eq!(tags[0].harness_kind, "codex");
+    assert!(tags[0].lead);
     let first = client
         .send(
             id,
@@ -876,6 +878,7 @@ async fn an_operator_creates_a_tag_once_with_the_lead_tag_defaults() {
     assert_eq!(created.name, "Reviewer");
     assert_eq!(created.harness_kind, "claude_code");
     assert_eq!(created.revision, 1);
+    assert!(!created.lead);
     assert_eq!(created.allowed_actions, ["commands:execute", "files:write"]);
     assert_eq!(
         client.create_tag(id, new_tag()).await.unwrap_err(),

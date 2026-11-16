@@ -779,6 +779,7 @@ impl<'a> Catalog<'a> {
             spec.allowed_actions.is_some(),
             spec.workspace.is_some(),
             spec.execution.is_some(),
+            spec.lead.is_some(),
         ];
         let mut value = PutTagRequest {
             tag_id: name.into(),
@@ -800,6 +801,7 @@ impl<'a> Catalog<'a> {
                 .map_or_else(Vec::new, |prior| prior.approval_rules.clone()),
             execution: prior.as_ref().and_then(|prior| prior.execution.clone()),
             expected_revision: Some(prior.as_ref().map_or(0, |tag| tag.revision)),
+            lead: spec.lead,
         };
         ensure!(
             value.instructions.len() <= 65_536,
@@ -1006,6 +1008,12 @@ impl<'a> Catalog<'a> {
                 old.map(|v| execution(v.harness_kind, &v.execution)),
                 execution(value.harness_kind, &value.execution),
             ),
+            // Not the lead is the unset value, which no manager owns.
+            field(
+                "spec.lead",
+                old.map(|v| flag(v.lead)),
+                flag(value.lead.unwrap_or_default()),
+            ),
         ]
         .into_iter()
         .zip(declared)
@@ -1017,6 +1025,7 @@ impl<'a> Catalog<'a> {
                 && old.workspace == value.workspace
                 && old.harness_kind == value.harness_kind
                 && old.execution == value.execution
+                && value.lead.is_none_or(|lead| lead == old.lead)
         });
         Ok((!unchanged).then_some((prior.is_some(), Write::Tag(value))))
     }

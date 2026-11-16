@@ -350,3 +350,14 @@ func TestRailRowsFitAndScrollToTheSelection(t *testing.T) {
 		t.Fatalf("the selected last Tag is not highlighted:\n%s", m.renderRail(9))
 	}
 }
+
+func TestRailStarsTheLeadTag(t *testing.T) {
+	list := tagList("lead", "reviewer")
+	list[0].Spec = &views.TagSpec{Lead: true}
+	m := start(t, testModel(t, &fakeControlPlane{tags: func() ([]*views.Tag, error) { return list, nil }}))
+	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 10})
+	rows := strings.Split(ansi.Strip(m.renderRail(9)), "\n")
+	if !strings.Contains(rows[1], "★ lead") || strings.Contains(rows[2], "★") {
+		t.Fatalf("the lead Tag is not starred alone:\n%s", strings.Join(rows, "\n"))
+	}
+}

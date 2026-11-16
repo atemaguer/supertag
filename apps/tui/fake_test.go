@@ -101,7 +101,7 @@ func (f *fakeControlPlane) ListTags(context.Context, *connect.Request[v2.ListTag
 			return nil, err
 		}
 		for _, tag := range tags {
-			res.Tags = append(res.Tags, &v2.Tag{TagId: tag.GetMetadata().GetName(), Name: tag.GetMetadata().GetName()})
+			res.Tags = append(res.Tags, &v2.Tag{TagId: tag.GetMetadata().GetName(), Name: tag.GetMetadata().GetName(), Lead: tag.GetSpec().GetLead()})
 		}
 	}
 	return connect.NewResponse(res), nil

@@ -16,6 +16,9 @@ whole system rather than another first-class resource.
 - <a id="tag"></a>**Tag** — a persistent AI actor with a stable identity, responsibilities,
   permissions, and work history. It exists independently of the model or harness executing its
   work. See [Tags](../concepts/tags.md).
+- <a id="lead-tag"></a>**lead Tag** — the Control Plane's default Tag, the one `supertag init` creates,
+  which the terminal UI and the desktop app show first. At most one Tag is the lead. See
+  [the Tag fields](resource-model.md).
 - <a id="role"></a>**Role** — an enduring responsibility assigned to a Tag. It can include a purpose, instructions,
   reusable knowledge, and allowed actions. See [Roles](../concepts/roles.md).
 - <a id="objective"></a>**Objective** — an outcome a Tag owns, with a budget, a deadline and a

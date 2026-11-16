@@ -140,11 +140,17 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | `spec.runsOn` | label | Labels a bound Worker Host must carry to run the Tag's Tasks. See [Worker Host labels](#worker-host-labels). |
 | `spec.workspace` | `id`, `baseCommit` or `ref`, `mcp` | The Workspace the Tag's Tasks work in, the commit new Sessions start from or the local branch whose current commit they start from, and the `.mcp.json` servers they may use. See [Workspaces](#workspaces). |
 | `spec.acceptsMessagesFrom` | Tag name | Mailbox grants where this Tag is the recipient |
+| `spec.lead` | `true` or `false` | Whether this is the Control Plane's **lead Tag**. Omitted keeps the current value. |
 
 Where a Tag answers is a separate `SurfaceLocation` resource, a Tag **location**. It names the
 Tag, a channel, repository, chat, or team of a Surface Account, and the Permission Sets and Context Sets
 it activates there. `supertag tag update TAG --add-location PROVIDER` creates one for a local
 Gateway. See [Manage resources](../operations/resources.md).
+
+The lead Tag is the Control Plane's default Tag: `supertag init` makes the Tag it creates the lead,
+and the terminal UI and the desktop app show it first. At most one active Tag is the lead; making
+a second one the lead is refused with the name of the current one, so clear that one first with
+`lead: false` or `supertag tag put TAG --lead false`. Retiring the lead Tag leaves no lead.
 
 Each `acceptsMessagesFrom` entry names one sender Tag this Tag accepts messages from. Tags that
 share a Team need no entry. See [Mailbox](coordination.md#mailbox).

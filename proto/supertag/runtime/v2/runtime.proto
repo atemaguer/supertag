@@ -1501,6 +1501,10 @@ message PutTagRequest {
   optional string name = 8;
   // Zero requires a new identity; a positive value fences an existing revision.
   optional uint64 expected_revision = 9;
+  // Makes this the Control Plane's lead Tag, or not. At most one active Tag is the lead, and
+  // `supertag init` makes the Tag it creates the lead. Omitted keeps the current value; a new
+  // Tag is not the lead.
+  optional bool lead = 6600;
 }
 
 message Tag {
@@ -1516,6 +1520,9 @@ message Tag {
   optional int64 retired_at_ms = 10;
   // Labels a bound Worker Host must carry to run this Tag's Tasks.
   repeated string runs_on = 1400;
+  // Whether this is the Control Plane's lead Tag: the default Tag `supertag init` creates, which
+  // clients show first. At most one active Tag is the lead.
+  bool lead = 6600;
 }
 
 message ListTagsRequest {

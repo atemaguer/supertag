@@ -106,7 +106,7 @@ Worker Host must carry, from the host's `labels` in `supertag.yaml` or its host 
 | `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `reference`, `surfaceAccountId`, `scope`, and `approvalRequired`; and the set's `approvers` |
 | `ContextSet` | Knowledge items a Task may receive, each with an `itemKey`, `type`, `version`, and `config`, and optionally `required` |
 | `Role` | `purpose`, `instructions`, `permissionSets`, `contextSets`, and `execution` |
-| `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, and `acceptsMessagesFrom` |
+| `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, `acceptsMessagesFrom`, and `lead` |
 | `Team` | `members` and `maxConcurrency` |
 | `Objective` | An outcome; see [Declare Objectives](#declare-objectives) |
 | `Workspace` | A GitHub repository source: `github` with `accountId`, `repositoryId`, `repository`, and a `revision` or `commitSha`, and optionally `pullRequestBase`. A repository on a Worker Host is not a manifest; map it in the host's `workspaces` in `supertag.yaml` |

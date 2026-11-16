@@ -2756,6 +2756,7 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
     json!({
         "tag_id": tag.tag_id,
         "name": tag.name,
+        "lead": tag.lead,
         "revision": tag.revision,
         "instructions": tag.instructions,
         "allowed_actions": tag.allowed_actions,

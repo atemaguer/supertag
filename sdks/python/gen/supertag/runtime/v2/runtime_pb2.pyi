@@ -2024,7 +2024,7 @@ class HostRecord(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., revoked: _Optional[bool] = ...) -> None: ...
 
 class PutTagRequest(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution", "name", "expected_revision")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution", "name", "expected_revision", "lead")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -2034,6 +2034,7 @@ class PutTagRequest(_message.Message):
     EXECUTION_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    LEAD_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -2043,10 +2044,11 @@ class PutTagRequest(_message.Message):
     execution: _policy_pb2.PolicyExecutionSettings
     name: str
     expected_revision: int
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+    lead: bool
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., expected_revision: _Optional[int] = ..., lead: _Optional[bool] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on", "lead")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -2058,6 +2060,7 @@ class Tag(_message.Message):
     NAME_FIELD_NUMBER: _ClassVar[int]
     RETIRED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     RUNS_ON_FIELD_NUMBER: _ClassVar[int]
+    LEAD_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -2069,7 +2072,8 @@ class Tag(_message.Message):
     name: str
     retired_at_ms: int
     runs_on: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ...) -> None: ...
+    lead: bool
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ..., lead: _Optional[bool] = ...) -> None: ...
 
 class ListTagsRequest(_message.Message):
     __slots__ = ("limit", "cursor", "include_retired")

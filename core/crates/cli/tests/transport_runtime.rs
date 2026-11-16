@@ -910,6 +910,7 @@ async fn exercise_workload(workload: Workload, database: String, label: &str) ->
                 execution: None,
                 name: None,
                 expected_revision: None,
+                lead: None,
             })?)
             .await?;
     }
@@ -1354,6 +1355,7 @@ async fn exercise_soak(database: String) -> Result<Value> {
                 execution: None,
                 name: None,
                 expected_revision: None,
+                lead: None,
             })?)
             .await?;
         hosts.push(
