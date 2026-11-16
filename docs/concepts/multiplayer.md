@@ -124,8 +124,8 @@ The originating thread is also the shared place where people observe the work:
 
 In Slack, SuperTag also acknowledges the Task when it accepts it, naming the Workspace when the
 Task has one. While the Task runs, that message shows the latest message the Tag wrote, such as
-the sentence saying what it is about to do, or its plan, and the result replaces it instead of
-adding another reply. Editing one message keeps the thread to one reply per turn and notifies
+the sentence saying what it is about to do, once the Tag moves on to its work, or its plan. The
+result replaces it instead of adding another reply, and the result is written only once. Editing one message keeps the thread to one reply per turn and notifies
 nobody until the result arrives. SuperTag stores outgoing updates separately from the
 Task Attempt, so a long-running Task does not block delivery. Routine retries, tool events, and
 internal IDs stay in the audit history instead of filling the conversation.

@@ -96,21 +96,36 @@ pub(crate) fn progress_text(event: &str) -> Option<String> {
 
 /// Replaces the newest progress for a running Task. Identical text is not a new revision.
 ///
-/// A message the Tag writes while it works, such as the sentence saying what it is about to do,
-/// replaces the acknowledgement's text, as does a plan. Activity lines do not: they change too
-/// often for a chat message, and every edit would only churn the thread. Editing the one
-/// acknowledgement keeps a thread to one message per turn, which Slack paces and which notifies
-/// nobody, until the final reply replaces it.
+/// A plan replaces the acknowledgement's text. So does a message the Tag wrote, such as the
+/// sentence saying what it is about to do, but only once a later event shows the Tag moved on:
+/// a Task's last message is usually its result too, which the final reply delivers, so showing
+/// it early would write the result to the provider twice. Activity lines never change the text:
+/// they change too often for a chat message. Editing the one acknowledgement keeps a thread to
+/// one message per turn, which Slack paces and which notifies nobody, until the final reply
+/// replaces it.
 pub(crate) async fn record_in(
     tx: &mut Transaction<'_, Any>,
     task_id: &str,
+    sequence: i64,
     kind: TaskEventKind,
     event: &str,
 ) -> Result<()> {
-    let text = match kind {
-        TaskEventKind::Progress => progress_text(event),
-        TaskEventKind::Message => message_text(event),
-        TaskEventKind::Activity | TaskEventKind::Unspecified => None,
+    let text = if kind == TaskEventKind::Progress {
+        progress_text(event)
+    } else {
+        let previous = sqlx::query(
+            "SELECT text,kind FROM supertag_v2_task_events WHERE task_id=$1 AND sequence=$2",
+        )
+        .bind(task_id)
+        .bind(sequence - 1)
+        .fetch_optional(&mut **tx)
+        .await?;
+        match previous {
+            Some(row) if row.try_get::<i64, _>("kind")? == TaskEventKind::Message as i64 => {
+                message_text(&row.try_get::<String, _>("text")?)
+            }
+            _ => None,
+        }
     };
     let Some(text) = text else {
         return Ok(());

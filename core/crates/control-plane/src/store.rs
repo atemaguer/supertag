@@ -1071,8 +1071,14 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
             supertag_protocol::crash_point("control-plane.append-event", "before-commit");
-            crate::reply_progress::record_in(&mut transaction, &input.task_id, kind, &input.text)
-                .await?;
+            crate::reply_progress::record_in(
+                &mut transaction,
+                &input.task_id,
+                sequence,
+                kind,
+                &input.text,
+            )
+            .await?;
         }
         transaction.commit().await?;
         Ok(TaskEvent {

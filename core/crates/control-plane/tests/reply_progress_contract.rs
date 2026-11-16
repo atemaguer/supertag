@@ -449,6 +449,11 @@ async fn contract(url: String) {
     )
     .await;
     clock.fetch_add(UPDATE_INTERVAL_MS, Ordering::SeqCst);
+    // A message shows only once the Tag moves on: the last message is usually the result,
+    // which only the final reply may write, so the provider never receives it twice.
+    assert_eq!(claim(&store, "u1b").await.update, None);
+    run.event(&store, &host, TaskEventKind::Activity, "Running cargo test")
+        .await;
     let lost = claim(&store, "u2").await;
     assert_eq!(
         lost.update.as_ref().unwrap().text,
