@@ -26,12 +26,12 @@ it("puts each Tag in the rail and the Tag and conversation in the floating pill"
         conversation: "release-checks",
         names: ["release-checks", "default"],
         connected: true,
-        selector: null,
+        selector: () => null,
       },
       null,
     ),
   );
-  expect(html).toMatch(/<nav class="rail" aria-label="Tags">/);
+  expect(html).toMatch(/<nav id="sidebar" class="rail" aria-label="Tags">/);
   expect(html).toMatch(/aria-label="finch" title="finch" aria-current="false"/);
   expect(html).toMatch(/aria-label="Moss" title="Moss" aria-current="true"/);
   expect(html).toContain('aria-label="Moss, Release checks. Switch conversation"');
@@ -50,7 +50,7 @@ it("shows an empty rail and no conversation controls before a Control Plane conn
       {
         tags: [],
         connected: false,
-        selector: null,
+        selector: () => null,
       },
       null,
     ),

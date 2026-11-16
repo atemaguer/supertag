@@ -3,7 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConnectionDialog } from "./components/connection";
 import { ControlPlaneSelector } from "./components/control-plane-selector";
-import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
+import {
+  EmptyWorkspace,
+  type SelectorPlacement,
+  Workspace,
+  WorkspaceShell,
+} from "./components/workspace";
 import {
   type ControlPlane,
   type ControlPlaneActivation,
@@ -124,8 +129,9 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     });
   }
 
-  const selector = (
+  const selector = (placement: SelectorPlacement) => (
     <ControlPlaneSelector
+      side={placement === "rail" ? "right" : "bottom"}
       active={connection?.origin}
       principal={connection?.principal}
       profiles={controlPlanes.profiles}

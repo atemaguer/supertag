@@ -1,5 +1,12 @@
-import { Check, ChevronDown, Plus } from "lucide-react";
-import { type MouseEvent, type ReactNode, useCallback, useState } from "react";
+import { Check, ChevronDown, PanelLeft, PanelLeftClose, Plus } from "lucide-react";
+import {
+  type MouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
 import { describe } from "../lib/polling";
@@ -38,6 +45,53 @@ function harness(kind: string) {
   return { codex: "Codex", claude_code: "Claude Code", openai_agents: "OpenAI Agents" }[kind];
 }
 
+const SIDEBAR_KEY = "supertag.desktop.sidebar";
+const sidebarListeners = new Set<() => void>();
+
+/** Whether the sidebar is open: the one saved preference, open unless collapsed. */
+export function sidebarOpen(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) !== "collapsed";
+  } catch {
+    return true;
+  }
+}
+
+/** Opens or collapses the sidebar in every shell, and remembers it across restarts. */
+export function setSidebarOpen(open: boolean) {
+  try {
+    localStorage.setItem(SIDEBAR_KEY, open ? "open" : "collapsed");
+  } catch {
+    // Without storage the choice lasts until the window closes.
+  }
+  for (const listener of sidebarListeners) listener();
+}
+
+function subscribeSidebar(listener: () => void) {
+  sidebarListeners.add(listener);
+  return () => {
+    sidebarListeners.delete(listener);
+  };
+}
+
+const mac = () => typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh");
+
+/**
+ * Whether a key press toggles the sidebar: ⌘B on macOS, Ctrl+B elsewhere. The composer is plain
+ * text, so the shortcut has nothing to make bold there and applies everywhere in the window.
+ */
+export function isSidebarShortcut(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "isComposing">,
+  onMac: boolean,
+) {
+  if (event.key.toLowerCase() !== "b" || event.altKey || event.shiftKey || event.isComposing)
+    return false;
+  return onMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}
+
+/** Where the Control Plane selector shows: in the rail, or beside the toggle when it is collapsed. */
+export type SelectorPlacement = "rail" | "top";
+
 export type SettingsAction = (event: MouseEvent<HTMLButtonElement>) => void;
 interface ShellProps {
   tags: Tag[];
@@ -46,7 +100,7 @@ interface ShellProps {
   names?: string[];
   connected: boolean;
   switching?: boolean;
-  selector: ReactNode;
+  selector(placement: SelectorPlacement): ReactNode;
   error?: string;
   onSelectTag?(tagId: string): void;
   onSelectConversation?(name: string): void;
@@ -71,6 +125,18 @@ export function WorkspaceShell({
   children,
 }: ShellProps) {
   const [creating, setCreating] = useState(false);
+  const open = useSyncExternalStore(subscribeSidebar, sidebarOpen, () => true);
+  const onMac = mac();
+  const toggle = `${open ? "Hide" : "Show"} sidebar (${onMac ? "⌘B" : "Ctrl+B"})`;
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (!isSidebarShortcut(event, onMac)) return;
+      event.preventDefault();
+      setSidebarOpen(!sidebarOpen());
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onMac]);
   const provider = tag && harness(tag.harnessKind);
   const threadNames =
     conversation && !names?.includes(conversation)
@@ -78,8 +144,24 @@ export function WorkspaceShell({
       : (names ?? []);
 
   return (
-    <div className="shell">
-      <nav className="rail" aria-label="Tags">
+    <div className="shell" data-sidebar={open ? "open" : "collapsed"}>
+      {/* The toggle stays in one place, beside the macOS window controls, in both states. */}
+      <div className="window-controls">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="sidebar-toggle"
+          aria-label={toggle}
+          title={toggle}
+          aria-expanded={open}
+          aria-controls="sidebar"
+          onClick={() => setSidebarOpen(!open)}
+        >
+          {open ? <PanelLeftClose size={17} aria-hidden /> : <PanelLeft size={17} aria-hidden />}
+        </Button>
+        {!open && selector("top")}
+      </div>
+      <nav id="sidebar" className="rail" aria-label="Tags" inert={!open}>
         <div className="rail-top" data-tauri-drag-region>
           <img
             className="rail-mascot"
@@ -126,7 +208,7 @@ export function WorkspaceShell({
               <Plus size={18} aria-hidden />
             </Button>
           )}
-          {selector}
+          {open && selector("rail")}
         </div>
       </nav>
       <main className="main" aria-label="Conversation" aria-busy={switching}>
@@ -136,6 +218,8 @@ export function WorkspaceShell({
               tag={tag}
               conversation={conversation}
               names={threadNames}
+              tags={open ? undefined : tags}
+              onSelectTag={(tagId) => onSelectTag?.(tagId)}
               onSelect={(name) => onSelectConversation?.(name)}
               onCreate={() => setCreating(true)}
             />
@@ -160,17 +244,25 @@ export function WorkspaceShell({
   );
 }
 
-/** The floating pill naming the Tag and conversation, which switches between conversations. */
+/**
+ * The floating pill naming the Tag and conversation, which switches between conversations, and
+ * between Tags while the sidebar is collapsed.
+ */
 function ConversationSwitcher({
   tag,
   conversation,
   names,
+  tags,
+  onSelectTag,
   onSelect,
   onCreate,
 }: {
   tag: Tag;
   conversation: string;
   names: string[];
+  /** The Tags to switch between, when the sidebar does not show them. */
+  tags?: Tag[];
+  onSelectTag(tagId: string): void;
   onSelect(name: string): void;
   onCreate(): void;
 }) {
@@ -192,6 +284,30 @@ function ConversationSwitcher({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="conversation-menu" align="center" sideOffset={6}>
+        {tags && (
+          <>
+            <div className="menu-label">Tags</div>
+            <DropdownMenuRadioGroup value={tag.tagId} onValueChange={onSelectTag}>
+              {tags.map((entry) => (
+                <DropdownMenuRadioItem
+                  key={entry.tagId}
+                  className="control-plane-choice menu-tag"
+                  value={entry.tagId}
+                >
+                  <TagAvatar tagId={entry.tagId} />
+                  <span className="row-title">{entry.name ?? entry.tagId}</span>
+                  <span className="control-plane-indicator menu-tag-check" aria-hidden>
+                    <DropdownMenuItemIndicator>
+                      <Check size={14} />
+                    </DropdownMenuItemIndicator>
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator className="control-plane-separator" />
+            <div className="menu-label">Conversations</div>
+          </>
+        )}
         <DropdownMenuRadioGroup value={conversation} onValueChange={onSelect}>
           {names.map((entry) => (
             <DropdownMenuRadioItem
@@ -320,7 +436,7 @@ interface WorkspaceProps {
   connectionId?: string;
   controlPlane: ControlPlane;
   initialTags: Tag[];
-  selector: ReactNode;
+  selector(placement: SelectorPlacement): ReactNode;
   switching: boolean;
   connectionError: string;
   onWriteChange(delta: 1 | -1): void;

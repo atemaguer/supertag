@@ -28,6 +28,8 @@ interface ControlPlaneSelectorProps {
   /** The local Control Plane: listed first while it runs, otherwise why it is unavailable. */
   local?: LocalControlPlane;
   preview?: boolean;
+  /** Where the menu opens: beside the rail, or below the button at the top of the window. */
+  side: "right" | "bottom";
   busy: boolean;
   switching: boolean;
   trigger: RefObject<HTMLButtonElement | null>;
@@ -49,6 +51,7 @@ export function ControlPlaneSelector({
   profiles,
   local,
   preview,
+  side,
   busy,
   switching,
   trigger,
@@ -97,7 +100,12 @@ export function ControlPlaneSelector({
           <span className="connection-dot" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="control-plane-menu" side="right" align="end" sideOffset={24}>
+      <DropdownMenuContent
+        className="control-plane-menu"
+        side={side}
+        align={side === "right" ? "end" : "start"}
+        sideOffset={side === "right" ? 24 : 8}
+      >
         <div className="control-plane-current">
           <span>{name}</span>
           {selected && selected.name !== selected.address && <small>{selected.address}</small>}

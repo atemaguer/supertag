@@ -55,9 +55,11 @@ button:disabled {
   opacity: 0.46;
 }
 .shell {
+  position: relative;
   display: grid;
   grid-template-columns: var(--rail-width) minmax(0, 1fr);
   height: 100%;
+  transition: grid-template-columns 180ms ease;
 }
 
 .rail {
@@ -158,14 +160,65 @@ button:disabled {
 }
 
 /* The rail: full height, its separator running to the top of the window. */
+.shell[data-sidebar="collapsed"] {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
 .rail {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
+  transition:
+    opacity 180ms ease,
+    visibility 0s;
   padding-bottom: 14px;
   background: var(--rail);
   border-right: 1px solid var(--line);
+}
+/* Room above the mascot for the sidebar toggle, or for the macOS window controls. */
+.shell[data-sidebar="collapsed"] .rail {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 180ms ease,
+    visibility 0s linear 180ms;
+}
+.rail > * {
+  flex-shrink: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell,
+  .rail,
+  .shell[data-sidebar="collapsed"] .rail {
+    transition: none;
+  }
+}
+/* The sidebar toggle: at the top left, or just right of the macOS window controls. */
+.window-controls {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+[data-titlebar="overlay"] .window-controls {
+  top: 13px;
+  left: 84px;
+}
+.sidebar-toggle {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+}
+.sidebar-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 .rail-top {
   display: flex;
@@ -173,11 +226,7 @@ button:disabled {
   align-items: flex-end;
   width: 100%;
   flex-shrink: 0;
-  padding: 16px 0 14px;
-}
-/* Room for the macOS window controls, which overlay the top of the rail. */
-[data-titlebar="overlay"] .rail-top {
-  padding-top: 52px;
+  padding: 52px 0 14px;
 }
 .rail-mascot {
   border-radius: 50%;
@@ -284,6 +333,22 @@ button:disabled {
 .control-plane-current small {
   color: var(--muted);
   font-size: 11px;
+}
+.menu-label {
+  padding: 6px 8px 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 620;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.menu-tag .avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+}
+.menu-tag-check {
+  margin-left: auto;
 }
 .conversation-menu {
   z-index: 40;
@@ -942,4 +1007,24 @@ button:disabled {
   .composer-footer {
     display: none;
   }
+}
+
+/* The Control Plane button beside the toggle while the sidebar is collapsed. */
+.window-controls .connection {
+  width: 32px;
+  height: 32px;
+}
+.window-controls .connection-dot {
+  width: 9px;
+  height: 9px;
+  right: -1px;
+  bottom: -1px;
+  border-color: var(--background);
+}
+/* While collapsed, the top strip leaves the toggle and Control Plane button their corner. */
+.shell[data-sidebar="collapsed"] .topstrip {
+  padding-left: 110px;
+}
+[data-titlebar="overlay"] .shell[data-sidebar="collapsed"] .topstrip {
+  padding-left: 170px;
 }
