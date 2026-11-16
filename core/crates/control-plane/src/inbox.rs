@@ -56,9 +56,20 @@ impl Store {
                 "capabilities require a live running Attempt".into(),
             ));
         }
-        let may_ask_objective_question = question_objective_in(&mut tx, &row, &attempt.task_id)
-            .await?
-            .is_some();
+        let objective = question_objective_in(&mut tx, &row, &attempt.task_id).await?;
+        let may_ask_objective_question = objective.is_some();
+        let objective_ongoing = match &objective {
+            Some(id) => {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT ongoing FROM supertag_v2_objectives WHERE objective_id=$1",
+                )
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await?
+                    != 0
+            }
+            None => false,
+        };
         let session: String = row.try_get("session_id")?;
         let scope = crate::work_sessions::task_scope_in(&mut tx, &attempt.task_id).await?;
         let kind = scope.as_ref().map(|scope| scope.kind);
@@ -103,6 +114,7 @@ impl Store {
             may_request_commit_review,
             may_read_tag_sessions: tag_portfolio.is_some(),
             tag_portfolio: tag_portfolio.unwrap_or_default(),
+            objective_ongoing,
         })
     }
 

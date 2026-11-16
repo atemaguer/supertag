@@ -22,6 +22,7 @@ import {
   TaskState,
   TURN_GUIDANCE,
   tagPortfolio,
+  withObjectiveReport,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { claudeToolActivity } from "../activity.js";
 import { ClaudeProcessTree } from "../process-tree.js";
@@ -658,17 +659,20 @@ export async function runAdapter(
       secrets,
       lastTotalCostUsd,
     );
-    const outcome = {
-      result,
-      succeeded: true,
-      checkpoint,
-      waitingApprovalIds: [
-        ...new Set([
-          ...(await coordination.waitingApprovalIds()),
-          ...(await mcp.waitingApprovalIds()),
-        ]),
-      ].sort(),
-    };
+    const outcome = withObjectiveReport(
+      {
+        result,
+        succeeded: true,
+        checkpoint,
+        waitingApprovalIds: [
+          ...new Set([
+            ...(await coordination.waitingApprovalIds()),
+            ...(await mcp.waitingApprovalIds()),
+          ]),
+        ].sort(),
+      },
+      await coordination.objectiveReport(),
+    );
     completionProposed = true;
     await receipt(() => client.complete(outcome, options()));
   } catch (error) {

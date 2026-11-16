@@ -35,6 +35,7 @@ pub(crate) enum Arguments {
     Start(StartSession),
     Continue(ContinueSession),
     TagSessions(crate::tag_sessions::Call),
+    Report(crate::questions::ObjectiveReport),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

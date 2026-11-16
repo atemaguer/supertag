@@ -5,11 +5,13 @@ export {
   COORDINATION_SERVER,
   type CoordinationScope,
   MAILBOX_SEND_ACTION,
+  type ObjectiveReport,
   registerCoordinationTools,
   TURN_GUIDANCE,
   tagPortfolio,
   validCoordinationArguments,
   WORKSTREAM_POST_ACTION,
+  withObjectiveReport,
 } from "./coordination.js";
 export { startCoordinationHttp } from "./coordination-http.js";
 export * from "./gen/supertag/runtime/v2/artifact_pb.js";

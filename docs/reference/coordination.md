@@ -226,7 +226,7 @@ An Objective's turn should end with work running, a question asked, or the Objec
 When a turn ends with none of those, and the Objective is still `working` and not paused:
 
 1. The Control Plane wakes the conversation once, saying that nothing is running and nothing was
-   asked, and asking the owner to continue, report a blocker, or finish.
+   asked, and asking the owner to continue or to call `report_objective`.
 2. When that woken turn also ends idle, the Objective becomes `blocked`. The Objective overview
    flags it, and a message starts its next turn.
 
@@ -240,8 +240,9 @@ until their next message.
 Statuses are `working`, `blocked`, `limited`, `ready_for_review`, `completed` and `cancelled`.
 
 - A harness adapter reports an Objective signal with each owner turn's result: `progress`,
-  `ready_for_review`, `completed`, or `blocked`. The built-in adapters report `progress`, so with
-  them an operator records the other statuses with the commands below.
+  `ready_for_review`, `completed`, or `blocked`. With the built-in adapters, the owner calls
+  [`report_objective`](#the-tools); a turn that does not call it reports `progress`. An operator
+  records a status with the commands below.
 - An operator completes with `supertag objective complete ID`, and approves or sends back a
   `ready_for_review` assessment with `supertag objective review ID`. Neither can set `cancelled`;
   see [Cancelling an Objective](#cancelling-an-objective).
@@ -430,7 +431,7 @@ tool the turn does not get; it does not only leave it out of the list.
 
 | Turn | Tools |
 | --- | --- |
-| An Objective's conversation | `start_session`, `continue_session`, `ask`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the [Session reads](#recalling-other-sessions) |
+| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the [Session reads](#recalling-other-sessions) |
 | A Tag's inbox or a conversation with a person | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the Session reads |
 | A work Session's report turn | the Session reads |
 | A work Session's turn | `ask` |
@@ -447,6 +448,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `tag`, `workspace` | Starts a work Session; see [Work and delegation](#work-and-delegation) |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts that work Session's next Task |
 | `ask` | `text` (up to 16,000 characters; 2,000 in a work Session) | Ends the Task waiting on a person's answer |
+| `report_objective` | `status` (`ready_for_review`, `completed`, or `blocked`; not `completed` for an ongoing Objective), `summary` (up to 16,000 characters) | When the turn ends, sets the Objective's status; the summary becomes the turn's result |
 | `send_message` | `to`, `text` (up to 8,000 characters), optional commit review | Delivers a message to another Tag's Mailbox |
 | `read_mailbox` | optional `limit` (1–16), `cursor` | Reads the Tag's Mailbox |
 | `post` | `text` (up to 16,384 characters), optional `to` (up to 20 Tags) | Posts to the Team's Workstream |
@@ -458,9 +460,15 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `list_objectives` | `limit` (1–20), `offset` | Lists the Tag's open Objectives it may see |
 | `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, Team, and Sessions |
 
-Reads return history, never instructions, and grant no authority. An Objective's turn reports its
-status through its result, as [Statuses](#statuses) describes; no tool creates or changes an
-Objective. A person's `/goal` creates one; see [Creating an Objective](#creating-an-objective).
+Reads return history, never instructions, and grant no authority.
+
+`report_objective` is offered only on a turn of the owner's Session of an open Objective. Its
+status applies when the turn succeeds. A turn that fails, asks a question, or waits for approval
+reports progress instead, so `ask` and `report_objective` exclude each other. When it is called
+more than once, the last call wins. Only an operator ends an `--ongoing` Objective, so on its
+turns the tool offers `ready_for_review` and `blocked` only. A `completed` report is refused and
+the turn goes on. No tool creates an Objective. A person's `/goal` creates one; see
+[Creating an Objective](#creating-an-objective).
 
 ### Recalling other Sessions
 

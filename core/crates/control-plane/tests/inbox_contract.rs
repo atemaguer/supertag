@@ -142,13 +142,9 @@ async fn contract(url: &str) {
         Err(StoreError::FailedPrecondition(_))
     ));
     start(&store, &host, &attempt).await;
-    assert!(
-        store
-            .attempt_capabilities(&host, &attempt)
-            .await
-            .unwrap()
-            .may_ask_objective_question
-    );
+    let capabilities = store.attempt_capabilities(&host, &attempt).await.unwrap();
+    assert!(capabilities.may_ask_objective_question);
+    assert!(!capabilities.objective_ongoing);
     assert!(matches!(
         store.attempt_capabilities(&other, &attempt).await,
         Err(StoreError::PermissionDenied)
@@ -654,4 +650,42 @@ async fn postgres_inbox_contract() {
         .unwrap();
     admin.close().await.unwrap();
     result.unwrap();
+}
+
+/// The owner of an ongoing Objective learns it is ongoing, so its harness never offers
+/// `completed`.
+#[tokio::test]
+async fn ongoing_objective_owner_turn_carries_objective_ongoing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("ongoing.db").display()
+    ))
+    .await
+    .unwrap()
+    .with_execution_clock(|| NOW);
+    store
+        .put_tag("owner", "Original policy", vec!["files:read".into()])
+        .await
+        .unwrap();
+    let host = support::register_host(&store, "ongoing-host").await;
+    let objective = store
+        .create_objective(
+            OPERATOR,
+            &CreateObjectiveRequest {
+                operation_id: "create-ongoing".into(),
+                objective_id: "ongoing".into(),
+                owner_tag_id: "owner".into(),
+                outcome: "Keep the docs current".into(),
+                ongoing: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let attempt = claim(&store, &host, &objective.starting_task_id).await;
+    start(&store, &host, &attempt).await;
+    let capabilities = store.attempt_capabilities(&host, &attempt).await.unwrap();
+    assert!(capabilities.may_ask_objective_question);
+    assert!(capabilities.objective_ongoing);
 }

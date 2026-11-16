@@ -121,8 +121,8 @@ its next message, report, or notice.
 
 ## 6. Review a result
 
-An owner stops at `ready_for_review` when its harness adapter submits the Objective for review;
-the built-in adapters report progress only, so with them you complete the Objective yourself (see
+An owner stops at `ready_for_review` when it reports the Objective ready for review with
+`report_objective` (see
 [Complete it, or review it first](objectives.md#5-complete-it-or-review-it-first)). Select the
 Objective in the terminal UI to read its assessment and see what needs your attention. To request
 a revision, run `supertag objective review service-operations request-changes --feedback TEXT`,

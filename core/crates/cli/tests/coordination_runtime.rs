@@ -228,6 +228,86 @@ database_tests! {
     worker_managed_effects_replay_and_stay_in_doubt_across_restart;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     slack_message_selects_only_an_authorized_github_workspace;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    an_owner_report_finishes_its_objective_through_the_worker_host;
+}
+
+/// A built-in harness's `report_objective` call reaches the Control Plane through the
+/// Worker Host: the reported status finishes the Objective with the turn's result as its
+/// summary, and a turn that reports nothing leaves it working.
+async fn an_owner_report_finishes_its_objective_through_the_worker_host(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let credentials = Credentials::new();
+    let services = Services::start(&credentials, &database, |_| {}).await?;
+    let cli = |args: &[&str]| services.cli(&credentials, args);
+    json(cli(&[
+        "tag",
+        "put",
+        "owner",
+        "--instructions",
+        "Release engineering",
+        "--allow",
+        "files:read",
+    ]))
+    .await?;
+    for (objective, status, expected) in [
+        (
+            "reviewed",
+            "ready_for_review",
+            "OBJECTIVE_STATUS_READY_FOR_REVIEW",
+        ),
+        ("shipped", "completed", "OBJECTIVE_STATUS_COMPLETED"),
+    ] {
+        json(cli(&[
+            "objective",
+            "create",
+            objective,
+            "--owner",
+            "owner",
+            "Ship the release notes",
+        ]))
+        .await?;
+        success(credentials.worker(
+            &public(&services),
+            &root.join(objective),
+            None,
+            &[&format!("--report-objective={status}")],
+        ))
+        .await?;
+        let read = json(cli(&["get", "objective", objective])).await?;
+        ensure!(
+            read["status"] == expected,
+            "{objective} did not finish: {read}"
+        );
+        ensure!(
+            read["completion_summary"]
+                .as_str()
+                .is_some_and(|summary| summary.contains("Ship the release notes")),
+            "{objective} summary is not the turn's result: {read}"
+        );
+    }
+    // A turn outside any Objective may not report one; the fixture sends progress.
+    json(cli(&[
+        "task",
+        "submit",
+        "--tag",
+        "owner",
+        "--session",
+        "plain",
+        "Say hello",
+    ]))
+    .await?;
+    success(credentials.worker(
+        &public(&services),
+        &root.join("plain"),
+        None,
+        &["--report-objective=completed"],
+    ))
+    .await?;
+    services.stop().await
 }
 
 /// TypeScript parity: `packages/control-plane/overlap-warnings.test.ts` and

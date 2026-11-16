@@ -275,9 +275,7 @@ fn transform(
     Ok(output)
 }
 
-pub(crate) fn coordination_inventory(
-    checkpoint: &SessionCheckpoint,
-) -> Option<crate::questions::Tools> {
+fn tool_manifest(checkpoint: &SessionCheckpoint) -> Option<String> {
     #[derive(Deserialize)]
     struct Manifest {
         tool_manifest: String,
@@ -285,9 +283,36 @@ pub(crate) fn coordination_inventory(
     if checkpoint.payload.len() > MAX_ENCODED_BYTES {
         return None;
     }
-    let manifest = serde_json::from_slice::<Manifest>(&checkpoint.payload)
-        .ok()?
-        .tool_manifest;
+    Some(
+        serde_json::from_slice::<Manifest>(&checkpoint.payload)
+            .ok()?
+            .tool_manifest,
+    )
+}
+
+/// Whether the checkpointed thread registered `report_objective`. A thread whose only
+/// coordination is the Objective question is not pinned: it resumes only while its
+/// Session still owns the open Objective, with the same tools it started with.
+pub(crate) fn reports_objective(checkpoint: &SessionCheckpoint) -> bool {
+    tool_manifest(checkpoint).is_some_and(|manifest| {
+        manifest.ends_with(crate::questions::OBJECTIVE_REPORT_SUFFIX)
+            || manifest.ends_with(crate::questions::ONGOING_OBJECTIVE_REPORT_SUFFIX)
+    })
+}
+
+pub(crate) fn coordination_inventory(
+    checkpoint: &SessionCheckpoint,
+) -> Option<crate::questions::Tools> {
+    let manifest = tool_manifest(checkpoint)?;
+    let (report, manifest) = if let Some(rest) =
+        manifest.strip_suffix(crate::questions::ONGOING_OBJECTIVE_REPORT_SUFFIX)
+    {
+        (crate::questions::Reporting::Ongoing, rest.to_owned())
+    } else if let Some(rest) = manifest.strip_suffix(crate::questions::OBJECTIVE_REPORT_SUFFIX) {
+        (crate::questions::Reporting::Finishing, rest.to_owned())
+    } else {
+        (crate::questions::Reporting::None, manifest)
+    };
     let tag_sessions = manifest.strip_suffix(crate::questions::TAG_SESSIONS_SUFFIX);
     let manifest = tag_sessions.unwrap_or(&manifest).to_owned();
     let attach = manifest.strip_suffix(crate::questions::ARTIFACT_ATTACH_SUFFIX);
@@ -332,6 +357,7 @@ pub(crate) fn coordination_inventory(
         acquire_artifacts: acquire.is_some(),
         attach_artifacts: attach.is_some(),
         tag_sessions: tag_sessions.is_some(),
+        report_objective: report,
     })
 }
 

@@ -216,7 +216,7 @@ Three rules shape what the owner can do:
   narrowed to the Objective's runtime actions and to the owner's own turn.
 - **The Objective keeps moving or stops.** When a turn ends with nothing running and no question
   asked while the Objective is still `working`, SuperTag wakes the owner once and asks it to
-  continue, report a blocker, or finish. If that woken turn also ends that way, the Objective
+  continue or to report the Objective's status. If that woken turn also ends that way, the Objective
   becomes `blocked`. An `--ongoing` Objective is exempt: it may
   rest until its next message.
 
@@ -234,8 +234,9 @@ next turn. You can also answer in the Objective's home thread. See
 ## 5. Complete it, or review it first
 
 The owner reports its assessment, with the evidence for each condition, in the Objective's
-conversation. A harness adapter can also signal that the Objective is complete or ready for
-review; the built-in adapters report progress only, so with them you record the result.
+conversation. When the outcome is met, it calls `report_objective` with `completed` or
+`ready_for_review` and a summary, and the Objective finishes with that summary. The owner can also
+report `blocked`. You can record the result yourself with `supertag objective complete`.
 
 If the owner stopped at `ready_for_review`, open the Objective in the terminal UI to read its
 assessment. To request changes, run

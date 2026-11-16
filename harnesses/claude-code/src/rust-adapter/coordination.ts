@@ -34,7 +34,7 @@ export function coordinationTools(
     timeout: run.mayCaptureArtifacts ? 70_000 : 16_000,
     tools: [],
   });
-  const { tools, waitingApprovalIds } = registerCoordinationTools(
+  const { tools, waitingApprovalIds, objectiveReport } = registerCoordinationTools(
     server.instance,
     bridge,
     run,
@@ -48,5 +48,6 @@ export function coordinationTools(
     tools: tools.map((name) => `${COORDINATION_PREFIX}${name}`),
     servers: tools.length ? { [COORDINATION_SERVER]: server } : {},
     waitingApprovalIds,
+    objectiveReport,
   };
 }

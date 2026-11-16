@@ -46,8 +46,11 @@ Worker Host ── claims Task ── starts adapter ── writes bootstrap to 
    `SettleLiveInput`; the adapter must handle accepted input before it completes.
 7. `Complete` ends the Task Attempt with the result text, whether it succeeded, a new Session
    checkpoint so the next turn can resume, and, on an Objective owner's turn, an Objective signal:
-   `progress`, `ready_for_review`, `completed`, or `blocked`. The built-in adapters always report
-   `progress`.
+   `progress`, `ready_for_review`, `completed`, or `blocked`. A failed turn, or one that asked a
+   question or waits for approval, reports `progress`. The built-in adapters report the status the
+   owner gave with its `report_objective` tool, with the owner's summary as the result, and
+   `progress` otherwise. When the run's capabilities set `objective_ongoing`, only an operator
+   ends the Objective, and the Control Plane refuses `completed`.
 
 The Worker Host supervises the adapter's process group. It stops the adapter when the Task is
 cancelled or reaches its time limit, and it cleans up processes the adapter leaves behind.

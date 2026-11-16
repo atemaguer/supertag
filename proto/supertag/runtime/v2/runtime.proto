@@ -464,6 +464,9 @@ message AttemptCapabilities {
   // The Tag's open Objectives and how to recall its other Sessions, for the
   // turn's context. State, not instructions. Empty when `may_read_tag_sessions` is false.
   string tag_portfolio = 11;
+  // With `may_ask_objective_question`: the Objective is ongoing, so only an operator ends it
+  // and its owner may report it ready for review or blocked, never completed.
+  bool objective_ongoing = 12;
 }
 
 // Operators see the work started in Sessions they can access.

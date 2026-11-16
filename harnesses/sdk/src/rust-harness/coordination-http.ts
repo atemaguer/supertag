@@ -48,7 +48,11 @@ export async function startCoordinationHttp(
   const bearer = randomBytes(32).toString("base64url");
   const authorization = `Bearer ${bearer}`;
   const expected = Buffer.from(authorization);
-  const { tools: operations, waitingApprovalIds } = registerCoordinationTools(
+  const {
+    tools: operations,
+    waitingApprovalIds,
+    objectiveReport,
+  } = registerCoordinationTools(
     protocol,
     bridge,
     run,
@@ -60,7 +64,13 @@ export async function startCoordinationHttp(
     { questionOperationPrefix },
   );
   if (operations.length === 0)
-    return { server: undefined, secrets: [], waitingApprovalIds, async close() {} };
+    return {
+      server: undefined,
+      secrets: [],
+      waitingApprovalIds,
+      objectiveReport,
+      async close() {},
+    };
 
   // A native process owns one client for this Attempt.
   const transport = new StreamableHTTPServerTransport({
@@ -132,6 +142,7 @@ export async function startCoordinationHttp(
       },
       secrets: [authorization, bearer],
       waitingApprovalIds,
+      objectiveReport,
       close,
     };
   } catch (error) {

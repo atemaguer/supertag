@@ -36,7 +36,7 @@ Turns are delivered, never scheduled. A turn runs when the Objective starts, whe
 beneath it reports, when a person messages it, when an approval is decided, and when SuperTag
 sends a budget or deadline notice. Each turn ends done or waiting. When a turn ends with nothing
 running and nothing asked while the Objective is still working, SuperTag wakes the Objective once
-to continue or finish. A second idle turn marks the Objective blocked and tells the person in the
+to continue or finish. The owner finishes it, or reports it blocked, with `report_objective`. A second idle turn marks the Objective blocked and tells the person in the
 thread.
 
 A person directs the Objective from the terminal UI or by replying in its home thread. The

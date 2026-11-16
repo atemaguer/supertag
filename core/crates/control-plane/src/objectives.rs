@@ -564,7 +564,7 @@ pub(crate) async fn create_objective_in(
         if input.ongoing {
             "This responsibility is ongoing. An operator must end it; completing an assessment does not complete the Objective."
         } else {
-            "When the outcome is met, report ready_for_review or completed with your result."
+            "When the outcome is met, call report_objective with ready_for_review or completed and a summary of the result."
         }
     );
     let task = Box::pin(insert_task(
@@ -1373,7 +1373,7 @@ pub(crate) async fn objective_finish_in(
                 }
                 if record.idle_wake_count == 0 {
                     record.idle_wake_count = 1;
-                    internal_turn_in(tx, &record, &format!("idle:{}", task.task_id), "Your last turn ended with nothing running and nothing asked, while the Objective is still working. Continue the work, report a blocker, or finish the Objective. If this turn also ends that way, the Objective becomes blocked.", "idle", now_ms).await?;
+                    internal_turn_in(tx, &record, &format!("idle:{}", task.task_id), "Your last turn ended with nothing running and nothing asked, while the Objective is still working. Continue the work, or call report_objective to report it ready_for_review, completed, or blocked. If this turn also ends that way, the Objective becomes blocked.", "idle", now_ms).await?;
                 } else {
                     record.change_status(ObjectiveStatus::Blocked, now_ms);
                 }

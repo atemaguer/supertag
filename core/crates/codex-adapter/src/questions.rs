@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, time::Duration};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        AttemptCapabilities, HarnessAskQuestionRequest,
+        AttemptCapabilities, HarnessAskQuestionRequest, ObjectiveSignal,
         harness_artifacts_client::HarnessArtifactsClient,
         harness_questions_client::HarnessQuestionsClient,
     },
@@ -30,6 +30,10 @@ pub(crate) const ARTIFACT_ACQUIRE_SUFFIX: &str = "+artifact-acquire-v1";
 pub(crate) const ARTIFACT_ATTACH_SUFFIX: &str = "+artifact-attach-v1";
 pub(crate) const ARTIFACT_CAPTURE_SUFFIX: &str = "+artifact-capture-v1";
 pub(crate) const TAG_SESSIONS_SUFFIX: &str = "+tag-sessions-v1";
+pub(crate) const OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-v1";
+pub(crate) const ONGOING_OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-ongoing-v1";
+const ONGOING_COMPLETION_REFUSED: &str = "This Objective is ongoing, so it never completes; only an operator ends it. Report ready_for_review or blocked instead, or finish the turn without a report.";
+const REPORT_SUMMARY_MAX: usize = 16_000;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Tools {
@@ -40,6 +44,51 @@ pub(crate) struct Tools {
     /// `list_sessions`, `search_sessions`, `read_session`, `list_objectives`, and
     /// `read_objective`.
     pub(crate) tag_sessions: bool,
+    /// `report_objective`, for the owner Session of an open Objective.
+    pub(crate) report_objective: Reporting,
+}
+
+/// Whether a turn offers `report_objective`, and which statuses it offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Reporting {
+    None,
+    /// `ready_for_review`, `completed`, or `blocked`.
+    Finishing,
+    /// An ongoing Objective never completes: `ready_for_review` or `blocked`.
+    Ongoing,
+}
+
+impl Reporting {
+    pub(crate) fn new(capabilities: &AttemptCapabilities) -> Self {
+        match (
+            capabilities.may_ask_objective_question,
+            capabilities.objective_ongoing,
+        ) {
+            (false, _) => Self::None,
+            (true, false) => Self::Finishing,
+            (true, true) => Self::Ongoing,
+        }
+    }
+
+    pub(crate) fn offered(self) -> bool {
+        self != Self::None
+    }
+
+    pub(crate) fn suffix(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Finishing => OBJECTIVE_REPORT_SUFFIX,
+            Self::Ongoing => ONGOING_OBJECTIVE_REPORT_SUFFIX,
+        }
+    }
+}
+
+/// The status an Objective's owner reported during this turn. It applies only when the
+/// turn succeeds without waiting for an answer or an approval.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ObjectiveReport {
+    pub(crate) signal: ObjectiveSignal,
+    pub(crate) summary: String,
 }
 
 impl Tools {
@@ -48,6 +97,7 @@ impl Tools {
             || self.capture_artifact
             || self.acquire_artifacts
             || self.tag_sessions
+            || self.report_objective.offered()
     }
 
     pub(crate) fn arguments(self, params: &Value) -> Result<Arguments> {
@@ -63,6 +113,9 @@ impl Tools {
             return Ok(Arguments::Acquire(crate::artifact::Acquisition::parse(
                 params,
             )?));
+        }
+        if params["tool"] == "report_objective" && self.report_objective.offered() {
+            return Ok(Arguments::Report(validate_report(params)?));
         }
         if self.tag_sessions
             && params["namespace"] == "supertag"
@@ -90,6 +143,7 @@ pub(crate) struct Bridge {
     calls: BTreeMap<String, (Arguments, Value)>,
     secrets: Vec<String>,
     asked: bool,
+    report: Option<ObjectiveReport>,
 }
 impl Bridge {
     pub(crate) fn new(
@@ -121,6 +175,7 @@ impl Bridge {
             calls: BTreeMap::new(),
             secrets: vec![],
             asked: false,
+            report: None,
         }
     }
     pub(crate) fn enabled(&self) -> bool {
@@ -146,6 +201,14 @@ impl Bridge {
         ids.sort_unstable();
         ids.dedup();
         ids
+    }
+    /// The Objective status this turn reported, unless it asked a question or left
+    /// approvals pending. A failed turn never applies it.
+    pub(crate) fn objective_report(&self) -> Option<ObjectiveReport> {
+        if self.asked || !self.coordination.pending.is_empty() {
+            return None;
+        }
+        self.report.clone()
     }
     pub(crate) fn manifest(&self) -> String {
         let base = match self.tools.coordination {
@@ -173,6 +236,7 @@ impl Bridge {
         if self.tools.tag_sessions {
             manifest.push_str(TAG_SESSIONS_SUFFIX);
         }
+        manifest.push_str(self.tools.report_objective.suffix());
         manifest
     }
     pub(crate) fn tools(&self) -> Value {
@@ -196,6 +260,12 @@ impl Bridge {
                 .as_array_mut()
                 .expect("tool specifications")
                 .extend(crate::tag_sessions::tool_specs());
+        }
+        if self.tools.report_objective.offered() {
+            specs[0]["tools"]
+                .as_array_mut()
+                .expect("tool specifications")
+                .push(report_spec(self.tools.report_objective));
         }
         specs
     }
@@ -275,6 +345,7 @@ impl Bridge {
             }
             Arguments::Ask(text)
                 if self.capabilities.may_ask_objective_question
+                    && self.report.is_none()
                     && self.coordination.pending.is_empty() =>
             {
                 let reply = self
@@ -367,6 +438,30 @@ impl Bridge {
                 self.tag_sessions
                     .call(call, &self.token, &self.secrets)
                     .await?
+            }
+            // An ongoing Objective never completes. Refuse that status so the owner
+            // can recover, rather than failing the turn at Finish.
+            Arguments::Report(report)
+                if self.current.report_objective.offered()
+                    && (report.signal == ObjectiveSignal::Completed
+                        && (self.capabilities.objective_ongoing
+                            || self.tools.report_objective == Reporting::Ongoing)) =>
+            {
+                coordination::response(ONGOING_COMPLETION_REFUSED, false)
+            }
+            Arguments::Report(report)
+                if self.current.report_objective.offered()
+                    && !self.asked
+                    && self.coordination.pending.is_empty() =>
+            {
+                self.report = Some(ObjectiveReport {
+                    signal: report.signal,
+                    summary: crate::auth::redact(report.summary.clone(), &self.secrets),
+                });
+                coordination::response(
+                    "Objective status recorded. It applies when this turn ends, and your summary becomes this turn's result. Finish the turn now.",
+                    true,
+                )
             }
             _ => coordination::refused(),
         };
@@ -484,4 +579,166 @@ pub(crate) fn validate_tool(params: &Value) -> Result<String> {
         "Codex question text is invalid"
     );
     Ok(text.into())
+}
+
+fn report_spec(reporting: Reporting) -> Value {
+    let (description, statuses) = if reporting == Reporting::Ongoing {
+        (
+            "Report this ongoing Objective's status when the turn ends: ready_for_review when a person should review your assessment, or blocked when you cannot continue without help. An ongoing Objective never completes; only an operator ends it. The summary becomes this turn's result. Call this last, then finish the turn.",
+            json!(["ready_for_review", "blocked"]),
+        )
+    } else {
+        (
+            "Report this Objective's status when the turn ends: ready_for_review when the outcome is met and a person should review it, completed when it is met and needs no review, or blocked when you cannot continue without help. The summary becomes this turn's result. Call this last, then finish the turn.",
+            json!(["ready_for_review", "completed", "blocked"]),
+        )
+    };
+    json!({
+        "type":"function", "name":"report_objective",
+        "description":description,
+        "inputSchema":{
+            "type":"object",
+            "properties":{
+                "status":{"type":"string","enum":statuses},
+                "summary":{"type":"string","minLength":1,"maxLength":REPORT_SUMMARY_MAX}
+            },
+            "required":["status","summary"], "additionalProperties":false
+        }
+    })
+}
+
+pub(crate) fn validate_report(params: &Value) -> Result<ObjectiveReport> {
+    ensure!(
+        params["namespace"] == "supertag" && params["tool"] == "report_objective",
+        "Codex requested an unregistered coordination tool"
+    );
+    let args = params["arguments"]
+        .as_object()
+        .context("Codex Objective report arguments must be an object")?;
+    ensure!(
+        args.len() == 2,
+        "Codex Objective report arguments do not match the admitted schema"
+    );
+    let signal = match args.get("status").and_then(Value::as_str) {
+        Some("ready_for_review") => ObjectiveSignal::ReadyForReview,
+        Some("completed") => ObjectiveSignal::Completed,
+        Some("blocked") => ObjectiveSignal::Blocked,
+        _ => bail!("Codex Objective report status is invalid"),
+    };
+    let summary = args
+        .get("summary")
+        .and_then(Value::as_str)
+        .context("Codex Objective report summary is missing")?
+        .trim();
+    ensure!(
+        !summary.is_empty()
+            && summary.encode_utf16().count() <= REPORT_SUMMARY_MAX
+            && !summary.contains('\0'),
+        "Codex Objective report summary is invalid"
+    );
+    Ok(ObjectiveReport {
+        signal,
+        summary: summary.into(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call(arguments: Value) -> Value {
+        json!({"namespace":"supertag","tool":"report_objective","arguments":arguments})
+    }
+
+    #[test]
+    fn report_maps_each_status_to_its_signal_and_trims_the_summary() -> Result<()> {
+        for (status, signal) in [
+            ("ready_for_review", ObjectiveSignal::ReadyForReview),
+            ("completed", ObjectiveSignal::Completed),
+            ("blocked", ObjectiveSignal::Blocked),
+        ] {
+            let report = validate_report(&call(json!({"status":status,"summary":"  Shipped. "})))?;
+            assert_eq!(report.signal, signal);
+            assert_eq!(report.summary, "Shipped.");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn report_rejects_other_statuses_blank_or_oversized_summaries_and_extra_fields() {
+        for arguments in [
+            json!({"status":"progress","summary":"Working"}),
+            json!({"status":"working","summary":"Working"}),
+            json!({"status":"completed","summary":"   "}),
+            json!({"status":"completed","summary":"a\0b"}),
+            json!({"status":"completed","summary":"x".repeat(REPORT_SUMMARY_MAX + 1)}),
+            json!({"status":"completed"}),
+            json!({"summary":"Done"}),
+            json!({"status":"completed","summary":"Done","objective_id":"other"}),
+            json!(["completed", "Done"]),
+        ] {
+            assert!(
+                validate_report(&call(arguments.clone())).is_err(),
+                "{arguments}"
+            );
+        }
+        let mut foreign = call(json!({"status":"completed","summary":"Done"}));
+        foreign["namespace"] = json!("operator");
+        assert!(validate_report(&foreign).is_err());
+    }
+
+    #[test]
+    fn report_is_offered_and_parsed_only_when_admitted() -> Result<()> {
+        let tools = |report_objective: Reporting| Tools {
+            coordination: Inventory::Ask,
+            capture_artifact: false,
+            acquire_artifacts: false,
+            attach_artifacts: false,
+            tag_sessions: false,
+            report_objective,
+        };
+        let params = call(json!({"status":"completed","summary":"Done"}));
+        assert!(matches!(
+            tools(Reporting::Finishing).arguments(&params)?,
+            Arguments::Report(_)
+        ));
+        // An ongoing Objective's call still parses, so the bridge can refuse it and the
+        // turn continues.
+        assert!(matches!(
+            tools(Reporting::Ongoing).arguments(&params)?,
+            Arguments::Report(_)
+        ));
+        assert!(tools(Reporting::None).arguments(&params).is_err());
+        let statuses = |reporting| {
+            report_spec(reporting)["inputSchema"]["properties"]["status"]["enum"].clone()
+        };
+        assert_eq!(
+            statuses(Reporting::Finishing),
+            json!(["ready_for_review", "completed", "blocked"])
+        );
+        assert_eq!(
+            statuses(Reporting::Ongoing),
+            json!(["ready_for_review", "blocked"])
+        );
+        assert!(
+            report_spec(Reporting::Ongoing)["description"]
+                .as_str()
+                .is_some_and(|text| text.contains("never completes"))
+        );
+        let capabilities = |ask, ongoing| AttemptCapabilities {
+            may_ask_objective_question: ask,
+            objective_ongoing: ongoing,
+            ..Default::default()
+        };
+        assert_eq!(Reporting::new(&capabilities(false, true)), Reporting::None);
+        assert_eq!(
+            Reporting::new(&capabilities(true, false)),
+            Reporting::Finishing
+        );
+        assert_eq!(
+            Reporting::new(&capabilities(true, true)),
+            Reporting::Ongoing
+        );
+        Ok(())
+    }
 }

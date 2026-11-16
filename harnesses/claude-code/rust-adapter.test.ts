@@ -36,6 +36,7 @@ import {
   HarnessWorkSessions,
   HarnessWorkstreams,
   LiveInputReceipt,
+  ObjectiveSignal,
   type ResolvedSkill,
   type SessionCheckpoint,
   TagMessageOrigin,
@@ -822,6 +823,26 @@ it("registers only the admitted Objective question in the real SDK and retries i
   expect(new Set(run.questions.map(({ operationId }) => operationId)).size).toBe(1);
   expect(run.questions[0]?.operationId).toBeTruthy();
 }, 30000);
+
+it("reports the Objective status with its summary as the result, and never after a question", async () => {
+  const reported = await invoke({
+    prompt: "objective-report",
+    mayAskObjectiveQuestion: true,
+    actions: [],
+  });
+  expect(reported.completions[0]?.succeeded, reported.completions[0]?.result).toBe(true);
+  expect(reported.completions[0]?.objectiveSignal).toBe(ObjectiveSignal.READY_FOR_REVIEW);
+  expect(reported.completions[0]?.result).toBe("Shipped the fix [REDACTED].");
+
+  const asked = await invoke({
+    prompt: "objective-report-after-question",
+    mayAskObjectiveQuestion: true,
+    actions: [],
+  });
+  expect(asked.completions[0]?.succeeded, asked.completions[0]?.result).toBe(true);
+  expect(asked.completions[0]?.objectiveSignal).toBe(ObjectiveSignal.PROGRESS);
+  expect(asked.completions[0]?.result).toBe("Asked which branch.");
+}, 60000);
 
 it("does not register or admit the Objective question without the attached capability", async () => {
   const run = await invoke({ prompt: "objective-question-denied" });

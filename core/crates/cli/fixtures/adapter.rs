@@ -16,8 +16,8 @@ use supertag_protocol::{
         HarnessAttachRequest, HarnessCompleteRequest, HarnessContinueWorkSessionRequest,
         HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessSendTagMessageRequest,
         HarnessSettleLiveInputRequest, HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest,
-        LiveInput, LiveInputReceipt, LiveInputState, TagMessageOrigin, TaskEventKind,
-        harness_client::HarnessClient, harness_mailbox_client::HarnessMailboxClient,
+        LiveInput, LiveInputReceipt, LiveInputState, ObjectiveSignal, TagMessageOrigin,
+        TaskEventKind, harness_client::HarnessClient, harness_mailbox_client::HarnessMailboxClient,
         harness_questions_client::HarnessQuestionsClient,
         harness_work_sessions_client::HarnessWorkSessionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
@@ -811,12 +811,32 @@ async fn main() -> Result<()> {
     if let Some(failure) = failure {
         result = failure;
     }
+    // `--report-objective=<status>` reports that status, as a built-in harness's
+    // `report_objective` tool does, on a turn that owns an open Objective.
+    let objective_signal = match std::env::args()
+        .find_map(|arg| arg.strip_prefix("--report-objective=").map(str::to_owned))
+    {
+        Some(status)
+            if succeeded
+                && waiting_approval_ids.is_empty()
+                && run
+                    .coordination
+                    .as_ref()
+                    .map_or(run.may_ask_objective_question, |scope| {
+                        scope.may_ask_objective_question
+                    }) =>
+        {
+            ObjectiveSignal::from_str_name(&format!("OBJECTIVE_SIGNAL_{}", status.to_uppercase()))
+                .context("fixture Objective status")?
+        }
+        _ => ObjectiveSignal::Progress,
+    };
     harness
         .complete(authenticated_request(
             HarnessCompleteRequest {
                 result,
                 succeeded,
-                objective_signal: 0,
+                objective_signal: objective_signal as i32,
                 checkpoint: None,
                 waiting_approval_ids,
             },

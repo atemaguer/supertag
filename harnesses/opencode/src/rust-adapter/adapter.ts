@@ -15,6 +15,7 @@ import {
   TaskState,
   TURN_GUIDANCE,
   tagPortfolio,
+  withObjectiveReport,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import {
   type OpenCodeCopy,
@@ -367,7 +368,8 @@ export async function runAdapter(
   const { client, options } = bridge;
   const run = await receipt(() => client.attach({}, options()));
   const task = activeTask(run);
-  let outcome: Pick<HarnessCompleteRequest, "succeeded" | "result" | "waitingApprovalIds">;
+  let outcome: Pick<HarnessCompleteRequest, "succeeded" | "result" | "waitingApprovalIds"> &
+    Partial<Pick<HarnessCompleteRequest, "objectiveSignal">>;
   let active = true;
   let started = false;
   try {
@@ -454,11 +456,10 @@ export async function runAdapter(
       cancellation.throwIfAborted();
       const result = parts.join("\n");
       if (!result.trim()) throw new SafeOpenCodeFailure("OpenCode ended without a final response.");
-      outcome = {
-        succeeded: true,
-        result,
-        waitingApprovalIds: await coordination.waitingApprovalIds(),
-      };
+      outcome = withObjectiveReport(
+        { succeeded: true, result, waitingApprovalIds: await coordination.waitingApprovalIds() },
+        await coordination.objectiveReport(),
+      );
     } finally {
       active = false;
       await coordination.close();

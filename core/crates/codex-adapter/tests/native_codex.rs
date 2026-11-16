@@ -11,7 +11,7 @@ use std::{
 use supertag_protocol::v2::{
     ArtifactAcquisition, ArtifactAcquisitionState, GetCapturedArtifactRequest, HarnessArtifactPage,
     HarnessAttachArtifactRequest, HarnessAttachedArtifact, HarnessFindArtifactsRequest,
-    HarnessReadArtifactRequest, ListCapturedArtifactsResponse,
+    HarnessReadArtifactRequest, ListCapturedArtifactsResponse, ObjectiveSignal,
 };
 
 use anyhow::{Context, Result, ensure};
@@ -2822,6 +2822,162 @@ async fn native_objective_question_is_scoped_idempotent_and_pins_its_manifest() 
             .succeeded
     );
     assert!(!rejected.directory.path().join("args").exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_objective_report_sets_the_signal_and_result_only_for_its_owner() -> Result<()> {
+    // The owner reports twice; the last report wins and its summary is the result.
+    let native = NativeFixture::new(&successful("Final native reply"), "exit 0")?;
+    std::fs::write(
+        native.directory.path().join("report-mode"),
+        json!([
+            {"status":"blocked","summary":"Waiting on staging"},
+            {"status":"ready_for_review","summary":"  Shipped the fix synthetic-codex-provider-secret. "},
+        ])
+        .to_string(),
+    )?;
+    let server = HarnessProcess::configured(&["files:read"], None, "Fix the bug", true).await?;
+    run(native.options(), server.bootstrap.clone()).await?;
+    let checkpoint = {
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        assert_eq!(
+            outcome.objective_signal,
+            ObjectiveSignal::ReadyForReview as i32
+        );
+        assert_eq!(outcome.result, "Shipped the fix [REDACTED].");
+        outcome.checkpoint.clone().context("checkpoint")?
+    };
+    let requests = native.read("requests.jsonl")?;
+    let start: Value = requests
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .find(|request| request["method"] == "thread/start")
+        .context("thread/start")?;
+    let names: Vec<_> = start["params"]["dynamicTools"][0]["tools"]
+        .as_array()
+        .context("tools")?
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(names, ["ask", "report_objective"]);
+
+    // The resumed owner thread keeps the tool and can complete the Objective.
+    let resumed = NativeFixture::new(&successful("Follow-up reply"), "exit 0")?;
+    std::fs::write(
+        resumed.directory.path().join("report-mode"),
+        json!([{"status":"completed","summary":"Done"}]).to_string(),
+    )?;
+    let server =
+        HarnessProcess::configured(&["files:read"], Some(checkpoint.clone()), "Ship it", true)
+            .await?;
+    run(resumed.options(), server.bootstrap.clone()).await?;
+    {
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        assert_eq!(outcome.objective_signal, ObjectiveSignal::Completed as i32);
+        assert_eq!(outcome.result, "Done");
+    }
+
+    // Once the Session no longer owns an open Objective, its thread does not resume.
+    let closed = NativeFixture::new(&successful("Must not launch"), "exit 0")?;
+    let server =
+        HarnessProcess::configured(&["files:read"], Some(checkpoint), "Thanks", false).await?;
+    let _ = run(closed.options(), server.bootstrap.clone()).await;
+    assert!(
+        server
+            .observed
+            .lock()
+            .await
+            .outcome
+            .as_ref()
+            .is_none_or(|outcome| !outcome.succeeded)
+    );
+    assert!(!closed.directory.path().join("args").exists());
+
+    // A turn that is not an Objective turn is never offered the tool.
+    let plain = NativeFixture::new(&successful("Plain reply"), "exit 0")?;
+    let server = HarnessProcess::configured(&["files:read"], None, "Hello", false).await?;
+    run(plain.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("outcome")?;
+    ensure!(outcome.succeeded, "{}", outcome.result);
+    assert!(
+        !plain
+            .read("requests.jsonl")
+            .unwrap_or_default()
+            .contains("report_objective")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_ongoing_objective_report_offers_no_completion_and_refuses_one() -> Result<()> {
+    // `completed` is refused with a recoverable reply; the turn goes on and reports review.
+    let native = NativeFixture::new(&successful("Final native reply"), "exit 0")?;
+    std::fs::write(
+        native.directory.path().join("report-mode"),
+        json!([
+            {"status":"completed","summary":"Done"},
+            {"status":"ready_for_review","summary":"Assessment ready"},
+        ])
+        .to_string(),
+    )?;
+    let server = HarnessProcess::configured_tools(
+        &["files:read"],
+        None,
+        "Keep the docs current",
+        true,
+        Some(AttemptCapabilities {
+            may_ask_objective_question: true,
+            objective_ongoing: true,
+            ..Default::default()
+        }),
+    )
+    .await?;
+    run(native.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("outcome")?;
+    ensure!(outcome.succeeded, "{}", outcome.result);
+    assert_eq!(
+        outcome.objective_signal,
+        ObjectiveSignal::ReadyForReview as i32
+    );
+    assert_eq!(outcome.result, "Assessment ready");
+    let requests: Vec<Value> = native
+        .read("requests.jsonl")?
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<std::result::Result<_, _>>()?;
+    let start = requests
+        .iter()
+        .find(|request| request["method"] == "thread/start")
+        .context("thread/start")?;
+    let report = start["params"]["dynamicTools"][0]["tools"]
+        .as_array()
+        .context("tools")?
+        .iter()
+        .find(|tool| tool["name"] == "report_objective")
+        .context("report_objective")?;
+    assert_eq!(
+        report["inputSchema"]["properties"]["status"]["enum"],
+        json!(["ready_for_review", "blocked"])
+    );
+    let refusal = requests
+        .iter()
+        .find(|request| request["id"] == "coordination-0")
+        .context("refusal reply")?;
+    assert_eq!(refusal["result"]["success"], false);
+    assert!(
+        refusal["result"]["contentItems"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("never completes"))
+    );
     Ok(())
 }
 

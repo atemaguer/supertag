@@ -73,6 +73,9 @@ if root.joinpath("tag-sessions-mode").exists():
         ("read_objective", {"objectiveId": "docs"}),
     ])
 
+if root.joinpath("report-mode").exists():
+    coordination_tools.extend(("report_objective", report) for report in json.loads(root.joinpath("report-mode").read_text()))
+
 if root.joinpath("artifact-read-mode").exists():
     coordination_tools.append(("read_artifact", {"artifactId": "artifact-prior", "path": "evidence.txt"}))
 

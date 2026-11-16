@@ -354,7 +354,7 @@ async function objectiveQuestion(allowed) {
   if (sdkServers.join() !== "supertag") throw new Error("Objective question server missing");
   const list = await sdkMcp("tools/list", {});
   if (
-    list.result?.tools?.map(({ name }) => name).join() !== "ask" ||
+    list.result?.tools?.map(({ name }) => name).join() !== "ask,report_objective" ||
     list.result.tools[0].inputSchema.additionalProperties !== false
   )
     throw new Error("SDK exposed an unexpected Objective tool or argument schema");
@@ -392,6 +392,38 @@ async function objectiveQuestion(allowed) {
   if (!conflict?.isError || JSON.stringify(conflict).includes("private refusal details"))
     throw new Error("Objective question conflict was not returned safely");
   return first.content[0].text;
+}
+
+async function objectiveReport(afterQuestion) {
+  const name = "mcp__supertag__report_objective";
+  const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
+  async function report(input) {
+    if (!(await hook(name, input, metadata))) throw new Error("Admitted Objective report denied");
+    return (await sdkMcp("tools/call", { name: "report_objective", arguments: input })).result;
+  }
+  for (const args of [
+    { status: "progress", summary: "Working" },
+    { status: "completed", summary: "   " },
+    { status: "completed", summary: "Done", objective_id: "other" },
+  ]) {
+    if (await hook(name, args, metadata)) throw new Error("Invalid Objective report was allowed");
+  }
+  if (afterQuestion) {
+    await sdkMcp("tools/call", { name: "ask", arguments: { text: "Which branch?" } });
+    const refused = await report({ status: "completed", summary: "Done" });
+    if (!refused?.isError) throw new Error("An Objective report followed a question");
+    return "Asked which branch.";
+  }
+  const blocked = await report({ status: "blocked", summary: "Waiting on staging" });
+  const ready = await report({
+    status: "ready_for_review",
+    summary: `  Shipped the fix ${process.env.ANTHROPIC_API_KEY}. `,
+  });
+  if (blocked?.isError || ready?.isError) throw new Error("Objective report was refused");
+  const question = (await sdkMcp("tools/call", { name: "ask", arguments: { text: "Next?" } }))
+    .result;
+  if (!question?.isError) throw new Error("A question followed an Objective report");
+  return "Final native reply";
 }
 
 async function coordinationTools(workstream) {
@@ -748,6 +780,8 @@ async function turn(message) {
   }
   if (prompt.startsWith("objective-question"))
     result = await objectiveQuestion(prompt === "objective-question");
+  if (prompt.startsWith("objective-report"))
+    result = await objectiveReport(prompt === "objective-report-after-question");
   if (prompt.startsWith("coordination-"))
     result = await coordinationTools(prompt === "coordination-tools");
   if (prompt === "direct-mailbox") result = await directMailbox();

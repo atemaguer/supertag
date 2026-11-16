@@ -4846,9 +4846,12 @@ type AttemptCapabilities struct {
 	MayReadTagSessions bool `protobuf:"varint,9,opt,name=may_read_tag_sessions,json=mayReadTagSessions,proto3" json:"may_read_tag_sessions,omitempty"`
 	// The Tag's open Objectives and how to recall its other Sessions, for the
 	// turn's context. State, not instructions. Empty when `may_read_tag_sessions` is false.
-	TagPortfolio  string `protobuf:"bytes,11,opt,name=tag_portfolio,json=tagPortfolio,proto3" json:"tag_portfolio,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TagPortfolio string `protobuf:"bytes,11,opt,name=tag_portfolio,json=tagPortfolio,proto3" json:"tag_portfolio,omitempty"`
+	// With `may_ask_objective_question`: the Objective is ongoing, so only an operator ends it
+	// and its owner may report it ready for review or blocked, never completed.
+	ObjectiveOngoing bool `protobuf:"varint,12,opt,name=objective_ongoing,json=objectiveOngoing,proto3" json:"objective_ongoing,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *AttemptCapabilities) Reset() {
@@ -4949,6 +4952,13 @@ func (x *AttemptCapabilities) GetTagPortfolio() string {
 		return x.TagPortfolio
 	}
 	return ""
+}
+
+func (x *AttemptCapabilities) GetObjectiveOngoing() bool {
+	if x != nil {
+		return x.ObjectiveOngoing
+	}
+	return false
 }
 
 type WorkSession struct {
@@ -23251,7 +23261,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12AskQuestionRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"\xbc\x04\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\xe9\x04\n" +
 	"\x13AttemptCapabilities\x12;\n" +
 	"\x1amay_ask_objective_question\x18\x01 \x01(\bR\x17mayAskObjectiveQuestion\x12,\n" +
 	"\x12may_use_workstream\x18\x02 \x01(\bR\x10mayUseWorkstream\x12(\n" +
@@ -23262,7 +23272,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x1dmay_ask_work_session_question\x18\a \x01(\bR\x19mayAskWorkSessionQuestion\x129\n" +
 	"\x19may_request_commit_review\x18\b \x01(\bR\x16mayRequestCommitReview\x121\n" +
 	"\x15may_read_tag_sessions\x18\t \x01(\bR\x12mayReadTagSessions\x12#\n" +
-	"\rtag_portfolio\x18\v \x01(\tR\ftagPortfolioJ\x04\b\n" +
+	"\rtag_portfolio\x18\v \x01(\tR\ftagPortfolio\x12+\n" +
+	"\x11objective_ongoing\x18\f \x01(\bR\x10objectiveOngoingJ\x04\b\n" +
 	"\x10\vR\x14may_create_objective\"\xda\x05\n" +
 	"\vWorkSession\x12&\n" +
 	"\x0fwork_session_id\x18\x01 \x01(\tR\rworkSessionId\x12\x14\n" +

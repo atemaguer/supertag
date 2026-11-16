@@ -169,8 +169,8 @@ the user explicitly authorizes that merge; team completion alone is not approval
 
 When the owner submits an Objective for review, ask the user to review the assessment. Then run
 `supertag objective review OBJECTIVE_ID approve`, or `supertag objective review OBJECTIVE_ID
-request-changes --feedback TEXT` with the user's feedback. The built-in harnesses report progress
-only, so an owner on them reports its assessment in the Objective's conversation instead. When the
+request-changes --feedback TEXT` with the user's feedback. The owner finishes an Objective with its
+`report_objective` tool. When an owner leaves its assessment in the conversation instead and the
 user accepts it, record it with `supertag objective complete OBJECTIVE_ID --summary-file -`.
 
 Keep reports concise: Objective ID, what changed, evidence, decisions needed, reported spend

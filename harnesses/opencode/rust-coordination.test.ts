@@ -5,11 +5,13 @@ import {
   HarnessRunSchema,
   harnessClient,
   ListTagSessionsResponseSchema,
+  ObjectiveSignal,
   ReadTagSessionResponseSchema,
   SearchTagSessionsResponseSchema,
   TagSessionAudience,
   tagPortfolio,
   WorkSessionQuestionSchema,
+  withObjectiveReport,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { expect, it, vi } from "vitest";
 import { startCoordination } from "./src/rust-adapter/coordination.js";
@@ -80,6 +82,144 @@ it("exposes only admitted tools to the authenticated Attempt and redacts both cr
     active = false;
     expect((await fetch(tool.url, { headers: tool.headers })).status).toBe(410);
     abort.abort();
+  } finally {
+    await client.close();
+    await service.close();
+  }
+});
+
+it("offers report_objective only to an Objective's owner and applies only a successful report", async () => {
+  const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
+  const scope = {
+    taskId,
+    tagId,
+    attemptId,
+    secrets: [grpcToken],
+    signal: new AbortController().signal,
+    active: () => true,
+  };
+  const plain = await startCoordination(
+    bridge,
+    create(HarnessRunSchema, { task: { taskId, tagId, sessionId: "objective" }, attemptId }),
+    scope,
+  );
+  expect(plain.tools).toEqual([]);
+  expect(await plain.objectiveReport()).toBeUndefined();
+  await plain.close();
+
+  const service = await startCoordination(
+    bridge,
+    create(HarnessRunSchema, {
+      task: { taskId, tagId, sessionId: "objective" },
+      attemptId,
+      coordination: { mayAskObjectiveQuestion: true },
+    }),
+    scope,
+  );
+  const client = new Client({ name: "opencode-fixture", version: "1" });
+  try {
+    const [tool] = service.tools;
+    if (!tool) throw new Error("expected private MCP binding");
+    expect(tool.operations).toEqual(["ask", "report_objective"]);
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(tool.url), {
+        requestInit: { headers: tool.headers },
+      }),
+    );
+    for (const args of [
+      { status: "working", summary: "Still going" },
+      { status: "completed", summary: "   " },
+      { status: "completed", summary: "Done", objectiveId: "other" },
+    ])
+      expect(await client.callTool({ name: "report_objective", arguments: args })).toMatchObject({
+        isError: true,
+      });
+    expect(await service.objectiveReport()).toBeUndefined();
+    await client.callTool({
+      name: "report_objective",
+      arguments: { status: "blocked", summary: "Waiting on staging" },
+    });
+    const recorded = await client.callTool({
+      name: "report_objective",
+      arguments: { status: "completed", summary: `  Shipped ${grpcToken}. ` },
+    });
+    expect(recorded.isError).toBeFalsy();
+    const report = await service.objectiveReport();
+    expect(report).toEqual({ signal: ObjectiveSignal.COMPLETED, summary: "Shipped [REDACTED]." });
+    expect(
+      await client.callTool({ name: "ask", arguments: { text: "Which branch?" } }),
+    ).toMatchObject({ isError: true });
+
+    const succeeded = { succeeded: true, result: "Final reply", waitingApprovalIds: [] };
+    expect(withObjectiveReport(succeeded, report)).toEqual({
+      ...succeeded,
+      result: "Shipped [REDACTED].",
+      objectiveSignal: ObjectiveSignal.COMPLETED,
+    });
+    expect(withObjectiveReport({ ...succeeded, waitingApprovalIds: ["approval"] }, report)).toEqual(
+      {
+        ...succeeded,
+        waitingApprovalIds: ["approval"],
+      },
+    );
+    expect(withObjectiveReport({ succeeded: false, result: "Failed" }, report)).toEqual({
+      succeeded: false,
+      result: "Failed",
+    });
+  } finally {
+    await client.close();
+    await service.close();
+  }
+});
+
+it("offers an ongoing Objective's owner no completion and refuses one without ending the turn", async () => {
+  const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
+  const service = await startCoordination(
+    bridge,
+    create(HarnessRunSchema, {
+      task: { taskId, tagId, sessionId: "objective" },
+      attemptId,
+      coordination: { mayAskObjectiveQuestion: true, objectiveOngoing: true },
+    }),
+    {
+      taskId,
+      tagId,
+      attemptId,
+      secrets: [grpcToken],
+      signal: new AbortController().signal,
+      active: () => true,
+    },
+  );
+  const client = new Client({ name: "opencode-fixture", version: "1" });
+  try {
+    const [tool] = service.tools;
+    if (!tool) throw new Error("expected private MCP binding");
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(tool.url), {
+        requestInit: { headers: tool.headers },
+      }),
+    );
+    const listed = (await client.listTools()).tools.find(({ name }) => name === "report_objective");
+    expect(listed?.description).toContain("never completes");
+    expect(
+      (listed?.inputSchema.properties?.status as { enum?: string[] } | undefined)?.enum,
+    ).toEqual(["ready_for_review", "blocked"]);
+    const refused = await client.callTool({
+      name: "report_objective",
+      arguments: { status: "completed", summary: "Done" },
+    });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain("never completes");
+    expect(await service.objectiveReport()).toBeUndefined();
+    const ready = await client.callTool({
+      name: "report_objective",
+      arguments: { status: "ready_for_review", summary: "Assessment ready" },
+    });
+    expect(ready.isError).toBeFalsy();
+    expect(await service.objectiveReport()).toEqual({
+      signal: ObjectiveSignal.READY_FOR_REVIEW,
+      summary: "Assessment ready",
+    });
   } finally {
     await client.close();
     await service.close();

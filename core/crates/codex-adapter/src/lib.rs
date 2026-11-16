@@ -18,8 +18,8 @@ use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
         AdapterBootstrap, AppliedExecutionLimits, ExecutionLimitEnforcement, ExecutionLimits,
-        HarnessAttachRequest, HarnessCompleteRequest, HarnessPublishRequest, SessionCheckpoint,
-        Task, TaskEventKind, harness_client::HarnessClient,
+        HarnessAttachRequest, HarnessCompleteRequest, HarnessPublishRequest, ObjectiveSignal,
+        SessionCheckpoint, Task, TaskEventKind, harness_client::HarnessClient,
     },
 };
 use tokio::{
@@ -128,6 +128,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         acquire_artifacts: attached.may_acquire_artifacts,
         attach_artifacts: attached.may_materialize_artifacts,
         tag_sessions: capabilities.may_read_tag_sessions,
+        report_objective: questions::Reporting::new(&capabilities),
     };
     let tools = previous_tools.unwrap_or(questions::Tools {
         coordination: inventory,
@@ -135,6 +136,15 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         acquire_artifacts: attached.checkpoint.is_none() && attached.may_acquire_artifacts,
         attach_artifacts: attached.checkpoint.is_none() && attached.may_materialize_artifacts,
         tag_sessions: attached.checkpoint.is_none() && capabilities.may_read_tag_sessions,
+        report_objective: if attached
+            .checkpoint
+            .as_ref()
+            .is_none_or(checkpoint::reports_objective)
+        {
+            questions::Reporting::new(&capabilities)
+        } else {
+            questions::Reporting::None
+        },
     });
     let mut questions = questions::Bridge::new(
         (channel, artifact_channel),
@@ -159,12 +169,18 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         Ok((result, checkpoint)) => (result, true, Some(checkpoint)),
         Err(error) => (error.to_string(), false, None),
     };
+    // A reported Objective status applies only to a turn that succeeded without
+    // asking a question or waiting for approvals; its summary is the result.
+    let (result, objective_signal) = match questions.objective_report() {
+        Some(report) if succeeded => (report.summary, report.signal as i32),
+        _ => (result, ObjectiveSignal::Progress as i32),
+    };
     harness
         .complete(request(
             HarnessCompleteRequest {
                 result,
                 succeeded,
-                objective_signal: 0,
+                objective_signal,
                 checkpoint,
                 waiting_approval_ids: if succeeded {
                     questions.waiting_approvals()

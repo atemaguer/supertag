@@ -17,7 +17,9 @@ import { ArtifactAcquisitionState } from "./gen/supertag/runtime/v2/artifact_pb.
 import { ObjectiveSessionStatus } from "./gen/supertag/runtime/v2/objective_overview_pb.js";
 import {
   ApprovalState,
+  type HarnessCompleteRequest,
   type HarnessRun,
+  ObjectiveSignal,
   ObjectiveStatus,
   TagMessageOrigin,
   TaskState,
@@ -96,6 +98,10 @@ const schemas = {
     paths: z.array(nonblankText(1024)).min(1).max(100),
   }),
   ask: z.strictObject({ text: nonblankText(16_000) }),
+  report_objective: z.strictObject({
+    status: z.enum(["ready_for_review", "completed", "blocked"]),
+    summary: nonblankText(16_000),
+  }),
   start_session: z.strictObject({
     title: nonblankText(120),
     instruction: nonblankText(8000),
@@ -181,6 +187,39 @@ export function validCoordinationArguments(tool: string, input: unknown): boolea
   return Object.hasOwn(schemas, tool) && schemas[tool as Tool].safeParse(input).success;
 }
 
+const ONGOING_COMPLETION_REFUSED =
+  "This Objective is ongoing, so it never completes; only an operator ends it. Report ready_for_review or blocked instead, or finish the turn without a report.";
+/** An ongoing Objective never completes, so its owner reports review or a blocker only. */
+const ongoingReport = z.strictObject({
+  status: z.enum(["ready_for_review", "blocked"], { error: ONGOING_COMPLETION_REFUSED }),
+  summary: nonblankText(16_000),
+});
+
+const reportedSignal = {
+  ready_for_review: ObjectiveSignal.READY_FOR_REVIEW,
+  completed: ObjectiveSignal.COMPLETED,
+  blocked: ObjectiveSignal.BLOCKED,
+} as const;
+
+/** The status an Objective's owner reported during this turn, with its summary. */
+export interface ObjectiveReport {
+  signal: ObjectiveSignal;
+  summary: string;
+}
+
+/**
+ * Applies a reported Objective status to a successful outcome. The summary becomes the turn's
+ * result. A turn that waits for approvals, or failed, finishes as progress instead.
+ */
+export function withObjectiveReport<
+  T extends Pick<HarnessCompleteRequest, "result" | "succeeded"> & {
+    waitingApprovalIds?: string[];
+  },
+>(outcome: T, report: ObjectiveReport | undefined): T & { objectiveSignal?: ObjectiveSignal } {
+  if (!report || !outcome.succeeded || outcome.waitingApprovalIds?.length) return outcome;
+  return { ...outcome, result: report.summary, objectiveSignal: report.signal };
+}
+
 export interface CoordinationScope {
   taskId: string;
   tagId: string;
@@ -253,6 +292,7 @@ export function registerCoordinationTools(
   const pending = new Map<string, string>();
   const reviewDeliveries = new Map<string, string>();
   let asked = false;
+  let report: ObjectiveReport | undefined;
   let writes = Promise.resolve();
   const meta = configuration.meta ?? {};
   const safeText = (text: string) => redact(text, scope.secrets);
@@ -507,6 +547,7 @@ export function registerCoordinationTools(
               "Finish this turn and wait for the Workstream approval decision first.",
               true,
             );
+          if (report) return response("This turn already reported the Objective's status.", true);
           const safe = trim(safeText(text));
           if (!askSchema.safeParse({ text: safe }).success)
             return response(`Provide a valid ${subject} question.`, true);
@@ -552,6 +593,35 @@ export function registerCoordinationTools(
             }
           }
           return response(`The ${subject} question could not be confirmed.`, true);
+        }),
+    );
+  }
+  if (!asksChild && (run.coordination?.mayAskObjectiveQuestion ?? run.mayAskObjectiveQuestion)) {
+    const ongoing = run.coordination?.objectiveOngoing === true;
+    tools.push("report_objective");
+    server.registerTool(
+      "report_objective",
+      {
+        description: ongoing
+          ? "Report this ongoing Objective's status when the turn ends: ready_for_review when a person should review your assessment, or blocked when you cannot continue without help. An ongoing Objective never completes; only an operator ends it. The summary becomes this turn's result. Call this last, then finish the turn."
+          : "Report this Objective's status when the turn ends: ready_for_review when the outcome is met and a person should review it, completed when it is met and needs no review, or blocked when you cannot continue without help. The summary becomes this turn's result. Call this last, then finish the turn.",
+        inputSchema: ongoing ? ongoingReport : schemas.report_objective,
+        _meta: meta,
+      },
+      ({ status, summary }: { status: keyof typeof reportedSignal; summary: string }) =>
+        write(async () => {
+          // The schema already refuses it; an ongoing Objective never completes.
+          if (ongoing && status === "completed") return response(ONGOING_COMPLETION_REFUSED, true);
+          if (asked) return response("This turn is waiting for an answer.", true);
+          if (pending.size || scope.hasPendingExternalApprovals?.())
+            return response(
+              "Finish this turn and wait for the approval decision before reporting the Objective's status.",
+              true,
+            );
+          report = { signal: reportedSignal[status], summary: trim(safeText(summary)) };
+          return response(
+            "Objective status recorded. It applies when this turn ends, and your summary becomes this turn's result. Finish the turn now.",
+          );
         }),
     );
   }
@@ -1234,6 +1304,11 @@ export function registerCoordinationTools(
     async waitingApprovalIds() {
       await writes;
       return [...new Set(pending.values())].sort();
+    },
+    /** The Objective status this turn reported, unless it asked a question. */
+    async objectiveReport(): Promise<ObjectiveReport | undefined> {
+      await writes;
+      return asked ? undefined : report;
     },
   };
 }

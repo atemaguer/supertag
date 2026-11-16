@@ -7,6 +7,7 @@ import {
   type AttemptHistoryEntry,
   COORDINATION_SERVER,
   harnessClient,
+  type ObjectiveSignal,
   receipt,
   redact,
   SharedExecutionTool,
@@ -16,6 +17,7 @@ import {
   TaskState,
   TURN_GUIDANCE,
   tagPortfolio,
+  withObjectiveReport,
   workerHostFailure,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import {
@@ -45,6 +47,7 @@ type CursorOutcome = {
   result: string;
   checkpoint?: ReturnType<typeof createCheckpoint>;
   waitingApprovalIds?: string[];
+  objectiveSignal?: ObjectiveSignal;
 };
 
 /** How long Cursor's text may pause before the message so far is published. */
@@ -383,15 +386,18 @@ export async function runAdapter(
             "Cursor Session archive unavailable. The next Attempt can replay recorded history.",
           );
         }
-        outcome = {
-          succeeded: true,
-          result,
-          ...(checkpoint ? { checkpoint } : {}),
-          waitingApprovalIds: [
-            ...(await coordination.waitingApprovalIds()),
-            ...(await taskMcp.waitingApprovalIds()),
-          ].sort(),
-        };
+        outcome = withObjectiveReport(
+          {
+            succeeded: true,
+            result,
+            ...(checkpoint ? { checkpoint } : {}),
+            waitingApprovalIds: [
+              ...(await coordination.waitingApprovalIds()),
+              ...(await taskMcp.waitingApprovalIds()),
+            ].sort(),
+          },
+          await coordination.objectiveReport(),
+        );
       } finally {
         active = false;
         await taskMcp?.close();

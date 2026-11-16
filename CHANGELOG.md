@@ -16,6 +16,10 @@ within the pre-1.0 compatibility policy described in
   line under the turn shows its current step, such as a command it runs, in the terminal UI and
   the desktop app; in Slack, the acknowledgement shows the Tag's latest message until its reply
   replaces it.
+- An Objective's owner finishes it on the built-in harnesses: Claude Code, Codex, Cursor, and
+  OpenCode offer a `report_objective` tool on the owner's turns. It reports the Objective
+  `ready_for_review`, `completed`, or `blocked` with a summary, which becomes the turn's result.
+  Before, Objectives on these harnesses could not finish on their own and ended `blocked`.
 - When a Task fails, the Worker Host log names the failure and shows the last lines its harness
   adapter wrote to standard error, secrets hidden.
 - The terminal UI and the desktop app find the local Control Plane that `supertag up` runs from
