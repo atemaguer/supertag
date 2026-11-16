@@ -269,6 +269,38 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
 
+    /// Tauri refuses a registered command the window's permission does not allow, so every
+    /// handler must be listed in permissions/control-plane.toml and nothing else may be.
+    #[test]
+    fn the_main_window_may_call_exactly_the_registered_commands() {
+        let source = include_str!("lib.rs");
+        let handlers = source
+            .split("generate_handler![")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .unwrap();
+        let mut registered: Vec<&str> = handlers
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .collect();
+        let permission = include_str!("../permissions/control-plane.toml");
+        let allowed = permission
+            .split("commands.allow = [")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .unwrap();
+        let mut allowed: Vec<&str> = allowed
+            .split(',')
+            .map(|name| name.trim().trim_matches('"'))
+            .filter(|name| !name.is_empty())
+            .collect();
+        registered.sort_unstable();
+        allowed.sort_unstable();
+        assert!(registered.contains(&"connect_local_control_plane"));
+        assert_eq!(registered, allowed);
+    }
+
     #[test]
     fn ipc_dispatch_uses_camel_case_and_only_the_local_main_window() {
         let app = builder(tauri::test::mock_builder())
