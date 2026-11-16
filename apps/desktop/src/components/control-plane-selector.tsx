@@ -14,13 +14,19 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ControlPlaneProfile } from "../control-plane";
+import {
+  type ControlPlaneProfile,
+  LOCAL_CONTROL_PLANE,
+  type LocalControlPlane,
+} from "../control-plane";
 
 interface ControlPlaneSelectorProps {
   active?: string;
   /** Whom the active connection acts as; a client device shows it. */
   principal?: string;
   profiles: ControlPlaneProfile[];
+  /** The local Control Plane: listed first while it runs, otherwise why it is unavailable. */
+  local?: LocalControlPlane;
   preview?: boolean;
   busy: boolean;
   switching: boolean;
@@ -28,12 +34,20 @@ interface ControlPlaneSelectorProps {
   onSelect(origin: string): void;
   onEdit(profile?: ControlPlaneProfile): void;
   onDisconnect(): void;
+  /** Opening the menu checks the local Control Plane again. */
+  onOpen(): void;
+}
+
+interface Choice extends ControlPlaneProfile {
+  /** The address shown under the name. */
+  address: string;
 }
 
 export function ControlPlaneSelector({
   active,
   principal,
   profiles,
+  local,
   preview,
   busy,
   switching,
@@ -41,8 +55,17 @@ export function ControlPlaneSelector({
   onSelect,
   onEdit,
   onDisconnect,
+  onOpen,
 }: ControlPlaneSelectorProps) {
-  const selected = profiles.find((profile) => profile.origin === active);
+  const localChoice: Choice | undefined =
+    active === LOCAL_CONTROL_PLANE || local?.origin
+      ? { name: "Local", origin: LOCAL_CONTROL_PLANE, address: local?.origin ?? "This machine" }
+      : undefined;
+  const choices: Choice[] = [
+    ...(localChoice ? [localChoice] : []),
+    ...profiles.map((profile) => ({ ...profile, address: profile.origin })),
+  ];
+  const selected = choices.find((choice) => choice.origin === active);
   const connected = Boolean(selected || preview);
   const client = selected && principal?.startsWith("client:") ? principal : undefined;
   const name = switching
@@ -50,7 +73,11 @@ export function ControlPlaneSelector({
     : (selected?.name ?? (preview ? "Preview workspace" : "Select Control Plane"));
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) onOpen();
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
@@ -63,7 +90,7 @@ export function ControlPlaneSelector({
               ? `Current Control Plane is ${selected.name}${client ? `, connected as ${client}` : ""}`
               : undefined
           }
-          title={client ? `${selected?.origin} · connected as ${client}` : selected?.origin}
+          title={client ? `${selected?.address} · connected as ${client}` : selected?.address}
           disabled={busy || switching}
         >
           <span className="connection-dot" aria-hidden />
@@ -73,15 +100,27 @@ export function ControlPlaneSelector({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="control-plane-menu" side="top" align="start" sideOffset={6}>
-        {profiles.length > 0 && (
+        {!localChoice && local?.problem && (
+          <>
+            <DropdownMenuItem className="control-plane-choice" disabled>
+              <span className="control-plane-indicator" aria-hidden />
+              <span className="control-plane-choice-text">
+                <span>Local · not running</span>
+                <small>{local.problem}</small>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="control-plane-separator" />
+          </>
+        )}
+        {choices.length > 0 && (
           <>
             <DropdownMenuRadioGroup value={active ?? ""} onValueChange={onSelect}>
-              {profiles.map((profile) => (
+              {choices.map((choice) => (
                 <DropdownMenuRadioItem
                   className="control-plane-choice"
-                  key={profile.origin}
-                  value={profile.origin}
-                  textValue={profile.name}
+                  key={choice.origin}
+                  value={choice.origin}
+                  textValue={choice.name}
                 >
                   <span className="control-plane-indicator" aria-hidden>
                     <DropdownMenuItemIndicator>
@@ -89,8 +128,8 @@ export function ControlPlaneSelector({
                     </DropdownMenuItemIndicator>
                   </span>
                   <span className="control-plane-choice-text">
-                    <span>{profile.name}</span>
-                    {profile.name !== profile.origin && <small>{profile.origin}</small>}
+                    <span>{choice.name}</span>
+                    {choice.name !== choice.address && <small>{choice.address}</small>}
                   </span>
                 </DropdownMenuRadioItem>
               ))}

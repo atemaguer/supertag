@@ -47,7 +47,8 @@ func main() {
 			noHandover = false
 		}
 	}
-	h, err := startupTargets(targetFile, profiles)
+	local, localProblem := discoverLocal()
+	h, local, err := startupTargets(targetFile, profiles, local)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, launchHint)
 		os.Exit(2)
@@ -69,7 +70,11 @@ func main() {
 	a.launchContexts = launchContexts
 	if noHandover {
 		a.launchContexts = nil
+		if local.URL != "" {
+			a.launchContexts = []client.Target{local}
+		}
 	}
+	a.local, a.localProblem, a.discover = local, localProblem, discoverLocal
 	if storeErr != nil {
 		a.inner.notice = note{text: "Saved Control Planes could not be read safely. This launch connection is still available.", err: true}
 		a.choiceErr = "Saved Control Planes could not be read safely. Check the private profile file and its permissions."

@@ -70,6 +70,8 @@ Plane joins with an Auth Key instead. See [supertag.yaml and local state](supert
 credential in the per-user stores the terminal UI and desktop app read:
 `supertag/tui-control-planes.json` and `ai.supertag.desktop/control-planes.json` in the user
 configuration directory (`~/Library/Application Support` on macOS, `~/.config` on Linux).
+Neither store ever holds the local operator token: the terminal UI and the desktop app read it
+from `credentials.json` each time they connect to the local Control Plane.
 
 ### Gateway credential vault
 

@@ -40,6 +40,7 @@ supertag-api.workspace = true
 supertag-credential-vault.workspace = true
 supertag-gateway.workspace = true
 supertag-github.workspace = true
+supertag-local-state.workspace = true
 supertag-protocol.workspace = true
 supertag-transport.workspace = true
 supertag-worker-host.workspace = true

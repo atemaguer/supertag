@@ -34,8 +34,28 @@ Saved connections use a private native file, `supertag/tui-control-planes.json` 
 system's user configuration directory, with owner-only permissions. It is separate from the
 local service credentials and the desktop app's store. A launch handover keeps its selected
 Control Plane and credentials; saved connections add to the chooser. Without a launch handover,
-`supertag-tui` reopens the last selected saved Control Plane or shows the empty chooser for adding
-the first one. The token never appears in command arguments or the terminal display.
+`supertag-tui` reopens the last selected saved Control Plane, else the local Control Plane while
+it runs, else the first saved one, or shows the empty chooser for adding the first one. The token
+never appears in command arguments or the terminal display.
+
+### The local Control Plane
+
+While `supertag up` runs a Control Plane from this user's state directory (`SUPERTAG_STATE_DIR`,
+else `~/.supertag`), the Control Planes list shows it first as **Local**, marked
+`[this machine]`, and it connects with no token to enter. `supertag-tui` asks the `supertag`
+command installed beside it (else the one on `PATH`) with the internal
+`supertag __local-control-plane`, so the CLI's own code checks the state directory: it must be
+private to this user, the supervisor must hold its lock, and the endpoint must be a loopback
+address. The command prints one JSON object to a pipe and refuses a terminal:
+`{"protocol": "local-control-plane.v1", "running": true, "state_directory": ..., "url": ...,
+"token": ...}`, or `"running": false` with a `message` naming the command that starts it.
+`core/crates/cli/tests/local_control_plane.rs` pins that format.
+
+The local operator token is read again each time you choose Local and is never saved, because
+`supertag up` may replace it; Local cannot be edited, saved, or forgotten. Choosing Local leaves
+no saved Control Plane selected, so the next launch opens Local again. Ctrl-P checks again, so a
+Local Control Plane started after launch appears; when none runs, the list says so and how to
+start one (`supertag up`), and the saved Control Planes stay available.
 
 Open Objectives show their status, owner, deadline, and available spend information. Use
 `/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to
@@ -89,8 +109,9 @@ work and latest entry. Enter switches to one. `n` starts a new conversation: typ
 64 letters, digits, `.`, `_` or `-`, starting with a letter or digit) and press enter. The Tag's
 rail state counts the open work Sessions of the conversation it shows. Esc goes back.
 
-Ctrl-P lists the Control Planes you can switch to: the one the CLI handed over, and each one saved
-in the terminal UI or with `supertag connect`. Enter switches to the one under the cursor, and esc goes back. Adding a Control Plane takes an
+Ctrl-P lists the Control Planes you can switch to: Local while `supertag up` runs one on this
+machine, the one the CLI handed over, and each one saved in the terminal UI or with
+`supertag connect`. Enter switches to the one under the cursor, and esc goes back. Adding a Control Plane takes an
 operator token, or a client Auth Key (`stak_…`) from an operator. An Auth Key joins this device as
 `client:HOSTNAME` once; only the device's own credential is saved. A client device sees its own
 conversations and Objectives within the Tags its key allows, and no Worker Host status. Switching ends every stream and call
@@ -147,7 +168,9 @@ binary with a socket as file descriptor 3, sets `SUPERTAG_TUI_HANDOVER=3`, and w
 object to it:
 `{"protocol": "runtime.v2", "current": 0, "contexts": [{"url": ..., "token": ..., "workspace": ...,
 "server_ca_file": ..., "client_cert_file": ..., "client_key_file": ...}]}`. The TUI refuses a
-handover that names another protocol or none. With nothing selected and no local services
-running, the CLI starts the binary without a handover, and it opens on the saved Control Planes.
+handover that names another protocol or none. A handed-over local Control Plane becomes the Local
+entry. The CLI also passes the state directory it resolved as `SUPERTAG_STATE_DIR`, so Local is
+found in the same place. With nothing selected and no local services running, the CLI starts the
+binary without a handover, and it opens on the saved Control Planes.
 A saved connection whose credential cannot be read is left out. The binary takes no token from its
 arguments or environment; the saved-connection flow is described above.

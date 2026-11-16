@@ -10,6 +10,7 @@ import {
   type ControlPlaneList,
   type ControlPlaneProfile,
   controlPlaneSession,
+  LOCAL_CONTROL_PLANE,
   nativeControlPlane,
   type Tag,
 } from "./control-plane";
@@ -39,14 +40,14 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const opener = useRef<HTMLButtonElement>(null);
 
   const activate = useCallback(
-    ({ controlPlanes, connectionId, tags, principal }: ControlPlaneActivation) => {
+    ({ controlPlanes, origin, connectionId, tags, principal }: ControlPlaneActivation) => {
       setControlPlanes(controlPlanes);
       setConnection({
         controlPlane: controlPlaneSession(connectionId),
         tags,
         preview: false,
         id: connectionId,
-        origin: controlPlanes.active ?? undefined,
+        origin,
         principal,
       });
     },
@@ -61,10 +62,13 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
         const saved = await nativeControlPlane.list();
         if (!live) return;
         setControlPlanes(saved);
-        if (saved.active) {
-          const next = await nativeControlPlane.select(saved.active);
-          if (live) activate(next);
-        }
+        // The last saved Control Plane used wins; with none, the local one when it runs.
+        const next = saved.active
+          ? await nativeControlPlane.select(saved.active)
+          : saved.local?.origin
+            ? await nativeControlPlane.connectLocal()
+            : undefined;
+        if (live && next) activate(next);
       } catch (error) {
         if (live) setError(describe(error));
       } finally {
@@ -125,16 +129,28 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
       active={connection?.origin}
       principal={connection?.principal}
       profiles={controlPlanes.profiles}
+      local={controlPlanes.local}
       preview={connection?.preview}
       busy={writing}
       switching={switching}
       trigger={trigger}
       onSelect={(origin) => {
-        if (origin !== connection?.origin)
-          void change(async () => activate(await nativeControlPlane.select(origin)));
+        if (origin === connection?.origin) return;
+        void change(async () =>
+          activate(
+            await (origin === LOCAL_CONTROL_PLANE
+              ? nativeControlPlane.connectLocal()
+              : nativeControlPlane.select(origin)),
+          ),
+        );
       }}
       onEdit={open}
       onDisconnect={() => void clear()}
+      onOpen={() => {
+        if (pendingSwitch.current || connection?.preview) return;
+        // A local Control Plane started or stopped since the list was read shows as it is now.
+        nativeControlPlane.list().then(setControlPlanes, () => {});
+      }}
     />
   );
 
@@ -162,6 +178,12 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           <EmptyWorkspace
             switching={switching}
             onSettings={(event) => open(undefined, event.currentTarget)}
+            localProblem={controlPlanes.local?.problem}
+            onLocal={
+              controlPlanes.local?.origin
+                ? () => void change(async () => activate(await nativeControlPlane.connectLocal()))
+                : undefined
+            }
           />
         </WorkspaceShell>
       )}

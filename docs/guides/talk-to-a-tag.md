@@ -25,7 +25,7 @@ with `supertag init`. For a shared Control Plane, ask its operator to set up a T
 | --- | --- |
 | Ctrl-K | Open the command palette. |
 | Ctrl-O | Open the selected Tag's conversations. |
-| Ctrl-P | Switch Control Planes when more than one is available. |
+| Ctrl-P | Switch Control Planes. **Local** is the one `supertag up` runs on this machine. |
 | ↑ on empty input | Select a work Session. Enter expands it. |
 | `d` on a work Session or branch | Show the diff from this checkout. |
 | `o` on a work Session or branch | Open its pull request when one exists. |

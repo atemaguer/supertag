@@ -59,6 +59,12 @@ The CLI, the terminal UI, and the desktop app share saved Control Planes: `super
 --name NAME` saves one, and `--control-plane NAME` uses it. `--state-directory` reaches the local
 services that `supertag up` runs.
 
+Every client finds the local Control Plane the same way. The state directory
+(`SUPERTAG_STATE_DIR`, else `~/.supertag`) must be private to the user, the `supertag up`
+supervisor must hold its lock, and the endpoint must be a loopback address. The client then reads
+the admin operator token from `credentials.json`. The terminal UI and the desktop app show this
+Control Plane as **Local**, read its token at each connect, and never save it.
+
 ## Callers and roles
 
 Every caller of the Control Plane authenticates with its own bearer credential. One

@@ -232,10 +232,16 @@ export function EmptyWorkspace({
   connected,
   switching,
   onSettings,
+  localProblem,
+  onLocal,
 }: {
   connected?: boolean;
   switching?: boolean;
   onSettings?: SettingsAction;
+  /** Why the local Control Plane is unavailable, such as the command that starts it. */
+  localProblem?: string;
+  /** Connects to the local Control Plane while it runs. */
+  onLocal?(): void;
 }) {
   return (
     <div className="work-area">
@@ -252,7 +258,17 @@ export function EmptyWorkspace({
             <img src={mascot} alt="" className="empty-mascot" />
             <h2>Your Tags, in one place</h2>
             <p>Connect to a SuperTag Control Plane to work with your persistent coding agents.</p>
-            <Button className="primary" onClick={onSettings}>
+            {localProblem && <p>{localProblem}</p>}
+            {onLocal && (
+              <Button className="primary" onClick={onLocal}>
+                Connect to Local
+              </Button>
+            )}
+            <Button
+              variant={onLocal ? "outline" : "default"}
+              className={onLocal ? "secondary" : "primary"}
+              onClick={onSettings}
+            >
               Add Control Plane
             </Button>
           </>

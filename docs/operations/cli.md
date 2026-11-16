@@ -97,6 +97,12 @@ The terminal UI is the place for conversations. Plain `supertag` opens it for yo
 services; `supertag tui --control-plane NAME` opens it for a saved Control Plane. See
 [Talk to a Tag from your terminal](../guides/talk-to-a-tag.md).
 
+The terminal UI and the desktop app find the local Control Plane on their own. While
+`supertag up` runs one from `SUPERTAG_STATE_DIR` or `~/.supertag`, each lists it as **Local**
+and connects with the local operator token, with nothing to enter. With no saved Control Plane
+last used, each opens Local at launch. The token is read at each connect and never saved. When no
+local Control Plane runs, they say so, name `supertag up`, and offer the saved Control Planes.
+
 ## Send messages from the CLI
 
 `task submit` sends one turn of work to a Tag. A new Session name starts a new conversation;

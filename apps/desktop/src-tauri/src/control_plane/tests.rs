@@ -735,3 +735,82 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     server.abort();
 }
+
+/// The local Control Plane connects with the operator token in its state directory, read at each
+/// connect, and nothing about it is saved.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_local_control_plane_connects_with_its_current_token_and_is_never_saved() {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let directory = tempfile::tempdir().unwrap();
+    let store = directory.path().join("control-planes.json");
+    let operator = "e".repeat(64);
+    let (address, control_plane, plane) = control_plane_fixture(
+        &directory.path().join("state.sqlite"),
+        "local-tag",
+        &operator,
+        false,
+    )
+    .await;
+    let state_directory = directory.path().join("supertag");
+    let state = ControlPlaneState::new(Some(state_directory.clone()));
+    let listed = serde_json::to_value(state.saved_control_planes(&store).await.unwrap()).unwrap();
+    assert!(listed["local"]["origin"].is_null());
+    assert!(
+        listed["local"]["problem"]
+            .as_str()
+            .unwrap()
+            .contains("supertag up")
+    );
+
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state_directory)
+        .unwrap();
+    let private = |name: &str, contents: String| {
+        let path = state_directory.join(name);
+        std::fs::write(&path, contents).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    };
+    let credentials = |token: &str| {
+        let enrolled =
+            || supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
+        serde_json::json!({
+            "gateway_credential": enrolled(),
+            "operator_token": token,
+            "host_credential": enrolled(),
+        })
+        .to_string()
+    };
+    private("endpoint", format!("{address}\n"));
+    private("credentials.json", credentials(&operator));
+    // Stands in for the supervisor `supertag up` runs, which holds this lock.
+    let lock =
+        supertag_local_state::open_private_file(&state_directory.join(".lock"), true).unwrap();
+    lock.try_lock().unwrap();
+
+    let local = state.connect_local_control_plane(&store).await.unwrap();
+    assert_eq!(local.principal(), "operator:desktop-test");
+    assert_eq!(
+        state.tags(local.connection_id()).await.unwrap()[0].tag_id,
+        "local-tag"
+    );
+    let activation = serde_json::to_value(&local).unwrap();
+    assert_eq!(activation["origin"], "local");
+    assert!(activation["controlPlanes"]["active"].is_null());
+    assert_eq!(activation["controlPlanes"]["local"]["origin"], address);
+    let saved = std::fs::read_to_string(&store).unwrap();
+    assert!(!saved.contains(&operator), "the local token was saved");
+
+    // A replaced token is read at the next connect.
+    private("credentials.json", credentials(&"f".repeat(64)));
+    assert!(state.connect_local_control_plane(&store).await.is_err());
+    private("credentials.json", credentials(&operator));
+    state.connect_local_control_plane(&store).await.unwrap();
+
+    drop(lock);
+    let stopped = state.connect_local_control_plane(&store).await.unwrap_err();
+    assert!(stopped.contains("supertag up"), "{stopped}");
+    control_plane.abort();
+    plane.abort();
+}

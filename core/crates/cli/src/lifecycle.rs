@@ -37,7 +37,6 @@ pub const SUPERVISOR: &str = "supervisor";
 pub const DEFAULT_INSTANCE: &str = "supertag";
 const STATUS: &str = "supervisor.json";
 const DRAINED: &str = "drained-hosts";
-const STATE_LOCK: &str = ".lock";
 const MODE_VARIABLE: &str = "SUPERTAG_SUPERVISOR_MODE";
 const MAX_STATUS_BYTES: u64 = 256 * 1024;
 const READY_TIMEOUT: Duration = Duration::from_secs(120);
@@ -235,7 +234,7 @@ pub fn inspect(state: &Path) -> Result<Supervisor> {
     let Ok(directory) = private_directory(state) else {
         return Ok(Supervisor::Stopped);
     };
-    let lock = match open_private_file(&directory.join(STATE_LOCK), false) {
+    let lock = match open_private_file(&directory.join(supertag_local_state::STATE_LOCK), false) {
         Ok(lock) => lock,
         Err(_) => return Ok(Supervisor::Stopped),
     };

@@ -58,6 +58,11 @@ func (a *app) openControlPlaneDialog(current bool) tea.Cmd {
 }
 
 func (a *app) editControlPlane(target client.Target) tea.Cmd {
+	if a.isLocal(target) {
+		// Its token is never shown or saved; it may change whenever supertag up restarts.
+		a.choiceErr = localRefusal
+		return nil
+	}
 	if a.controlPlaneStore == nil {
 		a.choiceErr = "Saved Control Plane storage is unavailable."
 		return nil
@@ -290,6 +295,13 @@ func (a *app) refreshControlPlanes(active client.Target) {
 }
 
 func (a *app) rememberControlPlane() {
+	if a.controlPlaneStore != nil && a.hasTarget && a.isLocal(a.contexts[a.current]) {
+		// With no saved Control Plane active, the next launch opens the local one again.
+		if err := a.controlPlaneStore.clearActive(); err != nil {
+			a.inner.notice = note{text: "Connected, but could not save the selected Control Plane.", err: true}
+		}
+		return
+	}
 	if a.controlPlaneStore != nil && a.hasTarget && a.isSavedControlPlane(a.contexts[a.current]) {
 		if err := a.controlPlaneStore.selectTarget(a.contexts[a.current]); err != nil {
 			a.inner.notice = note{text: "Connected, but could not save the selected Control Plane.", err: true}
@@ -320,24 +332,35 @@ func (a *app) renderControlPlaneDialog() string {
 	return lipgloss.NewStyle().Padding(0, 1).Height(height).MaxHeight(height).Render(strings.Join(lines, "\n"))
 }
 
-// A supplied launch target always wins. Without a handover, the native TUI may reopen its
-// selected saved Control Plane; credentials still never pass through argv or the environment.
-func startupTargets(f *os.File, profiles controlPlaneProfiles) (handover, error) {
+// A supplied launch target always wins. Without a handover, the native TUI reopens its selected
+// saved Control Plane, else the local Control Plane while it runs, else the first saved one;
+// credentials still never pass through argv or the environment. The local Control Plane, when
+// it runs, is listed first; the returned local target is that entry.
+func startupTargets(f *os.File, profiles controlPlaneProfiles, local client.Target) (handover, client.Target, error) {
 	if f != nil {
 		if info, err := f.Stat(); err == nil && info.Mode()&(os.ModeNamedPipe|os.ModeSocket) != 0 {
-			return readHandover(f)
+			h, err := readHandover(f)
+			if err != nil {
+				return h, client.Target{}, err
+			}
+			h.Contexts, h.Current, local = withLocal(h.Contexts, h.Current, local)
+			return h, local, nil
 		}
 		f.Close()
 	}
-	if len(profiles.ControlPlanes) == 0 {
-		return handover{Protocol: "runtime.v2"}, nil
-	}
-	current := 0
+	current := -1
 	for i, target := range profiles.ControlPlanes {
 		if target.Name == profiles.Active {
 			current = i
 			break
 		}
 	}
-	return handover{Contexts: profiles.ControlPlanes, Current: current, Protocol: "runtime.v2"}, nil
+	if current < 0 && local.URL == "" {
+		current = 0
+	}
+	contexts, current, local := withLocal(profiles.ControlPlanes, current, local)
+	if len(contexts) == 0 {
+		return handover{Protocol: "runtime.v2"}, local, nil
+	}
+	return handover{Contexts: contexts, Current: current, Protocol: "runtime.v2"}, local, nil
 }

@@ -2703,6 +2703,7 @@ dependencies = [
  "supertag-credential-vault",
  "supertag-gateway",
  "supertag-github",
+ "supertag-local-state",
  "supertag-protocol",
  "supertag-shared-execution",
  "supertag-transport",
@@ -2839,6 +2840,17 @@ dependencies = [
  "tokio-util",
  "tonic",
  "uuid",
+]
+
+[[package]]
+name = "supertag-local-state"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde_json",
+ "supertag-protocol",
+ "tempfile",
 ]
 
 [[package]]

@@ -9,6 +9,15 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- The terminal UI and the desktop app find the local Control Plane that `supertag up` runs from
+  `SUPERTAG_STATE_DIR` or `~/.supertag` and list it as **Local**. It connects with no token to
+  enter, and each opens it at launch when no saved Control Plane was last used. The local
+  operator token is read at each connect and never saved. When no local Control Plane runs, both
+  say so and name `supertag up`; the saved Control Planes stay available. Running `supertag-tui`
+  directly finds it too.
+
 ### Removed
 
 - Releases no longer include an Intel Mac (`darwin-amd64`) archive, and the installer script

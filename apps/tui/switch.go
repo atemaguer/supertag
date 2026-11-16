@@ -56,6 +56,11 @@ type app struct {
 	controlPlaneStore  *controlPlaneStore
 	savedControlPlanes []client.Target
 	controlPlaneDialog *controlPlaneDialog
+	// local is the local Control Plane while it runs, listed first and never saved;
+	// localProblem says why it is unavailable otherwise. discover looks for it again.
+	local        client.Target
+	localProblem string
+	discover     localDiscovery
 
 	width, height int
 }
@@ -162,7 +167,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.String() == switchKey {
 			a.choosing, a.choice, a.choiceErr = true, a.current, ""
-			return a, nil
+			return a, a.lookForLocal()
 		}
 		if msg.String() == paletteKey || (msg.String() == "/" && a.inner.slashOpensPalette()) {
 			return a, a.openPalette(msg.String() == "/")
@@ -203,9 +208,12 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *app) forward(msg tea.Msg) tea.Cmd {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case controlPlaneCheckedMsg, enrolledMsg:
 		return a.controlPlaneMessage(msg)
+	case localDiscoveredMsg:
+		a.setLocal(msg.target, msg.problem)
+		return nil
 	}
 	if !a.hasTarget {
 		return nil
@@ -238,12 +246,19 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 			return a.editControlPlane(a.contexts[a.choice])
 		}
 	case "d":
+		if len(a.contexts) > 0 && a.isLocal(a.contexts[a.choice]) {
+			a.choiceErr = localRefusal + " Stop it with supertag down."
+			return nil
+		}
 		if len(a.contexts) > 0 {
 			a.forgetControlPlane()
 		}
 	case "enter":
 		if len(a.contexts) == 0 {
 			return a.openControlPlaneDialog(false)
+		}
+		if a.isLocal(a.contexts[a.choice]) {
+			return a.chooseLocal()
 		}
 		if a.choice == a.current {
 			a.choosing = false
@@ -340,7 +355,9 @@ func (a *app) renderChoices() string {
 	rows := make([]string, 0, len(a.contexts))
 	for i, target := range a.contexts {
 		label := contextLabel(target)
-		if a.isSavedControlPlane(target) {
+		if a.isLocal(target) {
+			label += "  [this machine]"
+		} else if a.isSavedControlPlane(target) {
 			label += "  [saved]"
 		}
 		if i == a.current {
@@ -353,6 +370,9 @@ func (a *app) renderChoices() string {
 		rows = append(rows, style.Render(truncate(label, width)))
 	}
 	var footer []string
+	if a.local.URL == "" && a.localProblem != "" && a.choiceErr != a.localProblem {
+		footer = append(footer, faint.Render(truncate(terminalText(a.localProblem), width)))
+	}
 	if a.choiceErr != "" {
 		footer = append(footer, errorStyle.Render(truncate(strings.Join(strings.Fields(a.choiceErr), " "), width)))
 	}

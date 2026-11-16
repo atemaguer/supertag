@@ -786,8 +786,12 @@ button:disabled {
   background: var(--accent);
   color: #251b17;
 }
-.empty .primary {
+.empty .primary,
+.empty .secondary {
   margin-top: 20px;
+}
+.empty .primary + .secondary {
+  margin-top: 8px;
 }
 .secondary {
   border: 1px solid var(--line);

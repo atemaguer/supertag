@@ -32,6 +32,7 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 | `core/crates/gateway` | Collaboration surfaces: ingress, rendering, reply delivery, notifications |
 | `core/crates/worker-host` | Execution supervision, journal, adapters, MCP, artifacts |
 | `core/crates/{protocol,api,transport}` | Wire types, gRPC services, tunnel and TLS transport |
+| `core/crates/local-state` | The local state directory and local Control Plane discovery, shared by the CLI and the desktop app |
 | `core/crates/{workspaces,github,shared-execution,credential-vault,codex-adapter}` | Workspaces, GitHub, shared execution, credential vault, native Codex adapter |
 | `proto/supertag/runtime/v2` | The public API contract; `scripts/generate-bindings.py` regenerates every binding from it |
 | `sdks/typescript` | The `supertag-ai` npm SDK (`src/`) and the generated TypeScript bindings (`gen/`) |

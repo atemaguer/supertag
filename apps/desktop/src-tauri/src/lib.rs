@@ -16,6 +16,17 @@ fn control_plane_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<P
         .map_err(|_| "Could not locate your saved Control Plane connections.".into())
 }
 
+/// Where `supertag up` keeps this user's local state: `SUPERTAG_STATE_DIR`, else `~/.supertag`.
+#[cfg(unix)]
+fn local_state_directory() -> Option<PathBuf> {
+    supertag_local_state::state_directory(None).ok()
+}
+
+#[cfg(not(unix))]
+fn local_state_directory() -> Option<PathBuf> {
+    None
+}
+
 #[tauri::command]
 async fn list_control_planes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -36,6 +47,16 @@ async fn save_control_plane<R: tauri::Runtime>(
 ) -> Result<ControlPlaneActivation, String> {
     state
         .save_control_plane(&control_plane_store(&app)?, control_plane, name, token)
+        .await
+}
+
+#[tauri::command]
+async fn connect_local_control_plane<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, ControlPlaneState>,
+) -> Result<ControlPlaneActivation, String> {
+    state
+        .connect_local_control_plane(&control_plane_store(&app)?)
         .await
 }
 
@@ -185,7 +206,7 @@ async fn save_result_artifact<R: tauri::Runtime>(
 
 fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
-        .manage(ControlPlaneState::default())
+        .manage(ControlPlaneState::new(local_state_directory()))
         .plugin(tauri_plugin_dialog::init())
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && payload.event() == PageLoadEvent::Started {
@@ -218,6 +239,7 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         .invoke_handler(tauri::generate_handler![
             list_control_planes,
             save_control_plane,
+            connect_local_control_plane,
             select_control_plane,
             clear_control_plane,
             start_control_plane_watch,

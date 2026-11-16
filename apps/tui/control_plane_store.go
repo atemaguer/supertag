@@ -273,6 +273,18 @@ func (s *controlPlaneStore) selectTarget(target client.Target) error {
 	return err
 }
 
+// clearActive leaves no saved Control Plane selected, so the next launch opens the local one.
+func (s *controlPlaneStore) clearActive() error {
+	if profiles, err := s.load(); err == nil && profiles.Active == "" {
+		return nil
+	}
+	_, err := s.update(func(profiles *controlPlaneProfiles) error {
+		profiles.Active = ""
+		return nil
+	})
+	return err
+}
+
 func (s *controlPlaneStore) remove(target client.Target) (controlPlaneProfiles, error) {
 	return s.update(func(profiles *controlPlaneProfiles) error {
 		for i, existing := range profiles.ControlPlanes {

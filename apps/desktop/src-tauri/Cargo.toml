@@ -29,6 +29,7 @@ tonic = { version = "0.14", features = ["tls-ring", "tls-native-roots"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+supertag-local-state = { path = "../../../core/crates/local-state" }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

@@ -13,6 +13,33 @@ use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 use crate::{Connection, ROOT_CONTROL_PLANE, resolve_target};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The format `supertag __local-control-plane` prints; the terminal UI checks it.
+const LOCAL_PROTOCOL: &str = "local-control-plane.v1";
+
+/// Prints the local Control Plane the terminal UI offers as Local, with the operator token read
+/// from the state directory now, so a token `supertag up` replaced is never stale. Only a pipe
+/// receives it: the token is never shown in a terminal.
+pub fn print_local_control_plane() -> Result<()> {
+    ensure!(
+        // terminal-safe: only checks whether output is a terminal.
+        !std::io::stdout().is_terminal(),
+        "this command is for the terminal UI; it prints the local operator token"
+    );
+    let directory = supertag_local_state::state_directory(None)?;
+    let value = match supertag_local_state::control_plane(&directory)? {
+        Some(local) => json!({
+            "protocol": LOCAL_PROTOCOL, "running": true,
+            "state_directory": directory, "url": local.url, "token": local.token,
+        }),
+        None => json!({
+            "protocol": LOCAL_PROTOCOL, "running": false,
+            "state_directory": directory,
+            "message": supertag_local_state::not_running(&directory),
+        }),
+    };
+    crate::terminal::print_json(&value)?;
+    Ok(())
+}
 
 pub async fn launch(
     connection: Connection,
@@ -29,6 +56,8 @@ pub async fn launch(
     );
     // With nothing selected and no local services running in ~/.supertag, the terminal UI opens
     // on the Control Planes saved in it.
+    // The terminal UI finds the local Control Plane in the same state directory.
+    let state = supertag_local_state::state_directory(connection.state_directory.clone()).ok();
     let allow_saved_only = implicit
         && crate::environment_control_plane().is_none()
         && std::env::var_os("SUPERTAG_STATE_DIR").is_none()
@@ -49,7 +78,7 @@ pub async fn launch(
     check_version(&binary).await?;
 
     let Some(target) = target else {
-        let status = terminal_command(&binary)
+        let status = terminal_command(&binary, state.as_deref())
             .status()
             .await
             .context("run supertag-tui")?;
@@ -94,7 +123,7 @@ pub async fn launch(
     let (parent, child) = UnixStream::pair().context("create terminal UI handover")?;
     parent.set_nonblocking(true)?;
     let mut parent = tokio::net::UnixStream::from_std(parent)?;
-    let mut command = terminal_command(&binary);
+    let mut command = terminal_command(&binary, state.as_deref());
     command
         .env("SUPERTAG_TUI_HANDOVER", "3")
         .stdin(Stdio::inherit())
@@ -141,7 +170,7 @@ fn certificate_path(name: &str) -> Result<Option<PathBuf>> {
 async fn check_version(binary: &Path) -> Result<()> {
     let output = timeout(
         Duration::from_secs(5),
-        terminal_command(binary)
+        terminal_command(binary, None)
             .arg("--version")
             .stdin(Stdio::null())
             .output(),
@@ -159,7 +188,7 @@ async fn check_version(binary: &Path) -> Result<()> {
     Ok(())
 }
 
-fn terminal_command(binary: &Path) -> Command {
+fn terminal_command(binary: &Path, state: Option<&Path>) -> Command {
     let mut command = Command::new(binary);
     command
         .env_clear()
@@ -187,5 +216,8 @@ fn terminal_command(binary: &Path) -> Command {
             .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
         )
         .kill_on_drop(true);
+    if let Some(state) = state {
+        command.env("SUPERTAG_STATE_DIR", state);
+    }
     command
 }

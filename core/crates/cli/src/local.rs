@@ -1,12 +1,12 @@
 use std::{
     ffi::OsString,
     fmt::Write as _,
-    fs::{self, DirBuilder, File, OpenOptions, TryLockError},
+    fs::{self, DirBuilder, File, OpenOptions},
     future::Future,
-    io::{self, Read as _, Write as _},
+    io::{self, Write as _},
     net::SocketAddr,
     os::unix::{
-        fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
+        fs::{DirBuilderExt as _, OpenOptionsExt as _},
         process::ExitStatusExt as _,
     },
     path::{Path, PathBuf},
@@ -20,10 +20,14 @@ use crate::{
     local_config::{Environment, surfaces::Surface},
 };
 use std::collections::BTreeMap;
+use supertag_local_state::{
+    CREDENTIALS, Credentials, ENDPOINT, GATEWAY_ENDPOINT, STATE_LOCK, loopback_address,
+};
+pub(crate) use supertag_local_state::{open_private_file, private_directory, read_private};
 use supertag_worker_host::LaneState;
 
 use anyhow::{Context, Result, bail, ensure};
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::{
     io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader},
     process::{Child, ChildStdin, Command},
@@ -34,11 +38,6 @@ use uuid::Uuid;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 const STOP_TIMEOUT: Duration = Duration::from_secs(12);
 const KILL_TIMEOUT: Duration = Duration::from_secs(3);
-const ENDPOINT: &str = "endpoint";
-/// The local Gateway's endpoint, present while one runs, for `supertag test notification`.
-const GATEWAY_ENDPOINT: &str = "gateway-endpoint";
-const CREDENTIALS: &str = "credentials.json";
-const STATE_LOCK: &str = ".lock";
 /// The Control Plane address an enrolled installation keeps across restarts.
 const CONTROL_PLANE_ADDRESS: &str = "control-plane-address";
 /// Non-secret variables every local service inherits from the supervisor.
@@ -130,7 +129,7 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
     remove_endpoint(&directory)?;
     // A crashed supervisor leaves its status behind; it must not describe a reused PID.
     lifecycle::forget(&directory)?;
-    let credentials = Credentials::load_or_create(&directory)?;
+    let credentials = load_or_create_credentials(&directory)?;
     let executable = std::env::current_exe()?;
 
     let mut children = Children::new(&directory)?;
@@ -225,32 +224,16 @@ fn supervisor_log(line: &str) {
 
 /// Read the endpoint and operator credential for a local CLI invocation.
 pub fn connection(state_directory: &Path) -> Result<(String, String)> {
-    local_endpoint(state_directory, ENDPOINT)
+    let local = supertag_local_state::control_plane(state_directory)?
+        .context("local SuperTag services are not running")?;
+    Ok((local.url, local.token))
 }
 
 /// Read the local Gateway's endpoint and the operator credential.
 pub fn gateway_connection(state_directory: &Path) -> Result<(String, String)> {
-    local_endpoint(state_directory, GATEWAY_ENDPOINT).context("no local Gateway is running")
-}
-
-fn local_endpoint(state_directory: &Path, file: &str) -> Result<(String, String)> {
-    let directory = private_directory(state_directory)?;
-    let lock = open_private_file(&directory.join(STATE_LOCK), false)
-        .context("inspect local supervisor lock")?;
-    match lock.try_lock() {
-        Ok(()) => bail!("local SuperTag services are not running"),
-        Err(TryLockError::WouldBlock) => {}
-        Err(TryLockError::Error(error)) => {
-            return Err(error).context("inspect local supervisor lock");
-        }
-    }
-    let endpoint = read_private(&directory.join(file))?;
-    let endpoint = endpoint.trim();
-    let address = endpoint
-        .strip_prefix("http://")
-        .context("invalid local endpoint")?;
-    loopback_address(address)?;
-    Ok((endpoint.to_owned(), Credentials::load(&directory)?.operator))
+    let local =
+        supertag_local_state::gateway(state_directory)?.context("no local Gateway is running")?;
+    Ok((local.url, local.token))
 }
 
 /// What the local services run beyond the Control Plane's API.
@@ -803,71 +786,28 @@ fn successful_exit(exit: ExitStatus) -> Result<()> {
     Ok(())
 }
 
-/// The local services' own credentials: the admin operator token, and the enrolled credentials
-/// of `gateway:local` and `host:local`, which the Control Plane seeds at startup.
-pub(crate) struct Credentials {
-    gateway: String,
-    pub(crate) operator: String,
-    host: String,
-}
-
-impl Credentials {
-    pub(crate) fn load(directory: &Path) -> Result<Self> {
-        let value = read_private(&directory.join(CREDENTIALS))?;
-        // Parsing errors stay generic because this file contains credentials.
-        let value: Value = serde_json::from_str(&value)
-            .map_err(|_| anyhow::anyhow!("invalid local credential bundle"))?;
-        let field = |key, valid: fn(&str) -> bool| {
-            value
-                .get(key)
-                .and_then(Value::as_str)
-                .filter(|token| valid(token))
-                .map(str::to_owned)
-                .context(
-                    "invalid local credential bundle; remove it with the local services stopped to create a new one",
-                )
-        };
-        let hex =
-            |token: &str| token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit());
-        let enrolled = |token: &str| {
-            supertag_protocol::is_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX, token)
-        };
-        let credentials = Self {
-            gateway: field("gateway_credential", enrolled)?,
-            operator: field("operator_token", hex)?,
-            host: field("host_credential", enrolled)?,
-        };
-        ensure!(
-            credentials.gateway != credentials.operator
-                && credentials.gateway != credentials.host
-                && credentials.operator != credentials.host,
-            "local credential bundle must contain distinct tokens"
-        );
-        Ok(credentials)
-    }
-
-    fn load_or_create(directory: &Path) -> Result<Self> {
-        let path = directory.join(CREDENTIALS);
-        match fs::symlink_metadata(&path) {
-            Ok(_) => Self::load(directory),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                let enrolled =
-                    || supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
-                let credentials = Self {
-                    gateway: enrolled(),
-                    operator: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
-                    host: enrolled(),
-                };
-                let bytes = serde_json::to_vec(&json!({
-                    "gateway_credential": credentials.gateway,
-                    "operator_token": credentials.operator,
-                    "host_credential": credentials.host,
-                }))?;
-                write_private(directory, CREDENTIALS, &bytes)?;
-                Ok(credentials)
-            }
-            Err(error) => Err(error).context("inspect local credential bundle"),
+/// The local services' credential bundle, created on first start.
+fn load_or_create_credentials(directory: &Path) -> Result<Credentials> {
+    let path = directory.join(CREDENTIALS);
+    match fs::symlink_metadata(&path) {
+        Ok(_) => Credentials::load(directory),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let enrolled =
+                || supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
+            let credentials = Credentials {
+                gateway: enrolled(),
+                operator: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+                host: enrolled(),
+            };
+            let bytes = serde_json::to_vec(&json!({
+                "gateway_credential": credentials.gateway,
+                "operator_token": credentials.operator,
+                "host_credential": credentials.host,
+            }))?;
+            write_private(directory, CREDENTIALS, &bytes)?;
+            Ok(credentials)
         }
+        Err(error) => Err(error).context("inspect local credential bundle"),
     }
 }
 
@@ -909,60 +849,6 @@ pub(crate) fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> Resul
         let _ = fs::remove_file(temporary);
     }
     written.with_context(|| format!("write local {name}"))
-}
-
-pub(crate) fn read_private(path: &Path) -> Result<String> {
-    let mut value = String::new();
-    open_private_file(path, false)?
-        .take(4097)
-        .read_to_string(&mut value)?;
-    ensure!(value.len() <= 4096, "local state file is too large");
-    Ok(value)
-}
-
-pub(crate) fn open_private_file(path: &Path, create: bool) -> Result<File> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(create)
-        .create(create)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .with_context(|| format!("open {}", path.display()))?;
-    let metadata = file.metadata()?;
-    ensure!(
-        metadata.is_file() && metadata.nlink() == 1 && private(&metadata),
-        "{} must be a private regular file owned by this user",
-        path.display()
-    );
-    Ok(file)
-}
-
-pub(crate) fn private_directory(path: &Path) -> Result<PathBuf> {
-    let metadata =
-        fs::symlink_metadata(path).with_context(|| format!("read {}", path.display()))?;
-    ensure!(
-        metadata.is_dir() && private(&metadata),
-        "{} must be a private directory owned by this user",
-        path.display()
-    );
-    path.canonicalize().context("resolve local state directory")
-}
-
-fn private(metadata: &fs::Metadata) -> bool {
-    // SAFETY: geteuid returns the calling process's effective user ID.
-    let user = unsafe { libc::geteuid() };
-    metadata.uid() == user && metadata.mode() & 0o077 == 0
-}
-
-fn loopback_address(value: &str) -> Result<SocketAddr> {
-    let address: SocketAddr = value.parse().context("invalid local service address")?;
-    ensure!(
-        address.ip().is_loopback() && address.port() != 0,
-        "invalid local service address"
-    );
-    Ok(address)
 }
 
 fn sqlite_url(database: &Path) -> Result<String> {
@@ -1575,7 +1461,7 @@ pub async fn configured(
         let credentials = config
             .plane
             .as_ref()
-            .map(|_| Credentials::load_or_create(&directory))
+            .map(|_| load_or_create_credentials(&directory))
             .transpose()?;
         let endpoint = if let Some(plane) = config.plane {
             // An enrolled installation pins its Control Plane origin. Reuse an initially selected

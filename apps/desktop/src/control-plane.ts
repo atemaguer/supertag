@@ -66,13 +66,28 @@ export interface ControlPlaneProfile {
   origin: string;
 }
 
+/** What the app calls the local Control Plane in place of a saved origin. */
+export const LOCAL_CONTROL_PLANE = "local";
+
+/**
+ * The Control Plane `supertag up` runs on this machine: its origin while it runs, otherwise why it
+ * is unavailable. It connects with this machine's own credentials, which are never saved.
+ */
+export interface LocalControlPlane {
+  origin?: string;
+  problem?: string;
+}
+
 export interface ControlPlaneList {
   profiles: ControlPlaneProfile[];
   active?: string | null;
+  local?: LocalControlPlane;
 }
 
 export interface ControlPlaneActivation {
   controlPlanes: ControlPlaneList;
+  /** The saved origin connected to, or `local` for the local Control Plane. */
+  origin: string;
   connectionId: string;
   tags: Tag[];
   /** Whom the saved credential acts as, such as `operator:local` or `client:alice-laptop`. */
@@ -99,6 +114,7 @@ export const nativeControlPlane = {
   save: (controlPlane: string, name: string, token: string) =>
     invoke<ControlPlaneActivation>("save_control_plane", { controlPlane, name, token }),
   select: (origin: string) => invoke<ControlPlaneActivation>("select_control_plane", { origin }),
+  connectLocal: () => invoke<ControlPlaneActivation>("connect_local_control_plane"),
   clear: (forget?: string) => invoke<ControlPlaneList>("clear_control_plane", { forget }),
   async watch(connectionId: string, watchEpoch: number, receive: (update: WatchUpdate) => void) {
     const onUpdate = new Channel<WatchUpdate>(receive);

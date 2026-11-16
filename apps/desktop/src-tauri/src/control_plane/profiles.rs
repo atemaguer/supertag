@@ -8,7 +8,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 use supertag_transport::Target;
 
-use super::{ControlPlaneState, Result, Session, Tag, bearer, device_name, endpoint};
+use super::{
+    ControlPlaneState, Result, Session, Tag, bearer, device_name, endpoint,
+    local::{self, LOCAL, LocalControlPlane},
+};
 
 const STORE_ERROR: &str = "Could not read or save your Control Plane connections.";
 const MAX_STORE_BYTES: u64 = 16 * 1024 * 1024;
@@ -38,12 +41,16 @@ struct Profiles {
 pub struct ControlPlaneList {
     profiles: Vec<ControlPlaneProfile>,
     active: Option<String>,
+    /// The local Control Plane, which is found rather than saved.
+    local: LocalControlPlane,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlPlaneActivation {
     control_planes: ControlPlaneList,
+    /// The saved origin connected to, or `local` for the local Control Plane.
+    origin: String,
     connection_id: String,
     tags: Vec<Tag>,
     /// Whom the saved credential acts as, such as `operator:local` or `client:alice-laptop`.
@@ -61,15 +68,16 @@ impl ControlPlaneActivation {
     }
 }
 
-impl From<Profiles> for ControlPlaneList {
-    fn from(value: Profiles) -> Self {
-        Self {
+impl ControlPlaneState {
+    fn list(&self, value: Profiles) -> ControlPlaneList {
+        ControlPlaneList {
             active: value.active,
             profiles: value
                 .control_planes
                 .into_iter()
                 .map(|entry| entry.profile)
                 .collect(),
+            local: local::status(self.2.as_deref()),
         }
     }
 }
@@ -188,7 +196,7 @@ fn control_plane_origin(address: &str) -> Result<(String, Target)> {
 impl ControlPlaneState {
     pub async fn saved_control_planes(&self, path: &Path) -> Result<ControlPlaneList> {
         let _guard = self.1.lock().await;
-        Ok(Profiles::load(path)?.into())
+        Ok(self.list(Profiles::load(path)?))
     }
 
     pub async fn save_control_plane(
@@ -232,7 +240,7 @@ impl ControlPlaneState {
                 entry.token = token;
             }
             let authorization = entry.token.clone();
-            self.activate(path, profiles, origin, endpoint, &authorization)
+            self.activate(path, profiles, Some(origin), endpoint, &authorization)
                 .await
         } else {
             bearer(&token)?;
@@ -243,7 +251,7 @@ impl ControlPlaneState {
                 },
                 token: token.clone(),
             });
-            self.activate(path, profiles, origin, endpoint, &token)
+            self.activate(path, profiles, Some(origin), endpoint, &token)
                 .await
         }
     }
@@ -266,15 +274,30 @@ impl ControlPlaneState {
         if canonical != origin {
             return Err("The saved Control Plane address is invalid.".into());
         }
-        self.activate(path, profiles, origin, endpoint, &token)
+        self.activate(path, profiles, Some(origin), endpoint, &token)
             .await
     }
 
+    /// Connects to the local Control Plane with the operator token its state directory holds
+    /// now. Nothing about it is saved, and no saved Control Plane stays active, so the next
+    /// launch opens the local one again.
+    pub async fn connect_local_control_plane(&self, path: &Path) -> Result<ControlPlaneActivation> {
+        let _guard = self.1.lock().await;
+        let local = local::discover(self.2.as_deref())?;
+        let endpoint = endpoint(&local.url)?;
+        let _file_lock = lock_profiles(path)?;
+        let profiles = Profiles::load(path)?;
+        self.activate(path, profiles, None, endpoint, &local.token)
+            .await
+    }
+
+    /// Connects and makes the connection current. A saved `origin` becomes the active saved
+    /// Control Plane; `None` is the local Control Plane, which leaves none active.
     async fn activate(
         &self,
         path: &Path,
         mut profiles: Profiles,
-        origin: String,
+        origin: Option<String>,
         endpoint: Target,
         token: &str,
     ) -> Result<ControlPlaneActivation> {
@@ -286,13 +309,15 @@ impl ControlPlaneState {
         if state.generation != generation {
             return Err("The connection changed. Connect again.".into());
         }
-        profiles.active = Some(origin.clone());
+        profiles.active = origin.clone();
         profiles.save(path)?;
+        let origin = origin.unwrap_or_else(|| LOCAL.to_owned());
         let connection_id = state.replace().to_string();
         state.session = Some(session);
-        state.origin = Some(origin);
+        state.origin = Some(origin.clone());
         Ok(ControlPlaneActivation {
-            control_planes: profiles.into(),
+            control_planes: self.list(profiles),
+            origin,
             connection_id,
             tags,
             principal,
@@ -326,6 +351,6 @@ impl ControlPlaneState {
         {
             state.replace();
         }
-        Ok(profiles.into())
+        Ok(self.list(profiles))
     }
 }

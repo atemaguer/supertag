@@ -51,7 +51,7 @@ func TestSavedControlPlanesReopenRotateAndPreserveLaunchCredentials(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := startupTargets(nil, profiles)
+	h, _, err := startupTargets(nil, profiles, client.Target{})
 	if err != nil || h.Contexts[h.Current] != first {
 		t.Fatal("saved-only startup did not reopen the selected Control Plane")
 	}
@@ -82,7 +82,7 @@ func TestSavedControlPlanesReopenRotateAndPreserveLaunchCredentials(t *testing.T
 		t.Fatal(err)
 	}
 	w.Close()
-	h, err = startupTargets(r, profiles)
+	h, _, err = startupTargets(r, profiles, client.Target{})
 	if err != nil || h.Contexts[h.Current] != first {
 		t.Fatal("handover selection must win")
 	}
@@ -307,7 +307,7 @@ func TestRuntimeControlPlaneAddSwitchAndForgetKeepRostersAndCredentialsIsolated(
 }
 
 func TestEmptyControlPlaneStartupCanAddAndCancelDoesNotSave(t *testing.T) {
-	h, err := startupTargets(nil, controlPlaneProfiles{Version: 1})
+	h, _, err := startupTargets(nil, controlPlaneProfiles{Version: 1}, client.Target{})
 	if err != nil || len(h.Contexts) != 0 || h.Protocol != "runtime.v2" {
 		t.Fatal("first launch must open an empty chooser")
 	}

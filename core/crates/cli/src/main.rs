@@ -611,6 +611,9 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     },
     #[command(name = "__codex-adapter", hide = true)]
     CodexAdapter(CodexAdapterArgs),
+    /// The local Control Plane and its current operator token, as JSON for the terminal UI.
+    #[command(name = "__local-control-plane", hide = true)]
+    LocalControlPlane,
     #[command(name = "__adapter-guardian", hide = true)]
     AdapterGuardian {
         #[arg(long)]
@@ -824,6 +827,7 @@ fn dispatch(cli: Cli) -> Result<()> {
                     | Command::Test { .. }
                     | Command::CodexAdapter(_)
                     | Command::AdapterGuardian { .. }
+                    | Command::LocalControlPlane
             ),
             "--control-plane before the command applies only to operator commands"
         );
@@ -834,6 +838,7 @@ fn dispatch(cli: Cli) -> Result<()> {
             adapter,
             adapter_args,
         } => supertag_worker_host::guard_adapter(&adapter, &adapter_args),
+        Command::LocalControlPlane => tui::print_local_control_plane(),
         Command::CodexAdapter(args) => tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
@@ -1344,6 +1349,7 @@ async fn run(command: Command) -> Result<()> {
             .await?;
         }
         Command::AdapterGuardian { .. } => unreachable!("guardian runs outside Tokio"),
+        Command::LocalControlPlane => unreachable!("local discovery runs outside Tokio"),
         Command::CodexAdapter(_) => unreachable!("Codex adapter uses a dedicated runtime"),
         Command::Tag {
             connection,

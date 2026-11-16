@@ -1,4 +1,4 @@
-use std::{net::IpAddr, sync::Arc, time::Duration};
+use std::{net::IpAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use serde::Serialize;
 use supertag_protocol::{
@@ -18,6 +18,7 @@ use tonic::{
 };
 
 mod artifacts;
+mod local;
 mod profiles;
 mod watch;
 pub use profiles::{ControlPlaneActivation, ControlPlaneList};
@@ -27,8 +28,16 @@ type Result<T> = std::result::Result<T, String>;
 const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_PAGES: usize = 100;
 
+/// The current connection, a lock that orders connection changes, and the local state directory
+/// a local Control Plane is found in, if one could be located.
 #[derive(Default)]
-pub struct ControlPlaneState(RwLock<Connection>, Mutex<()>);
+pub struct ControlPlaneState(RwLock<Connection>, Mutex<()>, Option<PathBuf>);
+
+impl ControlPlaneState {
+    pub fn new(local_state: Option<PathBuf>) -> Self {
+        Self(RwLock::default(), Mutex::default(), local_state)
+    }
+}
 
 #[derive(Default)]
 struct Connection {

@@ -1,0 +1,16 @@
+[package]
+name = "supertag-local-state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+libc.workspace = true
+serde_json.workspace = true
+supertag-protocol.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

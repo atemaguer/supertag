@@ -67,7 +67,7 @@ export function ConnectionDialog({
           <DialogDescription>
             {profile
               ? "Update the name or credential for this connection."
-              : "Use the Control Plane URL and an operator token, or a client Auth Key (stak_…) that joins this device. Only the token or this device's own credential is saved."}
+              : "Use the Control Plane URL and an operator token, or a client Auth Key (stak_…) that joins this device. Only the token or this device's own credential is saved. A Control Plane started on this machine with supertag up is listed as Local and needs no token."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={save}>
