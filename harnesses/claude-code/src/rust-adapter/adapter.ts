@@ -18,9 +18,12 @@ import {
   LiveInputReceipt,
   receipt,
   redact,
+  TaskEventKind,
   TaskState,
+  TURN_GUIDANCE,
   tagPortfolio,
 } from "@supertag/worker-sdk/internal/rust-harness";
+import { claudeToolActivity } from "../activity.js";
 import { ClaudeProcessTree } from "../process-tree.js";
 import {
   type ClaudeProgressItem,
@@ -395,7 +398,9 @@ export async function runAdapter(
         syncClaudeAiPlugins: false,
         disableSkillShellExecution: true,
       },
-      systemPrompt: [task.instructions, tagPortfolio(run)].filter(Boolean).join("\n\n"),
+      systemPrompt: [task.instructions, TURN_GUIDANCE, tagPortfolio(run)]
+        .filter(Boolean)
+        .join("\n\n"),
       env,
       stderr: () => {},
       includePartialMessages: true,
@@ -585,19 +590,37 @@ export async function runAdapter(
         });
         if (Buffer.byteLength(event) > 16000) continue;
         const sequence = ++eventSequence;
-        await receipt(() => client.publish({ sequence, text: event }, options()));
+        await receipt(() =>
+          client.publish({ sequence, text: event, kind: TaskEventKind.PROGRESS }, options()),
+        );
       }
       if (message.type === "assistant") {
+        // Each completed assistant message is its own conversation message, shown at once: the
+        // sentence saying what Claude is about to do arrives before its first tool call.
         const text = message.message.content
           .filter((part) => part.type === "text")
           .map((part) => part.text)
           .join("\n");
         const safe = redact(text, secrets).replaceAll("\0", "");
-        if (safe)
+        if (safe.trim())
           for (const chunk of utf8Chunks(safe, 16000)) {
             const sequence = ++eventSequence;
-            await receipt(() => client.publish({ sequence, text: chunk }, options()));
+            await receipt(() =>
+              client.publish({ sequence, text: chunk, kind: TaskEventKind.MESSAGE }, options()),
+            );
           }
+        // Then one activity line per tool call it starts, from the call's input only.
+        for (const part of message.message.content) {
+          if (part.type !== "tool_use") continue;
+          const line = claudeToolActivity(part, (text) =>
+            redact(text, secrets).replaceAll("\0", ""),
+          );
+          if (!line) continue;
+          const sequence = ++eventSequence;
+          await receipt(() =>
+            client.publish({ sequence, text: line, kind: TaskEventKind.ACTIVITY }, options()),
+          );
+        }
       }
       if (isClaudeFinalResult(message) && message.type === "result") {
         finalSeen = true;

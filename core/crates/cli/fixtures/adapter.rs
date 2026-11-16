@@ -16,7 +16,7 @@ use supertag_protocol::{
         HarnessAttachRequest, HarnessCompleteRequest, HarnessContinueWorkSessionRequest,
         HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessSendTagMessageRequest,
         HarnessSettleLiveInputRequest, HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest,
-        LiveInput, LiveInputReceipt, LiveInputState, TagMessageOrigin,
+        LiveInput, LiveInputReceipt, LiveInputState, TagMessageOrigin, TaskEventKind,
         harness_client::HarnessClient, harness_mailbox_client::HarnessMailboxClient,
         harness_questions_client::HarnessQuestionsClient,
         harness_work_sessions_client::HarnessWorkSessionsClient,
@@ -547,6 +547,7 @@ async fn main() -> Result<()> {
             HarnessPublishRequest {
                 sequence: 1,
                 text: format!("{} started", run.attempt_id),
+                kind: TaskEventKind::Activity as i32,
             },
             &bootstrap.token,
             None,
@@ -622,6 +623,7 @@ async fn main() -> Result<()> {
                     HarnessPublishRequest {
                         sequence: 2,
                         text: "artifact attached".into(),
+                        kind: TaskEventKind::Activity as i32,
                     },
                     &bootstrap.token,
                     None,
@@ -661,6 +663,7 @@ async fn main() -> Result<()> {
                     HarnessPublishRequest {
                         sequence: 2,
                         text: "workspace edited".into(),
+                        kind: TaskEventKind::Activity as i32,
                     },
                     &bootstrap.token,
                     None,
@@ -743,6 +746,7 @@ async fn main() -> Result<()> {
                         },
                     })
                     .to_string(),
+                    kind: TaskEventKind::Progress as i32,
                 },
                 &bootstrap.token,
                 None,
@@ -761,11 +765,40 @@ async fn main() -> Result<()> {
             sleep(Duration::from_millis(20)).await;
         }
     }
+    // `--conversation-fixture=MS` behaves like a Tag that says what it is about to do, works for
+    // MS milliseconds while showing what it is doing, and then answers.
+    if let Some(work) = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--conversation-fixture=")
+            .and_then(|ms| ms.parse::<u64>().ok())
+    }) {
+        for (kind, text) in [
+            (
+                TaskEventKind::Message,
+                format!("I'll check the fixture, then answer: {}", task.prompt),
+            ),
+            (TaskEventKind::Activity, "Running the fixture check".into()),
+        ] {
+            harness
+                .publish(authenticated_request(
+                    HarnessPublishRequest {
+                        sequence,
+                        text,
+                        kind: kind as i32,
+                    },
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await?;
+            sequence += 1;
+        }
+        sleep(Duration::from_millis(work)).await;
+    }
     harness
         .publish(authenticated_request(
             HarnessPublishRequest {
                 sequence,
                 text: result.clone(),
+                kind: TaskEventKind::Message as i32,
             },
             &bootstrap.token,
             None,

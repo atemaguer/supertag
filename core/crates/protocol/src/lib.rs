@@ -28,6 +28,9 @@ pub mod v2 {
 pub const FILE_DESCRIPTOR_SET: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/supertag_descriptors.bin"));
 
+/// What SuperTag tells every Tag about its turn, beside the Tag's own instructions. The sentence
+/// it asks for reaches the person at once as its own message, before the work that follows.
+pub const TURN_GUIDANCE: &str = "When a turn will take more than a moment, open it with one short sentence saying what you are about to do, as its own message, then do it. Answer a quick question directly.";
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 pub const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
 pub const CHECKPOINT_CHUNK_BYTES: usize = 256 * 1024;

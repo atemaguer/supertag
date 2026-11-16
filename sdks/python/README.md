@@ -50,7 +50,10 @@ async def main():
         run = await harness.client.Attach(runtime.HarnessAttachRequest(), timeout=5)
         result = f"Received work for {run.task.tag_id}"
         await harness.client.Publish(
-            runtime.HarnessPublishRequest(sequence=1, text=result), timeout=5
+            runtime.HarnessPublishRequest(
+                sequence=1, text=result, kind=runtime.TASK_EVENT_KIND_MESSAGE
+            ),
+            timeout=5,
         )
         await harness.client.Complete(
             runtime.HarnessCompleteRequest(succeeded=True, result=result), timeout=5

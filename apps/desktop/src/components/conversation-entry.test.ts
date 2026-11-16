@@ -71,3 +71,34 @@ it("offers the selected Task result files in the Tag reply", () => {
   expect(html).toContain('aria-label="Task result files"');
   expect(html).toContain('aria-label="Save outputs/report.md"');
 });
+
+it("shows each message the Tag wrote, its current activity, and then its reply once", () => {
+  const running = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: { conversation: "planning", task: { ...task, state: "running", result: undefined } },
+      events: [
+        { sequence: 1, kind: "message", text: "I'll check the lockfile first." },
+        { sequence: 2, kind: "activity", text: "Running pnpm install" },
+      ],
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(running).toContain("I&#x27;ll check the lockfile first.");
+  expect(running).toContain("Running pnpm install");
+  const done = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: { conversation: "planning", task },
+      events: [
+        { sequence: 1, kind: "message", text: "I'll check the lockfile first." },
+        { sequence: 2, kind: "activity", text: "Running pnpm install" },
+        { sequence: 3, kind: "message", text: task.result ?? "" },
+      ],
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(done).toContain("I&#x27;ll check the lockfile first.");
+  expect(done).not.toContain("Running pnpm install");
+  expect(done.split(task.result ?? "").length - 1).toBe(1);
+});

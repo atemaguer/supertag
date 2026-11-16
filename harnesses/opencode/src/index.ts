@@ -277,6 +277,14 @@ export async function* runOpenCode(
           if (state?.["status"] === "completed") return { type: "tool.call.completed", call };
         }
       }
+      if (record["type"] === "tool_use" && typeof part?.["tool"] === "string") {
+        // What the Tag did, as one activity line from the call's input, never its output.
+        const state = part["state"] as Record<string, unknown> | undefined;
+        return {
+          type: "progress.updated",
+          progress: { summary: openCodeToolActivity(part["tool"], state?.["input"]) },
+        };
+      }
       if (record["type"] === "text" && typeof part?.["text"] === "string") {
         const text = part["text"];
         responseBytes += Buffer.byteLength(text);
@@ -381,4 +389,54 @@ export async function readProviderApiKey(
   } finally {
     await file.close();
   }
+}
+
+/** The most an activity line shows before it is cut short. */
+const MAX_ACTIVITY = 160;
+
+/** One line saying what an OpenCode tool call did, such as `Running pnpm test`. */
+export function openCodeToolActivity(tool: string, input: unknown): string {
+  const fields = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const target = (verb: string, ...names: string[]) => {
+    for (const name of names) {
+      const value = fields[name];
+      if (typeof value === "string" && value.trim()) return `${verb} ${value}`;
+    }
+    return verb;
+  };
+  const line = (() => {
+    switch (tool) {
+      case "bash":
+        return target("Running", "command");
+      case "read":
+        return target("Reading", "filePath");
+      case "edit":
+      case "write":
+      case "patch":
+        return target("Editing", "filePath");
+      case "grep":
+      case "glob":
+        return target("Searching for", "pattern");
+      case "list":
+        return target("Listing", "path");
+      case "webfetch":
+        return target("Fetching", "url");
+      case "todowrite":
+        return "Updating its plan";
+      default:
+        return `Using ${tool}`;
+    }
+  })();
+  // Only the first line, still at full length: the adapter cuts it with `shortenActivity` once
+  // it is redacted, so a cut never leaves part of a secret that redaction cannot match.
+  const lines = line.split(/\r?\n/u).filter((text) => text.trim());
+  const first = (lines[0] ?? "").trim();
+  return lines.length > 1 ? `${first}…` : first;
+}
+
+/** An activity line cut to its length. Call it on redacted text. */
+export function shortenActivity(line: string): string {
+  const chars = [...line];
+  if (chars.length <= MAX_ACTIVITY) return line;
+  return `${chars.slice(0, MAX_ACTIVITY - 1).join("")}…`;
 }

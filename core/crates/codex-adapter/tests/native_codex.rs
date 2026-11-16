@@ -53,7 +53,7 @@ use supertag_protocol::{
         HarnessPublishRequest, HarnessRun, HarnessSettleLiveInputRequest,
         HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput, LiveInputReceipt,
         LiveInputState, ObjectiveQuestion, ReportAttemptUsageResponse, ReportedCostLimit,
-        SessionCheckpoint, TakeInputResponse, Task, TaskEvent,
+        SessionCheckpoint, TakeInputResponse, Task, TaskEvent, TaskEventKind,
         harness_questions_server::{HarnessQuestions, HarnessQuestionsServer},
         harness_server::{Harness, HarnessServer},
     },
@@ -312,9 +312,11 @@ impl Harness for HarnessFixture {
         let mut observed = self.observed.lock().await;
         assert_eq!(event.sequence, observed.events.len() as u64 + 1);
         assert!(event.text.len() <= 16_384);
+        assert_ne!(event.kind(), TaskEventKind::Unspecified);
         let result = TaskEvent {
             sequence: event.sequence,
             text: event.text.clone(),
+            kind: event.kind,
         };
         observed.events.push(event);
         Ok(Response::new(result))
@@ -1845,8 +1847,10 @@ async fn native_app_server_uses_exact_model_read_only_sandbox_scoped_env_and_red
     assert!(outcome.succeeded, "{}", outcome.result);
     assert_eq!(outcome.result, "Reviewed [REDACTED]; no changes.");
     assert_eq!(outcome.objective_signal, 0);
-    assert_eq!(observed.events.len(), 2);
-    assert_eq!(observed.events[1].text, outcome.result);
+    // The Tag's message is the only event: no harness status line reads as its reply.
+    assert_eq!(observed.events.len(), 1);
+    assert_eq!(observed.events[0].text, outcome.result);
+    assert_eq!(observed.events[0].kind(), TaskEventKind::Message);
     let args = fixture.args()?;
     assert_eq!(&args[..3], ["app-server", "--listen", "stdio://"]);
     assert!(!args.iter().any(|value| value == "--ephemeral"));
@@ -1877,15 +1881,19 @@ async fn native_app_server_uses_exact_model_read_only_sandbox_scoped_env_and_red
     );
     assert_eq!(
         fixture.read("prompt")?,
-        "Tag instructions:\nReview carefully\n\nTask:\nInspect this fixture\n"
+        format!(
+            "Tag instructions:\nReview carefully\n\n{}\n\nTask:\nInspect this fixture\n",
+            supertag_protocol::TURN_GUIDANCE
+        )
     );
     let environment = fixture.read("env")?;
-    assert!(
-        environment
-            .lines()
-            .any(|line| line == format!("CODEX_API_KEY={KEY}"))
+    // `codex app-server` reads only auth.json, so the key is staged there, never in the env.
+    assert_eq!(
+        serde_json::from_str::<Value>(&fixture.read("auth")?)?,
+        json!({"auth_mode": "apikey", "OPENAI_API_KEY": KEY})
     );
-    assert!(!environment.contains("OPENAI_API_KEY="));
+    assert!(fixture.read("auth-mode")?.starts_with("-rw-------"));
+    assert!(!environment.contains("API_KEY="));
     assert!(!environment.contains("must-not-reach") && !environment.contains(TOKEN));
     assert!(!environment.contains("HTTP_PROXY="));
     let private_home = environment
@@ -1938,11 +1946,11 @@ async fn openai_key_is_used_only_when_no_selected_sign_in_exists() -> Result<()>
     options.environment.remove(&OsString::from("CODEX_API_KEY"));
     let server = HarnessProcess::start(&["files:read"]).await?;
     run(options, server.bootstrap.clone()).await?;
-    assert!(
-        fixture
-            .read("env")?
-            .contains("CODEX_API_KEY=unselected-openai-secret\n")
+    assert_eq!(
+        serde_json::from_str::<Value>(&fixture.read("auth")?)?,
+        json!({"auth_mode": "apikey", "OPENAI_API_KEY": "unselected-openai-secret"})
     );
+    assert!(!fixture.read("env")?.contains("API_KEY="));
     assert!(
         server
             .observed
@@ -2024,6 +2032,56 @@ async fn code_mode_commands_run_only_with_web_fetch_and_fail_clearly_without_it(
             );
         }
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn each_message_is_its_own_event_and_commands_and_edits_are_activity_lines() -> Result<()> {
+    // The sentence Codex writes before it works is a message the person sees at once; what it
+    // runs and edits are activity lines; its last message is also the Task's result.
+    let fixture = NativeFixture::new(
+        &event_lines(&[
+            json!({"type":"thread.started","thread_id":"native-thread"}),
+            json!({"type":"turn.started"}),
+            json!({"type":"item.completed","item":{"id":"intent","type":"agent_message","text":"I'll run the tests, then fix what fails."}}),
+            json!({"type":"item.started","item":{"id":"run","type":"command_execution","command":format!("pnpm test --token {KEY}\nsecond line"),"aggregated_output":"","status":"in_progress"}}),
+            json!({"type":"item.completed","item":{"id":"run","type":"command_execution","command":"pnpm test","aggregated_output":"ok","status":"completed"}}),
+            json!({"type":"item.completed","item":{"id":"edit","type":"file_change","changes":[{"path":"src/a.rs","kind":"update"},{"path":"src/b.rs","kind":"add"}],"status":"completed"}}),
+            json!({"type":"item.completed","item":{"id":"answer","type":"agent_message","text":"Fixed the failing test."}}),
+            json!({"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}),
+        ]),
+        "exit 0",
+    )?;
+    let mut options = fixture.options();
+    options.allow_workspace_write = true;
+    let server =
+        HarnessProcess::start(&["files:read", "files:write", "commands:execute", "web:fetch"])
+            .await?;
+    run(options, server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("no native outcome")?;
+    assert!(outcome.succeeded, "{}", outcome.result);
+    assert_eq!(outcome.result, "Fixed the failing test.");
+    let events: Vec<(TaskEventKind, &str)> = observed
+        .events
+        .iter()
+        .map(|event| (event.kind(), event.text.as_str()))
+        .collect();
+    assert_eq!(
+        events,
+        [
+            (
+                TaskEventKind::Message,
+                "I'll run the tests, then fix what fails."
+            ),
+            (
+                TaskEventKind::Activity,
+                "Running pnpm test --token [REDACTED]…"
+            ),
+            (TaskEventKind::Activity, "Edited src/a.rs, src/b.rs"),
+            (TaskEventKind::Message, "Fixed the failing test."),
+        ]
+    );
     Ok(())
 }
 
@@ -2246,7 +2304,6 @@ async fn long_unicode_messages_are_bounded_and_redacted_before_publish_chunking(
         observed
             .events
             .iter()
-            .skip(1)
             .map(|event| event.text.as_str())
             .collect::<String>(),
         outcome.result

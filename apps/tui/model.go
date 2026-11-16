@@ -95,6 +95,9 @@ const (
 	entryWork
 	// entryReport is a work Session's report; its branch line follows the latest one.
 	entryReport
+	// entryMessage is a message the Tag wrote while its turn ran, such as the sentence saying
+	// what it is about to do. It shows like a reply.
+	entryMessage
 )
 
 // entry is one shown item; its text is already filtered for the terminal.
@@ -109,6 +112,8 @@ type transcript struct {
 	entries []entry
 	// draft is the reply text streaming in; the final reply replaces it.
 	draft string
+	// status is what the Tag is doing now, shown under its turn until the reply arrives.
+	status string
 	// cache holds each entry rendered at cacheWidth, "" for an entry that renders anew each time.
 	// Other entries never change once added, so each is rendered once per width, not on every
 	// streamed token.
@@ -132,6 +137,18 @@ type conversation struct {
 // add appends an entry, filtering its text for the terminal.
 func (c *transcript) add(kind entryKind, text string) {
 	c.entries = append(c.entries, entry{kind: kind, text: terminalLines(text)})
+}
+
+// settle removes the messages at the end of the turn that its final reply repeats: a harness
+// reports its last message both as it writes it and as the turn's result.
+func (c *transcript) settle(reply string) {
+	reply = terminalLines(reply)
+	end := len(c.entries)
+	for end > 0 && c.entries[end-1].kind == entryMessage && strings.Contains(reply, c.entries[end-1].text) {
+		end--
+	}
+	c.entries = c.entries[:end]
+	c.cache = c.cache[:min(len(c.cache), end)]
 }
 
 // addFor appends an entry of a work Session.
@@ -1459,6 +1476,11 @@ func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd
 		dim("· waiting: " + terminalText(event.Text))
 	case client.EventDelta:
 		c.draft += terminalLines(event.Text)
+	case client.EventMessage:
+		c.status = ""
+		c.add(entryMessage, event.Text)
+	case client.EventStatus:
+		c.status = terminalText(event.Text)
 	case client.EventActivity:
 		line := terminalText(event.Text)
 		if title != "" {
@@ -1472,10 +1494,11 @@ func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd
 			cmd = m.reloadWork(event.WorkSession)
 		}
 	case client.EventReply:
-		c.draft = ""
+		c.draft, c.status = "", ""
+		c.settle(event.Reply.GetText())
 		c.add(entryReply, event.Reply.GetText())
 	case client.EventTurnError:
-		c.draft = ""
+		c.draft, c.status = "", ""
 		c.add(entryError, event.Text)
 	case client.EventWorking:
 		if event.WorkSession == "" {
@@ -1500,7 +1523,7 @@ func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd
 	case client.EventJoined:
 		dim("· added to the turn in progress")
 	case client.EventError:
-		c.draft = ""
+		c.draft, c.status = "", ""
 		c.add(entryError, event.Text)
 		m.connected, m.status = false, event.Text
 	}

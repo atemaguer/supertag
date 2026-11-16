@@ -137,6 +137,14 @@ type Tool = keyof typeof schemas;
  * The Tag's open Objectives and how to recall its other Sessions, for a root turn's context:
  * state, not instructions. Empty when the turn does not read the Tag's Sessions.
  */
+/**
+ * What SuperTag tells every Tag about its turn, beside the Tag's own instructions. The sentence
+ * it asks for reaches the person at once as its own message, before the work that follows.
+ * Matches Rust `supertag_protocol::TURN_GUIDANCE`.
+ */
+export const TURN_GUIDANCE =
+  "When a turn will take more than a moment, open it with one short sentence saying what you are about to do, as its own message, then do it. Answer a quick question directly.";
+
 export function tagPortfolio(run: Pick<HarnessRun, "coordination">): string {
   const portfolio = run.coordination?.mayReadTagSessions ? run.coordination.tagPortfolio : "";
   return portfolio ? `SuperTag context:\n${portfolio}` : "";

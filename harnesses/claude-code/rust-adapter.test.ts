@@ -39,6 +39,7 @@ import {
   type ResolvedSkill,
   type SessionCheckpoint,
   TagMessageOrigin,
+  TaskEventKind,
   type TaskPolicySnapshot,
   TaskPolicySnapshotSchema,
   TaskSchema,
@@ -122,6 +123,7 @@ async function invoke({
   await mkdir(join(state, "tmp"), { mode: 0o700 });
   const completions: HarnessCompleteRequest[] = [];
   const events: string[] = [];
+  const kinds: TaskEventKind[] = [];
   const usage: HarnessUsageRequest[] = [];
   const appliedLimits: AppliedExecutionLimits[] = [];
   const settlements: LiveInputReceipt[] = [];
@@ -208,6 +210,7 @@ async function invoke({
           },
           publish(request) {
             events.push(request.text);
+            kinds.push(request.kind);
             if (cancel && request.text === "fixture waiting") cancelAdapter();
             return request;
           },
@@ -512,6 +515,7 @@ async function invoke({
     state,
     completions,
     events,
+    kinds,
     usage,
     appliedLimits,
     settlements,
@@ -1140,4 +1144,15 @@ it("reports Claude Code background tasks and API retries as progress events", as
     },
   ]);
   expect(run.events.join(" ")).not.toContain(providerSecret);
+}, 30000);
+
+it("publishes Claude's sentence of intent as a message and its tool call as an activity line", async () => {
+  const run = await invoke({ prompt: "intent-then-tool" });
+  expect(run.completions[0]?.succeeded).toBe(true);
+  const events = run.events.map((text, index) => [run.kinds[index], text]);
+  expect(events).toEqual([
+    [TaskEventKind.MESSAGE, "I'll check the lint configuration first."],
+    [TaskEventKind.ACTIVITY, "Running pnpm lint --token [REDACTED]"],
+    [TaskEventKind.MESSAGE, "fixture first turn"],
+  ]);
 }, 30000);

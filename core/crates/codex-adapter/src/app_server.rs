@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use supertag_protocol::v2::{
     HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput,
-    LiveInputReceipt, LiveInputState, NativeTokenUsage, TakeInputResponse, Task,
+    LiveInputReceipt, LiveInputState, NativeTokenUsage, TakeInputResponse, Task, TaskEventKind,
     harness_client::HarnessClient,
 };
 use tokio::{
@@ -169,10 +169,11 @@ impl Transport {
                     value["id"].as_u64() == Some(id),
                     "Codex returned an unexpected response identity"
                 );
-                ensure!(
-                    value.get("error").is_none(),
-                    "Codex rejected an execution request"
-                );
+                if let Some(error) = value.get("error") {
+                    // Standard error reaches only the Worker Host log, which redacts it.
+                    eprintln!("Codex rejected {method}: {error}");
+                    bail!("Codex rejected an execution request");
+                }
                 return value
                     .get("result")
                     .filter(|result| result.is_object())
@@ -181,7 +182,12 @@ impl Transport {
             }
         })
         .await
-        .context("Codex request timed out")?
+        .with_context(|| {
+            format!(
+                "Codex did not answer {method} within {}s",
+                RPC_TIMEOUT.as_secs()
+            )
+        })?
     }
 }
 
@@ -357,6 +363,7 @@ impl Stream {
                         harness,
                         token,
                         &mut self.sequence,
+                        TaskEventKind::Progress,
                         &auth::redact(progress, secrets),
                     )
                     .await?;
@@ -545,17 +552,28 @@ impl Stream {
                     _ => bail!("Codex emitted an unsupported tool or item"),
                 }
                 let normalized = json!({"type":if method=="item/completed" {"item.completed"}else{"item.started"},"item":item});
-                if let Some(message) = self.native.accept(&serde_json::to_vec(&normalized)?)? {
-                    publish(
-                        harness,
-                        token,
-                        &mut self.sequence,
-                        &auth::redact(message, secrets),
-                    )
-                    .await?;
+                if let Some((kind, text)) = self.native.accept(&serde_json::to_vec(&normalized)?)? {
+                    let text = auth::redact(text, secrets);
+                    // Activity is cut to length only once redacted, so no partial secret shows.
+                    let text = if kind == TaskEventKind::Activity {
+                        events::shorten(text)
+                    } else {
+                        text
+                    };
+                    publish(harness, token, &mut self.sequence, kind, &text).await?;
                 }
             }
-            "error" => bail!("Codex reported a failed turn"),
+            // Codex reports a transient failure it retries itself, such as a dropped model
+            // stream, with `willRetry`. Only an error it gives up on fails the turn. The message
+            // goes to standard error, which only the redacting Worker Host log reads, because
+            // provider errors can quote credentials.
+            "error" if params["willRetry"] == true => {
+                eprintln!("Codex is retrying after an error: {}", params["error"]);
+            }
+            "error" => {
+                eprintln!("Codex reported a failed turn: {}", params["error"]);
+                bail!("Codex reported a failed turn")
+            }
             // A code-mode-only model has no other command tool, so it would answer that commands
             // are disabled and the Task would succeed without them. Neither the Control Plane nor
             // `model/list` exposes a model's tool mode, so the earliest sign is this warning, sent
@@ -860,7 +878,6 @@ pub(crate) async fn execute(
             .notification(notification, harness, token, secrets)
             .await?;
     }
-    publish(harness, token, &mut stream.sequence, "Codex started").await?;
     ensure!(
         stream.baseline.is_some(),
         "Codex resume usage baseline is unavailable"
@@ -872,14 +889,15 @@ pub(crate) async fn execute(
     );
     stream.turn_requested = true;
     let portfolio = questions.portfolio();
+    let guidance = supertag_protocol::TURN_GUIDANCE;
     let prompt = if portfolio.is_empty() {
         format!(
-            "Tag instructions:\n{}\n\nTask:\n{}\n",
+            "Tag instructions:\n{}\n\n{guidance}\n\nTask:\n{}\n",
             task.instructions, task.prompt
         )
     } else {
         format!(
-            "Tag instructions:\n{}\n\nSuperTag context:\n{portfolio}\n\nTask:\n{}\n",
+            "Tag instructions:\n{}\n\n{guidance}\n\nSuperTag context:\n{portfolio}\n\nTask:\n{}\n",
             task.instructions, task.prompt
         )
     };

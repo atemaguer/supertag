@@ -174,7 +174,10 @@ func (m model) renderConversation() string {
 	}
 	text := out.String()
 	if c.draft != "" {
-		text += headerStyle.Render(name) + "\n" + faint.Render(wrap.Render(c.draft))
+		text += headerStyle.Render(name) + "\n" + faint.Render(wrap.Render(c.draft)) + "\n"
+	}
+	if c.status != "" {
+		text += faint.Render(wrap.Render("· "+c.status)) + "\n"
 	}
 	return strings.TrimRight(text, "\n")
 }
@@ -185,7 +188,7 @@ func (m model) renderEntry(e entry, name string, width int) string {
 	switch e.kind {
 	case entryYou:
 		return bold.Render("you") + "\n" + wrap.Render(e.text) + "\n\n"
-	case entryReply, entryReport:
+	case entryReply, entryReport, entryMessage:
 		return headerStyle.Render(name) + "\n" + m.md.render(e.text, width) + "\n\n"
 	case entryError:
 		return errorStyle.Render(wrap.Render(e.text)) + "\n\n"

@@ -18,6 +18,12 @@ const (
 	EventWaiting EventKind = iota
 	// EventDelta is reply text as the Tag writes it (Text). The final reply replaces it.
 	EventDelta
+	// EventMessage is a whole message the Tag wrote while its turn runs (Text), such as the
+	// sentence saying what it is about to do. Each is its own message; the final reply follows.
+	EventMessage
+	// EventStatus is what the Tag is doing now (Text), such as a command it runs. Only the
+	// latest is shown, in a status line under the turn, until the reply arrives.
+	EventStatus
 	// EventActivity is a command or tool the Tag or a work Session (Title) starts (Text).
 	EventActivity
 	// EventReply is the Tag's final reply (Reply).

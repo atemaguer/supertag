@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -149,8 +151,8 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 				continue
 			}
 			state.after = event.GetSequence()
-			if event.GetText() != "" {
-				emit(FollowEvent{Kind: EventDelta, Text: event.GetText()})
+			if shown, ok := turnEvent(event); ok {
+				emit(shown)
 			}
 		}
 		if len(events) >= runtimeEventPage {
@@ -183,8 +185,8 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 				continue
 			}
 			state.children[id] = event.GetSequence()
-			if event.GetText() != "" {
-				emit(FollowEvent{Kind: EventActivity, Text: event.GetText(), Indent: true, WorkSession: work.GetWorkSessionId(), Title: state.shown.title(work.GetWorkSessionId()), TaskID: id, Sequence: event.GetSequence()})
+			if text := eventLine(event); text != "" {
+				emit(FollowEvent{Kind: EventActivity, Text: text, Indent: true, WorkSession: work.GetWorkSessionId(), Title: state.shown.title(work.GetWorkSessionId()), TaskID: id, Sequence: event.GetSequence()})
 			}
 		}
 		if len(events) >= runtimeEventPage {
@@ -204,4 +206,49 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 		}
 	}
 	return settled, more, nil
+}
+
+// turnEvent is what a recorded event of the followed turn shows: a message the Tag wrote, or a
+// status line saying what it is doing.
+func turnEvent(event *v2.TaskEvent) (FollowEvent, bool) {
+	switch event.GetKind() {
+	case v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE:
+		if strings.TrimSpace(event.GetText()) != "" {
+			return FollowEvent{Kind: EventMessage, Text: strings.TrimSpace(event.GetText())}, true
+		}
+	case v2.TaskEventKind_TASK_EVENT_KIND_ACTIVITY, v2.TaskEventKind_TASK_EVENT_KIND_PROGRESS:
+		if text := eventLine(event); text != "" {
+			return FollowEvent{Kind: EventStatus, Text: text}, true
+		}
+	}
+	return FollowEvent{}, false
+}
+
+// eventLine is one line for a recorded event: its text, or a plan's summary and current step.
+func eventLine(event *v2.TaskEvent) string {
+	if event.GetKind() != v2.TaskEventKind_TASK_EVENT_KIND_PROGRESS {
+		return strings.TrimSpace(event.GetText())
+	}
+	var plan struct {
+		Progress struct {
+			Summary string `json:"summary"`
+			Items   []struct {
+				Text   string `json:"text"`
+				Status string `json:"status"`
+			} `json:"items"`
+		} `json:"progress"`
+	}
+	if json.Unmarshal([]byte(event.GetText()), &plan) != nil {
+		return ""
+	}
+	line := strings.TrimSpace(plan.Progress.Summary)
+	for _, item := range plan.Progress.Items {
+		if step := strings.TrimSpace(item.Text); item.Status == "active" && step != "" {
+			if line == "" {
+				return step
+			}
+			return line + ": " + step
+		}
+	}
+	return line
 }

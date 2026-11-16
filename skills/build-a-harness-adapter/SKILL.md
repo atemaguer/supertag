@@ -19,9 +19,11 @@ Do not build one when Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents fit
    with a loopback `endpoint` and a `token`. Refuse a non-loopback endpoint.
 2. Call `Harness.Attach` with `authorization: Bearer TOKEN`. The `HarnessRun` holds the Task and
    its prompt, the Session checkpoint, earlier turns, resolved Skills, and what the Task may do.
-3. Work in the current directory, the Task's checkout. Send progress with `Harness.Publish`
-   (increasing `sequence`), usage with `Harness.ReportUsage`, and enforced limits with
-   `Harness.ConfirmExecutionLimits`.
+3. Work in the current directory, the Task's checkout. Report with `Harness.Publish`
+   (increasing `sequence`, and a `kind`: `TASK_EVENT_KIND_MESSAGE` for each whole message the agent
+   writes, `TASK_EVENT_KIND_ACTIVITY` for one line from a tool call's input, or
+   `TASK_EVENT_KIND_PROGRESS` for `progress.updated` plan JSON), usage with
+   `Harness.ReportUsage`, and enforced limits with `Harness.ConfirmExecutionLimits`.
 4. End with `Harness.Complete`: `result`, `succeeded`, and a `checkpoint` if the agent can resume.
 
 Never print the token or pass it to the agent. The messages are in

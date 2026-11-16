@@ -134,6 +134,7 @@ async def test_real_sdk_tool_usage_redaction_and_portable_session(
     assert result.result == f"{FIRST_RESULT} [REDACTED]"
     assert [event.sequence for event in first.events] == list(range(1, len(first.events) + 1))
     assert "".join(event.text for event in first.events) == result.result
+    assert {event.kind for event in first.events} == {pb.TASK_EVENT_KIND_MESSAGE}
     assert result.checkpoint.harness == HARNESS
     assert API_KEY.encode() not in result.checkpoint.payload
     assert TOKEN.encode() not in result.checkpoint.payload

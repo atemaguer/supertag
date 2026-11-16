@@ -110,8 +110,9 @@ supertag get reply
 supertag logs HOST_NAME
 ```
 
-`task events` shows the run's progress and result. `get reply` shows whether the reply reached
-the surface. After checking the provider, resolve an `uncertain` reply with `supertag reply
+`task events` shows the run's progress and result. `logs HOST_NAME` shows why a Task failed: the
+host logs the failure with the last lines the harness adapter wrote to standard error, redacted.
+`get reply` shows whether the reply reached the surface. After checking the provider, resolve an `uncertain` reply with `supertag reply
 resolve REPLY_ID --decision failed --evidence TEXT`, or `--decision delivered` with
 `--provider-receipt` too; it never resends the reply.
 

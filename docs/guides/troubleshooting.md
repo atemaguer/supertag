@@ -104,8 +104,11 @@ supertag task events TASK_ID
 supertag get reply
 ```
 
-`task events` shows the run's progress and result. `get reply` shows whether the Gateway
-delivered the reply. A reply whose delivery is uncertain waits for
+`task events` shows the run's progress and result: each line has a `kind`, `message` for what
+the Tag wrote, `activity` for what it did, or `progress` for its plan. `get reply` shows whether
+the Gateway delivered the reply. When a Task failed, `supertag logs HOST_NAME` shows why: the
+Worker Host logs the failure with the last lines its harness adapter wrote to standard error,
+secrets hidden. A reply whose delivery is uncertain waits for
 `supertag reply resolve REPLY_ID --decision ... --evidence ...` after you check the thread.
 
 ## A Task Attempt is uncertain

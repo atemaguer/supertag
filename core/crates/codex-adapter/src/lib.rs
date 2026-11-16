@@ -19,7 +19,7 @@ use supertag_protocol::{
     v2::{
         AdapterBootstrap, AppliedExecutionLimits, ExecutionLimitEnforcement, ExecutionLimits,
         HarnessAttachRequest, HarnessCompleteRequest, HarnessPublishRequest, SessionCheckpoint,
-        Task, harness_client::HarnessClient,
+        Task, TaskEventKind, harness_client::HarnessClient,
     },
 };
 use tokio::{
@@ -322,7 +322,8 @@ async fn execute(
         .envs(environment)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // Codex's own diagnostics reach the Worker Host log through the guardian, redacted.
+        .stderr(Stdio::inherit())
         .kill_on_drop(true);
     // Do not create a new process group: the owning guardian must retain authority
     // over Codex and every tool process that Codex launches.
@@ -429,6 +430,7 @@ async fn publish(
     harness: &mut HarnessClient<Channel>,
     token: &str,
     sequence: &mut u64,
+    kind: TaskEventKind,
     mut text: &str,
 ) -> Result<()> {
     while !text.is_empty() {
@@ -442,6 +444,7 @@ async fn publish(
                 HarnessPublishRequest {
                     sequence: *sequence,
                     text: text[..end].into(),
+                    kind: kind as i32,
                 },
                 token,
             )?)

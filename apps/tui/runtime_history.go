@@ -328,6 +328,9 @@ func (m model) renderRuntimeHistory(c *conversation, name string, width int) str
 		if t.draft != "" {
 			out.WriteString(headerStyle.Render(name) + "\n" + faint.Render(wrap.Render(t.draft)) + "\n\n")
 		}
+		if t.status != "" {
+			out.WriteString(faint.Render(wrap.Render("· "+t.status)) + "\n\n")
+		}
 	}
 	for _, id := range c.runtime.order {
 		render(&c.runtime.turns[id].transcript)

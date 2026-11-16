@@ -939,6 +939,13 @@ pub async fn run(
                                 || error.code() == Code::InvalidArgument
                                 || error.code() == Code::DataLoss =>
                         {
+                            supertag_protocol::terminal_text::warn(&format!(
+                                "Task {} Attempt {}: the Control Plane refused its Session checkpoint ({:?}): {}",
+                                attempt.task_id,
+                                attempt.attempt_id,
+                                error.code(),
+                                error.message()
+                            ));
                             save_finish(
                                 &journal,
                                 attempt,

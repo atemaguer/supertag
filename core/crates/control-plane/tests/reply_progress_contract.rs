@@ -71,7 +71,13 @@ impl Run {
         }
     }
 
-    async fn event(&mut self, store: &Store, host: &HostAuthority, text: &str) {
+    async fn event(
+        &mut self,
+        store: &Store,
+        host: &HostAuthority,
+        kind: TaskEventKind,
+        text: &str,
+    ) {
         self.sequence += 1;
         store
             .append_event(
@@ -82,6 +88,7 @@ impl Run {
                     lease_token: self.lease_token.clone(),
                     sequence: self.sequence,
                     text: text.into(),
+                    kind: kind as i32,
                 },
             )
             .await
@@ -230,17 +237,28 @@ async fn contract(url: String) {
     ));
     assert_eq!(claim(&store, "p3").await.update, None);
 
-    // Only `progress.updated` events change the message, and updates are paced per message.
+    // Activity lines never change the message, and updates are paced per message.
     let mut run = Run::start(&store, &host, "run-one").await;
     assert_eq!(run.task_id, task.task_id);
-    run.event(&store, &host, "Codex started").await;
+    run.event(&store, &host, TaskEventKind::Activity, "Running cargo test")
+        .await;
     assert_eq!(claim(&store, "p4").await.update, None);
     clock.fetch_add(UPDATE_INTERVAL_MS, Ordering::SeqCst);
     assert_eq!(claim(&store, "p5").await.update, None);
-    run.event(&store, &host, &progress("Fixing tests", "Patch"))
-        .await;
-    run.event(&store, &host, &progress("Fixing tests", "Patch"))
-        .await;
+    run.event(
+        &store,
+        &host,
+        TaskEventKind::Progress,
+        &progress("Fixing tests", "Patch"),
+    )
+    .await;
+    run.event(
+        &store,
+        &host,
+        TaskEventKind::Progress,
+        &progress("Fixing tests", "Patch"),
+    )
+    .await;
     let second = claim(&store, "p6").await;
     let update = second.update.clone().unwrap();
     assert_eq!(update.text, "Fixing tests\n\n• Patch");
@@ -249,8 +267,13 @@ async fn contract(url: String) {
         "identical progress is not a new revision"
     );
     assert_eq!(update.provider_receipt.as_deref(), Some(ACK));
-    run.event(&store, &host, &progress("Fixing tests", "Run CI"))
-        .await;
+    run.event(
+        &store,
+        &host,
+        TaskEventKind::Progress,
+        &progress("Fixing tests", "Run CI"),
+    )
+    .await;
 
     // The final reply waits for the in-flight update, then for the pace, then replaces the
     // acknowledgement in place. Stale progress is never sent after it.
@@ -310,7 +333,13 @@ async fn contract(url: String) {
         .await
         .unwrap();
     let mut run = Run::start(&store, &host, "run-two").await;
-    run.event(&store, &host, &progress("Working", "Read")).await;
+    run.event(
+        &store,
+        &host,
+        TaskEventKind::Progress,
+        &progress("Working", "Read"),
+    )
+    .await;
     clock.fetch_add(UPDATE_INTERVAL_MS, Ordering::SeqCst);
     assert_eq!(claim(&store, "q2").await.update, None);
     run.finish(&store, &host, "Two").await;
@@ -409,14 +438,21 @@ async fn contract(url: String) {
     )
     .await
     .unwrap();
+    // A message the Tag writes while it works, such as what it is about to do, replaces the
+    // acknowledgement's text.
     let mut run = Run::start(&store, &host, "run-five").await;
-    run.event(&store, &host, &progress("Fixing tests", "Patch"))
-        .await;
+    run.event(
+        &store,
+        &host,
+        TaskEventKind::Message,
+        "  I'll fix the failing tests first.\n",
+    )
+    .await;
     clock.fetch_add(UPDATE_INTERVAL_MS, Ordering::SeqCst);
     let lost = claim(&store, "u2").await;
     assert_eq!(
         lost.update.as_ref().unwrap().text,
-        "Fixing tests\n\n• Patch"
+        "I'll fix the failing tests first."
     );
     assert_eq!(claim(&store, "u2").await, lost, "a live lease replays");
     run.finish(&store, &host, "Five").await;

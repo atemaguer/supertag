@@ -18,6 +18,13 @@ In the same repository, run `supertag`. Select `lead`, type “Read this reposit
 you would improve first,” and press Enter. The reply appears in the conversation. To check a
 delivered branch, ask for a small edit and wait for the Tag's work Session to report.
 
+While the Tag works, the conversation shows what it is doing. Before longer work, the Tag first
+writes one short sentence saying what it is about to do, which appears as its own message as
+soon as the Tag writes it. A dim status line under the turn shows its current step, such as a
+command it runs or a file it edits, and its answer follows as the last message. The first
+message arrives once the Tag's harness has started and written its first sentence, which takes a
+few seconds.
+
 If there is no local setup or the Control Plane has no Tags, SuperTag shows how to get started
 with `supertag init`. For a shared Control Plane, ask its operator to set up a Tag.
 

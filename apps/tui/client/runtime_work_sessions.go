@@ -241,8 +241,8 @@ func (c *runtimeClient) taskActivity(ctx context.Context, task string, after int
 				return nil, after, workSessionDataLoss("Control Plane event sequence exceeds the presentation limit.")
 			}
 			after = int64(event.GetSequence())
-			if event.GetText() != "" {
-				activity = append(activity, Activity{Key: task + ":" + strconv.FormatInt(after, 10), Line: event.GetText()})
+			if line := eventLine(event); line != "" {
+				activity = append(activity, Activity{Key: task + ":" + strconv.FormatInt(after, 10), Line: line})
 			}
 		}
 		if len(events) < runtimeEventPage {

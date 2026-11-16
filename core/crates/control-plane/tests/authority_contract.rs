@@ -10,7 +10,7 @@ use supertag_control_plane::{Store, StoreError};
 use supertag_protocol::v2::{
     AppendEventRequest, Assignment, AttemptDecision, ExecutionLimits, FinishTaskRequest,
     HarnessKind, InspectAttemptRequest, ObjectiveSignal, PutTagRequest, ReportedCostLimit,
-    ResolveAttemptRequest, StartTaskRequest, SubmitTaskRequest, TaskState,
+    ResolveAttemptRequest, StartTaskRequest, SubmitTaskRequest, TaskEventKind, TaskState,
 };
 use uuid::Uuid;
 
@@ -129,6 +129,7 @@ fn event(identity: &InspectAttemptRequest, text: &str) -> AppendEventRequest {
         lease_token: identity.lease_token.clone(),
         sequence: 1,
         text: text.into(),
+        kind: TaskEventKind::Message as i32,
     }
 }
 

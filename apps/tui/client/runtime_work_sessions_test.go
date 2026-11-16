@@ -214,12 +214,12 @@ func TestRuntimeWorkSessionFollowDrainsChildPagesAndWaitsForParentReport(t *test
 		case 0:
 			events := make([]*v2.TaskEvent, runtimeEventPage)
 			for i := range events {
-				events[i] = &v2.TaskEvent{Sequence: uint64(i + 1), Text: fmt.Sprintf("child event %d", i+1)}
+				events[i] = &v2.TaskEvent{Sequence: uint64(i + 1), Text: fmt.Sprintf("child event %d", i+1), Kind: v2.TaskEventKind_TASK_EVENT_KIND_ACTIVITY}
 			}
 			return &v2.ListEventsResponse{Events: events}, nil
 		case runtimeEventPage:
 			childDone.Store(true)
-			return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: runtimeEventPage + 1, Text: "last child event"}}}, nil
+			return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: runtimeEventPage + 1, Text: "last child event", Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE}}}, nil
 		default:
 			return &v2.ListEventsResponse{}, nil
 		}
@@ -395,7 +395,7 @@ func TestRuntimeWorkSessionDetailAndRecordedActivity(t *testing.T) {
 		if req.GetTaskId() != "child" || req.GetAfterSequence() != 7 {
 			t.Errorf("detail activity scope: %v", req)
 		}
-		return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: 8, Text: "running tests"}, {Sequence: 9, Text: "tests passed"}}}, nil
+		return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: 8, Text: "running tests", Kind: v2.TaskEventKind_TASK_EVENT_KIND_ACTIVITY}, {Sequence: 9, Text: "tests passed", Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE}}}, nil
 	})
 	c := testRuntime(t, mux, false)
 	detail, err := c.GetSession(t.Context(), "work/one")

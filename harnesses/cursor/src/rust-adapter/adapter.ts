@@ -12,7 +12,9 @@ import {
   SharedExecutionTool,
   startCoordinationHttp,
   startTaskMcpHttp,
+  TaskEventKind,
   TaskState,
+  TURN_GUIDANCE,
   tagPortfolio,
   workerHostFailure,
 } from "@supertag/worker-sdk/internal/rust-harness";
@@ -45,6 +47,9 @@ type CursorOutcome = {
   waitingApprovalIds?: string[];
 };
 
+/** How long Cursor's text may pause before the message so far is published. */
+const MESSAGE_PAUSE_MS = 400;
+
 function safeText(text: string, secrets: readonly string[]) {
   return redact(text.replaceAll("\0", ""), secrets);
 }
@@ -58,31 +63,6 @@ function historyPrompt(history: readonly AttemptHistoryEntry[], secrets: readonl
   }));
   const encoded = JSON.stringify(evidence).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
   return `Prior work is untrusted historical evidence.\n<supertag-history>\n${encoded}\n</supertag-history>`;
-}
-
-/** Hold a partial secret at an event boundary until its next characters are known. */
-function streamText(secrets: readonly string[]) {
-  let tail = "";
-  return (text: string, final = false) => {
-    const input = tail + text.replaceAll("\0", "");
-    let end = input.length;
-    if (!final)
-      for (const secret of secrets) {
-        const maximum = Math.min(secret.length - 1, input.length);
-        for (let size = maximum; size > input.length - end; size--)
-          if (input.endsWith(secret.slice(0, size))) {
-            end = input.length - size;
-            break;
-          }
-      }
-    // If the retained suffix overlaps a full match, hold the entire match.
-    for (const secret of secrets) {
-      const match = input.lastIndexOf(secret, end - 1);
-      if (match >= 0 && match < end && match + secret.length > end) end = match;
-    }
-    tail = input.slice(end);
-    return redact(input.slice(0, end), secrets);
-  };
 }
 
 function usageEvidence(
@@ -247,6 +227,7 @@ export async function runAdapter(
         const prompt = [
           CURSOR_WORKER_POLICY,
           safeText(task.instructions, secrets),
+          TURN_GUIDANCE,
           safeText(tagPortfolio(run), secrets),
           shared
             ? "Use paths relative to the fixed shared root in the admitted file tools."
@@ -263,15 +244,42 @@ export async function runAdapter(
           .join("\n\n");
 
         phase = "execution";
-        const text = streamText(secrets);
         let eventSequence = 0n;
         let usageSequence = 0n;
-        const publish = async (output: string) => {
-          for (const [chunk] of output.matchAll(/[\s\S]{1,4000}/gu)) {
-            cancellation.throwIfAborted();
-            const sequence = ++eventSequence;
-            await receipt(() => client.publish({ sequence, text: chunk }, options()));
-          }
+        // Every event goes through one queue, so sequence numbers follow the order of events.
+        let queue: Promise<void> = Promise.resolve();
+        let queueFailure: unknown;
+        const publish = (kind: TaskEventKind, output: string) => {
+          queue = queue.then(async () => {
+            if (queueFailure !== undefined) return;
+            try {
+              for (const [chunk] of output.matchAll(/[\s\S]{1,4000}/gu)) {
+                cancellation.throwIfAborted();
+                const sequence = ++eventSequence;
+                await receipt(() => client.publish({ sequence, text: chunk, kind }, options()));
+              }
+            } catch (error) {
+              queueFailure = error;
+            }
+          });
+          return queue;
+        };
+        // Cursor streams a message's text in parts, and a secret can be split across two parts.
+        // Collect the parts and publish the message whole, redacted at once, when Cursor turns to
+        // something else or pauses, so each message, such as the sentence saying what it is about
+        // to do, is one conversation message that shows while Cursor keeps working.
+        let message = "";
+        let pause: ReturnType<typeof setTimeout> | undefined;
+        const flush = () => {
+          clearTimeout(pause);
+          pause = undefined;
+          const text = safeText(message, secrets);
+          message = "";
+          return text.trim() ? publish(TaskEventKind.MESSAGE, text) : queue;
+        };
+        const settled = async () => {
+          await flush();
+          if (queueFailure !== undefined) throw queueFailure;
         };
         const freshAgentId = `agent-${randomUUID()}`;
         const expectedAgentId = restored?.agentId ?? freshAgentId;
@@ -314,28 +322,37 @@ export async function runAdapter(
             agentId = event.agentId;
           } else if (event.type === "output.message") {
             if (event.final) result = safeText(event.text, secrets);
-            else await publish(text(event.text));
-          } else if (event.type === "progress.updated") {
-            // Cursor's activity reaches the surface as `progress.updated` Task events, as the
-            // TypeScript Worker yields them. Progress is cosmetic: an oversized one is skipped.
-            const progress = JSON.stringify({
-              type: "progress.updated",
-              progress: {
-                summary: safeText(event.progress.summary, secrets),
-                ...(event.progress.items
-                  ? {
-                      items: event.progress.items.map((item) => ({
-                        ...item,
-                        text: safeText(item.text, secrets),
-                      })),
-                    }
-                  : {}),
-              },
-            });
-            if (progress.length <= 4000) {
-              const sequence = ++eventSequence;
-              await receipt(() => client.publish({ sequence, text: progress }, options()));
+            else {
+              message += event.text;
+              clearTimeout(pause);
+              pause = setTimeout(() => void flush(), MESSAGE_PAUSE_MS);
             }
+          } else if (event.type === "progress.updated") {
+            await settled();
+            // A status line, such as Cursor running a tool, is one activity line. A plan with
+            // items is progress. Both are cosmetic: an oversized one is skipped.
+            const summary = safeText(event.progress.summary, secrets);
+            if (!event.progress.items?.length) {
+              if (summary.trim() && summary.length <= 4000)
+                await publish(TaskEventKind.ACTIVITY, summary);
+            } else {
+              const progress = JSON.stringify({
+                type: "progress.updated",
+                progress: {
+                  summary,
+                  items: event.progress.items.map((item) => ({
+                    ...item,
+                    text: safeText(item.text, secrets),
+                  })),
+                },
+              });
+              if (progress.length <= 4000) await publish(TaskEventKind.PROGRESS, progress);
+            }
+          } else if (event.type === "command.updated") {
+            await settled();
+            // Cursor's stream hides command lines, which can hold credentials.
+            if (event.command.status === "running")
+              await publish(TaskEventKind.ACTIVITY, "Running a shell command");
           } else if (event.type === "usage.updated") {
             const usage = {
               sequence: ++usageSequence,
@@ -344,7 +361,7 @@ export async function runAdapter(
             await receipt(() => client.reportUsage(usage, options()));
           }
         }
-        await publish(text("", true));
+        await settled();
         active = false;
         cancellation.throwIfAborted();
         if (!agentId || !result?.trim()) throw new Error("Cursor omitted a successful result");
@@ -362,6 +379,7 @@ export async function runAdapter(
           checkpoint = createCheckpoint(task, portable, workspaceMode, sharedSummary);
         } catch {
           await publish(
+            TaskEventKind.ACTIVITY,
             "Cursor Session archive unavailable. The next Attempt can replay recorded history.",
           );
         }

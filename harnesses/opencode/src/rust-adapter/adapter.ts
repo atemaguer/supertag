@@ -11,7 +11,9 @@ import {
   redact,
   spawnOwnedProcess,
   type Task,
+  TaskEventKind,
   TaskState,
+  TURN_GUIDANCE,
   tagPortfolio,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import {
@@ -21,6 +23,7 @@ import {
   openCodeConfigurationEnvironment,
   readProviderApiKey,
   runOpenCode,
+  shortenActivity,
 } from "../index.js";
 import {
   exportOpenCodeCompletion,
@@ -270,6 +273,7 @@ export async function nativeRequest(
   }));
   const prompt = [
     redact(task.instructions, secrets),
+    TURN_GUIDANCE,
     redact(context, secrets),
     ...(evidence.length
       ? [
@@ -413,6 +417,23 @@ export async function runAdapter(
         active = false;
         return native.recoverCompletion(sessionId, signal);
       })) {
+        if (event.type === "progress.updated") {
+          // A tool call ends the message before it: the Tag's answer is what it writes after
+          // its last tool call, and each earlier text was already its own message.
+          parts.length = 0;
+          const line = shortenActivity(
+            redact(event.progress.summary, secrets).replaceAll("\0", ""),
+          );
+          if (!line.trim()) continue;
+          const current = ++sequence;
+          await receipt(() =>
+            client.publish(
+              { sequence: current, text: line, kind: TaskEventKind.ACTIVITY },
+              options(),
+            ),
+          );
+          continue;
+        }
         if (event.type !== "output.message") continue;
         const safe = redact(event.text, secrets).replaceAll("\0", "");
         if (!safe) continue;
@@ -424,7 +445,9 @@ export async function runAdapter(
         for (const [text] of safe.matchAll(/[\s\S]{1,4000}/gu)) {
           cancellation.throwIfAborted();
           const current = ++sequence;
-          await receipt(() => client.publish({ sequence: current, text }, options()));
+          await receipt(() =>
+            client.publish({ sequence: current, text, kind: TaskEventKind.MESSAGE }, options()),
+          );
         }
       }
       active = false;

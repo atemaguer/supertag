@@ -8,12 +8,11 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 pub(crate) struct Prepared {
     directory: TempDir,
-    key: Option<String>,
     secrets: Vec<String>,
 }
 
@@ -37,12 +36,10 @@ impl Prepared {
             .context("could not create private Codex home")?;
         let mut prepared = Self {
             directory,
-            key: None,
             secrets: Vec::new(),
         };
         if let Some(key) = variable(source, "CODEX_API_KEY")? {
-            prepared.secrets.push(key.clone());
-            prepared.key = Some(key);
+            prepared.stage_key(key)?;
             return Ok(prepared);
         }
         let source_home = source
@@ -84,8 +81,7 @@ impl Prepared {
             }
         }
         if let Some(key) = variable(source, "OPENAI_API_KEY")? {
-            prepared.secrets.push(key.clone());
-            prepared.key = Some(key);
+            prepared.stage_key(key)?;
             return Ok(prepared);
         }
         bail!("Codex requires CODEX_API_KEY, a file-backed Codex sign-in, or OPENAI_API_KEY")
@@ -108,10 +104,23 @@ impl Prepared {
             "CODEX_HOME".into(),
             self.directory.path().as_os_str().to_owned(),
         );
-        if let Some(key) = &self.key {
-            environment.insert("CODEX_API_KEY".into(), key.into());
-        }
         environment
+    }
+
+    /// Signs the private home in with an API key, as `codex login --with-api-key` does.
+    /// `codex app-server` reads only `auth.json`; it ignores `CODEX_API_KEY`, which only
+    /// `codex exec` honours, so a key in the environment would leave every request unsigned.
+    fn stage_key(&mut self, key: String) -> Result<()> {
+        let auth = serde_json::to_vec(&json!({"auth_mode": "apikey", "OPENAI_API_KEY": key}))?;
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(self.directory.path().join("auth.json"))
+            .and_then(|mut file| file.write_all(&auth))
+            .context("could not stage the Codex API key")?;
+        self.secrets.push(key);
+        Ok(())
     }
 
     pub(crate) fn secrets(&self) -> Vec<String> {

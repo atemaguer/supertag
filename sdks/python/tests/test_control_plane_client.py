@@ -299,7 +299,9 @@ async def run():
         doubt = await harness.effects.Begin(unsettled, timeout=5)
         assert doubt.state == effects.EFFECT_RECEIPT_STATE_IN_DOUBT
         result = "Installed Python harness for " + attached.task.tag_id
-        event = runtime.HarnessPublishRequest(sequence=1, text=result)
+        event = runtime.HarnessPublishRequest(
+            sequence=1, text=result, kind=runtime.TASK_EVENT_KIND_MESSAGE
+        )
         await harness.client.Publish(event, timeout=5)
         await harness.client.Publish(event, timeout=5)
         await harness.client.Complete(

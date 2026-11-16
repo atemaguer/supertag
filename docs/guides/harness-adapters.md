@@ -32,8 +32,16 @@ Worker Host ── claims Task ── starts adapter ── writes bootstrap to 
 4. `Attach` returns a `HarnessRun`: the Task and its prompt, the Session checkpoint to resume
    from, earlier turns of the Session, the Skills its Context Sets resolved, and what the Task may
    do.
-5. While the agent works, the adapter sends progress text with `Publish`, token usage with
-   `ReportUsage`, and the limits it enforces with `ConfirmExecutionLimits`.
+5. While the agent works, the adapter reports what it does with `Publish`, token usage with
+   `ReportUsage`, and the limits it enforces with `ConfirmExecutionLimits`. Each `Publish` names
+   its `kind`:
+   - `TASK_EVENT_KIND_MESSAGE`: a whole message the agent wrote, such as the sentence saying what
+     it is about to do. People see each as its own message at once, so publish it as soon as it
+     is complete, not word by word. The last message is usually the result too.
+   - `TASK_EVENT_KIND_ACTIVITY`: one line saying what the agent is doing, such as
+     `Running pnpm test`. People see the latest in a status line. Build it from a tool call's
+     input, never its output.
+   - `TASK_EVENT_KIND_PROGRESS`: a plan, as `progress.updated` JSON with a `summary` and `items`.
 6. A message that arrives while the Task runs can be taken with `TakeLiveInput` and settled with
    `SettleLiveInput`; the adapter must handle accepted input before it completes.
 7. `Complete` ends the Task Attempt with the result text, whether it succeeded, a new Session
@@ -70,7 +78,11 @@ async def main() -> None:
     async with open_harness(sys.stdin.buffer) as harness:
         run = await harness.client.Attach(runtime.HarnessAttachRequest())
         answer = await my_agent(run.task.prompt)
-        await harness.client.Publish(runtime.HarnessPublishRequest(sequence=1, text="Done."))
+        await harness.client.Publish(
+            runtime.HarnessPublishRequest(
+                sequence=1, text=answer, kind=runtime.TASK_EVENT_KIND_MESSAGE
+            )
+        )
         await harness.client.Complete(runtime.HarnessCompleteRequest(result=answer, succeeded=True))
 
 
@@ -123,7 +135,10 @@ supertag describe task TASK_ID
 ## Rules
 
 - Never print the bootstrap token or pass it to the agent.
-- Keep each `Publish` text short; send long output in pieces with increasing sequence numbers.
+- Publish each message once it is whole; a long message may go in pieces with increasing
+  sequence numbers.
+- When a Task Attempt fails, the Worker Host log shows the last lines the adapter wrote to standard
+  error, with secrets hidden. Write diagnostics there, never to standard output.
 - Send a checkpoint with `Complete` if your agent can resume a conversation; the next Task in the
   Session receives it, possibly on another host.
 - Report failures through `Complete` with `succeeded: false` and a result safe to show to people.

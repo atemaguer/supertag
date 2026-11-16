@@ -25,7 +25,7 @@ use supertag_protocol::{
     v2::{
         AttemptCleanup, CancelTaskRequest, GetTaskRequest, HarnessKind, ListEventsRequest,
         ListNativeUsageRequest, PolicyExecutionSettings, PutTagRequest, SubmitTaskRequest, Task,
-        TaskEvent, TaskState, WorkspaceSpec, operator_client::OperatorClient,
+        TaskEvent, TaskEventKind, TaskState, WorkspaceSpec, operator_client::OperatorClient,
     },
     valid_sha256,
 };
@@ -574,11 +574,18 @@ impl<'a> Runtime<'a> {
             events.iter().all(|event| secret_free(&event.text)),
             "Cursor leaked provider credential bytes in durable events"
         );
-        // Cursor SDK activity reaches the surface as a `progress.updated` Task event.
+        // Cursor SDK activity reaches the surface as an activity line, and its streamed text as
+        // one whole message, redacted at once even though the secret arrived in two parts.
         ensure!(
-            events.iter().any(|event| event.text
-                == r#"{"type":"progress.updated","progress":{"summary":"Cursor is reasoning"}}"#),
-            "Cursor activity was not reported as progress: {events:?}"
+            events
+                .iter()
+                .any(|event| event.kind() == TaskEventKind::Activity
+                    && event.text == "Cursor is reasoning")
+                && events
+                    .iter()
+                    .any(|event| event.kind() == TaskEventKind::Message
+                        && event.text == format!("cursor-stream:{mode} [REDACTED]")),
+            "Cursor activity was not reported as an activity line and one message: {events:?}"
         );
         Ok(task)
     }

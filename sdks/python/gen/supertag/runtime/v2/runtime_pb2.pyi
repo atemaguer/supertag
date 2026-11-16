@@ -224,6 +224,13 @@ class AttemptDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     ATTEMPT_DECISION_FAILED: _ClassVar[AttemptDecision]
     ATTEMPT_DECISION_RETRY: _ClassVar[AttemptDecision]
 
+class TaskEventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    TASK_EVENT_KIND_UNSPECIFIED: _ClassVar[TaskEventKind]
+    TASK_EVENT_KIND_MESSAGE: _ClassVar[TaskEventKind]
+    TASK_EVENT_KIND_ACTIVITY: _ClassVar[TaskEventKind]
+    TASK_EVENT_KIND_PROGRESS: _ClassVar[TaskEventKind]
+
 class ExecutionLimitEnforcement(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     EXECUTION_LIMIT_ENFORCEMENT_UNSPECIFIED: _ClassVar[ExecutionLimitEnforcement]
@@ -434,6 +441,10 @@ MODEL_SOURCE_HARNESS_DEFAULT: ModelSource
 ATTEMPT_DECISION_UNSPECIFIED: AttemptDecision
 ATTEMPT_DECISION_FAILED: AttemptDecision
 ATTEMPT_DECISION_RETRY: AttemptDecision
+TASK_EVENT_KIND_UNSPECIFIED: TaskEventKind
+TASK_EVENT_KIND_MESSAGE: TaskEventKind
+TASK_EVENT_KIND_ACTIVITY: TaskEventKind
+TASK_EVENT_KIND_PROGRESS: TaskEventKind
 EXECUTION_LIMIT_ENFORCEMENT_UNSPECIFIED: ExecutionLimitEnforcement
 EXECUTION_LIMIT_ENFORCEMENT_HARNESS_GUARD: ExecutionLimitEnforcement
 EXECUTION_LIMIT_ENFORCEMENT_INTERRUPT_ON_REPORT: ExecutionLimitEnforcement
@@ -2787,26 +2798,30 @@ class HarnessUsageRequest(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., native_usage: _Optional[_Union[NativeTokenUsage, _Mapping]] = ..., amount_minor: _Optional[int] = ..., currency: _Optional[str] = ..., estimated: _Optional[bool] = ...) -> None: ...
 
 class AppendEventRequest(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "lease_token", "sequence", "text")
+    __slots__ = ("task_id", "attempt_id", "lease_token", "sequence", "text", "kind")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     attempt_id: str
     lease_token: str
     sequence: int
     text: str
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
+    kind: TaskEventKind
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., sequence: _Optional[int] = ..., text: _Optional[str] = ..., kind: _Optional[_Union[TaskEventKind, str]] = ...) -> None: ...
 
 class TaskEvent(_message.Message):
-    __slots__ = ("sequence", "text")
+    __slots__ = ("sequence", "text", "kind")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
     sequence: int
     text: str
-    def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
+    kind: TaskEventKind
+    def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ..., kind: _Optional[_Union[TaskEventKind, str]] = ...) -> None: ...
 
 class FinishTaskRequest(_message.Message):
     __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256", "workspace_delivery", "waiting_approval_ids", "artifacts")
@@ -3215,12 +3230,14 @@ class GetReviewArtifactRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., review_id: _Optional[str] = ...) -> None: ...
 
 class HarnessPublishRequest(_message.Message):
-    __slots__ = ("sequence", "text")
+    __slots__ = ("sequence", "text", "kind")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
     sequence: int
     text: str
-    def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
+    kind: TaskEventKind
+    def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ..., kind: _Optional[_Union[TaskEventKind, str]] = ...) -> None: ...
 
 class HarnessCompleteRequest(_message.Message):
     __slots__ = ("result", "succeeded", "objective_signal", "checkpoint", "waiting_approval_ids")

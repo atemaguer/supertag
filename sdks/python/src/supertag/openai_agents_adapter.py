@@ -53,12 +53,15 @@ class _Harness:
         return await method(request, metadata=self.metadata, timeout=RPC_TIMEOUT_SECONDS)
 
     async def emit(self, text: str) -> None:
+        """Publishes one whole message the agent wrote, in pieces when it is long."""
         for offset in range(0, len(text), MAX_EVENT_CHARACTERS):
             self.sequence += 1
             await self.call(
                 self.publish,
                 self.pb.HarnessPublishRequest(
-                    sequence=self.sequence, text=text[offset : offset + MAX_EVENT_CHARACTERS]
+                    sequence=self.sequence,
+                    text=text[offset : offset + MAX_EVENT_CHARACTERS],
+                    kind=self.pb.TASK_EVENT_KIND_MESSAGE,
                 ),
             )
 
@@ -254,6 +257,8 @@ async def _execute(
     )
     stream = run.stream()
     deltas = []
+    # The streamed text is one message: each Task event is a whole message the agent wrote.
+    message = []
     total = 0
     try:
         async for event in stream:
@@ -265,7 +270,7 @@ async def _execute(
             if total > MAX_OUTPUT_BYTES:
                 raise _AdapterFailure("OpenAI Agents output exceeds its size limit")
             deltas.append(event.text)
-            await harness.emit(redactor.stream(event.text))
+            message.append(redactor.stream(event.text))
     except BaseException:
         await run.cancel()
         raise
@@ -273,7 +278,9 @@ async def _execute(
         close = getattr(stream, "aclose", None)
         if close is not None:
             await close()
-    await harness.emit(redactor.stream("", final=True))
+    message.append(redactor.stream("", final=True))
+    if "".join(message).strip():
+        await harness.emit("".join(message))
     usage = getattr(run, "usage", None)
     if usage is not None:
         await harness.meter(usage, redactor)

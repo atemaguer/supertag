@@ -283,6 +283,32 @@ func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
 	}
 }
 
+func TestTagMessagesShowAtOnceAndTheReplyEndsTheTurn(t *testing.T) {
+	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead")}))
+	m = followed(t, m,
+		client.FollowEvent{Kind: client.EventMessage, Text: "I'll run the tests, then fix what fails."},
+		client.FollowEvent{Kind: client.EventStatus, Text: "Running pnpm test"},
+	)
+	got := screen(m)
+	for _, want := range []string{"I'll run the tests, then fix what fails.", "· Running pnpm test"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("screen lacks %q while the turn runs:\n%s", want, got)
+		}
+	}
+	m = followed(t, m,
+		client.FollowEvent{Kind: client.EventStatus, Text: "Editing src/app.ts"},
+		client.FollowEvent{Kind: client.EventMessage, Text: "Fixed the failing test."},
+		client.FollowEvent{Kind: client.EventReply, Reply: &views.Reply{Text: "Fixed the failing test."}},
+	)
+	got = screen(m)
+	if strings.Count(got, "I'll run the tests") != 1 || strings.Count(got, "Fixed the failing test.") != 1 {
+		t.Fatalf("each message shows once, and the reply does not repeat the last one:\n%s", got)
+	}
+	if strings.Contains(got, "Running pnpm test") || strings.Contains(got, "Editing src/app.ts") {
+		t.Fatalf("the status line outlives the turn:\n%s", got)
+	}
+}
+
 func TestPastRepliesAreRenderedOncePerWidth(t *testing.T) {
 	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead", "builder")}))
 	for i := range 20 {

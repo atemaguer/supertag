@@ -11,6 +11,13 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Tag's conversation shows each message the Tag writes while it works, as soon as it writes
+  it: every Tag opens longer work with one short sentence saying what it is about to do. A status
+  line under the turn shows its current step, such as a command it runs, in the terminal UI and
+  the desktop app; in Slack, the acknowledgement shows the Tag's latest message until its reply
+  replaces it.
+- When a Task fails, the Worker Host log names the failure and shows the last lines its harness
+  adapter wrote to standard error, secrets hidden.
 - The terminal UI and the desktop app find the local Control Plane that `supertag up` runs from
   `SUPERTAG_STATE_DIR` or `~/.supertag` and list it as **Local**. It connects with no token to
   enter, and each opens it at launch when no saved Control Plane was last used. The local
@@ -29,6 +36,10 @@ within the pre-1.0 compatibility policy described in
   threads can now start and steer Objectives as Slack threads do.
 - `supertag describe objective` no longer says the owner reported a blocked Objective when the
   Control Plane blocked it after two turns ended with nothing running and nothing asked.
+- Every Task event has a kind: `message` (a whole message the Tag wrote), `activity` (one line
+  saying what it does), or `progress` (its plan). Harness adapters set `kind` on
+  `Harness.Publish`, which refuses an event without one, and `supertag task events` prints it.
+  OpenCode's result is the text after its last tool call; earlier text shows as messages.
 
 ### Removed
 
@@ -42,6 +53,12 @@ within the pre-1.0 compatibility policy described in
   [Install SuperTag](docs/operations/install.md#build-only-the-cli) describes.
 
 ### Fixed
+
+- A Codex Task signed in with `CODEX_API_KEY` or `OPENAI_API_KEY` no longer fails with `401
+  Unauthorized`: the key is staged as the Task's Codex sign-in, because `codex app-server` ignores
+  it in the environment. A model stream that Codex retries no longer fails the turn, and the
+  Codex status line `Codex started` no longer appears in the reply.
+- The terminal UI no longer shows harness status lines or raw plan JSON as reply text.
 
 - The example organizations in `examples/organizations/` apply with the 0.3.0 CLI. Their Tags bind
   the Workspace with `workspace: {id, ref}`, the `review-team` verifier is placed with `runsOn` and

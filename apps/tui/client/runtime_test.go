@@ -246,14 +246,14 @@ func TestRuntimeV2FollowsEventPagesAfterTransientFailure(t *testing.T) {
 		case 1:
 			events := make([]*v2.TaskEvent, runtimeEventPage)
 			for i := range events {
-				events[i] = &v2.TaskEvent{Sequence: uint64(i + 1), Text: fmt.Sprintf("piece %d", i+1)}
+				events[i] = &v2.TaskEvent{Sequence: uint64(i + 1), Text: fmt.Sprintf("piece %d", i+1), Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE}
 			}
 			return &v2.ListEventsResponse{Events: events}, nil
 		case 2:
 			settled.Store(true)
 			return nil, connect.NewError(connect.CodeUnavailable, errors.New("Control Plane restarted"))
 		case 3:
-			return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: runtimeEventPage + 1, Text: "last piece"}}}, nil
+			return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: runtimeEventPage + 1, Text: "last piece", Kind: v2.TaskEventKind_TASK_EVENT_KIND_ACTIVITY}}}, nil
 		default:
 			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("unexpected event request"))
 		}
@@ -264,9 +264,9 @@ func TestRuntimeV2FollowsEventPagesAfterTransientFailure(t *testing.T) {
 	events := collect(t, testFollower(c).Follow(ctx, "lead", message("t1"), nil))
 	var want []string
 	for i := 1; i <= runtimeEventPage; i++ {
-		want = append(want, fmt.Sprintf("delta piece %d", i))
+		want = append(want, fmt.Sprintf("message piece %d", i))
 	}
-	expect(t, events, append(want, "delta last piece", "reply done")...)
+	expect(t, events, append(want, "status last piece", "reply done")...)
 	mu.Lock()
 	defer mu.Unlock()
 	if !slices.Equal(cursors, []uint64{0, runtimeEventPage, runtimeEventPage}) {
@@ -302,7 +302,7 @@ func TestRuntimeV2FollowsWithdrawnInputAsItsOwnTask(t *testing.T) {
 		if req.GetTaskId() != "follower" || req.GetAfterSequence() != 0 {
 			t.Errorf("ListMessageEvents request = %v", req)
 		}
-		return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: 1, Text: "own event"}}}, nil
+		return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: 1, Text: "own event", Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE}}}, nil
 	})
 	c := testRuntime(t, mux, false)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -316,7 +316,7 @@ func TestRuntimeV2FollowsWithdrawnInputAsItsOwnTask(t *testing.T) {
 		t.Fatalf("joined history = %v", history)
 	}
 	expect(t, history[1].Events, "joined")
-	expect(t, collect(t, testFollower(c).Follow(ctx, "lead", follower, history[1].Shown)), "delta own event", "reply own reply")
+	expect(t, collect(t, testFollower(c).Follow(ctx, "lead", follower, history[1].Shown)), "message own event", "reply own reply")
 }
 
 func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
@@ -517,5 +517,27 @@ func TestRuntimeV2RefusesRedirect(t *testing.T) {
 	c := testRuntime(t, mux, false)
 	if _, err := c.ListTags(context.Background()); err == nil || redirected.Load() {
 		t.Fatal("Control Plane redirect must fail without a second request")
+	}
+}
+
+func TestRuntimeEventsShowAsMessagesOrOneStatusLine(t *testing.T) {
+	for _, tc := range []struct {
+		event *v2.TaskEvent
+		want  string
+	}{
+		{&v2.TaskEvent{Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE, Text: " I'll look first.\n"}, "message I'll look first."},
+		{&v2.TaskEvent{Kind: v2.TaskEventKind_TASK_EVENT_KIND_ACTIVITY, Text: "Running go test"}, "status Running go test"},
+		{&v2.TaskEvent{Kind: v2.TaskEventKind_TASK_EVENT_KIND_PROGRESS, Text: `{"type":"progress.updated","progress":{"summary":"Fixing tests","items":[{"text":"Patch","status":"completed"},{"text":"Run CI","status":"active"}]}}`}, "status Fixing tests: Run CI"},
+		{&v2.TaskEvent{Kind: v2.TaskEventKind_TASK_EVENT_KIND_PROGRESS, Text: `{"type":"progress.updated","progress":{"summary":"Waiting on CI"}}`}, "status Waiting on CI"},
+		{&v2.TaskEvent{Kind: v2.TaskEventKind_TASK_EVENT_KIND_PROGRESS, Text: "not json"}, ""},
+		{&v2.TaskEvent{Text: "untyped"}, ""},
+	} {
+		var got []FollowEvent
+		if event, ok := turnEvent(tc.event); ok {
+			got = append(got, event)
+		}
+		if describe(got) != tc.want {
+			t.Errorf("turnEvent(%v) = %q, want %q", tc.event, describe(got), tc.want)
+		}
 	}
 }

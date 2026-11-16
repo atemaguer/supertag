@@ -1,4 +1,5 @@
-import type { ControlPlane, Message } from "../control-plane";
+import type { ControlPlane, Message, TaskEvent } from "../control-plane";
+import { turnView, useTurnEvents } from "../lib/turn";
 import { ResultFiles } from "./result-files";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
@@ -25,13 +26,35 @@ function statusText(taskState: string, inputState?: string) {
   );
 }
 
+const RUNNING = new Set(["queued", "claimed", "running"]);
+
+/** A conversation entry that reads its turn's messages and activity while it runs. */
+export function LiveConversationEntry(
+  props: Omit<Parameters<typeof ConversationEntry>[0], "events"> & {
+    readEvents: ControlPlane["events"];
+  },
+) {
+  const { task, workSessionReportId, liveInput } = props.message;
+  const joined = workSessionReportId === undefined && liveInput?.state === "accepted";
+  const events = useTurnEvents(
+    props.readEvents,
+    task.tagId,
+    joined ? undefined : task.taskId,
+    RUNNING.has(task.state),
+  );
+  return <ConversationEntry {...props} events={events} />;
+}
+
 export function ConversationEntry({
   message,
+  events = [],
   activeTask,
   onActivity,
   onSaveArtifact,
 }: {
   message: Message;
+  /** The turn's recorded events, for the messages the Tag wrote and what it is doing. */
+  events?: readonly TaskEvent[];
   activeTask?: string;
   onActivity(taskId: string, trigger: HTMLButtonElement): void;
   onSaveArtifact: ControlPlane["saveArtifact"];
@@ -42,6 +65,7 @@ export function ConversationEntry({
   const status = statusText(task.state, input?.state);
   const joined = input?.state === "accepted";
   const activityTask = joined ? input.taskId : task.taskId;
+  const turn = turnView(joined ? [] : events, task.result);
   return (
     <article className="exchange">
       {!report && (
@@ -68,6 +92,18 @@ export function ConversationEntry({
               {status}
             </Button>
           </div>
+          {turn.messages.map((text, index) => (
+            // Messages are append-only, so their position is their identity.
+            // biome-ignore lint/suspicious/noArrayIndexKey: see above.
+            <p key={index} className="result-text tag-message">
+              {text}
+            </p>
+          ))}
+          {turn.status && (
+            <p className="turn-status" role="status">
+              {turn.status}
+            </p>
+          )}
           {task.result && !joined && <p className="result-text">{task.result}</p>}
           {!joined && task.artifacts && task.artifacts.length > 0 && (
             <ResultFiles artifacts={task.artifacts} onSave={onSaveArtifact} />

@@ -95,17 +95,43 @@ pub(crate) fn progress_text(event: &str) -> Option<String> {
 }
 
 /// Replaces the newest progress for a running Task. Identical text is not a new revision.
+///
+/// A message the Tag writes while it works, such as the sentence saying what it is about to do,
+/// replaces the acknowledgement's text, as does a plan. Activity lines do not: they change too
+/// often for a chat message, and every edit would only churn the thread. Editing the one
+/// acknowledgement keeps a thread to one message per turn, which Slack paces and which notifies
+/// nobody, until the final reply replaces it.
 pub(crate) async fn record_in(
     tx: &mut Transaction<'_, Any>,
     task_id: &str,
+    kind: TaskEventKind,
     event: &str,
 ) -> Result<()> {
-    let Some(text) = progress_text(event) else {
+    let text = match kind {
+        TaskEventKind::Progress => progress_text(event),
+        TaskEventKind::Message => message_text(event),
+        TaskEventKind::Activity | TaskEventKind::Unspecified => None,
+    };
+    let Some(text) = text else {
         return Ok(());
     };
     sqlx::query("UPDATE supertag_v2_reply_progress SET text=$1,revision=revision+1 WHERE task_id=$2 AND stopped=0 AND text<>$1")
         .bind(text).bind(task_id).execute(&mut **tx).await?;
     Ok(())
+}
+
+/// The text a Tag's message shows in its acknowledgement, within the progress limit.
+fn message_text(message: &str) -> Option<String> {
+    let message = message.trim();
+    if message.is_empty() {
+        return None;
+    }
+    if message.chars().count() <= MAX_PROGRESS_CHARS {
+        return Some(message.to_owned());
+    }
+    let mut text: String = message.chars().take(MAX_PROGRESS_CHARS - 1).collect();
+    text.push('…');
+    Some(text)
 }
 
 /// Expired progress claims. An unconfirmed first post stops the row; an update is retried.

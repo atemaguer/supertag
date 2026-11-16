@@ -12,8 +12,8 @@ use supertag_protocol::{
     v2::{
         AttemptDecision, CancelTaskRequest, DiagnoseTaskPlacementRequest, ExecutionLimits,
         GetTaskRequest, ListEventsRequest, ListNativeUsageRequest, ReportedCostLimit,
-        ResolveAttemptRequest, SubmitTaskRequest, TaskState, operator_client::OperatorClient,
-        placement_client::PlacementClient,
+        ResolveAttemptRequest, SubmitTaskRequest, TaskEventKind, TaskState,
+        operator_client::OperatorClient, placement_client::PlacementClient,
     },
 };
 use uuid::Uuid;
@@ -207,8 +207,14 @@ pub async fn run(connection: Connection, command: TaskCommand) -> Result<()> {
                 .await?
                 .into_inner();
             for event in events.events {
+                let kind = match event.kind() {
+                    TaskEventKind::Message => "message",
+                    TaskEventKind::Activity => "activity",
+                    TaskEventKind::Progress => "progress",
+                    TaskEventKind::Unspecified => "unspecified",
+                };
                 crate::terminal::print_json(
-                    &json!({ "sequence": event.sequence, "text": event.text }),
+                    &json!({ "sequence": event.sequence, "kind": kind, "text": event.text }),
                 )?;
             }
         }

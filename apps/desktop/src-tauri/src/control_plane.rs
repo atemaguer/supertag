@@ -354,6 +354,12 @@ impl ControlPlaneState {
                 .into_iter()
                 .map(|event| Event {
                     sequence: event.sequence,
+                    kind: match event.kind() {
+                        v2::TaskEventKind::Message => "message",
+                        v2::TaskEventKind::Activity => "activity",
+                        v2::TaskEventKind::Progress => "progress",
+                        v2::TaskEventKind::Unspecified => "unspecified",
+                    },
                     text: event.text,
                 })
                 .collect(),
@@ -672,9 +678,12 @@ pub struct Messages {
     pub next_cursor: String,
 }
 
+/// One recorded event of a Task: a message its Tag wrote (`message`), one line saying what it is
+/// doing (`activity`), or its plan as `progress.updated` JSON (`progress`).
 #[derive(Serialize, Debug)]
 pub struct Event {
     pub sequence: u64,
+    pub kind: &'static str,
     pub text: String,
 }
 

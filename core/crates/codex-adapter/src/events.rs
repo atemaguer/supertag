@@ -1,8 +1,43 @@
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
-use supertag_protocol::v2::NativeTokenUsage;
+use supertag_protocol::v2::{NativeTokenUsage, TaskEventKind};
 
 use crate::config::Policy;
+
+/// A Task event this stream produces: its kind and text.
+pub(crate) type Event = (TaskEventKind, String);
+
+/// The most an activity line shows before it is cut short.
+const MAX_ACTIVITY_CHARS: usize = 160;
+
+fn activity(text: &str) -> Option<Event> {
+    Some((TaskEventKind::Activity, text.to_owned()))
+}
+
+/// The first line of `text`, marked when more follows. It is cut to length only after it is
+/// redacted ([`shorten`]), so a cut never leaves part of a secret that redaction cannot match.
+fn one_line(text: &str) -> String {
+    let line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    if text.trim() == line {
+        line.to_owned()
+    } else {
+        format!("{line}…")
+    }
+}
+
+/// An activity line cut to its length. Call it on redacted text.
+pub(crate) fn shorten(line: String) -> String {
+    if line.chars().count() <= MAX_ACTIVITY_CHARS {
+        return line;
+    }
+    let mut short: String = line.chars().take(MAX_ACTIVITY_CHARS - 1).collect();
+    short.push('…');
+    short
+}
 
 pub(crate) struct Stream {
     policy: Policy,
@@ -29,7 +64,7 @@ impl Stream {
         }
     }
 
-    pub(crate) fn accept(&mut self, line: &[u8]) -> Result<Option<String>> {
+    pub(crate) fn accept(&mut self, line: &[u8]) -> Result<Option<Event>> {
         self.count += 1;
         ensure!(self.count <= 100_000, "Codex emitted too many events");
         ensure!(
@@ -68,7 +103,7 @@ impl Stream {
                 "Codex did not resume the requested Session"
             );
             self.thread = Some(id.into());
-            return Ok(Some("Codex started".into()));
+            return Ok(None);
         }
         if matches!(kind, "error" | "turn.failed") {
             bail!("Codex reported a failed turn");
@@ -113,7 +148,7 @@ impl Stream {
         }
     }
 
-    fn item(&mut self, event: &Value, completed: bool) -> Result<Option<String>> {
+    fn item(&mut self, event: &Value, completed: bool) -> Result<Option<Event>> {
         let item = event
             .get("item")
             .context("Codex event is missing its item")?;
@@ -137,7 +172,7 @@ impl Stream {
                         "Codex final response exceeds its limit"
                     );
                     self.final_response = Some(text.into());
-                    return Ok(Some(text.into()));
+                    return Ok(Some((TaskEventKind::Message, text.into())));
                 }
             }
             "reasoning" => {
@@ -150,44 +185,59 @@ impl Stream {
                     self.policy.commands,
                     "Codex attempted an unadmitted command"
                 );
-                item.get("command")
+                let command = item
+                    .get("command")
                     .and_then(Value::as_str)
                     .context("Codex command item is invalid")?;
                 item.get("aggregated_output")
                     .and_then(Value::as_str)
                     .context("Codex command item is invalid")?;
+                let status = item.get("status").and_then(Value::as_str);
                 ensure!(
-                    matches!(
-                        item.get("status").and_then(Value::as_str),
-                        Some("in_progress" | "completed" | "failed")
-                    ),
+                    matches!(status, Some("in_progress" | "completed" | "failed")),
                     "Codex command status is invalid"
                 );
+                if status == Some("in_progress") {
+                    return Ok(activity(&format!("Running {}", one_line(command))));
+                }
             }
             "file_change" => {
                 ensure!(
                     self.policy.write,
                     "Codex attempted an unadmitted file change"
                 );
-                item.get("changes")
+                let changes = item
+                    .get("changes")
                     .and_then(Value::as_array)
                     .context("Codex file change item is invalid")?;
+                let status = item.get("status").and_then(Value::as_str);
                 ensure!(
-                    matches!(
-                        item.get("status").and_then(Value::as_str),
-                        Some("completed" | "failed")
-                    ),
+                    matches!(status, Some("completed" | "failed")),
                     "Codex file change status is invalid"
                 );
+                let paths: Vec<&str> = changes
+                    .iter()
+                    .filter_map(|change| change.get("path").and_then(Value::as_str))
+                    .collect();
+                if completed && status == Some("completed") && !paths.is_empty() {
+                    return Ok(activity(&format!("Edited {}", one_line(&paths.join(", ")))));
+                }
             }
             "web_search" => {
                 ensure!(
                     self.policy.search,
                     "Codex attempted an unadmitted web search"
                 );
-                item.get("query")
+                let query = item
+                    .get("query")
                     .and_then(Value::as_str)
                     .context("Codex web search item is invalid")?;
+                if !completed && !query.trim().is_empty() {
+                    return Ok(activity(&format!(
+                        "Searching the web for {}",
+                        one_line(query)
+                    )));
+                }
             }
             "todo_list" => {
                 for todo in item

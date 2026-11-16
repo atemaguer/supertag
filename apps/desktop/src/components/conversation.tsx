@@ -12,8 +12,9 @@ import {
   receivedMessage,
 } from "../lib/history";
 import { describe, usePolling } from "../lib/polling";
+import { eventLine } from "../lib/turn";
 import { useWatchRefresh, type WatchFeed } from "../lib/watch";
-import { ConversationEntry } from "./conversation-entry";
+import { LiveConversationEntry } from "./conversation-entry";
 import { TagAvatar } from "./tag-avatar";
 
 const interval = 2_500;
@@ -210,9 +211,10 @@ export function ConversationPane({
                 </Button>
               )}
               {messages.map((message) => (
-                <ConversationEntry
+                <LiveConversationEntry
                   key={message.task.taskId}
                   message={message}
+                  readEvents={controlPlane.events}
                   activeTask={activeTask}
                   onActivity={viewActivity}
                   onSaveArtifact={controlPlane.saveArtifact}
@@ -333,7 +335,7 @@ function ActivityPane({
         const last = next.at(-1);
         if (last) {
           after.current = last.sequence;
-          setEvents((previous) => previous.concat(next.filter((entry) => entry.text)));
+          setEvents((previous) => previous.concat(next.filter((entry) => eventLine(entry))));
         }
         setError("");
       } catch (error) {
@@ -370,7 +372,7 @@ function ActivityPane({
       )}
       <ol>
         {events.map((event) => (
-          <li key={event.sequence}>{event.text}</li>
+          <li key={event.sequence}>{eventLine(event)}</li>
         ))}
       </ol>
     </aside>

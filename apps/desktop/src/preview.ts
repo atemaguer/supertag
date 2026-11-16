@@ -117,15 +117,21 @@ export const previewControlPlane: ControlPlane = {
   },
   async events(_tagId, taskId, afterSequence) {
     const events: TaskEvent[] = [
-      { sequence: 1, text: "Task accepted" },
-      { sequence: 2, text: "Worker started" },
+      {
+        sequence: 1,
+        kind: "message",
+        text: taskId.startsWith("ci-health")
+          ? "I'll look at the deadline and cancellation paths first."
+          : "I'll prepare the preview result.",
+      },
+      { sequence: 2, kind: "activity", text: "Reading src/runtime/deadline.ts" },
       {
         sequence: 3,
+        kind: "activity",
         text: taskId.startsWith("ci-health")
-          ? "Inspected the deadline and cancellation paths"
-          : "Prepared the preview result",
+          ? "Running pnpm test -- deadline"
+          : "Writing the preview result",
       },
-      { sequence: 4, text: "Task completed" },
     ];
     return events.filter(({ sequence }) => sequence > afterSequence);
   },

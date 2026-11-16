@@ -284,6 +284,7 @@ impl Harness for Bridge {
             lease_token: self.assignment.lease_token.clone(),
             sequence: event.sequence,
             text: self.redact_within(&event.text, MAX_EVENT_TEXT_BYTES),
+            kind: event.kind,
         };
         // The Control Plane deduplicates an event by sequence and content, so an
         // append whose outcome the transport lost is safely repeated.
@@ -662,7 +663,7 @@ async fn supervise(
         )
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .process_group(0)
         .kill_on_drop(true);
     if let Some(workspace) = workspace {
@@ -695,6 +696,10 @@ async fn supervise(
         Err(_) => return Ok(failed("Harness adapter could not start")),
     };
     let group = child.id().context("adapter process has no PID")?;
+    let diagnostics = child
+        .stderr
+        .take()
+        .map(|pipe| tokio::spawn(stderr_tail(pipe)));
     let outcome = time::timeout_at(execution_ends, async {
         let mut input = child
             .stdin
@@ -745,23 +750,95 @@ async fn supervise(
     })
     .await
     .context("adapter process group did not stop")??;
-    let status = match outcome {
-        Ok(Ok(status)) => status,
-        Ok(Err(_)) => return Ok(failed("Harness execution was interrupted")),
-        Err(_) => return Ok(failed("Harness execution timed out")),
+    let reported = bridge.state.lock().await.outcome.clone();
+    let complete = match outcome {
+        // An adapter that already reported a failure may have stopped its harness abruptly and
+        // left processes the guardian then stopped. Its own failure is the better explanation.
+        Ok(Ok(_)) if reported.as_ref().is_some_and(|outcome| !outcome.succeeded) => {
+            reported.unwrap_or_else(|| failed("Harness adapter exited without an outcome"))
+        }
+        Ok(Ok(status)) if survivors || !status.success() => {
+            failed("Harness adapter exited unsuccessfully or left running descendants")
+        }
+        Ok(Ok(_)) => {
+            reported.unwrap_or_else(|| failed("Harness adapter exited without an outcome"))
+        }
+        Ok(Err(_)) => failed("Harness execution was interrupted"),
+        Err(_) => failed("Harness execution timed out"),
     };
-    if survivors || !status.success() {
-        return Ok(failed(
-            "Harness adapter exited unsuccessfully or left running descendants",
-        ));
+    match diagnostics {
+        // Only a failure is explained. The process group is gone, so the pipe is closed unless
+        // a process that left the group still holds it; wait for it briefly, never for success.
+        Some(reader) if !complete.succeeded => {
+            let stderr = time::timeout(Duration::from_secs(1), reader)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            report_diagnostics(bridge, &complete.result, &stderr);
+        }
+        Some(reader) => reader.abort(),
+        None if !complete.succeeded => report_diagnostics(bridge, &complete.result, &[]),
+        None => {}
     }
-    Ok(bridge
-        .state
-        .lock()
-        .await
-        .outcome
-        .clone()
-        .unwrap_or_else(|| failed("Harness adapter exited without an outcome")))
+    Ok(complete)
+}
+
+/// The most of an adapter's standard error a failed Attempt reports in the Worker Host log.
+const MAX_ADAPTER_DIAGNOSTICS: usize = 8 * 1024;
+
+/// Reads an adapter's standard error to its end, keeping only the last
+/// [`MAX_ADAPTER_DIAGNOSTICS`] bytes, so a chatty adapter costs bounded memory.
+async fn stderr_tail(mut pipe: tokio::process::ChildStderr) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+    let mut tail = Vec::with_capacity(MAX_ADAPTER_DIAGNOSTICS);
+    let mut chunk = [0_u8; 4096];
+    let mut cut = false;
+    while let Ok(read) = pipe.read(&mut chunk).await {
+        if read == 0 {
+            break;
+        }
+        tail.extend_from_slice(&chunk[..read]);
+        if tail.len() > MAX_ADAPTER_DIAGNOSTICS {
+            tail.drain(..tail.len() - MAX_ADAPTER_DIAGNOSTICS);
+            cut = true;
+        }
+    }
+    complete_lines(tail, cut)
+}
+
+/// Drops a first line that keeping the tail cut short: it could begin inside a secret that
+/// redaction can then no longer recognize.
+fn complete_lines(mut tail: Vec<u8>, cut: bool) -> Vec<u8> {
+    if cut {
+        let start = tail
+            .iter()
+            .position(|&byte| byte == b'\n')
+            .map_or(tail.len(), |at| at + 1);
+        tail.drain(..start);
+    }
+    tail
+}
+
+/// Explains a failed Attempt in the Worker Host log with the adapter's own last words,
+/// redacted like every other harness text that leaves the adapter.
+fn report_diagnostics(bridge: &Bridge, result: &str, stderr: &[u8]) {
+    use supertag_protocol::terminal_text::warn;
+    warn(&format!(
+        "Task {} Attempt {} failed: {}",
+        bridge.task_id(),
+        bridge.assignment.attempt_id,
+        bridge.redact(result),
+    ));
+    let text = bridge.redact(String::from_utf8_lossy(stderr).trim());
+    if text.is_empty() {
+        warn("  The harness adapter wrote nothing to standard error.");
+        return;
+    }
+    warn("  Harness adapter standard error (its last lines):");
+    for line in text.lines() {
+        warn(&format!("  | {line}"));
+    }
 }
 
 /// The secrets of this Worker Host's environment, plus `credentials` it holds itself.

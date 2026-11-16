@@ -531,6 +531,17 @@ button:disabled {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.tag-message + .result-text {
+  margin-top: 10px;
+}
+.turn-status {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .result-files {
   display: flex;
   flex-wrap: wrap;

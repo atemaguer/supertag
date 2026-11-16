@@ -140,6 +140,12 @@ func (m *model) objectiveReplyRead(msg objectiveReplyMsg) tea.Cmd {
 		case client.EventDelta:
 			message.waiting = ""
 			message.reply += terminalLines(msg.event.Text)
+		case client.EventMessage:
+			// The owner's latest message shows until its final reply replaces it.
+			message.waiting = ""
+			message.reply = terminalLines(msg.event.Text)
+		case client.EventStatus:
+			message.waiting = terminalText(msg.event.Text)
 		case client.EventReply:
 			message.waiting = ""
 			message.reply = terminalLines(msg.event.Reply.GetText())

@@ -5,7 +5,8 @@ use std::path::Path;
 use sqlx::{Connection, Executor};
 use supertag_control_plane::{Store, StoreError};
 use supertag_protocol::v2::{
-    AppendEventRequest, FinishTaskRequest, StartTaskRequest, SubmitTaskRequest, TaskState,
+    AppendEventRequest, FinishTaskRequest, StartTaskRequest, SubmitTaskRequest, TaskEventKind,
+    TaskState,
 };
 use uuid::Uuid;
 
@@ -106,14 +107,29 @@ async fn contract(store: &Store) {
         attempt_id: start.attempt_id.clone(),
         lease_token: start.lease_token.clone(),
         sequence: 1,
-        text: "Inspected patch".into(),
+        text: "I'll inspect the patch.".into(),
+        kind: TaskEventKind::Message as i32,
     };
+    let mut untyped = event.clone();
+    untyped.kind = TaskEventKind::Unspecified as i32;
+    assert!(matches!(
+        store.append_event(owner, &untyped).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
     let accepted = store.append_event(owner, &event).await.unwrap();
+    assert_eq!(accepted.kind(), TaskEventKind::Message);
     assert_eq!(store.append_event(owner, &event).await.unwrap(), accepted);
     let mut conflict = event.clone();
     conflict.text = "Conflicting replay".into();
     assert!(matches!(
         store.append_event(owner, &conflict).await,
+        Err(StoreError::Conflict(_))
+    ));
+    // The same text replayed as another kind is a different event.
+    let mut retyped = event.clone();
+    retyped.kind = TaskEventKind::Activity as i32;
+    assert!(matches!(
+        store.append_event(owner, &retyped).await,
         Err(StoreError::Conflict(_))
     ));
     conflict.sequence = 3;

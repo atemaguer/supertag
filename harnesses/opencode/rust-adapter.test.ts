@@ -100,7 +100,9 @@ it("projects the admitted model, credentials and manager tools into a private na
     },
   ]);
   expect(request).toMatchObject({ model: "openai/test", workspace, timeoutMs: 2000 });
-  expect(request.prompt).toContain("Be precise.\n\nImplement scheduling.");
+  expect(request.prompt).toContain(
+    `Be precise.\n\n${rustHarness.TURN_GUIDANCE}\n\nImplement scheduling.`,
+  );
   expect(request.prompt).not.toMatch(/secret|outside-policy/u);
   expect(request.environment).toMatchObject({
     HOME: join(root, "opencode-home"),

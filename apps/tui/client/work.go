@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"strings"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
 )
@@ -22,51 +21,19 @@ func (c *Client) GetSession(ctx context.Context, id string) (*views.Session, err
 	return c.runtime.getWorkSessionDetail(ctx, id)
 }
 
-// Activity is one command or tool call a Task ran, as its activity line shows it.
+// Activity is one recorded event of a Task, as its activity line shows it.
 type Activity struct {
-	// Key names the command or tool call, so a later event about it adds no second line.
+	// Key names the event, so a refresh adds no second line for it.
 	Key string
-	// Line is the activity line, such as "· running: pytest -q". It is not filtered for the
-	// terminal.
+	// Line is the activity line: a message the Task's Tag wrote, what it did, such as
+	// "Running pytest -q", or its plan's current step. It is not filtered for the terminal.
 	Line string
 }
 
-// TaskActivity returns the commands and tool calls the Task's recorded events after sequence
-// after start, in order, and the last sequence read. A command shows once, when it starts
-// running.
+// TaskActivity returns the activity lines of the Task's recorded events after sequence after,
+// in order, and the last sequence read.
 func (c *Client) TaskActivity(ctx context.Context, taskID string, after int64) ([]Activity, int64, error) {
 	return c.runtime.taskActivity(ctx, taskID, after)
-}
-
-// eventActivity is the activity a recorded event shows: a command that starts running, or a tool
-// call that starts. The Control Plane stores Worker events under an `execution.` prefix.
-func eventActivity(event *views.TaskEvent) (Activity, bool) {
-	payload := event.GetPayload().AsMap()
-	field := func(object any, name string) string {
-		if m, ok := object.(map[string]any); ok {
-			if s, ok := m[name].(string); ok {
-				return s
-			}
-		}
-		return ""
-	}
-	switch strings.TrimPrefix(event.GetType(), "execution.") {
-	case "command.updated":
-		command := payload["command"]
-		text := strings.TrimSpace(field(command, "command"))
-		if field(command, "status") != "running" || text == "" {
-			return Activity{}, false
-		}
-		return Activity{Key: "command:" + field(command, "id"), Line: "· running: " + text}, true
-	case "tool.call.started":
-		call := payload["call"]
-		tool := field(call, "provider") + "." + field(call, "operation")
-		if tool == "." {
-			return Activity{}, false
-		}
-		return Activity{Key: "tool:" + field(call, "id"), Line: "· using: " + strings.Trim(tool, ".")}, true
-	}
-	return Activity{}, false
 }
 
 // ListTeams returns every Team, by name.

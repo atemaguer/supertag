@@ -45,6 +45,11 @@ export interface MessagePage {
 
 export interface TaskEvent {
   sequence: number;
+  /**
+   * `message`: a message the Tag wrote while its turn ran. `activity`: one line saying what it
+   * was doing. `progress`: its plan, as `progress.updated` JSON.
+   */
+  kind: "message" | "activity" | "progress" | "unspecified";
   text: string;
 }
 

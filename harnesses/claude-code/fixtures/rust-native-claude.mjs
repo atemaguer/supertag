@@ -721,6 +721,31 @@ async function turn(message) {
       uuid: randomUUID(),
     });
   }
+  if (prompt === "intent-then-tool") {
+    // Claude's sentence of intent and its first tool call, in one assistant message.
+    send({
+      type: "assistant",
+      session_id: sessionId,
+      parent_tool_use_id: null,
+      uuid: randomUUID(),
+      message: {
+        id: "fixture-intent",
+        type: "message",
+        role: "assistant",
+        model: "fixture-claude",
+        content: [
+          { type: "text", text: "I'll check the lint configuration first." },
+          {
+            type: "tool_use",
+            id: "toolu_fixture",
+            name: "Bash",
+            input: { command: `pnpm lint --token ${process.env.ANTHROPIC_API_KEY}` },
+          },
+        ],
+        usage,
+      },
+    });
+  }
   if (prompt.startsWith("objective-question"))
     result = await objectiveQuestion(prompt === "objective-question");
   if (prompt.startsWith("coordination-"))

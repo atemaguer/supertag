@@ -94,7 +94,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 80;
+        const SCHEMA_VERSION: i64 = 81;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -261,6 +261,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0078_workspace_base_ref.sql"),
                 include_str!("../migrations/sqlite/0079_delivery_holder.sql"),
                 include_str!("../migrations/sqlite/0080_objective_home_task.sql"),
+                include_str!("../migrations/sqlite/0081_task_event_kind.sql"),
             ]
         } else {
             [
@@ -346,6 +347,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0078_workspace_base_ref.sql"),
                 include_str!("../migrations/postgresql/0079_delivery_holder.sql"),
                 include_str!("../migrations/postgresql/0080_objective_home_task.sql"),
+                include_str!("../migrations/postgresql/0081_task_event_kind.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1005,6 +1007,12 @@ impl Store {
             return Err(invalid("event sequence starts at one"));
         }
         text("event", &input.text, 16_384)?;
+        let kind = match supertag_protocol::v2::TaskEventKind::try_from(input.kind) {
+            Ok(supertag_protocol::v2::TaskEventKind::Unspecified) | Err(_) => {
+                return Err(invalid("event kind is required"));
+            }
+            Ok(kind) => kind,
+        };
         let (mut transaction, _) = self.write().await?;
         let row = owned(
             &mut transaction,
@@ -1018,15 +1026,17 @@ impl Store {
             .try_get::<i64, _>("event_sequence_base")?
             .checked_add(sequence)
             .ok_or_else(|| invalid("event sequence is too large"))?;
-        let prior: Option<String> = sqlx::query_scalar(
-            "SELECT text FROM supertag_v2_task_events WHERE task_id = $1 AND sequence = $2",
+        let prior = sqlx::query(
+            "SELECT text, kind FROM supertag_v2_task_events WHERE task_id = $1 AND sequence = $2",
         )
         .bind(&input.task_id)
         .bind(sequence)
         .fetch_optional(&mut *transaction)
         .await?;
         if let Some(prior) = prior {
-            if prior != input.text {
+            if prior.try_get::<String, _>("text")? != input.text
+                || prior.try_get::<i64, _>("kind")? != kind as i64
+            {
                 return Err(StoreError::Conflict(
                     "event sequence was used with different content".into(),
                 ));
@@ -1046,11 +1056,12 @@ impl Store {
                 ));
             }
             sqlx::query(
-                "INSERT INTO supertag_v2_task_events (task_id, sequence, text) VALUES ($1,$2,$3)",
+                "INSERT INTO supertag_v2_task_events (task_id, sequence, text, kind) VALUES ($1,$2,$3,$4)",
             )
             .bind(&input.task_id)
             .bind(sequence)
             .bind(&input.text)
+            .bind(kind as i64)
             .execute(&mut *transaction)
             .await?;
             sqlx::query(
@@ -1060,12 +1071,14 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
             supertag_protocol::crash_point("control-plane.append-event", "before-commit");
-            crate::reply_progress::record_in(&mut transaction, &input.task_id, &input.text).await?;
+            crate::reply_progress::record_in(&mut transaction, &input.task_id, kind, &input.text)
+                .await?;
         }
         transaction.commit().await?;
         Ok(TaskEvent {
             sequence: input.sequence,
             text: input.text.clone(),
+            kind: kind as i32,
         })
     }
 
@@ -1285,9 +1298,14 @@ impl Store {
         let after =
             i64::try_from(after_sequence).map_err(|_| invalid("event cursor is too large"))?;
         let limit = if limit == 0 { 32 } else { limit.min(32) } as i64;
-        sqlx::query("SELECT sequence, text FROM supertag_v2_task_events WHERE task_id = $1 AND sequence > $2 ORDER BY sequence LIMIT $3")
+        sqlx::query("SELECT sequence, text, kind FROM supertag_v2_task_events WHERE task_id = $1 AND sequence > $2 ORDER BY sequence LIMIT $3")
             .bind(task_id).bind(after).bind(limit).fetch_all(&self.pool).await?.into_iter()
-            .map(|row| Ok(TaskEvent { sequence: row.try_get::<i64, _>("sequence")? as u64, text: row.try_get("text")? })).collect()
+            .map(|row| Ok(TaskEvent {
+                sequence: row.try_get::<i64, _>("sequence")? as u64,
+                text: row.try_get("text")?,
+                kind: row.try_get::<i64, _>("kind")? as i32,
+            }))
+            .collect()
     }
 }
 
