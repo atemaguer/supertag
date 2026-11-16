@@ -28,7 +28,8 @@ directories.
   shows.
 - PostgreSQL for every platform except Compose, which runs its own, and Render, whose Blueprint
   creates one.
-- The `hosted` container image, for every platform except Compose. See
+- The container images: the `hosted` image for every platform except Compose, and the
+  `control-plane` and `gateway` images for Compose. See
   [Build the hosted image](../../deploy/native/README.md#build-the-hosted-image).
 
 ## 1. Choose a platform
@@ -58,7 +59,8 @@ supertag setup deployment compose --output supertag-deployment
 supertag check deployment compose --directory supertag-deployment
 ```
 
-Setup writes `control-plane.env`, `gateway.env`, and `operator.env`, each readable only by you.
+Setup writes `control-plane.env`, `gateway.env`, `operator.env`, and, for Compose without a
+database URL, `postgres.env`, each readable only by you.
 It generates the Gateway's credential and the admin **Operator Token** in `operator.env`, and
 prints the next steps for the platform. Upload the files through your platform's secret
 controls.

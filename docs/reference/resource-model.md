@@ -41,7 +41,7 @@ and [execution environments](glossary.md#execution-environment).
   assignments, and results persist across model and harness sessions.
 - **Permission Set** — reusable authority to perform surface-backed actions, use harness/runtime tools, or call tools of MCP servers.
   A permission can carry `approvalRequired: true`, and `spec.approvers` lists the operators
-  (`operator:<id>`) and Tags (`tag:<name or id>`) that may decide. See [IAM approval](iam.md#approval).
+  (`operator:<id>`) and clients (`client:<name>`) that may decide. See [IAM approval](iam.md#approval).
 - **Context Set** — reusable knowledge and [Skills](glossary.md#skill) that may enter a Task.
 - **Role** — passive reusable policy for a responsibility, combining instructions, Context Sets, and Permission Sets.
 - **Volume** — a named storage location, a directory or an S3 bucket prefix: a Workspace Volume
@@ -79,21 +79,17 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
   `shared` or `private`. A direct chat or a conversation in the terminal UI is private to one
   person. One Session does not read another's transcript. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-many-conversations). A [work Session](../concepts/tasks.md#session)
-  reports its conversation as `parentSessionId`. In `supertag get session`, `latestTaskStatus` is
-  the status of a Session's latest Task, `tag` the Tag's name, and `title` a work Session's title
-  or a conversation's first request.
-- **Task** records one turn of a Session. Its result can carry
-  [findings](coordination.md#review-findings): problems the Task reports about its own work, each
-  with a severity, a summary and an optional location. A finding is part of the result, not a
-  separate resource.
+  reports its conversation as `parent_session_id`. In `supertag get session`, `latest_task_state`
+  is the state of a work Session's latest Task, `tag_id` its Tag, and `title` its title.
+- **Task** records one turn of a Session.
 - **Task Attempt** records one execution or retry of a Task on a Worker Host.
 - An **approval request** records one ask for a decision on a gated action, with its scope and
   decider. It is operational state listed with `supertag get approval`, not an applied resource.
   See [Approval requests](coordination.md#approval-requests).
 - **Worker Host** is the durable enrolled identity and latest observed capacity, capability,
   health, and scheduling state of one execution location.
-- **Auth Key** is an operator-issued join secret. A machine that redeems it joins as a new Worker
-  Host bound to the key's Tags. See [Auth Keys](#auth-keys).
+- **Auth Key** is an operator-issued join secret. Redeeming it enrolls a new Worker Host bound to
+  the key's Tags, a Gateway, or a client device, by the key's role. See [Auth Keys](#auth-keys).
 - **Operator Token** is a named management credential that the [admin token](glossary.md#admin-token)'s holder issues to one
   teammate or machine. SuperTag records the changes it makes under its name. See
   [Operator Tokens](#operator-tokens).
@@ -238,7 +234,7 @@ supertag get operator-token laptop-2
 | --- | --- |
 | `phase` | `active`, `expired`, or `revoked`. |
 | `operator_id` | The operator ID recorded for the token's changes, such as `operator:token:laptop-2`. |
-| `expires_at_ms` | Fixed at creation: 90 days later. |
+| `expires_at_ms` | 90 days after the token was created or last rotated. |
 | `last_used_at_ms` | The last request the token authenticated, updated at most once a minute. |
 | `rotated_at_ms`, `secret_revision` | The last `supertag operator-token rotate` and how many secrets the token has had. |
 | `revoked_at_ms` | When the token was revoked. |
@@ -297,10 +293,10 @@ Auth Key granted. Automatic and declared labels come from the host's latest conn
 self-reported: a host can claim any label. Labels therefore decide placement only. They never grant
 access, and a Tag's bindings stay the only way to let a host run its Tasks.
 
-A Task in a named Workspace prefers bound hosts labeled `workspace:NAME`, on a profile that can
-use the checkout in place. When the Workspace records a `source`, hosts that can clone it come
-next; without a `source`, `workspace:NAME` is required. Either way the host must carry the Tag's
-`runsOn` labels. When no bound host carries the required labels, the Task waits. Its
+A Task in a named Workspace runs only on a bound host that serves it and so carries
+`workspace:NAME`: a host that maps the local Workspace, or, for a GitHub Workspace, a host started
+with `--workspace-from-control-plane`. The host must also carry the Tag's `runsOn` labels. When no
+bound host carries the required labels, the Task waits. Its
 scheduling record names the requirement, such as `labels:macos,gpu`, and `supertag describe task`
 prints `No bound Worker Host has labels: macos, gpu`. The list names the labels no bound host
 carries; when each label exists on some host but none carries them all, it names every required
@@ -311,8 +307,7 @@ A Task granted `commands:execute` also skips an **unsandboxed harness**: one tha
 as the host's user, without an operating-system sandbox: Claude Code, Cursor, or OpenCode on a
 local host. It
 runs on one only when the host service lists it in `allow-unsandboxed-commands`. Otherwise it runs
-on another Worker Host, such as one serving Codex, or waits; its scheduling record names the
-requirement `allow-unsandboxed-commands:HOST`, and `supertag describe task` explains it. See
+on another Worker Host, such as one serving Codex, or waits. See
 [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).
 
 `runsOn` is set in a Tag manifest or with `supertag placement runs-on TAG LABEL...`. Each label is its own
@@ -337,13 +332,14 @@ spec:
     efforts: [medium, high]    # allowed efforts; the first is the default
 ```
 
-`spec.execution` takes the same three fields on a Role and on a Tag:
+`spec.execution` takes the same fields on a Role and on a Tag:
 
 | Field | Value | Meaning |
 | --- | --- | --- |
 | `harness` | One harness name, such as `codex` or `claude-code` | Tasks run only on that harness. |
 | `models` | A list of model IDs | Each is allowed, and the first is the default. |
 | `efforts` | A list of `low`, `medium`, and `high` | Same rule as `models`. |
+| `sharedExecutionEnvironmentId` | One shared execution environment ID | New Cursor Sessions run in that environment. Requires `harness: cursor` or no harness. |
 
 A `harness` or `models` left out allows anything the Worker Host offers and uses the host's
 default. Effort is different: when neither the Tag nor its Roles set `efforts`, Tasks start at
@@ -363,7 +359,7 @@ Tag's own range. See
 [Scheduling and recovery](scheduling-and-recovery.md#placement-by-harness-and-model).
 
 `execution` is one field under the [field manager rules](#field-managers-and-apply-sets): one
-manager owns all three settings together. `supertag get role NAME` and `supertag get tag NAME`
+manager owns all its settings together. `supertag get role NAME` and `supertag get tag NAME`
 print it as JSON. Tags and Roles without `execution` run on
 whatever harness and model their Worker Hosts offer, starting at low effort.
 
@@ -407,7 +403,7 @@ spec:
 
 A local Workspace needs a full `baseCommit` or a `ref`, never both. New Sessions start from the
 base commit, and later Tasks of a Session continue on the Session's branch,
-`supertag/session/SESSION`. `ref` names a local branch, such as `main`, instead: the Worker Host
+`supertag/session/HASH`. `ref` names a local branch, such as `main`, instead: the Worker Host
 that starts a Session's first Task records the commit the branch names in its checkout, and the
 whole Session works from that commit. See
 [Follow a branch instead of a commit](../guides/workspaces.md#follow-a-branch-instead-of-a-commit).
@@ -497,7 +493,8 @@ these; the mapping itself is the host owner's consent.
 `supertag get workspace-volume NAME` shows a Workspace Volume's source, credential label, and
 revision. Changing a source is a new revision.
 
-An artifact Volume is registered with `supertag volume put NAME --source SOURCE` or a manifest,
+An artifact Volume is registered with `supertag volume put NAME --source SOURCE --operation-id ID`
+or a manifest,
 whose only field is `spec.source`:
 
 ```yaml

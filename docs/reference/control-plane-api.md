@@ -38,10 +38,10 @@ table of roles:
 | Caller | Secret | May call |
 | --- | --- | --- |
 | The admin operator | The admin Operator Token | Every operator service, including `OperatorAccess` |
-| A named operator, `token:NAME` | An Operator Token | Every operator service except `OperatorAccess` |
+| A named operator, `token:NAME` | An Operator Token | Every operator service except Operator Token management in `OperatorAccess` |
 | A client device, `client:NAME` | The credential `supertag connect` saved from a client Auth Key | Operator services, limited to the Tags its key named |
 | A Worker Host, `host:NAME` | Its host credential | `WorkerHost` and the services a running Task Attempt uses |
-| A Gateway, `gateway:NAME` | Its Gateway credential | `Connector` and the operator notification services |
+| A Gateway, `gateway:NAME` | Its Gateway credential | `Connector`, `ReplyProgress`, and `OperatorNotifications` |
 
 An application usually runs with an Operator Token of its own, so its changes appear under its
 name in `supertag audit`.
@@ -64,8 +64,9 @@ name in `supertag audit`.
 | `ManifestRelationships` | Server-side apply of manifests and apply sets |
 | `Placement` | A Tag's required labels, and why a Task waits |
 | `AuthKeys`, `Enrollments` | Auth Keys, enrollment, and credential rotation |
-| `OperatorAccess` | Operator Tokens (admin only) |
+| `OperatorAccess` | Operator Tokens (admin only) and the audit log |
 | `ArtifactCatalog`, `ArtifactPublications`, `ArtifactVolumes` | Artifacts, publications to other Objectives, and Volumes |
+| `ArtifactTransfers.DownloadFile`, `Transfers.DownloadWorkspaceArtifact` | Artifact files and Workspace delivery patches and bundles, relayed from the Worker Host that holds them |
 | `GithubWorkspaces`, `GithubPublications` | GitHub Workspace sources and publications |
 | `WorkspaceVolumes` | Workspace data Volumes |
 | `Spend`, `Metrics` | Spend reports and an operational snapshot |
@@ -81,7 +82,7 @@ exposes messages and gRPC stubs.
 
 ```text
 1. Negotiate(role: SERVICE_ROLE_CLIENT, protocol_versions: [...])  → protocol_version
-2. Operator.SubmitTask(tag_id: "lead", session_id: "triage", prompt: "...")
+2. Operator.SubmitTask(tag_id: "lead", session_id: "triage", operation_id: "...", prompt: "...")
      metadata: authorization: Bearer stop_..., x-supertag-protocol: <version>
 3. OperatorEvents.Watch(...)  → change notices until the Task finishes
 ```

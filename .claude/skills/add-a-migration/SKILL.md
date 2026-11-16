@@ -37,5 +37,6 @@ production and replicas. **Both are first-class.** Every schema change touches b
 
 **Never edit a migration that has merged.** Add a new one.
 
-**No persistence-schema compatibility promise before release.** Tables are internal; you may
-restructure them, but not break documented resource shapes.
+**Tables are internal.** See `docs/reference/api-stability.md`. You may restructure them, but not
+break documented resource shapes. The Control Plane applies pending migrations when it starts, so
+a migration runs against existing databases, not only fresh ones.

@@ -37,6 +37,8 @@ Never print the token or pass it to the agent. The messages are in
 
 ## Run and verify
 
+On a Worker Host enrolled with `supertag host enroll` (see [run-a-worker](../run-a-worker/SKILL.md)):
+
 ```sh
 supertag worker-host --control-plane https://supertag.example.com \
   --state-directory ~/.supertag-host --adapter /usr/local/bin/my-adapter

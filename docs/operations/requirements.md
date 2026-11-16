@@ -32,18 +32,20 @@ Check this page before [installing SuperTag](install.md).
 
 ## Choose and sign in to a harness
 
-Prepare at least one harness on the Worker Host. Claude Code, Codex, and OpenCode need their
-CLIs on `PATH`; Cursor uses its bundled SDK and does not need `cursor-agent`. Sign in as the
-same OS user that runs the host.
+Prepare at least one harness on the Worker Host. Codex and OpenCode need their CLIs on `PATH`,
+and `supertag init` finds Claude Code by its `claude` CLI; Cursor uses its bundled SDK and does not
+need `cursor-agent`. Sign in as the same OS user that runs the host.
 
-SuperTag runs the Claude Code and Codex CLIs you install, so keep them current. Each needs at
-least the version SuperTag's SDK targets. `supertag init` and `supertag up` check the installed
-version and stop with the upgrade command when it is older.
+SuperTag runs the Codex CLI you install, so keep it current: `supertag init` and `supertag up`
+check its version and stop with the upgrade command when it is older than the minimum. Claude Code
+Tasks run the Claude Code bundled with the release's Claude Code bridge, unless the Worker Host
+is started with `--claude-path`; `supertag init` and `supertag sign-in` use the `claude` on `PATH`
+to find Claude Code and check its sign-in.
 
 | Harness | Command on PATH | Minimum version | Sign-in |
 | --- | --- | --- | --- |
-| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | 2.1.280. Install with `npm install -g @anthropic-ai/claude-code`; upgrade with `claude update`. | Run `claude` and follow its sign-in prompt. |
-| [Codex](https://developers.openai.com/codex/cli/) | `codex` | 0.156.0. Install or upgrade with `npm install -g @openai/codex`. | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
+| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | None checked. Install with `npm install -g @anthropic-ai/claude-code`. | Run `claude` and follow its sign-in prompt. |
+| [Codex](https://developers.openai.com/codex/cli/) | `codex` | 0.163.0. Install or upgrade with `npm install -g @openai/codex`. | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
 | [Cursor](https://cursor.com/docs/sdk/typescript.md) | None | None | Generate an API key and set `CURSOR_API_KEY` for the host service; see [Cursor setup](#cursor-setup-and-limits). Signing in to the Cursor app or `cursor-agent` is not enough. |
 | [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the Worker Host, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |
 
@@ -57,13 +59,14 @@ remote hosts and [credential storage](../reference/credential-storage.md) for se
 
 ### Codex commands and models
 
-Codex marks most current models, gpt-6-sol among them, as code-mode-only: they run commands only
+Every current Codex model, gpt-6-sol among them, is code-mode-only: it runs commands only
 through Codex code mode. Code-mode commands can reach the network that the `commands:execute`
 sandbox otherwise blocks, so SuperTag starts code mode only for a Task that also has `web:fetch`.
 A Codex Task with `commands:execute` but without `web:fetch` on such a model fails when its turn
 starts, naming the model. To let it run commands, do one of these:
 
-- grant the Tag `web:fetch` as well, which also opens the network to its commands; or
+- grant the Tag `web:fetch` as well, which also opens the network to its commands; Codex allows
+  `web:fetch` only with `files:write`; or
 - select a Codex model that is not code-mode-only in the Tag's or Role's `execution.models`.
 
 SuperTag cannot tell a model's mode before the Task Attempt starts: Codex does not report it, so
@@ -90,8 +93,9 @@ not sign in the Worker Host, so every host that serves Cursor needs a key:
    Type or paste the key yourself in an editor. Keep it out of shell history, command flags,
    Objective text, and messages to Tags. A key exported in the shell that runs `supertag up`
    also works, but a service unit does not inherit the shell.
-3. Run `supertag init`, or `supertag up` for an existing setup. SuperTag checks the key by listing
-   Cursor's models, which uses no model turn. A missing key stops the host with the reason.
+3. Run `supertag init`, or `supertag up` for an existing setup. `init` offers Cursor only when
+   `CURSOR_API_KEY` is set in the environment it runs in, so export the key in that shell too.
+   SuperTag checks the key by listing Cursor's models, which uses no model turn. A missing key stops the host with the reason.
    A rejected key reports `Cursor rejected CURSOR_API_KEY`.
 
 SuperTag passes the key only to the Cursor adapter. Tasks never receive it, and redaction removes
@@ -108,21 +112,17 @@ redaction do not protect process memory from a process with tracing access.
 
 ### Cursor tools, models, and sandbox
 
-`supertag init` also detects Cursor when only `cursor-agent` is installed, then asks you to set
-`CURSOR_API_KEY`. A binary named `agent` counts as Cursor only if it identifies itself as Cursor;
-another vendor may install that name.
-
 Choose a model ID returned by Cursor's model list. For example, a host can serve
 `models: { cursor: [composer-2.5] }`, and a Tag or its Role can choose
 `execution.harness: cursor`. See [host models](../reference/supertag-yaml.md#host-models)
 and [Cursor models and pricing](https://cursor.com/docs/models-and-pricing.md).
 
 A **Context Set** selects reusable knowledge for a Tag. The Control Plane resolves
-`supertag/artifacts@1` selections into artifact summaries in Cursor's prompt; Cursor can retrieve
-selected content through admitted artifact tools. This selection applies only to Tasks from a
-collaboration surface, not internal Objective Tasks. A Role can also select
-`supertag/skill@1` when the Worker Host has a [Skill catalog](../reference/context-resolution.md#skills).
-No other Context Item type is resolved.
+`supertag/artifacts` selections into artifact summaries in Cursor's prompt. This selection applies
+only to Tasks from a collaboration surface, not internal Objective Tasks. Cursor does not load
+[Skills](../reference/context-resolution.md#skills): a Task Attempt that carries a resolved
+`supertag/skill` fails on Cursor. Cursor also enforces no execution limits, so a Task submitted to
+a Cursor Tag with a token, cost, or native agent limit is refused.
 
 For colocated local Tasks, SuperTag allows Cursor's read, search, list, and MCP tools.
 It adds edit only for `files:write` and enables web search only for `web:search`.
@@ -133,9 +133,8 @@ can fetch the version pinned by the project. Use a trusted repository for local 
 or use a [remote environment](#cursor-with-a-remote-environment) to isolate its commands.
 
 SuperTag keeps Cursor's [OS sandbox](https://cursor.com/docs/agent/security/run-modes.md) enabled
-for the SDK and refuses a run if it is unavailable or a repository or Task Attempt home contains
-`.cursor/sandbox.json`. Reads may still reach outside the workspace. A private home excludes
-the operator's Cursor hooks, MCP servers, and rules; Cursor can still read workspace files.
+for the SDK and refuses a run if it is unavailable. Reads may still reach outside the workspace.
+A private home excludes the operator's Cursor hooks, MCP servers, and rules; Cursor can still read workspace files.
 SuperTag supplies only the Task's admitted tools, as Cursor
 [custom tools](https://cursor.com/docs/sdk/typescript.md#custom-tools). The adapter stays their MCP
 client. Sandboxed SDK runs reject inline MCP server tools because they cannot ask for approval.
@@ -152,14 +151,13 @@ executable.
 In this split mode, Cursor has no built-in tools. SDK custom tools provide read, write, edit,
 glob, grep, ls, and foreground commands in the sandbox, plus the Task's allowed external tools.
 Web search, subagents, and background commands are unavailable. A **Permission Set** selects
-allowed actions: write and edit require `files:write`; commands require both `commands:execute`
-and `files:write`. `--allow-unsandboxed-commands` does not apply: the sandbox is the command
-boundary.
+allowed actions: write and edit require `files:write`. Such a host cannot take
+`--allow-unsandboxed-commands`, so the Control Plane does not place a Task with
+`commands:execute` on it; run those Tasks in a shared execution environment.
 
 `local.cwd` is an empty host directory. Repository rules do not load automatically, so supply
 needed instructions as Task context. Cursor's own sandbox provides no useful workspace
-protection in split mode; the remote provider enforces the command boundary, and the bridge
-checks file paths and permissions. See [Cursor reference](../reference/worker.md#remote-sandboxes-and-shared-execution).
+protection in split mode; the bridge checks file paths and permissions. See [Cursor reference](../reference/worker.md#remote-sandboxes-and-shared-execution).
 
 ### Cursor local runtime details
 
@@ -194,7 +192,7 @@ Commands running as the same user may be able to access these credentials.
 
 For shared or unattended Worker Hosts, prefer scoped `CODEX_API_KEY` or `ANTHROPIC_API_KEY`
 credentials with appropriate provider limits. `CODEX_API_KEY` takes precedence over copying
-the Codex sign-in file; `OPENAI_API_KEY` is only a fallback after the file copy fails.
+the Codex sign-in file; `OPENAI_API_KEY` is only a fallback when that file is missing.
 
 ## Telemetry and network traffic
 

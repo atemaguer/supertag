@@ -24,22 +24,22 @@ The operator inbox is one list of everything waiting on a person, across Objecti
 supertag get inbox-item
 ```
 
-Each item names its kind, its Objective, and the command that acts on it. Filter with `--kind`:
-`approval`, `question`, `objective-budget`, `objective-limit`, `task-attention`, or `mcp-login`.
+Each item names its kind, its Objective or Task, and why it waits. Filter with `--kind`:
+`approval`, `question`, `budget`, `limit`, `task-attention`, or `mcp-login`.
 
 To see new items as they arrive, keep this running; press Ctrl-C to stop:
 
 ```sh
-supertag get inbox-item
+supertag watch inbox-item
 ```
 
 ```text
-2026-09-30T14:02:11.000Z  approval  Objective usage-dashboard  Approval 5c1e9a40-2b7d-4f0e-9a51-3d6c8e2f1b07 (work is waiting): Merge pull request 42 (requested by Tag reviewer)  -> supertag approval approve 5c1e9a40-2b7d-4f0e-9a51-3d6c8e2f1b07
+approval approval:5c1e9a40-2b7d-4f0e-9a51-3d6c8e2f1b07 objective=usage-dashboard task=8d50c417-3e6b-49aa-b2f1-c07d5e9143ab: Merge pull request 42
 ```
 
 Add `--output json` for one JSON object per line. To be told without keeping a terminal open,
-configure an [operator channel](../operations/control-plane.md#operator-notifications): the Control
-Plane posts new items to a Slack channel or sends you a direct message.
+[set up operator notifications](notifications.md): a desktop notification, a webhook, or a Slack
+message to a channel or to you.
 
 ## 1. Answer a question
 
@@ -76,24 +76,23 @@ report back. A chat message saying "approved" approves nothing. See
 
 One budget pool covers an Objective: its own conversation and every Session beneath it draw on it.
 When the pool is spent, no new turn starts, the Objective becomes `limited`, and the inbox lists
-it under `objective-budget` or `objective-limit`.
+it under `budget`.
 
 ```sh
-supertag get inbox-item --kind objective-budget
+supertag get inbox-item --kind budget
 supertag objective set-limits service-operations --budget-minor 1500
 ```
 
-A budget can only increase. The Objective leaves `limited`, the owner gets a notice with the new
-figure, and work can start again. Only an operator can make this change. See
+A budget can only increase. The Objective leaves `limited` and work can start again. Only an operator can make this change. See
 [budgets and allocation](../reference/coordination.md#the-budget-pool).
 
 ## 4. Respond to a budget or deadline warning
 
 ```sh
-supertag get inbox-item --kind objective-limit
+supertag get inbox-item --kind limit
 ```
 
-An item appears when a monetary budget reaches 80% or its limit, or when a deadline is 24 hours
+An item appears when a monetary budget reaches 80%, or when a deadline is 24 hours
 away, 1 hour away, has a quarter of its time left, or has passed. The owner receives the same
 warnings in its conversation, so it can replan. At the limit or the deadline, new work has already
 stopped. To let work continue, raise the budget or move the deadline:
@@ -103,16 +102,15 @@ supertag objective set-limits service-operations --budget-minor 400000
 supertag objective set-limits service-operations --deadline 2027-04-15T23:00:00Z
 ```
 
-The CLI reads the current revision for you; see
-[changing the deadline or budget](objectives.md#change-the-deadline-or-budget). Warnings restart
-for the new deadline, measured from when you set it.
+A new deadline reaches the owner as a notice in its conversation. Warnings restart for it,
+measured from when you set it. See
+[changing the deadline or budget](objectives.md#change-the-deadline-or-budget).
 
 ## 5. Restart a blocked Objective
 
 An Objective ends each turn with work running, a question asked, or the outcome finished. When a
 turn ends with none of those and the Objective is still `working`, SuperTag wakes it once. If
-that woken turn also ends with nothing running and nothing asked, the Objective becomes `blocked`
-and SuperTag says so in its home thread.
+that woken turn also ends with nothing running and nothing asked, the Objective becomes `blocked`.
 
 Select the blocked Objective in the terminal UI and check what the last turn did. Press `m`,
 enter a direction such as “Start with the overdue tickets from last week,” and press Enter. The
@@ -123,11 +121,13 @@ its next message, report, or notice.
 
 ## 6. Review a result
 
-An owner stops at `ready_for_review` when the Objective's statement asks for a person's review.
-Select the Objective in the terminal UI to read its assessment and see what needs your attention.
-To request a revision, press `m`, type what should change, and press Enter. For example, “The
-runbook still names the old dashboard. Update it.” The Objective returns to `working` and the
-owner acts on your text.
+An owner stops at `ready_for_review` when its harness adapter submits the Objective for review;
+the built-in adapters report progress only, so with them you complete the Objective yourself (see
+[Complete it, or review it first](objectives.md#5-complete-it-or-review-it-first)). Select the
+Objective in the terminal UI to read its assessment and see what needs your attention. To request
+a revision, run `supertag objective review service-operations request-changes --feedback TEXT`,
+for example with “The runbook still names the old dashboard. Update it.” The Objective returns to
+`working` and the owner acts on your text.
 
 To accept the result, run `supertag objective review service-operations approve`. This completes a
 `ready_for_review` Objective and uses the owner's assessment as the completion summary.
@@ -139,7 +139,8 @@ or the thread an operator chose as its notification destination. Where SuperTag 
 that surface, you can direct the Objective from the thread itself:
 
 - A plain reply goes to the Objective's conversation. It answers a pending question and moves
-  a `blocked`, `limited`, or `ready_for_review` Objective back to `working`.
+  a `blocked` Objective back to `working`. A `limited` Objective refuses it until an operator
+  raises the limit.
 - `@SuperTag approve` completes a `ready_for_review` Objective.
 - `@SuperTag pause` and `@SuperTag resume` pause and resume it, like `supertag objective pause`
   and `supertag objective resume`.
@@ -151,27 +152,28 @@ the conversation.
 ## Check that it worked
 
 - `supertag get inbox-item` no longer lists the item you acted on.
-- `supertag get objective service-operations` shows status `working` after a message, or
-  `completed` with the assessment after `approve`.
-- `supertag get objective service-operations` shows the new `budgetLimitMinor` or `deadline`.
+- `supertag describe objective service-operations` shows `working` after a message, or
+  `completed` with the assessment as its **Result** after `approve`.
+- `supertag get objective service-operations` shows the new `budget_limit_minor` or
+  `deadline_ms`.
 
 ## If something goes wrong
 
-- **The update is rejected as stale.** Another change happened first. Refresh the Objective and
-  retry with its current revision.
+- **The update is rejected as stale.** Another change happened since the revision you passed with
+  `--expected-revision`. Refresh the Objective and retry with its current revision.
 - **`approve` is refused.** The Objective is not `ready_for_review`. Message it instead.
 - **A message is refused.** A completed or cancelled Objective takes no more messages. Create a
   new Objective for new direction.
 - **The Objective did not act on a message.** Check `supertag describe objective ID` for a pause
   or a limit, and run `supertag placement explain TASK_ID` on the queued turn to see why no
   Worker Host takes it.
-- **No external notification arrived.** The inbox shows the notification status, such as
-  `unconfigured` or `failed`. See
+- **No external notification arrived.** Each item in `supertag get inbox-item` shows its
+  notification status, such as `not configured` or `failed`. See
   [Set up operator notifications](notifications.md).
 
 ## Next
 
 - [Check an Objective's progress](objective-overview.md)
 - [Define and complete an Objective](objectives.md)
-- [Operator notifications](../operations/control-plane.md#operator-notifications)
+- [Set up operator notifications](notifications.md)
 - [Budgets and allocation](../reference/coordination.md#the-budget-pool)

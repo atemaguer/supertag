@@ -18,7 +18,7 @@ an external work tool, such as Slack or GitHub.
 Follow this order on your first visit:
 
 1. [Install SuperTag](operations/install.md).
-2. [Talk to your first Tag](../README.md#get-started) in the terminal UI. The
+2. [Talk to your first Tag](../README.md#run-your-first-tag) in the terminal UI. The
    [terminal guide](guides/talk-to-a-tag.md) shows how to review a branch or create an Objective.
    [Write an Objective](guides/write-an-objective.md) explains how to state outcomes a Tag can verify.
 3. [Add a builder](guides/first-team.md) and put two Tags in a [Team](guides/teams.md).

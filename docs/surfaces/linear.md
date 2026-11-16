@@ -70,7 +70,6 @@ in any letter case.
 
 ## Next
 
-- [Add your team's chat](../../README.md#next-add-your-teams-chat)
 - [Worker-side collaboration surface tools](worker-tools.md#linear) for permission-scoped Linear tools
   available to a [harness](../reference/glossary.md#harness)
 - [collaboration surface guides](README.md)

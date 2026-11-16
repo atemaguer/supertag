@@ -72,14 +72,15 @@ already-running daemon, such as a tmux server or `ssh localhost`, also escapes s
 ## Execution limits
 
 A Task may require limits. A Task whose Tag's harness cannot enforce a requested limit is refused
-when it is submitted. Cursor and OpenCode enforce none. A limit an Objective budget adds that the
-harness cannot enforce keeps the Task queued, and `supertag placement explain` names it.
+when it is submitted. Cursor, OpenCode, and OpenAI Agents enforce none. A limit an Objective
+budget adds that the harness cannot enforce keeps the Task queued, and `supertag placement explain`
+names it.
 
 | Limit | Set with | Enforced by |
 | --- | --- | --- |
 | Reported tokens | `task submit --max-reported-tokens` | Codex: the adapter interrupts the turn when reported usage reaches it. Reports arrive after use, so usage can overshoot |
-| Reported cost | `--max-reported-cost-minor` with `--reported-cost-currency` | Claude Code: the provider's own budget, in USD |
-| Native agents and work Sessions | `--max-native-agents` | The adapter |
+| Reported cost | `--max-reported-cost-minor` with `--reported-cost-currency` | Claude Code: the provider's own budget, in USD only |
+| Native agents and work Sessions | `--max-native-agents` | Codex, for a limit of 0 only |
 
 An Objective with a budget caps each of its turns at what its budget has left. Reported tokens
 are not a billing cap. See [Budgets and allocation](coordination.md#budgets-and-allocation).
@@ -90,7 +91,7 @@ are not a billing cap. See [Budgets and allocation](coordination.md#budgets-and-
 | --- | --- | --- | --- |
 | `codex` | Built into `supertag`; drives Codex's app-server | `CODEX_API_KEY`, `OPENAI_API_KEY`, and a copy of a file-backed sign-in | In Codex's sandbox, writable only in the checkout and read-write Workspace Volume copies. A code-mode-only model, such as gpt-6-sol, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) |
 | `claude-code` | Node bridge on the Claude Agent SDK | `ANTHROPIC_API_KEY` or the host user's sign-in | Without a sandbox, only with `--allow-unsandboxed-commands`; a permission hook keeps file tools in the Task's roots |
-| `cursor` | Node bridge on the Cursor SDK | `CURSOR_API_KEY` | Without a sandbox, only with `--allow-unsandboxed-commands`; or in an E2B, Modal, or shared execution environment |
+| `cursor` | Node bridge on the Cursor SDK | `CURSOR_API_KEY` | Without a sandbox, only with `--allow-unsandboxed-commands`; or in a shared execution environment. A host with an E2B or Modal Workspace runs no commands |
 | `opencode` | Node bridge | The selected provider's API key, or `--opencode-auth-file` | Without a sandbox, only with `--allow-unsandboxed-commands` |
 | `openai-agents` | The `supertag` Python package | `OPENAI_API_KEY` | The tools the Task's permissions allow |
 
@@ -117,10 +118,10 @@ result as a Git bundle, with the ref `refs/heads/supertag-deliveries/DELIVERY_ID
 keeps both in its artifact storage and registers only their digests; the Control Plane relays them
 from the host to whoever imports the delivery, including the next Task of the Session on another
 host. It never writes your repository. Your machine imports the delivery as the branch
-`supertag/session/SESSION`, one branch per Session that each later Task advances:
+`supertag/session/HASH`, one branch per Session that each later Task advances:
 
-- `supertag up` imports deliveries for every Workspace its `supertag.yaml` maps, unless the
-  Workspace sets `delivery: patch`.
+- `supertag up` imports deliveries for every Workspace that a host of its own Control Plane maps
+  in `supertag.yaml`, unless the Workspace sets `delivery: patch`.
 - `supertag fetch TASK_OR_SESSION_ID --repository PATH` imports one into any clone.
 - `supertag task download TASK_ID --kind patch|bundle --output FILE` saves the file.
 
@@ -145,9 +146,11 @@ the only form: read-only provider-native Modal Volume mounts are on the backlog.
 
 ## Remote sandboxes and shared execution
 
-A Cursor Task can keep its files and commands in an E2B or Modal sandbox
+A Cursor Task can keep its Workspace in an E2B or Modal sandbox
 (`--e2b-workspace-provider`, `--modal-workspace-provider`) while the harness and its credentials
-stay on the host. Only the checkout moves into the sandbox; keys never do. A repository's
+stay on the host. Only the checkout moves into the sandbox; keys never do. Such a host holds files
+only: it cannot take `--allow-unsandboxed-commands`, so a Task with `commands:execute` does not
+run on it. A repository's
 `.devcontainer` settings choose the sandbox image, user, and setup; see
 [Devcontainer settings](devcontainer-subset.md).
 

@@ -10,52 +10,13 @@ and permissions, on your repositories. One installation holds everything a machi
 | `supertag-shared-execution` | An optional shared execution provider for Cursor Tasks |
 | Node bridges | The harness adapters for Claude Code, Cursor, and OpenCode, run with your Node.js |
 
-Codex runs through an adapter built into `supertag`. The installer still checks Node.js and
-tests the Node bridges with it, so every installation needs Node.js.
+Codex runs through an adapter built into `supertag` and needs no Node.js. The installer prints a
+notice when Node.js 22.13.0 or a later 22.x release is not on `PATH`.
 
 ## Before you start
 
 Check the [requirements](requirements.md) for git, Node.js, supported platforms, and sign-in for
-a **harness**, the connection to an agent system such as Claude Code or Codex. If this machine
-ran the earlier TypeScript runtime, [retire it first](#retire-the-earlier-typescript-runtime).
-
-## Retire the earlier TypeScript runtime
-
-This SuperTag replaces the earlier TypeScript runtime and starts from fresh state; there is no
-importer. Its installer replaces the earlier `supertag` link in `~/.local/bin`, and its
-`supertag down` does not stop the earlier runtime's services. Do these steps before you install,
-while `supertag` is still the earlier CLI. The earlier CLI stays installed afterwards, at
-`~/.local/share/supertag/versions/VERSION/node_modules/.bin/supertag`.
-
-1. Stop the earlier services and remove their service units:
-
-   ```sh
-   supertag down --remove-services
-   ```
-
-   Check that none remains: `launchctl list | grep ai.supertag` on macOS, or
-   `systemctl --user list-units 'supertag-*'` on Linux, prints nothing.
-2. Archive the earlier state, check the archive, then move the state aside so the new runtime
-   starts empty:
-
-   ```sh
-   tar -czf ~/supertag-typescript-state.tar.gz -C ~ .supertag
-   tar -tzf ~/supertag-typescript-state.tar.gz .supertag/supertag.db
-   mv ~/.supertag ~/.supertag-typescript
-   ```
-
-   The archive holds `supertag.db`, the local database, with the credentials and history. Keep
-   it private.
-3. For a shared deployment on PostgreSQL, stop every earlier service, then dump the earlier
-   database and check that the dump reads back before you point the new Control Plane at a new,
-   empty database:
-
-   ```sh
-   pg_dump --format=custom --file supertag-typescript.dump "$EARLIER_DATABASE_URL"
-   pg_restore --list supertag-typescript.dump > /dev/null
-   ```
-
-Then [install a release archive](#install-a-release-archive) and run `supertag init`.
+a **harness**, the connection to an agent system such as Claude Code or Codex.
 
 ## Install a release archive
 
@@ -80,14 +41,13 @@ To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
 | --- | --- |
-| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.0`, to install that release. Releases before the native CLI have no archive, so the script refuses them |
-| `SUPERTAG_INSTALL_ROOT` | `~/.local/share/supertag` |
-| `SUPERTAG_BIN_DIR` | `~/.local/bin` |
+| `SUPERTAG_VERSION` | The release the script came from. Set a version, such as `0.3.0`, to install that release |
+| `SUPERTAG_INSTALL_ROOT` | `$XDG_DATA_HOME/supertag` when `XDG_DATA_HOME` is set, otherwise `~/.local/share/supertag` |
+| `SUPERTAG_BIN_DIR` | `$XDG_BIN_HOME` when it is set, otherwise `~/.local/bin` |
 
 Installing a newer release keeps the older one beside it and switches the `supertag` link only
 after the new release passes its checks. The script replaces a symbolic link at
-`~/.local/bin/supertag`, such as the earlier runtime's, and refuses to replace any other file
-there.
+`~/.local/bin/supertag` and refuses to replace any other file there.
 
 ### Build an archive from a checkout
 
@@ -142,9 +102,9 @@ TypeScript, and Python bindings live beside the SDKs in [`sdks/`](../../sdks/REA
 
 ## Upgrade
 
-Run the installer script again, or install a newer archive the same way. Then restart this machine's services with
-`supertag up`, which waits for running Task Attempts before replacing a service. For a hosted
-deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-deployment).
+Run the installer script again, or install a newer archive the same way. Then restart this
+machine's services with `supertag up`, which waits for running Task Attempts before replacing a
+service. For a hosted deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-deployment).
 
 ## Check the CLI and the local services
 

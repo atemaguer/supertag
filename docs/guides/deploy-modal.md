@@ -142,21 +142,21 @@ that connect outbound:
   `--lark-state-directory /var/lib/supertag/lark`, with `SUPERTAG_LARK_ACCOUNT_ID`,
   `SUPERTAG_LARK_DOMAIN` (`lark` or `feishu`), `SUPERTAG_LARK_APP_ID`, `SUPERTAG_LARK_TENANT_KEY`,
   `SUPERTAG_LARK_BOT_OPEN_ID`, `SUPERTAG_LARK_CHAT_ID`, `SUPERTAG_LARK_TAG_ID`, and
-  `SUPERTAG_LARK_ALLOWED_USERS` (comma-separated) in the `supertag-gateway` secret. The app secret comes from the
-  credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it, or from
+  `SUPERTAG_LARK_ALLOWED_USERS` (comma-separated) in the `supertag-gateway` secret. The app
+  secret comes from the credential vault, where [`supertag setup surface lark`](../surfaces/lark.md) stores it, or from
   `SUPERTAG_LARK_APP_SECRET`.
 - **Slack**, over Socket Mode: `--slack-socket-mode --slack-state-directory
   /var/lib/supertag/slack`, with `SUPERTAG_SLACK_ACCOUNT_ID`, `SUPERTAG_SLACK_TEAM_ID`,
   `SUPERTAG_SLACK_CHANNEL_ID`, `SUPERTAG_SLACK_TAG_ID`, and `SUPERTAG_SLACK_ALLOWED_USERS`
-  (comma-separated) in the `supertag-gateway` secret. The bot token and app-level token come from the credential vault,
-  where [`supertag setup surface slack`](../surfaces/slack.md) stores them, or from
+  (comma-separated) in the `supertag-gateway` secret. The bot token and app-level token come
+  from the credential vault, where [`supertag setup surface slack`](../surfaces/slack.md) stores them, or from
   `SUPERTAG_SLACK_BOT_TOKEN` and `SUPERTAG_SLACK_APP_TOKEN`.
 - **Operator notifications to a webhook**: `--notify webhook:HTTPS_URL#NAME`, with the bearer
   secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
 
 GitHub, Linear, Microsoft Teams, and Slack HTTP events need inbound webhooks, which this
-deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see [service deployment definitions](../../deploy/native/README.md)), enrolled
-with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
+deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see
+[service deployment definitions](../../deploy/native/README.md)), enrolled with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
 URL with its own credential.
 
 ```sh
@@ -189,10 +189,11 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 
 - One container. Every Control Plane runs the controllers, so do not raise `max_containers`.
 - Modal commits Volume writes in the background; Session checkpoints written just before a
-  container replacement may be lost, and work whose upload was in progress must be retried. - Native gRPC
-  (`https://`) does not reach this deployment; clients use the `wss://` URL. The terminal UI uses
-  your CA when you save the Control Plane with `supertag connect --server-ca-file`; the desktop app
-  trusts only the system roots, so it cannot connect to a certificate from your own CA.
+  container replacement may be lost, and work whose upload was in progress must be retried.
+- Native gRPC (`https://`) does not reach this deployment; clients use the `wss://` URL. The
+  terminal UI uses your CA when you save the Control Plane with `supertag connect
+  --server-ca-file`; the desktop app trusts only the system roots, so it cannot connect to a
+  certificate from your own CA.
 - The web endpoint forwards only the tunnel port, so the Gateway here serves Lark, Slack Socket
   Mode, and webhook notifications only. GitHub, Linear, Microsoft Teams, and Slack HTTP events
   need a Gateway on another host.

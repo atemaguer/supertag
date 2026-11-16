@@ -106,10 +106,10 @@ A Task Attempt that ends, is cancelled, or is resolved frees its host slot. A dr
 
 ## Automatic retries
 
-The Codex adapter retries explicit model, provider, or server capacity rejections up to twice
-within the same Task Attempt, and records each retry as Task progress. Any output or tool call
-prevents a replay. Claude Code retries retryable API errors itself, inside the same request, and
-SuperTag records each retry as progress. Quota, authentication, and billing errors end the Task
+Apart from the Task Attempts of a removed [ephemeral host](#ephemeral-hosts), SuperTag does not
+run a Task again on its own. Claude Code retries retryable API errors
+itself, such as overload, server, and connection errors, inside the same request before it produces
+output, and SuperTag records each retry as Task progress. Rate and usage limits end the Task
 Attempt.
 
 A message whose delivery to a running Task is uncertain waits for

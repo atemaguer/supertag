@@ -38,7 +38,8 @@ Worker Host ── prepares a pinned checkout ── starts the harness adapter
 4. The adapter runs the agent, reports progress, and completes the Task Attempt with its result
    and a Session checkpoint.
 5. The host verifies the commits the Task made and delivers them as a Git bundle. Your machine
-   imports them as a `supertag/session/...` branch.
+   imports them as a `supertag/session/...` branch, automatically for a Workspace one of its
+   Worker Hosts maps, or with `supertag fetch`.
 
 ## Worker Host
 
@@ -64,18 +65,21 @@ Workstream post.
 
 ## Execution environment
 
-By default a Task runs in a local checkout on the host. Codex and Claude Code run commands inside
-their own sandbox. OpenCode and Cursor need the host's consent to run commands without one.
+By default a Task runs in a local checkout on the host. Codex runs commands inside its own
+sandbox. Claude Code, OpenCode, and Cursor run commands in a local checkout only when the host
+opts in with `allow-unsandboxed-commands`, because those commands run as the host's user without
+an operating-system sandbox.
 
-Cursor Tasks can also keep their files and commands in an E2B or Modal sandbox, or in a shared
-execution environment that several Sessions use, while the harness and its credentials stay on
-the host. See [Run Cursor in a sandbox](../guides/workers.md#run-cursor-in-a-sandbox).
+Cursor Tasks can also keep a Workspace's files in an E2B or Modal sandbox, without commands, or
+keep their files and run commands in a shared execution environment that several Sessions use.
+Either way, the harness and its credentials stay on the host. See [Run Cursor in a sandbox](../guides/workers.md#run-cursor-in-a-sandbox).
 
 ## What a Worker Host keeps
 
-A host's state directory holds its credential, its execution journal, output files waiting to
-upload, and Workspace checkouts. The journal lets a restarted host recover an interrupted Task
-Attempt without running it twice. See [Persistence](persistence.md).
+A host's state directory holds its credential, its execution journal, Workspace checkouts, and
+the artifacts and Workspace deliveries its Tasks produce. The Control Plane stores none of those
+files; it relays them from the host to readers. The journal lets a restarted host recover an
+interrupted Task Attempt without running it twice. See [Persistence](persistence.md).
 
 ## Next
 

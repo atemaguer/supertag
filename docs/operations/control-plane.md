@@ -47,8 +47,9 @@ authentication. See [Identity and access](../reference/iam.md).
 An **Auth Key** enrolls principals of exactly one role and never changes role. A one-time key
 enrolls one principal and lasts at most an hour; `--reusable` keys last up to 90 days. `--tag`
 limits a host to the Tags it may run and a client to the Tags it may talk to; `--all-tags`
-removes the limit. Revoking an Auth Key stops further enrollment; principals that already joined
-stay enrolled.
+removes the limit. On a host key, `--label` gives every host that joins a placement label that a
+Tag's `runsOn` can select. Revoking an Auth Key stops further enrollment; principals that already
+joined stay enrolled.
 
 ```sh
 supertag auth-key create laptops --role host --reusable --tag lead --control-plane team
@@ -151,8 +152,9 @@ An artifact is saved output from a Task, such as a report or a file. The Control
 catalog in the database and never stores its files. The Worker Host whose Task captured them keeps
 them, and the Control Plane relays them to readers while that host is connected. A read of an
 offline host's files fails with an error naming the host. For copies that stay readable while it
-is offline, map artifact Volumes with `--artifact-volume VOLUME_ID=DIRECTORY` or
-`--artifact-s3-volumes FILE` and copy files there with `supertag volume copy`. Worker Hosts run
+is offline, start the Control Plane with `--artifact-volume VOLUME_ID=DIRECTORY` or
+`--artifact-s3-volumes FILE` to map artifact Volumes, and copy files there with
+`supertag volume copy`. Worker Hosts run
 with `--artifact-transfer-listen` also serve each other directly. Workspace deliveries, the patch
 and bundle behind `supertag fetch`, follow the same rule without Volume copies. See
 [Artifacts](../reference/artifacts.md).

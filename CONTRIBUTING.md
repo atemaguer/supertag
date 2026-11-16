@@ -7,7 +7,7 @@ small changes, and honest test results are especially valuable. Everyone taking 
 ## Ways to contribute
 
 - Report a reproducible bug or confusing behavior in a GitHub issue.
-- Improve documentation, examples, tests, or Surface support.
+- Improve documentation, examples, tests, or collaboration surface support.
 - Propose a focused improvement to a public contract before building it.
 
 Search existing issues and pull requests first. For a substantial change, open
@@ -28,8 +28,8 @@ repository checks are TypeScript; the terminal UI is Go. `sdks/` holds one direc
 each with its SDK and generated bindings, and `scripts/` holds the repository checks and the
 release, packaging, and install scripts. Install the tools listed in
 [Requirements](docs/operations/requirements.md), the Rust toolchain pinned by
-`core/rust-toolchain.toml`, Go 1.26 or later, and the pnpm version pinned by `packageManager` in the
-root `package.json`:
+`core/rust-toolchain.toml`, Go 1.26 or later, Python 3.13 with `uv`, and the pnpm version pinned by
+`packageManager` in the root `package.json`:
 
 ```sh
 git clone https://github.com/atemaguer/supertag.git
@@ -177,10 +177,11 @@ against more than one runtime or database.
 Discuss these changes before implementation:
 
 - public SDK interfaces or package entry points;
-- Gateway and Worker wire protocols;
+- the protobuf contracts in `proto/`: `supertag.runtime.v2`, including the harness and connector
+  protocols, and `supertag.environment.v2`;
 - persisted resource schemas or migration behavior;
 - Tag, Task, Session, Context Set, or Permission Set semantics;
-- extension points for Surfaces, Workers, harnesses, environments, or tool
+- extension points for collaboration surfaces, harness adapters, Workspace providers, or tool
   integrations;
 - compatibility or security policy.
 
@@ -208,10 +209,6 @@ proposals belong outside it. Keep contributor guidance in this file, the protoco
 `docs/development/`: tracked contributor records of the Rust port (the cutover runbook, the
 capability ledger, the TypeScript removal inventory, and Control Plane replica notes), which no
 user page links to.
-
-The local `FakeS3` fixture uses verified HTTPS on the [supported Node.js runtime](docs/operations/requirements.md#system-and-tools). It supplies
-its CA only to HTTPS agents connecting to active fixture endpoints and restores agent
-behavior when the last fixture closes. Always close fixtures in test cleanup.
 
 ### Execution lifecycle conformance
 
@@ -293,19 +290,19 @@ The independent verifier's regression tests require no model calls:
 python3 -m unittest discover -s tests/fixtures/rust-harness-interop -p test_live_project.py -v
 ```
 
-#### SDK lifecycle and Python tests
+#### Python SDK tests
 
 `sdks/python/tests/fixtures/harness-lifecycle.json` supplies language-neutral behavioral cases
-for the Python SDK's conformance validator. Run the repository execution, lifecycle fixture, and
-sandbox provider tests when changing harness/environment contracts. The repository
-suite pins a real Git revision, produces immutable artifacts, and checks them in a
-fresh reviewer environment without model-provider calls. Process tests include
-cancellation of descendants that ignore SIGTERM.
+for the Python SDK's conformance validator. Run the Python SDK's tests and lint when changing it or
+the harness contract:
 
-Run Python tests with `sdks/python/.venv/bin/python -m pytest sdks/python/tests`.
+```sh
+python -m pip install "./sdks/python[dev]"
+ruff check sdks/python
+pytest sdks/python/tests
+```
 
-Live Python Codex tests additionally require `SUPERTAG_LIVE_MODEL_TESTS=1` and
-provider credentials.
+Install into a virtual environment. These tests make no model-provider calls.
 
 ## Prepare release notes
 
@@ -335,7 +332,7 @@ documentation check reads the same version: docs may name only the current relea
 ## Test an installable release
 
 Users install SuperTag with `install.sh`, which downloads a native archive from a GitHub
-Release, the Python SDK from PyPI, and the TypeScript SDK, `supertag-ai`, from npm (see
+Release. The Python SDK comes from PyPI and the TypeScript SDK, `supertag-ai`, from npm (see
 [Install SuperTag](docs/operations/install.md)). Each archive holds the `supertag` command, the terminal UI, the
 shared execution provider, and the Node.js bridges; the
 [native release platform checks](tests/native-release/README.md) build one. To install a local
@@ -422,57 +419,28 @@ existing tag with `upload_assets` false; the archives remain workflow artifacts 
 Only the signing release run passes the Apple secrets to the build; pull request and manual
 checks of `native-release-check.yml` build unsigned archives without them.
 
-## Live Modal native mounts
+## Live Modal mounts
 
-Run the Modal Volume test on its own with `pnpm test:volumes:modal:live`. It prepares a Workspace
-with two disposable Volumes, verifies read-only input and git delivery, then reads persisted output
-in a replacement sandbox. It removes the sandboxes, Volumes, and prepared image when it finishes.
-Use your normal Modal credentials and optionally set `SUPERTAG_LIVE_MODAL_APP` for a dedicated app.
+`harnesses/environments/modal/modal-mounts-live.test.ts` checks the Modal provider's native mounts
+against real storage. Both cases skip unless their gate equals `1`, always skip in CI, and cost
+real Modal usage. Normal tests use fake clients and make no cloud calls. Authenticate with Modal's
+usual host credentials: `~/.modal.toml`, or `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`.
 
-The opt-in suite reads `fixture.txt` from a small bucket prefix and an existing Modal Volume
-subdirectory. Put a nonempty `fixture.txt` in each before running it. The suite creates an app
-named `supertag-mounts-live` if needed, creates one sandbox, verifies both writes fail even as root,
-and terminates the sandbox in `finally`. A 180-second sandbox lifetime bounds interrupted runs.
-It never creates a bucket, Secret, or Volume. Normal tests use fake clients and make no cloud calls.
-
-Authenticate with Modal's usual host credentials. Set these Experimental inputs:
+The read-only case reads `fixture.txt` from a bucket prefix and a Modal Volume subdirectory, then
+checks that writes to both fail. Put a nonempty `fixture.txt` in each before running it. Set:
 
 - `SUPERTAG_MODAL_MOUNTS_BUCKET`: the full `s3://`, `r2://`, or `gs://` source URL.
 - `SUPERTAG_MODAL_MOUNTS_SECRET`: an existing Modal Secret name, never a credential value.
-- `SUPERTAG_MODAL_MOUNTS_VOLUME`: the full `modal-volume://NAME/PREFIX/` source URL (no query). The suite consents to this exact name in the host's Modal environment.
+- `SUPERTAG_MODAL_MOUNTS_VOLUME`: the full `modal-volume://NAME/PREFIX/` source URL.
 
 ```sh
 SUPERTAG_MODAL_MOUNTS_LIVE=1 pnpm exec vitest run harnesses/environments/modal/modal-mounts-live.test.ts
 ```
 
-The suite skips unless the gate equals `1`, and always skips in CI. It costs real Modal usage.
-Run it with an S3/R2 or GCS bucket to verify that backend; the fake-client suite covers all schemes.
+The read-write case writes a probe file through both mounts, reads it back, and removes it. Point
+`SUPERTAG_MODAL_RW_BUCKET`, `SUPERTAG_MODAL_RW_SECRET`, and `SUPERTAG_MODAL_RW_VOLUME` at dedicated
+writable fixtures in the same forms, and set `SUPERTAG_LIVE_MODAL=1` instead.
 
-## Live Modal workspace conformance
-
-The workspace sandbox fake models the commands and paths in `python:3.13-slim`. It has `apt-get`
-but no Node.js, and missing commands exit 127. An image gets `node` only from preparation's trusted
-Node.js install layer, or from a snapshot of trusted preparation content. A Task-copied binary does
-not count, and `apt-get` in a sandbox installs nothing. The fake's path checks are best effort and do not form a security boundary. Run the
-live provider suite to verify behavior in a real sandbox.
-
-A live conformance run checks the Modal workspace provider against a temporary git repository.
-Use it when validating changes to Modal workspace preparation, checkout, or cleanup. It
-requires an existing, dedicated `supertag-conformance` Modal app used only for this suite.
-Configure credentials through `~/.modal.toml` or `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, as
-the Modal SDK expects. The run uses 0.125 CPU and 512 MiB for setup and Task sandboxes. At 128 MiB, real Modal setup
-sandboxes were killed with exit 137 before writing any output. Each run
-adds a layer that sets `SUPERTAG_LIVE_RUN_ID` to its base image, so the image it deletes is never
-shared with other builds. It tags every sandbox with the same run ID, retries cleanup, and sweeps by
-tag if creation fails after Modal starts a sandbox. A sandbox or image created after cleanup starts
-is removed at once. Snapshot images expire after one hour. The runner reports created, deleted, and remaining IDs on
-success, failure, or signal. It is excluded from `pnpm test` and CI.
-
-```sh
-pnpm test:workspace:modal:live
-```
-
-Set `SUPERTAG_LIVE_MODAL_APP` to use a different existing dedicated Modal app. Check the final
-report and deletion lines before leaving the run. If cleanup reports a failure, remove
-the listed resource in Modal before retrying.
-
+Each case creates its app if needed (`supertag-mounts-live` or `supertag-rw-mounts-live`) and one
+sandbox with a 180-second lifetime, which it terminates when it finishes. Neither creates a
+bucket, Modal Secret, or Modal Volume.

@@ -43,16 +43,20 @@ The local Control Plane that `supertag init` and `supertag up` run uses the same
 | `supertag.yaml` | The services file. It never holds a secret value: keys that take a secret name an entry in `secrets`, whose value comes from an environment variable or a file. |
 | `runtime.sqlite3` | Local SQLite state, owner-only |
 
-For `supertag init`, the bundled Claude Agent SDK checks the selected model using the Worker
-Host's credentials. Run `claude` and use `/login`, or set `ANTHROPIC_API_KEY` in the host's
-environment. The SDK reads the sign-in store selected by `CLAUDE_SECURESTORAGE_CONFIG_DIR`, then
-`CLAUDE_CONFIG_DIR`, then `~/.claude` (macOS Keychain or Linux `.credentials.json`).
+`supertag init` and `supertag sign-in` check each harness's credentials as its Task Attempts
+will read them. For Claude Code, run `claude` and use `/login`, or set `ANTHROPIC_API_KEY` in the
+host's `env_file` (default `~/.supertag/.env`). Task Attempts read the sign-in store selected by
+`CLAUDE_SECURESTORAGE_CONFIG_DIR`, otherwise `~/.claude` (macOS Keychain on macOS,
+`.credentials.json` on Linux).
 
-The bundled Codex SDK checks `CODEX_API_KEY`, then `$CODEX_HOME/auth.json` (default
-`~/.codex/auth.json`), then `OPENAI_API_KEY` if the file cannot be read. Run `codex login` or set
-either API key in the host's environment. For a login that Task Attempts can copy, run
-`codex -c 'cli_auth_credentials_store="file"' login`; a Keychain-only login is not copied.
-The file-backed init check verifies credential structure without testing account access.
+Codex Task Attempts use `CODEX_API_KEY` first, then copy `$CODEX_HOME/auth.json` (default
+`~/.codex/auth.json`), then fall back to `OPENAI_API_KEY` if that file is missing. Set either API
+key in the host's `env_file`, or, for a login that Task Attempts can copy, run
+`codex -c 'cli_auth_credentials_store="file"' login`; a Keychain-only login is not copied. The
+file-backed sign-in check verifies credential structure without testing account access.
+
+A background host started from a shell also inherits these variables from the shell; a service
+unit does not.
 
 ### Operator and host credentials
 
@@ -159,7 +163,7 @@ Select Vault for the Gateway with `SUPERTAG_CREDENTIAL_VAULT=vault`, `VAULT_ADDR
 `VAULT_TOKEN`, plus optional `SUPERTAG_VAULT_MOUNT`, `SUPERTAG_VAULT_PATH_PREFIX`, and
 `VAULT_NAMESPACE`. Each logical ID maps beneath the deployment's KV v2 prefix. `supertag up` passes
 the selection from the shell or `env_file` to the local Gateway, and `supertag setup surface`
-stores into the same backend. Writes are create-only compare-and-set, and errors never include a
-response body or token.
+stores into the same backend. A store replaces the entry, and errors never include a response
+body or token.
 
 Use a narrowly scoped token with `create`, `update`, and `read` capabilities on the prefix's KV v2 `data` path and `read` and `delete` on its `metadata` path. Non-loopback addresses require HTTPS. Follow [Vault production hardening](https://developer.hashicorp.com/vault/docs/concepts/production-hardening) for server deployment, authentication, audit devices, recovery, and token policy.

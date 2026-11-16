@@ -30,8 +30,8 @@ curl --fail --location \
 Tags work in Teams, flat lists of member Tags. Together,
 your Teams of Tags make up an **autonomous organization**: Teams may pursue different Objectives but
 share one Control Plane, its rules, and its record of the work. The **Control Plane** stores the
-organization and schedules work. A **Worker Host** provides execution capacity. Check that `supertag ps`
-shows the host connected. Note the lead Tag's name; the example below uses `lead`. Do not start a
+organization and schedules work. A **Worker Host** provides execution capacity. Check that `supertag status`
+shows the host `ready`. Note the lead Tag's name; the example below uses `lead`. Do not start a
 second Control Plane. Operator commands use your local services unless you name another Control
 Plane: add `--control-plane NAME` for a shared one saved with `supertag connect`.
 
@@ -139,7 +139,9 @@ The date is illustrative; use the timestamp agreed with the user. The quoted com
 passes the statement as one argument without evaluating its contents as shell code. The trap
 removes the private file even if creation fails.
 1000 minor units in USD means
-USD 10. Creation queues the lead's first turn. Record the Objective ID and its `session_id`.
+USD 10. A currency budget needs a harness that enforces a reported cost limit, such as Claude Code;
+see [Define and complete an Objective](objectives.md#write-an-objective-a-tag-can-finish).
+Creation queues the lead's first turn. Record the Objective ID and its `session_id`.
 
 ### 2. Check progress and answer questions
 

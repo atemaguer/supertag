@@ -82,8 +82,7 @@ thread, and the same Tag keeps the responsibilities you assigned it. [Connect a 
 On an Apple silicon Mac or Linux, install Git, Node.js, and a [supported coding agent](#works-with). [Check requirements and sign-in](docs/operations/requirements.md)
 
 [Install SuperTag](docs/operations/install.md), then run this from an existing Git repository with
-at least one commit. If this machine ran the earlier TypeScript runtime,
-[retire it](docs/operations/install.md#retire-the-earlier-typescript-runtime) before installing.
+at least one commit.
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
@@ -167,8 +166,8 @@ branches and test results in your own review interface. Generated Go, TypeScript
 bindings come with the repository. [Explore the API](docs/reference/control-plane-api.md)
 
 To bring your own execution system, write a **harness adapter**: a program that a Worker Host
-starts for each Task Attempt and that drives your agent through the harness protocol. Python and
-TypeScript adapters ship with SuperTag as examples.
+starts for each Task Attempt and that drives your agent through the harness protocol. The built-in
+Python and TypeScript adapters are working examples to read.
 
 The TypeScript SDK, `supertag-ai` on npm, and the Python SDK, `supertag` on PyPI, connect an
 application to a Control Plane and a harness adapter to its Worker Host:

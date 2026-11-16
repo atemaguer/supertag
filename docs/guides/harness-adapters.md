@@ -127,6 +127,9 @@ supertag describe task TASK_ID
 - Send a checkpoint with `Complete` if your agent can resume a conversation; the next Task in the
   Session receives it, possibly on another host.
 - Report failures through `Complete` with `succeeded: false` and a result safe to show to people.
+- When the run carries execution limits, enforce them and confirm them with
+  `ConfirmExecutionLimits` before the agent starts, and report usage with `ReportUsage`. A Task
+  with limits cannot succeed without that confirmation and usage within its limits.
 
 ## Next
 

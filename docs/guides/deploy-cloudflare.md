@@ -89,9 +89,9 @@ npx wrangler deploy
 With the Gateway on, set `"SUPERTAG_GATEWAY": "on"` and `SUPERTAG_GATEWAY_FLAGS` in
 `wrangler.json` (see [Collaboration surfaces](#collaboration-surfaces)), and also upload
 `gateway.env` and the connector settings with `wrangler secret bulk`, and
-`SUPERTAG_SERVER_CA_PEM` (your CA). The Worker passes only the deployment
-settings, these PEM values, and settings named `SUPERTAG_LARK_*`, `SUPERTAG_SLACK_*`, or
-`SUPERTAG_NOTIFY_SECRET_*` into the container; the image entrypoint writes each PEM value to a file and runs the services as
+`SUPERTAG_SERVER_CA_PEM` (your CA). The Worker passes only the deployment settings, these PEM
+values, and settings named `SUPERTAG_LARK_*`, `SUPERTAG_SLACK_*`, or `SUPERTAG_NOTIFY_SECRET_*`
+into the container; the image entrypoint writes each PEM value to a file and runs the services as
 an unprivileged user.
 
 `wrangler deploy` builds the image from `supertag-hosted:local` and pushes it to Cloudflare's
@@ -156,8 +156,8 @@ start the Gateway without one.
   secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
 
 GitHub, Linear, Microsoft Teams, and Slack HTTP events need inbound webhooks, which this
-deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see [service deployment definitions](../../deploy/native/README.md)), enrolled
-with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
+deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see
+[service deployment definitions](../../deploy/native/README.md)), enrolled with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
 URL with its own credential.
 
 ```json
@@ -192,8 +192,9 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 
 - One container. Every Control Plane runs the controllers, so do not raise `max_instances`.
 - Session checkpoints live on the container's temporary disk and are lost on restart. Artifacts
-  and Workspace deliveries stay on the Worker Hosts that produced them. - Native gRPC (`https://`) does not reach this deployment; clients use the `wss://` URL.
-  The terminal UI uses your CA when you save the Control Plane with `supertag connect
+  and Workspace deliveries stay on the Worker Hosts that produced them.
+- Native gRPC (`https://`) does not reach this deployment; clients use the `wss://` URL. The
+  terminal UI uses your CA when you save the Control Plane with `supertag connect
   --server-ca-file`; the desktop app trusts only the system roots, so it cannot connect to a
   certificate from your own CA.
 - The Worker forwards no webhook routes, so the Gateway here serves Lark, Slack Socket Mode, and

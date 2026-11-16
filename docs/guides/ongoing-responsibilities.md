@@ -68,20 +68,22 @@ supertag apply -f support-policy.yaml
 
 Applying creates the Team and the Objective, and starts the manager: it takes its first turn in
 the Objective's own conversation. Applying again changes nothing. Keep the manifest in a
-directory with the Tags it names, and apply them together as a set, such as
-`supertag apply -f support/ --set support`.
+directory with the Tags it names, and apply them together, such as
+`supertag apply -f support/ --set support`. An apply set owns the resources it creates, such as the
+Team; an Objective never belongs to one.
 
 The same Objective can be created with a command instead:
 
 ```sh
-supertag team create support --member support-specialist
+supertag team create support --member support-manager --member support-specialist
 supertag objective create support-policy \
   "Maintain the support response policy. Investigate each overdue-ticket report that arrives in this conversation, and change the policy only after a specialist's written proposal." \
   --owner support-manager --team support --ongoing --budget-minor 50000 --currency USD
 ```
 
-**Check:** `supertag describe objective support-policy` shows status `working`, the Team and its
-members, and the manager's first turn under **Work**.
+**Check:** `supertag describe objective support-policy` shows `working`, the Team and its
+members, and the manager's first turn under **Work**. The manager is a member of the Team because
+only members may post to its Workstream.
 
 ## 2. Deliver evidence to the Objective
 
@@ -119,15 +121,16 @@ supertag describe objective support-policy
 
 ```text
 Work: 2 Sessions
-  completed  support-manager     Objective conversation            (Task b81e5d47-2fa0-4c69-9d31-7e05a3bc8164)
-  completed  support-specialist  Propose a response-time policy    (Task 81ba…)
+  succeeded  support-manager     Objective conversation  (3 Tasks, latest Task b81e5d47-2fa0-4c69-9d31-7e05a3bc8164)
+  succeeded  support-specialist  Propose a response-time policy  (1 Task, latest Task 81ba…)
 ```
 
 Once the manager applies a change, it posts the decision to the Team's Workstream, where every
-member reads it:
+member reads it. The manager posts from a turn of the Objective's conversation; the turn that
+brings a Session's report back cannot post.
 
 ```sh
-supertag get workstream-post --team support --limit 20
+supertag get workstream-post --team support
 ```
 
 With nothing left to do, the manager ends its turn. The Objective stays `working` and waits. No
@@ -144,29 +147,29 @@ changes neither budgets nor permissions. See [Respond to an Objective](objective
 
 ## 5. Change or end the responsibility
 
-Applying the Objective again leaves it alone, because the owner treats its definition as the
-work. Change a running Objective with commands instead, and give a declaration a new name to
-create a new Objective:
+The owner treats the Objective's definition as the work, so `ownerTagId`, `outcome`, `ongoing`,
+`team`, and `runtimeActions` are fixed. Applying the manifest again with a new `deadline` or
+`budgetLimitMinor` changes those limits, with the same rules as `supertag objective set-limits`.
+Change runtime actions with a command, and give a declaration a new name to create a new
+Objective:
 
 ```sh
-supertag objective set-limits support-policy --budget-minor 80000 --currency USD \
-  --expected-revision REVISION
-supertag objective set-runtime-actions support-policy --runtime-action files:write \
-  --expected-revision REVISION
+supertag objective set-limits support-policy --budget-minor 80000 --currency USD
+supertag objective set-runtime-actions support-policy --runtime-action files:write
 ```
 
 Change the Team's members and `maxConcurrency` in its manifest and apply it again.
 
-To end the responsibility, remove it from the file and apply with `--prune` and the input's set.
-Prune cancels the Objective and keeps its history. See
-[Manage Control Plane resources](../operations/resources.md#declare-objectives). An operator can
-also cancel it directly:
+To end the responsibility, cancel it. Removing it from the file does not, because `--prune` never
+removes an Objective. See
+[Manage Control Plane resources](../operations/resources.md#declare-objectives).
 
 ```sh
 supertag objective cancel support-policy --reason "Policy moved to the new support platform"
 ```
 
-**Check:** `supertag get objective support-policy` shows status `cancelled` with your reason.
+**Check:** `supertag describe objective support-policy` shows `cancelled`, when, and your
+reason.
 
 ## Rules for your application
 
@@ -194,8 +197,8 @@ supertag objective cancel support-policy --reason "Policy moved to the new suppo
   every Objective that names the Team. See
   [Throttle a Team on purpose](teams.md#throttle-a-team-on-purpose).
 - **A turn needs attention.** Run `supertag get inbox-item --kind task-attention`.
-- **Apply refuses a change.** `owner`, `outcome`, `ongoing`, `workspaces`, and which Team the
-  Objective names are fixed. Create a new Objective for a different definition.
+- **Apply refuses a change.** `ownerTagId`, `outcome`, `ongoing`, `team`, and `runtimeActions`
+  are fixed once the Objective exists. Create a new Objective for a different definition.
 
 ## Next
 

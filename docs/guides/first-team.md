@@ -14,8 +14,9 @@ The lead delegates a file to the builder, reviews what comes back, posts the res
 Finish the quickstart and send your first message to `lead` in the terminal UI. From the
 repository, run `supertag` to reopen that conversation. The quickstart creates `lead`, the
 `local-tools` **Permission Set** (allowed file edits and commands), and a **Workspace** named
-after your repository. A Workspace tells SuperTag where repository work belongs; this guide uses
-`app`. Commands below use the local Control Plane, which they find without a flag.
+after your repository: an entry under the host's `workspaces` in `supertag.yaml` that maps the name
+to your checkout, with `lead` bound to it. Commands below use the local Control Plane, which they
+find without a flag.
 
 The **Control Plane** coordinates work. Your **Worker Host** supplies execution capacity through a
 signed-in harness such as Codex or Claude Code. Check that both services are running:
@@ -69,7 +70,10 @@ supertag describe tag builder
 
 The Role grants the same local file-editing and command permissions that `init` gave `lead`.
 Membership of a Team grants none of these. Give this builder only work you trust to run on the
-selected host.
+selected host. A Session the lead starts for `builder` works in the lead's Workspace, so the
+builder needs no Workspace binding of its own. If your harness is Codex, a current Codex model runs
+commands only when the Tag also has `web:fetch`; see
+[Codex commands and models](../operations/requirements.md#codex-commands-and-models).
 
 ## 2. Create the Team
 
@@ -97,7 +101,9 @@ supertag objective create team-greeting \
 
 It prints the Objective as JSON. Creating the Objective starts it. The lead takes its first turn in the Objective's own
 conversation, starts a Session of `builder` for the file, and gets a turn back there when that
-Session reports. Use new Objective and Team IDs if these already exist.
+Session reports. That report turn cannot post to the Workstream or message `builder`; the lead
+does both in a later turn of the Objective's conversation, such as the one SuperTag starts when
+nothing is left running. Use new Objective and Team IDs if these already exist.
 
 ## 4. Follow the work
 
@@ -113,11 +119,11 @@ supertag describe objective team-greeting
 
 ```text
 Work: 2 Sessions
-  completed  lead     Objective conversation      (Task 6c2b48d0-9e13-4a77-b5f2-80ad1e6c4932)
-  completed  builder  Write TEAM-HELLO.md         (Task 4c71…)
+  succeeded  lead     Objective conversation  (3 Tasks, latest Task 6c2b48d0-9e13-4a77-b5f2-80ad1e6c4932)
+  succeeded  builder  Write TEAM-HELLO.md  (1 Task, latest Task 4c71…)
 ```
 
-Each Session's work arrives in your repository as its own branch, `supertag/session/SESSION`, so
+Each Session's work arrives in your repository as its own branch under `supertag/session/`, so
 the change stays there until you choose to integrate it. You are still in `~/supertag-first-team`,
 which is not a git checkout, so inspect the file with `git -C`, replacing `APP_CHECKOUT` with your
 repository and `BUILDER_BRANCH` with the builder Session's branch from
@@ -137,8 +143,17 @@ supertag get message --mailbox builder
 ```
 
 The first command shows the lead's one-line summary in the Team's Workstream, which every member
-can read. The second shows the lead's message to `builder`, `pending` until the builder's inbox
-takes it and `handled` afterwards.
+can read. The second shows the lead's message to `builder`, with `state`
+`TAG_MESSAGE_STATE_PENDING` until the builder's inbox takes it and `TAG_MESSAGE_STATE_HANDLED`
+afterwards.
+
+The lead cannot close the Objective itself. Once the file, the post, and the message check out,
+record the result:
+
+```sh
+printf '%s\n' "builder wrote TEAM-HELLO.md; lead posted the summary and messaged builder." | \
+  supertag objective complete team-greeting --summary-file -
+```
 
 In the terminal UI, open **Waiting on you** to answer a question from the lead. Your answer
 becomes its next turn. If no builder Session starts, check `supertag placement explain TASK_ID`, then use [first-reply troubleshooting](troubleshooting.md). A provider error needs a

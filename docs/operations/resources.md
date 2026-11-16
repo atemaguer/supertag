@@ -61,6 +61,8 @@ spec:
   permissions:
     - { target: runtime, action: commands:execute }
     - { target: runtime, action: files:write }
+    # Codex runs commands on current models only when the Task may also fetch from the web.
+    - { target: runtime, action: web:fetch }
 ---
 apiVersion: supertag/v1
 kind: Role
@@ -69,7 +71,7 @@ spec:
   purpose: Implement bounded changes with tests.
   instructions: Run the project's checks before reporting, and report the exact commands.
   permissionSets: [local-tools]
-  execution: { harness: codex, models: [gpt-5.5], efforts: [medium, high] }
+  execution: { harness: codex, models: [gpt-6-sol], efforts: [medium, high] }
 ---
 apiVersion: supertag/v1
 kind: Tag
@@ -94,17 +96,20 @@ supertag apply -f organization.yaml
 `-f` takes YAML documents, a JSON array, a directory of manifests, or `-` for standard input.
 `diff` prints each change, such as `create Tag/builder` or `assign Role/Builder to Tag/builder`;
 it prints `No changes.` when the Control Plane already matches. `apply` applies resources in
-dependency order. Applying the same files again changes nothing.
+dependency order. Applying the same files again changes nothing. A Tag's `runsOn` names labels a
+Worker Host must carry, from the host's `labels` in `supertag.yaml` or its host Auth Key. See
+[Codex commands and models](requirements.md#codex-commands-and-models) for why the example grants
+`web:fetch`.
 
 | Kind | Declares |
 | --- | --- |
-| `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `scope`, and `approvalRequired` |
-| `ContextSet` | Knowledge items a Task may receive, each with a `type`, `version`, and `config` |
+| `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `reference`, `surfaceAccountId`, `scope`, and `approvalRequired`; and the set's `approvers` |
+| `ContextSet` | Knowledge items a Task may receive, each with an `itemKey`, `type`, `version`, and `config`, and optionally `required` |
 | `Role` | `purpose`, `instructions`, `permissionSets`, `contextSets`, and `execution` |
 | `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, and `acceptsMessagesFrom` |
 | `Team` | `members` and `maxConcurrency` |
 | `Objective` | An outcome; see [Declare Objectives](#declare-objectives) |
-| `Workspace` | A GitHub repository source: `github` with `accountId`, `repositoryId`, `repository`, and a `revision` or `commitSha` |
+| `Workspace` | A GitHub repository source: `github` with `accountId`, `repositoryId`, `repository`, and a `revision` or `commitSha`, and optionally `pullRequestBase`. A repository on a Worker Host is not a manifest; map it in the host's `workspaces` in `supertag.yaml` |
 | `Volume` | A storage `source`: `file:///absolute/path` or `s3://bucket/prefix` |
 | `SurfaceAccount`, `SurfaceLocation` | A connected account's identity and Gateway, and a location's Tag and policy; see [Declare Surface Accounts](#declare-surface-accounts) |
 
@@ -127,8 +132,10 @@ spec:
 ```
 
 Applying an Objective that does not exist creates it and queues its owner's first turn, as
-`supertag objective create` does. Applying it again leaves it alone. Change a running Objective
-with `objective set-limits`, `pause`, `resume`, `cancel`, or `complete`. `deadline` takes an
+`supertag objective create` does. Applying it again updates a changed `deadline` or budget on an
+Objective that is not completed or cancelled, and refuses a changed `ownerTagId`, `outcome`,
+`ongoing`, `team`, or `runtimeActions`. Change a running Objective's state with `objective pause`,
+`resume`, `cancel`, or `complete`. `deadline` takes an
 RFC 3339 time with a time zone, and `runtimeActions` narrows what its turns may do.
 
 ### Declare Surface Accounts
@@ -178,7 +185,7 @@ repository of manifests, and run `diff` in review and `apply` after merge.
 ### supertag.yaml is not a manifest
 
 `supertag.yaml` configures how one machine runs SuperTag's services; manifests configure the
-organization. A `control-plane` service may still name manifests to create on start; see
+organization. A `control-plane` service may name manifests to create on start; see
 [Provision resources](../reference/supertag-yaml.md#provision-resources).
 
 ## Change resources directly

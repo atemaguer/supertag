@@ -49,8 +49,9 @@ A Task records what the requester asked SuperTag to do. It keeps the status, pol
 needs, source, and final result. Each Task Attempt records the Worker Host, harness, and model that ran it; the
 Tag and Session do not choose a permanent host.
 
-A Task may remain pending while no compatible execution capacity is ready. Losing a connection to
-an execution machine does not erase the Task.
+A Task may remain pending while no compatible execution capacity is ready.
+`supertag placement explain TASK_ID` names the Worker Hosts that could take it and why the others
+cannot. Losing a connection to an execution machine does not erase the Task.
 
 ## Session
 
@@ -252,9 +253,6 @@ Objective's budget, follow
 
 The Task itself stores the request text, response text, and structured result. Its result includes
 observable outcomes and references; execution events remain attached to the producing Task Attempt.
-A reviewer's result can also carry findings: problems it found, each with a severity of high,
-medium, or low. An Objective's owner reads them in the report turn and decides what to send back
-with `continue_session`. See [review findings](../reference/coordination.md#review-findings).
 There is no separate handoff resource created for every response.
 
 When a Task can't resume its Session's native harness session, SuperTag derives bounded history
@@ -280,7 +278,9 @@ how the Control Plane ranks hosts and orders the queue.
 A Tag's or Role's `execution` names the harness, models, and reasoning efforts its Tasks may use,
 with the defaults first; a Tag's own settings override its Roles'. Worker Hosts advertise the
 harnesses and models they serve, and a Tag's `runsOn` labels narrow which hosts may run it. These
-settings choose where work runs; they grant no permission. See
+settings choose where work runs; they grant no permission. A Task that asks for an execution
+limit its harness cannot enforce, such as a token limit on Claude Code, is
+refused when it is submitted. See
 [execution settings](../reference/resource-model.md#execution-settings).
 
 The Control Plane records the selected harness and model on the Task before execution. Recovery
@@ -316,8 +316,7 @@ Without live input support, messages wait in Session order. Before the next exec
 SuperTag refreshes its Session history and selects the latest compatible completed session state.
 Sessions started beneath this one still run independently.
 
-Codex app-server mode supports steering. Claude Code supports queueing when it runs through the
-Agent SDK, which it does for Session continuity, forwarded tools, and split execution. Claude Code
+Codex supports steering. Claude Code runs through the Agent SDK and supports queueing. Claude Code
 reads queued input at its next turn boundary: between tool calls, or as a new turn after a turn
 that ended with background work still running. The final result ends live input. Claude Code
 takes no more input, and input it hasn't taken yet waits for the next Task Attempt. If Claude Code
@@ -332,8 +331,8 @@ later model or hook activity, or when the process is still running 10 seconds af
 On macOS and Linux, it tracks detached tools and children whose parents already exited. It stops
 those processes before committing the Task branch. If process inspection or ownership is uncertain,
 it reports a cleanup failure and withholds the result and normal completion. It also refuses to
-launch Claude Code when process inspection is unavailable. A one-shot Claude Code CLI run and the
-OpenCode adapter use the Control Plane queue. A custom
+launch Claude Code when process inspection is unavailable. The OpenCode and Cursor adapters use
+the Control Plane queue. A custom
 [harness adapter](../guides/harness-adapters.md) takes live input with `Harness.TakeLiveInput` and
 records what it did with `SettleLiveInput`; it must process accepted input before it completes the
 Task Attempt and exports its checkpoint.
@@ -357,7 +356,7 @@ The original Session stays blocked because its saved conversation may already co
 Once SuperTag queues this notice, late acknowledgements cannot change the unknown outcome.
 A late withdrawal cannot trigger an automatic retry.
 Restarting the Control Plane preserves this decision and does not queue a second notice.
-This message path does not yet infer answers to specific harness clarification or permission requests.
+This message path does not infer answers to specific harness clarification or permission requests.
 
 ## Where to go next
 

@@ -53,8 +53,8 @@ supertag tag update lead --add-location teams --team-id TEAM_ID --channel-id CHA
 
 Use stable IDs, not display names. `--allowed-user ID` limits who may ask the Tag for work there.
 `--account NAME` picks the Surface Account when several of one provider exist. The local Gateway
-serves one location per Surface Account; remove one with `--remove-location PROVIDER` before
-adding another.
+serves one location per Surface Account and one per provider; remove one with
+`--remove-location PROVIDER` before adding another.
 
 ## Two credential boundaries
 

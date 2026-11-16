@@ -118,15 +118,15 @@ become a shared artifact automatically.
 
 The originating thread is also the shared place where people observe the work:
 
-1. SuperTag accepts and stores the Task, then acknowledges it;
-2. the execution system reports one quiet running update, including the selected workspace when available;
-3. completion returns the useful outcome in the original conversation;
-4. a final failure returns a concise error in the same thread.
+1. SuperTag accepts and stores the Task;
+2. completion returns the useful outcome in the original conversation;
+3. a final failure returns a concise error in the same thread.
 
-SuperTag stores outgoing updates separately from the Task Attempt, so a long-running Task does not
-block delivery. On tools that support message updates, SuperTag can replace the acknowledgement
-with the result instead of adding another reply. Routine retries, tool events, and internal IDs stay
-in the audit history instead of filling the conversation.
+In Slack, SuperTag also acknowledges the Task when it accepts it, naming the Workspace when the
+Task has one. While the Task runs, that message shows its latest progress, and the result
+replaces it instead of adding another reply. SuperTag stores outgoing updates separately from the
+Task Attempt, so a long-running Task does not block delivery. Routine retries, tool events, and
+internal IDs stay in the audit history instead of filling the conversation.
 
 ## Safety properties
 

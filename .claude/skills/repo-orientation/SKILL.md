@@ -13,7 +13,7 @@ Worker Hosts, in the desktop app, or in the `supertag-ai` SDK.
 | Directory | Holds |
 | --- | --- |
 | `core/` | The Rust workspace: `Cargo.toml`, `Cargo.lock`, the toolchain pin, `crates/*`, `test-support/` |
-| `proto/` | The `supertag.runtime.v2` protobuf contract every language uses |
+| `proto/` | The `supertag.runtime.v2` protobuf contract every language uses, and the shared execution provider's `supertag.environment.v2` |
 | `sdks/` | One directory per language: the hand-written SDK and its generated bindings |
 | `harnesses/` | Node harness bridges and Workspace providers a Worker Host starts, and their shared SDK |
 | `apps/` | The Go terminal UI and the Tauri desktop app |

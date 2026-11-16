@@ -7,33 +7,41 @@ This page uses these SuperTag terms, each defined in the glossary: [Tag](glossar
 [Task](glossary.md#task), [Task Attempt](glossary.md#task-attempt), and
 [Control Plane](glossary.md#control-plane).
 
-Harnesses can read or change external systems through any supported tool mechanism. The authorization model is independent of that mechanism: MCP, a native SDK, HTTP, and future adapters all receive the same Task-scoped capability.
-
-External writes have two execution modes with different recovery guarantees.
+Harnesses can read or change external systems. A retried Task Attempt or a later Task could repeat
+a write the provider already performed, so SuperTag offers two ways to make external writes
+recoverable, with different guarantees.
 
 In **adapter-managed mode**, a harness adapter supplies a stable idempotency key for the intended
 effect and records a durable effect receipt before and after the provider call. It calls the
 Worker Host's `HarnessEffects` service: `Begin` before the call, then `Complete` with the result or
 `Fail`. The Worker Host forwards each call with the Task Attempt's authority, and the Control Plane
 keeps the receipts, keyed by Tag and idempotency key, so a later Task of the same Tag sees them
-too.
+too. `Begin` answers with the receipt's state:
 
-- A completed receipt replays the recorded result instead of calling the provider twice.
-- Reusing a key for different arguments fails closed.
-- A crash after provider execution but before receipt completion leaves an **in-doubt** effect. SuperTag does not blindly retry it; an integration must reconcile it against the provider first.
-- Read operations do not require an effect receipt.
+- `ACQUIRED`: call the provider once, then `Complete` or `Fail`.
+- `COMPLETED`: do not call the provider; replay the recorded result.
+- `FAILED`: the earlier call failed without effect, and this `Begin` may acquire it again.
+- `IN_FLIGHT`: another running Task Attempt began the effect and may still be calling the provider.
+  Do not call the provider; `Begin` again later.
+- `IN_DOUBT`: an earlier Task Attempt began the effect and stopped without settling it. SuperTag never
+  acquires it again. The integration must reconcile it against the provider, then settle the
+  receipt with `Complete` or `Fail`.
+
+Reusing a key for different arguments fails closed. Read operations do not need a receipt. Never
+put credentials in a recorded result: later callers receive it as written.
 
 TypeScript adapters get this client as the `effects` of the connection `openHarness` from
 `supertag-ai/harness` returns, and Python adapters as `HarnessConnection.effects`. See
 [Write a harness adapter](../guides/harness-adapters.md).
 
-In **harness-managed mode**, Codex or Claude Code calls an MCP server through the Worker Host's
-policy proxy, which records a durable dispatch before it forwards a call that needs approval. If
-the Task fails after a write starts, the Control Plane stops automatic retries because the provider may already
-have changed. An operator must reconcile that action before retrying. This prevents blind
-duplication, but it is not exactly-once execution.
-
-Permission evaluation produces a structured decision that records the Tag, resource, action, matching sources, and denial reason. Credentials and raw secret values never appear in decisions, Task events, or receipts.
+In **harness-managed mode**, the harness calls an MCP server through the Worker Host's policy
+proxy. Before it forwards a call that needs approval, the proxy records a durable dispatch, and it
+records the result when the call returns. A dispatch that never recorded a result is unconfirmed:
+the provider may already have changed. The proxy refuses to send the same tool call with the same
+arguments again in that Tag's Session, so an operator must reconcile the action first. Separately,
+a Task whose Task Attempt stopped without reporting is `uncertain`, and SuperTag never retries it on its
+own; an operator decides with `supertag task resolve-attempt`. This prevents blind duplication,
+but it is not exactly-once execution.
 
 ## Inspect an uncertain action
 

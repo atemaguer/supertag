@@ -13,7 +13,7 @@ Tag lead ── Workspace app (base commit 4f2c…) ── Task ── Worker Ho
                                                          │ pinned checkout, harness runs
                                                          │ commits, verifies, bundles
                                                          v
-your repository  <──  branch supertag/session/SESSION  <── delivery
+your repository  <──  branch supertag/session/HASH  <── delivery
 ```
 
 1. A Worker Host maps the Workspace to a source: a local Git repository, or a GitHub repository
@@ -23,8 +23,9 @@ your repository  <──  branch supertag/session/SESSION  <── delivery
    Session continue on the Session's own branch, on top of the earlier ones.
 4. After the harness finishes, the host commits the changes, verifies them, and delivers a Git
    bundle and a patch. It never writes your repository.
-5. Your machine imports the delivery as the branch `supertag/session/SESSION`, one branch per
-   Session.
+5. Your machine imports the delivery as the branch `supertag/session/HASH`, one branch per
+   Session. `HASH` is a SHA-256 digest of the Tag and Session IDs, and the Session's report names
+   the branch.
 
 ## Before you start
 
@@ -73,6 +74,9 @@ A local Workspace needs a full base commit or a branch to follow. With a base co
 start from it; move the Tag to a newer commit by putting the binding again. The Tag's Tasks run
 only on hosts that map the Workspace.
 
+A Codex Tag on a code-mode-only model, such as gpt-6-sol, also needs `web:fetch` to run commands;
+see [Codex commands and models](../operations/requirements.md#codex-commands-and-models).
+
 ### Follow a branch instead of a commit
 
 To start each new Session from wherever a local branch points, name the branch instead of a
@@ -110,7 +114,7 @@ repository:
 
 ```sh
 git -C ~/code/app branch --list 'supertag/session/*'
-git -C ~/code/app diff main...supertag/session/SESSION
+git -C ~/code/app diff main...supertag/session/HASH
 ```
 
 Your checkout stays on its own branch; SuperTag never switches it or changes its files. To import
@@ -210,8 +214,7 @@ its checkout; the sandbox image needs `python3`.
 After a successful Task Attempt, the Worker Host writes a read-write copy's changed and created
 files back to the Volume, never deletions or links. A failed or cancelled Task Attempt writes
 nothing. `supertag describe task ID` shows what was written: `complete`, `partial`, or `refused`.
-A Workspace Volume must stay outside artifact storage. Read-only provider-native Modal Volume
-mounts are on the backlog. See [Worker Host reference](../reference/worker.md#workspace-volumes).
+A Workspace Volume must stay outside artifact storage. See [Worker Host reference](../reference/worker.md#workspace-volumes).
 
 ## Select repository Skills and MCP servers
 
@@ -237,12 +240,13 @@ host. A repository's `.devcontainer` settings choose the sandbox's image and set
 | --- | --- |
 | Your checkout | Untouched. Deliveries arrive only as `supertag/session/...` branches |
 | Task checkouts | The Worker Host's state directory, one per Task Attempt |
-| Deliveries | Bundles and patches, recorded with the Task and downloadable with `task download` |
+| Deliveries | Bundles and patches, kept on the Worker Host that ran the Task and relayed by the Control Plane to `fetch` and `task download` |
 | Captured artifacts | The Worker Host that captured them; see [Artifacts](../reference/artifacts.md) |
 
 ## Current limits
 
-- A local Workspace's Tag binding pins one base commit; update it to move new Sessions forward.
+- A local Workspace follows a branch only as far as each host's checkout: SuperTag never fetches,
+  so update the checkout, or put a newer `baseCommit`, to move new Sessions forward.
 - The host's own Git commands ignore repository hooks, filters, and configuration, and a Task
   Attempt fails when the repository's Git configuration changes while it runs.
 - Workspace Volumes arrive as copies only; a Tag with copies may not run commands or fetch from

@@ -12,7 +12,7 @@ generated from the `supertag.runtime.v2` protos in [`proto/`](../proto).
 The Go module's Connect clients need `connect.WithGRPC()` to talk to the Control Plane.
 
 The Gateway and Control Plane refuse every call that does not name a negotiated protocol version.
-A client first calls `ProtocolNegotiation.Negotiate` with its role (`SERVICE_ROLE_OPERATOR` for an
+A client first calls `ProtocolNegotiation.Negotiate` with its role (`SERVICE_ROLE_CLIENT` for an
 operator application) and the versions it speaks, then sends the selected version in the
 `x-supertag-protocol` metadata header on every other call. Only negotiation and the standard gRPC
 health service are exempt.

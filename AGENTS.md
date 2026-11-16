@@ -36,8 +36,9 @@ repo-orientation skill (`.claude/skills/repo-orientation/SKILL.md`) maps each di
 
 ## Rules that are easy to violate
 
-**No public npm package from this checkout.** The `@supertag/*` workspace packages are private
-and carry no compatibility promise; never tell users to depend on them.
+**`supertag-ai` is the only public npm package.** It is the TypeScript SDK in `sdks/typescript`.
+The `@supertag/*` workspace packages are private and carry no compatibility promise; never tell
+users to depend on them. The `supertag` PyPI package is the Python SDK in `sdks/python`.
 
 **Two databases, always.** Every schema change adds a migration to both
 `core/crates/control-plane/migrations/sqlite` and `core/crates/control-plane/migrations/postgresql`,
@@ -65,9 +66,7 @@ must define its subject and any neighboring SuperTag concepts used in its introd
 
 **Docs use `supertag`, not `pnpm supertag`.** Documentation is written for a reader who installed
 the native release archive. The `pnpm supertag` form runs the checkout's Rust CLI through
-`cargo run`, and belongs in `CONTRIBUTING.md`. The one exception is
-`docs/operations/control-plane.md`, which deliberately contrasts installed / checkout / built /
-container invocations.
+`cargo run`, and belongs only in `CONTRIBUTING.md`.
 
 **Capitalized terms are a controlled vocabulary.** `docs/reference/resource-model.md` is the
 authority. Do not capitalize a noun just because it is a domain concept.
@@ -94,7 +93,7 @@ documented `supertag` command and flag against it.
 ## Verify before reporting done
 
 ```sh
-pnpm check   # biome + protobuf generation + typecheck + docs
+pnpm check   # biome + typecheck + docs
 pnpm test    # vitest
 pnpm build   # tsc --build
 cargo test --manifest-path core/Cargo.toml --locked --workspace --all-features

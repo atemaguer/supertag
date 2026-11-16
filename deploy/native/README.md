@@ -28,10 +28,10 @@ Control Plane relays them to readers in flight.
 The Gateway runs collaboration surfaces: Slack, GitHub, Linear, Lark, and Microsoft Teams ingress,
 reply delivery, and operator notifications. Deploy it only when you use a surface or notification.
 It runs only the connectors its flags name. Its webhook listeners are loopback only, so put a
-reverse proxy for them in the same container or host; Lark and webhook notifications connect
-outbound and need none. Render, Cloudflare, and Modal route no inbound traffic to the Gateway, so
-there it serves only Lark and webhook notifications. Its own gRPC listener serves only
-`supertag test notification`, on loopback inside its container. It holds no operator credential.
+reverse proxy for them in the same container or host; Lark, Slack in Socket Mode, and webhook
+notifications connect outbound and need none. Render, Cloudflare, and Modal route no inbound
+traffic to the Gateway, so there it serves only those outbound connectors. Its own gRPC listener
+serves only `supertag test notification`, on loopback inside its container. It holds no operator credential.
 
 Every caller authenticates with its own credential, and the Control Plane checks each call
 against one table of roles. The deployment's Gateway is `gateway:local`: setup gives the Control
@@ -143,9 +143,9 @@ own path when it receives it. Set these secrets per role:
 ### Build the hosted image
 
 Build it from a Linux `supertag` binary with the two scripts beside it, and push it to a registry
-your platform can pull from. Deploy it by digest. No native release archive is published yet, so
-build the binary for Linux from a checkout of the release you deploy, in the Rust image whose
-Debian release matches the runtime image:
+your platform can pull from. Deploy it by digest. Take the binary from the release's Linux archive
+for your platform's architecture (`linux-amd64` or `linux-arm64`), or build it from a checkout of
+the release you deploy, in the Rust image whose Debian release matches the runtime image:
 
 ```sh
 docker run --rm --platform linux/amd64 -v "$PWD":/src -w /src/core \
@@ -157,6 +157,9 @@ docker build --platform linux/amd64 --file deploy/docker/rust-service.Dockerfile
   --target hosted --tag REGISTRY/supertag-hosted:VERSION hosted
 docker push REGISTRY/supertag-hosted:VERSION   # prints the digest
 ```
+
+Compose runs the `control-plane` and `gateway` targets of the same Dockerfile instead. Build each
+the same way from the same directory, naming that target in place of `hosted`.
 
 ### Issue certificates from your own CA
 

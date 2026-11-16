@@ -77,8 +77,19 @@ supertag diff -f team.yaml
 supertag apply -f team.yaml
 ```
 
-A grant with `approvalRequired: true` waits in the operator inbox for each call. To apply a set
-only in one channel, activate it at that location:
+A grant with `approvalRequired: true` waits in the operator inbox for each call.
+
+Two harness rules decide whether `commands:execute` works:
+
+- Claude Code, Cursor, and OpenCode run commands without a sandbox. Their Tasks that may run
+  commands run only on a host that lists the harness in `allow-unsandboxed-commands`, as the
+  `Builder` above needs `allow-unsandboxed-commands: [claude-code]`; otherwise they wait.
+- Current Codex models run commands only in Codex code mode, which SuperTag starts only for a Task
+  that also has `web:fetch`. A Codex Tag that should run commands needs
+  `{ target: runtime, action: web:fetch }` too, which also opens the network to its commands; see
+  [Codex commands and models](../../docs/operations/requirements.md#codex-commands-and-models).
+
+To apply a set only in one channel, activate it at that location:
 
 ```sh
 supertag permission-set activate engineering-access --tag builder --provider slack \

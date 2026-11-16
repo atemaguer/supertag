@@ -53,7 +53,7 @@ or harness session:
   members share. A Mailbox is where one Tag receives another's messages, inside a Team or across
   Teams by grant.
 - **Context Sets and Permission Sets** separate reusable knowledge from authority.
-- **Requester and source rules, budgets, approvals, scoped credentials, and Task policy records**
+- **Requester and source rules, budgets, approvals, and Task policy records**
   prevent execution from silently gaining more authority.
 - **Recovery and audit** preserve accountability when work spans processes, retries, and hosts.
 - **Worker Hosts and harnesses** let the same organization use different execution

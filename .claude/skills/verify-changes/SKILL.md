@@ -29,6 +29,8 @@ CONTRIBUTING.md.
 
 After `supertag-ai` changes, run `pnpm --filter supertag-ai typecheck` and, with
 `SUPERTAG_RUST_TEST_CLI` naming a built `supertag`, `pnpm --filter supertag-ai test:package`.
+After Python SDK changes, install it with `python -m pip install "./sdks/python[dev]"` in a virtual
+environment, then run `ruff check sdks/python` and `pytest sdks/python/tests`.
 After terminal UI changes, run `go vet ./...` and `go test ./...` in `apps/tui`. After desktop
 changes, run `pnpm --filter @supertag/desktop build` and `cargo clippy` with
 `--manifest-path apps/desktop/src-tauri/Cargo.toml`.

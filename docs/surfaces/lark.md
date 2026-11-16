@@ -2,12 +2,12 @@
 
 Connect a Lark or Feishu app so a **Tag**, a persistent AI actor with its own responsibilities
 and permissions, replies in group chats and direct bot chats. SuperTag's Lark collaboration surface
-uses the official Node SDK and an outbound long connection, so SuperTag does not need a public
-webhook endpoint for Lark message events.
+uses an outbound long connection, so SuperTag does not need a public webhook endpoint for Lark
+message events.
 
 A **collaboration surface** links SuperTag to an
-external work tool. The **Gateway** is the part of the **Control Plane**, the SuperTag service, that
-receives and sends collaboration surface traffic. Each request becomes a **Task**, one request
+external work tool. The **Gateway** is the SuperTag service that
+receives and sends collaboration surface traffic, as a client of the **Control Plane**. Each request becomes a **Task**, one request
 accepted for a Tag. See the [glossary](../reference/glossary.md) for other terms.
 
 ## Before you start
@@ -51,11 +51,12 @@ For Lark International:
 ```sh
 export LARK_APP_ID="cli_..."
 export LARK_APP_SECRET="..."
+export LARK_TENANT_KEY="..."
 supertag setup surface lark --domain lark
 ```
 
-For Feishu, use `--domain feishu`. Setup asks for the tenant key too, or reads `LARK_TENANT_KEY`.
-It verifies the credentials through `bot/v3/info`, saves the App Secret in the credential vault,
+For Feishu, use `--domain feishu`. Setup prompts for any value not set in the environment. It
+verifies the credentials through `bot/v3/info`, saves the App Secret in the credential vault,
 and records the App ID, bot `open_id`, domain, and display name as the Surface Account in the
 Control Plane and in `supertag.yaml`. The local Gateway then opens the long connection; Lark needs
 no public URL.

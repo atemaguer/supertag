@@ -39,8 +39,8 @@ if (!readFileSync(join(root, "docs/README.md"), "utf8").includes(`](${objectiveG
 
 // Internal design records are gitignored and must not be linked or checked.
 const internal = /(architecture|product-brief)[^/]*\.md$/u;
-// Contributors use the checkout shortcut; the operations page compares invocation forms.
-const checkoutFormAllowed = new Set(["CONTRIBUTING.md", "docs/operations/control-plane.md"]);
+// Contributors use the checkout shortcut.
+const checkoutFormAllowed = new Set(["CONTRIBUTING.md"]);
 
 function markdownFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

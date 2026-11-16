@@ -112,7 +112,8 @@ Control Plane on SQLite and PostgreSQL: it admits an event, replays it, delivers
 and releases the account.
 
 The example dials cleartext, so it reaches only a Control Plane on loopback. A connector for a
-remote Control Plane adds TLS with a client certificate, as described above.
+remote Control Plane adds TLS, and a client certificate only when the Control Plane requires one,
+as described above.
 
 ```text
 supertag-example-connector accept http://127.0.0.1:3434 discord/acme EVENT TAG SESSION CHANNEL "text"

@@ -20,7 +20,7 @@ services:
     type: host
     harnesses: [codex, claude-code]
     models:
-      codex: [gpt-5.5]
+      codex: [gpt-6-sol]
     workspaces:
       app: ~/code/app
     concurrency: 2
@@ -37,8 +37,10 @@ A host in the same file as its Control Plane joins on its own and may run every 
 `harnesses` (up to five of `codex`, `claude-code`, `cursor`, `opencode`, `openai-agents`), or
 `adapter` and `adapter-args` for your own; `models` per harness, default first; `workspaces`, each
 a path or `{ path, delivery: branch|patch, setup: COMMAND }`; `concurrency` 1 to 16 per harness;
-`attempt-timeout-seconds`; `skills`; `allow-unsandboxed-commands` for `cursor` or `opencode`;
-`restart: unless-stopped`.
+`attempt-timeout-seconds`; `skills`; `labels`; `allow-unsandboxed-commands` for `claude-code`,
+`cursor`, or `opencode`; `restart: unless-stopped`. Claude Code, Cursor, and OpenCode run commands
+without a sandbox, so their Tasks that may run commands (`commands:execute`) run only on a host
+that lists the harness in `allow-unsandboxed-commands`.
 
 ## Join a shared Control Plane
 
@@ -83,7 +85,7 @@ supertag worker-host --control-plane https://supertag.example.com \
 | Harness | Needs | Sign-in |
 | --- | --- | --- |
 | `codex` | `codex` on `PATH` | `CODEX_API_KEY`, `OPENAI_API_KEY`, or file-backed `codex login` |
-| `claude-code` | `claude` on `PATH`, Node.js | `ANTHROPIC_API_KEY` or the user's `claude` sign-in |
+| `claude-code` | Node.js; `claude` on `PATH` for `init` and `sign-in` (Tasks use the bundled Claude Code) | `ANTHROPIC_API_KEY` or the user's `claude` sign-in |
 | `cursor` | Node.js | `CURSOR_API_KEY` |
 | `opencode` | `opencode` on `PATH`, Node.js, a `provider/model` model | The provider's API key |
 | `openai-agents` | Python with the `supertag` package | `OPENAI_API_KEY` |
@@ -91,6 +93,10 @@ supertag worker-host --control-plane https://supertag.example.com \
 ```sh
 supertag sign-in codex
 ```
+
+A Codex Tag that should run commands also needs `web:fetch`: current Codex models run commands
+only in Codex code mode, which SuperTag starts only for a Task that has `web:fetch`. See
+[Codex commands and models](../../docs/operations/requirements.md#codex-commands-and-models).
 
 Put provider keys in `~/.supertag/.env`, not the shell profile: a service unit does not inherit
 the shell. Never handle the user's keys yourself.
@@ -103,8 +109,10 @@ supertag placement explain TASK_ID --control-plane team
 ```
 
 A host carries labels from `--label`, its host service's `labels: [...]` in supertag.yaml, or its
-Auth Key's `--label`. A Tag with `runsOn` labels runs only on hosts that carry all of them.
-`supertag up` refuses invalid or reserved labels before starting any service.
+Auth Key's `--label`. A Tag with `runsOn` labels runs only on hosts that carry all of them, and a
+Tag bound to a Workspace runs only on hosts that map that Workspace. `supertag up` refuses invalid
+or reserved labels before starting any service. `placement explain` names why a queued Task
+waits.
 
 ## Verify
 

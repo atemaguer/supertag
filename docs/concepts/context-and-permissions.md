@@ -86,10 +86,18 @@ Use a Permission Set for collaboration surface resource/actions such as:
 
 Permission Sets also control powerful tools supplied by a harness or execution environment:
 
-- `commands:execute` allows command or shell tools;
+- `files:read` allows file-reading tools;
 - `files:write` allows file-editing tools and a writable workspace;
+- `commands:execute` allows command or shell tools;
 - `web:fetch` and `web:search` allow their respective web tools;
-- `browser:use` allows browser or computer-use tools when the selected harness supports them.
+- `browser:use` allows browser or computer-use tools. No built-in harness supports it yet, so a
+  Task that needs it cannot run on one.
+
+A Task never runs with an action its harness cannot enforce: it waits for a host that can run it,
+or fails. Current Codex models run commands only in Codex's code mode, which can reach
+the network. A Codex Tag therefore needs `web:fetch`, and the `files:write` that Codex requires
+with it, as well as `commands:execute` to run commands. Claude Code, OpenCode, and Cursor run commands only on a Worker Host that allows
+unsandboxed commands, or, for Cursor, in a shared execution environment.
 
 ```yaml
 apiVersion: supertag/v1
@@ -102,6 +110,8 @@ spec:
       action: commands:execute
     - target: runtime
       action: files:write
+    - target: runtime
+      action: web:fetch
 ```
 
 ```sh
@@ -164,8 +174,8 @@ spec:
 A gated collaboration surface or MCP call does not run. It returns "approval pending" with a request ID, and the AI
 actor continues other work or waits. A Task that would receive a gated runtime action waits for
 approval before it starts, whatever its manager asked for. The decider approves once, or for every
-matching action in the Objective, so repeated work does not ask again. Shell commands and file
-writes inside a harness are not yet gated one by one; the Task-level hold is the control today.
+matching action in the Objective, so repeated work does not ask again. SuperTag does not gate shell
+commands and file writes inside a harness one by one; the Task-level hold is the control.
 See [IAM approval](../reference/iam.md#approval) for precedence and scope.
 
 Direct activation and Role composition serve different needs. Activate a Context Set or Permission

@@ -3,15 +3,17 @@
 SuperTag's terminal UI, written in Go with Bubble Tea v2, Lip Gloss v2, Bubbles v2
 and Glamour.
 
-## Runtime v2
+## Launch and connections
 
-The Rust CLI launches the Go TUI with a Control Plane URL and an operator credential over file
-descriptor 3 and sets `SUPERTAG_TUI_HANDOVER=3`. The TUI reads descriptor 3 only when that variable
-is set, so a plain launch with no handover never touches a descriptor it does not own. The handover
+Plain `supertag` in an interactive terminal, or `supertag tui`, launches the binary
+`supertag-tui` installed beside the CLI (`--binary` or `SUPERTAG_TUI_BINARY` names another). The
+CLI first checks that `supertag-tui --version` matches its own version. It hands over a Control
+Plane URL and an operator credential over file descriptor 3 and sets `SUPERTAG_TUI_HANDOVER=3`.
+The TUI reads descriptor 3 only when that variable is set, so a plain launch with no handover never touches a descriptor it does not own. The handover
 identifies the protocol as `runtime.v2` and can include a trusted server certificate authority and
 client certificate and key paths. The TUI uses the generated runtime v2 Go bindings over gRPC and
 HTTP/2. A `wss://` Control Plane URL carries the same connection through a WebSocket tunnel, as the
-Rust CLI does, with the Control Plane's TLS and any client certificate inside it; the server
+CLI does, with the Control Plane's TLS and any client certificate inside it; the server
 certificate authority also checks the tunnel's outer certificate. Cleartext `http://` and `ws://`
 connections require a loopback IP address.
 
@@ -34,15 +36,16 @@ local service credentials and the desktop app's store. A launch handover keeps i
 Control Plane and credentials; saved connections add to the chooser. Without a launch handover,
 `supertag-tui` reopens the last selected saved Control Plane or shows the empty chooser for adding
 the first one. The token never appears in command arguments or the terminal display.
+
 Open Objectives show their status, owner, deadline, and available spend information. Use
 `/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to
 message its owner. You can select a Team in the Objective form and read its members, concurrency
 limit, and recent Workstream posts from the rail. Work uses the Workspace configured on the owner
-Tag. The rail lists questions waiting for an operator. Select a question to answer the owner in
-the same Session, its thread of work. The status bar shows whether Worker Hosts, the machines or
+Tag. The rail lists questions waiting for an
+operator. Select a question to answer the owner in the same Session, its thread of work. The status bar shows whether Worker Hosts, the machines or
 sandboxes that run Tasks, are ready, busy, draining, or offline.
 
-## Node launcher
+## Using the terminal UI
 
 The status bar shows which Control Plane it talks to, its Worker Hosts by phase
 (such as `Worker Hosts: 2 ready, 1 unreachable`; revoked hosts are left out), and whether it is
@@ -86,9 +89,8 @@ work and latest entry. Enter switches to one. `n` starts a new conversation: typ
 64 letters, digits, `.`, `_` or `-`, starting with a letter or digit) and press enter. The Tag's
 rail state counts the open work Sessions of the conversation it shows. Esc goes back.
 
-Ctrl-P lists the Control Planes you can switch to, when there is more than one: this machine's,
-when it has a local operator credential, and each one saved with `supertag connect`.
-Enter switches to the one under the cursor, and esc goes back. Adding a Control Plane takes an
+Ctrl-P lists the Control Planes you can switch to: the one the CLI handed over, and each one saved
+in the terminal UI or with `supertag connect`. Enter switches to the one under the cursor, and esc goes back. Adding a Control Plane takes an
 operator token, or a client Auth Key (`stak_…`) from an operator. An Auth Key joins this device as
 `client:HOSTNAME` once; only the device's own credential is saved. A client device sees its own
 conversations and Objectives within the Tags its key allows, and no Worker Host status. Switching ends every stream and call
@@ -97,8 +99,7 @@ to the Control Plane you leave and reads everything anew from the next; unsent i
 Ctrl-K, or `/` on an empty input line or where the pane has none, opens the command palette.
 From a Tag's conversation, type `/goal <outcome>` and press enter to create an Objective that the
 Tag owns. The owner's first turn starts at once. Type `/goal` on its own to open the form.
-When you open the terminal UI in a checkout registered with the local Control Plane, new
-Objectives use that Workspace.
+The Objective works in the Workspace configured on its owner Tag.
 
 Type to filter the palette commands, move with up and down, and press enter to run one. Esc goes
 back.
@@ -111,7 +112,9 @@ back.
   on the budget, creates the Objective, which starts at once. The pane then says whether its
   owner took its first turn, with any warnings, and enter shows the Objective. When it could not
   start, such as for an owner without a connected Worker Host, `r` starts it once that is fixed.
-- **Switch Control Plane** opens the Ctrl-P list, when there is more than one.
+- **Control Planes · add or switch** opens the Ctrl-P list.
+- **Task files** lists the files a completed Task captured, by Task ID, and saves the chosen one
+  to a destination you type.
 - **Open inbox** shows the first item waiting on you, with the rail on it.
 
 Tab moves between the rail and the main pane; up and down (or `k` and `j`) move through the rail,
@@ -131,20 +134,20 @@ when the Control Plane refuses it, the status bar leaves the Worker Hosts out. `
 lists the Tags. The replies are projected into the TUI's own presentation types in `views/`. See
 `contributing/tui-design.md`.
 
-Build with `./build.sh`, which cross-compiles static binaries for macOS and Linux (arm64 and
-amd64) into `dist/supertag-tui-GOOS-GOARCH`. It uses the Rust workspace version from
-`core/Cargo.toml` by default. Set `SUPERTAG_TUI_VERSION` when building for a launcher with a
+Build with `./build.sh`, which cross-compiles static binaries for macOS arm64 and Linux arm64 and
+amd64 into `dist/supertag-tui-GOOS-GOARCH`. It uses the workspace version from `core/Cargo.toml`
+by default. Set `SUPERTAG_TUI_VERSION` when building for a launcher with a
 different version.
-Run the tests with `go test ./...`. The Rust CLI's `operator_runtime.rs` tests drive a built
-binary end to end under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
+Run the tests with `go test ./...`. The ignored tests in `core/crates/cli/tests/operator_runtime.rs`
+drive a built binary end to end under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
 
-Plain `supertag`, run in an interactive terminal, launches it. The CLI resolves the current
-Control Plane as every other command does, and the others it can switch to, starts the binary with
-an extra pipe as file descriptor 3, sets `SUPERTAG_TUI_HANDOVER=3`, and writes one JSON line to it:
-`{"protocol": "runtime.v2", "contexts": [{"url": ..., "token": ..., "name": ...}, ...], "current": N}`,
-where `current` is the index of the selected Control Plane and `name` is left out for this
-machine's. The TUI refuses a handover that names another protocol or none. When
-`SUPERTAG_OPERATOR_TOKEN` or `SUPERTAG_ADMIN_TOKEN` is set, that token goes only to the Control Plane
-it selects, so the list holds that one alone. A saved connection whose credential cannot be read is
-left out. The binary takes no token from its arguments or environment; the saved-connection flow
-is described above.
+The CLI resolves the Control Plane as every other command does (`--control-plane`,
+`--state-directory`, `SUPERTAG_CONTROL_PLANE_URL`, or this machine's local services), starts the
+binary with a socket as file descriptor 3, sets `SUPERTAG_TUI_HANDOVER=3`, and writes one JSON
+object to it:
+`{"protocol": "runtime.v2", "current": 0, "contexts": [{"url": ..., "token": ..., "workspace": ...,
+"server_ca_file": ..., "client_cert_file": ..., "client_key_file": ...}]}`. The TUI refuses a
+handover that names another protocol or none. With nothing selected and no local services
+running, the CLI starts the binary without a handover, and it opens on the saved Control Planes.
+A saved connection whose credential cannot be read is left out. The binary takes no token from its
+arguments or environment; the saved-connection flow is described above.

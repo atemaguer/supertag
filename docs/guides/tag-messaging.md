@@ -56,12 +56,11 @@ supertag mailbox-grant allow support backend
 supertag get mailbox-grant --tag backend
 ```
 
-```text
-backend accepts messages from support.
-```
+The second command prints the grant as JSON, with `sender_tag_id` `support` and
+`recipient_tag_id` `backend`.
 
 Grants are directional, so a reply back to `support` needs its own grant. Remove one with
-`supertag mailbox-grant revoke support`. backend A Tag manifest declares the same routes:
+`supertag mailbox-grant revoke support backend`. A Tag manifest declares the same routes:
 
 ```yaml
 apiVersion: supertag/v1
@@ -87,7 +86,8 @@ A Tag sends with the `send_message` coordination tool, which takes `to` (a Tag n
 
 `send_message` is available in a Tag's conversations, in an Objective's conversation, and in the
 Tag's own inbox turn. It is not available in a work Session, which may address only the Session
-that started it.
+that started it, nor in the turn that brings a work Session's report back, except to request a
+commit review of what that Session delivered.
 
 `backend` takes the message in its next inbox turn, together with anything else waiting. It
 answers with `send_message` back to `support` only when the sender needs an answer; a message
@@ -95,40 +95,43 @@ sent only to acknowledge another is noise.
 
 ## Request a commit review
 
-An [Objective](objectives.md) records an outcome owned by a Tag. Its owner can ask a Tag on
-another Team to review a delivered Git commit. Set `review.commit` to the full hash in
+An [Objective](objectives.md) records an outcome owned by a Tag. Its owner can ask another Tag,
+such as one on another Team, to review a delivered Git commit. Set `review.commit` to the full hash in
 `send_message`. The reviewer gets the request in its Mailbox with the Objective, commit,
-and request message ID.
+and request message ID, and reads the commit's patch with `read_review_patch`.
 
 The reviewer uses `send_message` with the requester as `to` and its evidence as `text`.
 Set `review.requestId` to the request message ID and `review.verdict` to `approved` or
 `changes_requested`. Both directions use the usual Mailbox grants. SuperTag records the
 verdict on the Objective for that commit and brings it to the owner's Objective conversation.
-See it under **Commit reviews** in the terminal UI or `supertag describe objective`. A new
+See it under **Commit reviews** in the terminal UI or with
+`supertag objective commit-reviews OBJECTIVE_ID`. A new
 commit needs its own request. The operator still decides whether to accept the result.
 
 ## Check that it worked
 
 ```sh
-supertag get message --mailbox backend --limit 50
+supertag get message --mailbox backend
 ```
 
-Each message shows its sender, its text, and its status: `pending` until the inbox takes it, then
-`handled` with the turn that took it, or `failed`. The same command with
-`--mailbox support` shows the reply.
+Each message shows its sender, its text, and its `state`: `TAG_MESSAGE_STATE_PENDING` until the
+inbox takes it, then `TAG_MESSAGE_STATE_HANDLED` with the `task_id` of the turn that took it, or
+`TAG_MESSAGE_STATE_FAILED`. A page holds at most 16 messages, newest first; pass the returned
+`next_cursor` as `--cursor` for older ones. The same command with `--mailbox support` shows the
+reply.
 
 A Tag reads its own Mailbox with the `read_mailbox` tool.
 
 ## If something goes wrong
 
 - **The send is refused as not permitted.** The two Tags share no Team and there is no grant.
-  Add one with `supertag mailbox-grant allow SENDER`, RECIPIENT or put both in a Team. See
+  Add one with `supertag mailbox-grant allow SENDER RECIPIENT` or put both in a Team. See
   [A Tag cannot send a message to another Tag](troubleshooting.md).
 - **The send is refused for too many messages.** A turn sends at most 3. Say what the recipient
   needs in one message.
 - **The send is refused for too many hops.** The message answers a chain that is already 4
   messages long. Bring a person in instead, or start the work directly.
-- **A message stays `pending`.** The recipient has no connected Worker Host, so it cannot take an
+- **A message stays pending.** The recipient has no connected Worker Host, so it cannot take an
   inbox turn. Check `supertag describe tag NAME`.
 - **The recipient did nothing.** A message is information; the recipient decides under its own
   Roles whether to act. Give a Tag work you expect done through an

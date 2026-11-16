@@ -23,7 +23,7 @@ and [Workspace](glossary.md#workspace).
 
 The **Control Plane** is the service that stores the
 [organization](glossary.md#autonomous-organization) and accepts its work. When it accepts a Task, it
-stores two independent snapshots:
+stores a policy snapshot with it that holds two independent parts:
 
 - **Context Plan** — the versioned declarations of knowledge that may be added, called Context
   Items: Skills and cross-Session artifact selections.
@@ -36,25 +36,16 @@ inputs with the claim, without database access. Policy changes affect later Task
 
 ## Same-Session continuity
 
-The Control Plane derives up to five recent completed Task history entries from the current
-Session and includes them directly in the Task snapshot. This is not a Context Plan item and
-requires no Context Set. Each `TaskHistoryEntry` contains `taskId`, `sessionId`, `tagId`, optional
-`requestText`, a bounded `result`, and `completedAt`. It is an execution input projection of the
-stored Task, not a separately published resource.
+Each Session maps to one native harness session. When a Task Attempt finishes, its harness may
+save the native session as a checkpoint. The Control Plane keeps the latest checkpoint for each Tag
+and Session in its private `--checkpoint-directory`; a Task Attempt that finishes without one,
+such as a failed one, clears it, so the Session's next Task starts a new native session.
 
-Each Session maps to one native harness session. The Control Plane offers a Session's latest
-resumable native state when the Tag, the Session, and the reply audience match, and the Task runs
-on the harness that produced it. The harness then checks that it can load the
-state where it runs. Authorization, Role instructions, the Context Plan, the workspace plan,
-and execution settings do not gate a resume. Each Task Attempt
-receives the tools and permissions admitted for its own Task.
-
-The history entries above are the fallback. A harness that resumes native state omits them from
-its prompt. It includes them when no state was offered, when it rejects the offered state, or when
-the predecessor Task Attempt failed for a reason other than its spending limit. A Task Attempt
-stopped by its spending limit resumes after the allocation is renewed. A resume that fails while running fails its Task Attempt, so
-the next Task Attempt replays. Earlier tool output stays in a resumed transcript after a permission is removed; it grants no new
-access.
+The Session's next Task receives the checkpoint, and its harness resumes it. A harness refuses a
+checkpoint that another harness, Tag, or Session produced, and the refusal fails the Task Attempt.
+Authorization, Role instructions, the Context Plan, the workspace plan, and execution settings do
+not gate a resume: each Task Attempt is authorized for its own Task. Earlier tool output stays in a
+resumed transcript after a permission is removed; it grants no new access.
 
 ## Cross-Session artifact selection
 

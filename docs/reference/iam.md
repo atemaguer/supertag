@@ -73,7 +73,6 @@ metadata:
   name: release-engineering
 spec:
   approvers:
-    - tag:release-manager
     - operator:release-oncall
   permissions:
     - target: surface
@@ -106,20 +105,22 @@ The approvers of a request are the union of the approvers of the sets that requi
 | Entry | Who may decide |
 | --- | --- |
 | `operator:<operatorId>` | That operator, authenticated to the Control Plane's operator RPCs |
-| `tag:<Tag name or ID>` | That Tag, in its own turn |
+| `client:<name>` | That client device, enrolled with a client Auth Key. Only for `workstream:post` and `mailbox:send` |
+| `tag:<Tag name or ID>` | Accepted in a Permission Set, but no Tag decides an approval |
 
-Without `approvers`, authorized operators decide. Listing only Tags adds Tag approvers; it
-does not remove operator authority. Listing any operator restricts operator decisions to the
-listed operators. A Tag never decides a request its own Task made.
+Without `approvers`, any authorized operator decides, and no client does. Listing operators
+restricts the decision to them. A gate must name at least one operator: a gated MCP tool call
+whose approvers name none is denied, a gated Workspace pull request accepts only operator
+approvers, and a gated runtime action whose approvers name none is not admitted.
 
 ### Where SuperTag checks approval
 
 | Action | Check |
 | --- | --- |
-| Collaboration surface action through hosted MCP | The Worker Host's policy proxy asks the Control Plane before forwarding each call |
-| MCP server tool (`target: mcp`) | The Worker Host's policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
+| MCP server tool (`target: mcp`), including collaboration surface tools | The Worker Host's policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
 | Opening a Workspace pull request (`pull-requests:create`) | The Worker Host asks the Control Plane before pushing the Task branch; see [Workspaces](../guides/workspaces.md#use-a-github-repository) |
-| Shell commands and file writes inside a harness | Not checked per action yet; only through Task admission |
+| Posting to a Workstream or sending a Mailbox message (`workstream:post`, `mailbox:send`) | The harness's coordination tool asks the Control Plane before each post or message |
+| Other runtime actions, such as shell commands and file writes | Not checked per call; only through Task admission. A Task never receives one of these that requires approval |
 
 The Worker Host fails closed. A gated call without a reachable Control Plane is not forwarded. The
 call returns "approval pending" with the request ID. Every turn except a conversation's own ends
@@ -137,29 +138,33 @@ A decision chooses its scope:
 | `once` | Allows one call with the same Task, action, and arguments digest. For a work Session, any Task of that work Session matches, so the retry in its next Task runs |
 | `objective` | Allows every matching action in the Objective, optionally until a time |
 
-An Objective-scope approval of a runtime action also admits later Tasks in that Objective
-without holding them. See [Approval requests](coordination.md#approval-requests) for the
+An Objective-scope approval of `workstream:post` or `mailbox:send` also covers later Tasks in that
+Objective. See [Approval requests](coordination.md#approval-requests) for the
 lifecycle.
 
 ## Current action vocabulary
 
+A `target: surface` permission names a Surface Account and a scope. Its actions cover GitHub
+Workspaces:
+
 | Collaboration surface | Actions |
 | --- | --- |
-| Lark / Feishu | `messages:read`, `messages:send`, `messages:reply` |
 | GitHub Workspace source and delivery | `contents:read`, `pull-requests:create` |
-| Linear | `issues:read`, `issues:create`, `comments:create` |
-| Teams | `messages:read`, `messages:send`, `messages:reply` |
+
+Tools on Slack, GitHub, Linear, Microsoft Teams, and Lark are MCP server tools, granted with
+`target: mcp`; see [Tool resolution and adaptation](#tool-resolution-and-adaptation).
 
 Runtime permissions use the same Permission Set but have a different target:
 
 | Runtime action | Meaning |
 | --- | --- |
-| `commands:execute` | Use command or shell tools |
+| `files:read` | Read files in the Task workspace |
 | `files:write` | Edit files in a writable Task workspace |
+| `commands:execute` | Use command or shell tools |
 | `files:delegate-write` | Let an Objective's owner delegate writes to a Team member whose Role grants `files:write` |
 | `web:fetch` | Fetch a known web resource |
 | `web:search` | Search the web |
-| `browser:use` | Use browser or computer-control tools |
+| `browser:use` | Use browser or computer-control tools. No built-in harness supports it yet |
 
 Other `namespace:action` names can be stored but enable nothing in the built-in harnesses. Published actions should describe authority, not a particular harness API.
 
@@ -175,8 +180,8 @@ the actions its owner Tag's Permission Sets allow, resolved once at creation:
 
 An operator's explicit list narrows the default and never widens it. A Task in the Objective
 receives the actions within the Objective's list and, for delegated work, within its delegating
-Task's. Approval travels with the action: a Task waits when its own Permission Sets, or those of
-the Task or owner it inherits the action from, mark it `approvalRequired: true`. See
+Task's. Approval travels with the action: the action stays gated when the Task's own Permission
+Sets, or those of the Task or owner it inherits the action from, mark it `approvalRequired: true`. See
 [Objective runtime actions](coordination.md#objective-runtime-actions).
 
 When the Objective and the delegating Task include `files:delegate-write`, a different Team
@@ -208,7 +213,7 @@ spec:
 | --- | --- |
 | `action` | `server/tool`. The server is an exact server name. The tool is a tool name, or a pattern in which `*` matches any run of characters. |
 | `resource` | Optional. Limits the grant to calls whose arguments name this resource, as `kind:value`. Allowed only for servers with a resource mapping. |
-| `approval` | Optional `required`: each call waits for a recorded decision. See [Approval](#approval). |
+| `approvalRequired` | Optional `true`: each call waits for a recorded decision. See [Approval](#approval). |
 
 Matching is exact and case-sensitive. `sentry/get_*` covers `get_issue` and `get_event`, but not
 `Get_Issue` or `list_issues`. Server names never take a pattern. Tool names outside letters,
@@ -258,7 +263,7 @@ that Workspace use the server. A host server whose login lapsed still counts as 
 turn waits for `supertag mcp login NAME`.
 
 When no bound host provides a needed server, the Task waits. `supertag describe task` shows
-`Waiting: no bound Worker Host provides MCP server NAME`. A Worker Host that receives a Task for a
+`No bound Worker Host provides MCP server NAME` as the reason it waits. A Worker Host that receives a Task for a
 server it cannot provide fails the Task Attempt before the harness starts.
 
 ## Tool resolution and adaptation
@@ -278,18 +283,24 @@ Runtime actions are captured separately from collaboration surface resources in 
 
 | Runtime action | Claude Code | Codex | Cursor |
 | --- | --- | --- | --- |
-| no write permission | removes `Write` and `Edit` | read-only sandbox | read, grep, glob, ls, and MCP tools only |
+| `files:read` | enables `Read`, `Glob`, and `Grep` | read-only sandbox | read, grep, glob, ls, and MCP tools |
+| no write permission | removes `Write` and `Edit` | read-only sandbox | no edit tool |
 | `files:write` | enables `Write` and `Edit` | workspace-write sandbox | adds edit |
-| `commands:execute` | enables `Bash` only with `allow-unsandboxed-commands: [claude-code]`; otherwise a Claude Code host does not run the Task | enables shell and unified execution features, and lets commands use loopback sockets | adds shell only with `files:write` and `allow-unsandboxed-commands: [cursor]`; otherwise refused |
-| `web:fetch` | enables `WebFetch` | with `files:write`, enables sandbox network access | no native web tool |
+| `commands:execute` | enables `Bash` only with `allow-unsandboxed-commands: [claude-code]`; otherwise a Claude Code host does not run the Task | enables shell and unified execution features, and lets commands use loopback sockets. A code-mode-only model, which is every current Codex model, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) | adds shell only with `files:write` and `allow-unsandboxed-commands: [cursor]`; otherwise the Task waits |
+| `web:fetch` | enables `WebFetch` | requires `files:write`; enables sandbox network access, for commands too | not supported: the Task waits |
 | `web:search` | enables `WebSearch` | enables live web search | adds `webSearch` |
-| `browser:use` | available only through an installed compatible tool | enables supported browser/computer-use features | no native browser tool |
+| `browser:use` | not supported | not supported | not supported: the Task waits |
+
+`files:write` or `commands:execute` also gives a Codex Task read access. A Codex Task with none of
+`files:read`, `files:write`, and `commands:execute` fails, because Codex reads the Workspace in
+every sandbox mode. A harness adapter that receives an action it cannot enforce fails the Task
+Attempt before the harness starts.
 
 ### Cursor limits
 
-Cursor can read outside the workspace and has no per-call approval. It refuses a repository or
-Task Attempt home `.cursor/sandbox.json` at start. The agent can create that file during a run
-and widen later shell decisions, so its sandbox is defense in depth, not command isolation.
+Cursor can read outside the workspace and has no per-call approval. The agent can change
+Cursor's own sandbox configuration during a run and widen later shell decisions, so its sandbox
+is defense in depth, not command isolation.
 See [Cursor setup and limits](../operations/requirements.md#cursor-setup-and-limits).
 
 ### Codex sandbox network
@@ -301,8 +312,8 @@ may run commands, the Codex adapter therefore allows loopback and nothing more:
 | Admitted runtime actions | Files Codex may write | Network inside the sandbox |
 | --- | --- | --- |
 | neither `commands:execute` nor `web:fetch` | the workspace with `files:write`, otherwise none | none |
-| `commands:execute` | the workspace with `files:write`, otherwise none | loopback only |
-| `files:write` and `web:fetch` | the workspace | outbound network, as before |
+| `commands:execute` without `web:fetch` | the workspace with `files:write`, otherwise none | loopback only |
+| `files:write` and `web:fetch` | the workspace | outbound network |
 
 For loopback, the adapter replaces Codex's `--sandbox` mode with a SuperTag-owned Codex permission
 profile named `supertag`. The profile extends Codex's `:workspace` or `:read-only` profile, so
@@ -337,7 +348,7 @@ operating-system sandbox. Claude Code, OpenCode, and Cursor on a local Worker Ho
 an enforced command boundary: their shell tools run commands as the Worker Host's user. SuperTag therefore
 places a Task with `commands:execute` on them only when the host service lists them in
 `allow-unsandboxed-commands`. Otherwise the Task goes to a Worker Host that may run commands, such
-as one serving Codex, or waits with a reason naming that setting. See
+as one serving Codex, or waits. See
 [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).
 
 `files:write` alone needs no opt-in. The harness writes files through its own file tools, inside

@@ -45,7 +45,9 @@ A Tag posts with the `post` coordination tool, which takes `text` and an optiona
 
 SuperTag records the calling Tag as the author and appends the post to its Team's Workstream. In
 an Objective's conversation the Team is the Objective's; elsewhere it is the caller's only Team. A
-Tag in several Teams and no Objective gets an error listing them.
+Tag in several Teams, outside an Objective, gets an error saying an Objective must select the
+Workstream. The author must be a member of that Team. A work Session, and the turn in which a
+Session's report reaches the Tag that started it, can neither post nor read the Workstream.
 
 Each Tag in `to` must be a current member, and the list holds at most 20 Tags. Each addressee
 receives the post in its inbox, exactly as it receives a direct message, and handles it in its
@@ -61,17 +63,17 @@ Bounds:
 A Tag reads with `read_workstream`, which takes an optional `afterSequence` cursor and `limit`:
 
 ```json
-{ "afterSequence": 0, "limit": 50 }
+{ "afterSequence": 0, "limit": 16 }
 ```
 
 Without `afterSequence` the newest posts come back; with it, the posts after that sequence number,
-oldest first. The Team is chosen the same way as for `post`. Read again from the last sequence you
+oldest first. A page holds at most 16 posts. The Team is chosen the same way as for `post`. Read again from the last sequence you
 processed until a page is empty. Reading does not subscribe to anything and acknowledges nothing.
 
 Operators read the same record from the CLI:
 
 ```sh
-supertag get workstream-post --team service-identity --after-sequence 0 --limit 50
+supertag get workstream-post --team service-identity --after-sequence 0
 ```
 
 Each post shows its author, its addressees, its text, and its sequence number.
@@ -79,18 +81,22 @@ Each post shows its author, its addressees, its text, and its sequence number.
 ## Check that it worked
 
 ```sh
-supertag get workstream-post --team service-identity --after-sequence 0 --limit 50
+supertag get workstream-post --team service-identity --after-sequence 0
 supertag get message --mailbox migration --limit 10
 ```
 
 The first command lists the post in sequence order. The second shows the same post delivered to
-`migration` as a message, `pending` until its inbox takes it and `handled` afterwards.
+`migration` as a message, with `state` `TAG_MESSAGE_STATE_PENDING` until its inbox takes it and
+`TAG_MESSAGE_STATE_HANDLED` afterwards.
 
 ## If something goes wrong
 
 - **The post is refused because the Team is ambiguous.** The calling Tag belongs to several Teams
-  and the turn is not an Objective's conversation. The error lists the Teams; post from a turn
-  that has one Team.
+  and the turn is not an Objective's conversation. Post from that Objective's conversation, or
+  from a Tag in one Team.
+- **The post is refused in a work Session or a report turn.** Those turns have no Workstream
+  access. Return the information in the Session's result, and post from a later turn of the
+  conversation.
 - **The post is refused because a Tag in `to` is not a member.** Check the membership with
   `supertag get team service-identity`. Remove the Tag from `to`, or add it to the Team.
 - **An addressee never acted on the post.** It reaches the addressee's inbox only; confirm with

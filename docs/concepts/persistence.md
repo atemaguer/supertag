@@ -4,9 +4,9 @@ A few terms first:
 
 - A **Task** is one unit of work an agent runs, such as a code change or a review.
 - A **Worker Host** is a machine that runs Tasks: a laptop, a server, or a cloud machine. A remote
-  sandbox (Modal, e2b) is a short-lived machine a Worker Host starts for a Task.
-- A **Worker** is the code on a Worker Host that completes a Task. A **harness** connects it to an
-  agent system such as Codex, Claude Code, or Cursor.
+  sandbox (Modal, e2b) is a short-lived machine a Worker Host starts for a Cursor Task.
+- A **harness** is the agent system a Task runs on, such as Codex, Claude Code, or Cursor. The
+  Worker Host drives it through a harness adapter.
 - The **Control Plane** is the service that records Tasks and their results and keeps the catalog
   of artifacts, the files Tasks produce. It never stores their bytes: the Worker Host that produced
   them keeps them.
@@ -29,6 +29,7 @@ dies.
 | Artifacts on an artifact Volume | Yes, per the Volume's own durability |
 | Delivered git branches and pull requests | Yes, in the git remote |
 | The Control Plane's catalog, Tasks, and results | Yes, in its database |
+| Session checkpoints, which let a later Task resume the harness session | Yes, in the Control Plane's checkpoint directory |
 
 ## Compared with Docker
 
@@ -58,9 +59,9 @@ read-only copy cannot preserve Task output. A read-write copy can: after a succe
 Attempt, the Worker Host writes changed and created files back to the Volume, and records what it
 wrote. A failed Task Attempt writes nothing, and deletions are never written.
 
-Read-only provider-native Modal Volume mounts are on the backlog. Live read-write mounts are not
-offered: a write through one would bypass the Worker Host's bounded, recorded write-back.
-[Attach data outside the repository](../guides/workspaces.md#attach-data-outside-the-repository)
+SuperTag offers no live read-write mounts: a write through one would bypass the Worker Host's
+bounded, recorded write-back. See
+[Attach data outside the repository](../guides/workspaces.md#attach-data-outside-the-repository).
 
 ## Where artifacts are kept
 
@@ -82,26 +83,19 @@ details, see [Run the Control Plane](../operations/control-plane.md#artifact-sto
 Catalog grants control what SuperTag Worker Hosts fetch. They do not isolate a Task from files its
 operating-system account can read. In particular, a Worker Host's artifact storage under `~/.supertag`, `file://` artifact
 Volumes, and Volume credential files are readable by Codex read-only and workspace-write sandboxes
-and by Claude Code with `allow-unsandboxed-commands` when running under that account. Those Tasks can read local copies
-without catalog grants, and credentials may give access to other artifacts on a shared Volume.
+and by Claude Code, OpenCode, or Cursor with `allow-unsandboxed-commands` when running under that
+account. Those Tasks can read local copies without catalog grants, and credentials may give access to other artifacts on a shared Volume.
 Keeping credentials outside the workspace does not prevent these reads. Use separate operating-system
 identities or an isolation boundary that denies access to supervisor storage for untrusted Tasks.
 
-## Ephemeral storage is visible
+## Ephemeral Worker Hosts
 
-A Worker Host can be declared ephemeral when it joins. Remote sandboxes always count as ephemeral.
-SuperTag doesn't hide this. Host and Task listings mark ephemeral storage and say where each output
-and artifact lives. Starting work warns, without refusing, when an ephemeral host would hold the
-only copy of artifacts.
+A Worker Host that joins with an ephemeral Auth Key (`supertag auth-key create NAME --role host
+--ephemeral`) is removed once it goes offline. Use one for a CI runner or a cloud machine that
+does not come back. Its host record marks it ephemeral. Its Workspace deliveries go with it, and
+so do its artifacts, unless an operator copied them to a Volume first.
 
-This warning describes recorded storage, not independently verified durability. For example, an
-ephemeral host can report an upload to its artifact Volume. That one report records both the Volume
-copy and its upload receipt; the receipt is not separate evidence that bytes were written. Once
-all files have matching available Volume records and receipts, the artifact's warning clears.
-The Control Plane checks the producing Task Attempt, host, and configured Volume, but never reads
-the bytes. A faulty or dishonest host can therefore clear the warning without storing the files.
-Missing warnings do not prove that artifacts exist, remain readable, or survive host removal.
-Downloads check availability, size, and digest at the time of retrieval; Volume durability still
+Downloads check availability, size, and digest at the time of retrieval. Volume durability still
 depends on the storage provider and its retention settings. For the commands, see
 [CLI](../operations/cli.md).
 

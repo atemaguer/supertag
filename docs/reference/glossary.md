@@ -34,8 +34,6 @@ whole system rather than another first-class resource.
 - <a id="team"></a>**Team** — a flat list of member Tags with an optional concurrency limit. Members
   message each other and share the Team's Workstream, and an Objective that names the Team may
   start work Sessions of its members. See [Teams](coordination.md#teams).
-- <a id="finding"></a>**finding** — one problem a Task result reports about its own work, with a
-  severity of high, medium, or low. See [Review findings](coordination.md#review-findings).
 - <a id="workstream"></a>**Workstream** — a Team's shared record of posts. Every member reads it. See
   [Workstream](coordination.md#workstream).
 - <a id="post"></a>**post** — one append-only entry in a Team's Workstream. It is plain text and carries
@@ -87,8 +85,9 @@ whole system rather than another first-class resource.
   It connects outbound to the Control Plane. See [Run Worker Hosts](../guides/workers.md).
 - <a id="host-service"></a>**host service** — a `host` entry in `supertag.yaml` that connects its machine as a
   Worker Host. See [host service](supertag-yaml.md#host-service).
-- <a id="auth-key"></a>**Auth Key** — an operator-issued, short-lived secret that enrolls principals of one role: a
-  Worker Host (`host`), a Gateway (`gateway`), or a client device (`client`). See
+- <a id="auth-key"></a>**Auth Key** — an operator-issued secret that enrolls principals of one role: a
+  Worker Host (`host`), a Gateway (`gateway`), or a client device (`client`). A one-time key
+  lasts at most an hour, and a reusable key at most 90 days. See
   [Identities and access](../operations/control-plane.md#identities-and-access).
 - <a id="client"></a>**client** — a device running the CLI, the terminal UI, or the desktop app, enrolled with a client
   Auth Key as `client:NAME`.
@@ -123,6 +122,3 @@ whole system rather than another first-class resource.
 - <a id="connection-generation"></a>**Task Attempt generation** — an increasing number that fences a Task Attempt's lease.
   SuperTag rejects reports from a host that lost the lease. See
   [Leases and unknown outcomes](scheduling-and-recovery.md#leases-and-unknown-outcomes).
-- <a id="durable-wait"></a>**durable wait** — a pause whose wake conditions SuperTag stores, so the Task can resume
-  when a condition is met even after a Control Plane restart. See
-  [Scheduling and recovery](scheduling-and-recovery.md).

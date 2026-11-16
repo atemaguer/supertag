@@ -14,13 +14,14 @@ supertag ps
 supertag status
 ```
 
-`ps` should show `control-plane`, `gateway`, and each host `running`. If a service stopped, run
-`supertag up` and read its log with `supertag logs control-plane`, `supertag logs gateway`, or
-`supertag logs HOST`. For a shared deployment, run
-`supertag verify deployment URL --env-file operator.env`.
+`ps` should show `control-plane`, each host, and, once a surface or notification is configured,
+`gateway` as `running`. If a service stopped, run `supertag up` and read its log with
+`supertag logs control-plane`, `supertag logs gateway`, or `supertag logs HOST`. For a shared
+deployment, run `supertag verify deployment URL --env-file operator.env`.
 
-If a command says `pass --control-plane URL, --control-plane NAME of a saved Control Plane, or
---state-directory`, add the target it asks for.
+If a command says `no local Control Plane is running`, start the local services with
+`supertag up`, or pass `--control-plane URL` or the `--control-plane NAME` of a saved Control
+Plane.
 
 ## 2. Check the Surface Account
 
@@ -32,8 +33,8 @@ supertag logs gateway
 The account must exist, be enabled, and name the Gateway that serves it. If it is missing, run
 `supertag setup surface PROVIDER` against the same Control Plane. Then check that events arrive:
 
-- Lark keeps a long connection; the Gateway log shows it connecting.
-- Slack, GitHub, Linear, and Microsoft Teams send webhooks. The public HTTPS URL must forward to
+- Lark, and Slack in Socket Mode, keep a long connection; the Gateway log shows it connecting.
+- GitHub, Linear, Microsoft Teams, and Slack without Socket Mode send webhooks. The public HTTPS URL must forward to
   the Gateway's loopback listener and path, and the provider's delivery log should show success.
   A failed signature check is refused before anything is stored.
 
@@ -93,6 +94,8 @@ If it reports not signed in, follow the sign-in instructions it prints, as the s
 runs the host, and run `supertag up`. Keys belong in `~/.supertag/.env`: a service unit does not
 inherit your shell. Claude Code, Cursor, and OpenCode Tasks that may run commands also need
 `allow-unsandboxed-commands` on the host; see [Run Worker Hosts](workers.md#harnesses-without-a-sandbox).
+A Codex Tag on a code-mode-only model needs `web:fetch` as well as `commands:execute` to run
+commands; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models).
 
 ## 7. Check the run and the reply
 
@@ -124,15 +127,6 @@ supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
 A Task Attempt fails when the repository's Git configuration, hooks, or attributes changed while
 it ran, because SuperTag's own Git commands must not run anything a Task wrote. Restore the
 repository's configuration and send the work again.
-
-## The local state is from the earlier TypeScript runtime
-
-This SuperTag does not import the earlier runtime's state, but it may still load an earlier
-`supertag.yaml` and report its services as not running while the earlier services keep running.
-`supertag down` does not stop them. Run `down --remove-services` with the earlier CLI, which
-stays installed at `~/.local/share/supertag/versions/VERSION/node_modules/.bin/supertag`, then
-archive and move `~/.supertag` aside and run `supertag init`. See
-[Retire the earlier TypeScript runtime](../operations/install.md#retire-the-earlier-typescript-runtime).
 
 ## Next
 

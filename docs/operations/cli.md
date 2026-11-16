@@ -39,7 +39,8 @@ supertag init
 ```
 
 `init` finds the harnesses on your `PATH`, checks each one's sign-in with the credentials a
-Worker Host will have, and asks for a Control Plane port, a harness, and the Tag's name. It writes
+Worker Host will have, and asks for a Control Plane port, a harness, a Workspace name, and the
+Tag's name; for OpenCode it also asks for a `provider/model`. It writes
 `~/.supertag/supertag.yaml` with two services and starts them in the background:
 
 - a `control-plane` service, which also creates a `local-tools` Permission Set, a `Lead` Role,
@@ -52,6 +53,11 @@ without a sandbox, so its Tags should get only trusted work, and asks whether to
 defaulting to yes. The answer becomes the host's `allow-unsandboxed-commands`; without it, the
 lead Tag's Tasks that run commands wait. `--yes` allows it and prints how to undo it. See
 [Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
+
+The `local-tools` Permission Set grants `commands:execute` and `files:write`. For a Codex `lead`,
+grant `web:fetch` as well before it runs commands: current Codex models run commands only in
+Codex code mode, which SuperTag starts only for Tasks that may also fetch from the web. See
+[Codex commands and models](requirements.md#codex-commands-and-models).
 
 Each new Session of `lead` starts from that branch's current commit (`workspace.ref`), so commits
 you make there reach the next Session. When HEAD is detached, `init` pins the checked-out commit
@@ -112,7 +118,11 @@ supertag task cancel TASK_ID
 
 `task input` delivers a message to a running Task, or queues it as the Session's next turn when
 the Task cannot take it. `describe task TASK_ID` explains a Task that is waiting, such as one
-with no Worker Host that may run its Tag.
+with no Worker Host that may run its Tag, and `placement explain TASK_ID` lists which bound
+Worker Hosts can take it and why the others cannot.
+
+`task submit` also takes execution limits, such as `--max-reported-tokens`. A limit the Tag's
+harness cannot enforce is refused at submission, with the limits that harness supports.
 
 ## See what your organization is doing
 
@@ -182,7 +192,7 @@ answer out of the shell history and the process list. See
 ## Bring delivered work into your repository
 
 A Task that changes a Workspace delivers its commits. For a Workspace that `supertag.yaml` maps,
-`supertag up` imports each delivery into the repository as the branch `supertag/session/SESSION`,
+`supertag up` imports each delivery into the repository as the branch `supertag/session/HASH`,
 one branch per Session. Import a delivery yourself, or into another clone, with `fetch`:
 
 ```sh

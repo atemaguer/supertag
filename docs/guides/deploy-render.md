@@ -150,8 +150,8 @@ none, it runs no connector.
   secret in `SUPERTAG_NOTIFY_SECRET_NAME` (the name uppercased, `-` as `_`).
 
 GitHub, Linear, Microsoft Teams, and Slack HTTP events need inbound webhooks, which this
-deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see [service deployment definitions](../../deploy/native/README.md)), enrolled
-with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
+deployment cannot receive. For them, run a Gateway on a host that can receive webhooks (see
+[service deployment definitions](../../deploy/native/README.md)), enrolled with a gateway Auth Key (`supertag gateway enroll NAME`); it dials this Control Plane's `wss://`
 URL with its own credential.
 
 ```yaml

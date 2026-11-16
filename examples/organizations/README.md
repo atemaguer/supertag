@@ -37,7 +37,7 @@ expects. See the [resource model](../../docs/reference/resource-model.md) for ev
    ```
 
 If you ran `supertag init`, the first `diff` shows the `Lead` Role's purpose and instructions as
-owned by `init`. Review them, then take them over once:
+owned by `cli`. Review them, then take them over once:
 
 ```sh
 supertag apply -f supertag/organization.yaml --force-conflicts

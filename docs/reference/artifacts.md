@@ -118,7 +118,9 @@ journal, and saves them to the catalog. Declared outputs are submitted with the 
 With this policy, separately captured intermediate artifacts remain available for discovery but
 are submitted only if the result explicitly selects them. Other harnesses and read-only Tasks keep explicit capture only.
 
-Remote E2B and Modal Workspaces and shared execution environments do not collect declared outputs.
+Declared outputs run on Codex and Claude Code Worker Hosts with local Workspaces, and on Cursor
+hosts whose Workspaces run in E2B or Modal sandboxes. A Task that declares outputs also needs a
+Workspace and `files:read`. Shared execution environments do not collect declared outputs.
 
 ### Git-backed files
 
@@ -177,8 +179,8 @@ To pass reviewed evidence to another Task in the same Objective, use:
 Omit `requireAccepted` for independent review of a submission or repair of rejected work. The
 Control Plane checks source visibility and submission, resolves the selected catalog entries,
 and records their URI, digest, size, and exact producing Task Attempt on the accepted Task. Subsequent
-captures do not change this input. Built-in Codex and Claude Code adapters preserve the original
-entry paths beneath separate per-artifact input directories. An operator selects inputs with
+captures do not change this input. The Worker Host preserves the original entry paths beneath separate per-artifact input directories
+in the Task's Workspace, so a Task with artifact inputs needs a Workspace and `files:read`. An operator selects inputs with
 `supertag task submit --artifact-input ARTIFACT_ID:PATH`, repeated for each file.
 
 Review saves the exact submitted selections and Task Attempt identity. New captures and replacement
@@ -208,9 +210,10 @@ publication cannot expand its approved paths or audience.
 
 ## Agent tools
 
-The built-in Codex and Claude Code adapters offer these tools to the agent. They are scoped to the
-current Task Attempt and exposed to the harness's manager, rather than automatically delegated to
-its native child agents.
+The built-in harness adapters offer these tools to the agent. They are scoped to the current Task
+Attempt and exposed to the harness's manager, rather than automatically delegated to its native
+child agents. `capture_artifact` needs a Workspace and `files:read`, and `attach_artifact` also
+needs that Workspace to be local; the search and read tools are always offered.
 
 | Tool | Purpose |
 | --- | --- |
@@ -245,8 +248,7 @@ definition fails. A new result or a different selection needs a new operation ID
 acquisition before delivering bytes and records delivery separately; delivery is evidence that
 the adapter received content, not that a model read or understood it.
 
-OpenCode and Cursor Tasks do not receive these tools; declared outputs and preselected artifact
-inputs still work for them. A custom harness adapter calls the Worker Host's `HarnessArtifacts`
+A custom harness adapter calls the Worker Host's `HarnessArtifacts`
 service (`Capture`, `Find`, `Inspect`, `Read`, `Attach`); see
 [Write a harness adapter](../guides/harness-adapters.md).
 

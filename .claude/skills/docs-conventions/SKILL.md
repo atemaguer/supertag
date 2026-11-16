@@ -10,7 +10,7 @@ description: Documentation structure, CLI command form, and the controlled capit
 | Layer | Answers | Altitude |
 | --- | --- | --- |
 | `docs/concepts/` | What is this and how does it behave? | No interfaces, no code |
-| `docs/guides/`, `docs/connectors/`, `docs/operations/` | How do I accomplish a task? | Commands and procedures |
+| `docs/guides/`, `docs/surfaces/`, `docs/operations/` | How do I accomplish a task? | Commands and procedures |
 | `docs/reference/` | What is the exact contract? | Interfaces, schemas, invariants |
 
 `README.md` gets one Tag replying and nothing more. `docs/README.md` is the index and must
@@ -28,10 +28,8 @@ GitHub Release (`docs/operations/install.md`). `pnpm supertag` runs the checkout
 User installation instructions use the installer script for the CLI, and PyPI and npm for the
 SDKs; the Python install pins the version that matches the CLI.
 
-Two intentional exceptions to the CLI form:
-
-- `CONTRIBUTING.md` documents the `pnpm supertag` shortcut for running uncommitted changes.
-- `docs/operations/control-plane.md` may contrast invocation forms.
+The one exception: `CONTRIBUTING.md` documents the `pnpm supertag` shortcut for running
+uncommitted changes.
 
 `docs/reference/cli.md` is the command inventory. It is generated from the Rust CLI's help and
 checked by `core/crates/cli/tests/cli_help.rs`; regenerate it with
@@ -46,10 +44,11 @@ internal architecture record — some were never implemented.
 Capitalize a term only if it is something a user **creates, configures, inspects, or
 implements**. Everything else is lowercase prose.
 
-Configuration resources: **Tag, Role, Permission Set, Context Set, Team, Objective, Workspace,
-Volume, Surface Account, Auth Key, Operator Token**.
+Configuration resources: **Tag, Role, Permission Set, Context Set, Workspace, Volume, Surface
+Account**.
 
-Operational resources: **Session, Task, Task Attempt, Worker Host**.
+Operational resources: **Objective, Team, Workstream, Mailbox, Session, Task, Task Attempt, Worker
+Host, Auth Key, Operator Token**.
 
 Extension contracts (as named in `api-stability.md`): **Connector**. Write *harness* and *harness
 adapter* in lowercase, like other industry terms, and keep code identifiers such as `Harness` as
@@ -86,5 +85,5 @@ Rules:
   on the page (headings don't count). Readers land on pages directly.
 - Every relative link resolves.
 - New pages are linked from `docs/README.md`.
-- No `pnpm supertag` outside the two exceptions.
+- No `pnpm supertag` outside `CONTRIBUTING.md`.
 - Every command and resource kind exists in the CLI.

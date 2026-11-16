@@ -13,20 +13,15 @@ Check [Requirements](../../docs/operations/requirements.md) for system tools and
 before starting. Before `supertag init`, sign in to each harness you will serve: run
 `codex -c 'cli_auth_credentials_store="file"' login` for Codex, or run `claude` and follow its
 prompt for Claude Code. For Cursor, the user generates an API key at
-https://cursor.com/dashboard/api and adds `CURSOR_API_KEY=...` to `~/.supertag/.env` themselves.
+https://cursor.com/dashboard/api and adds `CURSOR_API_KEY=...` to `~/.supertag/.env` themselves;
+`init` detects Cursor only when `CURSOR_API_KEY` is also set in the environment it runs in.
 Never ask for a key in chat or write it for them. For OpenCode, set the provider's API-key
 variable in `~/.supertag/.env`.
 
 ## 1. Install
 
-If the machine ran the earlier TypeScript runtime, retire it before installing: stop its services
-with its own CLI, archive and move aside its `~/.supertag`, as
-[Retire the earlier TypeScript runtime](../../docs/operations/install.md#retire-the-earlier-typescript-runtime)
-explains. The new installer replaces its `supertag` link, and there is no importer.
-
-Follow [the installation guide](../../docs/operations/install.md). Until release archives are
-published, it builds one from a checkout and installs it with
-`scripts/install_native_release.py`. Then:
+Releases cover Linux on arm64 or amd64 and macOS on Apple silicon; on an Intel Mac, build the CLI
+as [the installation guide](../../docs/operations/install.md#build-only-the-cli) shows. Otherwise:
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
@@ -45,16 +40,18 @@ supertag init
 stops without changing anything when none is available. It checks each harness's sign-in with
 the credentials the Worker Host will have and labels it `signed in` or not, with sign-in
 instructions. OpenCode prints `sign-in not checked (choose a model)` until you choose a model.
-It then asks for the Control Plane port, the harness, and the Tag's name, with defaults in
-brackets (`--yes` accepts every default and needs no terminal). It writes
-`~/.supertag/supertag.yaml` and starts, in the background:
+It then asks for the Control Plane port, the harness (and a `provider/model` for OpenCode), the
+Workspace name, and the Tag's name, with defaults in brackets. For Claude Code, Cursor, or
+OpenCode, it also asks whether to let that harness run commands without a sandbox, recorded as
+`allow-unsandboxed-commands` on the host. `--yes` accepts every default, including that opt-in,
+and needs no terminal. It writes `~/.supertag/supertag.yaml` and starts, in the background:
 
-- a `control-plane` service, which creates the Permission Set `local-tools`, the Role `Lead`, and
-  the Tag `lead`, bound to this repository's Workspace and following the branch checked out when
-  `init` ran;
+- a `control-plane` service, which creates the Permission Set `local-tools` (`commands:execute`
+  and `files:write`), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
+  following the branch checked out when `init` ran;
 - a Gateway; and
-- a `host` service named after the machine, which maps this repository as a Workspace named
-  after it.
+- a `host` service named after the machine, which maps this repository as the Workspace,
+  named after the repository by default.
 
 Nothing is written to the repository; state lives in `~/.supertag/`. Each new Session of `lead`
 starts from the current commit of the branch `init` found (`workspace.ref`). When HEAD is
@@ -63,6 +60,33 @@ output. To follow another branch or pin a commit, apply a Tag manifest; see [Wor
 
 Operator commands use these local services without a flag; `--control-plane NAME` targets
 another Control Plane.
+
+If `lead` runs on Codex, grant it `web:fetch` before creating an Objective. Current Codex models
+run commands only in Codex code mode, which SuperTag starts only for a Task that also has
+`web:fetch`; without it, a Task that may run commands fails when its turn starts. `web:fetch` also
+opens the network to its commands; see
+[Codex commands and models](../../docs/operations/requirements.md#codex-commands-and-models).
+Write this manifest to `local-tools.yaml`:
+
+```yaml
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: local-tools }
+spec:
+  permissions:
+    - { target: runtime, action: commands:execute }
+    - { target: runtime, action: files:write }
+    - { target: runtime, action: web:fetch }
+```
+
+```sh
+supertag diff -f local-tools.yaml
+supertag apply -f local-tools.yaml --force-conflicts
+```
+
+`diff` shows the change and a `conflict` line for `permissions`, because no apply has owned the
+value `init` created; `--force-conflicts` takes it over. An Objective records its owner's runtime
+actions when it is created, so apply this first.
 
 ## 3. Create the first Objective
 
@@ -86,11 +110,11 @@ supertag describe objective readme-setup
 
 `watch objective` follows the Objective as a timeline until it closes. `describe` shows status,
 owner, **Delivered**, **Needs you**, and each Session. When a Task changes the repository,
-`supertag up` imports its commits as the branch `supertag/session/SESSION` in your checkout:
+`supertag up` imports its commits as the branch `supertag/session/HASH` in your checkout:
 
 ```sh
 git branch --list 'supertag/session/*'
-git diff main...supertag/session/SESSION
+git diff main...supertag/session/HASH
 ```
 
 ## 5. Answer, push back, or approve

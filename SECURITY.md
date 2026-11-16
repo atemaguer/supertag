@@ -26,9 +26,11 @@ who want to be named.
 
 ## Supported versions
 
-SuperTag is in active pre-1.0 development and has no published release of the
-current Rust services yet. Security fixes are made on the current `main` branch.
-Older commits may require upgrading rather than receiving a backport.
+SuperTag is in active pre-1.0 development. Security fixes are made on the
+current `main` branch and ship in the next release. Only the
+[latest release](https://github.com/atemaguer/supertag/releases/latest) is
+supported; older releases and commits require upgrading rather than receiving a
+backport.
 
 ## Scope
 
@@ -36,7 +38,7 @@ Examples of useful reports include:
 
 - a permission or context boundary bypass;
 - credentials exposed in logs, events, stored Task results, or process arguments;
-- forged collaboration surface events or Worker identities;
+- forged collaboration surface events or Worker Host, Gateway, or client identities;
 - unauthorized tool execution or cross-tenant access;
 - unsafe handling of untrusted harness output;
 - a dependency vulnerability with a demonstrated path through SuperTag.

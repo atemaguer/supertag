@@ -23,15 +23,17 @@ services:
     notify: [desktop, "webhook:https://hooks.example/x#webhook-token", slack:U0123456789]
 ```
 
-The webhook receives a JSON POST. Its `authorization` header carries `Bearer` followed by the
-value of `webhook-token`. The secret comes from the environment or a file named under `secrets:`;
-it does not go in the URL. A Slack destination uses an enrolled Slack **Surface Account**, the record of one connected Slack
-workspace whose credentials stay in a vault. Use
-`slack:WORKSPACE_ID/USER_ID` if you enrolled several Slack workspaces.
+The local **Gateway**, which `supertag up` runs beside the Control Plane, delivers to these
+destinations. The webhook receives a JSON POST. Its `authorization` header carries `Bearer`
+followed by the value of `webhook-token`. The secret comes from the environment or a file named under `secrets:`;
+it does not go in the URL. A Slack destination is a channel or user ID, posted with an enrolled Slack **Surface Account**,
+the record of one connected Slack workspace whose credentials stay in a vault. Use
+`slack:WORKSPACE_ID/CHANNEL_OR_USER_ID` if you enrolled several Slack workspaces.
 
-Restart the **Control Plane**, the SuperTag service that stores and schedules work, with
-`supertag up` after changing the file. Send a sample through every
-configured destination with `supertag test notification`. Add `--objective ID` to include a
+Run `supertag up` after changing the file so the **Control Plane**, the SuperTag service that
+stores and schedules work, and the Gateway pick it up. Send a sample through every
+configured destination with `supertag test notification`. A Gateway you run yourself takes the
+same destinations as repeated `--notify` options; pass `--gateway URL` to test it. Add `--objective ID` to include a
 specific **Objective**, an outcome owned by a [Tag](../reference/glossary.md#tag), in its link
 back. The command reports `delivered`, `unavailable`,
 `not configured`, or `failed` for each destination. It sends immediately without creating an

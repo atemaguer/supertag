@@ -29,7 +29,9 @@ repositories.
 
 ### On your own
 
-`supertag init` writes a file like this. The host service is named after the machine:
+`supertag init` writes a file like this for the repository you run it in. It provisions a
+`local-tools` Permission Set, a `Lead` Role, and a Tag that follows the current branch. The host
+service is named after the machine:
 
 ```yaml
 version: 1
@@ -40,9 +42,25 @@ services:
     ports: ["127.0.0.1:3434"]
     provision:
       - apiVersion: supertag/v1
+        kind: PermissionSet
+        metadata: { name: local-tools }
+        spec:
+          permissions:
+            - { target: runtime, action: commands:execute }
+            - { target: runtime, action: files:write }
+      - apiVersion: supertag/v1
+        kind: Role
+        metadata: { name: Lead }
+        spec:
+          purpose: "Own Objectives for this repository: plan the work, make and verify changes, and report what changed."
+          permissionSets: [local-tools]
+      - apiVersion: supertag/v1
         kind: Tag
         metadata: { name: lead }
-        spec: { roles: [Lead], execution: { harness: codex } }
+        spec:
+          roles: [Lead]
+          execution: { harness: codex }
+          workspace: { id: app, ref: main }
   studio:
     type: host
     harnesses: [codex]
@@ -91,7 +109,7 @@ that credential and ignore the key, so the key file can be deleted.
 | --- | --- |
 | `version` | Optional. `1`, the only format. |
 | `name` | Instance name, default `supertag`. Labels service units. |
-| `services` | Service name to service. Names use lowercase letters, digits, `-`, and `_`, up to 63 characters. `gateway` and `supervisor` are reserved. |
+| `services` | Service name to service: one to 33 services, at most 32 of them hosts. Names use lowercase letters, digits, `-`, and `_`, up to 63 characters. A host cannot be named `supervisor`, `control-plane`, or `gateway`. |
 | `secrets` | Secret name to source. Services refer to secrets by name. See [Secrets](#secrets). |
 | `surfaces` | Surface Accounts the local Gateway serves. `supertag setup surface` and `supertag tag update` write it; see [Connect a collaboration surface](../surfaces/README.md). |
 | `env_file` | A file, or a list of files, of `KEY=value` lines for interpolation, `environment` secrets, and provider credentials. The process environment wins over it. Default: `.env` beside this file, when present. |
@@ -125,13 +143,13 @@ echoing secret values.
 | `harnesses` | required, unless `adapter` | Up to five of `codex`, `claude-code`, `cursor`, `opencode`, and `openai-agents` |
 | `adapter`, `adapter-args` | none | An executable that speaks the harness protocol, in place of `harnesses`. See [Write a harness adapter](../guides/harness-adapters.md) |
 | `models` | none | Models per harness: one model, or a list whose first is the default. See [Host models](#host-models) |
-| `workspaces` | none | Workspace name to a repository path, or `{ path, delivery, setup }`. See [Workspaces](#workspaces) |
+| `workspaces` | none | Up to 128 Workspace names, each to a repository path or `{ path, delivery, setup }`. See [Workspaces](#workspaces) |
 | `skills` | none | Local Skill directory or JSON catalog file selected by Context Sets. Relative paths resolve from this file |
 | `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
 | `concurrency` | `1` | Task Attempts each harness runs at once, from 1 through 16. See [Host concurrency](#host-concurrency) |
 | `attempt-timeout-seconds` | `3600` | Seconds a Task Attempt may run, from 1 through 86400 |
-| `depends_on` | none | Service names to bring up first |
+| `depends_on` | none | The file's `control-plane` service, to bring up first. Only a host of the local Control Plane takes it |
 | `restart` | `no` | `unless-stopped` installs a service unit |
 
 ### Host enrollment
@@ -146,7 +164,7 @@ terminal. After joining, the host uses its stored credential.
 ```yaml
     harnesses: [codex, opencode]
     models:
-      codex: [gpt-5.5, gpt-5.5-mini]
+      codex: [gpt-6-sol]
       opencode: anthropic/claude-sonnet-4-5
 ```
 
@@ -198,9 +216,10 @@ A host started without supertag.yaml takes the same opt-in with `supertag worker
 Each Task Attempt runs in its own checkout of the repository, pinned to an exact commit. `setup`
 runs in each new checkout before the harness starts, on the host and outside any harness sandbox,
 with a 10-minute limit. With `delivery: branch`, the default, `supertag up` imports each delivered
-Task into the repository as the branch `supertag/session/SESSION`. With `delivery: patch`, the
-repository is left alone, and the patch and bundle stay downloadable with `supertag task
-download`.
+Task into the repository as the branch `supertag/session/HASH`. It does so only for a host of
+the file's own Control Plane; on a host of a shared Control Plane, import a delivery with
+`supertag fetch ID`. With `delivery: patch`, the repository is left alone, and the patch and
+bundle stay downloadable with `supertag task download`.
 
 ## Secrets
 
@@ -263,10 +282,11 @@ runtime.sqlite3        the local Control Plane's SQLite database
 credentials.json       the file credential vault: the local operator credential and surface secrets
 checkpoints/           the Control Plane's Session checkpoints
 logs/                  supervisor, control-plane, gateway, and hosts/ logs
+hosts/NAME/            each host service's own state directory
 ```
 
 Each host service keeps its credential, execution journal, checkouts, and the artifacts and
-Workspace deliveries its Tasks produce in its own state directory beneath this one. The Control
+Workspace deliveries its Tasks produce in its own state directory, `hosts/NAME/`. The Control
 Plane stores none of those bytes. See [Credential storage](credential-storage.md).
 
 ## Credentials

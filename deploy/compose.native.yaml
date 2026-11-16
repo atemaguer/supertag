@@ -1,4 +1,4 @@
-# Native split services, separate from the legacy compose.yaml entry point.
+# Native split services.
 # Supply per-role env files and TLS directories; no credentials belong in this file.
 # The internal network intentionally publishes no ports. deploy/compose.native.ingress.yaml
 # publishes the Control Plane, the public endpoint for operators, Worker Hosts, and Gateways.

@@ -39,9 +39,8 @@ supertag get team
 supertag get team service-identity
 ```
 
-```text
-team/service-identity created.
-```
+`team create` and `get team NAME` print the Team as JSON: its ID, name, members, concurrency
+limit, and revision. `get team` alone lists every Team.
 
 A Team has a name, its members, and an optional concurrency limit. There is no lead, no hierarchy,
 and no Objective of its own: several Objectives can name the same Team.
@@ -72,7 +71,8 @@ Tag runs under its own Roles, narrowed to the Objective's runtime actions, and d
 Objective's budget. A Tag must be active and bound to a Worker Host to take delegated work.
 The operator approves production cutovers and retirement of the shared keys.
 
-Repository work runs in each Tag's own **Workspace**, the repository it is bound to; see
+A Session the owner starts, for its own Tag or another member, works in the **Workspace** of the
+owner's turn that started it, the repository the owner is bound to; see
 [Work in a repository with Workspaces](workspaces.md).
 
 Manifests can declare the Team and the Objective together:

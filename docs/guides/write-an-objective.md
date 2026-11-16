@@ -16,15 +16,14 @@ Describe the end state in terms someone can verify. Name the affected product, r
 or users. “Improve reliability” leaves scope open; “Checkout retries cannot create duplicate
 orders” gives the team a concrete result.
 
-The template suggested by `supertag init` is:
+A template for the statement:
 
 > \<desired end state\>. Done when \<specific evidence\>. Keep \<constraints\>. Use
 > \<boundaries\>. Between steps, \<how to choose the next action\>. If blocked, stop and report
 > \<what you tried and what would unlock it\>.
 
 Replace the placeholders and omit sentences you do not need. These are parts of one outcome
-statement, not separate configuration fields. Number distinct deliverables when you want to
-track their coverage in the [Objective overview](objective-overview.md).
+statement, not separate configuration fields.
 
 ## Define done-when evidence
 
@@ -45,17 +44,19 @@ tried, and the decision needed.
 
 A **Permission Set** selects allowed actions. Prose constraints guide the team; they do not
 grant permissions or replace approval rules. See [identity and permissions](../reference/iam.md).
-A **Workspace** names a repository available to the Objective's Tasks. Select an existing
-Workspace when the work needs repository access.
+A **Workspace** names a repository available to the Objective's Tasks. The Objective works in
+the owner Tag's Workspace, so bind the owner to one when the work needs repository access.
 
 ## Choose a budget and deadline
 
 Allow for implementation, independent review, and fixing findings. Set monetary limits with
 both `--budget-minor` and `--currency`: `30000` with `USD` means $300. Without a currency,
-the budget limits Task allocations instead of provider-reported cost. A monetary budget tracks
-provider-reported spend; it is not a quote for completing the outcome.
+no spend counts against the budget. A monetary budget tracks
+provider-reported spend; it is not a quote for completing the outcome. Each turn runs with the remaining
+budget as a reported cost limit, so the owner and its Team need a harness that enforces one, such
+as Claude Code with `USD`.
 
-Use `--deadline` with an ISO timestamp and an explicit timezone, such as
+Use `--deadline` with an RFC 3339 timestamp and an explicit time zone, such as
 `2027-03-31T17:00:00Z`. Choose a future date that leaves time for review. Writing a date or dollar
 amount only in the outcome does not configure these limits. See the exact
 [budget](../reference/coordination.md#the-budget-pool) and
@@ -100,8 +101,8 @@ packages. Ask before adding dependencies. **Budget:** $450 USD. **Deadline:** fi
 
 ## Create and inspect the Objective
 
-For the first example, assume `lead` is an existing owner Tag with execution capacity and
-Choose your own ID, budget, and future deadline:
+For the first example, assume `lead` is an existing owner Tag with execution capacity. Choose
+your own ID, budget, and future deadline:
 
 ```sh
 supertag objective create checkout-retries \
@@ -110,7 +111,7 @@ supertag objective create checkout-retries \
 ```
 
 Creating the Objective queues its owner's first turn and refuses a request it cannot accept,
-with the reason. Then inspect progress:
+such as an unknown owner or an ID that already exists, with the reason. Then inspect progress:
 
 ```sh
 supertag watch objective checkout-retries
@@ -126,7 +127,7 @@ manifest fields.
 ## Decide when to split an Objective
 
 Keep one Objective when the team shares one acceptance decision, budget, and deadline. Use
-Tasks for implementation, documentation, and review that contribute to that same result.
+Sessions for implementation, documentation, and review that contribute to that same result.
 
 Split when outcomes can be accepted independently, need different owners or deadlines, or
 have different approval boundaries. For example, separate a database upgrade rehearsal from

@@ -51,10 +51,10 @@ supertag logs gateway
 No account means setup never completed, or completed against another state directory or Control
 Plane. Then confirm events reach the Gateway:
 
-- **Lark**: the Gateway log shows the long connection.
-- **Webhooks (Slack, GitHub, Linear, Teams)**: the public HTTPS URL must forward to the Gateway's
-  loopback listener and path. The provider's delivery log should show a 2xx. A signature or
-  timestamp failure is refused before admission.
+- **Lark, and Slack in Socket Mode (the default)**: the Gateway log shows the outbound connection.
+- **Webhooks (GitHub, Linear, Teams, and Slack with `--transport http`)**: the public HTTPS URL
+  must forward to the Gateway's loopback listener and path. The provider's delivery log should
+  show a 2xx. A signature or timestamp failure is refused before admission.
 
 Also confirm the app or bot was **invited to the channel**. Enrollment alone is not membership.
 
@@ -79,7 +79,8 @@ supertag describe task TASK_ID
 ```
 
 No Task means steps 2 and 3 failed. A refused Task's description names the missing permission
-or setting.
+or setting. `supertag task submit` refuses an execution limit, such as `--max-reported-tokens`,
+that the Tag's harness cannot enforce, and names the harness.
 
 ## 5. Can a Worker Host run it?
 
@@ -90,12 +91,16 @@ supertag metrics
 ```
 
 `placement explain` names why a queued Task waits: no host may run the Tag, the eligible hosts
-lack the Tag's `runsOn` labels, none serves the harness or model, or they are busy or draining.
-Fix the binding (an Auth Key's `--tag`), the labels (`supertag placement runs-on`), or the host's
-harnesses and models.
+lack the Tag's `runsOn` labels or do not map its Workspace, none serves the harness or model, its
+harness cannot run the Task's actions or load its Skills, or the hosts are busy or draining. Fix
+the binding (an Auth Key's `--tag`), the labels (`supertag placement runs-on`), or the host's
+harnesses, models, and `workspaces`.
 
 A host that stops with a sign-in error needs `supertag sign-in HARNESS` as the host's user.
-Cursor and OpenCode Tasks that may run commands need `allow-unsandboxed-commands` on the host.
+Claude Code, Cursor, and OpenCode Tasks that may run commands wait for a host with the harness in
+`allow-unsandboxed-commands`. A Codex Task that may run commands but lacks `web:fetch` fails when
+its turn starts, naming the model; see
+[Codex commands and models](../../docs/operations/requirements.md#codex-commands-and-models).
 
 ## 6. Did it run but fail?
 
@@ -106,7 +111,9 @@ supertag logs HOST_NAME
 ```
 
 `task events` shows the run's progress and result. `get reply` shows whether the reply reached
-the surface; a `failed` or `uncertain` reply can be resolved with `supertag reply resolve`.
+the surface. After checking the provider, resolve an `uncertain` reply with `supertag reply
+resolve REPLY_ID --decision failed --evidence TEXT`, or `--decision delivered` with
+`--provider-receipt` too; it never resends the reply.
 
 ## Uncertain Task Attempts
 
@@ -132,8 +139,6 @@ supertag objective cancel OBJECTIVE_ID --reason TEXT
 - Local state lives in `~/.supertag` or `SUPERTAG_STATE_DIR`. Two state directories are two
   separate organizations.
 - A service unit does not inherit your shell. Put provider keys in `~/.supertag/.env`.
-- A state directory from the earlier TypeScript runtime cannot be used; move it aside and run
-  `supertag init`.
 
 ## Escalating
 

@@ -22,7 +22,7 @@ services:
     type: host
     harnesses: [codex, claude-code]
     models:
-      codex: [gpt-5.5, gpt-5.5-mini]
+      codex: [gpt-6-sol]
     workspaces:
       app: ~/code/app
     concurrency: 2
@@ -137,7 +137,7 @@ a label, or they are busy or draining. `describe task` includes the same explana
 | Harness | Needs on the host | Sign-in |
 | --- | --- | --- |
 | `codex` | `codex` on `PATH` | `CODEX_API_KEY`, `OPENAI_API_KEY`, or a file-backed `codex login` |
-| `claude-code` | `claude` on `PATH`, and Node.js | `ANTHROPIC_API_KEY`, or `claude` signed in as the host's user |
+| `claude-code` | Node.js; `claude` on `PATH` for `init` and `sign-in`. Tasks run the Claude Code bundled with the release unless `--claude-path` names another | `ANTHROPIC_API_KEY`, or `claude` signed in as the host's user |
 | `cursor` | Node.js | `CURSOR_API_KEY` |
 | `opencode` | `opencode` on `PATH`, and Node.js; a `provider/model` model | The provider's API key variable, or `--opencode-auth-file` |
 | `openai-agents` | Python with the `supertag` package's OpenAI Agents extra | `OPENAI_API_KEY` |
@@ -165,7 +165,7 @@ kind: Role
 metadata: { name: Builder }
 spec:
   purpose: Implement bounded changes with tests.
-  execution: { harness: codex, models: [gpt-5.5], efforts: [medium, high] }
+  execution: { harness: codex, models: [gpt-6-sol], efforts: [medium, high] }
 ```
 
 A Task that names a model runs only on a host that lists it. See
@@ -191,8 +191,8 @@ its arguments; in `supertag.yaml`, use `adapter` and `adapter-args` instead of `
 
 ## Run Cursor in a sandbox
 
-Cursor Tasks can keep their files and commands in a sandbox while the harness, and its
-credentials, stay on the host:
+Cursor Tasks can keep their Workspace in a sandbox while the harness, and its credentials, stay
+on the host:
 
 | Option | Runs the Workspace in |
 | --- | --- |
@@ -200,7 +200,10 @@ credentials, stay on the host:
 | `--modal-workspace-provider` | A Modal sandbox per Task Attempt, with `SUPERTAG_MODAL_WORKSPACE_APP` and optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` |
 | `--shared-execution-endpoint` | A long-lived shared execution environment, served by `supertag-shared-execution`, that several Cursor Sessions share |
 
-A remote sandbox caps a Task Attempt at 3600 seconds, the longest those providers grant. A Tag
+A Task that may run commands (`commands:execute`) runs only in a shared execution environment:
+a host with an E2B or Modal Workspace provider holds files only and cannot take
+`allow-unsandboxed-commands`. A remote sandbox caps a Task Attempt at 3600 seconds, the longest
+those providers grant. A Tag
 requires a shared environment with `tag put --shared-execution-environment ID`. A repository's
 `.devcontainer` settings choose the sandbox's image, user, and setup commands; see
 [Devcontainer settings](../reference/devcontainer-subset.md).
@@ -294,7 +297,7 @@ confirm a reply.
 - **A Claude Code, Cursor, or OpenCode Task that may run commands stays queued.** Add the
   harness to `allow-unsandboxed-commands`, or run Tasks that do not need commands.
 - **A Codex Task fails because its model needs Codex code mode to run commands.** Grant the Tag
-  `web:fetch` as well as `commands:execute`, or select a Codex model that is not code-mode-only.
+  `web:fetch` and `files:write` as well as `commands:execute`, or select a Codex model that is not code-mode-only.
   `allow-unsandboxed-commands` does not apply to Codex. See
   [Codex commands and models](../operations/requirements.md#codex-commands-and-models).
 - **A Cursor Task fails.** The result gives Cursor's reason, such as a model outside the

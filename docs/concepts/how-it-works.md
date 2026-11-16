@@ -99,13 +99,16 @@ expand the allowed actions.
 Worker Hosts connect outbound and report their harnesses, models, labels, and capacity. The
 Control Plane places a Task only on a ready Worker Host that may run its Tag and carries the
 labels the Tag requires. A Task stays queued when none is available, and
-`supertag placement explain` says why.
+`supertag placement explain` says why. A Task that asks for an execution limit its Tag's harness
+cannot enforce is refused when it is submitted, instead of waiting forever.
 
 On the Worker Host, each **Task Attempt**, one execution of a Task, runs in its own pinned
 checkout of the Tag's Workspace. The host resolves the Task's Skills, starts the harness adapter,
 and supervises its processes. The adapter drives the agent and reports progress, usage, and the
 result through the harness protocol. When the Task changes the Workspace, the host delivers a
-verified Git bundle, which your machine imports as a branch.
+verified Git bundle, which your machine imports as a `supertag/session/...` branch. Deliveries
+stay on the Worker Host that produced them, and artifacts stay there or on a Volume; the Control
+Plane relays them to readers and stores only their records.
 
 ## What survives a failure
 

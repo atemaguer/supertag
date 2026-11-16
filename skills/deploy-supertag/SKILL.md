@@ -90,12 +90,9 @@ with the deployment's owner.
 - Persistent volumes for the Control Plane's Session checkpoints and the Gateway's state, or Vault
   for the Gateway's credentials where the platform has no persistent disk.
 - Persistent state directories for Worker Hosts. The Control Plane stores no artifact or
-  Workspace delivery bytes: each Worker Host keeps what its Tasks produce, and the Control Plane
-  relays them to readers only while that host is connected.
-- A fresh database. There is no importer from the earlier TypeScript runtime; dump and check its
-  database first, as
-  [Retire the earlier TypeScript runtime](../../docs/operations/install.md#retire-the-earlier-typescript-runtime)
-  shows.
+  Workspace delivery bytes: each Worker Host keeps what its Tasks produce, or writes it to a
+  shared Volume, and the Control Plane relays a host's files to readers only while that host is
+  connected.
 
 ## Health
 

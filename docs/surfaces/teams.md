@@ -67,13 +67,12 @@ If several tenants are enrolled, add `--account NAME`, the Surface Account name 
 ## Check that it worked
 
 Mention `@SuperTag` in that channel. The Tag replies in the originating thread. The Gateway checks
-the Microsoft activity token, and the Control Plane stores the accepted **Task**, one request for the Tag,
-before replying through
-the Gateway.
+the Microsoft activity token, and the Control Plane stores the accepted **Task**, one request for
+the Tag, before the Gateway replies.
 
 ## Rules
 
-- This first version supports channel mentions and replies. Personal chat, group chat, proactive
+- The Teams surface supports channel mentions and replies. Personal chat, group chat, proactive
   messages, and files or cards are outside this path.
 - Gateway credentials authenticate only ingress and replies. See
   [credential storage](../reference/credential-storage.md).
@@ -90,5 +89,5 @@ the Gateway.
 ## Next
 
 - [Worker-side collaboration surface tools](worker-tools.md#teams) for Microsoft's preview Agent 365 Teams MCP
-  read tool
+  server
 - [collaboration surface guides](README.md)

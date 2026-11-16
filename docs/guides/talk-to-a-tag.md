@@ -120,11 +120,11 @@ lists them, and `supertag describe session ID` shows one with its latest Task an
   servers their Workspace provides; see [MCP server placement](../reference/iam.md#placement).
 - **A work Session sees only its own work.** It can't read your conversation, the Tag's other
   Sessions, or its Objectives, so the Tag gives it everything it needs when it starts it.
-- **A work Session commits its edits to its own branch.** When the Tag's Worker Hosts declare a
-  Workspace, the work Session edits it and the Worker Host commits to a branch such as
-  `supertag/session/0f3c2a9e`. Your checkout stays on its branch. The report names the branch, and
-  a continued work Session commits on top of it, on the same branch. With
-  several Workspaces, the Tag picks one when it starts the work Session. See
+- **A work Session commits its edits to its own branch.** When the Tag is bound to a Workspace,
+  the work Session edits that Workspace, the same one as the turn that started it, and the Worker
+  Host commits to the Session's own branch under `supertag/session/`, such as
+  `supertag/session/0f3c2a9e…`. Your checkout stays on its branch. The report names the branch,
+  and a continued work Session commits on top of it, on the same branch. See
   [where a work Session's edits go](../concepts/tasks.md#where-a-work-sessions-edits-go).
 - **At most four work Sessions run at once per conversation.** Later ones wait their turn. One
   message starts at most four, and a conversation holds at most eight unfinished. A message whose

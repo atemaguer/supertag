@@ -56,7 +56,7 @@ in that thread.
             └─ work Session of reviewer  "Security review"    → reports back
   planner   Do we need SCIM provisioning in this release?        (ask)
   Maya      No, next quarter.
-  planner   Done. SSO ships behind the sso flag; review found no high findings.
+  planner   Done. SSO ships behind the sso flag, and the security review passed.
 ```
 
 `planner` owns the Objective, and `builder` and `reviewer` are the other members of its Team. Each
@@ -89,8 +89,8 @@ turn, in every Session, draws on the Objective's one budget pool.
 - Retrying the same definition returns the existing record with its current status. A different
   definition with the same ID is refused.
 
-A person creates an Objective from a thread with an authenticated `@SuperTag objective <outcome>`
-command at the start of their own message. The Control Plane parses only that message, never
+A person creates an Objective from a Slack thread with an authenticated
+`@SuperTag objective <outcome>` command at the start of their own message. The Control Plane parses only that message, never
 history, quotes, or model output. That Objective's home thread is the thread the command arrived
 in, and the Tag at that location owns it.
 
@@ -136,7 +136,7 @@ picks it in this order:
 2. the surface Task that created the Objective;
 3. the Control Plane's default operator notification Task.
 
-Without any of these, the conversation runs in the owner Tag's CLI account.
+Without any of these, the Objective has no home thread; direct it from the terminal UI or the CLI.
 
 Every turn of the conversation is delivered into that thread's location, and the owner's final
 reply is posted there exactly as written. While an Objective is open, a plain reply in its home
@@ -164,27 +164,29 @@ A message delivers the next turn of the conversation, attributed to the operator
 the Objective view in the terminal UI with `m`. For scripts, submit a turn to the owner in the
 Objective's Session with `supertag task submit`; see [Control Plane API](control-plane-api.md#operator-services).
 
-In a Slack or Lark home thread, a plain reply also delivers the next turn. `@SuperTag approve`
+In a Slack home thread, a plain reply also delivers the next turn. `@SuperTag approve`
 acts as `supertag objective review ID approve`, and `@SuperTag pause` and `@SuperTag resume` act as the
 pause and resume commands. The operator ID is the provider and the user, such as `slack:U123`.
 Anyone who may create Objectives in that channel may do this.
 
 - A message never changes a budget, permissions or any other resource. Apply the resource change
   with its own command first; replying "approved" alone changes no allocation.
-- A `blocked`, `limited` or `ready_for_review` Objective returns to `working` on a message. A
-  `completed` or `cancelled` Objective takes no more messages; a message to one is refused.
+- A `blocked` Objective returns to `working` on a message. A `limited`, paused, `completed`, or
+  `cancelled` Objective takes no messages; a message to one is refused until an operator raises
+  the limit or resumes it, and for good once it is closed.
 - The same `idempotencyKey` with the same text returns the original delivery; the CLI generates a
   new key for each command.
 - The owner's answer to the message is its next reply in the home thread.
 
-`supertag objective review ID` approve completes a `ready_for_review` Objective. The owner's assessment,
-recorded with `ready_for_review`, becomes the completion summary. Without one, the summary reads
-`Approved by operator OPERATOR_ID. The owner recorded no assessment.`
-`supertag objective complete ID --summary-file FILE` remains for scripts.
+`supertag objective review ID approve` completes a `ready_for_review` Objective. The owner's
+assessment, recorded with `ready_for_review`, becomes the completion summary.
+`supertag objective review ID request-changes --feedback TEXT` returns it to `working` with that
+feedback as the owner's next turn. `supertag objective complete ID --summary-file FILE` completes
+any open Objective with an operator's assessment.
 
 ### Asking a person
 
-An Objective's turn calls `ask {question}` with one concise question, then ends its turn. The
+An Objective's turn calls `ask {text}` with one concise question, then ends its turn. The
 Task ends waiting. The question reaches the person in the home thread and as a `question` item
 in the operator inbox. An answer from **Waiting on you** in the terminal UI or from the home
 thread becomes the conversation's next turn. The same tool in a work Session asks the Session that started it.
@@ -217,9 +219,10 @@ captured when the Session started.
 An Objective's turn should end with work running, a question asked, or the Objective finished.
 When a turn ends with none of those, and the Objective is still `working` and not paused:
 
-1. The Control Plane wakes the conversation once, with "nothing is running; continue or finish".
-2. When that woken turn also ends idle, the Objective becomes `blocked` and SuperTag posts a
-   notice to the home thread naming the command that directs it.
+1. The Control Plane wakes the conversation once, saying that nothing is running and nothing was
+   asked, and asking the owner to continue, report a blocker, or finish.
+2. When that woken turn also ends idle, the Objective becomes `blocked`. The Objective overview
+   flags it, and a message starts its next turn.
 
 An Objective is idle only when all of these hold: its latest conversation turn completed or
 failed, it asked no question and waits on no approval, no turn is pending or running in any of its
@@ -256,7 +259,7 @@ Statuses are `working`, `blocked`, `limited`, `ready_for_review`, `completed` an
 - An Objective created with `--ongoing` is a continuing responsibility. Only an operator ends it.
 - Completion admits no new turns. The exact Task Attempt that completed the Objective may finish
   its reply and clean up.
-- Pending approval requests of the Objective expire with the reason `Objective completed`.
+- Pending approval requests of the Objective expire.
 - Queued and waiting Tasks in the Objective's Sessions are cancelled, each with a recorded reason.
 - The Objective's Team is not deleted. A Team outlives the Objectives that name it; see
   [Teams](#teams).
@@ -284,13 +287,11 @@ regular sweep.
   `Objectives.CancelObjective`. No Objective signal can set `cancelled`.
 - `cancelled` is terminal. Later status, deadline and budget updates fail, and no new turn, wake
   or limit warning follows.
-- The Objective records its cancellation time and reason, up to 2,000 characters. The revision
-  increments once and the audit log records the operator.
-- Every open Task in the Objective's Sessions is cancelled through the same path as
-  `supertag task cancel`, pending deliveries fail, running Task Attempts stop, and Workspace pull
-  requests close.
-- Cancellation needs no revision. Cancelling a cancelled Objective succeeds with `changed` false
-  and retries any Task still open. Cancelling a completed Objective fails with
+- The Objective records its cancellation time and optional reason. The revision increments once.
+- Every queued, claimed, running, or uncertain Task in the Objective's Sessions is cancelled, and
+  running Task Attempts stop.
+- Cancellation needs no revision. Cancelling a cancelled Objective succeeds and cancels any Task
+  still open. Cancelling a completed Objective fails with
   `failed_precondition`.
 
 ## Budgets and allocation
@@ -320,7 +321,7 @@ same pool: the conversation's turns and every work Session's Tasks, however deep
   the owner hears the result. With nothing left, it stops on its first model call.
 - Reported spend is the sum of the latest provider-reported cost of each Task Attempt in the
   Objective's Sessions, in the Objective's currency. The Control Plane recomputes it from
-  persisted usage evidence about every 10 seconds, so it survives restarts.
+  persisted usage evidence on its regular sweep, so it survives restarts.
 - Codex costs are estimates from token usage and model prices, so the total can differ from
   provider billing.
 
@@ -330,7 +331,11 @@ reported token and cost limits, shared with the work Sessions it starts or conti
 
 ### Monetary budgets
 
-A budget with a currency caps provider-reported cost across the whole Objective.
+A budget with a currency caps provider-reported cost across the whole Objective. Each turn
+carries a reported cost limit, and only Claude Code enforces one, in USD. Under a currency budget,
+turns of a Codex, Cursor, or OpenCode Tag stay queued, and `supertag placement explain` names the
+limit; use a budget without a currency for those Tags. See
+[execution limits](worker.md#execution-limits).
 
 | Reported spend | Effect |
 | --- | --- |
@@ -342,8 +347,9 @@ toward reported spend even above the limit. `supertag describe objective ID` sho
 The Objective becomes `limited` once they have all settled, and only a raised budget or a moved
 deadline leaves that status.
 
-A Task Attempt that finished without reporting cost counts as unknown, not zero. The overview then
-shows `budget_coverage_incomplete`: actual spend may be higher than the reported total.
+A Task Attempt that finished without reporting cost counts as unknown, not zero. The overview's
+`pool` counts those Task Attempts in `unknown_cost_attempts`: actual spend may be higher than the
+reported total.
 
 For example, an Objective has `budgetLimitMinor` 300000 and `budgetCurrency` `USD`, a $3,000 cap.
 At $2,400 reported the operator receives one warning. At $3,000 new turns stop while running Task
@@ -361,7 +367,7 @@ Attempts finish. If they finish at $3,080, the Objective shows an $80 overrun an
   against it. The increase is audited in the Objective's change history.
 
 The API rules are in
-[`UpdateObjective`](control-plane-api.md#operator-services). For the
+[`SetLimits`](control-plane-api.md#operator-services). For the
 procedure, see [Respond to budget and operator requests](../guides/objective-decisions.md).
 
 ## Deadlines
@@ -400,12 +406,8 @@ Only an operator moves a deadline, with `supertag objective set-limits ID --dead
 deadline may replace one that passed; normal delivery resumes, the owner receives one notice with
 the old and new deadline, and warnings are raised again against a window that starts at the move.
 
-When the Control Plane ends a running Task Attempt's authority, the Task Attempt records that
-cause as its failure, even when the harness reported its own error first. `supertag describe task`
-then reads, for example, `Control Plane revoked Task Attempt authority: Objective deadline
-passed`. The other causes are `Objective was cancelled`, `Objective was completed` and
-`Objective budget exhausted`. A lost lease reads `Attempt authority expired` or
-`Execution lease lost`.
+When the deadline's grace period ends, or the Objective is completed or cancelled, the Control
+Plane cancels the Objective's open Tasks, and their running Task Attempts stop.
 
 ## Coordination tools
 
@@ -430,9 +432,8 @@ tool the turn does not get; it does not only leave it out of the list.
 A work Session sees only its own work: it cannot message another Tag, start more work, or read
 the Tag's other Sessions or Objectives. Its final reply returns to the Session that started it.
 `create_objective` is listed for every conversation turn, but only a turn started by an explicit
-objective command may use it. `request_action_approval` is open to every
-turn, but is never advertised to the model: the harness adapter calls it when a gated action needs
-a decision. The [artifact tools](artifacts.md#agent-tools) are separate.
+objective command may use it. A gated action needs no tool of its own: SuperTag requests approval
+when the Tag makes the call; see [Approval requests](#approval-requests). The [artifact tools](artifacts.md#agent-tools) are separate.
 
 ### The tools
 
@@ -440,11 +441,11 @@ a decision. The [artifact tools](artifacts.md#agent-tools) are separate.
 | --- | --- | --- |
 | `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `tag`, `workspace` | Starts a work Session; see [Work and delegation](#work-and-delegation) |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts that work Session's next Task |
-| `ask` | `question` (up to 2,000 characters) | Ends the Task waiting on a person's answer |
+| `ask` | `text` (up to 16,000 characters; 2,000 in a work Session) | Ends the Task waiting on a person's answer |
 | `send_message` | `to`, `text` (up to 8,000 characters), optional commit review | Delivers a message to another Tag's Mailbox |
-| `read_mailbox` | a cursor | Reads the Tag's Mailbox |
+| `read_mailbox` | optional `limit` (1–16), `cursor` | Reads the Tag's Mailbox |
 | `post` | `text` (up to 16,384 characters), optional `to` (up to 20 Tags) | Posts to the Team's Workstream |
-| `read_workstream` | `afterSequence`, `limit` (1–100, default 50) | Reads the Team's Workstream |
+| `read_workstream` | `afterSequence` or `cursor`, `limit` (1–16, default 16) | Reads the Team's Workstream |
 | `read_review_patch` | a commit review | Reads the patch a [commit review](#commit-reviews) asks about |
 | `list_sessions` | `limit` (1–20, default 20), `offset` | Lists the Tag's other visible Sessions, most recent first |
 | `search_sessions` | `query` (1–200 characters), `limit` (1–20) | Finds completed turns of visible Sessions whose request or result contains the query |
@@ -504,8 +505,8 @@ waiting when a turn starts is handled together in that one turn.
   it.
 - A Tag may message another when they share a Team, or when the recipient accepts messages from
   it. A grant is exactly that: "this recipient accepts messages from this sender". Operators set
-  one with `supertag mailbox-grant allow SENDER` RECIPIENT and remove it with
-  `supertag mailbox-grant revoke SENDER`; RECIPIENT a Tag manifest's `acceptsMessagesFrom`
+  one with `supertag mailbox-grant allow SENDER RECIPIENT` and remove it with
+  `supertag mailbox-grant revoke SENDER RECIPIENT`; a Tag manifest's `acceptsMessagesFrom`
   declares the same thing. `supertag get mailbox-grant --tag TAG` lists them. Without either,
   the call returns 403 and names the reason.
 - A message to a Tag that is retired, or to the sender itself, is refused.
@@ -521,8 +522,7 @@ A message that arrives between the claim and the binding is not lost. It stays u
 Control Plane's sweep delivers a turn for it. An inbox turn that binds nothing settles completed
 without dispatch.
 
-An inbox turn runs in the Tag's CLI account under the Tag's own Roles, like a private
-conversation in the terminal UI. It carries no Objective and draws on no pool. SuperTag records
+An inbox turn runs in the Tag's own inbox Session under the Tag's own Roles. It carries no Objective and draws on no pool. SuperTag records
 its final reply in the Session. Answering a sender takes another `send_message`.
 
 ### Limits
@@ -581,7 +581,7 @@ number of Objectives may name one Team.
   [Declared Objectives](resource-model.md#declared-objectives).
 - Every member must be an active Tag, the name must be unused, and a Team holds at most 100
   members.
-- `supertag team update NAME [--member TAG ...] [--max-concurrency N] [--name TEXT] [--expected-revision N]`
+- `supertag team update NAME [--member TAG ...] [--max-concurrency N | --clear-concurrency] [--name TEXT] [--expected-revision N]`
   replaces the fields it names; see [Statuses](#statuses) for the revision check. `supertag get team` and
   `supertag get team NAME` read them.
 - `supertag delete team NAME` deletes the Team and its Workstream posts. It is refused with 409
@@ -597,22 +597,23 @@ number of Objectives may name one Team.
 
 ## Approval requests
 
-An approval request records one ask for a person or a named approver. SuperTag creates one, of
-kind `surface-action`, when a Worker Host is about to forward a collaboration surface call whose
-permission has `approvalRequired: true`.
+An approval request records one ask for a person or a named approver. SuperTag creates one when
+a Task is about to perform an action whose permission has `approvalRequired: true`: an MCP tool
+call that the Worker Host's policy proxy forwards, a Mailbox message, or a Workstream post.
 
-Each request stores the Objective, Task, Task Attempt, requesting Tag, the actions, a `sha256`
-digest of the tool arguments, a short sanitized summary, and the Permission Sets that required it.
+Each request stores the Objective, Task, Task Attempt, Session, requesting Tag, the action and
+resource, the canonical tool arguments and their `sha256` digest, a short summary, and who may
+decide it.
 Its status is `pending`, `approved`, `denied` or `expired`. A pending request expires when its
 Task finishes, unless the Task ended waiting on it. When the Objective is completed or cancelled,
-every pending request expires with the reason `Objective completed` or `Objective cancelled`.
+every pending request expires.
 
 ### Matching a call to a decision
 
 For each gated call, the Control Plane checks in order:
 
-1. An approved `objective`-scope request in the same Objective covers the same Surface Account,
-   scope and action, and has not passed `validUntil`. The call runs.
+1. An approved `objective`-scope request in the same Objective covers the same Tag, action and
+   resource, and has not passed `validUntil`. The call runs.
 2. An approved `once`-scope request for the same Task, action and arguments digest has not been
    used. The Control Plane marks it consumed, and the call runs. A request from any Task of the
    same Session matches.
@@ -626,21 +627,21 @@ A pending call does not run and holds no execution capacity.
 
 ### A turn waiting on approval
 
-When a gated call is pending, the `request_action_approval` result tells the turn to end with a
-brief final reply and no further tool call. Then:
+When a gated call is pending, the call is not made, and its tool result names the request and tells
+the turn to end with a brief final reply. Then:
 
 1. The Task completes, and its outcome records `approvals`: the IDs of the requests it was told to
    end on, oldest first. That includes a request decided while the Task still ran, as long as no
    call used the decision. A Task with a question or approvals ends waiting.
 2. SuperTag posts a notice once per permission, in its own words. An Objective's turn posts it to
    the home thread, a work Session's to the Session that started it, and an inbox turn's to the
-   operator inbox only. It ends with "The work Session continues on its own once you decide."
+   operator inbox only.
 3. The request stays pending while that Task is completed, lists the request in `approvals` and is
    still its Session's latest Task. Otherwise it expires like any other request.
 4. Approving or denying admits the Session's next Task. A decision made while the Task still ran
-   does this when the Task completes. The Task's message is the decision:
-   "Approval request ID was approved (scope: once). Retry the same call to continue.", or the
-   denial with its reason. It runs under the waiting Task's own authorization and context, with no
+   does this when the Task completes. The Task's message lists each request's ID and decision,
+   with any denial reason, and asks the Tag to retry an approved action with its exact arguments
+   or choose another approach for a denied or expired one. It runs under the waiting Task's own authorization and context, with no
    new grants. The approval records it as `continuation_task_id`.
 5. The retried call matches the approval, because a `once` approval covers the same action and
    arguments in any Task of that Session. The Control Plane records `consumed_at_ms` on the
@@ -660,12 +661,11 @@ Session waits on nothing. After a permission change, start a new work Session.
 | Decider | Interface |
 | --- | --- |
 | Operator | `supertag get inbox-item --kind approval` or `supertag get approval`, then `supertag approval approve ID` or `supertag approval deny ID --reason TEXT` |
-| Named Tag approver | A Permission Set names it in `approvers`; see [IAM approval](iam.md#approval) |
+| Named approver | A Permission Set's `approvers` names the operators or client devices that may decide; see [IAM approval](iam.md#approval). Tags never decide approval requests |
 
 - An approval chooses `once` (the default) or `objective` scope, optionally until `validUntil`.
   An `objective` approval covers every matching call in that Objective until `validUntil`.
 - A denial requires a reason.
-- A Tag cannot decide a request its own Task made.
 - Pending requests are batched into one notice per Objective to its notification destination,
   when one is configured. The [operator channel](../operations/control-plane.md#operator-notifications), when
   configured, also receives requests that no Objective thread carries.
@@ -674,20 +674,6 @@ Session waits on nothing. After a permission change, start a new work Session.
 `decided_at_ms` and any `reason`, `valid_until_ms`, and `consumed_at_ms`. The operator API mirrors
 the CLI with the `Inbox` service's `ListApprovals`, `GetApproval`, and `DecideApproval`; see
 [Control Plane API](control-plane-api.md).
-
-## Review findings
-
-A Task's result can carry findings: problems the Task reported about its own work, each with a
-severity and an optional location. A finding is part of a result, not a separate resource.
-
-- A result carries at most 50 findings. Each has `severity` (`high`, `medium` or `low`), a
-  one-sentence `summary` of at most 500 characters, and an optional `location` such as
-  `src/session.ts:42`.
-- The Control Plane assigns the identifiers `F1`, `F2`, … in result order, whatever the harness
-  supplied, and refuses any other field. A finding therefore cannot name another Task.
-- `supertag describe objective ID` and the Objective overview list the high findings in the
-  latest result of each of the Objective's Sessions, so the owner and the operator see what is
-  still open.
 
 ## Overlap warnings
 
@@ -729,19 +715,15 @@ skipped.
 
 ### Allocation and usage
 
-- `budget` always describes the whole Objective, even on a later Task page.
+- `pool` always describes the whole Objective, even on a later Task page.
 - It sums each Task Attempt's latest cumulative report exactly once and counts the Task Attempts
   that reported no cost or no tokens. Missing reports stay unknown, never zero.
 - Amounts in different currencies stay separate and are never converted.
 
-### Timing
+### Queue time
 
-- Each Task Attempt's `startedAt` and `endedAt` measure its lifetime, including tool and runtime
-  waits, for failed and cancelled ones too.
-- Additional Task Attempts include continuations after an approval, so they are not all failures
-  or retries.
-- Queue age alone does not establish a capacity shortage: Team concurrency, the Tag's other
-  running work and Worker Host availability all delay a claim.
+Queue age alone does not establish a capacity shortage: Team concurrency, the Tag's other running
+work and Worker Host availability all delay a claim.
 
 ### Waiting turns
 

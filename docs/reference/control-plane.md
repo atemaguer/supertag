@@ -95,29 +95,29 @@ caller by its full principal, and an enrollment by the Auth Key that admitted it
 
 ## Resources
 
-Control Plane resources use `apiVersion`, `kind`, `metadata`, `spec`, and `status`.
+Manifests describe Control Plane resources with `apiVersion`, `kind`, `metadata.name`, and
+`spec`; see [Resource envelope](resource-model.md#resource-envelope).
 
-- Persistent resources such as Tags have stable IDs, names, timestamps, and opaque resource versions.
-- Desired configuration belongs in `spec`.
-- Reconciled or observed state belongs in `status`.
-- Cross-resource actions may use explicit virtual resources instead of ad hoc RPC or shell execution.
+- Persistent resources such as Tags have stable IDs, names, timestamps, and revisions.
+- Desired configuration belongs in `spec`, which `supertag apply` writes.
+- The Control Plane owns observed state, such as phases and revisions, and `supertag get`
+  reports it.
 
 The resource contract is versioned with the API's protocol, independently of database schemas
 and CLI syntax, so the CLI, the terminal UI, the desktop app, and applications share it.
 
-## Controllers
+## Background work
 
-A controller continuously reconciles one named responsibility and exposes status independently:
+Besides answering calls, the Control Plane keeps three kinds of work moving:
 
-| Controller | Desired input | Observed responsibility |
+| Work | Desired input | Responsibility |
 | --- | --- | --- |
-| `surfaces` | Surface Accounts and locations | Which Gateway serves each account |
-| `task-dispatch` | Durable admitted Tasks | Worker Host selection, Task Attempts, retries, and results |
-| `reply-delivery` | Durable outbound presentations | Gateway delivery, retry, and completion |
+| Connector leases | Surface Accounts and locations | Which Gateway delivers each account's replies, one at a time |
+| Task dispatch | Durable admitted Tasks | Offering Tasks to eligible Worker Hosts, Task Attempts, retries, and results |
+| Reply delivery | Durable outbound presentations | Gateway delivery, retry, and completion |
 
-Controllers do not define SuperTag's main building blocks. They are replaceable implementations
-behind the resource API. Security admission remains synchronous: a controller cannot later broaden
-a Tag's Context Sets or Permission Sets beyond what the Control Plane admitted.
+Security admission stays synchronous: none of this work can later broaden a Tag's Context Sets or
+Permission Sets beyond what the Control Plane admitted.
 
-For how `task-dispatch` picks a Worker Host and handles interrupted execution, see
+For how dispatch picks a Worker Host and handles interrupted execution, see
 [Scheduling and interrupted execution](scheduling-and-recovery.md).
