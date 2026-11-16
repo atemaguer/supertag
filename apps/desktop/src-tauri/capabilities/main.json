@@ -6,6 +6,17 @@
   "permissions": [
     "control-plane-client",
     "core:window:allow-start-dragging",
-    "core:window:allow-internal-toggle-maximize"
+    "core:window:allow-internal-toggle-maximize",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*"
+        }
+      ]
+    }
   ]
 }

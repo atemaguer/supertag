@@ -23,6 +23,7 @@ supertag-protocol = { path = "../../../core/crates/protocol" }
 supertag-transport = { path = "../../../core/crates/transport" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
 tempfile = "3"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "sync", "time"] }
 tonic = { version = "0.14", features = ["tls-ring", "tls-native-roots"] }

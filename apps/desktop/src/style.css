@@ -927,6 +927,12 @@ button:disabled {
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
+.message-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
 /* Streamdown spaces blocks for a page; a bubble wants them closer. */
 .markdown > * {
   margin-block: 0;

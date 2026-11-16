@@ -272,6 +272,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(ControlPlaneState::new(local_state_directory()))
         .plugin(tauri_plugin_dialog::init())
+        // Links in messages open in the system browser; the capability allows only http and https.
+        .plugin(tauri_plugin_opener::init())
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && payload.event() == PageLoadEvent::Started {
                 let app = webview.app_handle().clone();
@@ -336,6 +338,26 @@ pub fn run() {
 mod tests {
     use super::*;
     use serde_json::{Value, json};
+
+    /// The window may open only web links, in the system browser, and may otherwise only drag
+    /// and zoom itself.
+    #[test]
+    fn the_main_window_opens_only_web_links() {
+        let capability: Value =
+            serde_json::from_str(include_str!("../capabilities/main.json")).unwrap();
+        assert_eq!(
+            capability["permissions"],
+            json!([
+                "control-plane-client",
+                "core:window:allow-start-dragging",
+                "core:window:allow-internal-toggle-maximize",
+                {
+                    "identifier": "opener:allow-open-url",
+                    "allow": [{ "url": "https://*" }, { "url": "http://*" }]
+                }
+            ])
+        );
+    }
 
     /// Tauri refuses a registered command the window's permission does not allow, so every
     /// handler must be listed in permissions/control-plane.toml and nothing else may be.

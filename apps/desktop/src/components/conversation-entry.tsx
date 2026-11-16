@@ -4,6 +4,7 @@ import type { ControlPlane, Message as TagMessage, TaskEvent } from "../control-
 import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import { Shimmer } from "./ai-elements/shimmer";
+import { ExternalLink } from "./external-link";
 import { ResultFiles } from "./result-files";
 import { dividerLabel, RUNNING } from "./transcript";
 import { Button } from "./ui/button";
@@ -172,7 +173,13 @@ export function Bubble({
   return (
     <div className="bubble-row">
       <MessageContent className={`bubble ${className}${tail ? " tail" : ""}`}>
-        {markdown ? <MessageResponse className="markdown">{text}</MessageResponse> : text}
+        {markdown ? (
+          <MessageResponse className="markdown" components={{ a: ExternalLink }}>
+            {text}
+          </MessageResponse>
+        ) : (
+          text
+        )}
       </MessageContent>
       <CopyText text={text} />
     </div>
