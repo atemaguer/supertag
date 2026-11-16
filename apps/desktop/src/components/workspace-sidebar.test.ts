@@ -31,8 +31,6 @@ function render(onSelectTag = vi.fn(), placements: SelectorPlacement[] = []) {
       createElement(WorkspaceShell, {
         tags,
         tag: tags[0],
-        conversation: "default",
-        names: ["default"],
         connected: true,
         selector: (placement) => {
           placements.push(placement);
@@ -100,7 +98,7 @@ it("toggles with Ctrl+B outside macOS and ⌘B on macOS", () => {
   expect(isSidebarShortcut(press({ ctrlKey: true, isComposing: true }), false)).toBe(false);
 });
 
-it("switches Tags from the conversation pill while the sidebar is collapsed", () => {
+it("switches Tags from the Tag pill while the sidebar is collapsed", () => {
   localStorage.setItem("supertag.desktop.sidebar", "collapsed");
   const { onSelectTag } = render();
   const pill = host.querySelector(".identity-pill") as HTMLButtonElement;
@@ -109,7 +107,7 @@ it("switches Tags from the conversation pill while the sidebar is collapsed", ()
     pill.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
   const items = [...document.querySelectorAll('[role="menuitemradio"]')];
-  expect(items.map((item) => item.textContent)).toEqual(["finch", "moss", "Default"]);
+  expect(items.map((item) => item.textContent)).toEqual(["finch", "moss"]);
   const moss = items[1] as HTMLElement;
   act(() => moss.click());
   expect(onSelectTag).toHaveBeenCalledWith("moss");

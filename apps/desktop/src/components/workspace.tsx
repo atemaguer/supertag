@@ -1,4 +1,4 @@
-import { Check, ChevronDown, PanelLeft, PanelLeftClose, Plus } from "lucide-react";
+import { Check, ChevronDown, PanelLeft, PanelLeftClose } from "lucide-react";
 import {
   type MouseEvent,
   type ReactNode,
@@ -15,31 +15,16 @@ import { ConversationPane, type Draft } from "./conversation";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuItemIndicator,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { Input } from "./ui/input";
 
 const rosterInterval = 15_000;
 const conversationInterval = 2_500;
-function label(name: string) {
-  const words = name.replace(/[._-]/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
 
 function harness(kind: string) {
   return { codex: "Codex", claude_code: "Claude Code", openai_agents: "OpenAI Agents" }[kind];
@@ -96,35 +81,29 @@ export type SettingsAction = (event: MouseEvent<HTMLButtonElement>) => void;
 interface ShellProps {
   tags: Tag[];
   tag?: Tag;
-  conversation?: string;
-  names?: string[];
   connected: boolean;
   switching?: boolean;
   selector(placement: SelectorPlacement): ReactNode;
   error?: string;
   onSelectTag?(tagId: string): void;
-  onSelectConversation?(name: string): void;
   children?: ReactNode;
 }
 
 /**
- * The window: a full-height rail of Tags on the left, and the conversation reaching the top of
- * the window, with the Tag and conversation in a floating pill over it.
+ * The window: a full-height rail of Tags on the left, and the conversation with the selected Tag
+ * reaching the top of the window, with the Tag in a floating pill over it. A person has one
+ * conversation with each Tag here, so selecting a Tag opens it.
  */
 export function WorkspaceShell({
   tags,
   tag,
-  conversation,
-  names,
   connected,
   switching,
   selector,
   error,
   onSelectTag,
-  onSelectConversation,
   children,
 }: ShellProps) {
-  const [creating, setCreating] = useState(false);
   const open = useSyncExternalStore(subscribeSidebar, sidebarOpen, () => true);
   const onMac = mac();
   const toggle = `${open ? "Hide" : "Show"} sidebar (${onMac ? "⌘B" : "Ctrl+B"})`;
@@ -138,10 +117,6 @@ export function WorkspaceShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [onMac]);
   const provider = tag && harness(tag.harnessKind);
-  const threadNames =
-    conversation && !names?.includes(conversation)
-      ? [conversation, ...(names ?? [])]
-      : (names ?? []);
 
   return (
     <div className="shell" data-sidebar={open ? "open" : "collapsed"}>
@@ -196,32 +171,15 @@ export function WorkspaceShell({
             );
           })}
         </div>
-        <div className="rail-bottom">
-          {tag && (
-            <Button
-              variant="ghost"
-              className="rail-action"
-              aria-label="New conversation"
-              title="New conversation"
-              onClick={() => setCreating(true)}
-            >
-              <Plus size={18} aria-hidden />
-            </Button>
-          )}
-          {open && selector("rail")}
-        </div>
+        <div className="rail-bottom">{open && selector("rail")}</div>
       </nav>
       <main className="main" aria-label="Conversation" aria-busy={switching}>
         <header className="topstrip" data-tauri-drag-region>
-          {tag && conversation && (
-            <ConversationSwitcher
+          {tag && (
+            <TagPill
               tag={tag}
-              conversation={conversation}
-              names={threadNames}
               tags={open ? undefined : tags}
               onSelectTag={(tagId) => onSelectTag?.(tagId)}
-              onSelect={(name) => onSelectConversation?.(name)}
-              onCreate={() => setCreating(true)}
             />
           )}
           {provider && <span className="harness">{provider}</span>}
@@ -235,150 +193,60 @@ export function WorkspaceShell({
           {children}
         </div>
       </main>
-      <NewConversation
-        open={creating}
-        onOpenChange={setCreating}
-        onChoose={(name) => onSelectConversation?.(name)}
-      />
     </div>
   );
 }
 
 /**
- * The floating pill naming the Tag and conversation, which switches between conversations, and
- * between Tags while the sidebar is collapsed.
+ * The floating pill naming the selected Tag. While the sidebar is collapsed it also switches
+ * between Tags.
  */
-function ConversationSwitcher({
+function TagPill({
   tag,
-  conversation,
-  names,
   tags,
   onSelectTag,
-  onSelect,
-  onCreate,
 }: {
   tag: Tag;
-  conversation: string;
-  names: string[];
   /** The Tags to switch between, when the sidebar does not show them. */
   tags?: Tag[];
   onSelectTag(tagId: string): void;
-  onSelect(name: string): void;
-  onCreate(): void;
 }) {
   const name = tag.name ?? tag.tagId;
+  const identity = (
+    <>
+      <TagAvatar tagId={tag.tagId} />
+      <span className="tag-name">{name}</span>
+    </>
+  );
+  if (!tags) return <div className="identity-pill">{identity}</div>;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          className="identity-pill"
-          aria-label={`${name}, ${label(conversation)}. Switch conversation`}
-        >
-          <TagAvatar tagId={tag.tagId} />
-          <span className="tag-name">{name}</span>
-          <span className="thread-title" title={conversation}>
-            {label(conversation)}
-          </span>
+        <Button variant="outline" className="identity-pill" aria-label={`${name}. Switch Tag`}>
+          {identity}
           <ChevronDown size={14} className="identity-arrow" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="conversation-menu" align="center" sideOffset={6}>
-        {tags && (
-          <>
-            <div className="menu-label">Tags</div>
-            <DropdownMenuRadioGroup value={tag.tagId} onValueChange={onSelectTag}>
-              {tags.map((entry) => (
-                <DropdownMenuRadioItem
-                  key={entry.tagId}
-                  className="control-plane-choice menu-tag"
-                  value={entry.tagId}
-                >
-                  <TagAvatar tagId={entry.tagId} />
-                  <span className="row-title">{entry.name ?? entry.tagId}</span>
-                  <span className="control-plane-indicator menu-tag-check" aria-hidden>
-                    <DropdownMenuItemIndicator>
-                      <Check size={14} />
-                    </DropdownMenuItemIndicator>
-                  </span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator className="control-plane-separator" />
-            <div className="menu-label">Conversations</div>
-          </>
-        )}
-        <DropdownMenuRadioGroup value={conversation} onValueChange={onSelect}>
-          {names.map((entry) => (
+      <DropdownMenuContent className="tag-menu" align="center" sideOffset={6}>
+        <DropdownMenuRadioGroup value={tag.tagId} onValueChange={onSelectTag}>
+          {tags.map((entry) => (
             <DropdownMenuRadioItem
-              key={entry}
-              className="control-plane-choice"
-              value={entry}
-              title={entry}
+              key={entry.tagId}
+              className="control-plane-choice menu-tag"
+              value={entry.tagId}
             >
-              <span className="control-plane-indicator" aria-hidden>
+              <TagAvatar tagId={entry.tagId} />
+              <span className="row-title">{entry.name ?? entry.tagId}</span>
+              <span className="control-plane-indicator menu-tag-check" aria-hidden>
                 <DropdownMenuItemIndicator>
                   <Check size={14} />
                 </DropdownMenuItemIndicator>
               </span>
-              <span className="row-title">{label(entry)}</span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
-        <DropdownMenuSeparator className="control-plane-separator" />
-        <DropdownMenuItem className="control-plane-action" onSelect={onCreate}>
-          <Plus size={15} aria-hidden /> New conversation
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function NewConversation({
-  open,
-  onOpenChange,
-  onChoose,
-}: {
-  open: boolean;
-  onOpenChange(open: boolean): void;
-  onChoose(name: string): void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="workspace-dialog">
-        <DialogHeader>
-          <DialogTitle>New conversation</DialogTitle>
-          <DialogDescription>
-            Use letters, numbers, dots, underscores, or hyphens.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            const name = new FormData(event.currentTarget).get("name");
-            if (typeof name !== "string") return;
-            onChoose(name);
-            onOpenChange(false);
-          }}
-        >
-          <label htmlFor="thread-name">Conversation name</label>
-          <Input
-            id="thread-name"
-            name="name"
-            maxLength={64}
-            pattern={"[A-Za-z0-9][A-Za-z0-9._\\-]*"}
-            placeholder="release-review"
-            autoComplete="off"
-            required
-          />
-          <DialogFooter className="dialog-actions">
-            <Button className="primary" type="submit">
-              Open conversation
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -521,7 +389,6 @@ function TagWorkspace({
   onWriteChange(delta: 1 | -1): void;
 }) {
   const [conversation, setConversation] = useState<string>();
-  const [names, setNames] = useState<string[]>([]);
   const [error, setError] = useState("");
   const tagId = tag.tagId;
   const refreshThreads = useCallback(
@@ -529,7 +396,6 @@ function TagWorkspace({
       try {
         const entries = await controlPlane.conversations(tagId);
         if (!signal.aborted) {
-          setNames(entries.map(({ name }) => name));
           setConversation((prior) => prior ?? entries[0]?.name ?? "default");
           setError("");
         }
@@ -548,14 +414,7 @@ function TagWorkspace({
 
   const key = JSON.stringify([tagId, conversation]);
   return (
-    <WorkspaceShell
-      {...shell}
-      tag={tag}
-      names={names}
-      conversation={conversation}
-      error={shell.error || error}
-      onSelectConversation={setConversation}
-    >
+    <WorkspaceShell {...shell} tag={tag} error={shell.error || error}>
       {conversation ? (
         <ConversationPane
           key={key}

@@ -334,14 +334,6 @@ button:disabled {
   color: var(--muted);
   font-size: 11px;
 }
-.menu-label {
-  padding: 6px 8px 3px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 620;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 .menu-tag .avatar {
   width: 22px;
   height: 22px;
@@ -350,7 +342,7 @@ button:disabled {
 .menu-tag-check {
   margin-left: auto;
 }
-.conversation-menu {
+.tag-menu {
   z-index: 40;
   min-width: 220px;
   max-width: 320px;
@@ -464,7 +456,7 @@ button:disabled {
   box-shadow: 0 6px 20px rgb(0 0 0 / 30%);
   color: var(--text);
 }
-.identity-pill:hover,
+button.identity-pill:hover,
 .identity-pill[data-state="open"] {
   background: var(--hover);
 }
@@ -477,15 +469,6 @@ button:disabled {
   flex-shrink: 0;
   font-size: 13px;
   font-weight: 650;
-}
-.thread-title {
-  min-width: 0;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .identity-arrow {
   flex-shrink: 0;
