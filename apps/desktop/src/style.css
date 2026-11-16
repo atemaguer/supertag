@@ -416,9 +416,12 @@ button:disabled {
   flex-direction: column;
 }
 .history {
+  position: relative;
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   min-height: 0;
+}
+.history-scroll {
   outline-offset: -3px;
 }
 .timeline {
@@ -428,6 +431,18 @@ button:disabled {
   padding: 35px 38px 28px;
   display: flex;
   flex-direction: column;
+  gap: 34px;
+}
+.scroll-latest {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
+}
+.scroll-latest:hover {
+  background: var(--hover);
 }
 .empty {
   margin: auto;
@@ -477,17 +492,11 @@ button:disabled {
   font-size: 12px;
 }
 
-.exchange + .exchange {
-  margin-top: 34px;
-}
 .user-turn {
-  display: flex;
-  justify-content: flex-end;
   margin-bottom: 23px;
 }
 .prompt-text {
   max-width: min(85%, 510px);
-  margin: 0;
   padding: 13px 16px;
   background: #2d2b2d;
   border: 1px solid #3b373b;
@@ -497,7 +506,7 @@ button:disabled {
   line-height: 1.52;
 }
 .tag-turn {
-  display: flex;
+  flex-direction: row;
   gap: 12px;
   align-items: flex-start;
 }
@@ -520,22 +529,21 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
 }
-.result-text {
-  margin: 5px 0 0;
-  color: #e4dfe3;
-  font-size: 14px;
-  line-height: 1.65;
+.reply-content {
+  margin-top: 5px;
+  gap: 10px;
 }
-.prompt-text,
-.result-text {
+.prompt-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.tag-message + .result-text {
-  margin-top: 10px;
+.markdown {
+  color: #e4dfe3;
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 .turn-status {
-  margin: 8px 0 0;
   color: var(--muted);
   font-size: 12px;
   overflow: hidden;
@@ -662,7 +670,7 @@ button:disabled {
   text-decoration: underline;
   text-underline-offset: 3px;
   font-size: 12px;
-  margin-bottom: 24px;
+  margin-bottom: 0;
 }
 
 .icon-button {

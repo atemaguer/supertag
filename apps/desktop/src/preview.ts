@@ -24,10 +24,11 @@ const tags: Tag[] = [
   },
 ];
 
-function sample(taskId: string, conversation: string, prompt: string, result: string): Message {
+function sample(taskId: string, conversation: string, prompt: string, result?: string): Message {
+  const state = result === undefined ? "running" : "succeeded";
   return {
     conversation,
-    task: { taskId, tagId: "finch", sessionId: conversation, prompt, state: "succeeded", result },
+    task: { taskId, tagId: "finch", sessionId: conversation, prompt, state, result },
   };
 }
 
@@ -48,8 +49,9 @@ const messages = new Map<string, Map<string, Message[]>>([
             "ci-health-2",
             "CI-health",
             "Check whether the same race can affect SQLite.",
-            "SQLite uses the same cancellation path. I’d cover both databases with a test that releases the deadline and cancellation paths together, then checks that one abort was recorded.",
+            "SQLite uses the same cancellation path. I’d cover both databases with one test:\n\n1. Release the deadline and cancellation paths together.\n2. Check that **one** abort was recorded in `objective_events`.",
           ),
+          sample("ci-health-3", "CI-health", "Write that test for both databases."),
         ],
       ],
       [

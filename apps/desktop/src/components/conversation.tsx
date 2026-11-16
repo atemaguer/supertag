@@ -1,5 +1,6 @@
 import { ArrowUp, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { StickToBottomContext } from "use-stick-to-bottom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { ControlPlane, Tag, TaskEvent, WatchUpdate } from "../control-plane";
@@ -14,6 +15,11 @@ import {
 import { describe, usePolling } from "../lib/polling";
 import { eventLine } from "../lib/turn";
 import { useWatchRefresh, type WatchFeed } from "../lib/watch";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+} from "./ai-elements/conversation";
 import { LiveConversationEntry } from "./conversation-entry";
 import { TagAvatar } from "./tag-avatar";
 
@@ -59,9 +65,8 @@ export function ConversationPane({
   const revision = useRef(0);
   const inFlight = useRef(false);
   const active = useRef(true);
-  const following = useRef(true);
   const scrollOffset = useRef<{ height: number; top: number } | undefined>(undefined);
-  const viewport = useRef<HTMLElement>(null);
+  const transcript = useRef<StickToBottomContext>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const activityTrigger = useRef<HTMLButtonElement>(null);
   const setHistory = useCallback((next: History) => {
@@ -108,16 +113,15 @@ export function ConversationPane({
   );
   const requestHistory = useWatchRefresh(refresh, interval, watch, historyChanged);
 
+  // The transcript follows new messages while it is at the bottom. Earlier messages are added
+  // above, so keep what was in view where it was.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once the new history renders.
   useLayoutEffect(() => {
-    const region = viewport.current;
-    if (!region || history.loading) return;
-    if (scrollOffset.current) {
-      const { height, top } = scrollOffset.current;
-      region.scrollTop = Math.max(0, top + region.scrollHeight - height);
-      scrollOffset.current = undefined;
-    } else if (following.current) {
-      region.scrollTop = region.scrollHeight;
-    }
+    const region = transcript.current?.scrollRef.current;
+    if (!region || !scrollOffset.current) return;
+    const { height, top } = scrollOffset.current;
+    region.scrollTop = Math.max(0, top + region.scrollHeight - height);
+    scrollOffset.current = undefined;
   }, [history]);
 
   async function loadEarlier() {
@@ -130,7 +134,7 @@ export function ConversationPane({
       const previous = currentHistory.current;
       const next = earlierHistory(previous, expected, page);
       if (next === previous) return;
-      const region = viewport.current;
+      const region = transcript.current?.scrollRef.current;
       if (region) scrollOffset.current = { height: region.scrollHeight, top: region.scrollTop };
       setHistory(next);
     } catch (error) {
@@ -153,8 +157,8 @@ export function ConversationPane({
       setDraft({ text: "" });
       if (active.current) {
         revision.current++;
-        following.current = true;
         setHistory(receivedMessage(currentHistory.current, message));
+        void transcript.current?.scrollToBottom();
         requestHistory();
       }
     } catch (error) {
@@ -181,47 +185,54 @@ export function ConversationPane({
       )}
       <div className="work-area">
         <div className="conversation">
-          <section
-            className="history"
-            ref={viewport}
-            aria-label="Conversation history"
-            // biome-ignore lint/a11y/noNoninteractiveTabindex: The scrollable transcript must be reachable by keyboard.
-            tabIndex={0}
-            onScroll={({ currentTarget }) => {
-              following.current =
-                currentTarget.scrollHeight - currentTarget.scrollTop - currentTarget.clientHeight <
-                90;
-            }}
-          >
-            <div className="timeline">
-              {history.loading && (
+          {history.loading ? (
+            <div className="history">
+              <div className="timeline">
                 <div className="empty" role="status">
                   Loading conversation…
                 </div>
-              )}
-              {!history.loading && messages.length === 0 && <EmptyConversation tag={tag} />}
-              {history.cursor && (
-                <Button
-                  variant="link"
-                  className="earlier"
-                  disabled={paging}
-                  onClick={() => void loadEarlier()}
-                >
-                  {paging ? "Loading…" : "Load earlier messages"}
-                </Button>
-              )}
-              {messages.map((message) => (
-                <LiveConversationEntry
-                  key={message.task.taskId}
-                  message={message}
-                  readEvents={controlPlane.events}
-                  activeTask={activeTask}
-                  onActivity={viewActivity}
-                  onSaveArtifact={controlPlane.saveArtifact}
-                />
-              ))}
+              </div>
             </div>
-          </section>
+          ) : (
+            // Mounted once the history has loaded, so it opens at the latest message.
+            <Conversation className="history" contextRef={transcript} initial="instant">
+              <ConversationContent
+                className="timeline"
+                scrollProps={{
+                  className: "history-scroll",
+                  "aria-label": "Conversation history",
+                  tabIndex: 0,
+                }}
+              >
+                {messages.length === 0 && <EmptyConversation tag={tag} />}
+                {history.cursor && (
+                  <Button
+                    variant="link"
+                    className="earlier"
+                    disabled={paging}
+                    onClick={() => void loadEarlier()}
+                  >
+                    {paging ? "Loading…" : "Load earlier messages"}
+                  </Button>
+                )}
+                {messages.map((message) => (
+                  <LiveConversationEntry
+                    key={message.task.taskId}
+                    message={message}
+                    readEvents={controlPlane.events}
+                    activeTask={activeTask}
+                    onActivity={viewActivity}
+                    onSaveArtifact={controlPlane.saveArtifact}
+                  />
+                ))}
+              </ConversationContent>
+              <ConversationScrollButton
+                className="scroll-latest"
+                aria-label="Scroll to latest message"
+                title="Scroll to latest message"
+              />
+            </Conversation>
+          )}
           <form className="composer" onSubmit={(event) => void send(event)}>
             {draft.error && (
               <p className="field-error" role="alert">

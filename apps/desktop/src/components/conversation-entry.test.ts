@@ -102,3 +102,45 @@ it("shows each message the Tag wrote, its current activity, and then its reply o
   expect(done).not.toContain("Running pnpm install");
   expect(done.split(task.result ?? "").length - 1).toBe(1);
 });
+
+it("renders the operator's prompt as written and the Tag's messages and result as markdown", () => {
+  const html = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: {
+        conversation: "planning",
+        task: {
+          ...task,
+          prompt: "Ship **v2**",
+          result: "Updated `pnpm-lock.yaml`.\n\n- tests pass",
+        },
+      },
+      events: [{ sequence: 1, kind: "message", text: "Checking the **lockfile**." }],
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(html).toContain("is-user");
+  expect(html).toContain("Ship **v2**");
+  expect(html).toContain("is-assistant");
+  expect(html).toMatch(/data-streamdown="strong">lockfile</);
+  expect(html).toMatch(/data-streamdown="inline-code">pnpm-lock.yaml</);
+  expect(html).toMatch(/data-streamdown="list-item">tests pass</);
+});
+
+it("animates the activity line only while the Task runs", () => {
+  const render = (state: string) =>
+    renderToStaticMarkup(
+      createElement(ConversationEntry, {
+        message: { conversation: "planning", task: { ...task, state, result: undefined } },
+        events: [{ sequence: 1, kind: "activity", text: "Running pnpm test" }],
+        onActivity: () => {},
+        onSaveArtifact: async () => false,
+      }),
+    );
+  const running = render("running");
+  expect(running).toContain("Running pnpm test");
+  expect(running).toContain("bg-clip-text");
+  const failed = render("failed");
+  expect(failed).toContain("Running pnpm test");
+  expect(failed).not.toContain("bg-clip-text");
+});

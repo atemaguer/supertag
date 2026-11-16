@@ -1,5 +1,7 @@
-import type { ControlPlane, Message, TaskEvent } from "../control-plane";
+import type { ControlPlane, Message as TagMessage, TaskEvent } from "../control-plane";
 import { turnView, useTurnEvents } from "../lib/turn";
+import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
+import { Shimmer } from "./ai-elements/shimmer";
 import { ResultFiles } from "./result-files";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
@@ -52,7 +54,7 @@ export function ConversationEntry({
   onActivity,
   onSaveArtifact,
 }: {
-  message: Message;
+  message: TagMessage;
   /** The turn's recorded events, for the messages the Tag wrote and what it is doing. */
   events?: readonly TaskEvent[];
   activeTask?: string;
@@ -66,15 +68,16 @@ export function ConversationEntry({
   const joined = input?.state === "accepted";
   const activityTask = joined ? input.taskId : task.taskId;
   const turn = turnView(joined ? [] : events, task.result);
+  const working = RUNNING.has(task.state);
   return (
     <article className="exchange">
       {!report && (
-        <div className="user-turn">
+        <Message from="user" className="user-turn">
           <span className="visually-hidden">You</span>
-          <p className="prompt-text">{task.prompt}</p>
-        </div>
+          <MessageContent className="prompt-text">{task.prompt}</MessageContent>
+        </Message>
       )}
-      <div className="tag-turn">
+      <Message from="assistant" className="tag-turn">
         <TagAvatar tagId={task.tagId} />
         <div className="reply-body">
           <div className="reply-heading">
@@ -92,24 +95,28 @@ export function ConversationEntry({
               {status}
             </Button>
           </div>
-          {turn.messages.map((text, index) => (
-            // Messages are append-only, so their position is their identity.
-            // biome-ignore lint/suspicious/noArrayIndexKey: see above.
-            <p key={index} className="result-text tag-message">
-              {text}
-            </p>
-          ))}
-          {turn.status && (
-            <p className="turn-status" role="status">
-              {turn.status}
-            </p>
-          )}
-          {task.result && !joined && <p className="result-text">{task.result}</p>}
+          <MessageContent className="reply-content">
+            {turn.messages.map((text, index) => (
+              // Messages are append-only, so their position is their identity.
+              // biome-ignore lint/suspicious/noArrayIndexKey: see above.
+              <MessageResponse key={index} className="markdown tag-message">
+                {text}
+              </MessageResponse>
+            ))}
+            {turn.status && (
+              <div className="turn-status" role="status">
+                {working ? <Shimmer as="span">{turn.status}</Shimmer> : turn.status}
+              </div>
+            )}
+            {task.result && !joined && (
+              <MessageResponse className="markdown result-text">{task.result}</MessageResponse>
+            )}
+          </MessageContent>
           {!joined && task.artifacts && task.artifacts.length > 0 && (
             <ResultFiles artifacts={task.artifacts} onSave={onSaveArtifact} />
           )}
         </div>
-      </div>
+      </Message>
     </article>
   );
 }
