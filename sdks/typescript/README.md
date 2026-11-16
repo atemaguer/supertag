@@ -15,7 +15,8 @@ This package is the TypeScript SDK. It has two entry points:
   first call and names it on every call.
 - `supertag-ai/harness`: `openHarness` reads the execution bootstrap a Worker Host writes to a
   harness adapter's standard input and connects to the Worker Host's private harness service for
-  that one Task, including Worker-managed effect receipts.
+  that one Task, including Worker-managed effect receipts. Each event an adapter publishes names
+  its `TaskEventKind`: a whole message, an activity line, or a plan.
 
 ```sh
 npm install supertag-ai

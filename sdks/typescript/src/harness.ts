@@ -7,6 +7,7 @@ export {
   ExecutionLimitEnforcement,
   LiveInputReceipt,
   ObjectiveSignal,
+  TaskEventKind,
   TaskState,
 } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb.js";
 

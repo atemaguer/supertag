@@ -107,7 +107,7 @@ async function verifyRuntime(binary) {
     const harnessImport = import.meta.resolve("supertag-ai/harness");
     await writeFile(
       adapter,
-      `import { EffectReceiptState, openHarness, receipt } from ${JSON.stringify(harnessImport)};
+      `import { EffectReceiptState, openHarness, receipt, TaskEventKind } from ${JSON.stringify(harnessImport)};
 const harness = await openHarness(process.stdin);
 try {
   const run = await receipt(() => harness.client.attach({}));
@@ -125,7 +125,7 @@ try {
   if ((await harness.effects.begin(unsettled)).state !== EffectReceiptState.IN_DOUBT)
     throw new Error("unsettled effect was not in doubt");
   const result = "Installed Node harness for " + run.task.tagId;
-  const event = { sequence: 1n, text: result };
+  const event = { sequence: 1n, text: result, kind: TaskEventKind.MESSAGE };
   await receipt(() => harness.client.publish(event));
   await receipt(() => harness.client.publish(event));
   await receipt(() => harness.client.complete({ succeeded: true, result }));
