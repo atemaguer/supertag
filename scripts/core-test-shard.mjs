@@ -60,7 +60,13 @@ const positional = process.argv.slice(2, separator === -1 ? undefined : separato
 const testArgs = separator === -1 ? [] : process.argv.slice(separator + 1);
 const shard = Number(positional[0]);
 const total = Number(positional[1]);
-if (positional.length !== 2 || !Number.isInteger(shard) || !Number.isInteger(total) || shard < 1 || shard > total) {
+if (
+  positional.length !== 2 ||
+  !Number.isInteger(shard) ||
+  !Number.isInteger(total) ||
+  shard < 1 ||
+  shard > total
+) {
   console.error("usage: node scripts/core-test-shard.mjs SHARD TOTAL [-- TEST-ARGS...]");
   process.exit(2);
 }
@@ -97,19 +103,24 @@ for (let directory = core; ; directory = dirname(directory)) {
 }
 const workspace = ["--locked", "--workspace", "--all-features"];
 
-const build = spawnSync(cargo, ["test", ...workspace, "--no-run", "--message-format=json-render-diagnostics"], {
-  cwd: core,
-  stdio: ["ignore", "pipe", "inherit"],
-  maxBuffer: 256 * 1024 * 1024,
-  encoding: "utf8",
-});
+const build = spawnSync(
+  cargo,
+  ["test", ...workspace, "--no-run", "--message-format=json-render-diagnostics"],
+  {
+    cwd: core,
+    stdio: ["ignore", "pipe", "inherit"],
+    maxBuffer: 256 * 1024 * 1024,
+    encoding: "utf8",
+  },
+);
 if (build.status !== 0) process.exit(build.status ?? 1);
 
 const binaries = [];
 for (const line of build.stdout.split("\n")) {
   if (!line.startsWith("{")) continue;
   const message = JSON.parse(line);
-  if (message.reason !== "compiler-artifact" || !message.profile?.test || !message.executable) continue;
+  if (message.reason !== "compiler-artifact" || !message.profile?.test || !message.executable)
+    continue;
   const name = message.target.name.replaceAll("-", "_");
   binaries.push({
     label: `${message.target.kind.join(",")} ${message.target.name} (${message.manifest_path})`,
