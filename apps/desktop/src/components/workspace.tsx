@@ -9,6 +9,7 @@ import {
 } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
+import { shownConversation, useConversationPrefetch } from "../lib/conversation-cache";
 import { describe } from "../lib/polling";
 import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { harnessLabel, type TagAdmin } from "../tag-admin";
@@ -376,6 +377,12 @@ export function Workspace({
   const [error, setError] = useState("");
   const watch = useControlPlaneWatch(connectionId);
   const tag = tags.find((entry) => entry.tagId === selectedTag) ?? tags[0];
+  useConversationPrefetch(
+    controlPlane,
+    tags.map(({ tagId }) => tagId),
+    tag?.tagId,
+    watch,
+  );
 
   const refreshTags = useCallback(
     async (signal: AbortSignal) => {
@@ -459,9 +466,10 @@ function TagWorkspace({
   setDraft(key: string, draft: Draft): void;
   onWriteChange(delta: 1 | -1): void;
 }) {
-  const [conversation, setConversation] = useState<string>();
-  const [error, setError] = useState("");
   const tagId = tag.tagId;
+  // A Tag shown before opens its conversation at once, while its list revalidates.
+  const [conversation, setConversation] = useState(() => shownConversation(controlPlane, tagId));
+  const [error, setError] = useState("");
   const refreshThreads = useCallback(
     async (signal: AbortSignal) => {
       try {

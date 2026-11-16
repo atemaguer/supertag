@@ -73,6 +73,12 @@ configuration directory (`~/Library/Application Support` on macOS, `~/.config` o
 Neither store ever holds the local operator token: the terminal UI and the desktop app read it
 from `credentials.json` each time they connect to the local Control Plane.
 
+The desktop app also caches recently opened conversations so they show at once, in
+`ai.supertag.desktop/conversations/` in the user data directory, which is the configuration
+directory on macOS and `~/.local/share` on Linux. Each Control Plane and principal has its own
+owner-only directory there. The cache holds only what the Control Plane returned, never a
+credential. Forgetting a saved Control Plane deletes its cache.
+
 ### Gateway credential vault
 
 The Gateway reads each collaboration surface's secrets from its vault when it starts, at the

@@ -1,10 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ControlPlane, TaskEvent } from "../control-plane";
 
 /** How often a running turn's events are read. */
 const LIVE_INTERVAL = 1_000;
-/** The most events one read returns (`list_message_events`). */
-const PAGE = 100;
 
 /** What a turn shows from its recorded events, beside its prompt and result. */
 export interface TurnView {
@@ -51,34 +49,47 @@ export function eventLine(event: TaskEvent): string | undefined {
   }
 }
 
+/** Events by sequence, oldest first, each once. */
+export function mergeEvents(
+  known: readonly TaskEvent[],
+  read: readonly TaskEvent[],
+): readonly TaskEvent[] {
+  if (!read.length) return known;
+  if (!known.length) return read;
+  return [...new Map([...known, ...read].map((event) => [event.sequence, event])).values()].sort(
+    (a, b) => a.sequence - b.sequence,
+  );
+}
+
 /**
- * The recorded events of a turn: read every second while it runs, and once when it is done.
- * Returns nothing until the first read.
+ * The events a turn shows. Its history message carries them, so a finished turn reads nothing
+ * more; a running turn reads its newer events every second, and a turn whose message left
+ * earlier events out reads them once.
  */
 export function useTurnEvents(
   events: ControlPlane["events"] | undefined,
-  tagId: string,
-  taskId: string | undefined,
+  turn: { taskId?: string; events?: readonly TaskEvent[]; eventsTruncated?: boolean },
   running: boolean,
-): TaskEvent[] {
-  const [read, setRead] = useState<TaskEvent[]>([]);
+): readonly TaskEvent[] {
+  const { taskId, eventsTruncated } = turn;
+  const carried = turn.events ?? noEvents;
+  const latest = carried.at(-1)?.sequence ?? 0;
+  const [read, setRead] = useState<readonly TaskEvent[]>(noEvents);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer carried page starts where it ends.
   useEffect(() => {
-    if (!events || !taskId) return;
+    if (!events || !taskId || (!running && !eventsTruncated)) return;
     let stopped = false;
     let timer: number | undefined;
-    let after = 0;
-    const known: TaskEvent[] = [];
+    let after = eventsTruncated ? 0 : latest;
     async function poll() {
       try {
-        for (;;) {
-          const page = await events?.(tagId, taskId ?? "", after);
-          if (stopped || !page) return;
-          const next = page.filter((event) => event.sequence > after);
-          if (!next.length) break;
-          known.push(...next);
-          after = next[next.length - 1]?.sequence ?? after;
-          setRead([...known]);
-          if (next.length < PAGE) break;
+        const page = await events?.(taskId ?? "", after);
+        if (stopped || !page) return;
+        const next = page.filter((event) => event.sequence > after);
+        const last = next.at(-1);
+        if (last) {
+          after = last.sequence;
+          setRead((prior) => mergeEvents(prior, next));
         }
       } catch {
         // Events are presentation only; the turn's state and result still show.
@@ -90,6 +101,8 @@ export function useTurnEvents(
       stopped = true;
       window.clearTimeout(timer);
     };
-  }, [events, tagId, taskId, running]);
-  return read;
+  }, [events, taskId, running, eventsTruncated]);
+  return useMemo(() => mergeEvents(carried, read), [carried, read]);
 }
+
+const noEvents: readonly TaskEvent[] = [];

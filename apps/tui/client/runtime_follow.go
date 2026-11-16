@@ -37,16 +37,12 @@ func (c *runtimeClient) getObjectiveTask(ctx context.Context, tag, id string) (*
 	return &v2.ConversationMessage{Task: res.Msg}, nil
 }
 
-func (c *runtimeClient) listMessageEvents(ctx context.Context, tag, id string, after uint64, objective bool) ([]*v2.TaskEvent, error) {
+// listEvents reads a Task's events after a sequence. Operators and clients read the Tasks they
+// may see, which include their conversation turns and their children.
+func (c *runtimeClient) listEvents(ctx context.Context, id string, after uint64) ([]*v2.TaskEvent, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
-	var res *connect.Response[v2.ListEventsResponse]
-	var err error
-	if objective {
-		res, err = c.operator.ListEvents(ctx, connect.NewRequest(&v2.ListEventsRequest{TaskId: id, AfterSequence: after, Limit: runtimeEventPage}))
-	} else {
-		res, err = c.conversations.ListMessageEvents(ctx, connect.NewRequest(&v2.ListMessageEventsRequest{TagId: tag, TaskId: id, AfterSequence: after, Limit: runtimeEventPage}))
-	}
+	res, err := c.operator.ListEvents(ctx, connect.NewRequest(&v2.ListEventsRequest{TaskId: id, AfterSequence: after, Limit: runtimeEventPage}))
 	if err != nil {
 		return nil, apiError(err)
 	}
@@ -141,7 +137,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 		state.shown.replied = true
 	}
 	if !state.shown.replied {
-		events, err := runtime.listMessageEvents(ctx, state.tag, source, state.after, state.objective)
+		events, err := runtime.listEvents(ctx, source, state.after)
 		if err != nil {
 			return false, false, err
 		}
@@ -176,7 +172,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 		emit(state.shown.workSession(runtimeWork(work))...)
 		id := work.GetLatestTaskId()
 		after := state.children[id]
-		events, err := runtime.listMessageEvents(ctx, work.GetTagId(), id, after, true)
+		events, err := runtime.listEvents(ctx, id, after)
 		if err != nil {
 			return false, false, err
 		}

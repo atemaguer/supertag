@@ -84,6 +84,12 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
             ..Default::default()
         }),
         work_session_report_id: None,
+        events: vec![v2::TaskEvent {
+            sequence: 3,
+            text: "Looking at the build.".into(),
+            kind: v2::TaskEventKind::Message as i32,
+        }],
+        events_truncated: true,
     })
     .unwrap();
     let json = serde_json::to_value(message).unwrap();
@@ -94,6 +100,9 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
     assert!(json.get("workSessionReportId").is_none());
     assert_eq!(json["liveInput"]["state"], "dispatching");
     assert_eq!(json["liveInput"]["followerTaskId"], "follower");
+    assert_eq!(json["events"][0]["sequence"], 3);
+    assert_eq!(json["events"][0]["kind"], "message");
+    assert_eq!(json["eventsTruncated"], true);
 }
 
 #[test]
@@ -119,6 +128,8 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
             ..Default::default()
         }),
         work_session_report_id: Some("work/dependency".into()),
+        events: vec![],
+        events_truncated: false,
     })
     .unwrap();
     let json = serde_json::to_value(message).unwrap();
@@ -136,6 +147,7 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
     );
     assert!(json["task"].get("prompt").is_none());
     assert!(json.get("liveInput").is_none());
+    assert!(json.get("eventsTruncated").is_none());
 
     let summary = Conversation::from(v2::Conversation {
         latest_task: Some(v2::Task {
@@ -152,7 +164,7 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
 /// A Control Plane's API tier in front of its state owner. With `tunnel`, the API tier also
 /// accepts WebSocket tunnels, as with `--websocket-listen`, and the returned URL is a `ws://`
 /// tunnel URL with a path.
-async fn control_plane_fixture(
+pub(super) async fn control_plane_fixture(
     database: &std::path::Path,
     tag_id: &str,
     token: &str,
@@ -340,7 +352,7 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
     );
     assert!(
         client
-            .events(id, "engineer".into(), first.task.task_id, 0)
+            .events(id, first.task.task_id, 0)
             .await
             .unwrap()
             .is_empty()

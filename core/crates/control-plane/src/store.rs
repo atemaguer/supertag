@@ -1301,6 +1301,36 @@ impl Store {
         limit: u32,
     ) -> Result<Vec<TaskEvent>> {
         self.get_task(task_id).await?;
+        self.read_events(task_id, after_sequence, limit).await
+    }
+
+    /// A Task's events after `after_sequence` that `principal` may see: one query authorizes the
+    /// read, and a Task it may not see is not found.
+    pub async fn list_visible_events(
+        &self,
+        principal: &str,
+        task_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> Result<Vec<TaskEvent>> {
+        name("Task ID", task_id)?;
+        let owner: Option<String> =
+            sqlx::query_scalar("SELECT owner FROM supertag_v2_task_audience WHERE task_id=$1")
+                .bind(task_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        if !owner.is_some_and(|owner| sees_owner(principal, &owner)) {
+            return Err(StoreError::NotFound("Task was not found".into()));
+        }
+        self.read_events(task_id, after_sequence, limit).await
+    }
+
+    async fn read_events(
+        &self,
+        task_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> Result<Vec<TaskEvent>> {
         let after =
             i64::try_from(after_sequence).map_err(|_| invalid("event cursor is too large"))?;
         let limit = if limit == 0 { 32 } else { limit.min(32) } as i64;
@@ -2108,6 +2138,40 @@ pub(crate) fn reply_row(row: &AnyRow) -> Result<Reply> {
         provider_receipt: row.try_get("provider_receipt")?,
         ..Default::default()
     })
+}
+
+/// How many IDs one `IN (...)` list binds. Both databases accept far more parameters.
+pub(crate) const ID_BATCH: usize = 256;
+
+/// `$first, $first+1, ...`: `count` numbered parameters for an `IN (...)` list.
+pub(crate) fn placeholders(first: usize, count: usize) -> String {
+    (first..first + count)
+        .map(|index| format!("${index}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The Tasks with these IDs, by ID, in one query per [`ID_BATCH`]. A missing Task is absent.
+pub(crate) async fn tasks_in(
+    transaction: &mut Transaction<'_, Any>,
+    ids: &[&str],
+) -> Result<std::collections::HashMap<String, Task>> {
+    let mut tasks = std::collections::HashMap::with_capacity(ids.len());
+    for chunk in ids.chunks(ID_BATCH) {
+        let sql = format!(
+            "SELECT * FROM supertag_v2_tasks WHERE task_id IN ({})",
+            placeholders(1, chunk.len())
+        );
+        let mut query = sqlx::query(&sql);
+        for id in chunk {
+            query = query.bind(*id);
+        }
+        for row in query.fetch_all(&mut **transaction).await? {
+            let task = task_row(&row)?;
+            tasks.insert(task.task_id.clone(), task);
+        }
+    }
+    Ok(tasks)
 }
 
 pub(crate) async fn task_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Result<Task> {

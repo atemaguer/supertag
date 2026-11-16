@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { turnView } from "./turn";
+import { mergeEvents, turnView } from "./turn";
 
 it("shows the latest activity or plan step only while the turn runs", () => {
   const plan = JSON.stringify({
@@ -38,4 +38,23 @@ it("drops trailing messages its result repeats", () => {
       "Part one.\nPart two.",
     ),
   ).toEqual({ messages: ["I'll look."] });
+});
+
+it("merges a turn's carried events with those read since, once each and in order", () => {
+  const carried = [
+    { sequence: 1, kind: "message", text: "I'll look." },
+    { sequence: 4, kind: "activity", text: "Running go test" },
+  ] as const;
+  const read = [
+    { sequence: 4, kind: "activity", text: "Running go test" },
+    { sequence: 5, kind: "message", text: "Found it." },
+    { sequence: 6, kind: "activity", text: "Editing main.go" },
+  ] as const;
+  const merged = mergeEvents(carried, read);
+  expect(merged.map(({ sequence }) => sequence)).toEqual([1, 4, 5, 6]);
+  expect(turnView(merged)).toEqual({
+    messages: ["I'll look.", "Found it."],
+    status: "Editing main.go",
+  });
+  expect(mergeEvents(carried, [])).toBe(carried);
 });

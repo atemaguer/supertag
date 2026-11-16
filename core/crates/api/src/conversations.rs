@@ -53,16 +53,6 @@ impl conversations_server::Conversations for Api {
         })
         .await
     }
-
-    async fn list_message_events(
-        &self,
-        request: Request<ListMessageEventsRequest>,
-    ) -> Result<Response<ListEventsResponse>, Status> {
-        self.forward(request, |channel, request| async move {
-            client(channel).list_message_events(request).await
-        })
-        .await
-    }
 }
 
 fn client(channel: ProtocolChannel) -> conversations_client::ConversationsClient<ProtocolChannel> {

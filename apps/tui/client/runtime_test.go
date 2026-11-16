@@ -235,9 +235,9 @@ func TestRuntimeV2FollowsEventPagesAfterTransientFailure(t *testing.T) {
 	})
 	var cursors []uint64
 	var mu sync.Mutex
-	testRPC(mux, rpc.ConversationsListMessageEventsProcedure, func(_ context.Context, req *v2.ListMessageEventsRequest) (*v2.ListEventsResponse, error) {
-		if req.GetTagId() != "lead" || req.GetTaskId() != "t1" || req.GetLimit() != runtimeEventPage {
-			t.Errorf("ListMessageEvents request = %v", req)
+	testRPC(mux, rpc.OperatorListEventsProcedure, func(_ context.Context, req *v2.ListEventsRequest) (*v2.ListEventsResponse, error) {
+		if req.GetTaskId() != "t1" || req.GetLimit() != runtimeEventPage {
+			t.Errorf("ListEvents request = %v", req)
 		}
 		mu.Lock()
 		defer mu.Unlock()
@@ -298,9 +298,9 @@ func TestRuntimeV2FollowsWithdrawnInputAsItsOwnTask(t *testing.T) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("unexpected Task"))
 		}
 	})
-	testRPC(mux, rpc.ConversationsListMessageEventsProcedure, func(_ context.Context, req *v2.ListMessageEventsRequest) (*v2.ListEventsResponse, error) {
+	testRPC(mux, rpc.OperatorListEventsProcedure, func(_ context.Context, req *v2.ListEventsRequest) (*v2.ListEventsResponse, error) {
 		if req.GetTaskId() != "follower" || req.GetAfterSequence() != 0 {
-			t.Errorf("ListMessageEvents request = %v", req)
+			t.Errorf("ListEvents request = %v", req)
 		}
 		return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: 1, Text: "own event", Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE}}}, nil
 	})

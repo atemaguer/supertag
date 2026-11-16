@@ -94,7 +94,14 @@ export const previewControlPlane: ControlPlane = {
     );
   },
   async messages(tagId, name) {
-    return { messages: [...(conversationsFor(tagId).get(name) ?? [])].reverse() };
+    const messages = [...(conversationsFor(tagId).get(name) ?? [])].reverse();
+    return {
+      messages: messages.map((message) => {
+        // As the Control Plane does: each message the Tag wrote, and its latest activity.
+        const events = previewEvents(message.task.taskId);
+        return { ...message, events: [events[0], events.at(-1)].filter((e) => e !== undefined) };
+      }),
+    };
   },
   async send(tagId, name, text, operationId) {
     const threads = conversationsFor(tagId);
@@ -118,27 +125,35 @@ export const previewControlPlane: ControlPlane = {
   async saveArtifact() {
     return false;
   },
-  async events(_tagId, taskId, afterSequence) {
-    const events: TaskEvent[] = [
-      {
-        sequence: 1,
-        kind: "message",
-        text: taskId.startsWith("ci-health")
-          ? "I'll look at the deadline and cancellation paths first."
-          : "I'll prepare the preview result.",
-      },
-      { sequence: 2, kind: "activity", text: "Reading src/runtime/deadline.ts" },
-      {
-        sequence: 3,
-        kind: "activity",
-        text: taskId.startsWith("ci-health")
-          ? "Running pnpm test -- deadline"
-          : "Writing the preview result",
-      },
-    ];
-    return events.filter(({ sequence }) => sequence > afterSequence);
+  async events(taskId, afterSequence) {
+    return previewEvents(taskId).filter(({ sequence }) => sequence > afterSequence);
   },
+  scope: "preview",
+  async readCache() {
+    return undefined;
+  },
+  async writeCache() {},
 };
+
+function previewEvents(taskId: string): TaskEvent[] {
+  return [
+    {
+      sequence: 1,
+      kind: "message",
+      text: taskId.startsWith("ci-health")
+        ? "I'll look at the deadline and cancellation paths first."
+        : "I'll prepare the preview result.",
+    },
+    { sequence: 2, kind: "activity", text: "Reading src/runtime/deadline.ts" },
+    {
+      sequence: 3,
+      kind: "activity",
+      text: taskId.startsWith("ci-health")
+        ? "Running pnpm test -- deadline"
+        : "Writing the preview result",
+    },
+  ];
+}
 
 export const previewTagAdmin: TagAdmin = {
   async options() {

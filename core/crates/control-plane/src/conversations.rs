@@ -11,17 +11,20 @@ use uuid::Uuid;
 
 use crate::{
     ControlPlane, Store, StoreError,
-    inputs::{input_for_follower_in, record_live_input_in},
+    inputs::{inputs_for_followers_in, record_live_input_in},
     objectives::{objective_admission_in, objective_link_task_in},
     store::{
-        Result, insert_task_with_requirements, invalid, name, next_order, output_policy_digest,
-        task_in, text,
+        ID_BATCH, Result, insert_task_with_requirements, invalid, name, next_order,
+        output_policy_digest, placeholders, tasks_in, text,
     },
     surface_objectives::Command,
 };
 
 const SESSION_PREFIX: &str = "conversation/";
 const PAGE_BYTES: usize = MAX_MESSAGE_BYTES - 1024;
+/// The most a message's events take of a history page. A prompt and a result are each at most
+/// 256 KiB, so a message with its events still fits a page.
+const MESSAGE_EVENT_BYTES: usize = 128 * 1024;
 
 pub(crate) fn private_session(session_id: &str) -> bool {
     session_id.starts_with(SESSION_PREFIX)
@@ -227,6 +230,8 @@ impl Store {
                 conversation: input.conversation.clone(),
                 live_input: None,
                 work_session_report_id: None,
+                events: Vec::new(),
+                events_truncated: false,
             });
         }
         let active = if input.text.len() <= crate::inputs::MAX_INPUT_BYTES {
@@ -253,6 +258,8 @@ impl Store {
             conversation: input.conversation.clone(),
             live_input,
             work_session_report_id: None,
+            events: Vec::new(),
+            events_truncated: false,
         })
     }
 
@@ -277,17 +284,24 @@ impl Store {
              ORDER BY c.created_order DESC LIMIT $4",
         )
             .bind(principal).bind(cursor).bind(&input.tag_id).bind(limit + 1).fetch_all(&mut *tx).await?;
+        let latest_ids = rows
+            .iter()
+            .map(|row| row.try_get::<String, _>("task_id"))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let ids: Vec<&str> = latest_ids.iter().map(String::as_str).collect();
+        let tasks = tasks_in(&mut tx, &ids).await?;
         let mut page = Page::new(limit);
         for row in rows {
-            let latest_id: String = row.try_get("task_id")?;
             let report_id: Option<String> = row.try_get("work_session_report_id")?;
             let conversation = Conversation {
                 tag_id: row.try_get("tag_id")?,
                 name: row.try_get("name")?,
                 session_id: row.try_get("session_id")?,
-                latest_task: Some(
-                    conversation_task_in(&mut tx, &latest_id, report_id.is_some()).await?,
-                ),
+                latest_task: Some(conversation_task(
+                    &tasks,
+                    &row.try_get::<String, _>("task_id")?,
+                    report_id.is_some(),
+                )?),
             };
             if !page.push(
                 conversation,
@@ -322,19 +336,18 @@ impl Store {
         {
             let rows = sqlx::query("SELECT task_id,accepted_order,work_session_report_id FROM supertag_v2_conversation_history WHERE session_id=$1 AND accepted_order<$2 ORDER BY accepted_order DESC LIMIT $3")
                 .bind(session).bind(cursor).bind(limit + 1).fetch_all(&mut *tx).await?;
+            let mut entries = Vec::with_capacity(rows.len());
+            let mut orders = Vec::with_capacity(rows.len());
             for row in rows {
-                let task_id: String = row.try_get("task_id")?;
-                let message = message_in(
-                    &mut tx,
-                    &input.conversation,
-                    &task_id,
-                    row.try_get("work_session_report_id")?,
-                )
-                .await?;
-                if !page.push(
-                    message,
-                    row.try_get::<i64, _>("accepted_order")?.to_string(),
-                )? {
+                entries.push((
+                    row.try_get::<String, _>("task_id")?,
+                    row.try_get::<Option<String>, _>("work_session_report_id")?,
+                ));
+                orders.push(row.try_get::<i64, _>("accepted_order")?);
+            }
+            let messages = messages_in(&mut tx, &input.conversation, entries).await?;
+            for (message, order) in messages.into_iter().zip(orders) {
+                if !page.push(message, order.to_string())? {
                     break;
                 }
             }
@@ -441,25 +454,118 @@ async fn message_in(
     task_id: &str,
     work_session_report_id: Option<String>,
 ) -> Result<ConversationMessage> {
-    let is_report = work_session_report_id.is_some();
-    Ok(ConversationMessage {
-        task: Some(conversation_task_in(tx, task_id, is_report).await?),
-        conversation: conversation.to_owned(),
-        live_input: if is_report {
-            None
-        } else {
-            input_for_follower_in(tx, task_id).await?
-        },
-        work_session_report_id,
-    })
+    messages_in(
+        tx,
+        conversation,
+        vec![(task_id.to_owned(), work_session_report_id)],
+    )
+    .await?
+    .pop()
+    .ok_or_else(|| StoreError::NotFound("Task was not found".into()))
 }
 
-async fn conversation_task_in(
+/// The messages of these history entries (Task ID, and report ID for a report turn), in their
+/// order. It takes the same few queries however many entries there are.
+async fn messages_in(
     tx: &mut Transaction<'_, Any>,
+    conversation: &str,
+    entries: Vec<(String, Option<String>)>,
+) -> Result<Vec<ConversationMessage>> {
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<&str> = entries.iter().map(|(id, _)| id.as_str()).collect();
+    let tasks = tasks_in(tx, &ids).await?;
+    let followers: Vec<&str> = entries
+        .iter()
+        .filter(|(_, report)| report.is_none())
+        .map(|(id, _)| id.as_str())
+        .collect();
+    let mut inputs = if followers.is_empty() {
+        Default::default()
+    } else {
+        inputs_for_followers_in(tx, &followers).await?
+    };
+    let mut events = message_events_in(tx, &ids).await?;
+    entries
+        .into_iter()
+        .map(|(task_id, report)| {
+            let is_report = report.is_some();
+            let (events, events_truncated) = events.remove(&task_id).unwrap_or_default();
+            Ok(ConversationMessage {
+                task: Some(conversation_task(&tasks, &task_id, is_report)?),
+                conversation: conversation.to_owned(),
+                live_input: if is_report {
+                    None
+                } else {
+                    inputs.remove(&task_id)
+                },
+                work_session_report_id: report,
+                events,
+                events_truncated,
+            })
+        })
+        .collect()
+}
+
+/// What each Task's turn shows from its events, oldest first: every message the Tag wrote and
+/// its latest activity or plan event, keeping the latest within [`MESSAGE_EVENT_BYTES`]. The
+/// flag says earlier messages were left out.
+async fn message_events_in(
+    tx: &mut Transaction<'_, Any>,
+    task_ids: &[&str],
+) -> Result<std::collections::HashMap<String, (Vec<TaskEvent>, bool)>> {
+    let mut read: std::collections::HashMap<String, Vec<TaskEvent>> = Default::default();
+    for chunk in task_ids.chunks(ID_BATCH) {
+        let sql = format!(
+            "SELECT e.task_id,e.sequence,e.text,e.kind FROM supertag_v2_task_events e
+             WHERE e.task_id IN ({}) AND (e.kind=$1 OR e.sequence=(
+                 SELECT MAX(l.sequence) FROM supertag_v2_task_events l WHERE l.task_id=e.task_id AND l.kind<>$1))
+             ORDER BY e.task_id,e.sequence",
+            placeholders(2, chunk.len())
+        );
+        let mut query = sqlx::query(&sql).bind(TaskEventKind::Message as i64);
+        for id in chunk {
+            query = query.bind(*id);
+        }
+        for row in query.fetch_all(&mut **tx).await? {
+            read.entry(row.try_get("task_id")?)
+                .or_default()
+                .push(TaskEvent {
+                    sequence: row.try_get::<i64, _>("sequence")? as u64,
+                    text: row.try_get("text")?,
+                    kind: row.try_get::<i64, _>("kind")? as i32,
+                });
+        }
+    }
+    Ok(read
+        .into_iter()
+        .map(|(task_id, mut events)| {
+            let mut bytes = 0;
+            let kept = events
+                .iter()
+                .rev()
+                .take_while(|event| {
+                    bytes += event.encoded_len() + 8;
+                    bytes <= MESSAGE_EVENT_BYTES
+                })
+                .count();
+            let truncated = kept < events.len();
+            events.drain(..events.len() - kept);
+            (task_id, (events, truncated))
+        })
+        .collect())
+}
+
+fn conversation_task(
+    tasks: &std::collections::HashMap<String, Task>,
     task_id: &str,
     report: bool,
 ) -> Result<Task> {
-    let mut task = task_in(tx, task_id).await?;
+    let mut task = tasks
+        .get(task_id)
+        .cloned()
+        .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?;
     if report {
         // Report input is execution data. The conversation only presents its reply.
         task.prompt.clear();
@@ -602,22 +708,5 @@ impl conversations_server::Conversations for ControlPlane {
                 .get_message(&principal, &input.tag_id, &input.task_id)
                 .await?,
         ))
-    }
-
-    async fn list_message_events(
-        &self,
-        request: Request<ListMessageEventsRequest>,
-    ) -> std::result::Result<Response<ListEventsResponse>, Status> {
-        let principal = self.actor(&request)?;
-        let input = request.into_inner();
-        self.store
-            .get_message(&principal, &input.tag_id, &input.task_id)
-            .await?;
-        Ok(Response::new(ListEventsResponse {
-            events: self
-                .store
-                .list_events(&input.task_id, input.after_sequence, input.limit)
-                .await?,
-        }))
     }
 }

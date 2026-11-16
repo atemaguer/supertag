@@ -2132,16 +2132,20 @@ class Conversation(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., name: _Optional[str] = ..., session_id: _Optional[str] = ..., latest_task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
 
 class ConversationMessage(_message.Message):
-    __slots__ = ("task", "conversation", "live_input", "work_session_report_id")
+    __slots__ = ("task", "conversation", "live_input", "work_session_report_id", "events", "events_truncated")
     TASK_FIELD_NUMBER: _ClassVar[int]
     CONVERSATION_FIELD_NUMBER: _ClassVar[int]
     LIVE_INPUT_FIELD_NUMBER: _ClassVar[int]
     WORK_SESSION_REPORT_ID_FIELD_NUMBER: _ClassVar[int]
+    EVENTS_FIELD_NUMBER: _ClassVar[int]
+    EVENTS_TRUNCATED_FIELD_NUMBER: _ClassVar[int]
     task: Task
     conversation: str
     live_input: LiveInput
     work_session_report_id: str
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., conversation: _Optional[str] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ..., work_session_report_id: _Optional[str] = ...) -> None: ...
+    events: _containers.RepeatedCompositeFieldContainer[TaskEvent]
+    events_truncated: bool
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., conversation: _Optional[str] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ..., work_session_report_id: _Optional[str] = ..., events: _Optional[_Iterable[_Union[TaskEvent, _Mapping]]] = ..., events_truncated: _Optional[bool] = ...) -> None: ...
 
 class ListConversationsRequest(_message.Message):
     __slots__ = ("tag_id", "limit", "cursor")
@@ -2204,18 +2208,6 @@ class GetMessageRequest(_message.Message):
     tag_id: str
     task_id: str
     def __init__(self, tag_id: _Optional[str] = ..., task_id: _Optional[str] = ...) -> None: ...
-
-class ListMessageEventsRequest(_message.Message):
-    __slots__ = ("tag_id", "task_id", "after_sequence", "limit")
-    TAG_ID_FIELD_NUMBER: _ClassVar[int]
-    TASK_ID_FIELD_NUMBER: _ClassVar[int]
-    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
-    LIMIT_FIELD_NUMBER: _ClassVar[int]
-    tag_id: str
-    task_id: str
-    after_sequence: int
-    limit: int
-    def __init__(self, tag_id: _Optional[str] = ..., task_id: _Optional[str] = ..., after_sequence: _Optional[int] = ..., limit: _Optional[int] = ...) -> None: ...
 
 class SubmitTaskRequest(_message.Message):
     __slots__ = ("tag_id", "session_id", "operation_id", "prompt", "execution_limits", "output_policy", "input_artifacts")

@@ -687,19 +687,38 @@ async fn conversation_scope_survives_api_forwards_and_task_reads(database: Strin
         .env("SUPERTAG_HOST_TOKEN", &host_token);
     assert!(timeout(WAIT, host.status()).await??.success());
     let task_id = sent.task_id;
-    let events = ListMessageEventsRequest {
-        tag_id: "engineer".into(),
+    let events = ListEventsRequest {
         task_id: task_id.clone(),
         ..Default::default()
     };
-    let owned = alice_conversations
-        .list_message_events(authenticated_request(events.clone(), &alice_token, None)?)
+    let owned = alice_operator
+        .list_events(authenticated_request(events.clone(), &alice_token, None)?)
         .await?
         .into_inner();
     assert!(!owned.events.is_empty());
+    // The conversation history carries the turn's events itself, ending at its latest.
+    let alice_history = alice_conversations
+        .list_messages(authenticated_request(
+            ListMessagesRequest {
+                tag_id: "engineer".into(),
+                conversation: "personal".into(),
+                ..Default::default()
+            },
+            &alice_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
     assert_eq!(
-        bob_conversations
-            .list_message_events(authenticated_request(
+        alice_history.messages[0]
+            .events
+            .last()
+            .map(|event| event.sequence),
+        owned.events.last().map(|event| event.sequence)
+    );
+    assert_eq!(
+        bob_operator
+            .list_events(authenticated_request(
                 events,
                 &bob_token,
                 Some("operator:alice")

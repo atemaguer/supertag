@@ -397,13 +397,15 @@ impl operator_server::Operator for ControlPlane {
     ) -> Result<Response<ListEventsResponse>, Status> {
         let principal = self.actor(&request)?;
         let input = request.into_inner();
-        self.store
-            .ensure_task_access(&principal, &input.task_id)
-            .await?;
         Ok(Response::new(ListEventsResponse {
             events: self
                 .store
-                .list_events(&input.task_id, input.after_sequence, input.limit)
+                .list_visible_events(
+                    &principal,
+                    &input.task_id,
+                    input.after_sequence,
+                    input.limit,
+                )
                 .await?,
         }))
     }

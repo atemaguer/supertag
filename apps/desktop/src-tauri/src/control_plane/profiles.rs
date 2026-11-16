@@ -302,6 +302,11 @@ impl ControlPlaneState {
         token: &str,
     ) -> Result<ControlPlaneActivation> {
         let generation = self.0.read().await.generation;
+        // Cached conversations belong to this Control Plane and principal. The local Control
+        // Plane is told apart by where it runs.
+        let control_plane = origin
+            .clone()
+            .unwrap_or_else(|| format!("{LOCAL} {}", endpoint.url()));
         let session = Arc::new(Session::connect(endpoint, token).await?);
         let principal = session.principal().await?;
         let tags = session.tags().await?;
@@ -315,6 +320,10 @@ impl ControlPlaneState {
         let connection_id = state.replace().to_string();
         state.session = Some(session);
         state.origin = Some(origin.clone());
+        state.cache_scope = Some(super::cache::CacheScope {
+            control_plane,
+            principal: principal.clone(),
+        });
         Ok(ControlPlaneActivation {
             control_planes: self.list(profiles),
             origin,

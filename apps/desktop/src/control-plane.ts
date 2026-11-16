@@ -29,6 +29,13 @@ export interface Message {
   conversation: string;
   liveInput?: { taskId: string; state: string };
   workSessionReportId?: string;
+  /**
+   * What the turn shows from its events, oldest first: each message the Tag wrote and its latest
+   * activity or plan. The last is the turn's latest event.
+   */
+  events?: TaskEvent[];
+  /** Earlier messages the Tag wrote were left out; `events` reads them. */
+  eventsTruncated?: boolean;
 }
 
 export interface Conversation {
@@ -58,8 +65,17 @@ export interface ControlPlane {
   conversations(tagId: string): Promise<Conversation[]>;
   messages(tagId: string, conversation: string, cursor?: string): Promise<MessagePage>;
   send(tagId: string, conversation: string, text: string, operationId: string): Promise<Message>;
-  events(tagId: string, taskId: string, afterSequence: number): Promise<TaskEvent[]>;
+  /** All of a Task's events after a sequence, oldest first. */
+  events(taskId: string, afterSequence: number): Promise<TaskEvent[]>;
   saveArtifact(artifactId: string, path: string): Promise<boolean>;
+  /**
+   * The Control Plane and principal this connection acts as. Conversations cached under one
+   * scope are never shown under another.
+   */
+  readonly scope: string;
+  /** The conversation this connection's Control Plane and principal last cached, if any. */
+  readCache(tagId: string, conversation: string): Promise<unknown>;
+  writeCache(tagId: string, conversation: string, value: unknown): Promise<void>;
 }
 
 export type WatchUpdate =
@@ -99,18 +115,28 @@ export interface ControlPlaneActivation {
   principal: string;
 }
 
-export function controlPlaneSession(connectionId: string): ControlPlane {
+/** The scope of a connection's cached conversations: its Control Plane and principal. */
+export function cacheScope(origin: string, principal: string) {
+  return JSON.stringify([origin, principal]);
+}
+
+export function controlPlaneSession(connectionId: string, scope: string): ControlPlane {
   return {
+    scope,
     tags: () => invoke("list_tags", { connectionId }),
     conversations: (tagId) => invoke("list_conversations", { connectionId, tagId }),
     messages: (tagId, conversation, cursor) =>
       invoke("list_messages", { connectionId, tagId, conversation, cursor }),
     send: (tagId, conversation, text, operationId) =>
       invoke("send_message", { connectionId, tagId, conversation, text, operationId }),
-    events: (tagId, taskId, afterSequence) =>
-      invoke("list_message_events", { connectionId, tagId, taskId, afterSequence }),
+    events: (taskId, afterSequence) =>
+      invoke("list_task_events", { connectionId, taskId, afterSequence }),
     saveArtifact: (artifactId, path) =>
       invoke("save_result_artifact", { connectionId, artifactId, path }),
+    readCache: (tagId, conversation) =>
+      invoke("read_conversation_cache", { connectionId, tagId, conversation }),
+    writeCache: (tagId, conversation, value) =>
+      invoke("write_conversation_cache", { connectionId, tagId, conversation, value }),
   };
 }
 

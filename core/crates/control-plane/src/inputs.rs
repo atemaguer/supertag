@@ -409,29 +409,43 @@ async fn compatible_policy_in(
     Ok(active.execution_selection == follower.execution_selection)
 }
 
-pub(crate) async fn input_for_follower_in(
+/// The live input each of `follower_task_ids` delivers, by follower Task ID, in one query.
+pub(crate) async fn inputs_for_followers_in(
     tx: &mut Transaction<'_, Any>,
-    task_id: &str,
-) -> Result<Option<LiveInput>> {
-    let id: Option<String> = sqlx::query_scalar(
-        "SELECT input_id FROM supertag_v2_live_inputs WHERE follower_task_id=$1",
-    )
-    .bind(task_id)
-    .fetch_optional(&mut **tx)
-    .await?;
-    match id {
-        Some(id) => Ok(Some(input_in(tx, &id).await?.0)),
-        None => Ok(None),
+    follower_task_ids: &[&str],
+) -> Result<std::collections::HashMap<String, LiveInput>> {
+    let mut inputs = std::collections::HashMap::new();
+    for chunk in follower_task_ids.chunks(crate::store::ID_BATCH) {
+        let sql = format!(
+            "{INPUT_SELECT} WHERE i.follower_task_id IN ({})",
+            crate::store::placeholders(1, chunk.len())
+        );
+        let mut query = sqlx::query(&sql);
+        for id in chunk {
+            query = query.bind(*id);
+        }
+        for row in query.fetch_all(&mut **tx).await? {
+            let (input, _) = input_row(&row)?;
+            inputs.insert(input.follower_task_id.clone(), input);
+        }
     }
+    Ok(inputs)
 }
 
+const INPUT_SELECT: &str =
+    "SELECT i.*,f.prompt AS input_text,f.accepted_order AS input_order,f.state AS follower_state
+         FROM supertag_v2_live_inputs i JOIN supertag_v2_tasks f ON f.task_id=i.follower_task_id";
+
 async fn input_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<(LiveInput, i64)> {
-    let row = sqlx::query(
-        "SELECT i.*,f.prompt AS input_text,f.accepted_order AS input_order,f.state AS follower_state
-         FROM supertag_v2_live_inputs i JOIN supertag_v2_tasks f ON f.task_id=i.follower_task_id WHERE i.input_id=$1",
-    )
-    .bind(id).fetch_optional(&mut **tx).await?
-    .ok_or_else(|| StoreError::NotFound("live input was not found".into()))?;
+    let row = sqlx::query(&format!("{INPUT_SELECT} WHERE i.input_id=$1"))
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| StoreError::NotFound("live input was not found".into()))?;
+    input_row(&row)
+}
+
+fn input_row(row: &AnyRow) -> Result<(LiveInput, i64)> {
     Ok((
         LiveInput {
             input_id: row.try_get("input_id")?,

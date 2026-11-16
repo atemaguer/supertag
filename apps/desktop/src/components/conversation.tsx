@@ -3,6 +3,13 @@ import { type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import type { ControlPlane, Tag, TaskEvent, WatchUpdate } from "../control-plane";
 import {
+  cachedHistory,
+  cacheHistory,
+  openConversation,
+  showConversation,
+  storedHistory,
+} from "../lib/conversation-cache";
+import {
   earlierHistory,
   emptyHistory,
   type History,
@@ -56,12 +63,15 @@ export function ConversationPane({
   setDraft,
   onWriteChange,
 }: ConversationProps) {
-  const [history, renderHistory] = useState<History>(emptyHistory);
+  const tagId = tag.tagId;
+  // A conversation shown before renders at once from the cache, then revalidates.
+  const [history, renderHistory] = useState<History>(
+    () => cachedHistory(controlPlane, tagId, name) ?? emptyHistory,
+  );
   const currentHistory = useRef(history);
   const [error, setError] = useState("");
   const [paging, setPaging] = useState(false);
   const [activeTask, setActiveTask] = useState<string>();
-  const tagId = tag.tagId;
   const revision = useRef(0);
   const inFlight = useRef(false);
   const active = useRef(true);
@@ -69,17 +79,32 @@ export function ConversationPane({
   const transcript = useRef<StickToBottomContext>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const activityTrigger = useRef<HTMLButtonElement>(null);
-  const setHistory = useCallback((next: History) => {
-    currentHistory.current = next;
-    renderHistory(next);
-  }, []);
+  const setHistory = useCallback(
+    (next: History) => {
+      currentHistory.current = next;
+      renderHistory(next);
+      cacheHistory(controlPlane, tagId, name, next);
+    },
+    [controlPlane, tagId, name],
+  );
 
   useEffect(() => {
     active.current = true;
+    showConversation(controlPlane, tagId, name);
+    const close = openConversation(controlPlane, tagId, name);
+    // Not in memory: the disk cache shows it until the Control Plane answers.
+    if (!currentHistory.current.read)
+      void storedHistory(controlPlane, tagId, name).then((stored) => {
+        if (stored && active.current && !currentHistory.current.read) {
+          currentHistory.current = stored;
+          renderHistory(stored);
+        }
+      });
     return () => {
       active.current = false;
+      close();
     };
-  }, []);
+  }, [controlPlane, tagId, name]);
 
   const refresh = useCallback(
     async (signal: AbortSignal) => {
@@ -292,7 +317,6 @@ export function ConversationPane({
           <ActivityPane
             key={activeTask}
             controlPlane={controlPlane}
-            tagId={tagId}
             taskId={activeTask}
             onClose={() => {
               setActiveTask(undefined);
@@ -329,12 +353,10 @@ function EmptyConversation({ tag }: { tag: Tag }) {
 
 function ActivityPane({
   controlPlane,
-  tagId,
   taskId,
   onClose,
 }: {
   controlPlane: ControlPlane;
-  tagId: string;
   taskId: string;
   onClose(): void;
 }) {
@@ -349,7 +371,7 @@ function ActivityPane({
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       try {
-        const page = await controlPlane.events(tagId, taskId, after.current);
+        const page = await controlPlane.events(taskId, after.current);
         if (signal.aborted) return;
         const next = page.filter((entry) => entry.sequence > after.current);
         const last = next.at(-1);
@@ -364,7 +386,7 @@ function ActivityPane({
         if (!signal.aborted) setLoading(false);
       }
     },
-    [controlPlane, tagId, taskId],
+    [controlPlane, taskId],
   );
   usePolling(refresh, interval);
 

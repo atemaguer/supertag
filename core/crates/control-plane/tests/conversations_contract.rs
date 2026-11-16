@@ -125,6 +125,95 @@ async fn exercise(database: &str) {
         .await
         .unwrap();
 
+    // A message carries what its turn shows: each message the Tag wrote and its latest activity
+    // or plan, so a history page needs no further reads.
+    let events = [
+        (TaskEventKind::Message, "Looking at the build."),
+        (TaskEventKind::Activity, "Ran cargo test"),
+        (TaskEventKind::Progress, "{\"type\":\"progress.updated\"}"),
+        (TaskEventKind::Message, "Found the failing test."),
+        (TaskEventKind::Activity, "Edited src/lib.rs"),
+        (TaskEventKind::Activity, "Ran cargo test again"),
+    ];
+    for (index, (kind, text)) in events.iter().enumerate() {
+        store
+            .append_event(
+                &host,
+                &AppendEventRequest {
+                    task_id: attempt.task_id.clone(),
+                    attempt_id: attempt.attempt_id.clone(),
+                    lease_token: attempt.lease_token.clone(),
+                    sequence: index as u64 + 1,
+                    text: (*text).into(),
+                    kind: *kind as i32,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let shown = |message: &ConversationMessage| {
+        message
+            .events
+            .iter()
+            .map(|event| (event.sequence, event.text.clone()))
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![
+        (1, "Looking at the build.".to_owned()),
+        (4, "Found the failing test.".to_owned()),
+        (6, "Ran cargo test again".to_owned()),
+    ];
+    let listed = store
+        .list_messages(ALICE, &history(String::new()))
+        .await
+        .unwrap();
+    assert_eq!(shown(&listed.messages[0]), expected);
+    assert!(!listed.messages[0].events_truncated);
+    let read = store
+        .get_message(ALICE, "engineer", &alice.task_id)
+        .await
+        .unwrap();
+    assert_eq!(shown(&read), expected);
+    // Messages past the page's share are left out, earliest first, and flagged.
+    let long = "y".repeat(16_000);
+    for sequence in 7..=16 {
+        store
+            .append_event(
+                &host,
+                &AppendEventRequest {
+                    task_id: attempt.task_id.clone(),
+                    attempt_id: attempt.attempt_id.clone(),
+                    lease_token: attempt.lease_token.clone(),
+                    sequence,
+                    text: long.clone(),
+                    kind: TaskEventKind::Message as i32,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let read = store
+        .get_message(ALICE, "engineer", &alice.task_id)
+        .await
+        .unwrap();
+    assert!(read.events_truncated);
+    assert_eq!(read.events.last().unwrap().sequence, 16);
+    assert!(read.events.len() < 10);
+    assert!(read.events.iter().all(|event| event.text == long));
+    // Events read by a principal that may not see the Task are not found.
+    assert_eq!(
+        store
+            .list_visible_events(ALICE, &alice.task_id, 0, 32)
+            .await
+            .unwrap()
+            .len(),
+        16
+    );
+    assert!(matches!(
+        store.list_visible_events(BOB, &alice.task_id, 0, 32).await,
+        Err(StoreError::NotFound(_))
+    ));
+
     let second = send("Alice follow-up", "follow-up");
     let response = store.send_message(ALICE, &second).await.unwrap();
     let follower = response.task.unwrap();

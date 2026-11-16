@@ -36,7 +36,6 @@ service Conversations {
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
   rpc SendMessage(SendMessageRequest) returns (ConversationMessage);
   rpc GetMessage(GetMessageRequest) returns (ConversationMessage);
-  rpc ListMessageEvents(ListMessageEventsRequest) returns (ListEventsResponse);
 }
 
 // Operator-visible invalidation notices. Task event replay has its own cursor.
@@ -1561,6 +1560,14 @@ message ConversationMessage {
   LiveInput live_input = 3;
   // Set for a report turn in the conversation, which has no operator message.
   optional string work_session_report_id = 4;
+  // What the turn shows beside its prompt and result, oldest first: every message the Tag wrote
+  // while it ran, and its latest activity or plan event. Its last event is the turn's latest, so
+  // a client follows a running turn with Operator.ListEvents after that sequence. Every event is
+  // in Operator.ListEvents.
+  repeated TaskEvent events = 5;
+  // Set when the turn's earliest messages were left out to keep the page within its size
+  // limit. Operator.ListEvents reads them.
+  bool events_truncated = 6;
 }
 
 message ListConversationsRequest {
@@ -1598,13 +1605,6 @@ message SendMessageRequest {
 message GetMessageRequest {
   string tag_id = 1;
   string task_id = 2;
-}
-
-message ListMessageEventsRequest {
-  string tag_id = 1;
-  string task_id = 2;
-  uint64 after_sequence = 3;
-  uint32 limit = 4;
 }
 
 message SubmitTaskRequest {

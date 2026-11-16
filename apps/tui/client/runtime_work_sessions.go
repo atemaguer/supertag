@@ -228,7 +228,7 @@ func (c *runtimeClient) taskActivity(ctx context.Context, task string, after int
 	}
 	var activity []Activity
 	for range maxEventPages {
-		events, err := c.listMessageEvents(ctx, "", task, uint64(after), true)
+		events, err := c.listEvents(ctx, task, uint64(after))
 		if err != nil {
 			return nil, after, err
 		}

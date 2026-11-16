@@ -193,9 +193,6 @@ func TestRuntimeWorkSessionFollowDrainsChildPagesAndWaitsForParentReport(t *test
 		}
 		return runtimeParentMessage("root"), nil
 	})
-	testRPC(mux, rpc.ConversationsListMessageEventsProcedure, func(_ context.Context, _ *v2.ListMessageEventsRequest) (*v2.ListEventsResponse, error) {
-		return &v2.ListEventsResponse{}, nil
-	})
 	testRPC(mux, rpc.WorkSessionsListProcedure, func(_ context.Context, req *v2.ListWorkSessionsRequest) (*v2.ListWorkSessionsResponse, error) {
 		if req.GetStarterTaskId() != "root" || req.GetParentSessionId() != "parent" {
 			t.Errorf("work scope: %v", req)
@@ -207,7 +204,11 @@ func TestRuntimeWorkSessionFollowDrainsChildPagesAndWaitsForParentReport(t *test
 		return &v2.ListWorkSessionsResponse{WorkSessions: []*v2.WorkSession{work}}, nil
 	})
 	testRPC(mux, rpc.OperatorListEventsProcedure, func(_ context.Context, req *v2.ListEventsRequest) (*v2.ListEventsResponse, error) {
-		if req.GetTaskId() != "child" {
+		switch req.GetTaskId() {
+		case "root":
+			return &v2.ListEventsResponse{}, nil
+		case "child":
+		default:
 			t.Errorf("child scope: %v", req)
 		}
 		switch req.GetAfterSequence() {

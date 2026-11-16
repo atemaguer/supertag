@@ -18,6 +18,7 @@ use tonic::{
 };
 
 mod artifacts;
+pub mod cache;
 mod local;
 mod new_tag;
 mod profiles;
@@ -29,6 +30,8 @@ pub use watch::WatchUpdate;
 type Result<T> = std::result::Result<T, String>;
 const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_PAGES: usize = 100;
+/// The most events one `ListEvents` call returns.
+const EVENT_PAGE: u32 = 32;
 
 /// The current connection, a lock that orders connection changes, and the local state directory
 /// a local Control Plane is found in, if one could be located.
@@ -48,6 +51,7 @@ struct Connection {
     origin: Option<String>,
     watch: Option<watch::Registration>,
     watch_epoch: u64,
+    cache_scope: Option<cache::CacheScope>,
 }
 
 impl Connection {
@@ -57,6 +61,7 @@ impl Connection {
         self.origin = None;
         self.watch = None;
         self.watch_epoch = 0;
+        self.cache_scope = None;
         self.generation
     }
 }
@@ -331,42 +336,41 @@ impl ControlPlaneState {
         self.current(&session, Message::try_from(value)?).await
     }
 
+    /// A Task's events after `after_sequence`, oldest first, read page by page.
     pub async fn events(
         &self,
         connection_id: &str,
-        tag_id: String,
         task_id: String,
         after_sequence: u64,
     ) -> Result<Vec<Event>> {
         let session = self.session(connection_id).await?;
-        let page = session
-            .conversations()
-            .list_message_events(session.request(v2::ListMessageEventsRequest {
-                tag_id,
-                task_id,
-                after_sequence,
-                limit: 100,
-            }))
-            .await
-            .map_err(rpc_error)?
-            .into_inner();
-        self.current(
-            &session,
-            page.events
-                .into_iter()
-                .map(|event| Event {
-                    sequence: event.sequence,
-                    kind: match event.kind() {
-                        v2::TaskEventKind::Message => "message",
-                        v2::TaskEventKind::Activity => "activity",
-                        v2::TaskEventKind::Progress => "progress",
-                        v2::TaskEventKind::Unspecified => "unspecified",
-                    },
-                    text: event.text,
-                })
-                .collect(),
-        )
-        .await
+        let mut events = Vec::new();
+        let mut after = after_sequence;
+        for _ in 0..MAX_PAGES {
+            let page = session
+                .operator()
+                .list_events(session.request(v2::ListEventsRequest {
+                    task_id: task_id.clone(),
+                    after_sequence: after,
+                    limit: EVENT_PAGE,
+                }))
+                .await
+                .map_err(rpc_error)?
+                .into_inner()
+                .events;
+            let full = page.len() >= EVENT_PAGE as usize;
+            let read = page.into_iter().filter(|event| event.sequence > after);
+            let before = events.len();
+            events.extend(read.map(Event::from));
+            match events.last() {
+                Some(last) if events.len() > before => after = last.sequence,
+                _ => break,
+            }
+            if !full {
+                break;
+            }
+        }
+        self.current(&session, events).await
     }
 }
 
@@ -651,6 +655,12 @@ pub struct Message {
     pub live_input: Option<LiveInput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub work_session_report_id: Option<String>,
+    /// What the turn shows from its events: each message the Tag wrote and its latest activity
+    /// or plan, ending at its latest event.
+    pub events: Vec<Event>,
+    /// Earlier messages the Tag wrote were left out; `list_task_events` reads them.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub events_truncated: bool,
 }
 
 impl TryFrom<v2::ConversationMessage> for Message {
@@ -672,6 +682,8 @@ impl TryFrom<v2::ConversationMessage> for Message {
             conversation: value.conversation,
             live_input,
             work_session_report_id: value.work_session_report_id,
+            events: value.events.into_iter().map(Event::from).collect(),
+            events_truncated: value.events_truncated,
         })
     }
 }
@@ -692,5 +704,22 @@ pub struct Event {
     pub text: String,
 }
 
+impl From<v2::TaskEvent> for Event {
+    fn from(event: v2::TaskEvent) -> Self {
+        Self {
+            sequence: event.sequence,
+            kind: match event.kind() {
+                v2::TaskEventKind::Message => "message",
+                v2::TaskEventKind::Activity => "activity",
+                v2::TaskEventKind::Progress => "progress",
+                v2::TaskEventKind::Unspecified => "unspecified",
+            },
+            text: event.text,
+        }
+    }
+}
+
+#[cfg(test)]
+mod load_bench;
 #[cfg(test)]
 mod tests;

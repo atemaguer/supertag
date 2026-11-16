@@ -14,6 +14,7 @@ import {
   type ControlPlaneActivation,
   type ControlPlaneList,
   type ControlPlaneProfile,
+  cacheScope,
   controlPlaneSession,
   LOCAL_CONTROL_PLANE,
   nativeControlPlane,
@@ -51,7 +52,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     ({ controlPlanes, origin, connectionId, tags, principal }: ControlPlaneActivation) => {
       setControlPlanes(controlPlanes);
       setConnection({
-        controlPlane: controlPlaneSession(connectionId),
+        controlPlane: controlPlaneSession(connectionId, cacheScope(origin, principal)),
         tags,
         preview: false,
         id: connectionId,

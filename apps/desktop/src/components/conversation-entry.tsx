@@ -31,18 +31,18 @@ function statusText(taskState: string, inputState?: string) {
 
 const RUNNING = new Set(["queued", "claimed", "running"]);
 
-/** A conversation entry that reads its turn's messages and activity while it runs. */
+/** A conversation entry that shows its turn's messages and activity, and reads newer ones while it runs. */
 export function LiveConversationEntry(
   props: Omit<Parameters<typeof ConversationEntry>[0], "events"> & {
     readEvents: ControlPlane["events"];
   },
 ) {
-  const { task, workSessionReportId, liveInput } = props.message;
+  const { message } = props;
+  const { task, workSessionReportId, liveInput } = message;
   const joined = workSessionReportId === undefined && liveInput?.state === "accepted";
   const events = useTurnEvents(
     props.readEvents,
-    task.tagId,
-    joined ? undefined : task.taskId,
+    joined ? {} : { ...message, taskId: task.taskId },
     RUNNING.has(task.state),
   );
   return <ConversationEntry {...props} events={events} />;

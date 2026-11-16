@@ -16,6 +16,14 @@ fn control_plane_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<P
         .map_err(|_| "Could not locate your saved Control Plane connections.".into())
 }
 
+/// Where recently opened conversations are cached, in the app's data directory.
+fn conversation_cache<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|directory| directory.join("conversations"))
+        .map_err(|_| "Could not locate the conversation cache.".into())
+}
+
 /// Where `supertag up` keeps this user's local state: `SUPERTAG_STATE_DIR`, else `~/.supertag`.
 #[cfg(unix)]
 fn local_state_directory() -> Option<PathBuf> {
@@ -77,9 +85,13 @@ async fn clear_control_plane<R: tauri::Runtime>(
     state: State<'_, ControlPlaneState>,
     forget: Option<String>,
 ) -> Result<ControlPlaneList, String> {
-    state
-        .clear_control_plane(&control_plane_store(&app)?, forget)
-        .await
+    let list = state
+        .clear_control_plane(&control_plane_store(&app)?, forget.clone())
+        .await?;
+    if let (Some(origin), Ok(root)) = (forget, conversation_cache(&app)) {
+        control_plane::cache::forget(&root, &origin);
+    }
+    Ok(list)
 }
 
 #[tauri::command]
@@ -175,15 +187,50 @@ async fn get_message(
 }
 
 #[tauri::command]
-async fn list_message_events(
+async fn list_task_events(
     state: State<'_, ControlPlaneState>,
     connection_id: String,
-    tag_id: String,
     task_id: String,
     after_sequence: u64,
 ) -> Result<Vec<Event>, String> {
+    state.events(&connection_id, task_id, after_sequence).await
+}
+
+#[tauri::command]
+async fn read_conversation_cache<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, ControlPlaneState>,
+    connection_id: String,
+    tag_id: String,
+    conversation: String,
+) -> Result<Option<serde_json::Value>, String> {
     state
-        .events(&connection_id, tag_id, task_id, after_sequence)
+        .cached_conversation(
+            &connection_id,
+            conversation_cache(&app)?,
+            tag_id,
+            conversation,
+        )
+        .await
+}
+
+#[tauri::command]
+async fn write_conversation_cache<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, ControlPlaneState>,
+    connection_id: String,
+    tag_id: String,
+    conversation: String,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    state
+        .cache_conversation(
+            &connection_id,
+            conversation_cache(&app)?,
+            tag_id,
+            conversation,
+            value,
+        )
         .await
 }
 
@@ -268,7 +315,9 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             list_messages,
             send_message,
             get_message,
-            list_message_events,
+            list_task_events,
+            read_conversation_cache,
+            write_conversation_cache,
             save_result_artifact
         ])
 }

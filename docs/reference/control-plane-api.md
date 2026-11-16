@@ -95,6 +95,17 @@ exposes messages and gRPC stubs.
   resource changed since you read that revision.
 - A refused call returns a gRPC status with a plain message. Messages never echo secrets.
 
+## Read a conversation
+
+`Conversations.ListMessages` returns a page of a conversation, newest first. Each message carries
+its Task and the events its turn shows: every message the Tag wrote while it worked, and its
+latest activity or plan. One call renders a page; a client needs no read per message. When a
+turn's messages exceed the page's share, the oldest are left out and `events_truncated` is set.
+
+The last event of a message is its turn's latest. To follow a running turn, call
+`Operator.ListEvents` with that sequence as `after_sequence`. `ListEvents` also returns every
+event of a turn, including the activity a conversation page leaves out.
+
 ## Watch for changes
 
 `OperatorEvents.Watch` streams change notices for Tags, Tasks, conversation messages, Objectives,

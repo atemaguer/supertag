@@ -20,7 +20,8 @@ connections require a loopback IP address.
 The TUI lists Tags and named conversations, loads conversation history, sends messages, and
 follows replies. Watch keeps the rail and open conversation current across clients. The TUI
 resumes Watch after an interruption and polls while reconnecting. Each reply follows its own
-Task event sequence.
+Task event sequence through `Operator.ListEvents`. A history page reads its messages' work
+Sessions concurrently, and each conversation stays in memory, so returning to it shows it at once.
 
 Ctrl-P opens **Control Planes**, including when only one connection exists. Press `a` to add a
 Control Plane, enter a name, its URL, and an operator token in the masked field, then press Ctrl-S

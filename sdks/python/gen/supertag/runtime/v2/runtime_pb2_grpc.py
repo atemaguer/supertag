@@ -868,11 +868,6 @@ class ConversationsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetMessageRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConversationMessage.FromString,
                 _registered_method=True)
-        self.ListMessageEvents = channel.unary_unary(
-                '/supertag.runtime.v2.Conversations/ListMessageEvents',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMessageEventsRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListEventsResponse.FromString,
-                _registered_method=True)
 
 
 class ConversationsServicer:
@@ -903,12 +898,6 @@ class ConversationsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ListMessageEvents(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_ConversationsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -931,11 +920,6 @@ def add_ConversationsServicer_to_server(servicer, server):
                     servicer.GetMessage,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetMessageRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConversationMessage.SerializeToString,
-            ),
-            'ListMessageEvents': grpc.unary_unary_rpc_method_handler(
-                    servicer.ListMessageEvents,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMessageEventsRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListEventsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1047,33 +1031,6 @@ class Conversations:
             '/supertag.runtime.v2.Conversations/GetMessage',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetMessageRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConversationMessage.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ListMessageEvents(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.Conversations/ListMessageEvents',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMessageEventsRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListEventsResponse.FromString,
             options,
             channel_credentials,
             insecure,
