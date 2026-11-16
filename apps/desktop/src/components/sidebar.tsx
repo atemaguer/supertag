@@ -1,7 +1,8 @@
-import { PanelLeft, PanelLeftClose, Plus, Search, Star, X } from "lucide-react";
+import { Plus, Search, Star, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import type { Tag } from "../control-plane";
+import { clamp, KEY_STEP, ResizeHandle, useStoredWidth } from "./resize";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 
@@ -373,11 +374,14 @@ export function relativeTime(at: number, now = Date.now()): string {
   return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-/** The sidebar toggle, in one place beside the macOS window controls in both modes. */
-export function SidebarToggle({ mode }: { mode: SidebarMode }) {
-  const mac = onMac();
-  const label = `${mode === "expanded" ? "Collapse" : "Expand"} sidebar (${mac ? "⌘B" : "Ctrl+B"})`;
+/** The expanded sidebar's width: its default, its range, and where a drag snaps to the rail. */
+export const SIDEBAR_WIDTH = { rail: 84, min: 220, max: 360, snap: 150, initial: 256 };
+const SIDEBAR_WIDTH_KEY = "supertag.desktop.sidebar-width";
+
+/** ⌘B, or Ctrl+B outside macOS, folds the sidebar into the rail or expands it again. */
+export function useSidebarShortcut() {
   useEffect(() => {
+    const mac = onMac();
     function onKey(event: KeyboardEvent) {
       if (!isSidebarShortcut(event, mac)) return;
       event.preventDefault();
@@ -385,23 +389,61 @@ export function SidebarToggle({ mode }: { mode: SidebarMode }) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mac]);
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="sidebar-toggle"
-      aria-label={label}
-      title={label}
-      aria-expanded={mode === "expanded"}
-      aria-controls="sidebar"
-      onClick={() => setSidebarMode(mode === "expanded" ? "rail" : "expanded")}
-    >
-      {mode === "expanded" ? (
-        <PanelLeftClose size={17} aria-hidden />
-      ) : (
-        <PanelLeft size={17} aria-hidden />
-      )}
-    </Button>
-  );
+  }, []);
+}
+
+/**
+ * The sidebar's width as it is shown: the saved expanded width, the rail, or, while its separator
+ * is dragged, the width under the pointer.
+ */
+export function useSidebarWidth() {
+  const mode = useSidebarMode();
+  const [width, setWidth] = useStoredWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH.initial);
+  const [live, setLive] = useState<number>();
+  const expandedWidth = clamp(width, SIDEBAR_WIDTH.min, SIDEBAR_WIDTH.max);
+  const shownMode: SidebarMode =
+    live === undefined ? mode : live < SIDEBAR_WIDTH.snap ? "rail" : "expanded";
+  const shown =
+    shownMode === "rail"
+      ? SIDEBAR_WIDTH.rail
+      : clamp(live ?? expandedWidth, SIDEBAR_WIDTH.min, SIDEBAR_WIDTH.max);
+  return {
+    mode: shownMode,
+    width: shown,
+    resizing: live !== undefined,
+    separator: (
+      <ResizeHandle
+        label="Resize sidebar"
+        className="sidebar-resize"
+        value={shown}
+        min={SIDEBAR_WIDTH.rail}
+        max={SIDEBAR_WIDTH.max}
+        grows={1}
+        onResize={(raw, done) => {
+          if (!done) {
+            setLive(raw);
+            return;
+          }
+          // On release it settles into the rail or an expanded width, never in between.
+          setLive(undefined);
+          if (raw < SIDEBAR_WIDTH.snap) setSidebarMode("rail");
+          else {
+            setWidth(clamp(raw, SIDEBAR_WIDTH.min, SIDEBAR_WIDTH.max));
+            setSidebarMode("expanded");
+          }
+        }}
+        onStep={(direction) => {
+          if (mode === "rail") {
+            if (direction > 0) setSidebarMode("expanded");
+            return;
+          }
+          const next = expandedWidth + direction * KEY_STEP;
+          if (next < SIDEBAR_WIDTH.min) setSidebarMode("rail");
+          else setWidth(clamp(next, SIDEBAR_WIDTH.min, SIDEBAR_WIDTH.max));
+        }}
+        onDoubleClick={() => setSidebarMode(mode === "rail" ? "expanded" : "rail")}
+        onEnter={() => setSidebarMode(mode === "rail" ? "expanded" : "rail")}
+      />
+    ),
+  };
 }

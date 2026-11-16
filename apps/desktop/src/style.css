@@ -56,14 +56,77 @@ button:disabled {
   opacity: 0.46;
 }
 .shell {
+  --sidebar-current: var(--sidebar-width);
   position: relative;
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-current) minmax(0, 1fr);
   height: 100%;
-  transition: grid-template-columns 180ms ease;
+  transition: grid-template-columns 160ms ease;
 }
-.shell[data-sidebar="rail"] {
-  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+/* While a separator is dragged the pane follows the pointer; it eases only when it snaps. */
+.shell[data-resizing] {
+  transition: none;
+}
+[data-resizing],
+[data-resizing] * {
+  cursor: col-resize;
+  user-select: none;
+}
+/* A separator: a few pixels to grab, a line on hover, focus, or drag. */
+.resize-handle {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background 120ms;
+}
+.resize-handle:hover::before,
+.resize-handle:focus-visible::before,
+.resize-handle[data-dragging]::before {
+  left: 2px;
+  width: 3px;
+  background: #776358;
+}
+/* On the sidebar's separator, a grab pill shows where to drag, as in a messaging app. */
+.sidebar-resize {
+  left: calc(var(--sidebar-current) - 4px);
+}
+.sidebar-resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 7px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 120ms;
+}
+.sidebar-resize:hover::after,
+.sidebar-resize:focus-visible::after,
+.sidebar-resize[data-dragging]::after {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .resize-handle::before,
+  .sidebar-resize::after {
+    transition: none;
+  }
 }
 
 .row-title {
@@ -187,17 +250,6 @@ button:disabled {
   display: flex;
   gap: 6px;
 }
-.window-controls {
-  position: absolute;
-  z-index: 5;
-  top: 12px;
-  left: 26px;
-}
-[data-titlebar="overlay"] .window-controls {
-  top: 13px;
-  left: 84px;
-}
-.sidebar-toggle,
 .sidebar-button {
   width: 32px;
   height: 32px;
@@ -209,7 +261,6 @@ button:disabled {
 .sidebar-button {
   border: 1px solid var(--line);
 }
-.sidebar-toggle:hover,
 .sidebar-button:hover,
 .tag-row:hover,
 .lead-tag:hover,
@@ -1117,10 +1168,19 @@ button:disabled {
   font-size: 20px;
   line-height: 1;
 }
-.activity {
+.activity-frame {
   position: relative;
   z-index: 3;
-  flex: 0 0 264px;
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.activity-resize {
+  left: -4px;
+}
+.activity {
+  flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   border-left: 1px solid var(--line);
@@ -1277,10 +1337,10 @@ button:disabled {
   .result-files {
     max-width: 85%;
   }
-  .activity {
+  .activity-frame {
     position: absolute;
     inset: 0 0 0 auto;
-    width: min(295px, 95%);
+    max-width: 95%;
     box-shadow: -12px 0 30px #0004;
   }
 }

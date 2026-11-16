@@ -63,30 +63,124 @@ function render(props: Partial<Parameters<typeof WorkspaceShell>[0]> = {}) {
 }
 
 const shell = () => host.querySelector(".shell") as HTMLElement;
-const toggle = () => host.querySelector(".sidebar-toggle") as HTMLButtonElement;
+const separator = () => host.querySelector(".sidebar-resize") as HTMLElement;
 const rows = () =>
   [...host.querySelectorAll(".tag-row")].map((row) => row.getAttribute("aria-label"));
+const shown = () => shell().style.getPropertyValue("--sidebar-current");
 
-it("switches between the expanded sidebar and the rail, and remembers the choice", () => {
+/** Drags the separator from x to each later x, releasing at the last. */
+function drag(...xs: number[]) {
+  const [start, ...moves] = xs;
+  const event = (type: string, clientX: number) =>
+    new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX });
+  act(() => {
+    separator().dispatchEvent(event("pointerdown", start ?? 0));
+  });
+  for (const x of moves.slice(0, -1))
+    act(() => {
+      separator().dispatchEvent(event("pointermove", x));
+    });
+  act(() => {
+    separator().dispatchEvent(event("pointerup", moves.at(-1) ?? start ?? 0));
+  });
+}
+
+const key = (key: string, init: KeyboardEventInit = {}) =>
+  act(() => {
+    separator().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...init }));
+  });
+
+it("resizes the expanded sidebar by dragging its separator, within its range, and keeps it", () => {
   render();
   expect(shell().dataset.sidebar).toBe("expanded");
-  expect(toggle().getAttribute("aria-label")).toBe("Collapse sidebar (Ctrl+B)");
+  expect(shown()).toBe("256px");
+  expect(separator().getAttribute("role")).toBe("separator");
+  expect(separator().getAttribute("aria-orientation")).toBe("vertical");
   expect(host.querySelector(".sidebar .connection")?.textContent).toBe("expanded");
 
-  act(() => toggle().click());
+  // While dragging, the sidebar follows the pointer; past its maximum it stops.
+  act(() => {
+    separator().dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1, clientX: 256 }),
+    );
+  });
+  act(() => {
+    separator().dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 300 }),
+    );
+  });
+  expect(shown()).toBe("300px");
+  expect(shell().dataset.resizing).toBe("true");
+  act(() => {
+    separator().dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: 500 }),
+    );
+  });
+  expect(shown()).toBe("360px");
+  expect(shell().dataset.resizing).toBeUndefined();
+  expect(localStorage.getItem("supertag.desktop.sidebar-width")).toBe("360");
+
+  // Between the snap point and the minimum it holds at the minimum.
+  drag(360, 190, 190);
+  expect(shell().dataset.sidebar).toBe("expanded");
+  expect(shown()).toBe("220px");
+
+  // A restart restores the width.
+  act(() => root.unmount());
+  root = createRoot(host);
+  render();
+  expect(shown()).toBe("220px");
+});
+
+it("snaps to the rail when dragged past the threshold, and back out to the last width", () => {
+  render();
+  drag(256, 200, 120);
   expect(shell().dataset.sidebar).toBe("rail");
-  expect(toggle().getAttribute("aria-label")).toBe("Expand sidebar (Ctrl+B)");
-  expect(toggle().getAttribute("aria-expanded")).toBe("false");
+  expect(shown()).toBe("84px");
+  expect(localStorage.getItem("supertag.desktop.sidebar")).toBe("rail");
   // The rail keeps every Tag and the Control Plane: nothing is hidden.
   expect(rows()).toEqual(["finch", "moss"]);
   expect(host.querySelector(".sidebar .connection")?.textContent).toBe("rail");
-  expect(localStorage.getItem("supertag.desktop.sidebar")).toBe("rail");
 
+  // A short drag outward stays the rail; past the threshold it expands.
+  drag(84, 120);
+  expect(shell().dataset.sidebar).toBe("rail");
+  drag(84, 200, 280);
+  expect(shell().dataset.sidebar).toBe("expanded");
+  expect(shown()).toBe("280px");
+});
+
+it("toggles the rail by double-clicking the separator, with Enter, and with Ctrl+B", () => {
+  render();
+  act(() => {
+    separator().dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  });
+  expect(shell().dataset.sidebar).toBe("rail");
+  act(() => {
+    separator().dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  });
+  expect(shell().dataset.sidebar).toBe("expanded");
+  key("Enter");
+  expect(shell().dataset.sidebar).toBe("rail");
   act(() => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true }));
   });
   expect(shell().dataset.sidebar).toBe("expanded");
   expect(localStorage.getItem("supertag.desktop.sidebar")).toBe("expanded");
+});
+
+it("resizes with the arrow keys, collapsing below the minimum and expanding from the rail", () => {
+  render();
+  key("ArrowRight");
+  expect(shown()).toBe("272px");
+  expect(separator().getAttribute("aria-valuenow")).toBe("272");
+  for (let step = 0; step < 3; step++) key("ArrowLeft");
+  expect(shown()).toBe("224px");
+  key("ArrowLeft");
+  expect(shell().dataset.sidebar).toBe("rail");
+  key("ArrowRight");
+  expect(shell().dataset.sidebar).toBe("expanded");
+  expect(shown()).toBe("224px");
 });
 
 it("starts as the rail when that was the saved choice", () => {
@@ -105,7 +199,9 @@ it("puts the lead Tag in the top slot, named when expanded, and opens it on clic
   act(() => lead.click());
   expect(onSelectTag).toHaveBeenCalledWith("lead");
 
-  act(() => toggle().click());
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true }));
+  });
   expect(host.querySelector(".lead-tag .lead-name")).toBeNull();
 });
 

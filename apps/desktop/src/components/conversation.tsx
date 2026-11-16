@@ -31,6 +31,7 @@ import { useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { Conversation, ConversationContent } from "./ai-elements/conversation";
 import { Message } from "./ai-elements/message";
 import { Bubble, LiveConversationEntry } from "./conversation-entry";
+import { clamp, ResizeHandle, useStoredWidth } from "./resize";
 import type { TagSummary } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import {
@@ -43,6 +44,10 @@ import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 
 const interval = 2_500;
+
+/** The Task activity pane's default and least width, and the least the conversation keeps. */
+export const ACTIVITY_WIDTH = { initial: 320, min: 280, conversation: 420 };
+const ACTIVITY_WIDTH_KEY = "supertag.desktop.activity-width";
 
 /** A message on its way to the Control Plane: its text and the operation that sends it once. */
 export interface Outgoing {
@@ -244,6 +249,21 @@ export function ConversationPane({
     setActiveTask(taskId);
   }
 
+  // The activity pane's width: at least 280px, at most 60% of the window, and never so wide
+  // that the conversation is narrower than 420px.
+  const workArea = useRef<HTMLDivElement>(null);
+  const [activityWidth, setActivityWidth] = useStoredWidth(
+    ACTIVITY_WIDTH_KEY,
+    ACTIVITY_WIDTH.initial,
+  );
+  const [activityLive, setActivityLive] = useState<number>();
+  const activityMax = () =>
+    Math.min(
+      window.innerWidth * 0.6,
+      (workArea.current?.clientWidth ?? window.innerWidth) - ACTIVITY_WIDTH.conversation,
+    );
+  const activityShown = activityLive ?? clamp(activityWidth, ACTIVITY_WIDTH.min, activityMax());
+
   const messages = history.messages;
   const dividers = useMemo(() => timeDividers(messages), [messages]);
   const reportSummary = useRef(onSummary);
@@ -264,7 +284,7 @@ export function ConversationPane({
           {error}
         </div>
       )}
-      <div className="work-area">
+      <div className="work-area" ref={workArea}>
         <div className="conversation">
           {history.loading ? (
             <div className="history">
@@ -359,15 +379,33 @@ export function ConversationPane({
           </form>
         </div>
         {activeTask && (
-          <ActivityPane
-            key={activeTask}
-            controlPlane={controlPlane}
-            taskId={activeTask}
-            onClose={() => {
-              setActiveTask(undefined);
-              activityTrigger.current?.focus();
-            }}
-          />
+          <div className="activity-frame" style={{ width: activityShown }}>
+            <ResizeHandle
+              label="Resize Task activity"
+              className="activity-resize"
+              value={activityShown}
+              min={ACTIVITY_WIDTH.min}
+              max={activityMax()}
+              grows={-1}
+              onResize={(raw, done) => {
+                const width = clamp(raw, ACTIVITY_WIDTH.min, activityMax());
+                if (done) {
+                  setActivityLive(undefined);
+                  setActivityWidth(width);
+                } else setActivityLive(width);
+              }}
+              onDoubleClick={() => setActivityWidth(ACTIVITY_WIDTH.initial)}
+            />
+            <ActivityPane
+              key={activeTask}
+              controlPlane={controlPlane}
+              taskId={activeTask}
+              onClose={() => {
+                setActiveTask(undefined);
+                activityTrigger.current?.focus();
+              }}
+            />
+          </div>
         )}
       </div>
     </>

@@ -1,4 +1,11 @@
-import { type MouseEvent, type ReactNode, useCallback, useEffect, useState } from "react";
+import {
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
 import { shownConversation, useConversationPrefetch } from "../lib/conversation-cache";
@@ -10,9 +17,9 @@ import { NewTagDialog } from "./new-tag";
 import {
   Sidebar,
   type SidebarMode,
-  SidebarToggle,
   type TagSummary,
-  useSidebarMode,
+  useSidebarShortcut,
+  useSidebarWidth,
 } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
@@ -57,13 +64,16 @@ export function WorkspaceShell({
   newTagRefusal,
   children,
 }: ShellProps) {
-  const mode = useSidebarMode();
+  useSidebarShortcut();
+  const { mode, width, resizing, separator } = useSidebarWidth();
   const provider = tag && harnessLabel(tag.harnessKind);
   return (
-    <div className="shell" data-sidebar={mode}>
-      <div className="window-controls">
-        <SidebarToggle mode={mode} />
-      </div>
+    <div
+      className="shell"
+      data-sidebar={mode}
+      data-resizing={resizing || undefined}
+      style={{ "--sidebar-current": `${width}px` } as CSSProperties}
+    >
       <Sidebar
         mode={mode}
         tags={tags}
@@ -75,6 +85,7 @@ export function WorkspaceShell({
         onNewTag={onNewTag}
         newTagRefusal={newTagRefusal}
       />
+      {separator}
       <main className="main" aria-label="Conversation" aria-busy={switching}>
         <header className="topstrip" data-tauri-drag-region>
           {tag && (

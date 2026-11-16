@@ -128,3 +128,79 @@ it("moves a message that was not delivered back to the composer to edit", async 
   expect((host.querySelector("textarea") as HTMLTextAreaElement).value).toBe("Draft text");
   expect(host.querySelector(".delivery")).toBeNull();
 });
+
+it("resizes the Task activity pane between its limits, remembers it, and resets on double-click", async () => {
+  localStorage.clear();
+  const done: Message = {
+    conversation: "default",
+    task: { taskId: "t1", tagId: "lead", sessionId: "s", prompt: "Ship it", state: "succeeded" },
+  };
+  const controlPlane: ControlPlane = {
+    tags: async () => [tag],
+    conversations: async () => [],
+    messages: async () => ({ messages: [done] }),
+    send: async () => done,
+    events: async () => [],
+    saveArtifact: async () => false,
+    scope: "test",
+    readCache: async () => undefined,
+    writeCache: async () => {},
+  };
+  const open = async () => {
+    act(() => root.render(createElement(Pane, { controlPlane })));
+    await flush();
+    Object.defineProperty(host.querySelector(".work-area"), "clientWidth", { value: 1000 });
+    act(() => (host.querySelector(".task-status") as HTMLButtonElement).click());
+    await flush();
+  };
+  await open();
+  const frame = () => host.querySelector(".activity-frame") as HTMLElement;
+  const handle = () => host.querySelector(".activity-resize") as HTMLElement;
+  const pointer = (type: string, clientX: number) =>
+    act(() => {
+      handle().dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          pointerId: 1,
+          clientX,
+        }),
+      );
+    });
+  expect(frame().style.width).toBe("320px");
+  expect(handle().getAttribute("aria-valuemin")).toBe("280");
+
+  // Dragging the left edge left widens the pane.
+  pointer("pointerdown", 500);
+  pointer("pointermove", 400);
+  expect(frame().style.width).toBe("420px");
+  // It stops where the conversation would be narrower than 420px, here 580px.
+  pointer("pointerup", 0);
+  expect(frame().style.width).toBe("580px");
+  expect(handle().getAttribute("aria-valuemax")).toBe("580");
+  expect(localStorage.getItem("supertag.desktop.activity-width")).toBe("580");
+  pointer("pointerdown", 0);
+  pointer("pointerup", 900);
+  expect(frame().style.width).toBe("280px");
+
+  const key = (key: string) =>
+    act(() => {
+      handle().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    });
+  key("ArrowLeft");
+  expect(frame().style.width).toBe("296px");
+  key("ArrowRight");
+  key("ArrowRight");
+  expect(frame().style.width).toBe("280px");
+
+  act(() => {
+    handle().dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  });
+  expect(frame().style.width).toBe("320px");
+  key("ArrowLeft");
+  act(() => root.unmount());
+  root = createRoot(host);
+  await open();
+  expect(frame().style.width).toBe("336px");
+});

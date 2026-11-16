@@ -50,7 +50,9 @@ The desktop app reads like a messaging app. The lead Tag sits at the top of the 
 under your last message it shows **Sent** once the Control Plane has it and **Seen** once a
 Worker Host has taken it up. A message that is not delivered stays in the conversation with
 **Retry**, which sends it at most once, and **Edit**. What you have not sent stays with each Tag
-until you come back, even after a restart. ⌘B folds the sidebar into a rail of avatars, ⌘1 to
+until you come back, even after a restart. Drag the sidebar's edge to resize it, or past its
+narrowest to fold it into a rail of avatars; ⌘B does the same. The Task activity pane resizes from
+its edge too. ⌘1 to
 ⌘9 open the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘F searches them by name; use
 Ctrl in place of ⌘ outside macOS.
 
