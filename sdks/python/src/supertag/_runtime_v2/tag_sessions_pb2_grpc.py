@@ -68,11 +68,6 @@ class AttemptTagSessionsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagObjectiveRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.TagObjectiveView.FromString,
                 _registered_method=True)
-        self.CreateObjective = channel.unary_unary(
-                '/supertag.runtime.v2.AttemptTagSessions/CreateObjective',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveResponse.FromString,
-                _registered_method=True)
 
 
 class AttemptTagSessionsServicer:
@@ -117,14 +112,6 @@ class AttemptTagSessionsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def CreateObjective(self, request, context):
-        """Only a conversation turn whose message is its requester's explicit
-        `@SuperTag objective <outcome>` command, at most once per Task.
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_AttemptTagSessionsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -152,11 +139,6 @@ def add_AttemptTagSessionsServicer_to_server(servicer, server):
                     servicer.ReadObjective,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagObjectiveRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.TagObjectiveView.SerializeToString,
-            ),
-            'CreateObjective': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateObjective,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -313,33 +295,6 @@ class AttemptTagSessions:
             metadata,
             _registered_method=True)
 
-    @staticmethod
-    def CreateObjective(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.AttemptTagSessions/CreateObjective',
-            supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
 
 class HarnessTagSessionsStub:
     """Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
@@ -376,11 +331,6 @@ class HarnessTagSessionsStub:
                 '/supertag.runtime.v2.HarnessTagSessions/ReadObjective',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagObjectiveRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.TagObjectiveView.FromString,
-                _registered_method=True)
-        self.CreateObjective = channel.unary_unary(
-                '/supertag.runtime.v2.HarnessTagSessions/CreateObjective',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveResponse.FromString,
                 _registered_method=True)
 
 
@@ -419,12 +369,6 @@ class HarnessTagSessionsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def CreateObjective(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_HarnessTagSessionsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -452,11 +396,6 @@ def add_HarnessTagSessionsServicer_to_server(servicer, server):
                     servicer.ReadObjective,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagObjectiveRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.TagObjectiveView.SerializeToString,
-            ),
-            'CreateObjective': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateObjective,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -596,33 +535,6 @@ class HarnessTagSessions:
             '/supertag.runtime.v2.HarnessTagSessions/ReadObjective',
             supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagObjectiveRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.TagObjectiveView.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CreateObjective(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.HarnessTagSessions/CreateObjective',
-            supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.CreateTagObjectiveResponse.FromString,
             options,
             channel_credentials,
             insecure,

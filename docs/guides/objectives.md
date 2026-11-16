@@ -66,8 +66,8 @@ Open `supertag`, select `lead`, and enter a goal in its conversation.
 /goal Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change.
 ```
 
-SuperTag creates the Objective and starts the owner's first turn. Press Enter again to open its
-progress view. The owner's turns work in the owner Tag's
+The Control Plane creates the Objective, answers in the conversation with its ID, and starts the
+owner's first turn. The Objective appears in the rail; select it to open its progress view. The owner's turns work in the owner Tag's
 [Workspace](../reference/resource-model.md#workspaces). Enter `/goal` on its own to set a Team or
 budget in the form. You can also open the form with Ctrl-K and **Create Objective**.
 
@@ -155,20 +155,20 @@ accepted and waits until one can. If nothing starts, find the waiting Task under
 
 ## 2. Create it from a collaboration thread instead
 
-In a verified Slack, Lark, GitHub, Linear, or Teams conversation, an authenticated person can
-start an Objective with an explicit command:
+In a verified Slack or Microsoft Teams channel, an authenticated person can start an Objective by
+mentioning the app with `/goal`:
 
-> @SuperTag objective Customers can see their current usage in the dashboard, verified by the
+> @SuperTag /goal Customers can see their current usage in the dashboard, verified by the
 > end-to-end usage dashboard suite, within two weeks and a $2,000 budget.
 
-SuperTag creates the Objective and tells you briefly. That thread becomes the Objective's home
+SuperTag creates the Objective and answers with its ID. That thread becomes the Objective's home
 thread: every reply the owner writes posts there, and a plain reply in the thread reaches the
 owner as its next turn. See
 [Respond to an Objective](objective-decisions.md#reply-from-a-collaboration-thread).
 
 Rules:
 
-- Only the explicit `objective` command, at the start of a person's own message, creates an
+- Only `/goal`, at the start of a person's own message and right after the mention, creates an
   Objective. An ordinary mention cannot, and the Tag cannot create one on its own. Quoted commands and
   commands embedded in other text do not count.
 - The Objective inherits the requesting turn's runtime permission ceiling. The request cannot

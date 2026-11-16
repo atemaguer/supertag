@@ -3,10 +3,10 @@
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        CreateTagObjectiveRequest, CreateTagObjectiveResponse, ListTagObjectivesRequest,
-        ListTagObjectivesResponse, ListTagSessionsRequest, ListTagSessionsResponse,
-        ReadTagObjectiveRequest, ReadTagSessionRequest, ReadTagSessionResponse,
-        SearchTagSessionsRequest, SearchTagSessionsResponse, TagObjectiveView,
+        ListTagObjectivesRequest, ListTagObjectivesResponse, ListTagSessionsRequest,
+        ListTagSessionsResponse, ReadTagObjectiveRequest, ReadTagSessionRequest,
+        ReadTagSessionResponse, SearchTagSessionsRequest, SearchTagSessionsResponse,
+        TagObjectiveView,
         harness_tag_sessions_server::{HarnessTagSessions, HarnessTagSessionsServer},
     },
 };
@@ -105,22 +105,6 @@ impl HarnessTagSessions for Bridge {
         self.retry(input, |request| {
             let mut client = self.coordination.tag_sessions.clone();
             async move { client.read_objective(request).await }
-        })
-        .await
-    }
-
-    async fn create_objective(
-        &self,
-        request: Request<CreateTagObjectiveRequest>,
-    ) -> Result<Response<CreateTagObjectiveResponse>, Status> {
-        self.authenticate(&request)?;
-        self.readable().await?;
-        let mut input = request.into_inner();
-        input.attempt = Some(self.attempt());
-        input.outcome = self.redact(&input.outcome);
-        self.retry(input, |request| {
-            let mut client = self.coordination.tag_sessions.clone();
-            async move { client.create_objective(request).await }
         })
         .await
     }

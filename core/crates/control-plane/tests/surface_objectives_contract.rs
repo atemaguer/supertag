@@ -71,6 +71,21 @@ async fn reply_route(url: &str, task: &str) -> Option<(String, String, String)> 
     })
 }
 
+/// The texts queued for a thread, oldest first.
+async fn thread_replies(url: &str, thread: &str) -> Vec<String> {
+    sqlx::any::install_default_drivers();
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    let texts = sqlx::query_scalar(
+        "SELECT text FROM supertag_v2_replies WHERE thread_id=$1 ORDER BY ready_order",
+    )
+    .bind(thread)
+    .fetch_all(&mut connection)
+    .await
+    .unwrap();
+    connection.close().await.unwrap();
+    texts
+}
+
 /// Principals of the Objective's operation receipts.
 async fn actors(url: &str, objective: &str) -> Vec<String> {
     sqlx::any::install_default_drivers();
@@ -155,9 +170,9 @@ async fn contract(url: String) {
     // Ordinary, quoted, embedded, or fenced text never starts an Objective.
     for (index, text) in [
         "Help me inspect this scheduling product",
-        "> @SuperTag objective Validate scheduling",
-        "Someone wrote: @SuperTag objective Validate scheduling",
-        "```\n@SuperTag objective Validate scheduling\n```",
+        "> @SuperTag /goal Validate scheduling",
+        "Someone wrote: @SuperTag /goal Validate scheduling",
+        "```\n@SuperTag /goal Validate scheduling\n```",
     ]
     .into_iter()
     .enumerate()
@@ -180,7 +195,7 @@ async fn contract(url: String) {
             "1794460000.200000",
             ordinary_thread,
             false,
-            "<@UBOB1> objective Launch the product",
+            "<@UBOB1> /goal Launch the product",
         ),
     )
     .await;
@@ -195,7 +210,7 @@ async fn contract(url: String) {
         HOME,
         HOME,
         true,
-        "<@UBOT1> objective Validate scheduling; this is not approval to deploy",
+        "<@UBOT1> /goal Validate scheduling; this is not approval to deploy",
     );
     let (left, right) = tokio::join!(
         store.accept_slack_event(PRINCIPAL, &start),
@@ -218,6 +233,19 @@ async fn contract(url: String) {
     );
     assert_eq!(objective.status(), ObjectiveStatus::Working);
     assert_eq!(objective.starting_task_id, starting.task_id);
+    assert!(
+        objective
+            .objective_id
+            .starts_with("validate-scheduling-this-")
+    );
+    // The thread hears at once which Objective started.
+    assert_eq!(
+        thread_replies(&url, HOME).await,
+        [format!(
+            "Started Objective {}: Validate scheduling; this is not approval to deploy\nbuilder owns it, and this thread is its home. Reply here to steer it, or say @SuperTag approve, pause, or resume.",
+            objective.objective_id
+        )]
+    );
     // Its authority is what this surface grants the Tag, and no more.
     assert_eq!(
         objective.runtime_actions.as_ref().unwrap().actions,
@@ -302,7 +330,7 @@ async fn contract(url: String) {
             "1794470003.100000",
             HOME,
             true,
-            "@SuperTag objective Another",
+            "@SuperTag /goal Another",
         ),
     )
     .await;
@@ -587,7 +615,7 @@ async fn contract(url: String) {
             empty_thread,
             empty_thread,
             true,
-            "@SuperTag objective",
+            "@SuperTag /goal",
         ),
     )
     .await;
@@ -684,9 +712,9 @@ async fn refused(store: &Store, objective: &str, sequence: &mut u32, why: &str) 
         (HOME, "<@UBOT1> approve"),
         (HOME, "<@UBOT1> pause"),
         (HOME, "<@UBOT1> resume"),
-        (HOME, "<@UBOT1> objective Another"),
+        (HOME, "<@UBOT1> /goal Another"),
         (HOME, "Keep going"),
-        ("1794470900.100000", "<@UBOT1> objective"),
+        ("1794470900.100000", "<@UBOT1> /goal"),
     ] {
         *sequence += 1;
         let ts = format!("1794471000.{sequence:06}");
@@ -723,7 +751,7 @@ async fn gated(url: String) {
     put_location(&store, "bind", "home", "builder", true).await;
     let starting = accept(
         &store,
-        event("EvSTART", HOME, HOME, true, "<@UBOT1> objective Ship it"),
+        event("EvSTART", HOME, HOME, true, "<@UBOT1> /goal Ship it"),
     )
     .await;
     let objective = objectives(&store).await.remove(0);

@@ -183,25 +183,3 @@ class TagObjectiveView(_message.Message):
     total_sessions: int
     as_of_ms: int
     def __init__(self, objective: _Optional[_Union[_runtime_pb2.Objective, _Mapping]] = ..., team: _Optional[_Union[_objective_overview_pb2.ObjectiveOverviewTeam, _Mapping]] = ..., pool: _Optional[_Union[_objective_overview_pb2.ObjectiveBudgetPool, _Mapping]] = ..., deadline: _Optional[_Union[_objective_overview_pb2.ObjectiveDeadlineView, _Mapping]] = ..., notices: _Optional[_Iterable[_Union[_objective_overview_pb2.ObjectiveLimitNotice, _Mapping]]] = ..., sessions: _Optional[_Iterable[_Union[_objective_overview_pb2.ObjectiveSessionView, _Mapping]]] = ..., total_sessions: _Optional[int] = ..., as_of_ms: _Optional[int] = ...) -> None: ...
-
-class CreateTagObjectiveRequest(_message.Message):
-    __slots__ = ("attempt", "outcome", "deadline_ms", "budget_limit_minor", "budget_currency")
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
-    OUTCOME_FIELD_NUMBER: _ClassVar[int]
-    DEADLINE_MS_FIELD_NUMBER: _ClassVar[int]
-    BUDGET_LIMIT_MINOR_FIELD_NUMBER: _ClassVar[int]
-    BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
-    attempt: _runtime_pb2.InspectAttemptRequest
-    outcome: str
-    deadline_ms: int
-    budget_limit_minor: int
-    budget_currency: str
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., outcome: _Optional[str] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ...) -> None: ...
-
-class CreateTagObjectiveResponse(_message.Message):
-    __slots__ = ("objective", "started_task_id")
-    OBJECTIVE_FIELD_NUMBER: _ClassVar[int]
-    STARTED_TASK_ID_FIELD_NUMBER: _ClassVar[int]
-    objective: _runtime_pb2.Objective
-    started_task_id: str
-    def __init__(self, objective: _Optional[_Union[_runtime_pb2.Objective, _Mapping]] = ..., started_task_id: _Optional[str] = ...) -> None: ...

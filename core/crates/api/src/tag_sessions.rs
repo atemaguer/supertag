@@ -84,18 +84,4 @@ impl attempt_tag_sessions_server::AttemptTagSessions for Api {
         })
         .await
     }
-
-    async fn create_objective(
-        &self,
-        request: Request<CreateTagObjectiveRequest>,
-    ) -> Result<Response<CreateTagObjectiveResponse>, Status> {
-        self.forward_host(request, true, |channel, request| async {
-            attempt_tag_sessions_client::AttemptTagSessionsClient::new(channel)
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                .create_objective(request)
-                .await
-        })
-        .await
-    }
 }

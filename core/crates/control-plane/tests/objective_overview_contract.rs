@@ -47,7 +47,7 @@ async fn surface_objective(store: &Store, thread: &str, outcome: &str) -> Object
                 &format!("Ev{thread}"),
                 thread,
                 thread,
-                &format!("@SuperTag objective {outcome}"),
+                &format!("@SuperTag /goal {outcome}"),
             ),
         )
         .await

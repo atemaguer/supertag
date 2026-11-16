@@ -84,32 +84,55 @@ impl Store {
             "teams:{account}:{}:{}:{}",
             input.tenant_id, input.conversation_id, input.root_activity_id
         );
-        let Some(task) = admit_connector_task_in(
+        let origin = VerifiedConnectorOrigin {
+            connector_account_id: account,
+            tag_id: &input.tag_id,
+            scope: VerifiedScope::MicrosoftTeams {
+                app_id: &input.app_id,
+                tenant_id: &input.tenant_id,
+                team_id: &input.team_id,
+                channel_id: &input.channel_id,
+            },
+        };
+        let event = hash(&(&input.tenant_id, &input.conversation_id, &input.activity_id))?;
+        let now_ms = self.execution_now_ms();
+        let actor = format!("teams:{}", input.actor_id);
+        // The Gateway forwards only messages that mention the app, with the mention removed, so
+        // the message itself is the command: `@SuperTag /goal <outcome>` arrives as `/goal ...`.
+        let handled = Box::pin(crate::surface_objectives::handle_in(
             &mut tx,
             order,
-            VerifiedConnectorOrigin {
-                connector_account_id: account,
-                tag_id: &input.tag_id,
-                scope: VerifiedScope::MicrosoftTeams {
-                    app_id: &input.app_id,
-                    tenant_id: &input.tenant_id,
-                    team_id: &input.team_id,
-                    channel_id: &input.channel_id,
-                },
+            crate::surface_objectives::Message {
+                origin,
+                conversation_id: &input.conversation_id,
+                thread_id: &input.root_activity_id,
+                event_id: &event,
+                prompt: &input.prompt,
+                command: crate::surface_objectives::parse(&input.prompt),
+                actor: &actor,
+                method: "/supertag.runtime.v2.Connector/AcceptMicrosoftTeamsActivity",
             },
-            &session,
-            &input.prompt,
-            self.execution_now_ms(),
-        )
-        .await?
-        else {
+            now_ms,
+        ))
+        .await?;
+        let (task, answered) = match handled {
+            crate::surface_objectives::Handled::Ordinary => (
+                admit_connector_task_in(&mut tx, order, origin, &session, &input.prompt, now_ms)
+                    .await?,
+                false,
+            ),
+            crate::surface_objectives::Handled::Work(task) => (task, false),
+            crate::surface_objectives::Handled::Status(task) => (Some(task), true),
+        };
+        let audit_call = crate::surface_objectives::audit_call_id(account, &event);
+        let Some(task) = task else {
             tx.commit().await?;
+            self.emit_audit_call(&audit_call).await;
             return Ok(AcceptMicrosoftTeamsActivityResponse { task: None });
         };
         if route.is_none() {
             sqlx::query("INSERT INTO supertag_v2_microsoft_teams_routes (account_id,app_id,tenant_id,team_id,channel_id,tag_id) VALUES ($1,$2,$3,$4,$5,$6)").bind(account).bind(&input.app_id).bind(&input.tenant_id).bind(&input.team_id).bind(&input.channel_id).bind(&input.tag_id).execute(&mut *tx).await?;
         }
-        let event = hash(&(&input.tenant_id, &input.conversation_id, &input.activity_id))?;
         let thread = Some(input.root_activity_id.clone());
         let source = hash(&(
             &input.tag_id,
@@ -120,7 +143,11 @@ impl Store {
         ))?;
         sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id,event_id,request_digest,task_id,conversation_id,thread_id) VALUES ($1,$2,$3,$4,$5,$6)").bind(account).bind(event).bind(source).bind(&task.task_id).bind(&input.conversation_id).bind(thread).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_microsoft_teams_activities (account_id,conversation_id,activity_id,root_activity_id,service_url,request_digest,task_id) VALUES ($1,$2,$3,$4,$5,$6,$7)").bind(account).bind(&input.conversation_id).bind(&input.activity_id).bind(&input.root_activity_id).bind(&input.service_url).bind(digest).bind(&task.task_id).execute(&mut *tx).await?;
+        if answered {
+            crate::surface_objectives::reply_in(&mut tx, &task).await?;
+        }
         tx.commit().await?;
+        self.emit_audit_call(&audit_call).await;
         Ok(AcceptMicrosoftTeamsActivityResponse { task: Some(task) })
     }
     pub async fn get_microsoft_teams_reply_route(
@@ -161,8 +188,29 @@ impl Store {
         .bind(&input.lease_token)
         .bind(i64::from(ReplyState::Claimed as i32))
         .fetch_optional(&self.pool)
-        .await?
-        .ok_or(StoreError::PermissionDenied)?;
+        .await?;
+        // An Objective's own turns and Control Plane notices post to its home thread without an
+        // activity of their own: they reply through the latest authenticated activity there.
+        let row = match row {
+            Some(row) => row,
+            None => sqlx::query(
+                "SELECT a.service_url,a.conversation_id,a.root_activity_id,c.app_id,c.tenant_id,c.team_id,c.channel_id
+                 FROM supertag_v2_replies r
+                 JOIN supertag_v2_microsoft_teams_activities a ON a.account_id=r.account_id
+                     AND a.conversation_id=r.conversation_id AND a.root_activity_id=r.thread_id
+                 JOIN supertag_v2_tasks t ON t.task_id=a.task_id
+                 JOIN supertag_v2_microsoft_teams_routes c ON c.account_id=a.account_id
+                 WHERE r.reply_id=$1 AND r.account_id=$2 AND r.lease_token=$3 AND r.state=$4
+                 ORDER BY t.accepted_order DESC LIMIT 1",
+            )
+            .bind(&input.reply_id)
+            .bind(account)
+            .bind(&input.lease_token)
+            .bind(i64::from(ReplyState::Claimed as i32))
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(StoreError::PermissionDenied)?,
+        };
         Ok(MicrosoftTeamsReplyRoute {
             service_url: row.try_get("service_url")?,
             conversation_id: row.try_get("conversation_id")?,
@@ -328,6 +376,88 @@ mod tests {
                 .unwrap(),
             3
         );
+        // `@SuperTag /goal <outcome>` arrives without its mention and starts an Objective whose
+        // home is a new thread. The thread hears its ID at once, through its latest activity.
+        let home = "1741000000100";
+        let mut goal = event("1741000000101");
+        goal.root_activity_id = home.into();
+        goal.prompt = "/goal Ship the release notes".into();
+        let started = left
+            .accept_microsoft_teams_activity(PRINCIPAL, &goal)
+            .await
+            .unwrap()
+            .task
+            .unwrap();
+        let objectives = left
+            .list_objectives("operator:local", &Default::default())
+            .await
+            .unwrap();
+        assert_eq!(objectives.len(), 1);
+        let objective = &objectives[0];
+        assert_eq!(objective.starting_task_id, started.task_id);
+        assert_eq!(objective.owner_tag_id, "builder");
+        assert_eq!(objective.outcome, "Ship the release notes");
+        let (ack, text): (String, String) =
+            sqlx::query_as("SELECT reply_id, text FROM supertag_v2_replies WHERE thread_id=$1")
+                .bind(home)
+                .fetch_one(&left.pool)
+                .await
+                .unwrap();
+        assert!(
+            text.starts_with(&format!(
+                "Started Objective {}: Ship the release notes",
+                objective.objective_id
+            )),
+            "{text}"
+        );
+        sqlx::query(
+            "UPDATE supertag_v2_replies SET state=$1, lease_token='ack-lease' WHERE reply_id=$2",
+        )
+        .bind(i64::from(ReplyState::Claimed as i32))
+        .bind(&ack)
+        .execute(&left.pool)
+        .await
+        .unwrap();
+        let route = left
+            .get_microsoft_teams_reply_route(
+                PRINCIPAL,
+                &GetMicrosoftTeamsReplyRouteRequest {
+                    reply_id: ack,
+                    lease_token: "ack-lease".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(route.root_activity_id, home);
+        assert_eq!(route.conversation_id, input.conversation_id);
+        // The home thread directs that Objective: another `/goal` is answered, and any other
+        // message is its next turn.
+        let mut again = goal.clone();
+        again.activity_id = "1741000000102".into();
+        again.prompt = "/goal Another".into();
+        let answered = left
+            .accept_microsoft_teams_activity(PRINCIPAL, &again)
+            .await
+            .unwrap()
+            .task
+            .unwrap();
+        assert_eq!(answered.state(), TaskState::Succeeded);
+        assert!(
+            answered
+                .result
+                .unwrap()
+                .starts_with("This thread already directs Objective")
+        );
+        let mut steer = goal.clone();
+        steer.activity_id = "1741000000103".into();
+        steer.prompt = "Focus on the API changes".into();
+        let steer = left
+            .accept_microsoft_teams_activity(PRINCIPAL, &steer)
+            .await
+            .unwrap()
+            .task
+            .unwrap();
+        assert_eq!(steer.session_id, started.session_id);
         left.close().await;
         right.close().await;
     }

@@ -20,9 +20,6 @@ service AttemptTagSessions {
   rpc ReadSession(ReadTagSessionRequest) returns (ReadTagSessionResponse);
   rpc ListObjectives(ListTagObjectivesRequest) returns (ListTagObjectivesResponse);
   rpc ReadObjective(ReadTagObjectiveRequest) returns (TagObjectiveView);
-  // Only a conversation turn whose message is its requester's explicit
-  // `@SuperTag objective <outcome>` command, at most once per Task.
-  rpc CreateObjective(CreateTagObjectiveRequest) returns (CreateTagObjectiveResponse);
 }
 
 // Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
@@ -33,7 +30,6 @@ service HarnessTagSessions {
   rpc ReadSession(ReadTagSessionRequest) returns (ReadTagSessionResponse);
   rpc ListObjectives(ListTagObjectivesRequest) returns (ListTagObjectivesResponse);
   rpc ReadObjective(ReadTagObjectiveRequest) returns (TagObjectiveView);
-  rpc CreateObjective(CreateTagObjectiveRequest) returns (CreateTagObjectiveResponse);
 }
 
 // Who sees a Session from the Tag's other Sessions.
@@ -159,20 +155,4 @@ message TagObjectiveView {
   repeated ObjectiveSessionView sessions = 6;
   uint32 total_sessions = 7;
   int64 as_of_ms = 8;
-}
-
-// The Tag that runs the turn owns the new Objective. Its runtime actions are
-// what this Task may use, within what the Tag is granted.
-message CreateTagObjectiveRequest {
-  InspectAttemptRequest attempt = 1;
-  string outcome = 2;
-  optional int64 deadline_ms = 3;
-  optional uint64 budget_limit_minor = 4;
-  optional string budget_currency = 5;
-}
-
-message CreateTagObjectiveResponse {
-  Objective objective = 1;
-  // The Objective's first owner turn, queued at once.
-  string started_task_id = 2;
 }

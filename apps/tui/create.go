@@ -50,7 +50,7 @@ type createdMsg struct {
 	err      error
 }
 
-// goalOutcome recognizes /goal and leaves the rest of the line as the outcome.
+// goalOutcome recognizes /goal and leaves the rest of the message as the outcome.
 func goalOutcome(text string) (string, bool) {
 	text = strings.TrimSpace(text)
 	end := strings.IndexFunc(text, unicode.IsSpace)
@@ -63,7 +63,7 @@ func goalOutcome(text string) (string, bool) {
 	return strings.TrimSpace(text[end:]), true
 }
 
-// openObjectiveForm starts an inline goal or shows the form for the selected Tag.
+// openObjectiveForm shows the form for the selected Tag, with the outcome filled in if given.
 func (m *model) openObjectiveForm(outcome string) tea.Cmd {
 	owner := m.selectedTag()
 	if owner == "" {
@@ -89,11 +89,7 @@ func (m *model) openObjectiveForm(outcome string) tea.Cmd {
 	m.pane, m.focus = paneNewObjective, focusInput
 	m.placeCursor()
 	m.viewport.GotoTop()
-	if outcome != "" {
-		f.fields[fieldOutcome].SetValue(outcome)
-		f.field = fieldBudget
-		return m.createObjective()
-	}
+	f.fields[fieldOutcome].SetValue(outcome)
 	m.refresh()
 	return m.syncInput()
 }

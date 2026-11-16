@@ -123,12 +123,10 @@ impl Operator {
 
 database_tests! {
     #[tokio::test]
-    tag_reads_its_sessions_and_creates_an_objective_through_its_harness;
+    tag_reads_its_sessions_and_the_objective_its_goal_created;
 }
 
-async fn tag_reads_its_sessions_and_creates_an_objective_through_its_harness(
-    database: String,
-) -> Result<()> {
+async fn tag_reads_its_sessions_and_the_objective_its_goal_created(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let alice_token = Uuid::new_v4().to_string();
@@ -200,12 +198,11 @@ async fn tag_reads_its_sessions_and_creates_an_objective_through_its_harness(
     run_host(&public, &host_token, &host).await?;
     bob.result(&hiring.task_id).await?;
 
-    // Alice's turn sees her own conversation, never Bob's, and creates nothing unasked.
+    // Alice's turn sees her own conversation, never Bob's.
     let recall = alice.say("recall", "recall release").await?;
     run_host(&public, &host_token, &host).await?;
     let summary: Value = serde_json::from_str(&alice.result(&recall.task_id).await?)?;
     assert_eq!(summary["mayRead"], true, "{summary}");
-    assert_eq!(summary["mayCreate"], false, "{summary}");
     assert_eq!(summary["sessions"], json!([notes.session_id]), "{summary}");
     assert_eq!(summary["firstRequests"], json!(["Draft release notes"]));
     assert_eq!(
@@ -218,7 +215,6 @@ async fn tag_reads_its_sessions_and_creates_an_objective_through_its_harness(
     );
     assert_eq!(summary["objectives"], json!([]));
     assert_eq!(summary["readObjective"], "NotFound");
-    assert_eq!(summary["create"], "FailedPrecondition");
     assert!(
         summary["portfolio"]
             .as_str()
@@ -226,35 +222,32 @@ async fn tag_reads_its_sessions_and_creates_an_objective_through_its_harness(
         "{summary}"
     );
 
-    // An explicit command lets that turn create the Objective once, as Alice.
+    // `/goal` creates the Objective in the Control Plane, as Alice, and answers without a turn.
     let command_turn = alice
-        .say("recall", "@SuperTag objective Publish the v2 release notes")
+        .say("recall", "/goal Publish the v2 release notes")
         .await?;
-    run_host(&public, &host_token, &host).await?;
-    let summary: Value = serde_json::from_str(&alice.result(&command_turn.task_id).await?)?;
-    assert_eq!(summary["mayCreate"], true, "{summary}");
-    let objective = summary["created"]["objective"]
-        .as_str()
-        .context("created Objective")?
+    assert_eq!(command_turn.state(), TaskState::Succeeded);
+    let answer = alice.result(&command_turn.task_id).await?;
+    let objective = answer
+        .strip_prefix("Created Objective ")
+        .and_then(|rest| rest.split(':').next())
+        .with_context(|| answer.clone())?
         .to_owned();
-    assert_eq!(summary["again"], summary["created"], "{summary}");
-    assert_eq!(summary["readObjective"], objective);
-    let started = summary["created"]["started"]
-        .as_str()
-        .context("started Task")?
-        .to_owned();
-    let record = alice
-        .operator
-        .get_task(authenticated_request(
-            GetTaskRequest {
-                task_id: started.clone(),
+    assert!(objective.starts_with("publish-the-v2-"), "{answer}");
+    let record = objectives_client::ObjectivesClient::new(connected.clone())
+        .get_objective(authenticated_request(
+            GetObjectiveRequest {
+                objective_id: objective.clone(),
             },
             &alice_token,
             None,
         )?)
         .await?
         .into_inner();
-    assert_eq!(record.tag_id, "owner");
+    assert_eq!(record.owner_tag_id, "owner");
+    assert_eq!(record.created_by, "operator:alice");
+    assert_eq!(record.outcome, "Publish the v2 release notes");
+    let started = record.starting_task_id;
 
     // The Objective's own turn reads only its own Objective, and sees itself in its portfolio.
     run_host(&public, &host_token, &host).await?;

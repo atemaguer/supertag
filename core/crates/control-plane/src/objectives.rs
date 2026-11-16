@@ -455,10 +455,7 @@ impl Store {
         self.create_objective_in_home(principal, input, None).await
     }
 
-    /// Creates an Objective. Only the Tag's `create_objective` tool passes `home_task`: the
-    /// conversation Task the Objective is made from, whose audience it has (TS
-    /// `Objective.surfaceTaskId`); no public request sets it. A Task makes one Objective, whose
-    /// ID is then its operation ID, so a retry replays it and a changed request conflicts.
+    /// Creates an Objective.
     pub(crate) async fn create_objective_in_home(
         &self,
         principal: &str,
@@ -471,115 +468,133 @@ impl Store {
             .await?;
         let (mut tx, order) = self.write().await?;
         let now_ms = self.execution_now_ms();
-        let mut input = std::borrow::Cow::Borrowed(input);
-        if let Some(task) = home_task {
-            let made: Option<String> = sqlx::query_scalar(
-                "SELECT objective_id FROM supertag_v2_objectives WHERE home_task_id=$1",
-            )
-            .bind(task)
-            .fetch_optional(&mut *tx)
-            .await?;
-            let request = input.to_mut();
-            if let Some(made) = made {
-                request.objective_id = made;
-            }
-            request.operation_id = request.objective_id.clone();
-        }
-        name("operation ID", &input.operation_id)?;
-        let fingerprint = digest("create", &*input);
-        if let Some(prior) =
-            replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
-        {
-            tx.commit().await?;
-            return Ok(prior);
-        }
-        let exists: Option<String> = sqlx::query_scalar(
-            "SELECT objective_id FROM supertag_v2_objectives WHERE objective_id=$1",
-        )
-        .bind(&input.objective_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if exists.is_some() {
-            return Err(StoreError::Conflict("Objective ID already exists".into()));
-        }
-        let allowed = Box::pin(crate::store::owner_runtime_actions_in(
-            &mut tx,
-            &input.owner_tag_id,
-        ))
-        .await?;
-        let runtime_actions = select_runtime_actions(&allowed, input.runtime_actions.as_ref())?;
-        let team_id = match &input.team_id {
-            Some(team) => Some(
-                crate::teams::visible_team_in(&mut tx, principal, team)
-                    .await?
-                    .team_id,
-            ),
-            None => None,
-        };
-        // Choosing another conversation's surface thread for notices is an operator's call.
-        if input.notification_task_id.is_some() && !principal.starts_with("operator:") {
-            return Err(StoreError::PermissionDenied);
-        }
-        // TS `createObjective`: the chosen thread must verify when it is chosen.
-        if let Some(task) = &input.notification_task_id
-            && crate::surface_objectives::task_home_in(&mut tx, task)
-                .await?
-                .is_none()
-        {
-            return Err(invalid(
-                "notification Task must be a surface Task whose Tag is active and whose Surface Account is enabled",
-            ));
-        }
-        let session_id = Uuid::new_v4().to_string();
-        let mut state = limits::LimitState::default();
-        if let Some(deadline) = input.deadline_ms {
-            state.deadline_set_at = Some(limits::DeadlineObservation {
-                deadline: timestamp(deadline)?,
-                at: timestamp(now_ms)?,
-            });
-        }
-        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions,created_by,notification_task_id,home_task_id) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13,$14,$15,$16)")
-            .bind(&input.objective_id).bind(&input.owner_tag_id).bind(&session_id).bind(&input.outcome).bind(i64::from(input.ongoing)).bind(ObjectiveStatus::Working as i64)
-            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).bind(principal).bind(&input.notification_task_id).bind(home_task).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
-            .bind(&input.owner_tag_id).bind(&session_id).bind(&input.objective_id).execute(&mut *tx).await?;
-        let prompt = format!(
-            "The Objective just started: plan the work, then start it.\n\n{}\n\n{}",
-            input.outcome,
-            if input.ongoing {
-                "This responsibility is ongoing. An operator must end it; completing an assessment does not complete the Objective."
-            } else {
-                "When the outcome is met, report ready_for_review or completed with your result."
-            }
-        );
-        let task = Box::pin(insert_task(
-            &mut tx,
-            order,
-            &input.owner_tag_id,
-            &session_id,
-            &prompt,
-        ))
-        .await?;
-        objective_link_task_in(&mut tx, &task).await?;
-        sqlx::query("UPDATE supertag_v2_objectives SET starting_task_id=$1 WHERE objective_id=$2")
-            .bind(&task.task_id)
-            .bind(&input.objective_id)
-            .execute(&mut *tx)
-            .await?;
-        let record = get_in(&mut tx, &input.objective_id).await?;
-        receipt_in(
-            &mut tx,
-            principal,
-            &input.operation_id,
-            &fingerprint,
-            &record.value,
-        )
-        .await?;
-        // No warning sweep runs inside creation: accepting the starting Task is its own result.
+        let objective =
+            create_objective_in(&mut tx, order, now_ms, principal, input, home_task).await?;
         tx.commit().await?;
-        Ok(record.value)
+        Ok(objective)
     }
+}
 
+/// Creates an Objective in the caller's transaction, its starting Task at `order`. Only a
+/// conversation's `/goal` command passes `home_task`: the conversation Task the Objective is made
+/// from, whose audience it has (TS `Objective.surfaceTaskId`); no public request sets it. A Task
+/// makes one Objective, whose ID is then its operation ID, so a retry replays it and a changed
+/// request conflicts. The caller checks the principal may address the owner Tag.
+pub(crate) async fn create_objective_in(
+    tx: &mut Transaction<'_, Any>,
+    order: i64,
+    now_ms: i64,
+    principal: &str,
+    input: &CreateObjectiveRequest,
+    home_task: Option<&str>,
+) -> Result<Objective> {
+    actor(principal)?;
+    validate_manifest_objective(input)?;
+    let mut input = std::borrow::Cow::Borrowed(input);
+    if let Some(task) = home_task {
+        let made: Option<String> = sqlx::query_scalar(
+            "SELECT objective_id FROM supertag_v2_objectives WHERE home_task_id=$1",
+        )
+        .bind(task)
+        .fetch_optional(&mut **tx)
+        .await?;
+        let request = input.to_mut();
+        if let Some(made) = made {
+            request.objective_id = made;
+        }
+        request.operation_id = request.objective_id.clone();
+    }
+    name("operation ID", &input.operation_id)?;
+    let fingerprint = digest("create", &*input);
+    if let Some(prior) = replay_in(tx, principal, &input.operation_id, &fingerprint).await? {
+        return Ok(prior);
+    }
+    let exists: Option<String> =
+        sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objectives WHERE objective_id=$1")
+            .bind(&input.objective_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if exists.is_some() {
+        return Err(StoreError::Conflict("Objective ID already exists".into()));
+    }
+    let allowed = Box::pin(crate::store::owner_runtime_actions_in(
+        tx,
+        &input.owner_tag_id,
+    ))
+    .await?;
+    let runtime_actions = select_runtime_actions(&allowed, input.runtime_actions.as_ref())?;
+    let team_id = match &input.team_id {
+        Some(team) => Some(
+            crate::teams::visible_team_in(tx, principal, team)
+                .await?
+                .team_id,
+        ),
+        None => None,
+    };
+    // Choosing another conversation's surface thread for notices is an operator's call.
+    if input.notification_task_id.is_some() && !principal.starts_with("operator:") {
+        return Err(StoreError::PermissionDenied);
+    }
+    // TS `createObjective`: the chosen thread must verify when it is chosen.
+    if let Some(task) = &input.notification_task_id
+        && crate::surface_objectives::task_home_in(tx, task)
+            .await?
+            .is_none()
+    {
+        return Err(invalid(
+            "notification Task must be a surface Task whose Tag is active and whose Surface Account is enabled",
+        ));
+    }
+    let session_id = Uuid::new_v4().to_string();
+    let mut state = limits::LimitState::default();
+    if let Some(deadline) = input.deadline_ms {
+        state.deadline_set_at = Some(limits::DeadlineObservation {
+            deadline: timestamp(deadline)?,
+            at: timestamp(now_ms)?,
+        });
+    }
+    sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions,created_by,notification_task_id,home_task_id) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13,$14,$15,$16)")
+            .bind(&input.objective_id).bind(&input.owner_tag_id).bind(&session_id).bind(&input.outcome).bind(i64::from(input.ongoing)).bind(ObjectiveStatus::Working as i64)
+            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).bind(principal).bind(&input.notification_task_id).bind(home_task).execute(&mut **tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
+            .bind(&input.owner_tag_id).bind(&session_id).bind(&input.objective_id).execute(&mut **tx).await?;
+    let prompt = format!(
+        "The Objective just started: plan the work, then start it.\n\n{}\n\n{}",
+        input.outcome,
+        if input.ongoing {
+            "This responsibility is ongoing. An operator must end it; completing an assessment does not complete the Objective."
+        } else {
+            "When the outcome is met, report ready_for_review or completed with your result."
+        }
+    );
+    let task = Box::pin(insert_task(
+        tx,
+        order,
+        &input.owner_tag_id,
+        &session_id,
+        &prompt,
+    ))
+    .await?;
+    objective_link_task_in(tx, &task).await?;
+    sqlx::query("UPDATE supertag_v2_objectives SET starting_task_id=$1 WHERE objective_id=$2")
+        .bind(&task.task_id)
+        .bind(&input.objective_id)
+        .execute(&mut **tx)
+        .await?;
+    let record = get_in(tx, &input.objective_id).await?;
+    receipt_in(
+        tx,
+        principal,
+        &input.operation_id,
+        &fingerprint,
+        &record.value,
+    )
+    .await?;
+    // No warning sweep runs inside creation: accepting the starting Task is its own result.
+    Ok(record.value)
+}
+
+impl Store {
     pub async fn get_objective(&self, principal: &str, objective_id: &str) -> Result<Objective> {
         actor(principal)?;
         name("Objective ID", objective_id)?;

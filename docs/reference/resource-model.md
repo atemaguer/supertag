@@ -101,7 +101,7 @@ A **connection generation** is the increasing number that identifies the current
 
 Most of these records are inspectable but not declaratively applied. An Objective, with the Team
 it names, may also be declared in a manifest; see [Declared Objectives](#declared-objectives).
-Otherwise an Objective comes from `supertag objective create` or an `@SuperTag objective` command,
+Otherwise an Objective comes from `supertag objective create` or a person's `/goal` message,
 and a Team from `supertag team create`. A Team's Workstream exists with the Team. Status is never
 declared: owners and operators record it explicitly. The execution records report what the service
 did.

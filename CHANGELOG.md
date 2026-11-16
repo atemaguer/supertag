@@ -18,7 +18,24 @@ within the pre-1.0 compatibility policy described in
   say so and name `supertag up`; the saved Control Planes stay available. Running `supertag-tui`
   directly finds it too.
 
+### Changed
+
+- `/goal <outcome>` is the one command that creates an Objective, in every conversation: the
+  terminal UI, the desktop app, the conversations API, and Slack and Microsoft Teams channels,
+  where it follows the app's mention (`@SuperTag /goal <outcome>`). The Control Plane creates the
+  Objective itself, owned by the conversation's Tag and homed in that conversation or thread, and
+  answers with its ID; the message never reaches a turn. In the terminal UI, `/goal <outcome>` is
+  sent as a message, and `/goal` alone still opens the Create Objective form. Microsoft Teams
+  threads can now start and steer Objectives as Slack threads do.
+- `supertag describe objective` no longer says the owner reported a blocked Objective when the
+  Control Plane blocked it after two turns ended with nothing running and nothing asked.
+
 ### Removed
+
+- `@SuperTag objective <outcome>`; use `@SuperTag /goal <outcome>`.
+- The `create_objective` tool, the `AttemptTagSessions.CreateObjective` and
+  `HarnessTagSessions.CreateObjective` RPCs, and `AttemptCapabilities.may_create_objective`. No
+  turn creates an Objective.
 
 - Releases no longer include an Intel Mac (`darwin-amd64`) archive, and the installer script
   refuses Intel Macs. Build the CLI from source there, as

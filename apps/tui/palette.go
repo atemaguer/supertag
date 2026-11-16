@@ -141,8 +141,11 @@ func (a *app) paletteKeyPress(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		a.palette = nil
-		outcome, _ := p.goal()
-		return a.run(matching[p.cursor].id, outcome)
+		id := matching[p.cursor].id
+		if outcome, _ := p.goal(); outcome != "" && id == commandCreateObjective {
+			return a.scope(a.inner.sendGoal(outcome))
+		}
+		return a.run(id)
 	}
 	var cmd tea.Cmd
 	p.filter, cmd = p.filter.Update(msg)
@@ -151,7 +154,7 @@ func (a *app) paletteKeyPress(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // run carries out a palette command.
-func (a *app) run(id commandID, outcome string) tea.Cmd {
+func (a *app) run(id commandID) tea.Cmd {
 	var cmd tea.Cmd
 	switch id {
 	case commandSwitchControlPlane:
@@ -162,7 +165,7 @@ func (a *app) run(id commandID, outcome string) tea.Cmd {
 	case commandSwitchConversation:
 		cmd = a.inner.openPicker()
 	case commandCreateObjective:
-		cmd = a.inner.openObjectiveForm(outcome)
+		cmd = a.inner.openObjectiveForm("")
 	case commandTaskFiles:
 		return a.openTaskFiles()
 	case commandOpenInbox:

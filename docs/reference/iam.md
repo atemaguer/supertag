@@ -176,7 +176,7 @@ the actions its owner Tag's Permission Sets allow, resolved once at creation:
 | Objective created | Default runtime actions |
 | --- | --- |
 | By an operator (`supertag objective create`, API) | Union across the owner's active Roles |
-| From a collaboration thread (`@SuperTag objective`) | The invoking Task's: the Tag's Roles and the Permission Sets activated at that location |
+| From a collaboration thread (`@SuperTag /goal`) | The invoking Task's: the Tag's Roles and the Permission Sets activated at that location |
 
 An operator's explicit list narrows the default and never widens it. A Task in the Objective
 receives the actions within the Objective's list and, for delegated work, within its delegating

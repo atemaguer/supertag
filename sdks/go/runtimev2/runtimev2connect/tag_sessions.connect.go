@@ -50,9 +50,6 @@ const (
 	// AttemptTagSessionsReadObjectiveProcedure is the fully-qualified name of the AttemptTagSessions's
 	// ReadObjective RPC.
 	AttemptTagSessionsReadObjectiveProcedure = "/supertag.runtime.v2.AttemptTagSessions/ReadObjective"
-	// AttemptTagSessionsCreateObjectiveProcedure is the fully-qualified name of the
-	// AttemptTagSessions's CreateObjective RPC.
-	AttemptTagSessionsCreateObjectiveProcedure = "/supertag.runtime.v2.AttemptTagSessions/CreateObjective"
 	// HarnessTagSessionsListSessionsProcedure is the fully-qualified name of the HarnessTagSessions's
 	// ListSessions RPC.
 	HarnessTagSessionsListSessionsProcedure = "/supertag.runtime.v2.HarnessTagSessions/ListSessions"
@@ -68,9 +65,6 @@ const (
 	// HarnessTagSessionsReadObjectiveProcedure is the fully-qualified name of the HarnessTagSessions's
 	// ReadObjective RPC.
 	HarnessTagSessionsReadObjectiveProcedure = "/supertag.runtime.v2.HarnessTagSessions/ReadObjective"
-	// HarnessTagSessionsCreateObjectiveProcedure is the fully-qualified name of the
-	// HarnessTagSessions's CreateObjective RPC.
-	HarnessTagSessionsCreateObjectiveProcedure = "/supertag.runtime.v2.HarnessTagSessions/CreateObjective"
 )
 
 // AttemptTagSessionsClient is a client for the supertag.runtime.v2.AttemptTagSessions service.
@@ -80,9 +74,6 @@ type AttemptTagSessionsClient interface {
 	ReadSession(context.Context, *connect.Request[runtimev2.ReadTagSessionRequest]) (*connect.Response[runtimev2.ReadTagSessionResponse], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error)
 	ReadObjective(context.Context, *connect.Request[runtimev2.ReadTagObjectiveRequest]) (*connect.Response[runtimev2.TagObjectiveView], error)
-	// Only a conversation turn whose message is its requester's explicit
-	// `@SuperTag objective <outcome>` command, at most once per Task.
-	CreateObjective(context.Context, *connect.Request[runtimev2.CreateTagObjectiveRequest]) (*connect.Response[runtimev2.CreateTagObjectiveResponse], error)
 }
 
 // NewAttemptTagSessionsClient constructs a client for the supertag.runtime.v2.AttemptTagSessions
@@ -126,23 +117,16 @@ func NewAttemptTagSessionsClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(attemptTagSessionsMethods.ByName("ReadObjective")),
 			connect.WithClientOptions(opts...),
 		),
-		createObjective: connect.NewClient[runtimev2.CreateTagObjectiveRequest, runtimev2.CreateTagObjectiveResponse](
-			httpClient,
-			baseURL+AttemptTagSessionsCreateObjectiveProcedure,
-			connect.WithSchema(attemptTagSessionsMethods.ByName("CreateObjective")),
-			connect.WithClientOptions(opts...),
-		),
 	}
 }
 
 // attemptTagSessionsClient implements AttemptTagSessionsClient.
 type attemptTagSessionsClient struct {
-	listSessions    *connect.Client[runtimev2.ListTagSessionsRequest, runtimev2.ListTagSessionsResponse]
-	searchSessions  *connect.Client[runtimev2.SearchTagSessionsRequest, runtimev2.SearchTagSessionsResponse]
-	readSession     *connect.Client[runtimev2.ReadTagSessionRequest, runtimev2.ReadTagSessionResponse]
-	listObjectives  *connect.Client[runtimev2.ListTagObjectivesRequest, runtimev2.ListTagObjectivesResponse]
-	readObjective   *connect.Client[runtimev2.ReadTagObjectiveRequest, runtimev2.TagObjectiveView]
-	createObjective *connect.Client[runtimev2.CreateTagObjectiveRequest, runtimev2.CreateTagObjectiveResponse]
+	listSessions   *connect.Client[runtimev2.ListTagSessionsRequest, runtimev2.ListTagSessionsResponse]
+	searchSessions *connect.Client[runtimev2.SearchTagSessionsRequest, runtimev2.SearchTagSessionsResponse]
+	readSession    *connect.Client[runtimev2.ReadTagSessionRequest, runtimev2.ReadTagSessionResponse]
+	listObjectives *connect.Client[runtimev2.ListTagObjectivesRequest, runtimev2.ListTagObjectivesResponse]
+	readObjective  *connect.Client[runtimev2.ReadTagObjectiveRequest, runtimev2.TagObjectiveView]
 }
 
 // ListSessions calls supertag.runtime.v2.AttemptTagSessions.ListSessions.
@@ -170,11 +154,6 @@ func (c *attemptTagSessionsClient) ReadObjective(ctx context.Context, req *conne
 	return c.readObjective.CallUnary(ctx, req)
 }
 
-// CreateObjective calls supertag.runtime.v2.AttemptTagSessions.CreateObjective.
-func (c *attemptTagSessionsClient) CreateObjective(ctx context.Context, req *connect.Request[runtimev2.CreateTagObjectiveRequest]) (*connect.Response[runtimev2.CreateTagObjectiveResponse], error) {
-	return c.createObjective.CallUnary(ctx, req)
-}
-
 // AttemptTagSessionsHandler is an implementation of the supertag.runtime.v2.AttemptTagSessions
 // service.
 type AttemptTagSessionsHandler interface {
@@ -183,9 +162,6 @@ type AttemptTagSessionsHandler interface {
 	ReadSession(context.Context, *connect.Request[runtimev2.ReadTagSessionRequest]) (*connect.Response[runtimev2.ReadTagSessionResponse], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error)
 	ReadObjective(context.Context, *connect.Request[runtimev2.ReadTagObjectiveRequest]) (*connect.Response[runtimev2.TagObjectiveView], error)
-	// Only a conversation turn whose message is its requester's explicit
-	// `@SuperTag objective <outcome>` command, at most once per Task.
-	CreateObjective(context.Context, *connect.Request[runtimev2.CreateTagObjectiveRequest]) (*connect.Response[runtimev2.CreateTagObjectiveResponse], error)
 }
 
 // NewAttemptTagSessionsHandler builds an HTTP handler from the service implementation. It returns
@@ -225,12 +201,6 @@ func NewAttemptTagSessionsHandler(svc AttemptTagSessionsHandler, opts ...connect
 		connect.WithSchema(attemptTagSessionsMethods.ByName("ReadObjective")),
 		connect.WithHandlerOptions(opts...),
 	)
-	attemptTagSessionsCreateObjectiveHandler := connect.NewUnaryHandler(
-		AttemptTagSessionsCreateObjectiveProcedure,
-		svc.CreateObjective,
-		connect.WithSchema(attemptTagSessionsMethods.ByName("CreateObjective")),
-		connect.WithHandlerOptions(opts...),
-	)
 	return "/supertag.runtime.v2.AttemptTagSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AttemptTagSessionsListSessionsProcedure:
@@ -243,8 +213,6 @@ func NewAttemptTagSessionsHandler(svc AttemptTagSessionsHandler, opts ...connect
 			attemptTagSessionsListObjectivesHandler.ServeHTTP(w, r)
 		case AttemptTagSessionsReadObjectiveProcedure:
 			attemptTagSessionsReadObjectiveHandler.ServeHTTP(w, r)
-		case AttemptTagSessionsCreateObjectiveProcedure:
-			attemptTagSessionsCreateObjectiveHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -274,10 +242,6 @@ func (UnimplementedAttemptTagSessionsHandler) ReadObjective(context.Context, *co
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptTagSessions.ReadObjective is not implemented"))
 }
 
-func (UnimplementedAttemptTagSessionsHandler) CreateObjective(context.Context, *connect.Request[runtimev2.CreateTagObjectiveRequest]) (*connect.Response[runtimev2.CreateTagObjectiveResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptTagSessions.CreateObjective is not implemented"))
-}
-
 // HarnessTagSessionsClient is a client for the supertag.runtime.v2.HarnessTagSessions service.
 type HarnessTagSessionsClient interface {
 	ListSessions(context.Context, *connect.Request[runtimev2.ListTagSessionsRequest]) (*connect.Response[runtimev2.ListTagSessionsResponse], error)
@@ -285,7 +249,6 @@ type HarnessTagSessionsClient interface {
 	ReadSession(context.Context, *connect.Request[runtimev2.ReadTagSessionRequest]) (*connect.Response[runtimev2.ReadTagSessionResponse], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error)
 	ReadObjective(context.Context, *connect.Request[runtimev2.ReadTagObjectiveRequest]) (*connect.Response[runtimev2.TagObjectiveView], error)
-	CreateObjective(context.Context, *connect.Request[runtimev2.CreateTagObjectiveRequest]) (*connect.Response[runtimev2.CreateTagObjectiveResponse], error)
 }
 
 // NewHarnessTagSessionsClient constructs a client for the supertag.runtime.v2.HarnessTagSessions
@@ -329,23 +292,16 @@ func NewHarnessTagSessionsClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(harnessTagSessionsMethods.ByName("ReadObjective")),
 			connect.WithClientOptions(opts...),
 		),
-		createObjective: connect.NewClient[runtimev2.CreateTagObjectiveRequest, runtimev2.CreateTagObjectiveResponse](
-			httpClient,
-			baseURL+HarnessTagSessionsCreateObjectiveProcedure,
-			connect.WithSchema(harnessTagSessionsMethods.ByName("CreateObjective")),
-			connect.WithClientOptions(opts...),
-		),
 	}
 }
 
 // harnessTagSessionsClient implements HarnessTagSessionsClient.
 type harnessTagSessionsClient struct {
-	listSessions    *connect.Client[runtimev2.ListTagSessionsRequest, runtimev2.ListTagSessionsResponse]
-	searchSessions  *connect.Client[runtimev2.SearchTagSessionsRequest, runtimev2.SearchTagSessionsResponse]
-	readSession     *connect.Client[runtimev2.ReadTagSessionRequest, runtimev2.ReadTagSessionResponse]
-	listObjectives  *connect.Client[runtimev2.ListTagObjectivesRequest, runtimev2.ListTagObjectivesResponse]
-	readObjective   *connect.Client[runtimev2.ReadTagObjectiveRequest, runtimev2.TagObjectiveView]
-	createObjective *connect.Client[runtimev2.CreateTagObjectiveRequest, runtimev2.CreateTagObjectiveResponse]
+	listSessions   *connect.Client[runtimev2.ListTagSessionsRequest, runtimev2.ListTagSessionsResponse]
+	searchSessions *connect.Client[runtimev2.SearchTagSessionsRequest, runtimev2.SearchTagSessionsResponse]
+	readSession    *connect.Client[runtimev2.ReadTagSessionRequest, runtimev2.ReadTagSessionResponse]
+	listObjectives *connect.Client[runtimev2.ListTagObjectivesRequest, runtimev2.ListTagObjectivesResponse]
+	readObjective  *connect.Client[runtimev2.ReadTagObjectiveRequest, runtimev2.TagObjectiveView]
 }
 
 // ListSessions calls supertag.runtime.v2.HarnessTagSessions.ListSessions.
@@ -373,11 +329,6 @@ func (c *harnessTagSessionsClient) ReadObjective(ctx context.Context, req *conne
 	return c.readObjective.CallUnary(ctx, req)
 }
 
-// CreateObjective calls supertag.runtime.v2.HarnessTagSessions.CreateObjective.
-func (c *harnessTagSessionsClient) CreateObjective(ctx context.Context, req *connect.Request[runtimev2.CreateTagObjectiveRequest]) (*connect.Response[runtimev2.CreateTagObjectiveResponse], error) {
-	return c.createObjective.CallUnary(ctx, req)
-}
-
 // HarnessTagSessionsHandler is an implementation of the supertag.runtime.v2.HarnessTagSessions
 // service.
 type HarnessTagSessionsHandler interface {
@@ -386,7 +337,6 @@ type HarnessTagSessionsHandler interface {
 	ReadSession(context.Context, *connect.Request[runtimev2.ReadTagSessionRequest]) (*connect.Response[runtimev2.ReadTagSessionResponse], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error)
 	ReadObjective(context.Context, *connect.Request[runtimev2.ReadTagObjectiveRequest]) (*connect.Response[runtimev2.TagObjectiveView], error)
-	CreateObjective(context.Context, *connect.Request[runtimev2.CreateTagObjectiveRequest]) (*connect.Response[runtimev2.CreateTagObjectiveResponse], error)
 }
 
 // NewHarnessTagSessionsHandler builds an HTTP handler from the service implementation. It returns
@@ -426,12 +376,6 @@ func NewHarnessTagSessionsHandler(svc HarnessTagSessionsHandler, opts ...connect
 		connect.WithSchema(harnessTagSessionsMethods.ByName("ReadObjective")),
 		connect.WithHandlerOptions(opts...),
 	)
-	harnessTagSessionsCreateObjectiveHandler := connect.NewUnaryHandler(
-		HarnessTagSessionsCreateObjectiveProcedure,
-		svc.CreateObjective,
-		connect.WithSchema(harnessTagSessionsMethods.ByName("CreateObjective")),
-		connect.WithHandlerOptions(opts...),
-	)
 	return "/supertag.runtime.v2.HarnessTagSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HarnessTagSessionsListSessionsProcedure:
@@ -444,8 +388,6 @@ func NewHarnessTagSessionsHandler(svc HarnessTagSessionsHandler, opts ...connect
 			harnessTagSessionsListObjectivesHandler.ServeHTTP(w, r)
 		case HarnessTagSessionsReadObjectiveProcedure:
 			harnessTagSessionsReadObjectiveHandler.ServeHTTP(w, r)
-		case HarnessTagSessionsCreateObjectiveProcedure:
-			harnessTagSessionsCreateObjectiveHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -473,8 +415,4 @@ func (UnimplementedHarnessTagSessionsHandler) ListObjectives(context.Context, *c
 
 func (UnimplementedHarnessTagSessionsHandler) ReadObjective(context.Context, *connect.Request[runtimev2.ReadTagObjectiveRequest]) (*connect.Response[runtimev2.TagObjectiveView], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessTagSessions.ReadObjective is not implemented"))
-}
-
-func (UnimplementedHarnessTagSessionsHandler) CreateObjective(context.Context, *connect.Request[runtimev2.CreateTagObjectiveRequest]) (*connect.Response[runtimev2.CreateTagObjectiveResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessTagSessions.CreateObjective is not implemented"))
 }

@@ -37,8 +37,8 @@ pub(crate) struct Tools {
     pub(crate) capture_artifact: bool,
     pub(crate) acquire_artifacts: bool,
     pub(crate) attach_artifacts: bool,
-    /// `list_sessions`, `search_sessions`, `read_session`, `list_objectives`,
-    /// `read_objective`, and `create_objective`.
+    /// `list_sessions`, `search_sessions`, `read_session`, `list_objectives`, and
+    /// `read_objective`.
     pub(crate) tag_sessions: bool,
 }
 
@@ -365,12 +365,7 @@ impl Bridge {
                     && !self.asked =>
             {
                 self.tag_sessions
-                    .call(
-                        call,
-                        self.capabilities.may_create_objective,
-                        &self.token,
-                        &self.secrets,
-                    )
+                    .call(call, &self.token, &self.secrets)
                     .await?
             }
             _ => coordination::refused(),

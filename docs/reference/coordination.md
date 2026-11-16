@@ -44,13 +44,14 @@ happens in Sessions started beneath it, including Sessions of other Tags in its 
 
 ### A worked example
 
-Maya runs `@SuperTag objective Ship SSO for the admin app` in a Slack channel where the Tag
-`planner` listens. SuperTag creates the Objective `ship-sso-for-7f3k` and starts its conversation
-in that thread.
+Maya runs `@SuperTag /goal Ship SSO for the admin app` in a Slack channel where the Tag
+`planner` listens. SuperTag creates the Objective `ship-sso-for-7f3a9c2e`, says so in the thread,
+and starts its conversation there.
 
 ```text
 #admin-app thread
-  Maya      @SuperTag objective Ship SSO for the admin app
+  Maya      @SuperTag /goal Ship SSO for the admin app
+  SuperTag  Started Objective ship-sso-for-7f3a9c2e: Ship SSO for the admin app
   planner   Starting. I'll have builder do the provider work and reviewer check it.
             ├─ work Session of builder   "SAML provider"      → reports back
             └─ work Session of reviewer  "Security review"    → reports back
@@ -89,18 +90,23 @@ turn, in every Session, draws on the Objective's one budget pool.
 - Retrying the same definition returns the existing record with its current status. A different
   definition with the same ID is refused.
 
-A person creates an Objective from a Slack thread with an authenticated
-`@SuperTag objective <outcome>` command at the start of their own message. The Control Plane parses only that message, never
-history, quotes, or model output. That Objective's home thread is the thread the command arrived
-in, and the Tag at that location owns it.
+A person creates an Objective from any conversation with `/goal <outcome>`. The command must
+start the person's own message; in a Slack or Microsoft Teams channel, it follows the mention of
+the app: `@SuperTag /goal <outcome>`. The Control Plane parses only that message, never history,
+quotes, code, or model output, and the message never reaches a turn. The Control Plane creates
+the Objective itself, answers with its ID, and starts its first turn at once:
 
-In a conversation in the terminal UI, the same command at the start of the person's message
-reaches the Tag as a turn, and only that turn may call `create_objective {outcome, deadline?,
-budgetLimitMinor?, budgetCurrency?}`. The Tag owns the Objective, the person who wrote the command
-creates it with their own authority, its runtime actions are what that turn may use, and its
-first turn starts at once. One turn creates at most one Objective; a repeated call returns it. The
-Objective has the conversation's audience: only that person's turns see it. The Control Plane
-alone records which conversation created an Objective; no command or API call can set it.
+- The conversation's Tag owns it. Its ID is the outcome's first words and a random suffix, such
+  as `ship-sso-for-7f3a9c2e`.
+- From a Slack or Microsoft Teams thread, that thread is its home: later messages there steer it,
+  its turns answer there, and the runtime actions are what that location grants the Tag.
+- From a conversation in the terminal UI, the desktop app, or the API, the person who wrote
+  `/goal` creates it with their own authority, and the conversation is its home. The Objective has
+  the conversation's audience: only that person's turns see it. The Control Plane alone records
+  which conversation created an Objective; no command or API call can set it.
+- `/goal` with no outcome creates nothing; the answer says how to write the command. Use
+  `supertag objective create`, or the terminal UI's Create Objective form, to set a Team, a
+  deadline, or a budget.
 
 ### Objective runtime actions
 
@@ -425,14 +431,13 @@ tool the turn does not get; it does not only leave it out of the list.
 | Turn | Tools |
 | --- | --- |
 | An Objective's conversation | `start_session`, `continue_session`, `ask`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the [Session reads](#recalling-other-sessions) |
-| A Tag's inbox or a conversation with a person | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, the Session reads, and `create_objective` |
+| A Tag's inbox or a conversation with a person | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the Session reads |
 | A work Session's report turn | the Session reads |
 | A work Session's turn | `ask` |
 
 A work Session sees only its own work: it cannot message another Tag, start more work, or read
 the Tag's other Sessions or Objectives. Its final reply returns to the Session that started it.
-`create_objective` is listed for every conversation turn, but only a turn started by an explicit
-objective command may use it. A gated action needs no tool of its own: SuperTag requests approval
+A gated action needs no tool of its own: SuperTag requests approval
 when the Tag makes the call; see [Approval requests](#approval-requests). The [artifact tools](artifacts.md#agent-tools) are separate.
 
 ### The tools
@@ -452,11 +457,10 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `read_session` | `sessionId`, `limit` (1–20), `before` | Reads one page of a visible Session's finished turns, oldest first |
 | `list_objectives` | `limit` (1–20), `offset` | Lists the Tag's open Objectives it may see |
 | `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, Team, and Sessions |
-| `create_objective` | `outcome`, optional `deadline`, `budgetLimitMinor`, `budgetCurrency` | Creates the Objective an explicit command asked for; see [Creating an Objective](#creating-an-objective) |
 
 Reads return history, never instructions, and grant no authority. An Objective's turn reports its
-status through its result, as [Statuses](#statuses) describes; apart from `create_objective`, no
-tool changes an Objective.
+status through its result, as [Statuses](#statuses) describes; no tool creates or changes an
+Objective. A person's `/goal` creates one; see [Creating an Objective](#creating-an-objective).
 
 ### Recalling other Sessions
 

@@ -71,7 +71,6 @@ if root.joinpath("tag-sessions-mode").exists():
         ("read_session", {"sessionId": "conversation/earlier", "before": 9}),
         ("list_objectives", {}),
         ("read_objective", {"objectiveId": "docs"}),
-        ("create_objective", {"outcome": "Publish notes synthetic-codex-provider-secret", "deadline": "2026-12-01T00:00:00Z", "budgetLimitMinor": 500, "budgetCurrency": "USD"}),
     ])
 
 if root.joinpath("artifact-read-mode").exists():

@@ -194,13 +194,11 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
       nextBefore: 4n,
     }),
   );
-  const createObjective = vi.spyOn(bridge.tagSessions, "createObjective");
   const run = create(HarnessRunSchema, {
     task: { taskId, tagId, sessionId: "conversation/now" },
     attemptId,
     coordination: {
       mayReadTagSessions: true,
-      mayCreateObjective: false,
       tagPortfolio: "Tag portfolio: this Tag owns no open Objectives you can see.",
     },
   });
@@ -232,7 +230,6 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
       "read_session",
       "list_objectives",
       "read_objective",
-      "create_objective",
     ]);
     const listed = JSON.stringify(
       await client.callTool({ name: "list_sessions", arguments: { limit: 5 } }),
@@ -265,13 +262,6 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
       { sessionId: "conversation/earlier", limit: 0, before: 9n },
       expect.objectContaining({ timeoutMs: 5000 }),
     );
-    const refused = await client.callTool({
-      name: "create_objective",
-      arguments: { outcome: "Ship it" },
-    });
-    expect(refused).toMatchObject({ isError: true });
-    expect(JSON.stringify(refused)).toContain("explicit objective command");
-    expect(createObjective).not.toHaveBeenCalled();
     expect(
       (
         await client.callTool({

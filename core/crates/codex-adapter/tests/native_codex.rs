@@ -32,17 +32,17 @@ use supertag_protocol::v2::{
     harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
 };
 use supertag_protocol::v2::{
-    CreateTagObjectiveRequest, CreateTagObjectiveResponse, ListTagObjectivesRequest,
-    ListTagObjectivesResponse, ListTagSessionsRequest, ListTagSessionsResponse, Objective,
-    ReadTagObjectiveRequest, ReadTagSessionRequest, ReadTagSessionResponse,
-    SearchTagSessionsRequest, SearchTagSessionsResponse, TagObjectiveSummary, TagObjectiveView,
-    TagSessionAudience, TagSessionEntry, TagSessionSearchHit, TagSessionSummary,
-    harness_tag_sessions_server::{HarnessTagSessions, HarnessTagSessionsServer},
-};
-use supertag_protocol::v2::{
     HarnessAskWorkSessionQuestionRequest, HarnessContinueWorkSessionRequest,
     HarnessStartWorkSessionRequest, WorkSession, WorkSessionQuestion,
     harness_work_sessions_server::{HarnessWorkSessions, HarnessWorkSessionsServer},
+};
+use supertag_protocol::v2::{
+    ListTagObjectivesRequest, ListTagObjectivesResponse, ListTagSessionsRequest,
+    ListTagSessionsResponse, Objective, ReadTagObjectiveRequest, ReadTagSessionRequest,
+    ReadTagSessionResponse, SearchTagSessionsRequest, SearchTagSessionsResponse,
+    TagObjectiveSummary, TagObjectiveView, TagSessionAudience, TagSessionEntry,
+    TagSessionSearchHit, TagSessionSummary,
+    harness_tag_sessions_server::{HarnessTagSessions, HarnessTagSessionsServer},
 };
 use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, matches_bearer,
@@ -97,7 +97,6 @@ struct Observed {
     work_continuations: Vec<HarnessContinueWorkSessionRequest>,
     work_questions: Vec<HarnessAskWorkSessionQuestionRequest>,
     tag_session_calls: Vec<&'static str>,
-    created_objectives: Vec<CreateTagObjectiveRequest>,
     pending_post: bool,
     lose_post_response: bool,
     may_capture_artifacts: bool,
@@ -740,23 +739,6 @@ impl HarnessTagSessions for HarnessFixture {
                 ..Default::default()
             }),
             ..Default::default()
-        }))
-    }
-    async fn create_objective(
-        &self,
-        request: Request<CreateTagObjectiveRequest>,
-    ) -> Result<Response<CreateTagObjectiveResponse>, Status> {
-        self.authenticate(&request)?;
-        let mut observed = self.observed.lock().await;
-        observed.tag_session_calls.push("create_objective");
-        observed.created_objectives.push(request.into_inner());
-        Ok(Response::new(CreateTagObjectiveResponse {
-            objective: Some(Objective {
-                objective_id: "created-objective".into(),
-                status: 1,
-                ..Default::default()
-            }),
-            started_task_id: "started-task".into(),
         }))
     }
 }
@@ -3056,9 +3038,9 @@ async fn informational_moderation_metadata_does_not_accept_a_failed_turn() -> Re
 }
 
 #[tokio::test]
-async fn native_tag_session_tools_read_create_and_carry_the_portfolio() -> Result<()> {
+async fn native_tag_session_tools_read_and_carry_the_portfolio() -> Result<()> {
     let mut checkpoint = None;
-    for (read, create) in [(true, true), (true, false), (false, false)] {
+    for read in [true, false] {
         let native = NativeFixture::new(&successful("Recalled earlier work"), "exit 0")?;
         std::fs::write(native.directory.path().join("tag-sessions-mode"), "")?;
         let server = HarnessProcess::configured_tools(
@@ -3068,7 +3050,6 @@ async fn native_tag_session_tools_read_create_and_carry_the_portfolio() -> Resul
             false,
             Some(AttemptCapabilities {
                 may_read_tag_sessions: read,
-                may_create_objective: create,
                 tag_portfolio: if read {
                     "Tag portfolio: tag-portfolio-fixture".into()
                 } else {
@@ -3088,23 +3069,16 @@ async fn native_tag_session_tools_read_create_and_carry_the_portfolio() -> Resul
             checkpoint = Some(saved);
         }
         let logs = native.read("requests.jsonl")?;
-        let expected: &[&str] = match (read, create) {
-            (true, true) => &[
+        let expected: &[&str] = if read {
+            &[
                 "list_sessions",
                 "search_sessions",
                 "read_session",
                 "list_objectives",
                 "read_objective",
-                "create_objective",
-            ],
-            (true, false) => &[
-                "list_sessions",
-                "search_sessions",
-                "read_session",
-                "list_objectives",
-                "read_objective",
-            ],
-            _ => &[],
+            ]
+        } else {
+            &[]
         };
         assert_eq!(observed.tag_session_calls, expected);
         assert_eq!(
@@ -3124,20 +3098,6 @@ async fn native_tag_session_tools_read_create_and_carry_the_portfolio() -> Resul
             assert!(!logs.contains(KEY));
         } else {
             assert!(!logs.contains("tag-search-receipt"));
-        }
-        if create {
-            let created = &observed.created_objectives[0];
-            assert_eq!(created.outcome, "Publish notes [REDACTED]");
-            assert_eq!(created.deadline_ms, Some(1_796_083_200_000));
-            assert_eq!(created.budget_limit_minor, Some(500));
-            assert_eq!(created.budget_currency.as_deref(), Some("USD"));
-            assert!(logs.contains("created-objective") && logs.contains("started-task"));
-        } else if read {
-            assert!(
-                logs.contains(
-                    "Refused: Creating an Objective requires an explicit objective command"
-                )
-            );
         }
     }
     Ok(())

@@ -2,7 +2,8 @@
 //!
 //! Only the authenticated invocation is parsed: the Gateway forwards a verified,
 //! allowlisted human's own message text, never history, quotes, or model output.
-//! `@SuperTag objective <outcome>` makes the thread the new Objective's home.
+//! `/goal <outcome>`, after a mention of the app where the provider requires one, makes the
+//! thread the new Objective's home.
 //! In a home thread, `@SuperTag approve`, `pause`, and `resume` act on that
 //! Objective, and any other message is the Objective's next turn. Every
 //! Objective turn answers in the home thread. Each action on an Objective is
@@ -32,9 +33,42 @@ pub(crate) enum Command {
     Resume,
 }
 
-/// Recognize a command only at the start of the message, after a mention of
-/// the app. Quotes, code, and embedded or reported commands are ordinary text.
+/// The explicit Objective command: `/goal <outcome>` as the start of a message.
+pub(crate) const GOAL: &str = "/goal";
+
+/// Recognize a command in a message that already addresses the app: a private conversation, or
+/// a Microsoft Teams message whose mention of the app the Gateway removed. The command must be
+/// the start of the message. Quotes, code, and embedded or reported commands are ordinary text.
 pub(crate) fn parse(text: &str) -> Option<Command> {
+    let body = text.trim_start();
+    let word = |name: &str| {
+        let trimmed = body.trim_end();
+        let trimmed = trimmed.strip_suffix(['.', '!']).unwrap_or(trimmed);
+        trimmed.eq_ignore_ascii_case(name)
+    };
+    if word("approve") {
+        return Some(Command::Approve);
+    }
+    if word("pause") {
+        return Some(Command::Pause);
+    }
+    if word("resume") {
+        return Some(Command::Resume);
+    }
+    let after = strip_prefix_ignore_case(body, GOAL)?;
+    if !(after.is_empty() || after.starts_with(char::is_whitespace)) {
+        return None;
+    }
+    let outcome = after.trim();
+    if outcome.is_empty() {
+        return Some(Command::Invalid);
+    }
+    Some(Command::Create(outcome.to_owned()))
+}
+
+/// Recognize a command only at the start of a Slack message, right after a mention of the app:
+/// `@SuperTag /goal <outcome>`.
+pub(crate) fn parse_mentioned(text: &str) -> Option<Command> {
     let text = text.trim_start();
     let rest = if let Some(rest) = strip_prefix_ignore_case(text, "@SuperTag") {
         rest
@@ -52,34 +86,41 @@ pub(crate) fn parse(text: &str) -> Option<Command> {
         }
         &inner[end + 1..]
     };
-    // A mention must be followed by whitespace before its command word.
+    // A mention must be followed by whitespace before its command.
     if !rest.starts_with(char::is_whitespace) {
         return None;
     }
-    let body = rest.trim_start();
-    let word = |name: &str| {
-        let trimmed = body.trim_end();
-        let trimmed = trimmed.strip_suffix(['.', '!']).unwrap_or(trimmed);
-        trimmed.eq_ignore_ascii_case(name)
-    };
-    if word("approve") {
-        return Some(Command::Approve);
+    parse(rest)
+}
+
+/// A readable, unguessable Objective ID: up to three words of the outcome and a random suffix.
+pub(crate) fn new_objective_id(outcome: &str) -> String {
+    let lower = outcome.to_ascii_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .take(3)
+        .collect();
+    let mut slug = words.join("-");
+    if slug.len() > 40 {
+        slug.truncate(40);
+        slug = slug.trim_end_matches('-').to_owned();
     }
-    if word("pause") {
-        return Some(Command::Pause);
+    if slug.is_empty() {
+        slug = "objective".into();
     }
-    if word("resume") {
-        return Some(Command::Resume);
+    format!("{slug}-{}", &Uuid::new_v4().simple().to_string()[..8])
+}
+
+/// The first line of an outcome, shortened for an acknowledgement.
+pub(crate) fn outcome_headline(outcome: &str) -> String {
+    let line = outcome.lines().next().unwrap_or_default().trim();
+    if line.chars().count() <= 120 {
+        return line.to_owned();
     }
-    let after = strip_prefix_ignore_case(body, "objective")?;
-    if !(after.is_empty() || after.starts_with(char::is_whitespace)) {
-        return None;
-    }
-    let outcome = after.trim();
-    if outcome.is_empty() {
-        return Some(Command::Invalid);
-    }
-    Some(Command::Create(outcome.to_owned()))
+    let mut cut: String = line.chars().take(119).collect();
+    cut.push('…');
+    cut
 }
 
 fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
@@ -95,8 +136,9 @@ pub(crate) struct Message<'a> {
     pub thread_id: &'a str,
     pub event_id: &'a str,
     pub prompt: &'a str,
-    /// Whether the provider says the message addresses the app itself.
-    pub addressed: bool,
+    /// The command the message gives the app, parsed only when the provider says the message
+    /// addresses the app itself.
+    pub command: Option<Command>,
     /// The verified person who wrote it, as `<provider>:<user ID>`. Objective
     /// actions are recorded and receipted under this principal.
     pub actor: &'a str,
@@ -182,12 +224,12 @@ async fn home_in(
 pub(crate) async fn handle_in(
     tx: &mut Transaction<'_, Any>,
     order: i64,
-    message: Message<'_>,
+    mut message: Message<'_>,
     now_ms: i64,
 ) -> Result<Handled> {
     let account = message.origin.connector_account_id;
     let mut home = home_in(tx, account, message.conversation_id, message.thread_id).await?;
-    let command = message.addressed.then(|| parse(message.prompt)).flatten();
+    let command = message.command.take();
     // A thread chosen for an Objective's notices may still start an Objective of its own.
     if matches!(command, Some(Command::Create(_) | Command::Invalid))
         && home.as_ref().is_some_and(|home| !home.started)
@@ -221,7 +263,7 @@ pub(crate) async fn handle_in(
                     order,
                     message.origin.tag_id,
                     message.prompt,
-                    "Say which outcome the Objective should achieve: @SuperTag objective <outcome>.",
+                    "Say which outcome the Objective should achieve: @SuperTag /goal <outcome>.",
                     now_ms,
                 )
                 .await?,
@@ -293,7 +335,7 @@ async fn create_in(
         surface.as_ref(),
     ))
     .await?;
-    let objective_id = Uuid::new_v4().to_string();
+    let objective_id = new_objective_id(outcome);
     let session_id = Uuid::new_v4().to_string();
     objectives::insert_surface_objective_in(
         tx,
@@ -324,6 +366,21 @@ async fn create_in(
     sqlx::query("INSERT INTO supertag_v2_surface_objectives (account_id,conversation_id,thread_id,objective_id,tag_id,started_by_event_id) VALUES ($1,$2,$3,$4,$5,$6)")
         .bind(message.origin.connector_account_id).bind(message.conversation_id).bind(message.thread_id)
         .bind(&objective_id).bind(tag).bind(message.event_id).execute(&mut **tx).await?;
+    // Acknowledge in the thread at once; the owner's first turn answers there when it ends.
+    let text = format!(
+        "Started Objective {objective_id}: {}\n{tag} owns it, and this thread is its home. Reply here to steer it, or say @SuperTag approve, pause, or resume.",
+        outcome_headline(outcome)
+    );
+    Box::pin(home_report_in(
+        tx,
+        &objective_id,
+        tag,
+        "created",
+        None,
+        &text,
+        now_ms,
+    ))
+    .await?;
     Ok(Handled::Work(Some(task)))
 }
 
@@ -417,9 +474,19 @@ async fn status_in(
 ) -> Result<Task> {
     let session = format!("surface-status:{}", Uuid::new_v4());
     let task = Box::pin(insert_task(tx, order, tag_id, &session, prompt)).await?;
+    settle_in(tx, &task.task_id, answer, now_ms).await
+}
+
+/// Settles a just-accepted Task with the Control Plane's own answer: it never runs.
+pub(crate) async fn settle_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+    answer: &str,
+    now_ms: i64,
+) -> Result<Task> {
     sqlx::query("UPDATE supertag_v2_tasks SET state=$1, result=$2, allowed_actions='[]', completed_at_ms=$3, cleanup_pending=0, cleanup_observed=1 WHERE task_id=$4")
-        .bind(TaskState::Succeeded as i64).bind(answer).bind(now_ms).bind(&task.task_id).execute(&mut **tx).await?;
-    task_in(tx, &task.task_id).await
+        .bind(TaskState::Succeeded as i64).bind(answer).bind(now_ms).bind(task_id).execute(&mut **tx).await?;
+    task_in(tx, task_id).await
 }
 
 /// Where an Objective's notices post: a surface thread that still verifies.
@@ -698,35 +765,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recognizes_only_an_authenticated_leading_invocation() {
+    fn recognizes_only_a_leading_goal_command() {
         assert_eq!(
-            parse("<@U123> objective Launch product\nwithin $2,000"),
+            parse("/goal Launch product\nwithin $2,000"),
             Some(Command::Create("Launch product\nwithin $2,000".into()))
         );
         assert_eq!(
-            parse("@supertag OBJECTIVE  Validate scheduling "),
+            parse("  /GOAL  Validate scheduling "),
             Some(Command::Create("Validate scheduling".into()))
         );
-        assert_eq!(parse("@SuperTag objective"), Some(Command::Invalid));
-        assert_eq!(parse("@SuperTag objective   "), Some(Command::Invalid));
-        assert_eq!(parse("<@U1> approve."), Some(Command::Approve));
-        assert_eq!(parse("@SuperTag Pause!"), Some(Command::Pause));
-        assert_eq!(parse("@SuperTag resume"), Some(Command::Resume));
+        assert_eq!(parse("/goal"), Some(Command::Invalid));
+        assert_eq!(parse("/goal   "), Some(Command::Invalid));
+        assert_eq!(parse("approve."), Some(Command::Approve));
+        assert_eq!(parse("Pause!"), Some(Command::Pause));
         for text in [
-            "> @SuperTag objective launch",
-            "&gt; @SuperTag objective launch",
-            "Please say @SuperTag objective launch",
-            "```@SuperTag objective launch```",
-            "@SuperTag explain objectives",
-            "@SuperTag objectives launch",
-            "@SuperTagobjective launch",
-            "<@u1> objective launch",
-            "<@U1|name> objective launch",
-            "<#C1> objective launch",
-            "@SuperTag pause the deploy",
+            "> /goal launch",
+            "&gt; /goal launch",
+            "Please say /goal launch",
+            "`/goal launch`",
+            "```/goal launch```",
+            "```\n/goal launch\n```",
+            "/goals launch",
+            "/goallaunch",
+            "goal launch",
+            "@SuperTag objective launch",
             "Help me inspect this scheduling product",
         ] {
             assert_eq!(parse(text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn recognizes_only_an_authenticated_leading_invocation() {
+        assert_eq!(
+            parse_mentioned("<@U123> /goal Launch product\nwithin $2,000"),
+            Some(Command::Create("Launch product\nwithin $2,000".into()))
+        );
+        assert_eq!(
+            parse_mentioned("@supertag /GOAL  Validate scheduling "),
+            Some(Command::Create("Validate scheduling".into()))
+        );
+        assert_eq!(parse_mentioned("@SuperTag /goal"), Some(Command::Invalid));
+        assert_eq!(
+            parse_mentioned("@SuperTag /goal   "),
+            Some(Command::Invalid)
+        );
+        assert_eq!(parse_mentioned("<@U1> approve."), Some(Command::Approve));
+        assert_eq!(parse_mentioned("@SuperTag Pause!"), Some(Command::Pause));
+        assert_eq!(parse_mentioned("@SuperTag resume"), Some(Command::Resume));
+        for text in [
+            "> @SuperTag /goal launch",
+            "&gt; @SuperTag /goal launch",
+            "Please say @SuperTag /goal launch",
+            "```@SuperTag /goal launch```",
+            "@SuperTag `/goal launch`",
+            "@SuperTag explain goals",
+            "@SuperTag /goals launch",
+            "@SuperTag/goal launch",
+            "@SuperTag objective launch",
+            "/goal launch",
+            "<@u1> /goal launch",
+            "<@U1|name> /goal launch",
+            "<#C1> /goal launch",
+            "@SuperTag pause the deploy",
+            "Help me inspect this scheduling product",
+        ] {
+            assert_eq!(parse_mentioned(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn names_an_objective_after_its_outcome() {
+        let id = new_objective_id("Ship SSO for the admin app");
+        assert!(id.starts_with("ship-sso-for-"), "{id}");
+        assert_eq!(id.len(), "ship-sso-for-".len() + 8);
+        assert!(new_objective_id("  …  ").starts_with("objective-"));
+        assert!(new_objective_id(&"a".repeat(80)).len() <= 49);
     }
 }

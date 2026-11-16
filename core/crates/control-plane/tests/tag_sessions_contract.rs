@@ -1,6 +1,6 @@
 //! A Tag's root turns read its other Sessions and its Objectives (TS `tag-sessions.test.ts`):
 //! who sees which Session, search and paging, the Work Session refusal, `read_objective`
-//! scoping, the portfolio, and `create_objective` only on an explicit command.
+//! scoping, the portfolio, and the Objective a conversation's `/goal` creates.
 mod support;
 
 use std::collections::BTreeSet;
@@ -215,26 +215,6 @@ async fn read_objective(
         .await
 }
 
-async fn create(
-    store: &Store,
-    host: &HostAuthority,
-    attempt: &InspectAttemptRequest,
-    outcome: &str,
-) -> Result<CreateTagObjectiveResponse, StoreError> {
-    store
-        .create_tag_objective(
-            host,
-            &CreateTagObjectiveRequest {
-                attempt: Some(attempt.clone()),
-                outcome: outcome.into(),
-                deadline_ms: None,
-                budget_limit_minor: Some(500),
-                budget_currency: Some("USD".into()),
-            },
-        )
-        .await
-}
-
 async fn contract(url: &str) {
     let store = Store::open(url).await.unwrap();
     for tag in ["owner", "other"] {
@@ -293,7 +273,7 @@ async fn contract(url: &str) {
     let a2 = say(&store, ALICE, "alice", "What did we decide earlier?").await;
     let a2 = claim(&store, &host, &a2.task_id).await;
     let caps = store.attempt_capabilities(&host, &a2).await.unwrap();
-    assert!(caps.may_read_tag_sessions && !caps.may_create_objective);
+    assert!(caps.may_read_tag_sessions);
     assert!(
         caps.tag_portfolio
             .contains("- docs [working] Keep the docs current")
@@ -362,10 +342,6 @@ async fn contract(url: &str) {
     assert!(matches!(
         read_objective(&store, &host, &a2, None).await,
         Err(StoreError::NotFound(_))
-    ));
-    assert!(matches!(
-        create(&store, &host, &a2, "Ship it").await,
-        Err(StoreError::FailedPrecondition(_))
     ));
 
     // A Work Session sees only its own work; its report turn reads like its conversation, and
@@ -443,50 +419,50 @@ async fn contract(url: &str) {
     ));
     finish(&store, &host, &b2, "Only the docs audit").await;
 
-    // An explicit command lets the turn create the Objective, once, as Alice.
-    let a3 = say(
-        &store,
-        ALICE,
-        "alice",
-        "@SuperTag objective Publish the v2 release notes",
-    )
-    .await;
-    let a3 = claim(&store, &host, &a3.task_id).await;
-    assert!(
-        store
-            .attempt_capabilities(&host, &a3)
-            .await
-            .unwrap()
-            .may_create_objective
-    );
-    let created = create(&store, &host, &a3, "Publish the v2 release notes by Friday")
-        .await
-        .unwrap();
-    let objective = created.objective.unwrap();
+    // `/goal` creates the Objective in the Control Plane, as Alice, and answers without a turn.
+    let goal = SendMessageRequest {
+        tag_id: "owner".into(),
+        conversation: "alice".into(),
+        text: "/goal Publish the v2 release notes by Friday".into(),
+        operation_id: Uuid::new_v4().to_string(),
+        ..Default::default()
+    };
+    let a3 = store.send_message(ALICE, &goal).await.unwrap();
+    let a3 = a3.task.unwrap();
+    assert_eq!(a3.state(), TaskState::Succeeded);
+    assert_eq!(a3.session_id, alice_session);
+    let answer = a3.result.clone().unwrap();
+    let id = answer
+        .strip_prefix("Created Objective ")
+        .and_then(|rest| rest.split(':').next())
+        .unwrap_or_else(|| panic!("{answer}"));
+    let objective = store.get_objective(ALICE, id).await.unwrap();
+    assert!(answer.contains("Publish the v2 release notes by Friday"));
     assert_eq!(objective.created_by, ALICE);
     assert_eq!(objective.owner_tag_id, "owner");
-    assert_eq!(objective.budget_limit_minor, Some(500));
-    assert_eq!(objective.starting_task_id, created.started_task_id);
-    let again = create(&store, &host, &a3, "Publish the v2 release notes by Friday")
-        .await
-        .unwrap();
-    assert_eq!(
-        again.objective.unwrap().objective_id,
-        objective.objective_id
-    );
+    assert_eq!(objective.outcome, "Publish the v2 release notes by Friday");
+    // A retried message replays its answer and creates nothing more.
+    let again = store.send_message(ALICE, &goal).await.unwrap();
+    assert_eq!(again.task.unwrap().task_id, a3.task_id);
+    let mut changed = goal.clone();
+    changed.text = "/goal Something else".into();
     assert!(matches!(
-        create(&store, &host, &a3, "Something else").await,
+        store.send_message(ALICE, &changed).await,
         Err(StoreError::Conflict(_))
     ));
-    let bound = read_objective(&store, &host, &a3, None).await.unwrap();
-    assert_eq!(
-        bound.objective.unwrap().objective_id,
-        objective.objective_id
+    // `/goal` without an outcome creates nothing.
+    let empty = say(&store, ALICE, "alice", "/goal").await;
+    assert_eq!(empty.state(), TaskState::Succeeded);
+    assert!(
+        empty
+            .result
+            .unwrap()
+            .starts_with("Say which outcome the Objective should achieve: /goal <outcome>.")
     );
-    finish(&store, &host, &a3, "Created the Objective").await;
+    let created = objective.clone();
 
-    // The new Objective's own turn reads only its own Objective, and creates none.
-    let turn = claim(&store, &host, &created.started_task_id).await;
+    // The new Objective's own turn reads only its own Objective.
+    let turn = claim(&store, &host, &created.starting_task_id).await;
     assert!(
         store
             .attempt_capabilities(&host, &turn)
@@ -507,10 +483,6 @@ async fn contract(url: &str) {
             .objective_id,
         objective.objective_id
     );
-    assert!(matches!(
-        create(&store, &host, &turn, "More").await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
     // It was created in Alice's conversation, so it is Alice's: its Session sees hers.
     assert!(
         sessions(&store, &host, &turn)
@@ -547,7 +519,7 @@ async fn contract(url: &str) {
     );
     finish(&store, &host, &a4, "Two").await;
 
-    // The home a Tag-created Objective inherits is recorded by the Control Plane alone: an
+    // The home a `/goal` Objective inherits is recorded by the Control Plane alone: an
     // operation ID naming a conversation Task, or naming the Objective a Task made, plants none.
     let a5 = say(&store, ALICE, "alice", "Anything new?").await;
     let a5 = claim(&store, &host, &a5.task_id).await;

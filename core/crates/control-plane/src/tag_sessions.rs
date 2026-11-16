@@ -161,7 +161,7 @@ async fn audience_at(
     .await?
     {
         let created_by: String = objective.try_get("created_by")?;
-        // An Objective a conversation created with `create_objective` has that conversation's
+        // An Objective a conversation created with `/goal` has that conversation's
         // audience (TS `surfaceSessionId`), and one whose notices go to an operator-chosen
         // thread has that thread's (TS `notificationTaskId`).
         let home: Option<String> = match objective.try_get("home_task_id")? {
@@ -277,32 +277,6 @@ pub(crate) async fn viewer_in(
         requester,
         objective,
     }))
-}
-
-/// The requester whose explicit `@SuperTag objective <outcome>` command started this
-/// conversation turn (TS `parseSurfaceObjectiveCommand(...).kind === "create"`). A Slack command
-/// starts its Objective in the Control Plane and never reaches a turn, so only an operator's or
-/// client's own conversation message carries one.
-pub(crate) async fn objective_command_in(
-    tx: &mut Transaction<'_, Any>,
-    viewer: &Viewer,
-) -> Result<Option<String>> {
-    if viewer.turn != Turn::Conversation
-        || !crate::conversations::private_session(viewer.session())
-        || !matches!(
-            crate::surface_objectives::parse(&viewer.task.prompt),
-            Some(crate::surface_objectives::Command::Create(_))
-        )
-    {
-        return Ok(None);
-    }
-    Ok(sqlx::query_scalar(
-        "SELECT m.principal FROM supertag_v2_conversation_messages m JOIN supertag_v2_conversations c ON c.session_id=m.session_id AND c.principal=m.principal WHERE m.task_id=$1 AND c.tag_id=$2",
-    )
-    .bind(&viewer.task.task_id)
-    .bind(viewer.tag())
-    .fetch_optional(&mut **tx)
-    .await?)
 }
 
 fn shorten(text: &str, chars: usize) -> String {
@@ -944,65 +918,6 @@ impl Store {
             as_of_ms: overview.as_of_ms,
         })
     }
-
-    /// `create_objective`, only on an explicit objective command; its first turn starts at once.
-    /// The Objective is created as the requester who wrote the command, with that requester's
-    /// authority, and its runtime actions are what this Task may use within the Tag's grants.
-    pub async fn create_tag_objective(
-        &self,
-        host: &HostAuthority,
-        input: &CreateTagObjectiveRequest,
-    ) -> Result<CreateTagObjectiveResponse> {
-        let (principal, task) = {
-            let mut tx = self.pool.begin().await?;
-            let viewer = self
-                .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
-                .await?;
-            let principal = objective_command_in(&mut tx, &viewer)
-                .await?
-                .ok_or_else(|| {
-                    StoreError::FailedPrecondition(
-                        "Creating an Objective requires an explicit objective command".into(),
-                    )
-                })?;
-            tx.commit().await?;
-            (principal, viewer.task)
-        };
-        let actions = task
-            .policy_snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.runtime_authority.as_ref())
-            .map_or_else(
-                || task.allowed_actions.clone(),
-                |authority| authority.actions.clone(),
-            );
-        let request = CreateObjectiveRequest {
-            // The Store names the operation after the Objective this Task makes, so a retry
-            // replays it.
-            operation_id: String::new(),
-            // Random, so no caller can take the ID before this Task creates it.
-            objective_id: uuid::Uuid::new_v4().to_string(),
-            owner_tag_id: task.tag_id.clone(),
-            outcome: input.outcome.trim().to_owned(),
-            ongoing: false,
-            deadline_ms: input.deadline_ms,
-            budget_limit_minor: input.budget_limit_minor,
-            budget_currency: input.budget_currency.clone(),
-            team_id: None,
-            runtime_actions: Some(RuntimeActions { actions }),
-            notification_task_id: None,
-        };
-        if request.outcome.is_empty() {
-            return Err(invalid("outcome is required"));
-        }
-        let objective = self
-            .create_objective_in_home(&principal, &request, Some(&task.task_id))
-            .await?;
-        Ok(CreateTagObjectiveResponse {
-            started_task_id: objective.starting_task_id.clone(),
-            objective: Some(objective),
-        })
-    }
 }
 
 impl ControlPlane {
@@ -1073,18 +988,6 @@ impl attempt_tag_sessions_server::AttemptTagSessions for ControlPlane {
         Ok(Response::new(
             self.store
                 .read_tag_objective(&host, request.get_ref())
-                .await?,
-        ))
-    }
-
-    async fn create_objective(
-        &self,
-        request: Request<CreateTagObjectiveRequest>,
-    ) -> std::result::Result<Response<CreateTagObjectiveResponse>, Status> {
-        let host = self.host_authority(&request)?;
-        Ok(Response::new(
-            self.store
-                .create_tag_objective(&host, request.get_ref())
                 .await?,
         ))
     }

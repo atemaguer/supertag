@@ -57,8 +57,8 @@ no saved Control Plane selected, so the next launch opens Local again. Ctrl-P ch
 Local Control Plane started after launch appears; when none runs, the list says so and how to
 start one (`supertag up`), and the saved Control Planes stay available.
 
-Open Objectives show their status, owner, deadline, and available spend information. Use
-`/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to
+Open Objectives show their status, owner, deadline, and available spend information. Send
+`/goal <outcome>` in a Tag's conversation to create an Objective or press `m` in an Objective to
 message its owner. You can select a Team in the Objective form and read its members, concurrency
 limit, and recent Workstream posts from the rail. Work uses the Workspace configured on the owner
 Tag. The rail lists questions waiting for an
@@ -118,8 +118,9 @@ conversations and Objectives within the Tags its key allows, and no Worker Host 
 to the Control Plane you leave and reads everything anew from the next; unsent input stays behind.
 
 Ctrl-K, or `/` on an empty input line or where the pane has none, opens the command palette.
-From a Tag's conversation, type `/goal <outcome>` and press enter to create an Objective that the
-Tag owns. The owner's first turn starts at once. Type `/goal` on its own to open the form.
+From a Tag's conversation, type `/goal <outcome>` and press enter. It goes to the conversation
+like any other message, and the Control Plane creates an Objective that the Tag owns, answers with
+its ID, and starts the owner's first turn. Type `/goal` on its own to open the form instead.
 The Objective works in the Workspace configured on its owner Tag.
 
 Type to filter the palette commands, move with up and down, and press enter to run one. Esc goes

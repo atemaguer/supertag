@@ -1284,7 +1284,7 @@ async fn slack_thread_starts_and_steers_an_objective(database: String) -> Result
         "EvOBJECTIVE",
         THREAD,
         true,
-        "<@UBOT1> objective Validate the fixture",
+        "<@UBOT1> /goal Validate the fixture",
     );
     assert_eq!(signed(&http, &start).await?, reqwest::StatusCode::OK);
     let starting = receipt(&mut connector, &credentials, &start).await?;

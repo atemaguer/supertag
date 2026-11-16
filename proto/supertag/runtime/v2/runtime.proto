@@ -458,9 +458,10 @@ message AttemptCapabilities {
   // A root turn reads the Tag's other Sessions and its Objectives
   // (AttemptTagSessions); a Work Session's own Task does not.
   bool may_read_tag_sessions = 9;
-  // A conversation turn started by its requester's explicit
-  // `@SuperTag objective <outcome>` command may create that Objective.
-  bool may_create_objective = 10;
+  // A person's `/goal <outcome>` message creates its Objective in the Control
+  // Plane and never reaches a turn.
+  reserved 10;
+  reserved "may_create_objective";
   // The Tag's open Objectives and how to recall its other Sessions, for the
   // turn's context. State, not instructions. Empty when `may_read_tag_sessions` is false.
   string tag_portfolio = 11;

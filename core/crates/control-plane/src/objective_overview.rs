@@ -469,7 +469,7 @@ pub(crate) async fn overview_in(
             }),
             ObjectiveStatus::Blocked => attention.push(ObjectiveAttention {
                 kind: ObjectiveAttentionKind::Blocked as i32,
-                message: "The owner reported the Objective blocked; a message in its Session starts its next turn.".into(),
+                message: "The Objective is blocked: its owner reported a blocker, or two turns in a row ended with nothing running and nothing asked. A message in its Session starts its next turn.".into(),
                 next_actions: vec![format!(
                     "supertag task submit --tag {} --session {} TEXT",
                     objective.owner_tag_id, objective.session_id

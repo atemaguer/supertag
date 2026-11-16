@@ -31,8 +31,10 @@ with `supertag init`. For a shared Control Plane, ask its operator to set up a T
 | `o` on a work Session or branch | Open its pull request when one exists. |
 
 To give `lead` an **Objective**, an outcome it owns, type `/goal` followed by the outcome and how
-to verify it. Press Enter to create it, then Enter again to open its progress view. Enter `/goal`
-on its own to choose a Team or budget before starting. A currency budget requires a
+to verify it, and press Enter. The message goes to the conversation like any other, and the Control
+Plane creates the Objective, answers with its ID, and starts its first turn. Select it in the rail
+to open its progress view. Enter `/goal` on its own to choose a Team or budget before starting.
+`/goal` works the same way in the desktop app's conversations. A currency budget requires a
 [harness](../concepts/workers.md) that can enforce a reported cost limit.
 
 ## Continue a conversation

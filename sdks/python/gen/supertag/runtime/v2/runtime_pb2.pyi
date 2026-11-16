@@ -935,7 +935,7 @@ class AskQuestionRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class AttemptCapabilities(_message.Message):
-    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "may_create_objective", "tag_portfolio")
+    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio")
     MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     MAY_USE_WORKSTREAM_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_MAILBOX_FIELD_NUMBER: _ClassVar[int]
@@ -945,7 +945,6 @@ class AttemptCapabilities(_message.Message):
     MAY_ASK_WORK_SESSION_QUESTION_FIELD_NUMBER: _ClassVar[int]
     MAY_REQUEST_COMMIT_REVIEW_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_TAG_SESSIONS_FIELD_NUMBER: _ClassVar[int]
-    MAY_CREATE_OBJECTIVE_FIELD_NUMBER: _ClassVar[int]
     TAG_PORTFOLIO_FIELD_NUMBER: _ClassVar[int]
     may_ask_objective_question: bool
     may_use_workstream: bool
@@ -956,9 +955,8 @@ class AttemptCapabilities(_message.Message):
     may_ask_work_session_question: bool
     may_request_commit_review: bool
     may_read_tag_sessions: bool
-    may_create_objective: bool
     tag_portfolio: str
-    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., may_create_objective: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ...) -> None: ...
+    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ...) -> None: ...
 
 class WorkSession(_message.Message):
     __slots__ = ("work_session_id", "title", "parent_tag_id", "parent_session_id", "starter_task_id", "tag_id", "latest_task_id", "latest_task_state", "report_task_id", "report_task_state", "objective_id", "workspace_delivery", "created_order", "question")

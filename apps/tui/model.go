@@ -1027,20 +1027,18 @@ func (m *model) submit() tea.Cmd {
 	switch m.pane {
 	case paneConversation:
 		tag := m.selectedTag()
-		if outcome, goal := goalOutcome(text); goal && tag != "" {
+		// `/goal <outcome>` is a message like any other: the Control Plane creates its Objective.
+		// `/goal` alone opens the form, to set a Team or budget too.
+		if outcome, goal := goalOutcome(text); goal && outcome == "" && tag != "" {
 			m.input.Reset()
-			return m.openObjectiveForm(outcome)
+			return m.openObjectiveForm("")
 		}
 		name := m.currentConversation(tag)
 		if tag == "" || !m.conversation(tag, name).loaded {
 			return nil
 		}
 		m.input.Reset()
-
-		m.conversation(tag, name).runtime.sending++
-		m.refresh()
-
-		return m.send(tag, name, text)
+		return m.sendConversation(tag, name, text)
 	case paneObjective:
 		return m.sendObjectiveMessage(text)
 	case paneConversations:
@@ -1071,6 +1069,27 @@ func (m *model) submit() tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// sendConversation sends text to the Tag's conversation.
+func (m *model) sendConversation(tag, name, text string) tea.Cmd {
+	m.conversation(tag, name).runtime.sending++
+	m.refresh()
+	return m.send(tag, name, text)
+}
+
+// sendGoal sends `/goal <outcome>` to the conversation on screen, whose Tag then owns the
+// Objective the Control Plane creates. Away from a conversation, it opens the form with the
+// outcome filled in.
+func (m *model) sendGoal(outcome string) tea.Cmd {
+	tag := m.selectedTag()
+	if m.pane == paneConversation && tag != "" {
+		name := m.currentConversation(tag)
+		if m.conversation(tag, name).loaded {
+			return m.sendConversation(tag, name, "/goal "+outcome)
+		}
+	}
+	return m.openObjectiveForm(outcome)
 }
 
 // decide starts approving ("a") or denying ("d") the shown approval request.

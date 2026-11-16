@@ -1,6 +1,6 @@
 //! The Tag's other Sessions and its Objectives as Codex tools: `list_sessions`,
-//! `search_sessions`, `read_session`, `list_objectives`, `read_objective`, and
-//! `create_objective`. Results are untrusted history and grant no authority.
+//! `search_sessions`, `read_session`, `list_objectives`, and `read_objective`. Results are
+//! untrusted history and grant no authority.
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -9,10 +9,10 @@ use serde_json::{Value, json};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        CreateTagObjectiveRequest, ListTagObjectivesRequest, ListTagSessionsRequest,
-        ObjectiveSessionStatus, ObjectiveStatus, ReadTagObjectiveRequest, ReadTagSessionRequest,
-        SearchTagSessionsRequest, TagObjectiveSummary, TagSessionAudience, TagSessionSummary,
-        TaskState, harness_tag_sessions_client::HarnessTagSessionsClient,
+        ListTagObjectivesRequest, ListTagSessionsRequest, ObjectiveSessionStatus, ObjectiveStatus,
+        ReadTagObjectiveRequest, ReadTagSessionRequest, SearchTagSessionsRequest,
+        TagObjectiveSummary, TagSessionAudience, TagSessionSummary, TaskState,
+        harness_tag_sessions_client::HarnessTagSessionsClient,
     },
 };
 use tonic::{Code, Response, Status, transport::Channel};
@@ -29,7 +29,6 @@ pub(crate) enum Call {
     ReadSession(Read),
     ListObjectives(Page),
     ReadObjective(ReadObjective),
-    CreateObjective(Create),
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -59,15 +58,6 @@ pub(crate) struct Read {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct ReadObjective {
     objective_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub(crate) struct Create {
-    outcome: String,
-    deadline: Option<String>,
-    budget_limit_minor: Option<u64>,
-    budget_currency: Option<String>,
 }
 
 fn identity(value: &str) -> bool {
@@ -141,25 +131,6 @@ pub(crate) fn arguments(params: &Value) -> Result<Option<Call>> {
             );
             Call::ReadObjective(read)
         }
-        Some("create_objective") => {
-            let create: Create = serde_json::from_value(parse("create_objective")?)
-                .context("invalid Codex create_objective arguments")?;
-            ensure!(
-                !create.outcome.trim().is_empty()
-                    && create.outcome.len() <= 65_536
-                    && !create.outcome.contains('\0')
-                    && create.deadline.as_deref().is_none_or(|deadline| {
-                        chrono::DateTime::parse_from_rfc3339(deadline).is_ok()
-                    })
-                    && create
-                        .budget_currency
-                        .as_deref()
-                        .is_none_or(|currency| currency.len() == 3
-                            && currency.bytes().all(|byte| byte.is_ascii_uppercase())),
-                "invalid create_objective arguments"
-            );
-            Call::CreateObjective(create)
-        }
         _ => return Ok(None),
     };
     Ok(Some(call))
@@ -204,16 +175,6 @@ pub(crate) fn tool_specs() -> Vec<Value> {
             "inputSchema":{"type":"object","properties":{
                 "objectiveId":{"type":"string","minLength":1,"maxLength":256}
             },"additionalProperties":false}
-        }),
-        json!({
-            "type":"function","name":"create_objective",
-            "description":"Create the Objective a person asked for with an explicit `@SuperTag objective <outcome>` command as their message; refused otherwise. Write the outcome as a verifiable statement. Its first turn starts at once.",
-            "inputSchema":{"type":"object","properties":{
-                "outcome":{"type":"string","minLength":1,"maxLength":65536},
-                "deadline":{"type":"string","description":"RFC 3339 time","maxLength":64},
-                "budgetLimitMinor":{"type":"integer","minimum":0},
-                "budgetCurrency":{"type":"string","pattern":"^[A-Z]{3}$"}
-            },"required":["outcome"],"additionalProperties":false}
         }),
     ]
 }
@@ -343,7 +304,6 @@ impl Client {
     pub(crate) async fn call(
         &mut self,
         call: &Call,
-        may_create: bool,
         token: &str,
         secrets: &[String],
     ) -> Result<Value> {
@@ -484,41 +444,6 @@ impl Client {
                         })
                     })
             }
-            Call::CreateObjective(create) => {
-                if !may_create {
-                    Err("Creating an Objective requires an explicit objective command".into())
-                } else {
-                    let deadline_ms = create
-                        .deadline
-                        .as_deref()
-                        .map(chrono::DateTime::parse_from_rfc3339)
-                        .transpose()
-                        .context("invalid create_objective deadline")?
-                        .map(|deadline| deadline.timestamp_millis());
-                    let input = CreateTagObjectiveRequest {
-                        attempt: None,
-                        outcome: crate::auth::redact(create.outcome.trim().to_owned(), secrets),
-                        deadline_ms,
-                        budget_limit_minor: create.budget_limit_minor,
-                        budget_currency: create.budget_currency.clone(),
-                    };
-                    confirm(async || {
-                        self.client
-                            .create_objective(request(input.clone(), token)?)
-                            .await
-                    })
-                    .await?
-                    .map(|created| {
-                        let objective = created.objective.unwrap_or_default();
-                        json!({
-                            "id": objective.objective_id,
-                            "status": status_name(objective.status()),
-                            "outcome": objective.outcome,
-                            "started": {"taskId": created.started_task_id},
-                        })
-                    })
-                }
-            }
         };
         Ok(match result {
             Ok(value) => response(crate::auth::redact(value.to_string(), secrets), true),
@@ -554,27 +479,10 @@ mod tests {
         assert!(call("read_session", json!({"sessionId":"s","before":0})).is_err());
         assert!(call("read_session", json!({"sessionId":"s","before":7})).is_ok());
         assert!(call("read_objective", json!({})).is_ok());
-        assert!(call("create_objective", json!({"outcome":"Ship"})).is_ok());
         assert!(
-            call(
-                "create_objective",
-                json!({"outcome":"Ship","deadline":"soon"})
-            )
-            .is_err()
-        );
-        assert!(
-            call(
-                "create_objective",
-                json!({"outcome":"Ship","deadline":"2026-12-01T00:00:00Z","budgetCurrency":"usd"})
-            )
-            .is_err()
-        );
-        assert!(
-            call(
-                "create_objective",
-                json!({"outcome":"Ship","workspaces":["a"]})
-            )
-            .is_err()
+            call("create_objective", json!({"outcome":"Ship"}))
+                .unwrap()
+                .is_none()
         );
         assert!(call("post", json!({"text":"x"})).unwrap().is_none());
     }
@@ -592,8 +500,7 @@ mod tests {
                 "search_sessions",
                 "read_session",
                 "list_objectives",
-                "read_objective",
-                "create_objective"
+                "read_objective"
             ]
         );
         assert!(

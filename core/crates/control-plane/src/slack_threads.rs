@@ -124,7 +124,10 @@ impl Store {
                 prompt: &input.prompt,
                 // Only Slack's app_mention addresses the app. A plain thread
                 // message that mentions someone else is never a command.
-                addressed: input.mention_tag_id.is_some(),
+                command: input
+                    .mention_tag_id
+                    .as_ref()
+                    .and_then(|_| crate::surface_objectives::parse_mentioned(&input.prompt)),
                 actor: &actor,
                 method: "/supertag.runtime.v2.Connector/AcceptSlackEvent",
             },

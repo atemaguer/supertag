@@ -4,7 +4,7 @@ pub(crate) use work_sessions::{work_session_child_in, work_session_in};
 
 use prost::Message;
 use sha2::{Digest, Sha256};
-use sqlx::{Any, Row, Transaction};
+use sqlx::{Acquire, Any, Row, Transaction};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
@@ -14,8 +14,10 @@ use crate::{
     inputs::{input_for_follower_in, record_live_input_in},
     objectives::{objective_admission_in, objective_link_task_in},
     store::{
-        Result, insert_task_with_requirements, invalid, name, output_policy_digest, task_in, text,
+        Result, insert_task_with_requirements, invalid, name, next_order, output_policy_digest,
+        task_in, text,
     },
+    surface_objectives::Command,
 };
 
 const SESSION_PREFIX: &str = "conversation/";
@@ -23,6 +25,74 @@ const PAGE_BYTES: usize = MAX_MESSAGE_BYTES - 1024;
 
 pub(crate) fn private_session(session_id: &str) -> bool {
     session_id.starts_with(SESSION_PREFIX)
+}
+
+/// The outcome of a `/goal` message, or `Some(None)` for `/goal` without one.
+fn goal_command(text: &str) -> Option<Option<String>> {
+    match crate::surface_objectives::parse(text)? {
+        Command::Create(outcome) => Some(Some(outcome)),
+        Command::Invalid => Some(None),
+        Command::Approve | Command::Pause | Command::Resume => None,
+    }
+}
+
+/// Creates the Objective a `/goal` message asks for, owned by the conversation's Tag and homed in
+/// the message's Task, and returns the Control Plane's answer to the message. A request the
+/// Control Plane refuses is answered with the reason, and nothing is created.
+async fn goal_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    task: &Task,
+    outcome: Option<&str>,
+    now_ms: i64,
+) -> Result<String> {
+    let Some(outcome) = outcome else {
+        return Ok(format!(
+            "Say which outcome the Objective should achieve: {} <outcome>.",
+            crate::surface_objectives::GOAL
+        ));
+    };
+    let request = CreateObjectiveRequest {
+        objective_id: crate::surface_objectives::new_objective_id(outcome),
+        owner_tag_id: task.tag_id.clone(),
+        outcome: outcome.to_owned(),
+        ..Default::default()
+    };
+    let mut savepoint = tx.begin().await?;
+    let order = next_order(&mut savepoint).await?;
+    let created = Box::pin(crate::objectives::create_objective_in(
+        &mut savepoint,
+        order,
+        now_ms,
+        principal,
+        &request,
+        Some(&task.task_id),
+    ))
+    .await;
+    match created {
+        Ok(objective) => {
+            savepoint.commit().await?;
+            let id = &objective.objective_id;
+            Ok(format!(
+                "Created Objective {id}: {}\n{} owns it, and its first turn has started. This conversation is its home. Follow it with supertag describe objective {id}.",
+                crate::surface_objectives::outcome_headline(&objective.outcome),
+                objective.owner_tag_id,
+            ))
+        }
+        Err(
+            error @ (StoreError::FailedPrecondition(_)
+            | StoreError::InvalidArgument(_)
+            | StoreError::PermissionDenied
+            | StoreError::Conflict(_)),
+        ) => {
+            savepoint.rollback().await?;
+            Ok(format!(
+                "The Objective was not created: {}.",
+                error.to_string().trim_end_matches('.')
+            ))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 impl Store {
@@ -145,6 +215,20 @@ impl Store {
         sqlx::query("INSERT INTO supertag_v2_conversation_messages (task_id,session_id,principal,operation_id,request_digest,accepted_order) VALUES ($1,$2,$3,$4,$5,$6)")
             .bind(&task.task_id).bind(&session).bind(principal).bind(&input.operation_id).bind(digest)
             .bind(order).execute(&mut *tx).await?;
+        // `/goal <outcome>` creates the Objective here: the Tag owns it, this conversation is its
+        // home, and the Control Plane answers the message itself.
+        if let Some(goal) = goal_command(&input.text) {
+            let answer = goal_in(&mut tx, principal, &task, goal.as_deref(), now).await?;
+            let task =
+                crate::surface_objectives::settle_in(&mut tx, &task.task_id, &answer, now).await?;
+            tx.commit().await?;
+            return Ok(ConversationMessage {
+                task: Some(task),
+                conversation: input.conversation.clone(),
+                live_input: None,
+                work_session_report_id: None,
+            });
+        }
         let active = if input.text.len() <= crate::inputs::MAX_INPUT_BYTES {
             sqlx::query("SELECT task_id,attempt_id FROM supertag_v2_tasks t WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND lease_expires_at_ms>$4 AND NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_tasks wt WHERE wt.task_id=t.task_id AND wt.kind=$5) ORDER BY accepted_order LIMIT 1")
                 .bind(&input.tag_id).bind(&session).bind(TaskState::Running as i64).bind(now)

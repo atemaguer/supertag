@@ -305,8 +305,9 @@ A Session has one active conversational execution. New human messages are persis
 routing. When the active harness advertises native input support, SuperTag delivers the message
 to that exact Task Attempt using the harness's queue or steering behavior. An accepted input is
 not also executed as a separate Task, unless the harness withdraws it unread at the final result,
-as described below. Explicit Objective commands and messages with different
-execution requirements or authority wait for a separate execution.
+as described below. Messages with different execution requirements or authority wait for a
+separate execution. A `/goal` message never reaches a turn: the Control Plane creates its Objective
+and answers it.
 
 An uncertain acknowledgement holds the message to avoid duplicate delivery. If the same Task
 Attempt later confirms that it withdrew the unread message, SuperTag clears that uncertainty.

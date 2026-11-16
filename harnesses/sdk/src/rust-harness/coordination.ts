@@ -129,19 +129,6 @@ const schemas = {
   }),
   list_objectives: z.strictObject({ limit: sessionLimit, offset }),
   read_objective: z.strictObject({ objectiveId: tagId.optional() }),
-  create_objective: z.strictObject({
-    outcome: nonblankText(65_536),
-    deadline: z
-      .string()
-      .max(64)
-      .refine((value) => Number.isFinite(Date.parse(value)), "Provide an RFC 3339 time.")
-      .optional(),
-    budgetLimitMinor: z.number().int().nonnegative().safe().optional(),
-    budgetCurrency: z
-      .string()
-      .regex(/^[A-Z]{3}$/u)
-      .optional(),
-  }),
 };
 
 type Tool = keyof typeof schemas;
@@ -1230,50 +1217,6 @@ export function registerCoordinationTools(
           });
         } catch (error) {
           return refusal(error, "The Objective could not be read.");
-        }
-      },
-    );
-    tools.push("create_objective");
-    server.registerTool(
-      "create_objective",
-      {
-        description:
-          "Create the Objective a person asked for with an explicit `@SuperTag objective <outcome>` command as their message; refused otherwise. Write the outcome as a verifiable statement. Its first turn starts at once.",
-        inputSchema: schemas.create_objective,
-        _meta: meta,
-      },
-      async ({ outcome, deadline, budgetLimitMinor, budgetCurrency }, tool) => {
-        if (!run.coordination?.mayCreateObjective || asked)
-          return response(
-            "Refused: Creating an Objective requires an explicit objective command",
-            true,
-          );
-        try {
-          const created = await write(() =>
-            call(tool.signal, (config) =>
-              tagSessions.createObjective(
-                {
-                  outcome: safeText(trim(outcome)),
-                  ...(deadline === undefined ? {} : { deadlineMs: BigInt(Date.parse(deadline)) }),
-                  ...(budgetLimitMinor === undefined
-                    ? {}
-                    : { budgetLimitMinor: BigInt(budgetLimitMinor) }),
-                  ...(budgetCurrency === undefined ? {} : { budgetCurrency }),
-                },
-                config,
-              ),
-            ),
-          );
-          return response(
-            JSON.stringify({
-              id: safeText(created.objective?.objectiveId ?? ""),
-              status: objectiveStatus[created.objective?.status ?? 0] ?? "working",
-              outcome: safeText(created.objective?.outcome ?? ""),
-              started: { taskId: safeText(created.startedTaskId) },
-            }),
-          );
-        } catch (error) {
-          return refusal(error, "The Objective could not be created.");
         }
       },
     );
