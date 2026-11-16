@@ -12,7 +12,7 @@
 // besides tests (lint, package checks), so the assignment leaves it fewer tests.
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,6 +68,33 @@ const headStart = Number(process.env.SUPERTAG_CORE_SHARD_HEAD_START ?? 0);
 
 const core = resolve(dirname(fileURLToPath(import.meta.url)), "..", "core");
 const cargo = process.env.CARGO ?? "cargo";
+
+// Cargo gives the processes it runs the `[env]` table of each .cargo/config.toml from core/ up
+// (the nearer file wins; the environment wins over both). Only plain `KEY = "value"` entries are
+// supported; anything else stops the run rather than silently dropping a setting.
+const cargoEnv = {};
+for (let directory = core; ; directory = dirname(directory)) {
+  const file = join(directory, ".cargo", "config.toml");
+  if (existsSync(file)) {
+    let inEnv = false;
+    for (const raw of readFileSync(file, "utf8").split("\n")) {
+      const line = raw.trim();
+      if (line === "" || line.startsWith("#")) continue;
+      if (line.startsWith("[")) {
+        inEnv = line === "[env]";
+        continue;
+      }
+      if (!inEnv) continue;
+      const entry = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"\\]*)"$/.exec(line);
+      if (!entry) {
+        console.error(`unsupported [env] entry in ${file}: ${line}`);
+        process.exit(2);
+      }
+      if (!(entry[1] in cargoEnv)) cargoEnv[entry[1]] = entry[2];
+    }
+  }
+  if (dirname(directory) === directory) break;
+}
 const workspace = ["--locked", "--workspace", "--all-features"];
 
 const build = spawnSync(cargo, ["test", ...workspace, "--no-run", "--message-format=json-render-diagnostics"], {
@@ -121,7 +148,7 @@ for (const binary of mine) {
   const run = spawnSync(binary.executable, testArgs, {
     cwd: binary.directory,
     stdio: "inherit",
-    env: { ...process.env, CARGO_MANIFEST_DIR: binary.directory },
+    env: { ...cargoEnv, ...process.env, CARGO_MANIFEST_DIR: binary.directory },
   });
   if (run.status !== 0) failures.push(`${binary.label}: exit ${run.status ?? run.signal}`);
 }
