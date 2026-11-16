@@ -58,3 +58,22 @@ it("shows an empty rail and no Tag pill before a Control Plane connects", () => 
   expect(html).toContain("Connect to see your Tags");
   expect(html).not.toContain("identity-pill");
 });
+
+it("offers New Tag in the rail only to a connection that may create Tags", () => {
+  const render = (props: Partial<Parameters<typeof WorkspaceShell>[0]>) =>
+    renderToStaticMarkup(
+      createElement(
+        WorkspaceShell,
+        { tags, tag: tags[0], connected: true, selector: () => null, ...props },
+        null,
+      ),
+    );
+  expect(render({ onNewTag: () => {} })).toMatch(
+    /aria-label="New Tag" aria-disabled="false" title="New Tag"/,
+  );
+  const refused = render({ newTagRefusal: "Only an operator can create Tags." });
+  expect(refused).toMatch(
+    /aria-label="New Tag" aria-description="Only an operator can create Tags." aria-disabled="true"/,
+  );
+  expect(render({})).not.toContain("New Tag");
+});

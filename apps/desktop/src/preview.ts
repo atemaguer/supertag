@@ -1,4 +1,5 @@
 import type { ControlPlane, Conversation, Message, Tag, TaskEvent } from "./control-plane";
+import type { TagAdmin } from "./tag-admin";
 
 const tags: Tag[] = [
   {
@@ -136,5 +137,25 @@ export const previewControlPlane: ControlPlane = {
       },
     ];
     return events.filter(({ sequence }) => sequence > afterSequence);
+  },
+};
+
+export const previewTagAdmin: TagAdmin = {
+  async options() {
+    return { harnesses: ["claude_code", "codex"], workspaces: ["supertag"] };
+  },
+  async create({ tagId, name, harness }) {
+    if (tags.some((tag) => tag.tagId === tagId))
+      throw new Error("A Tag with that ID or name already exists.");
+    const tag: Tag = {
+      tagId,
+      name: name && name !== tagId ? name : undefined,
+      instructions: "",
+      allowedActions: ["commands:execute", "files:write"],
+      revision: 1,
+      harnessKind: harness,
+    };
+    tags.push(tag);
+    return tag;
   },
 };

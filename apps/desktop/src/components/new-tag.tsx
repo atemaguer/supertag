@@ -1,0 +1,179 @@
+import { useEffect, useState } from "react";
+import type { Tag } from "../control-plane";
+import { describe } from "../lib/polling";
+import { HARNESSES, harnessLabel, type TagAdmin, type TagOptions, tagIdFor } from "../tag-admin";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+
+/**
+ * Creates a Tag from a name and a harness, and optionally a Workspace. The rest matches the lead
+ * Tag `supertag init` creates: it may edit files and run commands.
+ */
+export function NewTagDialog({
+  admin,
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  admin: TagAdmin;
+  open: boolean;
+  onOpenChange(open: boolean): void;
+  onCreated(tag: Tag): void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="workspace-dialog">
+        <DialogHeader>
+          <DialogTitle>New Tag</DialogTitle>
+          <DialogDescription>
+            A Tag can edit files and run commands, like the lead Tag supertag init creates.
+          </DialogDescription>
+        </DialogHeader>
+        {open && (
+          <NewTagForm
+            admin={admin}
+            onCreated={(tag) => {
+              onCreated(tag);
+              onOpenChange(false);
+            }}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag): void }) {
+  const [options, setOptions] = useState<TagOptions>();
+  const [name, setName] = useState("");
+  const [harness, setHarness] = useState("");
+  const [workspace, setWorkspace] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    admin.options().then(
+      (offered) => {
+        if (!live) return;
+        setOptions(offered);
+        setHarness(
+          Object.keys(HARNESSES).find((kind) => offered.harnesses.includes(kind)) ??
+            offered.harnesses[0] ??
+            "claude_code",
+        );
+        if (offered.workspaces.length === 1) setWorkspace(offered.workspaces[0] ?? "");
+      },
+      () => {
+        // Without the hosts' offer, every harness and no Workspace can still be chosen.
+        if (!live) return;
+        setOptions({ harnesses: [], workspaces: [] });
+        setHarness("claude_code");
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [admin]);
+
+  const tagId = tagIdFor(name);
+  const harnesses = options?.harnesses.length ? options.harnesses : Object.keys(HARNESSES);
+  async function create() {
+    if (!tagId || !harness || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      onCreated(
+        await admin.create({
+          tagId,
+          name: name.trim(),
+          harness,
+          workspaceId: workspace || undefined,
+        }),
+      );
+    } catch (error) {
+      setError(describe(error));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void create();
+      }}
+    >
+      <label htmlFor="tag-name">Name</label>
+      <Input
+        id="tag-name"
+        name="name"
+        maxLength={63}
+        placeholder="Reviewer"
+        autoComplete="off"
+        required
+        value={name}
+        aria-describedby="tag-id"
+        onChange={(event) => setName(event.target.value)}
+      />
+      <small id="tag-id" className="field-hint">
+        {tagId ? `ID: ${tagId}. It cannot change later.` : "Use letters or digits."}
+      </small>
+      <label htmlFor="tag-harness">Harness</label>
+      <select
+        id="tag-harness"
+        className="field-select"
+        value={harness}
+        disabled={!options}
+        onChange={(event) => setHarness(event.target.value)}
+      >
+        {harnesses.map((kind) => (
+          <option key={kind} value={kind}>
+            {harnessLabel(kind) ?? kind}
+          </option>
+        ))}
+      </select>
+      {options && options.harnesses.length === 0 && (
+        <small className="field-hint">
+          No Worker Host is connected. Choose the harness its host will run.
+        </small>
+      )}
+      {options && options.workspaces.length > 0 && (
+        <>
+          <label htmlFor="tag-workspace">Workspace</label>
+          <select
+            id="tag-workspace"
+            className="field-select"
+            value={workspace}
+            onChange={(event) => setWorkspace(event.target.value)}
+          >
+            <option value="">None</option>
+            {options.workspaces.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+      {error && (
+        <p className="field-error" role="alert">
+          {error}
+        </p>
+      )}
+      <DialogFooter className="dialog-actions">
+        <Button className="primary" type="submit" disabled={!tagId || !options || busy}>
+          {busy ? "Creating…" : "Create Tag"}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}

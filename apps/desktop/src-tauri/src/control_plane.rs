@@ -19,8 +19,10 @@ use tonic::{
 
 mod artifacts;
 mod local;
+mod new_tag;
 mod profiles;
 mod watch;
+pub use new_tag::{NewTag, TagOptions};
 pub use profiles::{ControlPlaneActivation, ControlPlaneList};
 pub use watch::WatchUpdate;
 
@@ -506,13 +508,16 @@ pub struct Tag {
     pub harness_kind: String,
 }
 
+/// A harness as the app names it, such as `codex` or `claude_code`.
+fn harness_name(kind: v2::HarnessKind) -> String {
+    kind.as_str_name()
+        .trim_start_matches("HARNESS_KIND_")
+        .to_ascii_lowercase()
+}
+
 impl From<v2::Tag> for Tag {
     fn from(tag: v2::Tag) -> Self {
-        let harness_kind = tag
-            .harness_kind()
-            .as_str_name()
-            .trim_start_matches("HARNESS_KIND_")
-            .to_ascii_lowercase();
+        let harness_kind = harness_name(tag.harness_kind());
         Self {
             name: if tag.name.is_empty() {
                 tag.tag_id.clone()

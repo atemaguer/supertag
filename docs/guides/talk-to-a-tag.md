@@ -26,7 +26,8 @@ message arrives once the Tag's harness has started and written its first sentenc
 few seconds.
 
 If there is no local setup or the Control Plane has no Tags, SuperTag shows how to get started
-with `supertag init`. For a shared Control Plane, ask its operator to set up a Tag.
+with `supertag init`. For a shared Control Plane, ask its operator to set up a Tag. An operator can
+also create one in the desktop app with **+** at the bottom of its rail.
 
 | Key | Action |
 | --- | --- |
@@ -41,7 +42,8 @@ To give `lead` an **Objective**, an outcome it owns, type `/goal` followed by th
 to verify it, and press Enter. The message goes to the conversation like any other, and the Control
 Plane creates the Objective, answers with its ID, and starts its first turn. Select it in the rail
 to open its progress view. Enter `/goal` on its own to choose a Team or budget before starting.
-`/goal` works the same way in the desktop app's conversations. A currency budget requires a
+`/goal` works the same way in the desktop app, which keeps one conversation with each Tag:
+selecting a Tag opens it. A currency budget requires a
 [harness](../concepts/workers.md) that can enforce a reported cost limit.
 
 ## Continue a conversation

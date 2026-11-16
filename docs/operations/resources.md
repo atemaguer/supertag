@@ -202,6 +202,10 @@ Some changes have their own commands, which suit one-off edits:
 | Require labels for a Tag's hosts | `supertag placement runs-on TAG LABEL` |
 | Allow direct messages between Tags | `supertag mailbox-grant allow SENDER RECIPIENT` |
 
+An operator can also create a Tag in the desktop app with **+** at the bottom of its rail. It asks
+for a name, a harness, and optionally a Workspace, from those the connected Worker Hosts offer, and
+allows `commands:execute` and `files:write`, like the lead Tag `supertag init` creates.
+
 A change made outside apply is recorded as its own field owner, so a later `apply` of a different
 value reports a conflict instead of silently reverting it.
 

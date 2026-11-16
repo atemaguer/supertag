@@ -275,6 +275,14 @@ button:disabled {
   background: var(--selected);
   border-color: #494045;
 }
+.rail-action[aria-disabled="true"] {
+  opacity: 0.46;
+  cursor: default;
+}
+.rail-action[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--muted);
+}
 .rail-bottom {
   display: flex;
   flex-direction: column;
@@ -902,13 +910,18 @@ button.identity-pill:hover,
   font-weight: 550;
   margin-top: 5px;
 }
-.workspace-dialog input {
+.workspace-dialog input,
+.workspace-dialog .field-select {
   border: 1px solid var(--line);
   padding: 9px 10px;
   border-radius: 7px;
   background: var(--background);
   color: var(--text);
   font-size: 13px;
+}
+.field-hint {
+  color: var(--muted);
+  font-size: 12px;
 }
 .dialog-actions {
   display: flex;

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use control_plane::{
     ControlPlaneActivation, ControlPlaneList, ControlPlaneState, Conversation, Event, Message,
-    Messages, Tag, WatchUpdate,
+    Messages, NewTag, Tag, TagOptions, WatchUpdate,
 };
 use tauri::{Manager, State, ipc::Channel, webview::PageLoadEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -109,6 +109,23 @@ async fn list_tags(
     connection_id: String,
 ) -> Result<Vec<Tag>, String> {
     state.tags(&connection_id).await
+}
+
+#[tauri::command]
+async fn list_tag_options(
+    state: State<'_, ControlPlaneState>,
+    connection_id: String,
+) -> Result<TagOptions, String> {
+    state.tag_options(&connection_id).await
+}
+
+#[tauri::command]
+async fn create_tag(
+    state: State<'_, ControlPlaneState>,
+    connection_id: String,
+    tag: NewTag,
+) -> Result<Tag, String> {
+    state.create_tag(&connection_id, tag).await
 }
 
 #[tauri::command]
@@ -245,6 +262,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             start_control_plane_watch,
             stop_control_plane_watch,
             list_tags,
+            list_tag_options,
+            create_tag,
             list_conversations,
             list_messages,
             send_message,

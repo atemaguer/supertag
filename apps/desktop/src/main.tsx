@@ -20,6 +20,7 @@ import {
   type Tag,
 } from "./control-plane";
 import { describe } from "./lib/polling";
+import { type TagAdmin, tagAdminRefusal, tagAdminSession } from "./tag-admin";
 import "./shadcn.css";
 import "./style.css";
 
@@ -30,6 +31,8 @@ interface Connection {
   id?: string;
   origin?: string;
   principal?: string;
+  /** Creates Tags, when this connection's principal may. */
+  tagAdmin?: TagAdmin;
 }
 
 function App({ initialConnection }: { initialConnection?: Connection }) {
@@ -54,6 +57,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
         id: connectionId,
         origin,
         principal,
+        tagAdmin: tagAdminRefusal(principal) ? undefined : tagAdminSession(connectionId),
       });
     },
     [],
@@ -169,6 +173,8 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           controlPlane={connection.controlPlane}
           initialTags={connection.tags}
           selector={selector}
+          tagAdmin={connection.tagAdmin}
+          newTagRefusal={tagAdminRefusal(connection.principal)}
           switching={switching}
           connectionError={editor ? "" : error}
           onWriteChange={updateWrites}
@@ -225,11 +231,12 @@ async function start() {
   if (!target) throw new Error("Desktop root is missing");
   let initialConnection: Connection | undefined;
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("preview")) {
-    const { previewControlPlane } = await import("./preview");
+    const { previewControlPlane, previewTagAdmin } = await import("./preview");
     initialConnection = {
       controlPlane: previewControlPlane,
       tags: await previewControlPlane.tags(),
       preview: true,
+      tagAdmin: previewTagAdmin,
     };
   }
   createRoot(target).render(<App initialConnection={initialConnection} />);

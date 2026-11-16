@@ -1,4 +1,4 @@
-import { Check, ChevronDown, PanelLeft, PanelLeftClose } from "lucide-react";
+import { Check, ChevronDown, PanelLeft, PanelLeftClose, Plus } from "lucide-react";
 import {
   type MouseEvent,
   type ReactNode,
@@ -11,24 +11,24 @@ import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import type { ControlPlane, Tag, WatchUpdate } from "../control-plane";
 import { describe } from "../lib/polling";
 import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
+import { harnessLabel, type TagAdmin } from "../tag-admin";
 import { ConversationPane, type Draft } from "./conversation";
+import { NewTagDialog } from "./new-tag";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuItemIndicator,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 
 const rosterInterval = 15_000;
 const conversationInterval = 2_500;
-
-function harness(kind: string) {
-  return { codex: "Codex", claude_code: "Claude Code", openai_agents: "OpenAI Agents" }[kind];
-}
 
 const SIDEBAR_KEY = "supertag.desktop.sidebar";
 const sidebarListeners = new Set<() => void>();
@@ -86,6 +86,10 @@ interface ShellProps {
   selector(placement: SelectorPlacement): ReactNode;
   error?: string;
   onSelectTag?(tagId: string): void;
+  /** Opens the New Tag dialog, when this connection may create Tags. */
+  onNewTag?(): void;
+  /** Why this connection cannot create Tags. */
+  newTagRefusal?: string;
   children?: ReactNode;
 }
 
@@ -102,6 +106,8 @@ export function WorkspaceShell({
   selector,
   error,
   onSelectTag,
+  onNewTag,
+  newTagRefusal,
   children,
 }: ShellProps) {
   const open = useSyncExternalStore(subscribeSidebar, sidebarOpen, () => true);
@@ -116,7 +122,7 @@ export function WorkspaceShell({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onMac]);
-  const provider = tag && harness(tag.harnessKind);
+  const provider = tag && harnessLabel(tag.harnessKind);
 
   return (
     <div className="shell" data-sidebar={open ? "open" : "collapsed"}>
@@ -171,7 +177,22 @@ export function WorkspaceShell({
             );
           })}
         </div>
-        <div className="rail-bottom">{open && selector("rail")}</div>
+        <div className="rail-bottom">
+          {(onNewTag || newTagRefusal) && (
+            <Button
+              variant="ghost"
+              className="rail-action"
+              aria-label="New Tag"
+              aria-description={newTagRefusal}
+              aria-disabled={!onNewTag}
+              title={newTagRefusal ?? "New Tag"}
+              onClick={() => onNewTag?.()}
+            >
+              <Plus size={18} aria-hidden />
+            </Button>
+          )}
+          {open && selector("rail")}
+        </div>
       </nav>
       <main className="main" aria-label="Conversation" aria-busy={switching}>
         <header className="topstrip" data-tauri-drag-region>
@@ -180,6 +201,7 @@ export function WorkspaceShell({
               tag={tag}
               tags={open ? undefined : tags}
               onSelectTag={(tagId) => onSelectTag?.(tagId)}
+              onNewTag={onNewTag}
             />
           )}
           {provider && <span className="harness">{provider}</span>}
@@ -205,11 +227,13 @@ function TagPill({
   tag,
   tags,
   onSelectTag,
+  onNewTag,
 }: {
   tag: Tag;
   /** The Tags to switch between, when the sidebar does not show them. */
   tags?: Tag[];
   onSelectTag(tagId: string): void;
+  onNewTag?(): void;
 }) {
   const name = tag.name ?? tag.tagId;
   const identity = (
@@ -245,6 +269,14 @@ function TagPill({
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        {onNewTag && (
+          <>
+            <DropdownMenuSeparator className="control-plane-separator" />
+            <DropdownMenuItem className="control-plane-action" onSelect={onNewTag}>
+              <Plus size={15} aria-hidden /> New Tag
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -252,12 +284,15 @@ function TagPill({
 
 export function EmptyWorkspace({
   connected,
+  onNewTag,
   switching,
   onSettings,
   localProblem,
   onLocal,
 }: {
   connected?: boolean;
+  /** Opens the New Tag dialog, when this connection may create Tags. */
+  onNewTag?(): void;
   switching?: boolean;
   onSettings?: SettingsAction;
   /** Why the local Control Plane is unavailable, such as the command that starts it. */
@@ -273,7 +308,16 @@ export function EmptyWorkspace({
         ) : connected ? (
           <>
             <h2>No Tags available</h2>
-            <p>Configure a Tag in this workspace to start a conversation.</p>
+            {onNewTag ? (
+              <>
+                <p>Create a Tag to start a conversation.</p>
+                <Button className="primary" onClick={onNewTag}>
+                  New Tag
+                </Button>
+              </>
+            ) : (
+              <p>Ask an operator to create a Tag for you.</p>
+            )}
           </>
         ) : (
           <>
@@ -305,6 +349,10 @@ interface WorkspaceProps {
   controlPlane: ControlPlane;
   initialTags: Tag[];
   selector(placement: SelectorPlacement): ReactNode;
+  /** Creates Tags, when this connection may. */
+  tagAdmin?: TagAdmin;
+  /** Why this connection cannot create Tags. */
+  newTagRefusal?: string;
   switching: boolean;
   connectionError: string;
   onWriteChange(delta: 1 | -1): void;
@@ -315,11 +363,14 @@ export function Workspace({
   controlPlane,
   initialTags,
   selector,
+  tagAdmin,
+  newTagRefusal,
   switching,
   connectionError,
   onWriteChange,
 }: WorkspaceProps) {
   const [tags, setTags] = useState(initialTags);
+  const [creatingTag, setCreatingTag] = useState(false);
   const [selectedTag, setSelectedTag] = useState(initialTags[0]?.tagId);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [error, setError] = useState("");
@@ -349,9 +400,11 @@ export function Workspace({
     switching,
     connected: true,
     onSelectTag: setSelectedTag,
+    onNewTag: tagAdmin ? () => setCreatingTag(true) : undefined,
+    newTagRefusal,
     error: connectionError || error,
   };
-  return tag ? (
+  const workspace = tag ? (
     <TagWorkspace
       key={tag.tagId}
       controlPlane={controlPlane}
@@ -364,8 +417,26 @@ export function Workspace({
     />
   ) : (
     <WorkspaceShell {...shell}>
-      <EmptyWorkspace connected />
+      <EmptyWorkspace connected onNewTag={shell.onNewTag} />
     </WorkspaceShell>
+  );
+  return (
+    <>
+      {workspace}
+      {tagAdmin && (
+        <NewTagDialog
+          admin={tagAdmin}
+          open={creatingTag}
+          onOpenChange={setCreatingTag}
+          onCreated={(created) => {
+            setTags((prior) =>
+              prior.some((entry) => entry.tagId === created.tagId) ? prior : [...prior, created],
+            );
+            setSelectedTag(created.tagId);
+          }}
+        />
+      )}
+    </>
   );
 }
 

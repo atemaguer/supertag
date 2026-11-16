@@ -575,6 +575,21 @@ async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
             .collect::<Vec<_>>(),
         ["allowed-tag"]
     );
+    // A client device converses with its Tags but cannot create one or list hosts.
+    let refused = state
+        .create_tag(
+            joined.connection_id(),
+            NewTag {
+                tag_id: "device-tag".into(),
+                name: None,
+                harness: "codex".into(),
+                workspace_id: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused, "Only an operator can create Tags.");
+    assert!(state.tag_options(joined.connection_id()).await.is_err());
     let saved = std::fs::read_to_string(&store).unwrap();
     assert!(!saved.contains(&key), "the Auth Key was saved");
     assert!(saved.contains(supertag_protocol::CREDENTIAL_SECRET_PREFIX));
@@ -813,4 +828,54 @@ async fn the_local_control_plane_connects_with_its_current_token_and_is_never_sa
     assert!(stopped.contains("supertag up"), "{stopped}");
     control_plane.abort();
     plane.abort();
+}
+
+#[tokio::test]
+async fn an_operator_creates_a_tag_once_with_the_lead_tag_defaults() {
+    let directory = tempfile::tempdir().unwrap();
+    let (address, control_plane_task, cp_task) = control_plane_fixture(
+        &directory.path().join("state.sqlite"),
+        "engineer",
+        "operator-test-token",
+        false,
+    )
+    .await;
+    let client = ControlPlaneState::default();
+    let connection = client
+        .save_control_plane(
+            &directory.path().join("control-planes.json"),
+            address,
+            "Engineering".into(),
+            "operator-test-token".into(),
+        )
+        .await
+        .unwrap();
+    let id = connection.connection_id();
+    // No Worker Host has connected, so nothing is offered yet.
+    assert_eq!(client.tag_options(id).await.unwrap(), TagOptions::default());
+    let new_tag = || NewTag {
+        tag_id: "reviewer".into(),
+        name: Some("Reviewer".into()),
+        harness: "claude_code".into(),
+        workspace_id: None,
+    };
+    let created = client.create_tag(id, new_tag()).await.unwrap();
+    assert_eq!(created.tag_id, "reviewer");
+    assert_eq!(created.name, "Reviewer");
+    assert_eq!(created.harness_kind, "claude_code");
+    assert_eq!(created.revision, 1);
+    assert_eq!(created.allowed_actions, ["commands:execute", "files:write"]);
+    assert_eq!(
+        client.create_tag(id, new_tag()).await.unwrap_err(),
+        "A Tag with that ID or name already exists."
+    );
+    let tags = client.tags(id).await.unwrap();
+    assert_eq!(
+        tags.iter()
+            .map(|tag| tag.tag_id.as_str())
+            .collect::<Vec<_>>(),
+        ["engineer", "reviewer"]
+    );
+    control_plane_task.abort();
+    cp_task.abort();
 }

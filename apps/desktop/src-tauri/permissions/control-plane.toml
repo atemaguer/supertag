@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "control-plane-client"
-description = "Connect to a saved or the local Control Plane and read or send personal conversation messages and save Task result files."
+description = "Connect to a saved or the local Control Plane, create Tags, read or send personal conversation messages, and save Task result files."
 commands.allow = [
   "list_control_planes",
   "save_control_plane",
@@ -10,6 +10,8 @@ commands.allow = [
   "start_control_plane_watch",
   "stop_control_plane_watch",
   "list_tags",
+  "list_tag_options",
+  "create_tag",
   "list_conversations",
   "list_messages",
   "send_message",
