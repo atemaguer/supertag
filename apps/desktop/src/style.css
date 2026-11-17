@@ -18,6 +18,7 @@
   --sidebar-width: 256px;
   --bubble: #2a292d;
   --strip-height: 56px;
+  --transcript-inset: 22px;
 }
 
 * {
@@ -802,11 +803,13 @@ button:disabled {
   overflow: hidden;
   min-height: 0;
 }
+/* The transcript fills the pane, so the Tag's and the operator's bubbles overlap across it as in a
+   messaging app. A bubble is at most 85% of the pane, and no wider than a readable measure. */
 .timeline {
-  width: min(100%, 782px);
+  --bubble-max: min(85%, 800px);
+  width: 100%;
   min-height: 100%;
-  margin-inline: auto;
-  padding: calc(var(--strip-height) + 12px) 38px 28px;
+  padding: calc(var(--strip-height) + 12px) var(--transcript-inset) 28px;
   display: flex;
   flex-direction: column;
   gap: 26px;
@@ -910,6 +913,7 @@ button:disabled {
 .tag-turn,
 .user-turn {
   gap: 3px;
+  max-width: 100%;
 }
 .tag-turn {
   align-items: flex-start;
@@ -919,7 +923,7 @@ button:disabled {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 65%;
+  max-width: var(--bubble-max);
 }
 .user-turn .bubble-row {
   flex-direction: row-reverse;
@@ -939,7 +943,7 @@ button:disabled {
 }
 /* The typing bubble: a message bubble with large dots, with what the Tag does now under it. */
 .typing {
-  max-width: 65%;
+  max-width: var(--bubble-max);
 }
 .typing-button {
   display: flex;
@@ -1003,7 +1007,7 @@ button:disabled {
   font-weight: 600;
 }
 .delivery-error {
-  max-width: 65%;
+  max-width: var(--bubble-max);
   margin: 0;
   padding-right: 6px;
   color: var(--muted);
@@ -1026,6 +1030,12 @@ button:disabled {
   font-size: 14px;
   line-height: 1.6;
   overflow-wrap: anywhere;
+}
+/* Wide code and tables scroll inside the bubble rather than widen it past its measure. */
+.markdown pre,
+.markdown [data-streamdown="table-wrapper"] {
+  max-width: 100%;
+  overflow-x: auto;
 }
 .message-link {
   color: var(--accent);
@@ -1056,7 +1066,7 @@ button:disabled {
   opacity: 1;
 }
 .turn-status {
-  max-width: 65%;
+  max-width: var(--bubble-max);
   padding: 2px 6px;
   color: var(--muted);
   font-size: 12px;
@@ -1111,7 +1121,7 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  max-width: 65%;
+  max-width: var(--bubble-max);
   margin: 2px 0 0;
   padding: 0;
   list-style: none;
@@ -1136,9 +1146,8 @@ button:disabled {
 }
 /* The composer: one rounded pill across the bottom. */
 .composer {
-  width: min(100%, 782px);
-  margin-inline: auto;
-  padding: 6px 38px 14px;
+  width: 100%;
+  padding: 6px var(--transcript-inset) 14px;
 }
 .composer-box {
   display: flex;
@@ -1377,14 +1386,8 @@ button:disabled {
 }
 
 @media (max-width: 920px) {
-  .timeline,
-  .composer {
-    padding-inline: 24px;
-  }
-  .bubble-row,
-  .turn-status,
-  .result-files {
-    max-width: 85%;
+  :root {
+    --transcript-inset: 16px;
   }
   .activity-frame {
     position: absolute;
