@@ -133,6 +133,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Each turn's Workspace delivery bundle carries only what the turn added on top of its start
+  commit (about 500 bytes instead of the whole history, 44 MB on this repository). A reader
+  without the start commit, such as `supertag fetch` into another clone or a new host, gets a
+  complete bundle that the holding Worker Host builds on request.
+- A Worker Host claims its next Task without waiting for the previous checkout to be deleted;
+  deletion happens in the background.
 - Several quick messages get one answer. In Slack, Microsoft Teams and Lark, a message sent while
   the Tag works goes into its current turn when the harness supports that, as it already did in
   conversations. Otherwise the next turn reads every message waiting in the thread or
