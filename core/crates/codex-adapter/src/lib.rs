@@ -8,6 +8,7 @@ mod coordination;
 mod events;
 mod pricing;
 mod questions;
+mod recap;
 mod schedules;
 mod skills;
 mod tag_sessions;
@@ -99,23 +100,18 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
                 may_ask_objective_question: attached.may_ask_objective_question,
                 ..Default::default()
             });
-    let previous_tools = attached
-        .checkpoint
-        .as_ref()
-        .and_then(checkpoint::coordination_inventory);
-    let inventory = if let Some(tools) = previous_tools {
-        tools.coordination
-    } else if capabilities.may_ask_work_session_question && attached.checkpoint.is_none() {
+    // A fresh thread's tools for this turn. A checkpointed thread that registered others is
+    // not resumed (see `checkpoint::resumes`), so a Session gains new tools on its next turn.
+    let inventory = if capabilities.may_ask_work_session_question {
         coordination::Inventory::ChildQuestions
-    } else if capabilities.may_continue_work_session && attached.checkpoint.is_none() {
+    } else if capabilities.may_continue_work_session {
         coordination::Inventory::WorkSessionLifecycleReview
-    } else if capabilities.may_start_work_session && attached.checkpoint.is_none() {
+    } else if capabilities.may_start_work_session {
         coordination::Inventory::WorkSessionsReview
-    } else if attached.checkpoint.is_none()
-        && (capabilities.may_use_workstream
-            || capabilities.may_read_mailbox
-            || capabilities.may_send_tag_message
-            || capabilities.may_request_commit_review)
+    } else if capabilities.may_use_workstream
+        || capabilities.may_read_mailbox
+        || capabilities.may_send_tag_message
+        || capabilities.may_request_commit_review
     {
         coordination::Inventory::DirectReview
     } else if capabilities.may_ask_objective_question {
@@ -123,7 +119,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
     } else {
         coordination::Inventory::None
     };
-    let current = questions::Tools {
+    let tools = questions::Tools {
         coordination: inventory,
         capture_artifact: attached.may_capture_artifacts,
         acquire_artifacts: attached.may_acquire_artifacts,
@@ -132,23 +128,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         schedule: capabilities.may_schedule,
         report_objective: questions::Reporting::new(&capabilities),
     };
-    let tools = previous_tools.unwrap_or(questions::Tools {
-        coordination: inventory,
-        capture_artifact: attached.checkpoint.is_none() && attached.may_capture_artifacts,
-        acquire_artifacts: attached.checkpoint.is_none() && attached.may_acquire_artifacts,
-        attach_artifacts: attached.checkpoint.is_none() && attached.may_materialize_artifacts,
-        tag_sessions: attached.checkpoint.is_none() && capabilities.may_read_tag_sessions,
-        schedule: attached.checkpoint.is_none() && capabilities.may_schedule,
-        report_objective: if attached
-            .checkpoint
-            .as_ref()
-            .is_none_or(checkpoint::reports_objective)
-        {
-            questions::Reporting::new(&capabilities)
-        } else {
-            questions::Reporting::None
-        },
-    });
+    let reread = tools.tag_sessions;
     let mut questions = questions::Bridge::new(
         (channel, artifact_channel),
         &bootstrap.token,
@@ -156,12 +136,12 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         &attached.attempt_id,
         capabilities,
         tools,
-        current,
+        tools,
     );
     let outcome = execute(
         &options,
         (&task, &attached.resolved_skills),
-        attached.checkpoint.as_ref(),
+        (attached.checkpoint.as_ref(), &attached.history, reread),
         &attached.attempt_id,
         &mut harness,
         &mut questions,
@@ -169,7 +149,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
     )
     .await;
     let (result, succeeded, checkpoint) = match outcome {
-        Ok((result, checkpoint)) => (result, true, Some(checkpoint)),
+        Ok((result, checkpoint)) => (result, true, checkpoint),
         Err(error) => (error.to_string(), false, None),
     };
     // A reported Objective status applies only to a turn that succeeded without
@@ -216,12 +196,16 @@ fn transient(status: &tonic::Status) -> bool {
 async fn execute(
     options: &CodexOptions,
     task_and_skills: (&Task, &[supertag_protocol::v2::ResolvedSkill]),
-    previous_checkpoint: Option<&SessionCheckpoint>,
+    (previous_checkpoint, history, reread): (
+        Option<&SessionCheckpoint>,
+        &[supertag_protocol::v2::AttemptHistoryEntry],
+        bool,
+    ),
     attempt_id: &str,
     harness: &mut HarnessClient<Channel>,
     questions: &mut questions::Bridge,
     token: &str,
-) -> Result<(String, SessionCheckpoint)> {
+) -> Result<(String, Option<SessionCheckpoint>)> {
     let (task, resolved_skills) = task_and_skills;
     let applied_limits = execution_limits(task.execution_limits.as_ref())?;
     let max_reported_tokens = applied_limits
@@ -303,9 +287,9 @@ async fn execute(
     let thread_parameters = config::thread_parameters(&workspace, &policy, &arguments)?;
     let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
     let skills = skills::prepare(task, resolved_skills, authentication.home())?;
-    if let Some(checkpoint) = previous_checkpoint {
-        checkpoint::check_context(checkpoint, &skills.manifest)?;
-    }
+    let previous_checkpoint = previous_checkpoint.filter(|checkpoint| {
+        checkpoint::resumes(checkpoint, &questions.manifest(), &skills.manifest)
+    });
     let mut environment = authentication.environment(&options.environment);
     if let Some(path) = output_directory {
         let relative = path
@@ -347,6 +331,12 @@ async fn execute(
     let baseline = match previous_checkpoint {
         Some(checkpoint) => checkpoint::usage_baseline(checkpoint)?,
         None => Some(([0, 0, 0], Some(0))),
+    };
+    // A fresh thread starts from the Session's recap; a resumed one already holds it.
+    let recap = if previous_checkpoint.is_none() {
+        recap::render(history, &task.session_id, &secrets, reread)
+    } else {
+        String::new()
     };
     verify_version(options, &environment).await?;
     if let Some(applied) = applied_limits {
@@ -390,6 +380,7 @@ async fn execute(
             policy,
             &skills.paths,
             expected_thread,
+            &recap,
             baseline,
             max_reported_tokens,
             harness,
@@ -405,7 +396,9 @@ async fn execute(
             result.len() <= MAX_RESULT,
             "Codex final response exceeds its limit"
         );
-        let checkpoint = checkpoint::capture(
+        // A thread too big to keep leaves no checkpoint: the turn succeeds, and the next one
+        // starts fresh from the recap.
+        let checkpoint = match checkpoint::capture(
             task,
             &questions.manifest(),
             authentication.home(),
@@ -413,11 +406,13 @@ async fn execute(
             thread,
             &secrets,
         )
-        .context("could not preserve Codex Session continuity")?;
-        Ok::<_, anyhow::Error>((
-            result,
-            checkpoint::bind_context(checkpoint, &skills.manifest)?,
-        ))
+        .and_then(|checkpoint| checkpoint::bind_context(checkpoint, &skills.manifest))
+        {
+            Ok(checkpoint) => Some(checkpoint),
+            Err(error) if error.is::<checkpoint::TooBig>() => None,
+            Err(error) => return Err(error.context("could not preserve Codex Session continuity")),
+        };
+        Ok::<_, anyhow::Error>((result, checkpoint))
     })
     .await;
     // On malformed streams, timeouts, or RPC failure, stop and reap the actual

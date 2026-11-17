@@ -33,5 +33,6 @@ export * from "./gen/supertag/runtime/v2/policy_pb.js";
 export * from "./gen/supertag/runtime/v2/runtime_pb.js";
 export * from "./gen/supertag/runtime/v2/schedules_pb.js";
 export * from "./gen/supertag/runtime/v2/tag_sessions_pb.js";
+export { sessionRecap } from "./recap.js";
 export { redact } from "./redact.js";
 export { startTaskMcpHttp, type TaskMcpHttpServer } from "./task-mcp-http.js";

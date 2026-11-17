@@ -275,100 +275,37 @@ fn transform(
     Ok(output)
 }
 
-fn tool_manifest(checkpoint: &SessionCheckpoint) -> Option<String> {
+/// Whether this turn resumes the checkpointed thread: only one of this format whose thread
+/// registered exactly the tools and resolved context this turn has. Any other checkpoint is
+/// dropped, and the turn starts a fresh thread, with today's tools, from the Session's recap.
+pub(crate) fn resumes(checkpoint: &SessionCheckpoint, tools: &str, context: &str) -> bool {
     #[derive(Deserialize)]
-    struct Manifest {
+    struct Manifests {
+        version: u32,
         tool_manifest: String,
+        context_manifest: String,
     }
-    if checkpoint.payload.len() > MAX_ENCODED_BYTES {
-        return None;
-    }
-    Some(
-        serde_json::from_slice::<Manifest>(&checkpoint.payload)
-            .ok()?
-            .tool_manifest,
-    )
+    checkpoint.harness == "codex"
+        && checkpoint.format == FORMAT
+        && checkpoint.payload.len() <= MAX_ENCODED_BYTES
+        && serde_json::from_slice::<Manifests>(&checkpoint.payload).is_ok_and(|archive| {
+            archive.version == 2
+                && archive.tool_manifest == tools
+                && archive.context_manifest == context
+        })
 }
 
-/// Whether the checkpointed thread registered `report_objective`. A thread whose only
-/// coordination is the Objective question is not pinned: it resumes only while its
-/// Session still owns the open Objective, with the same tools it started with.
-pub(crate) fn reports_objective(checkpoint: &SessionCheckpoint) -> bool {
-    tool_manifest(checkpoint).is_some_and(|manifest| {
-        manifest.ends_with(crate::questions::OBJECTIVE_REPORT_SUFFIX)
-            || manifest.ends_with(crate::questions::ONGOING_OBJECTIVE_REPORT_SUFFIX)
-    })
+/// A thread too big to keep: the turn still succeeds, without a checkpoint.
+#[derive(Debug)]
+pub(crate) struct TooBig;
+
+impl std::fmt::Display for TooBig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Codex Session is too big to checkpoint")
+    }
 }
 
-pub(crate) fn coordination_inventory(
-    checkpoint: &SessionCheckpoint,
-) -> Option<crate::questions::Tools> {
-    let manifest = tool_manifest(checkpoint)?;
-    let (report, manifest) = if let Some(rest) =
-        manifest.strip_suffix(crate::questions::ONGOING_OBJECTIVE_REPORT_SUFFIX)
-    {
-        (crate::questions::Reporting::Ongoing, rest.to_owned())
-    } else if let Some(rest) = manifest.strip_suffix(crate::questions::OBJECTIVE_REPORT_SUFFIX) {
-        (crate::questions::Reporting::Finishing, rest.to_owned())
-    } else {
-        (crate::questions::Reporting::None, manifest)
-    };
-    let schedule = manifest.strip_suffix(crate::questions::SCHEDULE_SUFFIX);
-    let manifest = schedule.unwrap_or(&manifest).to_owned();
-    let tag_sessions = manifest.strip_suffix(crate::questions::TAG_SESSIONS_SUFFIX);
-    let manifest = tag_sessions.unwrap_or(&manifest).to_owned();
-    let attach = manifest.strip_suffix(crate::questions::ARTIFACT_ATTACH_SUFFIX);
-    let acquire = attach
-        .unwrap_or(&manifest)
-        .strip_suffix(crate::questions::ARTIFACT_ACQUIRE_SUFFIX);
-    if attach.is_some() && acquire.is_none() {
-        return None;
-    }
-    let remaining = acquire.or(attach).unwrap_or(&manifest);
-    let capture = remaining.strip_suffix(crate::questions::ARTIFACT_CAPTURE_SUFFIX);
-    let coordination = match capture.unwrap_or(remaining) {
-        crate::questions::NONE
-            if capture.is_some()
-                || acquire.is_some()
-                || tag_sessions.is_some()
-                || schedule.is_some() =>
-        {
-            Some(crate::coordination::Inventory::None)
-        }
-        crate::questions::OBJECTIVE_ASK
-            if capture.is_some()
-                || acquire.is_some()
-                || tag_sessions.is_some()
-                || schedule.is_some() =>
-        {
-            Some(crate::coordination::Inventory::Ask)
-        }
-        crate::questions::FULL_COORDINATION => Some(crate::coordination::Inventory::Workstream),
-        crate::questions::DIRECT_COORDINATION => Some(crate::coordination::Inventory::Direct),
-        crate::questions::DIRECT_REVIEW => Some(crate::coordination::Inventory::DirectReview),
-        crate::questions::WORK_SESSIONS => Some(crate::coordination::Inventory::WorkSessions),
-        crate::questions::WORK_SESSIONS_REVIEW => {
-            Some(crate::coordination::Inventory::WorkSessionsReview)
-        }
-        crate::questions::WORK_SESSION_LIFECYCLE => {
-            Some(crate::coordination::Inventory::WorkSessionLifecycle)
-        }
-        crate::questions::WORK_SESSION_LIFECYCLE_REVIEW => {
-            Some(crate::coordination::Inventory::WorkSessionLifecycleReview)
-        }
-        crate::questions::CHILD_QUESTIONS => Some(crate::coordination::Inventory::ChildQuestions),
-        _ => None,
-    }?;
-    Some(crate::questions::Tools {
-        coordination,
-        capture_artifact: capture.is_some(),
-        acquire_artifacts: acquire.is_some(),
-        attach_artifacts: attach.is_some(),
-        tag_sessions: tag_sessions.is_some(),
-        schedule: schedule.is_some(),
-        report_objective: report,
-    })
-}
+impl std::error::Error for TooBig {}
 
 pub(crate) fn restore(
     checkpoint: &SessionCheckpoint,
@@ -381,8 +318,7 @@ pub(crate) fn restore(
     validate_checkpoint_reference(&checkpoint.reference())
         .context("invalid Codex checkpoint envelope")?;
     ensure!(
-        checkpoint.harness == "codex"
-            && matches!(checkpoint.format.as_str(), FORMAT | "codex-session-v1"),
+        checkpoint.harness == "codex" && checkpoint.format == FORMAT,
         "incompatible Codex Session checkpoint"
     );
     ensure!(
@@ -399,36 +335,10 @@ pub(crate) fn restore(
             && identity(&archive.session_id),
         "Codex checkpoint belongs to a different Tag or Session"
     );
-    if checkpoint.format == "codex-session-v1" {
-        // The v1 adapter never registered dynamic tools. Preserve that exact
-        // no-tool contract; a pre-existing native thread cannot gain a new tool.
-        ensure!(
-            archive.version == 1
-                && archive.tool_manifest.is_empty()
-                && tool_manifest == crate::questions::NONE,
-            "Codex checkpoint cannot resume with a changed tool manifest"
-        );
-        for transcript in &archive.transcripts {
-            for record in records(&transcript.text)? {
-                if record["type"] == "session_meta" {
-                    for name in ["dynamic_tools", "dynamicTools"] {
-                        ensure!(
-                            record["payload"]
-                                .get(name)
-                                .is_none_or(|tools| tools.is_null()
-                                    || tools.as_array().is_some_and(Vec::is_empty)),
-                            "Legacy Codex checkpoint contains unpinned tools"
-                        );
-                    }
-                }
-            }
-        }
-    } else {
-        ensure!(
-            archive.version == 2 && archive.tool_manifest == tool_manifest,
-            "Codex checkpoint cannot resume with a changed tool manifest"
-        );
-    }
+    ensure!(
+        archive.version == 2 && archive.tool_manifest == tool_manifest,
+        "Codex checkpoint cannot resume with a changed tool manifest"
+    );
     ensure!(
         Path::new(&archive.workspace).is_absolute() && archive.workspace.len() <= 4096,
         "invalid Codex checkpoint workspace"
@@ -461,15 +371,6 @@ pub(crate) fn restore(
     Ok(archive.thread_id)
 }
 
-pub(crate) fn check_context(checkpoint: &SessionCheckpoint, expected: &str) -> Result<()> {
-    let archive: Archive = serde_json::from_slice(&checkpoint.payload)?;
-    ensure!(
-        archive.context_manifest == expected,
-        "Codex checkpoint cannot resume with changed resolved context"
-    );
-    Ok(())
-}
-
 pub(crate) fn bind_context(
     mut checkpoint: SessionCheckpoint,
     manifest: &str,
@@ -477,10 +378,9 @@ pub(crate) fn bind_context(
     let mut archive: Archive = serde_json::from_slice(&checkpoint.payload)?;
     archive.context_manifest = manifest.into();
     checkpoint.payload = serde_json::to_vec(&archive)?;
-    ensure!(
-        checkpoint.payload.len() <= MAX_ENCODED_BYTES,
-        "Codex checkpoint exceeds context archive limit"
-    );
+    if checkpoint.payload.len() > MAX_ENCODED_BYTES {
+        return Err(TooBig.into());
+    }
     checkpoint.sha256 = digest(&checkpoint.payload);
     Ok(checkpoint)
 }
@@ -543,20 +443,18 @@ fn scan(
             .to_str()
             .context("invalid Codex transcript filename")?;
         ensure!(valid_path(relative), "invalid Codex transcript path");
-        ensure!(
-            metadata.len() <= MAX_FILE_BYTES as u64 && transcripts.len() < MAX_FILES,
-            "Codex transcript exceeds its limit"
-        );
+        if metadata.len() > MAX_FILE_BYTES as u64 || transcripts.len() >= MAX_FILES {
+            return Err(TooBig.into());
+        }
         let mut text = String::new();
         child
             .take(MAX_FILE_BYTES as u64 + 1)
             .read_to_string(&mut text)
             .context("could not read Codex transcript")?;
         *total += text.len();
-        ensure!(
-            text.len() <= MAX_FILE_BYTES && *total <= MAX_RAW_BYTES,
-            "Codex checkpoint exceeds its transcript limit"
-        );
+        if text.len() > MAX_FILE_BYTES || *total > MAX_RAW_BYTES {
+            return Err(TooBig.into());
+        }
         transcripts.push(Transcript {
             path: relative.into(),
             text,
@@ -623,10 +521,9 @@ pub(crate) fn capture(
     lineage(&archive, true)?;
     let payload =
         serde_json::to_vec(&archive).context("could not encode Codex Session checkpoint")?;
-    ensure!(
-        payload.len() <= MAX_ENCODED_BYTES,
-        "Codex checkpoint exceeds its encoded limit"
-    );
+    if payload.len() > MAX_ENCODED_BYTES {
+        return Err(TooBig.into());
+    }
     Ok(SessionCheckpoint {
         harness: "codex".into(),
         format: FORMAT.into(),

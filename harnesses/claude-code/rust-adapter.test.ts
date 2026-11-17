@@ -14,6 +14,8 @@ import {
   type AppliedExecutionLimits,
   ApprovalState,
   type AttemptCapabilities,
+  type AttemptHistoryEntry,
+  AttemptHistoryEntrySchema,
   CommitReviewDecision,
   ContextPinSchema,
   ExecutionLimitEnforcement,
@@ -90,6 +92,7 @@ async function invoke({
   skill,
   sessionId = "session",
   allowUnsandboxedCommands = false,
+  history = [],
 }: {
   prompt?: string;
   checkpoint?: SessionCheckpoint;
@@ -107,6 +110,7 @@ async function invoke({
         | "mayStartWorkSession"
         | "mayContinueWorkSession"
         | "mayAskWorkSessionQuestion"
+        | "mayReadTagSessions"
       >
     >;
   policySnapshot?: TaskPolicySnapshot;
@@ -115,6 +119,7 @@ async function invoke({
   skill?: { markdown: string; tamper?: boolean };
   sessionId?: string;
   allowUnsandboxedCommands?: boolean;
+  history?: AttemptHistoryEntry[];
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "supertag-rust-claude-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -197,6 +202,7 @@ async function invoke({
                 ? { coordination: { ...coordination, mayAskObjectiveQuestion } }
                 : {}),
               ...(checkpoint ? { checkpoint } : {}),
+              history,
             };
           },
           takeLiveInput() {
@@ -665,6 +671,45 @@ it("resumes an approved transcript in another host directory with the real SDK m
   expect(text).not.toContain(first.workspace);
   expect(text).toContain(second.workspace);
 }, 30000);
+
+it("starts a fresh native Session from the recap, without Claude's own auto memory", async () => {
+  const history = [
+    create(AttemptHistoryEntrySchema, {
+      taskId: "earlier-task",
+      prompt: "Plan the release",
+      result: `Planned it ${providerSecret}`,
+      messages: ["Looking at the calendar."],
+    }),
+  ];
+  const fresh = await invoke({
+    prompt: "recall-recap",
+    history,
+    coordination: { mayUseWorkstream: false, mayReadMailbox: false, mayReadTagSessions: true },
+  });
+  expect(fresh.completions[0]?.succeeded, fresh.completions[0]?.result).toBe(true);
+  const seen = JSON.parse(fresh.completions[0]?.result ?? "{}");
+  expect(JSON.parse(seen.recap)).toEqual([
+    {
+      taskId: "earlier-task",
+      request: "Plan the release",
+      messages: ["Looking at the calendar."],
+      result: "Planned it [REDACTED]",
+    },
+  ]);
+  expect(seen.reread).toBe(true);
+  expect(seen.autoMemoryEnabled).toBe(false);
+  expect(seen.autoDreamEnabled).toBe(false);
+
+  // A resumed native Session already holds its history: no recap.
+  const first = await invoke({ prompt: "write" });
+  const resumed = await invoke({
+    prompt: "write resume",
+    checkpoint: first.completions[0]?.checkpoint,
+    history,
+  });
+  expect(resumed.completions[0]?.succeeded).toBe(true);
+  expect(resumed.completions[0]?.result).not.toContain("earlier-task");
+}, 60000);
 
 it("rejects a damaged checkpoint instead of silently resetting the native Session", async () => {
   const first = await invoke({ prompt: "write" });

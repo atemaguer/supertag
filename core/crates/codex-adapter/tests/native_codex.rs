@@ -39,9 +39,9 @@ use supertag_protocol::v2::{
 use supertag_protocol::v2::{
     ListTagObjectivesRequest, ListTagObjectivesResponse, ListTagSessionsRequest,
     ListTagSessionsResponse, Objective, ReadTagObjectiveRequest, ReadTagSessionRequest,
-    ReadTagSessionResponse, SearchTagSessionsRequest, SearchTagSessionsResponse,
-    TagObjectiveSummary, TagObjectiveView, TagSessionAudience, TagSessionEntry,
-    TagSessionSearchHit, TagSessionSummary,
+    ReadTagSessionResponse, ReadTagTurnRequest, ReadTagTurnResponse, SearchTagSessionsRequest,
+    SearchTagSessionsResponse, TagObjectiveSummary, TagObjectiveView, TagSessionAudience,
+    TagSessionEntry, TagSessionSearchHit, TagSessionSummary, TaskState,
     harness_tag_sessions_server::{HarnessTagSessions, HarnessTagSessionsServer},
 };
 use supertag_protocol::{
@@ -98,6 +98,8 @@ struct Observed {
     work_continuations: Vec<HarnessContinueWorkSessionRequest>,
     work_questions: Vec<HarnessAskWorkSessionQuestionRequest>,
     tag_session_calls: Vec<&'static str>,
+    /// The Session's recap the Worker Host attaches.
+    history: Vec<supertag_protocol::v2::AttemptHistoryEntry>,
     pending_post: bool,
     lose_post_response: bool,
     may_capture_artifacts: bool,
@@ -231,7 +233,7 @@ impl Harness for HarnessFixture {
             may_ask_objective_question: self.may_ask,
             coordination: self.coordination.clone(),
             resolved_skills: observed.resolved_skills.clone(),
-            history: vec![],
+            history: observed.history.clone(),
             remote_workspace: false,
             may_capture_artifacts: observed.may_capture_artifacts,
             may_acquire_artifacts: observed.may_acquire_artifacts,
@@ -711,6 +713,30 @@ impl HarnessTagSessions for HarnessFixture {
             next_before: Some(3),
         }))
     }
+    async fn read_turn(
+        &self,
+        request: Request<ReadTagTurnRequest>,
+    ) -> Result<Response<ReadTagTurnResponse>, Status> {
+        self.authenticate(&request)?;
+        assert!(request.get_ref().attempt.is_none());
+        assert_eq!(request.get_ref().task_id, "earlier-task");
+        assert_eq!(request.get_ref().after, Some(2));
+        self.observed
+            .lock()
+            .await
+            .tag_session_calls
+            .push("read_turn");
+        Ok(Response::new(ReadTagTurnResponse {
+            session_id: "conversation/earlier".into(),
+            state: TaskState::Succeeded as i32,
+            events: vec![TaskEvent {
+                sequence: 3,
+                text: format!("tag-turn-receipt {KEY}"),
+                kind: TaskEventKind::Activity as i32,
+            }],
+            next_after: None,
+        }))
+    }
     async fn list_objectives(
         &self,
         request: Request<ListTagObjectivesRequest>,
@@ -926,11 +952,13 @@ impl HarnessProcess {
 }
 
 #[tokio::test]
-async fn native_artifact_acquisition_pins_inventory_and_rechecks_current_authority() -> Result<()> {
+async fn native_artifact_acquisition_tools_follow_current_authority() -> Result<()> {
     let mut checkpoint = None;
     for allowed in [true, false] {
         let native = NativeFixture::new(&successful("Read evidence"), "exit 0")?;
-        std::fs::write(native.directory.path().join("artifact-read-mode"), "")?;
+        if allowed {
+            std::fs::write(native.directory.path().join("artifact-read-mode"), "")?;
+        }
         let server = HarnessProcess::configured(
             &["files:read"],
             checkpoint,
@@ -944,24 +972,30 @@ async fn native_artifact_acquisition_pins_inventory_and_rechecks_current_authori
         let outcome = observed.outcome.as_ref().context("outcome missing")?;
         ensure!(outcome.succeeded, "{}", outcome.result);
         let saved = outcome.checkpoint.clone().context("checkpoint missing")?;
-        assert!(String::from_utf8_lossy(&saved.payload).contains("none-v1+artifact-acquire-v1"));
+        // Losing the authority drops the thread that registered the tools: a fresh one has none.
+        assert_eq!(
+            String::from_utf8_lossy(&saved.payload).contains("none-v1+artifact-acquire-v1"),
+            allowed
+        );
         checkpoint = Some(saved);
         assert_eq!(observed.artifact_reads.len(), usize::from(allowed));
         let requests = native.read("requests.jsonl")?;
         assert_eq!(requests.contains("verified artifact evidence"), allowed);
         if !allowed {
-            assert!(!requests.contains("dynamicTools"));
+            assert!(requests.contains("thread/start") && !requests.contains("dynamicTools"));
         }
     }
     Ok(())
 }
 
 #[tokio::test]
-async fn native_artifact_tool_keeps_its_manifest_and_checks_current_turn_authority() -> Result<()> {
+async fn native_artifact_tool_follows_current_turn_authority() -> Result<()> {
     let mut checkpoint = None;
     for allowed in [true, false] {
         let native = NativeFixture::new(&successful("Reviewed evidence"), "exit 0")?;
-        std::fs::write(native.directory.path().join("artifact-mode"), "")?;
+        if allowed {
+            std::fs::write(native.directory.path().join("artifact-mode"), "")?;
+        }
         let server = HarnessProcess::configured(
             &["files:read"],
             checkpoint,
@@ -975,7 +1009,10 @@ async fn native_artifact_tool_keeps_its_manifest_and_checks_current_turn_authori
         let outcome = observed.outcome.as_ref().context("outcome missing")?;
         ensure!(outcome.succeeded, "{}", outcome.result);
         let saved = outcome.checkpoint.clone().context("checkpoint missing")?;
-        assert!(String::from_utf8_lossy(&saved.payload).contains("none-v1+artifact-capture-v1"));
+        assert_eq!(
+            String::from_utf8_lossy(&saved.payload).contains("none-v1+artifact-capture-v1"),
+            allowed
+        );
         checkpoint = Some(saved);
         let requests = native.read("requests.jsonl")?;
         assert_eq!(observed.captures.len(), usize::from(allowed));
@@ -989,7 +1026,7 @@ async fn native_artifact_tool_keeps_its_manifest_and_checks_current_turn_authori
             assert_eq!(capture.native_session_id.as_deref(), Some("native-thread"));
             assert!(requests.contains("dynamicTools") && requests.contains("artifact-fixture"));
         } else {
-            assert!(requests.contains("thread/resume") && !requests.contains("dynamicTools"));
+            assert!(requests.contains("thread/start") && !requests.contains("dynamicTools"));
             assert!(!requests.contains("artifact-fixture"));
         }
     }
@@ -997,12 +1034,13 @@ async fn native_artifact_tool_keeps_its_manifest_and_checks_current_turn_authori
 }
 
 #[tokio::test]
-async fn native_work_session_retries_one_receipt_and_checks_current_authority_on_resume()
--> Result<()> {
+async fn native_work_session_retries_one_receipt_and_follows_current_authority() -> Result<()> {
     let mut checkpoint = None;
     for allowed in [true, false] {
         let native = NativeFixture::new(&successful("I started the review"), "exit 0")?;
-        std::fs::write(native.directory.path().join("work-session-mode"), "")?;
+        if allowed {
+            std::fs::write(native.directory.path().join("work-session-mode"), "")?;
+        }
         let server = HarnessProcess::configured_tools(
             &["files:read"],
             checkpoint,
@@ -1031,7 +1069,7 @@ async fn native_work_session_retries_one_receipt_and_checks_current_authority_on
             );
             assert!(observed.work_starts[0].operation_id.starts_with("codex-"));
         } else {
-            assert!(requests.contains("thread/resume") && !requests.contains("dynamicTools"));
+            assert!(requests.contains("thread/start") && !requests.contains("dynamicTools"));
             assert!(!requests.contains("work/codex-fixture"));
         }
     }
@@ -1346,7 +1384,7 @@ fn successful(text: &str) -> String {
 }
 
 #[tokio::test]
-async fn native_skill_delivery_is_explicit_pinned_and_read_only() -> Result<()> {
+async fn native_skill_delivery_is_explicit_and_read_only() -> Result<()> {
     use supertag_protocol::v2::{
         ContextPin, ContextSet, PolicyContextItem, ResolvedSkill, TaskPolicySnapshot,
     };
@@ -1440,15 +1478,17 @@ async fn native_skill_delivery_is_explicit_pinned_and_read_only() -> Result<()> 
                     .join(".agents/skills/skill-review")
                     .exists()
             );
-        } else {
+        } else if index == 2 {
             assert!(!outcome.succeeded);
             assert!(outcome.checkpoint.is_none());
             assert!(!native.directory.path().join("pid").exists());
-            assert!(outcome.result.contains(if index == 2 {
-                "read-only"
-            } else {
-                "changed resolved context"
-            }));
+            assert!(outcome.result.contains("read-only"));
+        } else {
+            // A changed Skill is new resolved context: the thread that loaded the old one is
+            // not resumed, and a fresh one starts with the new one.
+            ensure!(outcome.succeeded, "{}", outcome.result);
+            let requests = native.read("requests.jsonl")?;
+            assert!(requests.contains("thread/start") && !requests.contains("thread/resume"));
         }
     }
     Ok(())
@@ -2708,11 +2748,8 @@ async fn checkpoint_corruption_wrong_scope_and_native_thread_mismatch_fail_close
         .unwrap();
     let mut corrupt = checkpoint.clone();
     corrupt.payload.push(b' ');
-    let mut wrong_harness = checkpoint.clone();
-    wrong_harness.harness = "another-harness".into();
     for invalid in [
         corrupt,
-        wrong_harness,
         modify_checkpoint(&checkpoint, |value| value["tag_id"] = "another-tag".into())?,
         modify_checkpoint(&checkpoint, |value| {
             value["session_id"] = "another-session".into()
@@ -2733,6 +2770,23 @@ async fn checkpoint_corruption_wrong_scope_and_native_thread_mismatch_fail_close
         assert!(observed.outcome.as_ref().unwrap().checkpoint.is_none());
         assert!(observed.usage.is_empty());
     }
+    // Another harness's checkpoint is not this harness's to resume: the turn starts fresh.
+    let mut wrong_harness = checkpoint.clone();
+    wrong_harness.harness = "another-harness".into();
+    let fresh = NativeFixture::new(&successful("fresh thread"), "exit 0")?;
+    let server = HarnessProcess::with_checkpoint(&["files:read"], Some(wrong_harness)).await?;
+    run(fresh.options(), server.bootstrap.clone()).await?;
+    assert!(
+        server
+            .observed
+            .lock()
+            .await
+            .outcome
+            .as_ref()
+            .unwrap()
+            .succeeded
+    );
+    assert!(fresh.read("requests.jsonl")?.contains("thread/start"));
     let mismatch = NativeFixture::new(
         &successful("wrong thread").replace("native-thread", "unrelated-thread"),
         "exit 0",
@@ -2780,7 +2834,8 @@ async fn checkpoint_larger_than_ordinary_message_limit_crosses_attach_and_comple
 }
 
 #[tokio::test]
-async fn native_objective_question_is_scoped_idempotent_and_pins_its_manifest() -> Result<()> {
+async fn native_objective_question_is_scoped_idempotent_and_leaves_with_its_authority() -> Result<()>
+{
     let fixture = NativeFixture::new(&successful("Waiting for your decision"), "exit 0")?;
     std::fs::write(fixture.directory.path().join("question-mode"), "duplicate")?;
     let server =
@@ -2837,7 +2892,9 @@ async fn native_objective_question_is_scoped_idempotent_and_pins_its_manifest() 
             .unwrap()
             .succeeded
     );
-    let rejected = NativeFixture::new(&successful("Must not launch"), "exit 0")?;
+    // Without question authority the thread that registered `ask` is not resumed: a fresh one
+    // starts without it.
+    let fresh = NativeFixture::new(&successful("Fresh without ask"), "exit 0")?;
     let server = HarnessProcess::configured(
         &["files:read"],
         Some(checkpoint),
@@ -2845,18 +2902,14 @@ async fn native_objective_question_is_scoped_idempotent_and_pins_its_manifest() 
         false,
     )
     .await?;
-    run(rejected.options(), server.bootstrap.clone()).await?;
-    assert!(
-        !server
-            .observed
-            .lock()
-            .await
-            .outcome
-            .as_ref()
-            .unwrap()
-            .succeeded
-    );
-    assert!(!rejected.directory.path().join("args").exists());
+    run(fresh.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().unwrap();
+    assert!(outcome.succeeded, "{}", outcome.result);
+    assert!(observed.questions.is_empty());
+    let requests = fresh.read("requests.jsonl")?;
+    assert!(requests.contains("thread/start") && !requests.contains("thread/resume"));
+    assert!(!requests.contains("dynamicTools"));
     Ok(())
 }
 
@@ -2919,21 +2972,20 @@ async fn native_objective_report_sets_the_signal_and_result_only_for_its_owner()
         assert_eq!(outcome.result, "Done");
     }
 
-    // Once the Session no longer owns an open Objective, its thread does not resume.
-    let closed = NativeFixture::new(&successful("Must not launch"), "exit 0")?;
+    // Once the Session no longer owns an open Objective, its thread does not resume: a fresh
+    // one starts without the tool.
+    let closed = NativeFixture::new(&successful("Fresh reply"), "exit 0")?;
     let server =
         HarnessProcess::configured(&["files:read"], Some(checkpoint), "Thanks", false).await?;
-    let _ = run(closed.options(), server.bootstrap.clone()).await;
-    assert!(
-        server
-            .observed
-            .lock()
-            .await
-            .outcome
-            .as_ref()
-            .is_none_or(|outcome| !outcome.succeeded)
-    );
-    assert!(!closed.directory.path().join("args").exists());
+    run(closed.options(), server.bootstrap.clone()).await?;
+    {
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        assert_eq!(outcome.objective_signal, ObjectiveSignal::Progress as i32);
+    }
+    let requests = closed.read("requests.jsonl")?;
+    assert!(requests.contains("thread/start") && !requests.contains("report_objective"));
 
     // A turn that is not an Objective turn is never offered the tool.
     let plain = NativeFixture::new(&successful("Plain reply"), "exit 0")?;
@@ -3194,12 +3246,14 @@ async fn ambiguous_question_and_invalid_receipts_fail_without_checkpoint_and_sto
     Ok(())
 }
 
+/// A checkpoint this turn cannot resume as is (an older format, or a thread that registered other
+/// tools) is dropped: the turn starts a fresh thread with today's tools, from the Session's recap.
 #[tokio::test]
-async fn legacy_no_tool_checkpoint_resumes_without_gaining_question_authority() -> Result<()> {
-    let first = NativeFixture::new(&successful("legacy history"), "exit 0")?;
+async fn outdated_checkpoint_starts_a_fresh_thread_from_the_recap() -> Result<()> {
+    let first = NativeFixture::new(&successful("first turn"), "exit 0")?;
     let server = HarnessProcess::start(&["files:read"]).await?;
     run(first.options(), server.bootstrap.clone()).await?;
-    let mut checkpoint = server
+    let current = server
         .observed
         .lock()
         .await
@@ -3209,59 +3263,51 @@ async fn legacy_no_tool_checkpoint_resumes_without_gaining_question_authority() 
         .checkpoint
         .clone()
         .unwrap();
-    let mut payload: Value = serde_json::from_slice(&checkpoint.payload)?;
-    payload["version"] = json!(1);
-    payload.as_object_mut().unwrap().remove("tool_manifest");
-    checkpoint.payload = serde_json::to_vec(&payload)?;
-    checkpoint.sha256 = format!("{:x}", Sha256::digest(&checkpoint.payload));
-    checkpoint.format = "codex-session-v1".into();
-    let legacy = checkpoint.clone();
-    let second = NativeFixture::new(&successful("legacy resumed"), "exit 0")?;
-    let server = HarnessProcess::with_checkpoint(&["files:read"], Some(legacy.clone())).await?;
-    run(second.options(), server.bootstrap.clone()).await?;
-    let observed = server.observed.lock().await;
-    let outcome = observed.outcome.as_ref().unwrap();
-    assert!(outcome.succeeded, "{}", outcome.result);
-    assert_eq!(
-        outcome.checkpoint.as_ref().unwrap().format,
-        "codex-session-v2"
-    );
-    drop(observed);
-    for mode in ["gain-authority", "untrusted-manifest"] {
-        let mut checkpoint = legacy.clone();
-        if mode == "untrusted-manifest" {
-            let mut archive: Value = serde_json::from_slice(&checkpoint.payload)?;
-            let text = archive["transcripts"][0]["text"].as_str().unwrap();
-            let mut records: Vec<Value> = text
-                .lines()
-                .map(serde_json::from_str)
-                .collect::<std::result::Result<_, _>>()?;
-            records[0]["payload"]["dynamic_tools"] = json!([{"name":"unexpected"}]);
-            archive["transcripts"][0]["text"] = json!(event_lines(&records));
-            checkpoint.payload = serde_json::to_vec(&archive)?;
-            checkpoint.sha256 = format!("{:x}", Sha256::digest(&checkpoint.payload));
-        }
-        let fixture = NativeFixture::new(&successful("must not launch"), "exit 0")?;
-        let server = HarnessProcess::configured(
-            &["files:read"],
-            Some(checkpoint),
-            "resume",
-            mode == "gain-authority",
-        )
-        .await?;
-        run(fixture.options(), server.bootstrap.clone()).await?;
+    let mut legacy = current.clone();
+    legacy.format = "codex-session-v1".into();
+    let outdated_tools = modify_checkpoint(&current, |archive| {
+        archive["tool_manifest"] = json!("none-v1+tag-sessions-v1")
+    })?;
+    let history = vec![supertag_protocol::v2::AttemptHistoryEntry {
+        task_id: "earlier-task".into(),
+        prompt: "What is the release plan?".into(),
+        result: Some(format!("recap-result-receipt {KEY}")),
+        messages: vec!["recap-message-receipt".into()],
+    }];
+    for (name, checkpoint, fresh) in [
+        ("current", current.clone(), false),
+        ("legacy format", legacy, true),
+        ("outdated tools", outdated_tools, true),
+    ] {
+        let native = NativeFixture::new(&successful("second turn"), "exit 0")?;
+        let server = HarnessProcess::with_checkpoint(&["files:read"], Some(checkpoint)).await?;
+        server.observed.lock().await.history = history.clone();
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().unwrap();
+        assert!(outcome.succeeded, "{name}: {}", outcome.result);
+        let saved = outcome.checkpoint.as_ref().unwrap();
+        assert_eq!(saved.format, "codex-session-v2", "{name}");
         assert!(
-            !server
-                .observed
-                .lock()
-                .await
-                .outcome
-                .as_ref()
-                .unwrap()
-                .succeeded,
-            "{mode}"
+            String::from_utf8_lossy(&saved.payload).contains(r#""tool_manifest":"none-v1""#),
+            "{name}: the new thread registers today's tools"
         );
-        assert!(!fixture.directory.path().join("args").exists(), "{mode}");
+        let requests = native.read("requests.jsonl")?;
+        assert_eq!(requests.contains("thread/resume"), !fresh, "{name}");
+        assert_eq!(requests.contains("thread/start"), fresh, "{name}");
+        let prompt = native.read("prompt")?;
+        assert_eq!(prompt.contains("Earlier in this Session"), fresh, "{name}");
+        assert_eq!(prompt.contains("recap-message-receipt"), fresh, "{name}");
+        assert_eq!(
+            prompt.contains("recap-result-receipt [REDACTED]"),
+            fresh,
+            "{name}"
+        );
+        assert!(!prompt.contains(KEY), "{name}");
+        assert!(
+            !prompt.contains("read_session with sessionId"),
+            "{name}: no rereading tools without the capability"
+        );
     }
     Ok(())
 }
@@ -3290,7 +3336,10 @@ async fn native_tag_session_tools_read_and_carry_the_portfolio() -> Result<()> {
     let mut checkpoint = None;
     for read in [true, false] {
         let native = NativeFixture::new(&successful("Recalled earlier work"), "exit 0")?;
-        std::fs::write(native.directory.path().join("tag-sessions-mode"), "")?;
+        // A fresh thread without the capability has no such tools to call.
+        if read {
+            std::fs::write(native.directory.path().join("tag-sessions-mode"), "")?;
+        }
         let server = HarnessProcess::configured_tools(
             &["files:read"],
             checkpoint.clone(),
@@ -3312,7 +3361,13 @@ async fn native_tag_session_tools_read_and_carry_the_portfolio() -> Result<()> {
         let outcome = observed.outcome.as_ref().context("outcome")?;
         ensure!(outcome.succeeded, "{}", outcome.result);
         let saved = outcome.checkpoint.clone().context("checkpoint")?;
-        assert!(String::from_utf8_lossy(&saved.payload).contains("none-v1+tag-sessions-v1"));
+        // Without the capability the checkpointed thread's tools are outdated: the turn starts
+        // a fresh thread without them.
+        assert_eq!(
+            String::from_utf8_lossy(&saved.payload)
+                .contains(r#""tool_manifest":"none-v1+tag-sessions-v2""#),
+            read
+        );
         if checkpoint.is_none() {
             checkpoint = Some(saved);
         }
@@ -3322,6 +3377,7 @@ async fn native_tag_session_tools_read_and_carry_the_portfolio() -> Result<()> {
                 "list_sessions",
                 "search_sessions",
                 "read_session",
+                "read_turn",
                 "list_objectives",
                 "read_objective",
             ]
@@ -3338,6 +3394,7 @@ async fn native_tag_session_tools_read_and_carry_the_portfolio() -> Result<()> {
                 "tag-list-receipt",
                 "tag-search-receipt",
                 "tag-read-receipt [REDACTED]",
+                "tag-turn-receipt [REDACTED]",
                 "tag-objectives-receipt",
                 "Keep docs current",
             ] {

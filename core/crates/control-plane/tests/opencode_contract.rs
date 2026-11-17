@@ -425,6 +425,50 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         .unwrap();
     let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
     let mut eligible = vec![];
+    // Older turns, beyond the recap's ten once the later ones are added.
+    for index in 0..5 {
+        let task = store
+            .send_message(
+                OP,
+                &SendMessageRequest {
+                    tag_id: "history".into(),
+                    text: format!("Earlier intent {index}"),
+                    operation_id: format!("history-earlier-{index}"),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .task
+            .unwrap();
+        sqlx::query("UPDATE supertag_v2_tasks SET state=$1,result=$2 WHERE task_id=$3")
+            .bind(TaskState::Succeeded as i64)
+            .bind(format!("Earlier result {index}"))
+            .bind(&task.task_id)
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        eligible.push(task.task_id.clone());
+    }
+    // The recap carries the messages the Tag wrote during a turn, not its activity.
+    for (sequence, kind, text) in [
+        (1i64, TaskEventKind::Message, "Looking now."),
+        (2, TaskEventKind::Activity, "Ran `ls`"),
+        (3, TaskEventKind::Message, "Found it."),
+        // The final message is the result, which the entry carries once.
+        (4, TaskEventKind::Message, "Earlier result 4"),
+    ] {
+        sqlx::query(
+            "INSERT INTO supertag_v2_task_events (task_id,sequence,text,kind) VALUES ($1,$2,$3,$4)",
+        )
+        .bind(&eligible[4])
+        .bind(sequence)
+        .bind(text)
+        .bind(kind as i64)
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    }
     for index in 0..11 {
         // Another principal's conversation with the Tag is a different Session.
         let principal = match index {
@@ -538,22 +582,24 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
             .collect::<Vec<_>>(),
         expected
     );
+    assert_eq!(history.entries[2].messages, ["Looking now.", "Found it."]);
+    assert!(history.entries[3].messages.is_empty());
     assert_eq!(
-        history.entries[1].result.as_deref(),
+        history.entries[6].result.as_deref(),
         Some("Prior result 3"),
         "settled failed result is history"
     );
     assert_eq!(
-        history.entries[2].result.as_deref(),
+        history.entries[7].result.as_deref(),
         Some("Prior result 4"),
         "settled cancelled result is history"
     );
     assert_eq!(
-        history.entries[4].prompt,
+        history.entries[9].prompt,
         format!("{}\n[truncated]", "😀".repeat(1_000))
     );
     assert_eq!(
-        history.entries[4].result,
+        history.entries[9].result,
         Some(format!("{}\n[truncated]", "😀".repeat(2_000)))
     );
     let wrong_generation = supertag_control_plane::HostAuthority::new("host:opencode", 2).unwrap();
@@ -615,7 +661,7 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
         history
     );
     sqlx::query("UPDATE supertag_v2_tasks SET cleanup_pending=1 WHERE task_id=$1")
-        .bind(&eligible[6])
+        .bind(&eligible[11])
         .execute(&mut connection)
         .await
         .unwrap();
@@ -626,11 +672,11 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
             .iter()
             .map(|entry| entry.task_id.clone())
             .collect::<Vec<_>>(),
-        eligible[1..6]
+        eligible[1..11]
     );
     sqlx::query("UPDATE supertag_v2_tasks SET state=$1,cleanup_pending=0 WHERE task_id=$2")
         .bind(TaskState::Queued as i64)
-        .bind(&eligible[6])
+        .bind(&eligible[11])
         .execute(&mut connection)
         .await
         .unwrap();
@@ -640,7 +686,7 @@ async fn history_contract(store: &Store, url: &str, host: &supertag_control_plan
     );
     sqlx::query("UPDATE supertag_v2_tasks SET state=$1 WHERE task_id=$2")
         .bind(TaskState::Succeeded as i64)
-        .bind(&eligible[6])
+        .bind(&eligible[11])
         .execute(&mut connection)
         .await
         .unwrap();

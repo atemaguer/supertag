@@ -1,5 +1,6 @@
 mod artifact_acquisition;
 mod budget;
+mod checkpoints;
 mod commit_reviews;
 mod coordination;
 mod partition_calls;
@@ -617,6 +618,9 @@ async fn main() -> Result<()> {
     if let Some(summary) = tag_sessions::exercise(&bootstrap, &run, &task).await? {
         result = summary;
     }
+    if checkpoints::enabled() {
+        result = checkpoints::summary(&run)?;
+    }
     if std::env::args().any(|arg| arg == "--artifact-acquisition-fixture") {
         result = artifact_acquisition::exercise(&bootstrap, &run).await?;
         if std::env::args().any(|arg| arg == "--wait-for-cancel") {
@@ -847,6 +851,20 @@ async fn main() -> Result<()> {
         let schedule = created.schedule.context("created Schedule")?;
         result.push_str(&format!("\nScheduled {}", schedule.schedule_id));
     }
+    if checkpoints::enabled() {
+        harness
+            .publish(authenticated_request(
+                HarnessPublishRequest {
+                    sequence,
+                    text: format!("Noted: {}", task.prompt),
+                    kind: TaskEventKind::Message as i32,
+                },
+                &bootstrap.token,
+                None,
+            )?)
+            .await?;
+        sequence += 1;
+    }
     harness
         .publish(authenticated_request(
             HarnessPublishRequest {
@@ -891,7 +909,8 @@ async fn main() -> Result<()> {
                 result,
                 succeeded,
                 objective_signal: objective_signal as i32,
-                checkpoint: None,
+                checkpoint: (succeeded && checkpoints::enabled())
+                    .then(|| checkpoints::checkpoint(&task)),
                 waiting_approval_ids,
             },
             &bootstrap.token,

@@ -69,6 +69,7 @@ if root.joinpath("tag-sessions-mode").exists():
         ("list_sessions", {"limit": 5}),
         ("search_sessions", {"query": "release"}),
         ("read_session", {"sessionId": "conversation/earlier", "before": 9}),
+        ("read_turn", {"taskId": "earlier-task", "after": 2}),
         ("list_objectives", {}),
         ("read_objective", {"objectiveId": "docs"}),
     ])

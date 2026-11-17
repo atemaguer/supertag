@@ -25,6 +25,7 @@ import {
   receipt,
   redact,
   resolveOutsideDirectories,
+  sessionRecap,
   TaskEventKind,
   TaskState,
   TURN_GUIDANCE,
@@ -581,6 +582,10 @@ export async function runAdapter(
         syncClaudeAiSkills: false,
         syncClaudeAiPlugins: false,
         disableSkillShellExecution: true,
+        // SuperTag keeps the Tag's history; Claude's own per-Attempt memory would be lost
+        // with the Attempt and is invisible to operators.
+        autoMemoryEnabled: false,
+        autoDreamEnabled: false,
         ...(fileScope ? { permissions: { deny: nativeDenyRules(cwd, fileScope) } } : {}),
       },
       systemPrompt: [task.instructions, TURN_GUIDANCE, tagPortfolio(run)]
@@ -690,7 +695,19 @@ export async function runAdapter(
     phase = "native SDK execution";
     for await (const message of claudeQuery(
       verifiedSkillQuery(names),
-      task.prompt,
+      restored
+        ? task.prompt
+        : [
+            sessionRecap(
+              run.history,
+              task.sessionId,
+              secrets,
+              run.coordination?.mayReadTagSessions ?? false,
+            ),
+            task.prompt,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
       sdkOptions,
       controller.signal,
       {
@@ -859,7 +876,7 @@ export async function runAdapter(
       {
         result,
         succeeded: true,
-        checkpoint,
+        ...(checkpoint ? { checkpoint } : {}),
         waitingApprovalIds: [
           ...new Set([
             ...(await coordination.waitingApprovalIds()),

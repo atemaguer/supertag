@@ -855,6 +855,18 @@ async function turn(message) {
     await new Promise((resolve) => shell.on("exit", resolve));
     result = "fixture ran an admitted command";
   }
+  if (prompt.endsWith("recall-recap")) {
+    // What a fresh native Session starts from: the recap in its first message, and no
+    // Claude auto memory of its own.
+    const raw = arg("--settings") ?? "{}";
+    const settings = JSON.parse(raw.trim().startsWith("{") ? raw : await readFile(raw, "utf8"));
+    result = JSON.stringify({
+      recap: prompt.split("<supertag-history>\n")[1]?.split("\n</supertag-history>")[0] ?? null,
+      reread: prompt.includes("call read_session"),
+      autoMemoryEnabled: settings.autoMemoryEnabled,
+      autoDreamEnabled: settings.autoDreamEnabled,
+    });
+  }
   if (message.uuid) result += `; input: ${prompt}`;
   if (prompt.includes("write")) {
     if (!(await hook("Write", { file_path: join(cwd, "answer.txt"), content: result })))

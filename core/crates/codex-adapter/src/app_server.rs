@@ -821,6 +821,7 @@ pub(crate) async fn execute(
     policy: Policy,
     admitted_skills: &std::collections::BTreeSet<String>,
     expected_thread: Option<String>,
+    recap: &str,
     baseline: Option<UsageCounters>,
     max_reported_tokens: Option<u64>,
     harness: &mut HarnessClient<Channel>,
@@ -915,17 +916,14 @@ pub(crate) async fn execute(
     stream.turn_requested = true;
     let portfolio = questions.portfolio();
     let guidance = supertag_protocol::TURN_GUIDANCE;
-    let prompt = if portfolio.is_empty() {
-        format!(
-            "Tag instructions:\n{}\n\n{guidance}\n\nTask:\n{}\n",
-            task.instructions, task.prompt
-        )
-    } else {
-        format!(
-            "Tag instructions:\n{}\n\n{guidance}\n\nSuperTag context:\n{portfolio}\n\nTask:\n{}\n",
-            task.instructions, task.prompt
-        )
-    };
+    let mut prompt = format!("Tag instructions:\n{}\n\n{guidance}\n\n", task.instructions);
+    if !portfolio.is_empty() {
+        prompt.push_str(&format!("SuperTag context:\n{portfolio}\n\n"));
+    }
+    if !recap.is_empty() {
+        prompt.push_str(&format!("{recap}\n\n"));
+    }
+    prompt.push_str(&format!("Task:\n{}\n", task.prompt));
     let response = transport
         .call(
             "turn/start",

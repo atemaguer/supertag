@@ -29,7 +29,7 @@ pub(crate) const CHILD_QUESTIONS: &str = "work-session-ask-v1";
 pub(crate) const ARTIFACT_ACQUIRE_SUFFIX: &str = "+artifact-acquire-v1";
 pub(crate) const ARTIFACT_ATTACH_SUFFIX: &str = "+artifact-attach-v1";
 pub(crate) const ARTIFACT_CAPTURE_SUFFIX: &str = "+artifact-capture-v1";
-pub(crate) const TAG_SESSIONS_SUFFIX: &str = "+tag-sessions-v1";
+pub(crate) const TAG_SESSIONS_SUFFIX: &str = "+tag-sessions-v2";
 pub(crate) const SCHEDULE_SUFFIX: &str = "+schedule-v1";
 pub(crate) const OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-v1";
 pub(crate) const ONGOING_OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-ongoing-v1";
@@ -42,7 +42,7 @@ pub(crate) struct Tools {
     pub(crate) capture_artifact: bool,
     pub(crate) acquire_artifacts: bool,
     pub(crate) attach_artifacts: bool,
-    /// `list_sessions`, `search_sessions`, `read_session`, `list_objectives`, and
+    /// `list_sessions`, `search_sessions`, `read_session`, `read_turn`, `list_objectives`, and
     /// `read_objective`.
     pub(crate) tag_sessions: bool,
     /// `schedule` and `cancel_schedule`, for a root turn.
@@ -102,6 +102,41 @@ impl Tools {
             || self.tag_sessions
             || self.schedule
             || self.report_objective.offered()
+    }
+
+    /// Names the tools a native thread registers. A checkpointed thread resumes only with the
+    /// same manifest; otherwise the turn starts a fresh thread that registers today's tools.
+    pub(crate) fn manifest(self) -> String {
+        let base = match self.coordination {
+            Inventory::None => NONE,
+            Inventory::Ask => OBJECTIVE_ASK,
+            Inventory::ChildQuestions => CHILD_QUESTIONS,
+            Inventory::Workstream => FULL_COORDINATION,
+            Inventory::Direct => DIRECT_COORDINATION,
+            Inventory::DirectReview => DIRECT_REVIEW,
+            Inventory::WorkSessions => WORK_SESSIONS,
+            Inventory::WorkSessionsReview => WORK_SESSIONS_REVIEW,
+            Inventory::WorkSessionLifecycle => WORK_SESSION_LIFECYCLE,
+            Inventory::WorkSessionLifecycleReview => WORK_SESSION_LIFECYCLE_REVIEW,
+        };
+        let mut manifest = base.to_owned();
+        if self.capture_artifact {
+            manifest.push_str(ARTIFACT_CAPTURE_SUFFIX);
+        }
+        if self.acquire_artifacts {
+            manifest.push_str(ARTIFACT_ACQUIRE_SUFFIX);
+        }
+        if self.attach_artifacts {
+            manifest.push_str(ARTIFACT_ATTACH_SUFFIX);
+        }
+        if self.tag_sessions {
+            manifest.push_str(TAG_SESSIONS_SUFFIX);
+        }
+        if self.schedule {
+            manifest.push_str(SCHEDULE_SUFFIX);
+        }
+        manifest.push_str(self.report_objective.suffix());
+        manifest
     }
 
     pub(crate) fn arguments(self, params: &Value) -> Result<Arguments> {
@@ -223,36 +258,7 @@ impl Bridge {
         self.report.clone()
     }
     pub(crate) fn manifest(&self) -> String {
-        let base = match self.tools.coordination {
-            Inventory::None => NONE,
-            Inventory::Ask => OBJECTIVE_ASK,
-            Inventory::ChildQuestions => CHILD_QUESTIONS,
-            Inventory::Workstream => FULL_COORDINATION,
-            Inventory::Direct => DIRECT_COORDINATION,
-            Inventory::DirectReview => DIRECT_REVIEW,
-            Inventory::WorkSessions => WORK_SESSIONS,
-            Inventory::WorkSessionsReview => WORK_SESSIONS_REVIEW,
-            Inventory::WorkSessionLifecycle => WORK_SESSION_LIFECYCLE,
-            Inventory::WorkSessionLifecycleReview => WORK_SESSION_LIFECYCLE_REVIEW,
-        };
-        let mut manifest = base.to_owned();
-        if self.tools.capture_artifact {
-            manifest.push_str(ARTIFACT_CAPTURE_SUFFIX);
-        }
-        if self.tools.acquire_artifacts {
-            manifest.push_str(ARTIFACT_ACQUIRE_SUFFIX);
-        }
-        if self.tools.attach_artifacts {
-            manifest.push_str(ARTIFACT_ATTACH_SUFFIX);
-        }
-        if self.tools.tag_sessions {
-            manifest.push_str(TAG_SESSIONS_SUFFIX);
-        }
-        if self.tools.schedule {
-            manifest.push_str(SCHEDULE_SUFFIX);
-        }
-        manifest.push_str(self.tools.report_objective.suffix());
-        manifest
+        self.tools.manifest()
     }
     pub(crate) fn tools(&self) -> Value {
         let mut specs = tool_specs(self.tools.coordination);

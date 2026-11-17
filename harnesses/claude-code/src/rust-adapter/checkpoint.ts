@@ -9,7 +9,8 @@ import {
 import { type ClaudeTranscript, readClaudeTranscripts } from "../session-store.js";
 
 const FORMAT = "claude-agent-sdk-v2";
-const MAX_BYTES = 9 * 1024 * 1024;
+/** Matches the Rust `MAX_RESUMED_CHECKPOINT_BYTES`: a larger checkpoint is never resumed. */
+const MAX_BYTES = 8 * 1024 * 1024;
 type Binding = Pick<Task, "tagId" | "sessionId">;
 interface Archive {
   version: 1;
@@ -128,7 +129,8 @@ export function captureCheckpoint(
     typeof value === "string" ? redact(value, secrets) : value,
   );
   const payload = Buffer.from(encoded);
-  if (payload.length > MAX_BYTES) throw new Error("Claude checkpoint exceeds its portable limit");
+  // Too big to resume: the turn keeps no checkpoint, and the next starts from the recap.
+  if (payload.length > MAX_BYTES) return undefined;
   return create(SessionCheckpointSchema, {
     harness: "claude-code",
     format: FORMAT,

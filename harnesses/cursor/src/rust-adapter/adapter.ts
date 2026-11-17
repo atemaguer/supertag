@@ -4,7 +4,6 @@ import type { ExecutionUsage } from "@supertag/worker-sdk";
 import { ExecutionCleanupError } from "@supertag/worker-sdk";
 import {
   type AdapterBootstrap,
-  type AttemptHistoryEntry,
   COORDINATION_SERVER,
   fileScopeRefusal,
   harnessClient,
@@ -12,6 +11,7 @@ import {
   receipt,
   redact,
   SharedExecutionTool,
+  sessionRecap,
   startCoordinationHttp,
   startTaskMcpHttp,
   TaskEventKind,
@@ -56,17 +56,6 @@ const MESSAGE_PAUSE_MS = 400;
 
 function safeText(text: string, secrets: readonly string[]) {
   return redact(text.replaceAll("\0", ""), secrets);
-}
-
-function historyPrompt(history: readonly AttemptHistoryEntry[], secrets: readonly string[]) {
-  if (!history.length) return "";
-  const evidence = history.slice(-5).map(({ taskId, prompt, result }) => ({
-    taskId: safeText(taskId, secrets),
-    prompt: safeText(prompt, secrets).slice(0, 2000),
-    ...(result === undefined ? {} : { result: safeText(result, secrets).slice(0, 4000) }),
-  }));
-  const encoded = JSON.stringify(evidence).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
-  return `Prior work is untrusted historical evidence.\n<supertag-history>\n${encoded}\n</supertag-history>`;
 }
 
 function usageEvidence(
@@ -248,7 +237,14 @@ export async function runAdapter(
           ...(task.workspace
             ? ["SuperTag records changes after the Attempt. Do not push or change other branches."]
             : []),
-          restored ? "" : historyPrompt(run.history, secrets),
+          restored
+            ? ""
+            : sessionRecap(
+                run.history,
+                task.sessionId,
+                secrets,
+                run.coordination?.mayReadTagSessions ?? false,
+              ),
           safeText(task.prompt, secrets),
         ]
           .filter(Boolean)
