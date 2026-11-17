@@ -318,6 +318,25 @@ async fn contract(url: &str) {
     let log = logs[0].log.as_ref().unwrap();
     assert_eq!((log.allowed, log.requests.len()), (7, 1));
     assert_eq!(log.requests[0].credential, "github");
+    // The Tag details view lists the Tag's logs, newest Task Attempt first; other Tags have none.
+    let listed = store
+        .list_network_logs(&ListNetworkLogsRequest {
+            tag_id: "codex-tag".into(),
+            limit: 0,
+        })
+        .await
+        .unwrap();
+    assert_eq!(listed.logs.len(), 1);
+    assert_eq!(listed.logs[0].task_id, scoped);
+    assert_eq!(listed.logs[0].log.as_ref().unwrap().allowed, 7);
+    let other = store
+        .list_network_logs(&ListNetworkLogsRequest {
+            tag_id: "claude-tag".into(),
+            limit: 5,
+        })
+        .await
+        .unwrap();
+    assert!(other.logs.is_empty());
 
     // A Tag's own web:fetch allows every origin; only the credential binding stays.
     store

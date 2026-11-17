@@ -11,6 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Operators see a Tag's network log, the web requests its Task Attempts made through the Worker
+  Host's egress proxy, allowed or refused, in the desktop app's Tag details under **Network** and
+  under **Network** in the terminal UI's command palette.
 - See and delete what a Tag remembers: the desktop app lists a Tag's notes in its details panel,
   opened from the Tag's name, and the terminal UI under Notes in the command palette. Each note
   records when a turn last had it in its context (`last_seen_at` in `supertag describe memory`),

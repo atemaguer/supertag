@@ -7483,6 +7483,83 @@ class HarnessWorkSessions:
             _registered_method=True)
 
 
+class NetworkLogsStub:
+    """A Tag's network logs for its Tag details view.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.List = channel.unary_unary(
+                '/supertag.runtime.v2.NetworkLogs/List',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNetworkLogsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNetworkLogsResponse.FromString,
+                _registered_method=True)
+
+
+class NetworkLogsServicer:
+    """A Tag's network logs for its Tag details view.
+    """
+
+    def List(self, request, context):
+        """The Tag's newest Task Attempts with a network log, newest first. Operators only: a log names
+        the origins and paths of other people's Tasks.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_NetworkLogsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'List': grpc.unary_unary_rpc_method_handler(
+                    servicer.List,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNetworkLogsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNetworkLogsResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.NetworkLogs', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.NetworkLogs', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class NetworkLogs:
+    """A Tag's network logs for its Tag details view.
+    """
+
+    @staticmethod
+    def List(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.NetworkLogs/List',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNetworkLogsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNetworkLogsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class AttemptMcpEffectsStub:
     """Missing associated documentation comment in .proto file."""
 

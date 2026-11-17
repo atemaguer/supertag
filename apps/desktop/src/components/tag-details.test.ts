@@ -2,9 +2,9 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ControlPlane, Note, Tag } from "../control-plane";
+import type { ControlPlane, NetworkLog, Note, Tag } from "../control-plane";
 import { watchFeed } from "../lib/watch";
-import { noteCaption, TagDetails } from "./tag-details";
+import { networkRequestLine, networkTotals, noteCaption, TagDetails } from "./tag-details";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -99,4 +99,81 @@ it("says when the Tag keeps no notes you can see", async () => {
   await settle();
   expect(host.textContent).toContain("Lead keeps no notes you can see yet");
   expect(host.querySelector('[aria-label^="Delete note"]')).toBeNull();
+});
+
+const networkLog: NetworkLog = {
+  taskId: "9f1c2d3e4b5a",
+  attemptId: "attempt-1",
+  allowed: 2,
+  denied: 1,
+  unrecorded: 0,
+  requests: [
+    {
+      atMs: Date.now(),
+      method: "GET",
+      origin: "https://api.github.com",
+      path: "/repos/acme",
+      allowed: true,
+      status: 200,
+      credential: "github",
+    },
+    {
+      atMs: Date.now(),
+      method: "CONNECT",
+      origin: "https://example.org",
+      path: "",
+      allowed: false,
+      reason: "origin is not in the Task's network scope",
+    },
+  ],
+};
+
+it("words each network request and an Attempt's totals", () => {
+  expect(networkRequestLine(networkLog.requests[0]!)).toBe(
+    "GET https://api.github.com/repos/acme → 200 · with github",
+  );
+  expect(networkRequestLine(networkLog.requests[1]!)).toBe(
+    "CONNECT https://example.org refused: origin is not in the Task's network scope",
+  );
+  expect(networkTotals({ ...networkLog, unrecorded: 4 })).toBe(
+    "2 allowed · 1 refused · 4 more not listed",
+  );
+});
+
+it("shows the Tag's network log as its own section and rereads when a turn ends", async () => {
+  let held: NetworkLog[] = [];
+  const networkLogs = vi.fn(async () => held);
+  const controlPlane = { notes: async () => [], networkLogs } as unknown as ControlPlane;
+  const feed = watchFeed();
+  act(() =>
+    root.render(createElement(TagDetails, { controlPlane, watch: feed, tag, onClose() {} })),
+  );
+  await settle();
+  expect(networkLogs).toHaveBeenCalledWith("lead");
+  const headings = [...host.querySelectorAll("section.details-section h3")].map(
+    (node) => node.textContent,
+  );
+  expect(headings).toEqual(["Notes", "Network"]);
+  expect(host.textContent).toContain("No network log yet.");
+  held = [networkLog];
+  act(() => feed.publish({ kind: "conversation", tagId: "lead" }));
+  await settle();
+  const lines = [...host.querySelectorAll(".network-request")].map((node) => node.textContent);
+  expect(lines).toEqual([
+    "GET https://api.github.com/repos/acme → 200 · with github",
+    "CONNECT https://example.org refused: origin is not in the Task's network scope",
+  ]);
+  expect(host.textContent).toContain("Task 9f1c2d3e");
+});
+
+it("tells a person who is not an operator that only operators see the network log", async () => {
+  const controlPlane = {
+    notes: async () => [],
+    networkLogs: async () => {
+      throw new Error("permission denied: the call needs an operator");
+    },
+  } as unknown as ControlPlane;
+  act(() => root.render(createElement(TagDetails, { controlPlane, tag, onClose() {} })));
+  await settle();
+  expect(host.textContent).toContain("Only operators can see the network log.");
 });

@@ -74,6 +74,25 @@ type fakeControlPlane struct {
 	// memories answers ListMemories, newest first; deleted are the DeleteMemory requests.
 	memories []*v2.Memory
 	deleted  []string
+	// networkLogs answers NetworkLogs.List for every Tag; networkRefusal refuses it instead.
+	networkLogs    []*v2.TaskNetworkLog
+	networkRefusal bool
+}
+
+// fakeNetworkLogs serves the fake's network logs.
+type fakeNetworkLogs struct {
+	rpc.UnimplementedNetworkLogsHandler
+	f *fakeControlPlane
+}
+
+func (n fakeNetworkLogs) List(_ context.Context, req *connect.Request[v2.ListNetworkLogsRequest]) (*connect.Response[v2.ListNetworkLogsResponse], error) {
+	f := n.f
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.networkRefusal {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("permission denied"))
+	}
+	return connect.NewResponse(&v2.ListNetworkLogsResponse{Logs: f.networkLogs}), nil
 }
 
 // fakeMemories serves the fake's notes.
@@ -132,6 +151,7 @@ func (f *fakeControlPlane) startWith(t testing.TB, wrap func(http.Handler) http.
 	mux.Handle(rpc.NewWorkSessionsHandler(f))
 	mux.Handle(rpc.NewEnrollmentsHandler(f))
 	mux.Handle(rpc.NewMemoriesHandler(fakeMemories{f: f}))
+	mux.Handle(rpc.NewNetworkLogsHandler(fakeNetworkLogs{f: f}))
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != rpc.ProtocolNegotiationNegotiateProcedure && r.Header.Get("Authorization") != "Bearer "+f.token {
 			f.mu.Lock()

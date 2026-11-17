@@ -133,6 +133,13 @@ forget it. In the terminal UI, open the command palette with Ctrl-K and choose *
 press `x` to delete the selected note. The conversation itself shows only messages. To add or change a note, tell the Tag. See
 [Memory](../reference/coordination.md#memory).
 
+## See what a Tag fetched
+
+When a Tag's Permission Sets limit `web:fetch` to named hosts, each Task Attempt's web requests go
+through the Worker Host, which keeps a log of what it allowed and refused. Operators see it in the
+desktop app's Tag details, under **Network**, and in the terminal UI by choosing **Network** in the
+command palette. See [Network log](../reference/iam.md#network-log).
+
 ## Ask a Tag to follow up
 
 Ask the Tag to come back to something later, once or on a schedule:

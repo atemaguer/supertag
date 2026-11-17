@@ -38,6 +38,7 @@ type runtimeClient struct {
 	artifactFiles runtimev2connect.ArtifactTransfersClient
 	enrollments   runtimev2connect.EnrollmentsClient
 	memories      runtimev2connect.MemoriesClient
+	networkLogs   runtimev2connect.NetworkLogsClient
 	streams       conversationStreams
 }
 
@@ -135,6 +136,7 @@ func New(target Target, version string) (*Client, error) {
 		artifactFiles: runtimev2connect.NewArtifactTransfersClient(httpClient, origin, options...),
 		enrollments:   runtimev2connect.NewEnrollmentsClient(httpClient, origin, options...),
 		memories:      runtimev2connect.NewMemoriesClient(httpClient, origin, options...),
+		networkLogs:   runtimev2connect.NewNetworkLogsClient(httpClient, origin, options...),
 	}
 	return c, nil
 }

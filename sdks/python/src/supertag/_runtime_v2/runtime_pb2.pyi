@@ -2558,6 +2558,30 @@ class ReportNetworkLogResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
+class ListNetworkLogsRequest(_message.Message):
+    __slots__ = ("tag_id", "limit")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    limit: int
+    def __init__(self, tag_id: _Optional[str] = ..., limit: _Optional[int] = ...) -> None: ...
+
+class TaskNetworkLog(_message.Message):
+    __slots__ = ("task_id", "attempt_id", "log")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    LOG_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    attempt_id: str
+    log: NetworkLog
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., log: _Optional[_Union[NetworkLog, _Mapping]] = ...) -> None: ...
+
+class ListNetworkLogsResponse(_message.Message):
+    __slots__ = ("logs",)
+    LOGS_FIELD_NUMBER: _ClassVar[int]
+    logs: _containers.RepeatedCompositeFieldContainer[TaskNetworkLog]
+    def __init__(self, logs: _Optional[_Iterable[_Union[TaskNetworkLog, _Mapping]]] = ...) -> None: ...
+
 class ResolveWorkspaceRefRequest(_message.Message):
     __slots__ = ("attempt", "base_commit")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]

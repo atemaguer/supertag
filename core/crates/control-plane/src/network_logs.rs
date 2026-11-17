@@ -125,3 +125,65 @@ pub(crate) async fn logs_for(
         })
         .collect()
 }
+
+impl Store {
+    /// A Tag's newest Task Attempts with a network log, newest first.
+    pub async fn list_network_logs(
+        &self,
+        input: &supertag_protocol::v2::ListNetworkLogsRequest,
+    ) -> Result<supertag_protocol::v2::ListNetworkLogsResponse> {
+        crate::store::name("Tag ID", &input.tag_id)?;
+        let limit = match input.limit {
+            0 => 20,
+            limit => limit.min(100),
+        };
+        let rows = sqlx::query(
+            "SELECT l.task_id, l.attempt_id, l.log FROM supertag_v2_attempt_network_logs l
+             JOIN supertag_v2_tasks t ON t.task_id = l.task_id
+             WHERE t.tag_id = $1 ORDER BY l.recorded_order DESC LIMIT $2",
+        )
+        .bind(&input.tag_id)
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await?;
+        let logs = rows
+            .iter()
+            .map(|row| {
+                Ok(supertag_protocol::v2::TaskNetworkLog {
+                    task_id: row.try_get("task_id")?,
+                    attempt_id: row.try_get("attempt_id")?,
+                    log: Some(crate::policy::decode::<NetworkLog>(
+                        &row.try_get::<Vec<u8>, _>("log")?,
+                    )?),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(supertag_protocol::v2::ListNetworkLogsResponse { logs })
+    }
+}
+
+impl crate::ControlPlane {
+    pub fn network_logs_service(
+        &self,
+    ) -> supertag_protocol::v2::network_logs_server::NetworkLogsServer<Self> {
+        supertag_protocol::v2::network_logs_server::NetworkLogsServer::new(self.clone())
+            .max_decoding_message_size(supertag_protocol::MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(supertag_protocol::MAX_MESSAGE_BYTES)
+    }
+}
+
+#[tonic::async_trait]
+impl supertag_protocol::v2::network_logs_server::NetworkLogs for crate::ControlPlane {
+    async fn list(
+        &self,
+        request: tonic::Request<supertag_protocol::v2::ListNetworkLogsRequest>,
+    ) -> std::result::Result<
+        tonic::Response<supertag_protocol::v2::ListNetworkLogsResponse>,
+        tonic::Status,
+    > {
+        self.actor(&request)?;
+        Ok(tonic::Response::new(
+            self.store.list_network_logs(request.get_ref()).await?,
+        ))
+    }
+}

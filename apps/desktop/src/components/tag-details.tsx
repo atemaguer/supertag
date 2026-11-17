@@ -1,6 +1,13 @@
 import { Lock, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ControlPlane, Note, Tag, WatchUpdate } from "../control-plane";
+import type {
+  ControlPlane,
+  NetworkLog,
+  NetworkRequest,
+  Note,
+  Tag,
+  WatchUpdate,
+} from "../control-plane";
 import { describe } from "../lib/polling";
 import { useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { relativeTime } from "./sidebar";
@@ -56,6 +63,7 @@ export function TagDetails({
         </Button>
       </div>
       <NotesSection controlPlane={controlPlane} watch={watch} tag={tag} />
+      <NetworkSection controlPlane={controlPlane} watch={watch} tag={tag} />
     </aside>
   );
 }
@@ -158,6 +166,116 @@ export function NotesSection({
                 </Button>
               )}
             </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** How often the network log is read again; it changes only when a Task Attempt ends. */
+const NETWORK_INTERVAL = 30_000;
+
+/** One line of the network log: `GET https://api.github.com/repos/acme → 200 · github`. */
+export function networkRequestLine(request: NetworkRequest): string {
+  const target = `${request.method} ${request.origin}${request.path}`;
+  if (!request.allowed) return `${target} refused: ${request.reason ?? "outside the scope"}`;
+  const parts = [`${target} → ${request.status ?? "no answer"}`];
+  if (request.credential) parts.push(`with ${request.credential}`);
+  return parts.join(" · ");
+}
+
+/** A Task Attempt's totals: `3 allowed · 1 refused`, and how many were not kept. */
+export function networkTotals(log: NetworkLog): string {
+  const parts = [`${log.allowed} allowed`, `${log.denied} refused`];
+  if (log.unrecorded) parts.push(`${log.unrecorded} more not listed`);
+  return parts.join(" · ");
+}
+
+/**
+ * What the Tag's Task Attempts sent through their Worker Host's egress proxy, for Tasks whose
+ * Permission Sets limit web:fetch: each request allowed or refused, newest Task Attempt first.
+ * Only operators may read it.
+ */
+export function NetworkSection({
+  controlPlane,
+  watch,
+  tag,
+}: {
+  controlPlane: ControlPlane;
+  watch?: WatchFeed;
+  tag: Tag;
+}) {
+  const [logs, setLogs] = useState<NetworkLog[]>();
+  const [error, setError] = useState("");
+  const tagId = tag.tagId;
+  const read = useCallback(
+    async (signal: AbortSignal) => {
+      if (!controlPlane.networkLogs) {
+        setLogs([]);
+        return;
+      }
+      try {
+        const next = await controlPlane.networkLogs(tagId);
+        if (signal.aborted) return;
+        setLogs(next);
+        setError("");
+      } catch (error) {
+        if (signal.aborted) return false;
+        const text = describe(error);
+        setError(
+          /permission|denied|operator/i.test(text)
+            ? "Only operators can see the network log."
+            : text,
+        );
+        return false;
+      }
+    },
+    [controlPlane, tagId],
+  );
+  // A conversation change is the sign that one of the Tag's turns ended.
+  const affected = useCallback(
+    (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
+    [tagId],
+  );
+  useWatchRefresh(read, NETWORK_INTERVAL, watch, affected);
+  const name = tag.name ?? tag.tagId;
+  const status =
+    error ||
+    (logs === undefined
+      ? "Loading the network log…"
+      : logs.length
+        ? ""
+        : `No network log yet. ${name}'s Tasks get one when its Permission Sets limit web:fetch to hosts.`);
+  return (
+    <section className="details-section" aria-labelledby="tag-details-network">
+      <h3 id="tag-details-network">Network</h3>
+      <p className="tag-details-intro">
+        Web requests {name}'s Tasks made through the Worker Host, allowed or refused.
+      </p>
+      {status && (
+        <p className="activity-status" role="status">
+          {status}
+        </p>
+      )}
+      <ul className="network-logs" aria-label="Network log">
+        {logs?.map((log) => (
+          <li key={log.attemptId} className="network-log">
+            <div className="note-footer">
+              <small>Task {log.taskId.slice(0, 8)}</small>
+              <small>{networkTotals(log)}</small>
+            </div>
+            <ul className="network-requests">
+              {log.requests.map((request) => (
+                <li
+                  key={`${request.atMs}-${request.method}-${request.origin}${request.path}-${request.status ?? request.reason}`}
+                  className={request.allowed ? "network-request" : "network-request refused"}
+                  title={new Date(request.atMs).toLocaleString()}
+                >
+                  {networkRequestLine(request)}
+                </li>
+              ))}
+            </ul>
           </li>
         ))}
       </ul>

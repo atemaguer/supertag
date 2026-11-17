@@ -1986,6 +1986,29 @@ message ReportNetworkLogRequest {
 
 message ReportNetworkLogResponse {}
 
+// A Tag's network logs for its Tag details view.
+service NetworkLogs {
+  // The Tag's newest Task Attempts with a network log, newest first. Operators only: a log names
+  // the origins and paths of other people's Tasks.
+  rpc List(ListNetworkLogsRequest) returns (ListNetworkLogsResponse);
+}
+
+message ListNetworkLogsRequest {
+  string tag_id = 1;
+  // At most this many Task Attempts; 0 means 20, and at most 100.
+  uint32 limit = 2;
+}
+
+message TaskNetworkLog {
+  string task_id = 1;
+  string attempt_id = 2;
+  NetworkLog log = 3;
+}
+
+message ListNetworkLogsResponse {
+  repeated TaskNetworkLog logs = 1;
+}
+
 message ResolveWorkspaceRefRequest {
   InspectAttemptRequest attempt = 1;
   string base_commit = 2;

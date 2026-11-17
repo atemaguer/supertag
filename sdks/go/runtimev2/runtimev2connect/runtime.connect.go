@@ -75,6 +75,8 @@ const (
 	HarnessMailboxName = "supertag.runtime.v2.HarnessMailbox"
 	// HarnessWorkSessionsName is the fully-qualified name of the HarnessWorkSessions service.
 	HarnessWorkSessionsName = "supertag.runtime.v2.HarnessWorkSessions"
+	// NetworkLogsName is the fully-qualified name of the NetworkLogs service.
+	NetworkLogsName = "supertag.runtime.v2.NetworkLogs"
 	// AttemptMcpEffectsName is the fully-qualified name of the AttemptMcpEffects service.
 	AttemptMcpEffectsName = "supertag.runtime.v2.AttemptMcpEffects"
 )
@@ -479,6 +481,8 @@ const (
 	// HarnessWorkSessionsCloseProcedure is the fully-qualified name of the HarnessWorkSessions's Close
 	// RPC.
 	HarnessWorkSessionsCloseProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Close"
+	// NetworkLogsListProcedure is the fully-qualified name of the NetworkLogs's List RPC.
+	NetworkLogsListProcedure = "/supertag.runtime.v2.NetworkLogs/List"
 	// AttemptMcpEffectsReserveProcedure is the fully-qualified name of the AttemptMcpEffects's Reserve
 	// RPC.
 	AttemptMcpEffectsReserveProcedure = "/supertag.runtime.v2.AttemptMcpEffects/Reserve"
@@ -5729,6 +5733,80 @@ func (UnimplementedHarnessWorkSessionsHandler) Ask(context.Context, *connect.Req
 
 func (UnimplementedHarnessWorkSessionsHandler) Close(context.Context, *connect.Request[runtimev2.HarnessCloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkSessions.Close is not implemented"))
+}
+
+// NetworkLogsClient is a client for the supertag.runtime.v2.NetworkLogs service.
+type NetworkLogsClient interface {
+	// The Tag's newest Task Attempts with a network log, newest first. Operators only: a log names
+	// the origins and paths of other people's Tasks.
+	List(context.Context, *connect.Request[runtimev2.ListNetworkLogsRequest]) (*connect.Response[runtimev2.ListNetworkLogsResponse], error)
+}
+
+// NewNetworkLogsClient constructs a client for the supertag.runtime.v2.NetworkLogs service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewNetworkLogsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) NetworkLogsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	networkLogsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("NetworkLogs").Methods()
+	return &networkLogsClient{
+		list: connect.NewClient[runtimev2.ListNetworkLogsRequest, runtimev2.ListNetworkLogsResponse](
+			httpClient,
+			baseURL+NetworkLogsListProcedure,
+			connect.WithSchema(networkLogsMethods.ByName("List")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// networkLogsClient implements NetworkLogsClient.
+type networkLogsClient struct {
+	list *connect.Client[runtimev2.ListNetworkLogsRequest, runtimev2.ListNetworkLogsResponse]
+}
+
+// List calls supertag.runtime.v2.NetworkLogs.List.
+func (c *networkLogsClient) List(ctx context.Context, req *connect.Request[runtimev2.ListNetworkLogsRequest]) (*connect.Response[runtimev2.ListNetworkLogsResponse], error) {
+	return c.list.CallUnary(ctx, req)
+}
+
+// NetworkLogsHandler is an implementation of the supertag.runtime.v2.NetworkLogs service.
+type NetworkLogsHandler interface {
+	// The Tag's newest Task Attempts with a network log, newest first. Operators only: a log names
+	// the origins and paths of other people's Tasks.
+	List(context.Context, *connect.Request[runtimev2.ListNetworkLogsRequest]) (*connect.Response[runtimev2.ListNetworkLogsResponse], error)
+}
+
+// NewNetworkLogsHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewNetworkLogsHandler(svc NetworkLogsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	networkLogsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("NetworkLogs").Methods()
+	networkLogsListHandler := connect.NewUnaryHandler(
+		NetworkLogsListProcedure,
+		svc.List,
+		connect.WithSchema(networkLogsMethods.ByName("List")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.NetworkLogs/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case NetworkLogsListProcedure:
+			networkLogsListHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedNetworkLogsHandler returns CodeUnimplemented from all methods.
+type UnimplementedNetworkLogsHandler struct{}
+
+func (UnimplementedNetworkLogsHandler) List(context.Context, *connect.Request[runtimev2.ListNetworkLogsRequest]) (*connect.Response[runtimev2.ListNetworkLogsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.NetworkLogs.List is not implemented"))
 }
 
 // AttemptMcpEffectsClient is a client for the supertag.runtime.v2.AttemptMcpEffects service.

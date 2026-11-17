@@ -127,6 +127,8 @@ export interface ControlPlane {
   notes?(tagId: string): Promise<Note[]>;
   /** Deletes a note at once; the Tag no longer sees it from its next turn. */
   deleteNote?(memoryId: string): Promise<Note>;
+  /** The Tag's newest Task Attempts with a network log, newest first. Operators only. */
+  networkLogs?(tagId: string): Promise<NetworkLog[]>;
   /**
    * The Control Plane and principal this connection acts as. What is cached under one scope is
    * never shown under another.
@@ -185,6 +187,33 @@ export interface Note {
   updatedAtMs: number;
   /** When a turn last had it in its context. */
   lastSeenAtMs?: number;
+}
+
+/** One request a Task Attempt's egress proxy allowed or refused. Never headers or bodies. */
+export interface NetworkRequest {
+  atMs: number;
+  method: string;
+  origin: string;
+  /** The path without its query, with credentials redacted. */
+  path: string;
+  allowed: boolean;
+  /** Why it was refused. */
+  reason?: string;
+  /** The origin's HTTP status, when the request reached it. */
+  status?: number;
+  /** The Worker Host credential the proxy added. */
+  credential?: string;
+}
+
+/** A Task Attempt's network log: its first requests and how many it allowed and refused. */
+export interface NetworkLog {
+  taskId: string;
+  attemptId: string;
+  allowed: number;
+  denied: number;
+  /** Requests counted but not kept. */
+  unrecorded: number;
+  requests: NetworkRequest[];
 }
 
 export interface ControlPlaneProfile {
@@ -249,6 +278,7 @@ export function controlPlaneSession(connectionId: string, scope: string): Contro
       invoke("save_result_artifact", { connectionId, artifactId, path }),
     notes: (tagId) => invoke("list_notes", { connectionId, tagId }),
     deleteNote: (memoryId) => invoke("delete_note", { connectionId, memoryId }),
+    networkLogs: (tagId) => invoke("list_network_logs", { connectionId, tagId }),
     readCache: (key) => invoke("read_cache", { connectionId, key }),
     writeCache: (key, value) => invoke("write_cache", { connectionId, key, value }),
   };

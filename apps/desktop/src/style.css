@@ -1322,6 +1322,32 @@ button.identity-pill[aria-expanded="true"] {
   align-items: center;
   gap: 4px;
 }
+.network-logs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.network-log {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--background);
+}
+.network-requests {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.network-request {
+  overflow-wrap: anywhere;
+}
+.network-request.refused {
+  color: var(--muted);
+}
 .workspace-dialog {
   width: min(440px, calc(100vw - 30px));
   padding: 23px;

@@ -133,6 +133,15 @@ async fn list_notes(
 }
 
 #[tauri::command]
+async fn list_network_logs(
+    state: State<'_, ControlPlaneState>,
+    connection_id: String,
+    tag_id: String,
+) -> Result<Vec<control_plane::network::NetworkLog>, String> {
+    state.network_logs(&connection_id, tag_id).await
+}
+
+#[tauri::command]
 async fn delete_note(
     state: State<'_, ControlPlaneState>,
     connection_id: String,
@@ -342,6 +351,7 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             list_tags,
             list_notes,
             delete_note,
+            list_network_logs,
             list_tag_options,
             create_tag,
             list_conversations,

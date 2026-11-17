@@ -58,6 +58,7 @@ type app struct {
 	palette            *palette
 	files              *taskFilesDialog
 	notes              *notesDialog
+	network            *networkDialog
 	controlPlaneStore  *controlPlaneStore
 	savedControlPlanes []client.Target
 	controlPlaneDialog *controlPlaneDialog
@@ -100,6 +101,7 @@ func (a *app) start(i int) error {
 	}
 	a.closeTaskFiles()
 	a.closeNotes()
+	a.closeNetwork()
 	a.closeControlPlaneDialog()
 	if a.cancel != nil {
 		a.inner.flush(true)
@@ -122,6 +124,7 @@ func (a *app) start(i int) error {
 func (a *app) stop() {
 	a.closeTaskFiles()
 	a.closeNotes()
+	a.closeNetwork()
 	a.closeControlPlaneDialog()
 	if a.cancel != nil {
 		a.inner.flush(true)
@@ -166,6 +169,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.notes != nil {
 			return a, a.notesKey(msg)
+		}
+		if a.network != nil {
+			return a, a.networkKey(msg)
 		}
 		if a.palette != nil {
 			return a, a.paletteKeyPress(msg)
@@ -230,10 +236,10 @@ func (a *app) forward(msg tea.Msg) tea.Cmd {
 	if !a.hasTarget {
 		return nil
 	}
-	if a.taskFilesMessage(msg) || a.notesMessage(msg) {
+	if a.taskFilesMessage(msg) || a.notesMessage(msg) || a.networkMessage(msg) {
 		return nil
 	}
-	watched := a.notesWatched(msg)
+	watched := tea.Batch(a.notesWatched(msg), a.networkWatched(msg))
 	next, cmd := a.inner.Update(msg)
 	a.inner = next.(model)
 	return tea.Batch(a.scope(cmd), watched)
@@ -335,7 +341,7 @@ func ownMessage(msg tea.Msg) bool {
 }
 
 func (a *app) View() tea.View {
-	if (!a.choosing && a.palette == nil && a.files == nil && a.notes == nil && a.controlPlaneDialog == nil) || a.width == 0 {
+	if (!a.choosing && a.palette == nil && a.files == nil && a.notes == nil && a.network == nil && a.controlPlaneDialog == nil) || a.width == 0 {
 		if !a.hasTarget {
 			return tea.NewView("")
 		}
@@ -350,6 +356,9 @@ func (a *app) View() tea.View {
 	}
 	if a.notes != nil {
 		shown = a.renderNotes
+	}
+	if a.network != nil {
+		shown = a.renderNetwork
 	}
 	if a.controlPlaneDialog != nil {
 		shown = a.renderControlPlaneDialog

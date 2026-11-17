@@ -649,7 +649,10 @@ The egress proxy records every request it decides: the time, the method, the ori
 without its query, whether it was allowed, the reason for a refusal, the origin's status code, and
 the credential it added. It never records headers or bodies, and it removes secrets and
 placeholders from paths. It keeps the first 500 requests of a Task Attempt and counts the rest.
-`supertag describe task` shows each Task Attempt's log under `network_log`.
+`supertag describe task` shows each Task Attempt's log under `network_log`. Operators also see a
+Tag's 20 newest logs in the desktop app's Tag details, opened from the Tag's name above the
+conversation, and under **Network** in the terminal UI's command palette. A log names the origins
+and paths of other people's Tasks, so only operators may read it.
 
 ### Fail-closed behavior
 

@@ -28,6 +28,7 @@ mod manifest_relationships;
 mod mcp_effects;
 mod memories;
 mod metrics;
+mod network_logs;
 mod operator_access;
 mod passthrough;
 mod placement;
@@ -220,6 +221,7 @@ impl Api {
             self.schedules_service(),
             self.attempt_schedules_service(),
             self.memories_service(),
+            self.network_logs_service(),
             self.attempt_memory_service(),
             self.attempt_mcp_effects_service(),
             self.attempt_changed_paths_service(),

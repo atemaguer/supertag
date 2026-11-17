@@ -22,6 +22,7 @@ pub mod cache;
 mod follow;
 mod local;
 pub mod memories;
+pub mod network;
 mod new_tag;
 mod profiles;
 mod watch;
