@@ -206,7 +206,7 @@ async fn contract(url: String) {
         )
         .await;
     assert!(
-        matches!(&continued, Err(StoreError::FailedPrecondition(reason)) if reason.contains("is closed")),
+        matches!(&continued, Err(StoreError::FailedPrecondition(reason)) if reason.contains("this Work Session was closed (the Tag closed it); start a new one")),
         "{continued:?}"
     );
 
@@ -479,7 +479,7 @@ async fn reopen_and_idle(url: String) {
         .continue_work_session(&host, &continuing(&y.work_session_id, "closed"))
         .await;
     assert!(
-        matches!(&final_close, Err(StoreError::FailedPrecondition(reason)) if reason.contains("is closed")),
+        matches!(&final_close, Err(StoreError::FailedPrecondition(reason)) if reason.contains("was closed (the Tag closed it)")),
         "{final_close:?}"
     );
     // Under the limit, continuing the idle Work Session reopens it.

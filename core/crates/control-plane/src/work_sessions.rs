@@ -368,9 +368,19 @@ pub(crate) async fn reopen_in(
     if row.try_get::<Option<i64>, _>("closed_at_ms")?.is_none() {
         return Ok(());
     }
-    if row.try_get::<i64, _>("close_reason")? != WorkSessionCloseReason::Idle as i64 {
+    let reason = WorkSessionCloseReason::try_from(row.try_get::<i64, _>("close_reason")? as i32)
+        .unwrap_or_default();
+    if reason != WorkSessionCloseReason::Idle {
+        let why = match reason {
+            WorkSessionCloseReason::Tag => "the Tag closed it",
+            WorkSessionCloseReason::Operator => "an operator closed it",
+            WorkSessionCloseReason::DeliveryPulled => "its delivery was pulled",
+            WorkSessionCloseReason::ObjectiveClosed => "its Objective closed",
+            WorkSessionCloseReason::Upgrade => "it had finished before an upgrade",
+            _ => "it was closed",
+        };
         return Err(StoreError::FailedPrecondition(format!(
-            "Work Session {work_session_id} is closed; start a new one"
+            "this Work Session was closed ({why}); start a new one"
         )));
     }
     let (open, max) = open_count_in(tx, &parent.tag_id).await?;
