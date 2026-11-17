@@ -392,6 +392,11 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
       "list_objectives",
       "read_objective",
     ]);
+    // An out-of-range limit is a tool error the agent can retry, not a failed turn.
+    const tooMany = await client.callTool({ name: "list_sessions", arguments: { limit: 50 } });
+    expect(tooMany).toMatchObject({ isError: true });
+    expect(JSON.stringify(tooMany)).toContain("limit");
+    expect(listSessions).not.toHaveBeenCalled();
     const listed = JSON.stringify(
       await client.callTool({ name: "list_sessions", arguments: { limit: 5 } }),
     );

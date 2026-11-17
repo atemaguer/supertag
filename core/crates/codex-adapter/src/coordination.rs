@@ -367,13 +367,41 @@ pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Argument
 }
 
 fn validate_page(limit: Option<u32>, cursor: &str) -> Result<()> {
+    read_limit(limit, PAGE_LIMIT)?;
     ensure!(
-        limit.is_none_or(|limit| (1..=PAGE_LIMIT).contains(&limit))
-            && cursor.len() <= 256
-            && !cursor.chars().any(char::is_control),
+        cursor.len() <= 256 && !cursor.chars().any(char::is_control),
         "invalid coordination page"
     );
     Ok(())
+}
+
+/// A read tool's argument the model got wrong but may correct, such as a page limit out of range.
+/// The model gets it back as a tool error; it does not fail the Attempt.
+#[derive(Debug)]
+pub(crate) struct RetryableArgument(pub(crate) String);
+
+impl std::fmt::Display for RetryableArgument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RetryableArgument {}
+
+/// Refuses a read limit outside `1..=maximum` as a [`RetryableArgument`].
+pub(crate) fn read_limit(limit: Option<u32>, maximum: u32) -> Result<()> {
+    if limit.is_some_and(|limit| !(1..=maximum).contains(&limit)) {
+        return Err(RetryableArgument(format!(
+            "limit must be an integer from 1 to {maximum}; call the tool again with one in range"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+/// The model's retryable argument mistake, if `error` is one.
+pub(crate) fn retryable(error: &anyhow::Error) -> Option<&RetryableArgument> {
+    error.downcast_ref()
 }
 
 /// The `close_session` tool, offered with `start_session`.

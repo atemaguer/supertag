@@ -66,6 +66,9 @@ if root.joinpath("artifact-mode").exists():
 
 if root.joinpath("tag-sessions-mode").exists():
     coordination_tools.extend([
+        # Out-of-range limits come back as tool errors; the turn goes on.
+        ("list_sessions", {"limit": 50}),
+        ("read_turn", {"taskId": "earlier-task", "limit": 500}),
         ("list_sessions", {"limit": 5}),
         ("search_sessions", {"query": "release"}),
         ("read_session", {"sessionId": "conversation/earlier", "before": 9}),

@@ -75,11 +75,7 @@ fn identity(value: &str) -> bool {
 }
 
 fn limit(value: Option<u32>) -> Result<()> {
-    ensure!(
-        value.is_none_or(|limit| (1..=MAX_RESULTS).contains(&limit)),
-        "limit must be an integer between 1 and {MAX_RESULTS}"
-    );
-    Ok(())
+    crate::coordination::read_limit(value, MAX_RESULTS)
 }
 
 fn rfc3339(ms: i64) -> Value {
@@ -129,13 +125,8 @@ pub(crate) fn arguments(params: &Value) -> Result<Option<Call>> {
         Some("read_turn") => {
             let turn: Turn = serde_json::from_value(parse("read_turn")?)
                 .context("invalid Codex read_turn arguments")?;
-            ensure!(
-                identity(&turn.task_id)
-                    && turn
-                        .limit
-                        .is_none_or(|limit| (1..=TURN_MAX_EVENTS).contains(&limit)),
-                "invalid read_turn arguments"
-            );
+            ensure!(identity(&turn.task_id), "invalid read_turn arguments");
+            crate::coordination::read_limit(turn.limit, TURN_MAX_EVENTS)?;
             Call::ReadTurn(turn)
         }
         Some("list_objectives") => {

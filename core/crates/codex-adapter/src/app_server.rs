@@ -547,8 +547,13 @@ impl Stream {
                             self.inventory.enabled(),
                             "Codex emitted an unregistered coordination tool item"
                         );
-                        self.inventory.arguments(&item)?;
-                        return Ok(());
+                        // A read argument the model may correct comes back to it as a tool error.
+                        match self.inventory.arguments(&item) {
+                            Err(error) if crate::coordination::retryable(&error).is_none() => {
+                                return Err(error);
+                            }
+                            _ => return Ok(()),
+                        }
                     }
                     Some("webSearch") => item["type"] = json!("web_search"),
                     _ => bail!("Codex emitted an unsupported tool or item"),

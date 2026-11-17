@@ -387,7 +387,13 @@ impl Bridge {
             self.enabled(),
             "Codex coordination tools were not admitted for this Task"
         );
-        let arguments = self.tools.arguments(params)?;
+        let arguments = match self.tools.arguments(params) {
+            Ok(arguments) => arguments,
+            Err(error) => match coordination::retryable(&error) {
+                Some(mistake) => return Ok(coordination::response(mistake.to_string(), false)),
+                None => return Err(error),
+            },
+        };
         let call_id = params["callId"]
             .as_str()
             .filter(|id| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))

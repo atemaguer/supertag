@@ -3466,6 +3466,13 @@ async fn native_tag_session_tools_read_and_carry_the_portfolio() -> Result<()> {
             ] {
                 assert!(logs.contains(receipt), "{receipt} missing from {logs}");
             }
+            // The out-of-range limits came back to the model as tool errors it may retry.
+            for refusal in [
+                "limit must be an integer from 1 to 20",
+                "limit must be an integer from 1 to 100",
+            ] {
+                assert!(logs.contains(refusal), "{refusal} missing from {logs}");
+            }
             assert!(!logs.contains(KEY));
         } else {
             assert!(!logs.contains("tag-search-receipt"));

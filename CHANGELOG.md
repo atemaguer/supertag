@@ -247,6 +247,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Codex turn that asks a read tool for an out-of-range page, such as `limit: 50`, gets a tool
+  error it can retry instead of failing with "invalid coordination page".
 - A Codex turn that called `stay_quiet` and then wrote no final text no longer fails with
   "Codex completed without a final response"; it finishes quietly with its note as the result.
 - A Linux Claude Code host offers Claude Code's sandbox only when a user namespace can be made
