@@ -150,8 +150,13 @@ impl Inputs {
         Ok(destination)
     }
     pub(crate) fn replay(&self, receipt: &ArtifactAcquisition) -> Result<bool, Status> {
-        self.replay_inner(receipt).map_err(|_| {
-            Status::failed_precondition("artifact attachment has uncertain or changed local files")
+        self.replay_inner(receipt).map_err(|error| {
+            crate::failures::noted(
+                Status::failed_precondition(
+                    "artifact attachment has uncertain or changed local files",
+                ),
+                &error,
+            )
         })
     }
     fn replay_inner(&self, receipt: &ArtifactAcquisition) -> Result<bool> {
@@ -198,8 +203,11 @@ impl Inputs {
         receipt: &ArtifactAcquisition,
         files: &[(String, Vec<u8>)],
     ) -> Result<(), Status> {
-        self.materialize_inner(receipt, files).map_err(|_| {
-            Status::failed_precondition("artifact attachment could not be written safely")
+        self.materialize_inner(receipt, files).map_err(|error| {
+            crate::failures::noted(
+                Status::failed_precondition("artifact attachment could not be written safely"),
+                &error,
+            )
         })
     }
     fn materialize_inner(

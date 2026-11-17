@@ -352,7 +352,9 @@ pub(crate) async fn materialize(
         Ok::<_, Status>((permit, done))
     })
     .await
-    .map_err(|_| Status::internal("artifact input journal failed"))??;
+    .map_err(|error| {
+        crate::failures::noted(Status::internal("artifact input journal failed"), &error)
+    })??;
     if !done {
         let mut files = Vec::new();
         let mut total = 0u64;
@@ -383,7 +385,9 @@ pub(crate) async fn materialize(
             inputs.materialize(&receipt, &files)
         })
         .await
-        .map_err(|_| Status::internal("artifact attachment failed"))?;
+        .map_err(|error| {
+            crate::failures::noted(Status::internal("artifact attachment failed"), &error)
+        })?;
         if let Err(error) = materialized {
             tokio::select! {
                 _ = client.settle_acquisition(&acquisition, ArtifactAcquisitionState::Uncertain) => {},
@@ -451,13 +455,21 @@ where
     Ok(bytes)
 }
 fn text_page(bytes: &[u8], offset: u64, limit: u32) -> Result<(String, Option<u64>), Status> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| Status::invalid_argument("artifact is not UTF-8 text"))?;
+    let text = std::str::from_utf8(bytes).map_err(|error| {
+        crate::failures::noted(
+            Status::invalid_argument("artifact is not UTF-8 text"),
+            &error,
+        )
+    })?;
     if text.contains('\0') {
         return Err(Status::invalid_argument("artifact is not text"));
     }
-    let offset = usize::try_from(offset)
-        .map_err(|_| Status::invalid_argument("artifact offset is invalid"))?;
+    let offset = usize::try_from(offset).map_err(|error| {
+        crate::failures::noted(
+            Status::invalid_argument("artifact offset is invalid"),
+            &error,
+        )
+    })?;
     if offset > text.len() || !text.is_char_boundary(offset) {
         return Err(Status::invalid_argument(
             "artifact offset is not a text boundary",

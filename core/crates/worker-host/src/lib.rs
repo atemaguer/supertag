@@ -9,6 +9,7 @@ pub mod context;
 mod credentials;
 mod enrollment;
 pub mod environment;
+mod failures;
 mod guardian;
 mod journal;
 mod mcp;
@@ -276,6 +277,9 @@ pub async fn run(
     shutdown: CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
+    if let Some(token) = &options.token {
+        failures::remember_credential(token);
+    }
     remote::validate_time_limit(options.attempt_timeout, options.remote_provider.is_some())?;
     ensure!(
         options.execution_profile.mcp_servers == options.mcp_catalog.capabilities()
@@ -777,7 +781,7 @@ pub async fn run(
                             workspace_mounts::write_back(&mounts, &state, &attempt_id, &copy_cancel)
                         })
                         .await
-                        .map_err(|_| Status::internal("Workspace Volume write-back failed"))?
+                        .map_err(|error| crate::failures::noted(Status::internal("Workspace Volume write-back failed"), &error))?
                         .map_err(|error| {
                             supertag_protocol::terminal_text::warn(&format!(
                                 "Workspace Volume write-back failed: {error:#}"
@@ -797,7 +801,7 @@ pub async fn run(
                             writes,
                         };
                         client
-                            .record_writes(request(report, &token).map_err(|_| Status::internal("Workspace Volume write-back failed"))?)
+                            .record_writes(request(report, &token).map_err(|error| crate::failures::noted(Status::internal("Workspace Volume write-back failed"), &error))?)
                             .await
                             .map(|_| complete)
                     })
@@ -815,7 +819,8 @@ pub async fn run(
                             wait_for_work(&shutdown).await;
                             continue;
                         }
-                        Err(_) => {
+                        Err(error) => {
+                            failures::note("Workspace Volume write-back failed", &error);
                             save_finish(&journal, attempt, adapter::failed("Workspace Volume write-back failed"))?;
                             continue;
                         }
@@ -833,19 +838,19 @@ pub async fn run(
                         let input_attempt = attempt.attempt_id.clone();
                         let input_checkout = workspace.checkout.path.clone();
                         tokio::task::spawn_blocking(move || artifact_inputs::Inputs::cleanup(&input_state, &input_attempt, &input_checkout))
-                            .await.map_err(|_| Status::internal("artifact input cleanup failed"))?
-                            .map_err(|_| Status::failed_precondition("artifact input files could not be removed safely"))?;
+                            .await.map_err(|error| crate::failures::noted(Status::internal("artifact input cleanup failed"), &error))?
+                            .map_err(|error| crate::failures::noted(Status::failed_precondition("artifact input files could not be removed safely"), &error))?;
                         if let Some(tree) = &remote_tree {
                             workspaces.restore_remote(&workspace, tree, &cancellation).await
-                                .map_err(|_| Status::invalid_argument("Remote Workspace output could not be restored safely"))?;
+                                .map_err(|error| crate::failures::noted(Status::invalid_argument("Remote Workspace output could not be restored safely"), &error))?;
                         }
                         if let Some(directory) = outputs.as_ref().and_then(|outputs| outputs.cleanup_directory()) {
                             let checkout = workspace.checkout.path.clone();
                             let directory = directory.to_owned();
                             tokio::task::spawn_blocking(move || {
                                 supertag_workspaces::remove_output_directory(&checkout, &directory)
-                                    .map_err(|_| Status::failed_precondition("Task output directory could not be removed safely"))
-                            }).await.map_err(|_| Status::internal("Task output cleanup failed"))??;
+                                    .map_err(|error| crate::failures::noted(Status::failed_precondition("Task output directory could not be removed safely"), &error))
+                            }).await.map_err(|error| crate::failures::noted(Status::internal("Task output cleanup failed"), &error))??;
                         }
                         workspaces
                             .finalize(&workspace, &result, (succeeded, file_scope.clone()), outputs.as_ref().map(|output| output.directory.as_str()), &cancellation)
@@ -879,11 +884,14 @@ pub async fn run(
                     Err(error) if error.code() == Code::PermissionDenied => {
                         save_finish(&journal, attempt, adapter::failed(error.message()))?
                     }
-                    Err(_) => save_finish(
-                        &journal,
-                        attempt,
-                        adapter::failed("Workspace output could not be captured safely"),
-                    )?,
+                    Err(error) => {
+                        failures::note("Workspace output could not be captured safely", &error);
+                        save_finish(
+                            &journal,
+                            attempt,
+                            adapter::failed("Workspace output could not be captured safely"),
+                        )?
+                    }
                 }
             }
             Entry::Finish {
@@ -916,7 +924,8 @@ pub async fn run(
                 {
                     let receipt = match workspaces.verify(&pending) {
                         Ok(receipt) => receipt,
-                        Err(_) => {
+                        Err(error) => {
+                            failures::note("Workspace output no longer matches its receipt", &error);
                             save_finish(
                                 &journal,
                                 attempt,
@@ -956,11 +965,14 @@ pub async fn run(
                             wait_for_work(&shutdown).await
                         }
                         Err(_) if shutdown.is_cancelled() => return Ok(()),
-                        Err(_) => save_finish(
-                            &journal,
-                            attempt,
-                            adapter::failed("Workspace output could not be committed"),
-                        )?,
+                        Err(error) => {
+                            failures::note("Workspace output could not be committed", &error);
+                            save_finish(
+                                &journal,
+                                attempt,
+                                adapter::failed("Workspace output could not be committed"),
+                            )?
+                        }
                     }
                     continue;
                 }
@@ -976,9 +988,7 @@ pub async fn run(
                                 |_| Status::internal("invalid upload authority request"),
                             )?)
                             .await?;
-                            let payload = journal.read_checkpoint(&pending).map_err(|_| {
-                                Status::data_loss("staged checkpoint could not be read")
-                            })?;
+                            let payload = journal.read_checkpoint(&pending).map_err(|error| crate::failures::noted(Status::data_loss("staged checkpoint could not be read"), &error))?;
                             transfers.upload(&attempt, &token, payload).await
                         }
                         .await;
@@ -1047,11 +1057,14 @@ pub async fn run(
                         })?,
                         Err(error) if retryable(&error) || error.code() == Code::ResourceExhausted => wait_for_work(&shutdown).await,
                         Err(_) if shutdown.is_cancelled() => return Ok(()),
-                        Err(_) => save_finish(
-                            &journal,
-                            attempt,
-                            adapter::failed("Task output could not be committed"),
-                        )?,
+                        Err(error) => {
+                            failures::note("Task output could not be committed", &error);
+                            save_finish(
+                                &journal,
+                                attempt,
+                                adapter::failed("Task output could not be committed"),
+                            )?
+                        }
                     }
                     continue;
                 }
@@ -1588,7 +1601,8 @@ async fn run_assignment(
                 wait_for_work(shutdown).await;
                 return Ok(());
             }
-            Err(_) => {
+            Err(error) => {
+                failures::note("Task Context Items could not be resolved safely", &error);
                 return save_finish(
                     journal,
                     attempt,
@@ -1665,7 +1679,11 @@ async fn run_assignment(
                 wait_for_work(shutdown).await;
                 return Ok(());
             }
-            Err(_) => {
+            Err(error) => {
+                failures::note(
+                    "Task artifact inputs could not be materialized safely",
+                    &error,
+                );
                 return save_finish(
                     journal,
                     attempt,
@@ -1694,14 +1712,19 @@ async fn run_assignment(
             let current = coordination
                 .workspace_mounts
                 .clone()
-                .preflight(
-                    request(attempt.inspect(), token)
-                        .map_err(|_| Status::internal("Workspace Volume request failed"))?,
-                )
+                .preflight(request(attempt.inspect(), token).map_err(|error| {
+                    crate::failures::noted(
+                        Status::internal("Workspace Volume request failed"),
+                        &error,
+                    )
+                })?)
                 .await?
                 .into_inner();
-            let protected = mappings.preflight(&mount_pins, current).map_err(|_| {
-                Status::failed_precondition("Workspace Volume path admission failed")
+            let protected = mappings.preflight(&mount_pins, current).map_err(|error| {
+                crate::failures::noted(
+                    Status::failed_precondition("Workspace Volume path admission failed"),
+                    &error,
+                )
             })?;
             tokio::task::spawn_blocking(move || {
                 mappings.stage(
@@ -1714,7 +1737,9 @@ async fn run_assignment(
                 )
             })
             .await
-            .map_err(|_| Status::internal("Workspace Volume staging failed"))?
+            .map_err(|error| {
+                crate::failures::noted(Status::internal("Workspace Volume staging failed"), &error)
+            })?
             .map_err(|error| {
                 supertag_protocol::terminal_text::warn(&format!(
                     "Workspace Volume staging failed: {error:#}"
@@ -1736,7 +1761,8 @@ async fn run_assignment(
                 Some(mounted)
             }
             Err(_) if shutdown.is_cancelled() => return Ok(()),
-            Err(_) => {
+            Err(error) => {
+                failures::note("Workspace Volume staging failed", &error);
                 return save_finish(
                     journal,
                     attempt,
@@ -1813,7 +1839,8 @@ async fn run_assignment(
     };
     let mut outputs = match pending_outputs {
         Ok(outputs) => outputs.map(Box::new),
-        Err(_) => {
+        Err(error) => {
+            failures::note("Task output directory could not be prepared safely", &error);
             return save_finish(
                 journal,
                 attempt,
@@ -1891,7 +1918,12 @@ async fn run_assignment(
                     &cancel,
                 )
                 .await
-                .map_err(|_| Status::failed_precondition("Remote Workspace could not be prepared"))
+                .map_err(|error| {
+                    crate::failures::noted(
+                        Status::failed_precondition("Remote Workspace could not be prepared"),
+                        &error,
+                    )
+                })
             },
         ))
         .await;
@@ -1950,7 +1982,8 @@ async fn run_assignment(
                 valid_until = expires;
                 mcp.map(Arc::new)
             }
-            Err(_) => {
+            Err(error) => {
+                failures::note("Workspace MCP servers could not be prepared", &error);
                 if let Some(prepared) = workspace.as_ref().filter(|_| workspace_mcp.is_some()) {
                     workspaces.remove_mcp_snapshot(prepared);
                 }
@@ -1994,8 +2027,11 @@ async fn run_assignment(
                 options.attempt_timeout,
             )
             .await
-            .map_err(|_| {
-                Status::failed_precondition("shared execution access could not be prepared")
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::failed_precondition("shared execution access could not be prepared"),
+                    &error,
+                )
             })
         })
         .await
@@ -2004,7 +2040,11 @@ async fn run_assignment(
                 valid_until = expires;
                 Some(access)
             }
-            Err(_) => {
+            Err(error) => {
+                failures::note(
+                    "Shared execution access could not be prepared safely",
+                    &error,
+                );
                 save_finish(
                     journal,
                     attempt.clone(),
@@ -2166,7 +2206,8 @@ async fn run_assignment(
             provider = Some(prepared);
             outcome
         }
-        Some((Err(_), while_running)) => {
+        Some((Err(error), while_running)) => {
+            failures::note("Remote Workspace could not be prepared", &error);
             with_cleanup_authority(
                 host,
                 &attempt,
@@ -2312,7 +2353,9 @@ async fn workspace_mcp(
     let snapshot = workspaces
         .mcp_snapshot(prepared, cancel)
         .await
-        .map_err(|_| Status::internal("Workspace MCP snapshot failed"))?;
+        .map_err(|error| {
+            crate::failures::noted(Status::internal("Workspace MCP snapshot failed"), &error)
+        })?;
     let names = supertag_protocol::mcp::workspace_servers(task);
     let resolved =
         mcp::WorkspaceMcp::resolve(&snapshot, &names, mcp::workspace_mcp_variable, sandbox)
@@ -2327,7 +2370,12 @@ async fn workspace_mcp(
                 },
                 token,
             )
-            .map_err(|_| Status::internal("Workspace MCP record request failed"))?,
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::internal("Workspace MCP record request failed"),
+                    &error,
+                )
+            })?,
         )
         .await?;
     Ok(resolved)
@@ -2356,10 +2404,15 @@ async fn prepare_context(
             cancel,
         )
         .await
-        .map_err(|_| Status::failed_precondition("Context Item could not be prepared"))?;
-    let manifest = prepared
-        .manifest()
-        .map_err(|_| Status::data_loss("invalid prepared Context Items"))?;
+        .map_err(|error| {
+            crate::failures::noted(
+                Status::failed_precondition("Context Item could not be prepared"),
+                &error,
+            )
+        })?;
+    let manifest = prepared.manifest().map_err(|error| {
+        crate::failures::noted(Status::data_loss("invalid prepared Context Items"), &error)
+    })?;
     let receipt = host
         .commit_context_resolution(
             request(
@@ -2378,9 +2431,9 @@ async fn prepare_context(
             "Context Item receipt has mismatched contents",
         ));
     }
-    prepared
-        .delivery()
-        .map_err(|_| Status::data_loss("invalid Context Item delivery"))
+    prepared.delivery().map_err(|error| {
+        crate::failures::noted(Status::data_loss("invalid Context Item delivery"), &error)
+    })
 }
 
 fn ensure_attempt(task: &Task, attempt: &Attempt) -> Result<()> {
@@ -2443,18 +2496,21 @@ async fn renew_running_attempt(
 ) -> Result<Instant, Status> {
     let sent = Instant::now();
     let response = host
-        .renew_attempt(
-            request(attempt.inspect(), token)
-                .map_err(|_| Status::internal("invalid authority request"))?,
-        )
+        .renew_attempt(request(attempt.inspect(), token).map_err(|error| {
+            crate::failures::noted(Status::internal("invalid authority request"), &error)
+        })?)
         .await?
         .into_inner();
     let task = response
         .task
         .as_ref()
         .ok_or_else(|| Status::data_loss("execution authority has no Task"))?;
-    ensure_attempt(task, attempt)
-        .map_err(|_| Status::data_loss("execution authority has mismatched identity"))?;
+    ensure_attempt(task, attempt).map_err(|error| {
+        crate::failures::noted(
+            Status::data_loss("execution authority has mismatched identity"),
+            &error,
+        )
+    })?;
     if task.state() != TaskState::Running {
         return Err(Status::failed_precondition("execution authority ended"));
     }

@@ -116,7 +116,9 @@ impl HarnessArtifacts for Bridge {
                 Ok::<_, Status>((permit, snapshots, capture))
             })
             .await
-            .map_err(|_| Status::internal("artifact snapshot failed"))??;
+            .map_err(|error| {
+                crate::failures::noted(Status::internal("artifact snapshot failed"), &error)
+            })??;
             let (manifest, selected) = match capture {
                 Capture::Pending(manifest, selected) => (manifest, selected),
                 Capture::Committed(capture) => return Ok(Response::new(capture)),
@@ -152,11 +154,18 @@ impl HarnessArtifacts for Bridge {
                 let _permit = permit;
                 snapshots
                     .commit(&manifest.operation_id, &capture)
-                    .map_err(|_| Status::data_loss("artifact receipt could not be saved safely"))?;
+                    .map_err(|error| {
+                        crate::failures::noted(
+                            Status::data_loss("artifact receipt could not be saved safely"),
+                            &error,
+                        )
+                    })?;
                 Ok::<_, Status>(capture)
             })
             .await
-            .map_err(|_| Status::internal("artifact receipt journal failed"))??;
+            .map_err(|error| {
+                crate::failures::noted(Status::internal("artifact receipt journal failed"), &error)
+            })??;
             Ok(Response::new(capture))
         };
         tokio::pin!(operation);
@@ -170,7 +179,7 @@ impl HarnessArtifacts for Bridge {
             tokio::select! {
                 biased;
                 _ = closed.cancelled() => return Err(Status::failed_precondition("artifact capture is closed")),
-                changed = authority_deadline.changed() => changed.map_err(|_| Status::failed_precondition("artifact capture is closed"))?,
+                changed = authority_deadline.changed() => changed.map_err(|error| crate::failures::noted(Status::failed_precondition("artifact capture is closed"), &error))?,
                 _ = time::sleep_until(expires) => return Err(Status::deadline_exceeded("artifact capture authority expired")),
                 result = &mut operation => return result,
             }

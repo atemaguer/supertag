@@ -149,15 +149,18 @@ impl SharedHost {
         lanes: &[(usize, State)],
         workspaces: &[String],
     ) -> Result<WorkerHostStatus, Status> {
-        let sequence = self
-            .journal
-            .next_report_sequence()
-            .map_err(|_| Status::internal("Host presence sequence is unavailable"))?;
+        let sequence = self.journal.next_report_sequence().map_err(|error| {
+            crate::failures::noted(
+                Status::internal("Host presence sequence is unavailable"),
+                &error,
+            )
+        })?;
         let mut report = aggregate(sequence, harnesses, lanes, workspaces);
         report.labels = self.labels.clone();
         report.disk_space = self.disk_space.sample();
-        let request = request(report, &self.token)
-            .map_err(|_| Status::internal("invalid Host presence request"))?;
+        let request = request(report, &self.token).map_err(|error| {
+            crate::failures::noted(Status::internal("invalid Host presence request"), &error)
+        })?;
         Ok(self.client.report_host(request).await?.into_inner())
     }
 }

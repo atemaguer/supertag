@@ -141,15 +141,17 @@ impl Workspace {
     }
 
     /// Whether `ancestor` is this Workspace's base commit or one of its ancestors. A commit the
-    /// repository does not hold is not.
-    pub async fn base_descends_from(&self, ancestor: &str, cancel: &CancellationToken) -> bool {
-        let Ok(repository) = self.repository(cancel).await else {
-            return false;
-        };
-        repository
+    /// repository does not hold is not. An error means the repository could not be opened.
+    pub async fn base_descends_from(
+        &self,
+        ancestor: &str,
+        cancel: &CancellationToken,
+    ) -> Result<bool> {
+        let repository = self.repository(cancel).await?;
+        Ok(repository
             .assert_ancestor(ancestor, &self.inner.config.base_commit, cancel)
             .await
-            .is_ok()
+            .is_ok())
     }
 
     /// Restore one immutable returned tree after the caller confirms remote

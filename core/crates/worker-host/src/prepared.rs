@@ -208,7 +208,11 @@ pub(crate) async fn artifact(
                 .await
                 {
                     Ok(artifact) => Ok(artifact),
-                    Err(_) if !cancel.is_cancelled() => {
+                    Err(error) if !cancel.is_cancelled() => {
+                        crate::failures::note(
+                            "Warm Workspace preparation failed; preparing it cold",
+                            &error,
+                        );
                         // As TypeScript retries a failed warm build cold once.
                         stop_preparation(options, journal, attempt, registration).await?;
                         build(preparation, attempt, workspace, environment, None, cancel).await

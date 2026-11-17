@@ -70,8 +70,12 @@ impl Transfers {
             part: Some(checkpoint_upload::Part::Begin(begin)),
         })
         .chain(chunks);
-        let mut upstream = request(tokio_stream::iter(messages), token)
-            .map_err(|_| Status::internal("cannot authenticate checkpoint upload"))?;
+        let mut upstream = request(tokio_stream::iter(messages), token).map_err(|error| {
+            crate::failures::noted(
+                Status::internal("cannot authenticate checkpoint upload"),
+                &error,
+            )
+        })?;
         upstream.set_timeout(Duration::from_secs(20));
         let returned =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
@@ -92,8 +96,12 @@ impl Transfers {
         attempt: &Attempt,
         token: &str,
     ) -> Result<Option<SessionCheckpoint>, Status> {
-        let mut upstream = request(attempt.inspect(), token)
-            .map_err(|_| Status::internal("cannot authenticate checkpoint download"))?;
+        let mut upstream = request(attempt.inspect(), token).map_err(|error| {
+            crate::failures::noted(
+                Status::internal("cannot authenticate checkpoint download"),
+                &error,
+            )
+        })?;
         upstream.set_timeout(Duration::from_secs(20));
         let mut stream =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())

@@ -452,7 +452,12 @@ impl Access {
                         &self.token,
                     )?)
                     .await
-                    .map_err(|_| Status::unavailable("shared file effect could not be confirmed"))?
+                    .map_err(|error| {
+                        crate::failures::noted(
+                            Status::unavailable("shared file effect could not be confirmed"),
+                            &error,
+                        )
+                    })?
                     .into_inner()
             }
             Err(error) => {
@@ -501,8 +506,9 @@ fn convert_receipt(
         (Some(Effect::FileContent(file)), Some(read), None)
             if file.content.len() <= MAX_FILE_BYTES =>
         {
-            let text = String::from_utf8(file.content)
-                .map_err(|_| Status::invalid_argument("shared file is not UTF-8"))?;
+            let text = String::from_utf8(file.content).map_err(|error| {
+                crate::failures::noted(Status::invalid_argument("shared file is not UTF-8"), &error)
+            })?;
             let offset = read.offset.unwrap_or(1).saturating_sub(1) as usize;
             let text = text
                 .lines()

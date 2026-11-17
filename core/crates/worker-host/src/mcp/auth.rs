@@ -939,7 +939,9 @@ async fn run_helper(server: &str, command: &[String]) -> Result<HeaderMap> {
     }
     let (output, status) = match result {
         Ok(Ok(finished)) => finished,
-        Ok(Err(_)) => bail!("MCP server {server}: auth helper {program} failed"),
+        Ok(Err(error)) => {
+            return Err(error.context(format!("MCP server {server}: auth helper {program} failed")));
+        }
         Err(_) => bail!("MCP server {server}: auth helper {program} did not finish in 15 seconds"),
     };
     ensure!(

@@ -121,7 +121,12 @@ impl Access {
                 &self.token,
             )?)
             .await
-            .map_err(|_| Status::failed_precondition("shared command challenge is unavailable"))?
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::failed_precondition("shared command challenge is unavailable"),
+                    &error,
+                )
+            })?
             .into_inner();
         if challenge.access_id != self.access_id
             || Uuid::parse_str(&challenge.challenge_id).is_err()
@@ -142,8 +147,11 @@ impl Access {
                 &self.token,
             )?)
             .await
-            .map_err(|_| {
-                Status::failed_precondition("shared command authority could not be renewed")
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::failed_precondition("shared command authority could not be renewed"),
+                    &error,
+                )
             })?
             .into_inner();
         if receipt.access_id != self.access_id
@@ -197,9 +205,12 @@ impl Access {
             }
             response => response,
         };
-        result
-            .map(tonic::Response::into_inner)
-            .map_err(|_| Status::unavailable("shared command launch could not be confirmed"))
+        result.map(tonic::Response::into_inner).map_err(|error| {
+            crate::failures::noted(
+                Status::unavailable("shared command launch could not be confirmed"),
+                &error,
+            )
+        })
     }
 
     async fn stop_command(&self, process_id: &str) -> Result<(), Status> {
@@ -253,7 +264,12 @@ impl Access {
             .clone()
             .watch_process(watch)
             .await
-            .map_err(|_| Status::unavailable("shared command output is unavailable"))?
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::unavailable("shared command output is unavailable"),
+                    &error,
+                )
+            })?
             .into_inner();
         let mut renewal = time::interval_at(Instant::now() + RENEW_EVERY, RENEW_EVERY);
         renewal.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
@@ -266,7 +282,7 @@ impl Access {
                     continue;
                 }
                 page = stream.message() => page
-                    .map_err(|_| Status::unavailable("shared command output was interrupted"))?
+                    .map_err(|error| crate::failures::noted(Status::unavailable("shared command output was interrupted"), &error))?
                     .ok_or_else(|| Status::unavailable("shared command ended before cleanup proof"))?,
             };
             if page.process_id != process_id {

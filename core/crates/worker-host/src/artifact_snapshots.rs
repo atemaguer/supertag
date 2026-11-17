@@ -323,9 +323,12 @@ impl Snapshots {
             } = match &mut source {
                 SnapshotSource::Checkout(checkout) => CollectedOutput {
                     bytes: supertag_workspaces::capture_artifact_file(checkout, &path, limit)
-                        .map_err(|_| {
-                            Status::failed_precondition(
-                                "cannot capture the selected workspace file",
+                        .map_err(|error| {
+                            crate::failures::noted(
+                                Status::failed_precondition(
+                                    "cannot capture the selected workspace file",
+                                ),
+                                &error,
                             )
                         })?,
                     git_output: None,

@@ -165,7 +165,10 @@ impl McpLoginStore {
         {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(_) => bail!("MCP login for {server} could not be opened"),
+            Err(error) => {
+                return Err(anyhow::Error::from(error)
+                    .context(format!("MCP login for {server} could not be opened")));
+            }
         };
         let metadata = file.metadata()?;
         // SAFETY: geteuid takes no parameters and has no caller invariants.

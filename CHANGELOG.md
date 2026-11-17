@@ -80,6 +80,10 @@ within the pre-1.0 compatibility policy described in
   messages now get one "Got it" and one reply instead of three of each. Only the message that
   starts a run is acknowledged, and the acknowledgement adds "Also reading your follow-up." when
   another joins it. The Tag's own turns, such as a Schedule firing, still run on their own.
+- The Worker Host log says why an operation failed or fell back. A Task still gets the same
+  fixed failure message, such as "Remote Workspace output could not be captured safely", but
+  the host's own log now names the underlying error, redacted with the host's credentials. A
+  warm remote Workspace preparation that is retried cold logs why it failed.
 - When the lead Tag runs on Codex, `supertag init` adds `web:fetch` to the `local-tools`
   Permission Set and says so. Current Codex models run commands only in Codex code mode, which
   SuperTag starts only for Tasks that may also fetch from the web, so a Codex lead created by

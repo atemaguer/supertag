@@ -30,11 +30,21 @@ pub(crate) async fn prepare(
     let attempt_id = attempt.attempt_id.clone();
     let inputs = tokio::task::spawn_blocking(move || {
         Inputs::prepare_optional(&state, &attempt_id, &checkout)
-            .map_err(|_| Status::failed_precondition("Task artifact input root is unavailable"))?
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::failed_precondition("Task artifact input root is unavailable"),
+                    &error,
+                )
+            })?
             .ok_or_else(|| Status::failed_precondition("Task artifact input root is unavailable"))
     })
     .await
-    .map_err(|_| Status::internal("Task artifact input preparation failed"))??;
+    .map_err(|error| {
+        crate::failures::noted(
+            Status::internal("Task artifact input preparation failed"),
+            &error,
+        )
+    })??;
     let client = AcquisitionClient {
         coordination: clients,
         host_token: token,

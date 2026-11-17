@@ -109,8 +109,12 @@ impl InputLane {
                 )),
             };
         }
-        response.valid_for_ms = u64::try_from(remaining)
-            .map_err(|_| Status::data_loss("invalid live input authority duration"))?;
+        response.valid_for_ms = u64::try_from(remaining).map_err(|error| {
+            crate::failures::noted(
+                Status::data_loss("invalid live input authority duration"),
+                &error,
+            )
+        })?;
         Ok(Response::new(response))
     }
 

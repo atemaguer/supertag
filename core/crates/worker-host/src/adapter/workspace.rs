@@ -109,7 +109,12 @@ impl RemoteWorkspace {
                     .map_err(|_| {
                         Status::deadline_exceeded("the remote Workspace is not ready yet")
                     })?
-                    .map_err(|_| Status::unavailable("Remote Workspace could not be prepared"))?
+                    .map_err(|error| {
+                        crate::failures::noted(
+                            Status::unavailable("Remote Workspace could not be prepared"),
+                            &error,
+                        )
+                    })?
                     .clone()
                     .expect("waited for a value");
                 let (channel, token) = prepared.map_err(Status::unavailable)?;
@@ -150,7 +155,12 @@ impl Bridge {
         let authority = time::timeout(timeout, self.host.clone().renew_attempt(authority))
             .await
             .map_err(|_| Status::deadline_exceeded("Task authority renewal timed out"))?
-            .map_err(|_| Status::failed_precondition("Task authority renewal was refused"))?
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::failed_precondition("Task authority renewal was refused"),
+                    &error,
+                )
+            })?
             .into_inner();
         if !authority.task.is_some_and(|task| {
             task.state() == TaskState::Running
@@ -234,7 +244,7 @@ impl HarnessWorkspace for Bridge {
             tokio::select! {
                 biased;
                 _ = closed.cancelled() => return Err(Status::failed_precondition("workspace execution is closed")),
-                changed = deadline.changed() => changed.map_err(|_| Status::failed_precondition("workspace execution is closed"))?,
+                changed = deadline.changed() => changed.map_err(|error| crate::failures::noted(Status::failed_precondition("workspace execution is closed"), &error))?,
                 _ = time::sleep_until(expires) => return Err(Status::deadline_exceeded("workspace operation authority expired")),
                 result = &mut operation => return result,
             }

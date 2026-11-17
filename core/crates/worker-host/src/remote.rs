@@ -222,11 +222,13 @@ pub(crate) async fn capture(
 ) -> Result<(TransferArtifact, Option<Box<PendingOutputs>>), Status> {
     let directory = journal
         .remote_scratch()
-        .map_err(|_| Status::internal(CAPTURE_FAILED))?;
+        .map_err(|error| crate::failures::noted(Status::internal(CAPTURE_FAILED), &error))?;
     let tree = provider
         .capture(&directory, cancel)
         .await
-        .map_err(|_| Status::failed_precondition(CAPTURE_FAILED))?;
+        .map_err(|error| {
+            crate::failures::noted(Status::failed_precondition(CAPTURE_FAILED), &error)
+        })?;
     let attempt_id = &authority.1.attempt_id;
     let mut excluded = vec![];
     if has_inputs {
@@ -244,8 +246,10 @@ pub(crate) async fn capture(
             supertag_workspaces::verify_return_excludes(&archive, &root, &cancel)
         })
         .await
-        .map_err(|_| Status::internal(CAPTURE_FAILED))?
-        .map_err(|_| Status::failed_precondition(CAPTURE_FAILED))?;
+        .map_err(|error| crate::failures::noted(Status::internal(CAPTURE_FAILED), &error))?
+        .map_err(|error| {
+            crate::failures::noted(Status::failed_precondition(CAPTURE_FAILED), &error)
+        })?;
     }
     if let Some((mounted, mounts)) = copies {
         // Read-write copies come back into their host copies, which the
@@ -270,8 +274,9 @@ pub(crate) async fn capture(
                     ));
                     Status::failed_precondition(COPY_CAPTURE_FAILED)
                 })?;
-            record_remote(state, attempt_id, copy.index, &listing)
-                .map_err(|_| Status::failed_precondition(COPY_CAPTURE_FAILED))?;
+            record_remote(state, attempt_id, copy.index, &listing).map_err(|error| {
+                crate::failures::noted(Status::failed_precondition(COPY_CAPTURE_FAILED), &error)
+            })?;
         }
     }
     let outputs = if let Some(outputs) = outputs {

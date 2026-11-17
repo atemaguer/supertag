@@ -373,8 +373,12 @@ impl SourceStorage {
         manifest: &mut CommitArtifactCaptureRequest,
         selected: &[Vec<u8>],
     ) -> Result<(), Status> {
-        self.persist(manifest, selected)
-            .map_err(|_| Status::data_loss("could not retain exact Worker Host artifact copy"))?;
+        self.persist(manifest, selected).map_err(|error| {
+            crate::failures::noted(
+                Status::data_loss("could not retain exact Worker Host artifact copy"),
+                &error,
+            )
+        })?;
         manifest.source_storage_id = Some(self.id.clone());
         Ok(())
     }
@@ -593,7 +597,12 @@ impl SourceServer {
             .clone()
             .authorize_artifact_transfer(request)
             .await
-            .map_err(|_| Status::permission_denied("direct artifact read is not authorized"))?
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::permission_denied("direct artifact read is not authorized"),
+                    &error,
+                )
+            })?
             .into_inner();
         let budget = Duration::from_millis(response.valid_for_ms);
         let deadline = sent + budget.min(GRANT_BUDGET);
@@ -646,8 +655,15 @@ impl WorkerArtifactTransfers for SourceServer {
         )
         .await
         .map_err(|_| Status::deadline_exceeded("direct artifact grant expired"))?
-        .map_err(|_| Status::internal("direct artifact read failed"))?
-        .map_err(|_| Status::data_loss("producer has no exact verified artifact bytes"))?;
+        .map_err(|error| {
+            crate::failures::noted(Status::internal("direct artifact read failed"), &error)
+        })?
+        .map_err(|error| {
+            crate::failures::noted(
+                Status::data_loss("producer has no exact verified artifact bytes"),
+                &error,
+            )
+        })?;
         // A slow local read must not hide a withdrawal or generation takeover.
         let (fresh, fresh_deadline) = self.authorize(scope.clone()).await?;
         if fresh.file != authorized.file

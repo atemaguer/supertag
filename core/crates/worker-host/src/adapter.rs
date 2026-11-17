@@ -793,7 +793,10 @@ async fn supervise(
         Ok(Ok(_)) => {
             reported.unwrap_or_else(|| failed("Harness adapter exited without an outcome"))
         }
-        Ok(Err(_)) => failed("Harness execution was interrupted"),
+        Ok(Err(error)) => {
+            crate::failures::note("Harness execution was interrupted", &error);
+            failed("Harness execution was interrupted")
+        }
         Err(_) => failed("Harness execution timed out"),
     };
     match diagnostics {

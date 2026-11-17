@@ -1109,10 +1109,13 @@ mod tests {
     }
     impl Mock {
         fn authorize<T>(&self, request: &Request<T>) -> Result<(), Status> {
-            let bytes = std::fs::read(&self.bootstrap)
-                .map_err(|_| Status::unauthenticated("missing bootstrap"))?;
-            let bootstrap = RemoteWorkspaceProviderBootstrap::decode(bytes.as_slice())
-                .map_err(|_| Status::unauthenticated("bad bootstrap"))?;
+            let bytes = std::fs::read(&self.bootstrap).map_err(|error| {
+                crate::failures::noted(Status::unauthenticated("missing bootstrap"), &error)
+            })?;
+            let bootstrap =
+                RemoteWorkspaceProviderBootstrap::decode(bytes.as_slice()).map_err(|error| {
+                    crate::failures::noted(Status::unauthenticated("bad bootstrap"), &error)
+                })?;
             if !matches_bearer(request, &bootstrap.token) {
                 return Err(Status::unauthenticated("wrong bearer"));
             }

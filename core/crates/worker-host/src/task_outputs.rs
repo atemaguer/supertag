@@ -293,12 +293,19 @@ impl PendingOutputs {
         let identity = attempt.inspect();
         let input = self.request();
         let artifact_source = coordination.artifact_source.clone();
-        let policy = self
-            .policy()
-            .map_err(|_| Status::data_loss("accepted output policy could not be restored"))?;
+        let policy = self.policy().map_err(|error| {
+            crate::failures::noted(
+                Status::data_loss("accepted output policy could not be restored"),
+                &error,
+            )
+        })?;
         let (snapshots, capture) = tokio::task::spawn_blocking(move || {
-            let snapshots = Snapshots::open(&state, &identity.attempt_id)
-                .map_err(|_| Status::data_loss("Task output snapshot is unavailable"))?;
+            let snapshots = Snapshots::open(&state, &identity.attempt_id).map_err(|error| {
+                crate::failures::noted(
+                    Status::data_loss("Task output snapshot is unavailable"),
+                    &error,
+                )
+            })?;
             let mut capture = snapshots.replay_outputs(
                 identity,
                 input,
@@ -313,7 +320,12 @@ impl PendingOutputs {
             Ok::<_, Status>((snapshots, capture))
         })
         .await
-        .map_err(|_| Status::internal("Task output snapshot could not be opened"))??;
+        .map_err(|error| {
+            crate::failures::noted(
+                Status::internal("Task output snapshot could not be opened"),
+                &error,
+            )
+        })??;
         let capture = match capture {
             Capture::Committed(receipt) => receipt,
             Capture::Pending(manifest, selected) => {
@@ -343,13 +355,21 @@ impl PendingOutputs {
                 }
                 let operation = self.operation_id.clone();
                 tokio::task::spawn_blocking(move || {
-                    snapshots
-                        .commit(&operation, &receipt)
-                        .map_err(|_| Status::data_loss("Task output receipt could not be saved"))?;
+                    snapshots.commit(&operation, &receipt).map_err(|error| {
+                        crate::failures::noted(
+                            Status::data_loss("Task output receipt could not be saved"),
+                            &error,
+                        )
+                    })?;
                     Ok::<_, Status>(receipt)
                 })
                 .await
-                .map_err(|_| Status::internal("Task output receipt could not be saved"))??
+                .map_err(|error| {
+                    crate::failures::noted(
+                        Status::internal("Task output receipt could not be saved"),
+                        &error,
+                    )
+                })??
             }
         };
         self.artifact_id = Some(

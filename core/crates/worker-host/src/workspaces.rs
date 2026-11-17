@@ -453,9 +453,19 @@ impl Workspaces {
         ancestor: &str,
         cancel: &CancellationToken,
     ) -> bool {
-        match self.open(&prepared.workspace_id, &prepared.checkout.base_commit) {
+        let descends = match self.open(&prepared.workspace_id, &prepared.checkout.base_commit) {
             Ok(workspace) => workspace.base_descends_from(ancestor, cancel).await,
-            Err(_) => false,
+            Err(error) => Err(error),
+        };
+        match descends {
+            Ok(descends) => descends,
+            Err(error) => {
+                crate::failures::note(
+                    "Workspace could not be opened to find a warm preparation",
+                    &error,
+                );
+                false
+            }
         }
     }
 
@@ -536,7 +546,12 @@ fn read_blob(path: &Path, reference: &BlobReference) -> Result<Vec<u8>, Status> 
         );
         Ok(bytes)
     };
-    read().map_err(|_| Status::data_loss("staged workspace artifact does not match its receipt"))
+    read().map_err(|error| {
+        crate::failures::noted(
+            Status::data_loss("staged workspace artifact does not match its receipt"),
+            &error,
+        )
+    })
 }
 
 impl Transfers {
@@ -553,7 +568,12 @@ impl Transfers {
             },
             token,
         )
-        .map_err(|_| Status::internal("cannot authenticate Git output verification"))?;
+        .map_err(|error| {
+            crate::failures::noted(
+                Status::internal("cannot authenticate Git output verification"),
+                &error,
+            )
+        })?;
         request.set_timeout(Duration::from_secs(32));
         let response =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
@@ -574,8 +594,12 @@ impl Transfers {
         attempt: &Attempt,
         token: &str,
     ) -> Result<(GithubWorkspaceBundle, Vec<u8>), Status> {
-        let mut request = request(attempt.inspect(), token)
-            .map_err(|_| Status::internal("cannot authenticate source download"))?;
+        let mut request = request(attempt.inspect(), token).map_err(|error| {
+            crate::failures::noted(
+                Status::internal("cannot authenticate source download"),
+                &error,
+            )
+        })?;
         request.set_timeout(Duration::from_secs(120));
         let mut stream =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
@@ -646,9 +670,17 @@ impl Transfers {
             storage.retain_blob(&attempt_id, &bundle_blob, &bundle)
         })
         .await
-        .map_err(|_| Status::internal("Workspace delivery storage failed"))?
-        .map_err(|_| {
-            Status::data_loss("could not keep the Workspace delivery on this Worker Host")
+        .map_err(|error| {
+            crate::failures::noted(
+                Status::internal("Workspace delivery storage failed"),
+                &error,
+            )
+        })?
+        .map_err(|error| {
+            crate::failures::noted(
+                Status::data_loss("could not keep the Workspace delivery on this Worker Host"),
+                &error,
+            )
         })?;
         let mut upstream = request(
             WorkspaceDeliveryRequest {
@@ -657,7 +689,12 @@ impl Transfers {
             },
             token,
         )
-        .map_err(|_| Status::internal("cannot authenticate workspace delivery"))?;
+        .map_err(|error| {
+            crate::failures::noted(
+                Status::internal("cannot authenticate workspace delivery"),
+                &error,
+            )
+        })?;
         upstream.set_timeout(Duration::from_secs(30));
         let received =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
@@ -681,8 +718,12 @@ impl Transfers {
         token: &str,
         held: impl AsyncFnOnce(&WorkspaceDeliveryReference) -> bool,
     ) -> Result<Option<(WorkspaceDeliveryReference, Option<Vec<u8>>)>, Status> {
-        let mut upstream = request(attempt.inspect(), token)
-            .map_err(|_| Status::internal("cannot authenticate workspace download"))?;
+        let mut upstream = request(attempt.inspect(), token).map_err(|error| {
+            crate::failures::noted(
+                Status::internal("cannot authenticate workspace download"),
+                &error,
+            )
+        })?;
         upstream.set_timeout(Duration::from_secs(120));
         let mut stream =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
@@ -697,8 +738,12 @@ impl Transfers {
             }) => reference,
             _ => return Err(Status::data_loss("workspace download has no receipt")),
         };
-        validate_workspace_delivery(&reference)
-            .map_err(|_| Status::data_loss("workspace continuation receipt is invalid"))?;
+        validate_workspace_delivery(&reference).map_err(|error| {
+            crate::failures::noted(
+                Status::data_loss("workspace continuation receipt is invalid"),
+                &error,
+            )
+        })?;
         let bundle = reference
             .bundle
             .as_ref()

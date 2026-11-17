@@ -75,8 +75,12 @@ where
         }) => reference,
         _ => return Err(Status::data_loss("review patch has no delivery receipt")),
     };
-    validate_workspace_delivery(&reference)
-        .map_err(|_| Status::data_loss("review patch delivery receipt is invalid"))?;
+    validate_workspace_delivery(&reference).map_err(|error| {
+        crate::failures::noted(
+            Status::data_loss("review patch delivery receipt is invalid"),
+            &error,
+        )
+    })?;
     let blob = reference.patch.as_ref().expect("validated patch reference");
     if offset > blob.byte_length {
         return Err(Status::invalid_argument(
