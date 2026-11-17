@@ -32,6 +32,7 @@ pub(crate) const ARTIFACT_CAPTURE_SUFFIX: &str = "+artifact-capture-v1";
 pub(crate) const TAG_SESSIONS_SUFFIX: &str = "+tag-sessions-v2";
 pub(crate) const SCHEDULE_SUFFIX: &str = "+schedule-v1";
 pub(crate) const CLOSE_SESSION_SUFFIX: &str = "+close-session-v1";
+pub(crate) const MEMORY_SUFFIX: &str = "+memory-v1";
 pub(crate) const OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-v1";
 pub(crate) const ONGOING_OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-ongoing-v1";
 const ONGOING_COMPLETION_REFUSED: &str = "This Objective is ongoing, so it never completes; only an operator ends it. Report ready_for_review or blocked instead, or finish the turn without a report.";
@@ -50,6 +51,8 @@ pub(crate) struct Tools {
     pub(crate) schedule: bool,
     /// `close_session`, with `start_session`.
     pub(crate) close_sessions: bool,
+    /// `remember` and `forget`, for a root turn of a Tag that keeps memory.
+    pub(crate) memory: bool,
     /// `report_objective`, for the owner Session of an open Objective.
     pub(crate) report_objective: Reporting,
 }
@@ -105,6 +108,7 @@ impl Tools {
             || self.tag_sessions
             || self.schedule
             || self.close_sessions
+            || self.memory
             || self.report_objective.offered()
     }
 
@@ -142,6 +146,9 @@ impl Tools {
         if self.close_sessions {
             manifest.push_str(CLOSE_SESSION_SUFFIX);
         }
+        if self.memory {
+            manifest.push_str(MEMORY_SUFFIX);
+        }
         manifest.push_str(self.report_objective.suffix());
         manifest
     }
@@ -174,6 +181,12 @@ impl Tools {
         {
             return Ok(Arguments::Schedule(call));
         }
+        if self.memory
+            && params["namespace"] == "supertag"
+            && let Some(call) = crate::memory::arguments(params)?
+        {
+            return Ok(Arguments::Memory(call));
+        }
         if self.tag_sessions
             && params["namespace"] == "supertag"
             && let Some(call) = crate::tag_sessions::arguments(params)?
@@ -198,6 +211,7 @@ pub(crate) struct Bridge {
     coordination: coordination::Client,
     tag_sessions: crate::tag_sessions::Client,
     schedules: crate::schedules::Client,
+    memory: crate::memory::Client,
     calls: BTreeMap<String, (Arguments, Value)>,
     secrets: Vec<String>,
     asked: bool,
@@ -230,6 +244,7 @@ impl Bridge {
             current,
             tag_sessions: crate::tag_sessions::Client::new(channel.clone()),
             schedules: crate::schedules::Client::new(channel.clone()),
+            memory: crate::memory::Client::new(channel.clone()),
             coordination: coordination::Client::new(channel),
             calls: BTreeMap::new(),
             secrets: vec![],
@@ -325,6 +340,12 @@ impl Bridge {
                     &self.capabilities.time_zone,
                     std::time::SystemTime::now().into(),
                 ));
+        }
+        if self.tools.memory {
+            specs[0]["tools"]
+                .as_array_mut()
+                .expect("tool specifications")
+                .extend(crate::memory::tool_specs());
         }
         if self.tools.report_objective.offered() {
             specs[0]["tools"]
@@ -517,6 +538,13 @@ impl Bridge {
                 if self.current.schedule && self.capabilities.may_schedule && !self.asked =>
             {
                 self.schedules
+                    .call(call, operation_id, &self.token, &self.secrets)
+                    .await?
+            }
+            Arguments::Memory(call)
+                if self.current.memory && self.capabilities.may_remember && !self.asked =>
+            {
+                self.memory
                     .call(call, operation_id, &self.token, &self.secrets)
                     .await?
             }
@@ -778,6 +806,7 @@ mod tests {
             tag_sessions: false,
             schedule: false,
             close_sessions: false,
+            memory: false,
             report_objective,
         };
         let params = call(json!({"status":"completed","summary":"Done"}));

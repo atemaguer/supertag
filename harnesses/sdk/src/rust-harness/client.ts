@@ -4,6 +4,7 @@ import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-no
 import { HarnessArtifacts } from "./gen/supertag/runtime/v2/artifact_pb.js";
 import { HarnessEffects } from "./gen/supertag/runtime/v2/effects_pb.js";
 import { HarnessMcp } from "./gen/supertag/runtime/v2/mcp_pb.js";
+import { HarnessMemory } from "./gen/supertag/runtime/v2/memories_pb.js";
 import {
   AdapterBootstrapSchema,
   Harness,
@@ -68,6 +69,8 @@ export function harnessClient(endpoint: string, token: string) {
   const tagSessions = createClient(HarnessTagSessions, transport);
   // A root turn's follow-ups: later turns of its Tag in its Session.
   const schedules = createClient(HarnessSchedules, transport);
+  // A root turn's notes: what its Tag keeps of what it cannot look up again.
+  const memory = createClient(HarnessMemory, transport);
   const workspace = createClient(HarnessWorkspace, transport);
   const artifacts = createClient(HarnessArtifacts, transport);
   const mcp = createClient(HarnessMcp, transport);
@@ -83,6 +86,7 @@ export function harnessClient(endpoint: string, token: string) {
     workSessions,
     tagSessions,
     schedules,
+    memory,
     workspace,
     artifacts,
     mcp,

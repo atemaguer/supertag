@@ -14,6 +14,7 @@ import {
   verifiedReviewPage,
 } from "./commit-review.js";
 import { ArtifactAcquisitionState } from "./gen/supertag/runtime/v2/artifact_pb.js";
+import type { AttemptMemoryResponse } from "./gen/supertag/runtime/v2/memories_pb.js";
 import { ObjectiveSessionStatus } from "./gen/supertag/runtime/v2/objective_overview_pb.js";
 import {
   ApprovalState,
@@ -154,6 +155,8 @@ const schemas = {
       message: "Give exactly one of at and every.",
     }),
   cancel_schedule: z.strictObject({ scheduleId: tagId }),
+  remember: z.strictObject({ text: nonblankText(500), replaces: tagId.optional() }),
+  forget: z.strictObject({ memoryId: tagId }),
 };
 
 type Tool = keyof typeof schemas;
@@ -238,6 +241,30 @@ export function scheduleLine(schedule: Schedule, zone: string) {
       : localTime(schedule.nextDueAtMs, every?.timeZone || zone);
   const recurrence = every ? `every ${every.cron} (${every.timeZone})` : "once";
   return `${schedule.scheduleId} next ${next}, ${recurrence}: ${schedule.note}`;
+}
+
+/**
+ * What the `remember` tool says a note is for. Matches the Codex adapter's
+ * `memory::REMEMBER_DESCRIPTION`.
+ */
+export const REMEMBER_DESCRIPTION =
+  "Keep a short note for later turns of this Tag. Only what you can't look up again: preferences, corrections, decisions and their reasons, and pointers (URL, path, Objective ID) to anything kept elsewhere. Never paste content that lives in a repository, issue or PR. Pass replaces with a note's ID to rewrite or merge it. A note written in a person's conversation stays private to that person. It takes effect when this turn succeeds.";
+
+/** The `remember` or `forget` result: what changed, then the notes this turn now sees. */
+export function memorySummary(result: AttemptMemoryResponse, forgot?: string) {
+  const lines = [
+    forgot
+      ? `Forgot ${forgot}. It takes effect when this turn succeeds.`
+      : result.memory
+        ? `Saved ${result.memory.memoryId}. It takes effect when this turn succeeds.`
+        : "Saved.",
+  ];
+  if (result.notes.length === 0) lines.push("You keep no notes.");
+  else {
+    lines.push("Your notes now:");
+    for (const note of result.notes) lines.push(`- ${note.memoryId}: ${note.text}`);
+  }
+  return lines.join("\n");
 }
 
 /** The `schedule` or `cancel_schedule` result: what changed, then the Session's other ones. */
@@ -354,6 +381,7 @@ export function registerCoordinationTools(
     workSessions,
     tagSessions,
     schedules,
+    memory,
     options,
   }: ReturnType<typeof harnessClient>,
   run: Pick<HarnessRun, "task" | "mayAskObjectiveQuestion" | "coordination"> &
@@ -1520,6 +1548,73 @@ export function registerCoordinationTools(
               schedules.cancel({ scheduleId }, config),
             );
             return response(safeText(scheduleSummary(result, false)));
+          } catch (error) {
+            return refused(error);
+          }
+        }),
+    );
+  }
+  if (run.coordination?.mayRemember) {
+    let written = 0;
+    const refused = (error: unknown) => {
+      const failure = ConnectError.from(error);
+      return [
+        Code.PermissionDenied,
+        Code.FailedPrecondition,
+        Code.NotFound,
+        Code.InvalidArgument,
+        Code.AlreadyExists,
+        Code.Aborted,
+      ].includes(failure.code)
+        ? response(`Refused: ${safeText(failure.rawMessage)}`, true)
+        : response("The note could not be confirmed.", true);
+    };
+    const operation = () => {
+      // One operation per call, so a retried call replays its own receipt.
+      written += 1;
+      return `${configuration.questionOperationPrefix}-memory-${written}`;
+    };
+    tools.push("remember", "forget");
+    server.registerTool(
+      "remember",
+      { description: REMEMBER_DESCRIPTION, inputSchema: schemas.remember, _meta: meta },
+      ({ text, replaces }, tool) =>
+        write(async () => {
+          if (asked) return response("This turn is waiting for an answer.", true);
+          const operationId = operation();
+          try {
+            const result = await call(tool.signal, (config) =>
+              memory.remember(
+                {
+                  operationId,
+                  text: trim(safeText(text)),
+                  ...(replaces === undefined ? {} : { replaces }),
+                },
+                config,
+              ),
+            );
+            return response(safeText(memorySummary(result)));
+          } catch (error) {
+            return refused(error);
+          }
+        }),
+    );
+    server.registerTool(
+      "forget",
+      {
+        description:
+          "Forget one of this Tag's notes by its ID, when it is wrong or no longer matters. It takes effect when this turn succeeds.",
+        inputSchema: schemas.forget,
+        _meta: meta,
+      },
+      ({ memoryId }, tool) =>
+        write(async () => {
+          const operationId = operation();
+          try {
+            const result = await call(tool.signal, (config) =>
+              memory.forget({ operationId, memoryId }, config),
+            );
+            return response(safeText(memorySummary(result, memoryId)));
           } catch (error) {
             return refused(error);
           }

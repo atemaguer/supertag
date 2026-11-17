@@ -74,6 +74,12 @@ if root.joinpath("tag-sessions-mode").exists():
         ("read_objective", {"objectiveId": "docs"}),
     ])
 
+if root.joinpath("memory-mode").exists():
+    coordination_tools.extend([
+        ("remember", {"text": "Atem prefers squash merges synthetic-codex-provider-secret", "replaces": "mem_old"}),
+        ("forget", {"memoryId": "mem_stale"}),
+    ])
+
 if root.joinpath("report-mode").exists():
     coordination_tools.extend(("report_objective", report) for report in json.loads(root.joinpath("report-mode").read_text()))
 

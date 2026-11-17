@@ -98,6 +98,8 @@ struct Observed {
     work_continuations: Vec<HarnessContinueWorkSessionRequest>,
     work_questions: Vec<HarnessAskWorkSessionQuestionRequest>,
     tag_session_calls: Vec<&'static str>,
+    remembered: Vec<supertag_protocol::v2::AttemptRememberRequest>,
+    forgotten: Vec<supertag_protocol::v2::AttemptForgetRequest>,
     /// The Session's recap the Worker Host attaches.
     history: Vec<supertag_protocol::v2::AttemptHistoryEntry>,
     pending_post: bool,
@@ -644,6 +646,45 @@ impl HarnessMailbox for HarnessFixture {
 }
 
 #[tonic::async_trait]
+impl supertag_protocol::v2::harness_memory_server::HarnessMemory for HarnessFixture {
+    async fn remember(
+        &self,
+        request: Request<supertag_protocol::v2::AttemptRememberRequest>,
+    ) -> Result<Response<supertag_protocol::v2::AttemptMemoryResponse>, Status> {
+        self.authenticate(&request)?;
+        let request = request.into_inner();
+        assert!(request.attempt.is_none());
+        self.observed.lock().await.remembered.push(request);
+        let note = supertag_protocol::v2::Memory {
+            memory_id: "mem_fixture".into(),
+            text: "fixture-note-receipt".into(),
+            ..Default::default()
+        };
+        Ok(Response::new(
+            supertag_protocol::v2::AttemptMemoryResponse {
+                memory: Some(note.clone()),
+                notes: vec![note],
+            },
+        ))
+    }
+
+    async fn forget(
+        &self,
+        request: Request<supertag_protocol::v2::AttemptForgetRequest>,
+    ) -> Result<Response<supertag_protocol::v2::AttemptMemoryResponse>, Status> {
+        self.authenticate(&request)?;
+        self.observed
+            .lock()
+            .await
+            .forgotten
+            .push(request.into_inner());
+        Ok(Response::new(
+            supertag_protocol::v2::AttemptMemoryResponse::default(),
+        ))
+    }
+}
+
+#[tonic::async_trait]
 impl HarnessTagSessions for HarnessFixture {
     async fn list_sessions(
         &self,
@@ -948,6 +989,11 @@ impl HarnessProcess {
                 .add_service(HarnessWorkSessionsServer::new(fixture.clone()))
                 .add_service(HarnessArtifactsServer::new(fixture.clone()))
                 .add_service(HarnessTagSessionsServer::new(fixture.clone()))
+                .add_service(
+                    supertag_protocol::v2::harness_memory_server::HarnessMemoryServer::new(
+                        fixture.clone(),
+                    ),
+                )
                 .add_service(HarnessMailboxServer::new(fixture))
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         );
@@ -3411,6 +3457,52 @@ async fn native_tag_session_tools_read_and_carry_the_portfolio() -> Result<()> {
             assert!(!logs.contains(KEY));
         } else {
             assert!(!logs.contains("tag-search-receipt"));
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_memory_tools_keep_notes_only_with_the_capability() -> Result<()> {
+    for may_remember in [true, false] {
+        let native = NativeFixture::new(&successful("Noted"), "exit 0")?;
+        if may_remember {
+            std::fs::write(native.directory.path().join("memory-mode"), "")?;
+        }
+        let server = HarnessProcess::configured_tools(
+            &["files:read"],
+            None,
+            "Remember that I prefer squash merges",
+            false,
+            Some(AttemptCapabilities {
+                may_remember,
+                ..Default::default()
+            }),
+        )
+        .await?;
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        let manifest =
+            String::from_utf8_lossy(&outcome.checkpoint.as_ref().context("checkpoint")?.payload)
+                .contains("+memory-v1");
+        assert_eq!(manifest, may_remember);
+        let logs = native.read("requests.jsonl")?;
+        if may_remember {
+            assert_eq!(observed.remembered.len(), 1);
+            assert_eq!(
+                observed.remembered[0].text,
+                "Atem prefers squash merges [REDACTED]"
+            );
+            assert_eq!(observed.remembered[0].replaces.as_deref(), Some("mem_old"));
+            assert!(observed.remembered[0].operation_id.starts_with("codex-"));
+            assert_eq!(observed.forgotten.len(), 1);
+            assert_eq!(observed.forgotten[0].memory_id, "mem_stale");
+            assert!(logs.contains("Saved mem_fixture") && logs.contains("Forgot mem_stale"));
+            assert!(!logs.contains(KEY));
+        } else {
+            assert!(observed.remembered.is_empty() && !logs.contains("\"remember\""));
         }
     }
     Ok(())

@@ -6,6 +6,7 @@ mod checkpoint;
 mod config;
 mod coordination;
 mod events;
+mod memory;
 mod pricing;
 mod questions;
 mod recap;
@@ -129,6 +130,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         tag_sessions: capabilities.may_read_tag_sessions,
         schedule: capabilities.may_schedule,
         close_sessions: capabilities.may_start_work_session,
+        memory: capabilities.may_remember,
         report_objective: questions::Reporting::new(&capabilities),
     };
     let reread = tools.tag_sessions;

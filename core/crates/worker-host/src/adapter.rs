@@ -4,6 +4,7 @@ mod effects;
 mod inputs;
 mod limits;
 mod mcp;
+mod memory;
 mod questions;
 mod review_artifacts;
 mod schedules;
@@ -600,6 +601,7 @@ async fn run(
             .add_service(bridge.work_sessions_service())
             .add_service(bridge.tag_sessions_service())
             .add_service(bridge.schedules_service())
+            .add_service(bridge.memory_service())
             .add_service(bridge.workspace_service())
             .add_service(bridge.mcp_service())
             .add_service(bridge.artifact_capture_service())

@@ -192,6 +192,10 @@ mod tests {
                     channel.clone(),
                     headers.clone(),
                 ),
+                memory: supertag_protocol::v2::attempt_memory_client::AttemptMemoryClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
             },
             state: Default::default(),
             attached: Default::default(),
