@@ -224,19 +224,17 @@ impl Workspaces {
         let mapping = self
             .mapping(&spec.workspace_id)
             .context("Task workspace is not configured on this Worker Host")?;
-        match (&mapping.source, &spec.github_source) {
+        match (&mapping.source, &spec.remote) {
             (WorkspaceSource::ControlPlane, Some(expected)) => {
                 let (reference, bytes) = tokio::select! {
-                    result = transfers.download_source(attempt, token) => result?,
+                    result = transfers.download_source(attempt, token, false) => result?,
                     _ = cancel.cancelled() => return Err(Status::cancelled("source download cancelled").into()),
                 };
                 ensure!(
                     reference.workspace.as_ref() == Some(expected)
                         && expected.workspace_id == spec.workspace_id
-                        && expected
-                            .source
-                            .as_ref()
-                            .is_some_and(|source| source.commit_sha == spec.base_commit),
+                        && expected.commit == spec.base_commit
+                        && reference.commit == spec.base_commit,
                     "Control Plane returned a different Workspace source"
                 );
                 fs::DirBuilder::new()
@@ -330,6 +328,37 @@ impl Workspaces {
                 Some(reference.head_commit)
             }
         };
+        // A merge follow-up starts from its Session's work with the target merged in.
+        let merge_commit = (!spec.merge_commit.is_empty()).then(|| spec.merge_commit.clone());
+        if let Some(commit) = &merge_commit {
+            match &mapping.source {
+                WorkspaceSource::ControlPlane => {
+                    let (reference, bytes) = tokio::select! {
+                        result = transfers.download_source(attempt, token, true) => result?,
+                        _ = cancel.cancelled() => return Err(Status::cancelled("merge source download cancelled").into()),
+                    };
+                    ensure!(
+                        &reference.commit == commit,
+                        "Control Plane returned a different merge commit"
+                    );
+                    let blob = reference.bundle.context("merge download has no bundle")?;
+                    let mut file = NamedTempFile::new_in(self.directory.canonicalize()?)?;
+                    file.write_all(&bytes)?;
+                    file.as_file().sync_all()?;
+                    workspace
+                        .import_merge_bundle(file.path(), &blob.sha256, commit, cancel)
+                        .await?;
+                }
+                WorkspaceSource::Local(_) => {
+                    workspace.import_source_commit(commit, cancel).await?;
+                }
+            }
+        }
+        let author = (!spec.author_name.is_empty()).then(|| supertag_workspaces::CommitAuthor {
+            name: spec.author_name.clone(),
+            email: spec.author_email.clone(),
+            co_author: spec.co_author.clone(),
+        });
         let checkout = workspace
             .prepare(
                 PrepareRequest {
@@ -338,6 +367,8 @@ impl Workspaces {
                     session_id: task.session_id.clone(),
                     expected_head,
                     setup: mapping.setup.clone(),
+                    merge_commit,
+                    author,
                 },
                 cancel,
             )
@@ -646,8 +677,13 @@ impl Transfers {
         &self,
         attempt: &Attempt,
         token: &str,
-    ) -> Result<(GithubWorkspaceBundle, Vec<u8>), Status> {
-        let mut request = request(attempt.inspect(), token).map_err(|error| {
+        merge: bool,
+    ) -> Result<(WorkspaceSourceBundle, Vec<u8>), Status> {
+        let input = DownloadWorkspaceSourceRequest {
+            attempt: Some(attempt.inspect()),
+            merge,
+        };
+        let mut request = request(input, token).map_err(|error| {
             crate::failures::noted(
                 Status::internal("cannot authenticate source download"),
                 &error,
@@ -661,8 +697,8 @@ impl Transfers {
                 .await?
                 .into_inner();
         let reference = match stream.message().await? {
-            Some(GithubWorkspaceDownload {
-                part: Some(github_workspace_download::Part::Reference(reference)),
+            Some(WorkspaceSourceDownload {
+                part: Some(workspace_source_download::Part::Reference(reference)),
             }) => reference,
             _ => return Err(Status::data_loss("source download has no receipt")),
         };
@@ -675,7 +711,7 @@ impl Transfers {
         }
         let mut bytes = Vec::new();
         while let Some(message) = stream.message().await? {
-            let Some(github_workspace_download::Part::Chunk(chunk)) = message.part else {
+            let Some(workspace_source_download::Part::Chunk(chunk)) = message.part else {
                 return Err(Status::data_loss("unexpected source download record"));
             };
             if chunk.is_empty()
@@ -1023,6 +1059,8 @@ mod tests {
                     session_id: "session".into(),
                     expected_head: Some(base_commit.clone()),
                     setup: None,
+                    merge_commit: None,
+                    author: None,
                 },
                 &CancellationToken::new(),
             )

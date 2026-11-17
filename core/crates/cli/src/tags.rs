@@ -211,8 +211,8 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 workspace_id,
                 base_commit: workspace_base.unwrap_or_default(),
                 base_ref: workspace_ref.unwrap_or_default(),
-                github_source: None,
                 mounts,
+                ..Default::default()
             });
             let mut approval_rules = Vec::new();
             for (required, action, operator_ids) in [

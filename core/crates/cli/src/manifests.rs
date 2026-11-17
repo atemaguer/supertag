@@ -83,19 +83,31 @@ struct VolumeSpec {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct WorkspaceSourceSpec {
-    account_id: String,
-    repository_id: u64,
-    repository: String,
-    commit_sha: Option<String>,
-    revision: Option<String>,
+struct WorkspaceCredentialsSpec {
+    #[serde(default)]
+    read: String,
+    #[serde(default)]
+    push: String,
+}
+
+/// `land: branch` or `land: { merge: TARGET }`.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LandSpec {
+    Mode(String),
+    Merge { merge: String },
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct WorkspaceSpecInput {
-    github: WorkspaceSourceSpec,
-    pull_request_base: Option<String>,
+    remote: String,
+    #[serde(rename = "ref", default)]
+    reference: String,
+    /// One Workspace Credential for both reading and pushing.
+    credential: Option<String>,
+    credentials: Option<WorkspaceCredentialsSpec>,
+    land: Option<LandSpec>,
 }
 
 #[derive(Deserialize)]
@@ -181,7 +193,7 @@ struct ObjectiveSpec {
 enum Resource {
     SurfaceAccount(SurfaceAccount),
     Volume(String),
-    Workspace(GithubWorkspace),
+    Workspace(supertag_protocol::v2::Workspace),
     ContextSet(ContextSet),
     PermissionSet(PermissionSet),
     Role(Role),
@@ -248,31 +260,47 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
         }
         Kind::Volume => Resource::Volume(typed::<VolumeSpec>(spec, kind)?.source),
         Kind::Workspace => {
+            use supertag_protocol::v2::{
+                Workspace, WorkspaceCredentialNames, WorkspaceLand, WorkspaceLandBranch,
+                WorkspaceLandMerge, workspace_land,
+            };
             let value: WorkspaceSpecInput = typed(spec, kind)?;
-            let commit_sha = value.github.commit_sha.unwrap_or_default();
             ensure!(
-                supertag_protocol::valid_workspace_id(&name)
-                    && value.github.repository_id != 0
-                    && valid_name(&value.github.account_id)
-                    && (commit_sha.is_empty()
-                        || (supertag_protocol::valid_git_commit(&commit_sha)
-                            && value.github.revision.is_none())),
-                "invalid GitHub Workspace selector"
+                value.credential.is_none() || value.credentials.is_none(),
+                "a Workspace names credential or credentials, not both"
             );
-            Resource::Workspace(GithubWorkspace {
-                workspace_id: name.clone(),
-                source: Some(GithubWorkspaceSource {
-                    account_id: value.github.account_id,
-                    repository_id: value.github.repository_id,
-                    repository: value.github.repository.to_ascii_lowercase(),
-                    commit_sha,
-                    revision: value.github.revision,
-                    resolved_revision: None,
+            let credentials = match (value.credential, value.credentials) {
+                (Some(name), _) => WorkspaceCredentialNames {
+                    read: name.clone(),
+                    push: name,
+                },
+                (None, Some(names)) => WorkspaceCredentialNames {
+                    read: names.read,
+                    push: names.push,
+                },
+                (None, None) => WorkspaceCredentialNames::default(),
+            };
+            let land = match value.land {
+                None => None,
+                Some(LandSpec::Mode(mode)) if mode == "branch" => Some(WorkspaceLand {
+                    mode: Some(workspace_land::Mode::Branch(WorkspaceLandBranch {})),
                 }),
-                pull_request: value
-                    .pull_request_base
-                    .map(|base_branch| GithubPullRequestDelivery { base_branch }),
-                revision: 0,
+                Some(LandSpec::Mode(mode)) => {
+                    anyhow::bail!("land is branch or {{merge: TARGET}}, not {mode}")
+                }
+                Some(LandSpec::Merge { merge }) => Some(WorkspaceLand {
+                    mode: Some(workspace_land::Mode::Merge(WorkspaceLandMerge {
+                        target: merge,
+                    })),
+                }),
+            };
+            Resource::Workspace(Workspace {
+                workspace_id: name.clone(),
+                remote: value.remote,
+                r#ref: value.reference,
+                credentials: Some(credentials),
+                land,
+                ..Default::default()
             })
         }
         Kind::ContextSet => {

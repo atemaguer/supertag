@@ -274,8 +274,18 @@ pub(crate) async fn close_in(
     reason: WorkSessionCloseReason,
     now: i64,
 ) -> Result<()> {
-    sqlx::query("UPDATE supertag_v2_work_sessions SET closed_at_ms=$1, close_reason=$2 WHERE work_session_id=$3 AND closed_at_ms IS NULL")
-        .bind(now).bind(reason as i64).bind(work_session_id).execute(&mut **tx).await?;
+    let closed = sqlx::query("UPDATE supertag_v2_work_sessions SET closed_at_ms=$1, close_reason=$2 WHERE work_session_id=$3 AND closed_at_ms IS NULL")
+        .bind(now).bind(reason as i64).bind(work_session_id).execute(&mut **tx).await?
+        .rows_affected();
+    // Its Tag or an operator reporting the work done lands it in a `merge` Workspace.
+    if closed > 0
+        && matches!(
+            reason,
+            WorkSessionCloseReason::Tag | WorkSessionCloseReason::Operator
+        )
+    {
+        crate::workspace_landings::session_done_in(tx, work_session_id).await?;
+    }
     Ok(())
 }
 
@@ -285,9 +295,15 @@ pub(crate) async fn close_objective_in(
     objective_id: &str,
     now: i64,
 ) -> Result<()> {
+    let open: Vec<String> = sqlx::query_scalar("SELECT work_session_id FROM supertag_v2_work_sessions WHERE objective_id=$1 AND closed_at_ms IS NULL")
+        .bind(objective_id).fetch_all(&mut **tx).await?;
     sqlx::query("UPDATE supertag_v2_work_sessions SET closed_at_ms=$1, close_reason=$2 WHERE objective_id=$3 AND closed_at_ms IS NULL")
         .bind(now).bind(WorkSessionCloseReason::ObjectiveClosed as i64).bind(objective_id)
         .execute(&mut **tx).await?;
+    // A closed Objective's work is done: its Work Sessions land in a `merge` Workspace.
+    for work_session_id in open {
+        crate::workspace_landings::session_done_in(tx, &work_session_id).await?;
+    }
     Ok(())
 }
 

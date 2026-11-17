@@ -212,7 +212,11 @@ async fn deliver_children(store: &Store, host: &HostAuthority) -> DeliveredChild
                 mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
-                github_source: None,
+                remote: None,
+                merge_commit: String::new(),
+                author_name: String::new(),
+                author_email: String::new(),
+                co_author: String::new(),
             }),
         )
         .await
@@ -628,7 +632,11 @@ async fn restore_owner_binding(store: &Store) {
                 mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
-                github_source: None,
+                remote: None,
+                merge_commit: String::new(),
+                author_name: String::new(),
+                author_email: String::new(),
+                co_author: String::new(),
             }),
         )
         .await
@@ -1030,7 +1038,11 @@ async fn prepare_gated_reports(
                 mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
-                github_source: None,
+                remote: None,
+                merge_commit: String::new(),
+                author_name: String::new(),
+                author_email: String::new(),
+                co_author: String::new(),
             }),
             approval_rules: vec![ApprovalRule {
                 action: "mailbox:send".into(),
@@ -1150,7 +1162,11 @@ async fn approve_scoped_request(
                 mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
-                github_source: None,
+                remote: None,
+                merge_commit: String::new(),
+                author_name: String::new(),
+                author_email: String::new(),
+                co_author: String::new(),
             }),
             ..Default::default()
         })

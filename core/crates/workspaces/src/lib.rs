@@ -172,6 +172,32 @@ pub struct PrepareRequest {
     /// The Workspace's operator-chosen setup command; see [`setup`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<String>,
+    /// A merge follow-up: the commit to merge into the checkout. The checkout starts with the
+    /// merge already made, conflict markers left in conflicting files, and the Task's commit gets
+    /// this commit as its second parent. The commit must already be in this Workspace's
+    /// repository ([`Workspace::import_merge_bundle`] or [`Workspace::import_source_commit`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_commit: Option<String>,
+    /// Who the Task's commit names as its author; SuperTag's own identity when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<CommitAuthor>,
+}
+
+/// A commit's author and committer, and a person credited with a `Co-authored-by` trailer.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CommitAuthor {
+    pub name: String,
+    pub email: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub co_author: String,
+}
+
+/// A merge a merge follow-up's checkout starts with.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+struct PreparedMerge {
+    commit: String,
+    /// Files the merge left with conflict markers.
+    conflicts: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -280,6 +306,8 @@ struct Preparation {
     /// Setup outputs copied into the checkout. Git ignores them, so finalization skips them.
     #[serde(default)]
     setup_outputs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    merge: Option<PreparedMerge>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -431,13 +459,32 @@ impl Workspace {
                 commit_seconds: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
                 ready: false,
                 setup_outputs: Vec::new(),
+                merge: None,
             },
         };
         atomic_json(&record_path, &preparation)?;
         if fs::symlink_metadata(&checkout.path).is_ok() {
             paths::remove_owned_directory(&checkout.path)?;
         }
-        let entries = repository.tree(&start, cancel).await?;
+        // A merge follow-up's checkout holds the merge, with conflict markers left in place.
+        let (merged_tree, merge) = match &request.merge_commit {
+            None => (None, None),
+            Some(commit) => {
+                git::validate_oid(commit)?;
+                repository.verify_commit(commit, cancel).await?;
+                let (tree, conflicts) = repository.merge_tree(&start, commit, cancel).await?;
+                (
+                    Some(tree),
+                    Some(PreparedMerge {
+                        commit: commit.clone(),
+                        conflicts,
+                    }),
+                )
+            }
+        };
+        let entries = repository
+            .tree(merged_tree.as_deref().unwrap_or(&start), cancel)
+            .await?;
         for entry in entries.values() {
             paths::validate_repo_path(&entry.path)?;
             ensure!(
@@ -463,12 +510,13 @@ impl Workspace {
         repository
             .checkout(
                 &checkout.path,
-                &self.inner.config.base_commit,
-                &start,
+                (&self.inner.config.base_commit, &start),
+                merged_tree.as_deref(),
                 &entries,
                 cancel,
             )
             .await?;
+        preparation.merge = merge;
         preparation.setup_outputs = match held {
             None => Vec::new(),
             Some(held) => {
@@ -593,15 +641,44 @@ impl Workspace {
         if let Some(rules) = scope {
             check_scope(rules, (&base_tree, &entries))?;
         }
+        if let Some(merge) = prior
+            .merge
+            .as_ref()
+            .filter(|_| request.outcome == Outcome::Completed)
+        {
+            // Never deliver a merge whose conflicts were left unresolved.
+            let unresolved: Vec<&str> = merge
+                .conflicts
+                .iter()
+                .filter(|path| {
+                    paths::read_checkout_file(&checkout.path, path).is_ok_and(|file| {
+                        file.bytes.split(|byte| *byte == b'\n').any(|line| {
+                            line.starts_with(b"<<<<<<< ") || line.starts_with(b">>>>>>> ")
+                        })
+                    })
+                })
+                .map(String::as_str)
+                .collect();
+            ensure!(
+                unresolved.is_empty(),
+                "conflict markers remain in {}; resolve every conflict before finishing",
+                unresolved.join(", ")
+            );
+        }
         let tree = repository.write_tree(&entries, cancel).await?;
         let original_tree = repository.tree_oid(&checkout.start_commit, cancel).await?;
-        let committed = tree != original_tree;
+        let committed = tree != original_tree || prior.merge.is_some();
+        let mut parents = vec![checkout.start_commit.as_str()];
+        if let Some(merge) = &prior.merge {
+            parents.push(merge.commit.as_str());
+        }
         let head = if committed {
             repository
                 .commit(
                     &tree,
-                    &checkout.start_commit,
-                    &commit_subject(&request.summary),
+                    &parents,
+                    &commit_message(&request.summary, prior.request.author.as_ref()),
+                    prior.request.author.as_ref(),
                     prior.commit_seconds,
                     cancel,
                 )
@@ -794,6 +871,52 @@ impl Workspace {
         Ok(())
     }
 
+    /// Imports a merge follow-up's commit from a verified, complete bundle. Unlike a continuation,
+    /// the commit need not descend from the Workspace's base: it is another branch's head.
+    pub async fn import_merge_bundle(
+        &self,
+        bundle_path: &Path,
+        expected_sha256: &str,
+        expected_head: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        check_cancelled(cancel)?;
+        let _guard = self.inner.gate.lock().await;
+        git::validate_oid(expected_head)?;
+        let bytes = paths::read_regular(bundle_path, 268_435_456)?;
+        ensure!(
+            sha256(&bytes) == expected_sha256,
+            "merge bundle digest differs from its receipt"
+        );
+        let mut copy = NamedTempFile::new_in(self.inner.root.join("temporary"))?;
+        copy.write_all(&bytes)?;
+        copy.flush()?;
+        let repository = self.repository(cancel).await?;
+        repository
+            .import_bundle(copy.path(), expected_head, cancel)
+            .await?;
+        repository.sync()?;
+        Ok(())
+    }
+
+    /// Copies a merge follow-up's commit, and only its history, from this Workspace's local
+    /// source repository.
+    pub async fn import_source_commit(
+        &self,
+        commit: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        check_cancelled(cancel)?;
+        let _guard = self.inner.gate.lock().await;
+        git::validate_oid(commit)?;
+        let repository = self.repository(cancel).await?;
+        repository
+            .import_from_source(&self.inner.config.source, commit, cancel)
+            .await?;
+        repository.sync()?;
+        Ok(())
+    }
+
     /// Materializes the base commit, exactly as pinned, in a Worker-owned directory outside every
     /// Task checkout, and returns it. A Workspace MCP server is read from and runs in it, so
     /// nothing the harness writes in its checkout changes what the Worker Host launches. Each call
@@ -816,7 +939,7 @@ impl Workspace {
         let base = &self.inner.config.base_commit;
         let entries = repository.tree(base, cancel).await?;
         repository
-            .checkout(&path, base, base, &entries, cancel)
+            .checkout(&path, (base, base), None, &entries, cancel)
             .await?;
         paths::sync_tree_off_runtime(path.clone()).await?;
         Ok(path)
@@ -1039,6 +1162,17 @@ fn check_cancelled(cancel: &CancellationToken) -> Result<()> {
         bail!("workspace operation cancelled");
     }
     Ok(())
+}
+
+/// The commit message: the subject, and the requester as a `Co-authored-by` trailer.
+fn commit_message(summary: &str, author: Option<&CommitAuthor>) -> String {
+    let subject = commit_subject(summary);
+    match author.map(|author| author.co_author.as_str()) {
+        Some(co_author) if !co_author.is_empty() && !co_author.chars().any(char::is_control) => {
+            format!("{subject}\n\nCo-authored-by: {co_author}\n")
+        }
+        _ => subject,
+    }
 }
 
 fn commit_subject(summary: &str) -> String {

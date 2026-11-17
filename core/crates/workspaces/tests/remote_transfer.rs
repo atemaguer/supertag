@@ -77,6 +77,8 @@ impl Fixture {
                     session_id: "session".into(),
                     expected_head: Some(pin.into()),
                     setup: None,
+                    merge_commit: None,
+                    author: None,
                 },
                 &CancellationToken::new(),
             )

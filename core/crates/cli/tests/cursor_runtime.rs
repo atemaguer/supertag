@@ -314,7 +314,11 @@ impl<'a> Runtime<'a> {
                     mounts: vec![],
                     workspace_id: WORKSPACE.into(),
                     base_commit: fixture.base.clone(),
-                    github_source: None,
+                    remote: None,
+                    merge_commit: String::new(),
+                    author_name: String::new(),
+                    author_email: String::new(),
+                    co_author: String::new(),
                 }),
                 harness_kind: harness as i32,
                 ..Default::default()

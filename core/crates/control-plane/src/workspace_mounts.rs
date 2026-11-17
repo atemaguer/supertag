@@ -152,7 +152,7 @@ pub(crate) async fn admission_in(
     let Some(spec) = workspace.as_mut().filter(|spec| !spec.mounts.is_empty()) else {
         return Ok(());
     };
-    if spec.github_source.is_some()
+    if spec.remote.is_some()
         || !HarnessKind::try_from(harness)
             .is_ok_and(|kind| kind == HarnessKind::Unspecified || mount_harness(kind))
         || !mount_actions(&spec.mounts, allowed)

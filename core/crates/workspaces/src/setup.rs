@@ -81,7 +81,7 @@ pub(crate) async fn run(
     DirBuilder::new().mode(0o700).create(scratch)?;
     let entries = repository.tree(base_commit, cancel).await?;
     repository
-        .checkout(checkout, base_commit, base_commit, &entries, cancel)
+        .checkout(checkout, (base_commit, base_commit), None, &entries, cancel)
         .await?;
     let temporary = scratch.join("tmp");
     DirBuilder::new().mode(0o700).create(&temporary)?;

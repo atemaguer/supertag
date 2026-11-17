@@ -1,0 +1,139 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+
+// A Workspace kept in a git remote: where its files come from, the Workspace Credentials that
+// read and push them, and where a Session's changes land. It names credentials, never secrets.
+// Every Worker Host that serves it receives its source relayed through the Control Plane, so no
+// host holds a source credential.
+service Workspaces {
+  rpc Put(PutWorkspaceRequest) returns (Workspace);
+  rpc Get(GetWorkspaceRequest) returns (Workspace);
+  rpc List(ListWorkspacesRequest) returns (ListWorkspacesResponse);
+  rpc Delete(DeleteWorkspaceRequest) returns (DeleteWorkspaceResponse);
+  // Reads the remote and checks pushing with the Workspace's credentials, and reports each step
+  // and how strong the protection it found is. It never changes the remote.
+  rpc Check(CheckWorkspaceRequest) returns (WorkspaceCheck);
+}
+
+message Workspace {
+  string workspace_id = 1;
+  // `ssh://`, `https://`, an scp-style `user@host:path`, or `file://` for a bare repository on
+  // the Control Plane's machine. It never contains a password or token.
+  string remote = 2;
+  // The branch each new Session starts from. Empty follows the remote's default branch.
+  string ref = 3;
+  WorkspaceCredentialNames credentials = 4;
+  // Absent: Session changes stay with SuperTag (download them with `supertag fetch`).
+  WorkspaceLand land = 5;
+  uint64 revision = 6;
+  // Set only on a Task's copy: the commit its Session started from, and the branch the
+  // Control Plane read it from.
+  string commit = 7;
+  string resolved_ref = 8;
+}
+
+// The Workspace Credentials git delivery uses. Empty names a remote that needs none, such as a
+// `file://` repository.
+message WorkspaceCredentialNames {
+  string read = 1;
+  string push = 2;
+}
+
+// Where a Session's changes land.
+message WorkspaceLand {
+  oneof mode {
+    // Each delivered Task updates the Session's branch `supertag/session/ID` on the remote.
+    WorkspaceLandBranch branch = 1;
+    // A Session's finished work is merged into `target`, which is pushed.
+    WorkspaceLandMerge merge = 2;
+  }
+}
+message WorkspaceLandBranch {}
+message WorkspaceLandMerge { string target = 1; }
+
+message PutWorkspaceRequest {
+  string operation_id = 1;
+  Workspace workspace = 2;
+  optional uint64 expected_revision = 3;
+}
+message GetWorkspaceRequest { string workspace_id = 1; }
+message ListWorkspacesRequest { string after_id = 1; uint32 limit = 2; }
+message ListWorkspacesResponse {
+  repeated Workspace workspaces = 1;
+  string next_cursor = 2;
+}
+message DeleteWorkspaceRequest {
+  string operation_id = 1;
+  string workspace_id = 2;
+  uint64 expected_revision = 3;
+  // Checks the deletion without deleting or recording the operation.
+  bool dry_run = 4;
+}
+message DeleteWorkspaceResponse {}
+
+message CheckWorkspaceRequest { string workspace_id = 1; }
+
+enum WorkspaceCheckStatus {
+  WORKSPACE_CHECK_STATUS_UNSPECIFIED = 0;
+  WORKSPACE_CHECK_STATUS_OK = 1;
+  WORKSPACE_CHECK_STATUS_FAILED = 2;
+  // A weakness that does not stop delivery, such as a credential that can push any branch.
+  WORKSPACE_CHECK_STATUS_WARNING = 3;
+  WORKSPACE_CHECK_STATUS_NOT_APPLICABLE = 4;
+  WORKSPACE_CHECK_STATUS_UNKNOWN = 5;
+}
+message WorkspaceCheckStep {
+  // `read`, `push`, `scope`, `review`, or `ci`.
+  string step = 1;
+  WorkspaceCheckStatus status = 2;
+  string detail = 3;
+}
+message WorkspaceCheck {
+  string workspace_id = 1;
+  repeated WorkspaceCheckStep steps = 2;
+}
+
+// Workspace Credentials: what git delivery uses to read and push a remote. The Control Plane
+// stores each one's name, kind, and non-secret identifiers; the secret stays in the credential
+// vault of the machine that runs git delivery.
+service WorkspaceCredentials {
+  rpc Put(PutWorkspaceCredentialRequest) returns (WorkspaceCredential);
+  rpc Get(GetWorkspaceCredentialRequest) returns (WorkspaceCredential);
+  rpc List(ListWorkspaceCredentialsRequest) returns (ListWorkspaceCredentialsResponse);
+  rpc Delete(DeleteWorkspaceCredentialRequest) returns (DeleteWorkspaceCredentialResponse);
+}
+
+enum WorkspaceCredentialKind {
+  WORKSPACE_CREDENTIAL_KIND_UNSPECIFIED = 0;
+  // An SSH private key, such as a deploy key.
+  WORKSPACE_CREDENTIAL_KIND_SSH_KEY = 1;
+  // An HTTPS user name and token or password.
+  WORKSPACE_CREDENTIAL_KIND_HTTPS_TOKEN = 2;
+  // A git credential helper that git delivery asks for each remote.
+  WORKSPACE_CREDENTIAL_KIND_CREDENTIAL_HELPER = 3;
+}
+
+message WorkspaceCredential {
+  string name = 1;
+  WorkspaceCredentialKind kind = 2;
+  // An SSH key's SHA256 fingerprint, an HTTPS user name, or a helper's command name.
+  string identifier = 3;
+  uint64 revision = 4;
+}
+message PutWorkspaceCredentialRequest {
+  string operation_id = 1;
+  WorkspaceCredential credential = 2;
+  optional uint64 expected_revision = 3;
+}
+message GetWorkspaceCredentialRequest { string name = 1; }
+message ListWorkspaceCredentialsRequest { string after_name = 1; uint32 limit = 2; }
+message ListWorkspaceCredentialsResponse {
+  repeated WorkspaceCredential credentials = 1;
+  string next_cursor = 2;
+}
+message DeleteWorkspaceCredentialRequest {
+  string operation_id = 1;
+  string name = 2;
+  uint64 expected_revision = 3;
+}
+message DeleteWorkspaceCredentialResponse {}

@@ -24,7 +24,7 @@ pub(super) struct Catalog<'a> {
     policy: policy_catalog_client::PolicyCatalogClient<ProtocolChannel>,
     surfaces: surface_policy_catalog_client::SurfacePolicyCatalogClient<ProtocolChannel>,
     volumes: artifact_volumes_client::ArtifactVolumesClient<ProtocolChannel>,
-    workspaces: github_workspaces_client::GithubWorkspacesClient<ProtocolChannel>,
+    workspaces: workspaces_client::WorkspacesClient<ProtocolChannel>,
     teams: teams_client::TeamsClient<ProtocolChannel>,
     objectives: objectives_client::ObjectivesClient<ProtocolChannel>,
     relationships: manifest_relationships_client::ManifestRelationshipsClient<ProtocolChannel>,
@@ -57,7 +57,7 @@ fn prunable(kind: Kind) -> bool {
 enum Write {
     Account(PutSurfaceAccountRequest),
     Volume(PutArtifactVolumeRequest),
-    Workspace(PutGithubWorkspaceRequest),
+    Workspace(PutWorkspaceRequest),
     Context(PutContextSetRequest),
     Permission(PutPermissionSetRequest),
     Role(PutRoleRequest),
@@ -175,7 +175,7 @@ impl<'a> Catalog<'a> {
             policy: client!(policy_catalog_client, PolicyCatalogClient),
             surfaces: client!(surface_policy_catalog_client, SurfacePolicyCatalogClient),
             volumes: client!(artifact_volumes_client, ArtifactVolumesClient),
-            workspaces: client!(github_workspaces_client, GithubWorkspacesClient),
+            workspaces: client!(workspaces_client, WorkspacesClient),
             teams: client!(teams_client, TeamsClient),
             objectives: client!(objectives_client, ObjectivesClient),
             relationships: client!(manifest_relationships_client, ManifestRelationshipsClient),
@@ -378,7 +378,7 @@ impl<'a> Catalog<'a> {
             }
             Resource::Workspace(mut value) => {
                 let prior = lookup(self.workspaces.get(request(
-                    GetGithubWorkspaceRequest {
+                    GetWorkspaceRequest {
                         workspace_id: name.into(),
                     },
                     token,
@@ -392,24 +392,6 @@ impl<'a> Catalog<'a> {
                     return Ok(None);
                 }
                 validate_manifest_workspace(&mut value)?;
-                let account = self
-                    .account(
-                        declarations,
-                        &value
-                            .source
-                            .as_ref()
-                            .expect("validated Workspace")
-                            .account_id,
-                    )
-                    .await?;
-                ensure!(
-                    account.enabled
-                        && matches!(
-                            account.identity.and_then(|identity| identity.provider),
-                            Some(surface_account_identity::Provider::Github(_))
-                        ),
-                    "Workspace source requires an enabled GitHub Surface Account"
-                );
                 let revision = prior.as_ref().map(|value| value.revision);
                 value.revision = revision.unwrap_or_default();
                 declarations
@@ -417,20 +399,30 @@ impl<'a> Catalog<'a> {
                     .insert((Kind::Workspace, name.into()), name.into());
                 self.planned_fields = vec![
                     field(
-                        "spec.github",
-                        prior.as_ref().map(|v| message(&v.source)),
-                        message(&value.source),
+                        "spec.remote",
+                        prior.as_ref().map(|v| v.remote.as_bytes().to_vec()),
+                        value.remote.as_bytes().to_vec(),
                     ),
                     field(
-                        "spec.pullRequestBase",
-                        prior.as_ref().map(|v| message(&v.pull_request)),
-                        message(&value.pull_request),
+                        "spec.ref",
+                        prior.as_ref().map(|v| v.r#ref.as_bytes().to_vec()),
+                        value.r#ref.as_bytes().to_vec(),
+                    ),
+                    field(
+                        "spec.credentials",
+                        prior.as_ref().map(|v| message(&v.credentials)),
+                        message(&value.credentials),
+                    ),
+                    field(
+                        "spec.land",
+                        prior.as_ref().map(|v| message(&v.land)),
+                        message(&value.land),
                     ),
                 ];
                 (prior.as_ref() != Some(&value)).then(|| {
                     (
                         prior.is_some(),
-                        Write::Workspace(PutGithubWorkspaceRequest {
+                        Write::Workspace(PutWorkspaceRequest {
                             operation_id: id(),
                             workspace: Some(value),
                             expected_revision: revision,
@@ -821,7 +813,7 @@ impl<'a> Catalog<'a> {
     async fn require_workspace(&mut self, declarations: &Declarations, id: &str) -> Result<()> {
         if declarations.resource_id(Kind::Workspace, id).is_none() {
             lookup(self.workspaces.get(request(
-                GetGithubWorkspaceRequest {
+                GetWorkspaceRequest {
                     workspace_id: id.into(),
                 },
                 self.token,
@@ -938,7 +930,7 @@ impl<'a> Catalog<'a> {
                 workspace_id: workspace.id,
                 base_commit,
                 base_ref,
-                github_source: None,
+                ..Default::default()
             });
         }
         if let Some(execution) = spec.execution {

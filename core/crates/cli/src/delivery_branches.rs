@@ -397,13 +397,13 @@ async fn import_task(
     let Some(repository) = repositories.get(&delivery.workspace_id) else {
         return Ok(());
     };
-    // A GitHub Workspace delivers by pull request instead.
+    // A remote Workspace lands on its own remote instead.
     if task.state() != TaskState::Succeeded
         || delivery.head_commit == delivery.base_commit
         || task
             .workspace
             .as_ref()
-            .is_some_and(|workspace| workspace.github_source.is_some())
+            .is_some_and(|workspace| workspace.remote.is_some())
         || imported.contains(&delivery.delivery_id)
     {
         return Ok(());

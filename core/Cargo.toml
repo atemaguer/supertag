@@ -38,6 +38,7 @@ supertag-codex-adapter = { path = "crates/codex-adapter" }
 supertag-api = { path = "crates/api" }
 supertag-credential-vault = { path = "crates/credential-vault" }
 supertag-gateway = { path = "crates/gateway" }
+supertag-git-delivery = { path = "crates/git-delivery" }
 supertag-github = { path = "crates/github" }
 supertag-local-state = { path = "crates/local-state" }
 supertag-transport = { path = "crates/transport" }

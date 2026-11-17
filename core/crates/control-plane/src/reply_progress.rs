@@ -314,8 +314,8 @@ pub(crate) async fn present_in(tx: &mut Transaction<'_, Any>, reply: &mut Reply)
     Ok(())
 }
 
-/// The verified delivery of the completed work Session a report Task reports on. The branch is
-/// the GitHub publication branch; the pull request URL must be the published receipt's exact URL.
+/// The verified delivery of the completed work Session a report Task reports on: the branch its
+/// latest landing put the Session's changes on, the Session's own branch or the merge target.
 pub(crate) async fn result_card_in(
     tx: &mut Transaction<'_, Any>,
     report_task_id: &str,
@@ -338,54 +338,27 @@ pub(crate) async fn result_card_in(
     {
         return Ok(None);
     }
+    // Only a landed branch exists on the remote; an unfinished or refused landing names none.
     let Some(payload) = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT payload FROM supertag_v2_github_publications WHERE task_id=$1",
+        "SELECT payload FROM supertag_v2_workspace_landings WHERE tag_id=$1 AND session_id=$2 AND state=$3 ORDER BY created_order DESC LIMIT 1",
     )
-    .bind(&child.task_id)
+    .bind(&child.tag_id)
+    .bind(&child.session_id)
+    .bind(WorkspaceLandingState::Landed as i64)
     .fetch_optional(&mut **tx)
     .await?
     else {
         return Ok(None);
     };
-    let publication: GithubPublication = policy::decode(&payload)?;
-    let published = publication.state() == GithubPublicationState::Published;
-    let pull_request_url = publication
-        .pull_request
-        .as_ref()
-        .filter(|_| published)
-        .filter(|receipt| {
-            receipt.number > 0
-                && receipt.url.eq_ignore_ascii_case(&format!(
-                    "https://github.com/{}/pull/{}",
-                    publication.repository, receipt.number
-                ))
-                && github_pull_request_url(&receipt.url)
-        })
-        .map(|receipt| receipt.url.clone());
-    // Only a published branch exists on GitHub; an unfinished or failed publication names none.
-    let branch = Some(publication.head_branch)
-        .filter(|branch| !branch.is_empty())
-        .filter(|_| published);
-    Ok(
-        (branch.is_some() || pull_request_url.is_some()).then_some(ReplyResultCard {
-            branch,
-            pull_request_url,
-        }),
-    )
-}
-
-fn github_pull_request_url(value: &str) -> bool {
-    let Some(path) = value.strip_prefix("https://github.com/") else {
-        return false;
+    let landing: WorkspaceLanding = policy::decode(&payload)?;
+    let branch = match landing.mode() {
+        WorkspaceLandingMode::Merge => landing.target,
+        _ => landing.branch,
     };
-    value.len() <= 3_000
-        && matches!(path.split('/').collect::<Vec<_>>().as_slice(), [owner, repository, "pull", number]
-            if !owner.is_empty()
-                && owner.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
-                && !repository.is_empty()
-                && repository.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-                && number.bytes().next().is_some_and(|b| (b'1'..=b'9').contains(&b))
-                && number.bytes().all(|b| b.is_ascii_digit()))
+    Ok((!branch.is_empty()).then_some(ReplyResultCard {
+        branch: Some(branch),
+        pull_request_url: None,
+    }))
 }
 
 fn update(row: &AnyRow, revision: i64) -> Result<ReplyProgressUpdate> {
@@ -660,7 +633,7 @@ mod tests {
             .unwrap()
     }
 
-    /// Only a completed work Session with a verified commit has a card, and only an exact published pull request URL.
+    /// Only a completed work Session with a verified commit that landed has a card.
     async fn result_card_contract(url: &str) {
         let store = Store::open(url).await.unwrap();
         store.put_tag("builder", "Build", vec![]).await.unwrap();
@@ -686,73 +659,46 @@ mod tests {
             .execute(&store.pool).await.unwrap();
         sqlx::query("INSERT INTO supertag_v2_work_session_reports (child_task_id,work_session_id,report_task_id,created_order) VALUES ($1,'work/ship',$2,900002)")
             .bind(&child.task_id).bind(&report.task_id).execute(&store.pool).await.unwrap();
-        // A commit that was not published to GitHub has no branch name to show.
+        // A commit that did not land on a remote has no branch name to show.
         assert_eq!(card(&store, &report.task_id).await, None);
         assert_eq!(card(&store, &starter.task_id).await, None);
 
-        let mut publication = GithubPublication {
-            publication_id: "publication".into(),
+        let landing = WorkspaceLanding {
+            landing_id: "landing".into(),
             task_id: child.task_id.clone(),
             tag_id: "builder".into(),
             session_id: child.session_id.clone(),
-            account_id: "github-app".into(),
-            repository: "acme/app".into(),
-            head_branch: "supertag/session/<!channel>".into(),
-            state: GithubPublicationState::Sending as i32,
+            mode: WorkspaceLandingMode::Merge as i32,
+            branch: "supertag/session/<!channel>".into(),
+            target: "drafts".into(),
+            state: WorkspaceLandingState::Queued as i32,
             created_order: 900003,
             ..Default::default()
         };
-        sqlx::query("INSERT INTO supertag_v2_github_publications(publication_id,task_id,tag_id,session_id,account_id,created_order,state,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(&publication.publication_id).bind(&child.task_id).bind("builder").bind(&child.session_id).bind("github-app").bind(900003_i64).bind(publication.state as i64).bind(publication.encode_to_vec())
+        sqlx::query("INSERT INTO supertag_v2_workspace_landings(landing_id,task_id,tag_id,session_id,created_order,state,payload) VALUES($1,$2,$3,$4,$5,$6,$7)")
+            .bind(&landing.landing_id).bind(&child.task_id).bind("builder").bind(&child.session_id).bind(900003_i64).bind(landing.state as i64).bind(landing.encode_to_vec())
             .execute(&store.pool).await.unwrap();
-        // A branch that is still being published, or failed to publish, is not shown.
+        // A branch that is still landing, or was refused, is not shown.
         for state in [
-            GithubPublicationState::Sending,
-            GithubPublicationState::Uncertain,
-            GithubPublicationState::Held,
+            WorkspaceLandingState::Queued,
+            WorkspaceLandingState::Claimed,
+            WorkspaceLandingState::Conflict,
+            WorkspaceLandingState::Held,
         ] {
-            sqlx::query("UPDATE supertag_v2_github_publications SET state=$1,payload=$2 WHERE publication_id='publication'")
+            sqlx::query("UPDATE supertag_v2_workspace_landings SET state=$1,payload=$2 WHERE landing_id='landing'")
                 .bind(state as i64)
-                .bind(GithubPublication { state: state as i32, ..publication.clone() }.encode_to_vec())
+                .bind(WorkspaceLanding { state: state as i32, ..landing.clone() }.encode_to_vec())
                 .execute(&store.pool).await.unwrap();
             assert_eq!(card(&store, &report.task_id).await, None, "{state:?}");
         }
-        let branch_only = Some(ReplyResultCard {
-            branch: Some("supertag/session/<!channel>".into()),
-            pull_request_url: None,
-        });
-
-        let save = |publication: GithubPublication| {
-            let pool = store.pool.clone();
-            async move {
-                sqlx::query("UPDATE supertag_v2_github_publications SET state=$1,payload=$2 WHERE publication_id='publication'")
-                    .bind(publication.state as i64).bind(publication.encode_to_vec()).execute(&pool).await.unwrap();
-            }
-        };
-        publication.state = GithubPublicationState::Published as i32;
-        for (number, url) in [
-            (8, "https://github.com/acme/app/pull/7"),
-            (7, "https://github.com.evil.example/acme/app/pull/7"),
-            (7, "https://github.com/acme/app/pull/7/files"),
-            (7, "http://github.com/acme/app/pull/7"),
-        ] {
-            publication.pull_request = Some(GithubPullRequestReceipt {
-                number,
-                url: url.into(),
-                ..Default::default()
-            });
-            save(publication.clone()).await;
-            assert_eq!(card(&store, &report.task_id).await, branch_only, "{url}");
-        }
-        publication.pull_request = Some(GithubPullRequestReceipt {
-            number: 7,
-            url: "https://github.com/acme/app/pull/7".into(),
-            ..Default::default()
-        });
-        save(publication).await;
+        sqlx::query("UPDATE supertag_v2_workspace_landings SET state=$1,payload=$2 WHERE landing_id='landing'")
+            .bind(WorkspaceLandingState::Landed as i64)
+            .bind(WorkspaceLanding { state: WorkspaceLandingState::Landed as i32, ..landing.clone() }.encode_to_vec())
+            .execute(&store.pool).await.unwrap();
+        // A merged Session shows the branch it landed on.
         let complete = Some(ReplyResultCard {
-            branch: Some("supertag/session/<!channel>".into()),
-            pull_request_url: Some("https://github.com/acme/app/pull/7".into()),
+            branch: Some("drafts".into()),
+            pull_request_url: None,
         });
         assert_eq!(card(&store, &report.task_id).await, complete);
 

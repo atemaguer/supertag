@@ -45,6 +45,7 @@ supertag-codex-adapter.workspace = true
 supertag-api.workspace = true
 supertag-credential-vault.workspace = true
 supertag-gateway.workspace = true
+supertag-git-delivery.workspace = true
 supertag-github.workspace = true
 supertag-local-state.workspace = true
 supertag-protocol.workspace = true
@@ -220,13 +221,8 @@ path = "tests/cursor_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
-name = "github_workspace_runtime"
-path = "tests/github_workspace_runtime.rs"
-required-features = ["test-fixtures"]
-
-[[test]]
-name = "github_delivery_runtime"
-path = "tests/github_delivery_runtime.rs"
+name = "git_delivery_runtime"
+path = "tests/git_delivery_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]

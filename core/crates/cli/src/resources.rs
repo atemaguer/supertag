@@ -19,9 +19,9 @@ use supertag_protocol::{MAX_MESSAGE_BYTES, negotiation::ProtocolChannel};
 use crate::observe::{Output, describe_text};
 use crate::{
     Connection, artifact_publications, artifacts, auth_keys, connect_operator, enrollments,
-    github_publications, github_workspaces, host_status, inbox, inputs, mailbox, memories,
-    objectives, operator_access, policy, replies, request, schedules, surface_policy, tags, tasks,
-    teams, volumes, work_sessions, workspace_mounts,
+    host_status, inbox, inputs, mailbox, memories, objectives, operator_access, policy,
+    remote_workspaces, replies, request, schedules, surface_policy, tags, tasks, teams, volumes,
+    work_sessions, workspace_landings, workspace_mounts,
 };
 
 /// A resource kind. The singular is the canonical name; the plural is accepted too.
@@ -67,8 +67,8 @@ pub enum Kind {
     ArtifactPublication,
     #[value(alias = "artifact-consumptions")]
     ArtifactConsumption,
-    #[value(alias = "github-publications")]
-    GithubPublication,
+    #[value(alias = "landings")]
+    Landing,
     #[value(alias = "replies")]
     Reply,
     #[value(alias = "inputs")]
@@ -233,13 +233,7 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "Artifact Consumption",
         LIST,
     ),
-    kind(
-        Kind::GithubPublication,
-        "github-publication",
-        "github-publications",
-        "GitHub Publication",
-        LIST,
-    ),
+    kind(Kind::Landing, "landing", "landings", "Landing", LIST),
     kind(Kind::Reply, "reply", "replies", "Reply", LIST),
     kind(Kind::Input, "input", "inputs", "Input", READ),
     kind(
@@ -426,13 +420,13 @@ pub enum GetCommand {
         /// Workspace Volume ID.
         id: String,
     },
-    /// Read one GitHub Workspace source, or list them.
+    /// Read one remote Workspace, or list them.
     #[command(visible_alias = "workspaces")]
     Workspace {
         /// Workspace ID. Omit to list.
         id: Option<String>,
         #[command(flatten)]
-        list: github_workspaces::ListArgs,
+        list: remote_workspaces::ListArgs,
     },
     /// Read one Auth Key without its secret, or list Auth Keys, revoked, expired and used ones
     /// included.
@@ -476,14 +470,13 @@ pub enum GetCommand {
         #[command(flatten)]
         list: artifact_publications::ListArgs,
     },
-    /// Read one GitHub publication, or list verified Workspace results and their publication
-    /// status.
-    #[command(visible_alias = "github-publications")]
-    GithubPublication {
-        /// Publication ID. Omit to list.
+    /// Read where one Session's changes landed on a remote Workspace, or list landings.
+    #[command(visible_alias = "landings")]
+    Landing {
+        /// Landing ID. Omit to list.
         id: Option<String>,
         #[command(flatten)]
-        list: github_publications::ListArgs,
+        list: workspace_landings::ListArgs,
     },
     /// Read a connector reply, its delivery status, and its audit history, or list replies.
     #[command(visible_alias = "replies")]
@@ -621,7 +614,7 @@ pub enum DeleteCommand {
         /// Workspace ID.
         id: String,
         #[command(flatten)]
-        args: github_workspaces::DeleteArgs,
+        args: remote_workspaces::DeleteArgs,
     },
     /// Remove a location's policy and stop new work on its connector alias.
     #[command(visible_alias = "surface-locations")]
@@ -735,7 +728,7 @@ pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
         GetCommand::WorkspaceVolume { id } => (Kind::WorkspaceVolume, id),
         GetCommand::Workspace { id: Some(id), .. } => (Kind::Workspace, id),
         GetCommand::Workspace { id: None, list } => {
-            return print(github_workspaces::list(connection, list)).await;
+            return print(remote_workspaces::list(connection, list)).await;
         }
         GetCommand::AuthKey { id: Some(id), .. } => (Kind::AuthKey, id),
         GetCommand::AuthKey { id: None, list } => {
@@ -757,9 +750,9 @@ pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
         GetCommand::ArtifactConsumption { id: None, list } => {
             return print(artifact_publications::list_consumptions(connection, list)).await;
         }
-        GetCommand::GithubPublication { id: Some(id), .. } => (Kind::GithubPublication, id),
-        GetCommand::GithubPublication { id: None, list } => {
-            return print(github_publications::list(connection, list)).await;
+        GetCommand::Landing { id: Some(id), .. } => (Kind::Landing, id),
+        GetCommand::Landing { id: None, list } => {
+            return print(workspace_landings::list(connection, list)).await;
         }
         GetCommand::Reply { id: Some(id), .. } => (Kind::Reply, id),
         GetCommand::Reply { id: None, list } => {
@@ -827,7 +820,7 @@ async fn fetch(channel: ProtocolChannel, token: &str, kind: Kind, id: String) ->
         Kind::Volume => volumes::fetch(channel, token, id).await,
         Kind::VolumeCopy => volumes::fetch_copy(channel, token, id).await,
         Kind::WorkspaceVolume => workspace_mounts::fetch(channel, token, id).await,
-        Kind::Workspace => github_workspaces::fetch(channel, token, id).await,
+        Kind::Workspace => remote_workspaces::fetch(channel, token, id).await,
         Kind::AuthKey => auth_keys::fetch(channel, token, id).await,
         Kind::OperatorToken => operator_access::fetch(channel, token, id).await,
         Kind::Artifact => artifacts::fetch(channel, token, id).await,
@@ -837,7 +830,7 @@ async fn fetch(channel: ProtocolChannel, token: &str, kind: Kind, id: String) ->
         Kind::ArtifactConsumption => {
             artifact_publications::fetch_consumption(channel, token, id).await
         }
-        Kind::GithubPublication => github_publications::fetch(channel, token, id).await,
+        Kind::Landing => workspace_landings::fetch(channel, token, id).await,
         Kind::Reply => replies::fetch(channel, token, id).await,
         Kind::Input => inputs::fetch(channel, token, id).await,
         Kind::SurfaceAccount => surface_policy::fetch_account(channel, token, id).await,
@@ -912,7 +905,7 @@ pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()
             }
             DeleteCommand::Volume { id, args } => volumes::delete(connection, id, args).await,
             DeleteCommand::Workspace { id, args } => {
-                github_workspaces::delete(connection, id, args).await
+                remote_workspaces::delete(connection, id, args).await
             }
             DeleteCommand::SurfaceLocation { id, args } => {
                 surface_policy::delete_location(connection, id, args).await

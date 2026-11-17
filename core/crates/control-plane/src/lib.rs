@@ -21,9 +21,6 @@ mod conversations;
 mod effect_receipts;
 mod enrollments;
 mod execution_report;
-mod external_effects;
-mod github_publications;
-mod github_workspaces;
 mod history;
 mod inbox;
 mod inputs;
@@ -41,6 +38,7 @@ mod operator_access;
 pub mod operator_notifications;
 mod placement;
 mod policy;
+mod remote_workspaces;
 mod replies;
 pub mod reply_progress;
 mod review_artifacts;
@@ -57,21 +55,24 @@ mod teams;
 mod usage;
 mod watch;
 mod work_sessions;
+mod workspace_credentials;
+mod workspace_landings;
 mod workspace_mounts;
 mod workspaces;
 
 pub use audit::{AuditChange, AuditChanges, AuditLayer, AuditService};
 pub use audit_sink::AuditSink;
-pub use github_workspaces::validate_manifest_workspace;
 pub use objectives::validate_manifest_objective;
 pub use operator_access::{AuditRecord, OPERATOR_TOKEN_LIFETIME_MS, OperatorAuthentication};
 pub use policy::{
     normalize_manifest_context, normalize_manifest_permission, normalize_manifest_role,
     normalize_tag_execution,
 };
+pub use remote_workspaces::validate_manifest_workspace;
 pub use store::{HostAuthority, Role, Store, StoreError};
 pub use surface_policy::{validate_manifest_account, validate_manifest_location};
 pub use watch::OperatorWatch;
+pub use workspace_landings::GIT_DELIVERY_PRINCIPAL;
 
 use std::sync::Arc;
 
@@ -214,7 +215,6 @@ impl ControlPlane {
         self.store.sweep_work_sessions().await?;
         self.store.sweep_commit_reviews().await?;
         self.store.sweep_replies().await?;
-        self.store.sweep_github_publications().await?;
         self.store.sweep_ephemeral_hosts().await?;
         self.store.sweep_schedules().await?;
         if self.slow_sweep_due() {

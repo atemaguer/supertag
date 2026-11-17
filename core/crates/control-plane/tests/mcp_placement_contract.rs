@@ -35,7 +35,11 @@ async fn contract(url: &str) {
                 mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: "a".repeat(40),
-                github_source: None,
+                remote: None,
+                merge_commit: String::new(),
+                author_name: String::new(),
+                author_email: String::new(),
+                co_author: String::new(),
             }),
             ..Default::default()
         })

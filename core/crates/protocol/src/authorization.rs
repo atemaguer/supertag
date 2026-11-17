@@ -64,8 +64,9 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("Teams", "GetTeam", OC),
     ("Teams", "ListTeams", OC),
     ("Mailbox", "*", O),
-    ("GithubWorkspaces", "*", O),
-    ("GithubPublications", "*", O),
+    ("Workspaces", "*", O),
+    ("WorkspaceCredentials", "*", O),
+    ("WorkspaceLandings", "*", O),
     ("WorkspaceVolumes", "*", O),
     ("ArtifactVolumes", "*", O),
     ("ArtifactPublications", "*", O),
@@ -168,8 +169,7 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("WorkspaceDirectory", "*", INTERNAL),
     ("ArtifactDirectory", "*", INTERNAL),
     ("ArtifactVolumeDirectory", "*", INTERNAL),
-    ("GithubPublisher", "*", INTERNAL),
-    ("GithubSourceResolver", "*", INTERNAL),
+    ("GitDelivery", "*", INTERNAL),
     // Served by a Worker Host to its harness adapters, or by a Gateway to operators.
     ("Harness", "*", PEER_LOCAL),
     ("HarnessArtifacts", "*", PEER_LOCAL),
@@ -331,7 +331,7 @@ mod tests {
         for internal in [
             "CredentialDirectory/Resolve",
             "CheckpointDirectory/GetCheckpoint",
-            "GithubPublisher/Claim",
+            "GitDelivery/Claim",
             "Harness/Attach",
             "NoSuchService/Call",
         ] {

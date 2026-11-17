@@ -19,7 +19,7 @@ from tempfile import TemporaryDirectory
 
 REPO = Path(__file__).resolve().parents[1]
 PROTO_ROOT = REPO / "proto"
-MODULES = ("runtime", "policy", "github_workspaces", "github_publications", "mcp", "artifact", "workspace_volume", "negotiation", "access", "placement", "reply_progress", "spend", "metrics", "changed_paths", "effects", "operator_notifications", "objective_overview", "tag_sessions", "schedules", "memories")
+MODULES = ("runtime", "policy", "workspaces", "workspace_landings", "mcp", "artifact", "workspace_volume", "negotiation", "access", "placement", "reply_progress", "spend", "metrics", "changed_paths", "effects", "operator_notifications", "objective_overview", "tag_sessions", "schedules", "memories")
 PROTO_FILES = tuple(f"supertag/runtime/v2/{module}.proto" for module in MODULES)
 # Generated output, relative to sdks/: the Go module root, and each SDK's gen/ directory.
 SDKS = REPO / "sdks"

@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 96;
+        const SCHEMA_VERSION: i64 = 97;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -295,6 +295,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0094_start_rate.sql"),
                 include_str!("../migrations/sqlite/0095_waiting_holder.sql"),
                 include_str!("../migrations/sqlite/0096_schedule_watch.sql"),
+                include_str!("../migrations/sqlite/0097_git_delivery.sql"),
             ]
         } else {
             [
@@ -396,6 +397,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0094_start_rate.sql"),
                 include_str!("../migrations/postgresql/0095_waiting_holder.sql"),
                 include_str!("../migrations/postgresql/0096_schedule_watch.sql"),
+                include_str!("../migrations/postgresql/0097_git_delivery.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -574,7 +576,11 @@ impl Store {
                 || (!spec.base_commit.is_empty() && !valid_git_commit(&spec.base_commit))
                 || (!spec.base_ref.is_empty()
                     && !supertag_protocol::valid_git_branch(&spec.base_ref))
-                || spec.github_source.is_some())
+                || spec.remote.is_some()
+                || !spec.merge_commit.is_empty()
+                || !spec.author_name.is_empty()
+                || !spec.author_email.is_empty()
+                || !spec.co_author.is_empty())
         {
             return Err(invalid(
                 "workspace ID and a full Git base commit or branch name required",
@@ -625,6 +631,7 @@ impl Store {
             return Err(StoreError::FailedPrecondition(reason));
         }
         crate::github_workspaces::validate_tag_in(transaction, workspace.as_ref()).await?;
+        crate::remote_workspaces::validate_tag_in(transaction, workspace.as_ref()).await?;
         crate::workspace_mounts::configure_in(transaction, &mut workspace).await?;
         if let Some(spec) = workspace.as_mut()
             && !supertag_protocol::mcp::normalize_workspace_servers(&mut spec.mcp_servers)
@@ -1041,7 +1048,8 @@ impl Store {
             let id: Option<String> = prior.try_get("task_id")?;
             let assignment = match id {
                 Some(id) => {
-                    let task = task_in(&mut transaction, &id).await?;
+                    let mut task = task_in(&mut transaction, &id).await?;
+                    crate::workspace_landings::with_author_in(&mut transaction, &mut task).await?;
                     let attempt_id: String = prior.try_get("attempt_id")?;
                     if task.attempt_id.as_deref() == Some(attempt_id.as_str())
                         && matches!(task.state(), TaskState::Claimed | TaskState::Running)
@@ -1099,7 +1107,8 @@ impl Store {
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
         // Later messages from the person join this run, so one reply answers them all.
-        let task = task_in(&mut transaction, &id).await?;
+        let mut task = task_in(&mut transaction, &id).await?;
+        crate::workspace_landings::with_author_in(&mut transaction, &mut task).await?;
         let joined = crate::inputs::join_at_claim_in(&mut transaction, &task, &attempt).await?;
         crate::reply_progress::claimed_in(&mut transaction, &task, !joined.is_empty()).await?;
         sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope, claimed_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
@@ -1123,7 +1132,8 @@ impl Store {
     ) -> Result<Task> {
         let mut transaction = self.pool.begin().await?;
         let row = owned(&mut transaction, host, task_id, attempt_id, lease_token).await?;
-        let task = task_row(&row)?;
+        let mut task = task_row(&row)?;
+        crate::workspace_landings::with_author_in(&mut transaction, &mut task).await?;
         transaction.commit().await?;
         Ok(task)
     }
@@ -1433,7 +1443,7 @@ impl Store {
         }
         if task.state == TaskState::Succeeded as i32 {
             enqueue_reply(&mut transaction, &task, order).await?;
-            crate::github_publications::finish_in(&mut transaction, &task).await?;
+            crate::workspace_landings::finish_in(&mut transaction, &task).await?;
         }
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         if state == TaskState::Running {
@@ -1615,7 +1625,7 @@ pub(crate) async fn insert_task_with_surface(
     .await
 }
 
-/// A surface message's Task. Its text may select one of the Tag's GitHub Workspaces.
+/// A surface message's Task.
 pub(crate) async fn insert_surface_message_task(
     transaction: &mut Transaction<'_, Any>,
     order: i64,
@@ -1632,7 +1642,6 @@ pub(crate) async fn insert_surface_message_task(
         prompt,
         TaskAdmission {
             surface,
-            surface_message: true,
             ..Default::default()
         },
     ))
@@ -1689,7 +1698,6 @@ pub(crate) async fn insert_owed_task(
 #[derive(Default)]
 struct TaskAdmission<'a> {
     surface: Option<&'a crate::surface_policy::AdmissionSurface>,
-    surface_message: bool,
     execution_limits: Option<&'a ExecutionLimits>,
     output_policy: Option<&'a supertag_protocol::v2::TaskOutputPolicy>,
     requested_execution: Option<&'a ExecutionSelection>,
@@ -1733,15 +1741,7 @@ async fn insert_task_options(
             serde_json::from_str(&objective.try_get::<String, _>("runtime_actions")?)?,
         )?;
     }
-    let (selection, refusal) = Box::pin(select_workspace_in(
-        transaction,
-        (tag_id, session_id),
-        prompt,
-        options.surface_message,
-        &mut accepted,
-    ))
-    .await?;
-    crate::github_workspaces::refs::bind_in(
+    crate::remote_workspaces::pins::bind_in(
         transaction,
         tag_id,
         session_id,
@@ -1767,9 +1767,7 @@ async fn insert_task_options(
         &mut accepted.workspace,
     )
     .await?;
-    // A refused Task never runs, so it cannot change its Session's Workspace.
-    if refusal.is_none()
-        && let Some(previous) = sqlx::query(&format!("SELECT workspace_id,workspace_base_commit,workspace_base_ref,workspace_github_source,workspace_mounts,workspace_mcp_servers,harness_kind,policy_snapshot FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 AND {SESSION_WORKSPACE_TASK} ORDER BY accepted_order LIMIT 1"))
+    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,workspace_base_ref,workspace_remote,workspace_merge_commit,workspace_mounts,workspace_mcp_servers,harness_kind,policy_snapshot FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
         .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await? {
         let prior_policy = previous.try_get::<Option<Vec<u8>>,_>("policy_snapshot")?.as_deref()
             .map(crate::policy::decode::<supertag_protocol::v2::TaskPolicySnapshot>).transpose()?;
@@ -1835,132 +1833,7 @@ async fn insert_task_options(
             return Err(invalid("accepted Task exceeds the transport limit"));
         }
     }
-    if let Some(selection) = selection {
-        // A refused request never runs: it fails at admission with the reason, and its surface
-        // reply says so (TypeScript fails the Attempt before credentials or retrieval).
-        sqlx::query("UPDATE supertag_v2_tasks SET workspace_selection=$1 WHERE task_id=$2")
-            .bind(selection)
-            .bind(&task.task_id)
-            .execute(&mut **transaction)
-            .await?;
-        task.workspace_selection = Some(selection.into());
-        if let Some(refusal) = refusal {
-            sqlx::query("UPDATE supertag_v2_tasks SET state=$1,result=$2 WHERE task_id=$3")
-                .bind(TaskState::Failed as i64)
-                .bind(&refusal)
-                .bind(&task.task_id)
-                .execute(&mut **transaction)
-                .await?;
-            task.state = TaskState::Failed as i32;
-            task.result = Some(refusal);
-        }
-    }
     Ok(task)
-}
-
-/// SQL condition: a Task that fixes its Session's Workspace. A Task refused at admission, or one
-/// that asked its requester to name a repository, leaves the next message free to select one.
-const SESSION_WORKSPACE_TASK: &str =
-    "(workspace_selection IS NULL OR workspace_selection NOT IN ('refused','required'))";
-
-/// For a Tag that configures no Workspace: a later turn keeps the GitHub Workspace its Session's
-/// first message selected, and the first message of a surface Session selects one. Returns the
-/// selection label and, for a refused request, the reason the Task fails with.
-async fn select_workspace_in(
-    transaction: &mut Transaction<'_, Any>,
-    (tag_id, session_id): (&str, &str),
-    prompt: &str,
-    surface_message: bool,
-    accepted: &mut AcceptedTag,
-) -> Result<(Option<&'static str>, Option<String>)> {
-    use crate::github_workspaces::selection::{self, Selection};
-    if accepted.workspace.is_some()
-        || supertag_protocol::shared_execution::environment(Some(&accepted.policy.snapshot))
-            .is_some()
-    {
-        return Ok((None, None));
-    }
-    let prior = sqlx::query(&format!("SELECT workspace_id,workspace_selection FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 AND {SESSION_WORKSPACE_TASK} ORDER BY accepted_order LIMIT 1"))
-        .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await?;
-    let name: Option<String> =
-        sqlx::query_scalar("SELECT name FROM supertag_v2_tags WHERE tag_id=$1")
-            .bind(tag_id)
-            .fetch_one(&mut **transaction)
-            .await?;
-    let tag_name = name.as_deref().unwrap_or(tag_id);
-    let (workspace_id, by, later) = if let Some(prior) = prior {
-        let workspace: Option<String> = prior.try_get("workspace_id")?;
-        let by = match prior
-            .try_get::<Option<String>, _>("workspace_selection")?
-            .as_deref()
-        {
-            Some(selection::BY_REQUEST) => selection::BY_REQUEST,
-            Some(selection::BY_ORIGIN) => selection::BY_ORIGIN,
-            Some(selection::BY_DEFAULT) => selection::BY_DEFAULT,
-            _ => return Ok((None, None)),
-        };
-        // The current policy must still grant the read; admission below checks it again.
-        (
-            workspace.ok_or_else(|| invalid("selected Workspace is missing"))?,
-            by,
-            true,
-        )
-    } else if surface_message {
-        match selection::select_in(transaction, tag_name, &accepted.policy.snapshot, prompt).await?
-        {
-            Selection::None => return Ok((None, None)),
-            Selection::Selected { workspace_id, by } => (workspace_id, by, false),
-            Selection::Required(guidance) => {
-                accepted.policy.instructions.push_str(&guidance);
-                return Ok((Some(selection::REQUIRED), None));
-            }
-            Selection::Refused(reason) => return Ok((Some(selection::REFUSED), Some(reason))),
-        }
-    } else {
-        return Ok((None, None));
-    };
-    accepted.workspace = Some(WorkspaceSpec {
-        workspace_id: workspace_id.clone(),
-        ..Default::default()
-    });
-    let admitted = crate::github_workspaces::admission_in(
-        transaction,
-        &mut accepted.workspace,
-        &accepted.policy.snapshot,
-    )
-    .await;
-    let reason = match admitted {
-        Ok(())
-            if accepted
-                .workspace
-                .as_ref()
-                .is_some_and(|spec| spec.github_source.is_some()) =>
-        {
-            return Ok((Some(by), None));
-        }
-        // A first message selects only Workspaces that pass admission.
-        Err(error) if !later => return Err(error),
-        Ok(()) if !later => {
-            return Err(StoreError::FailedPrecondition(
-                "the selected GitHub Workspace no longer exists".into(),
-            ));
-        }
-        Ok(()) => {
-            format!("The GitHub Workspace {workspace_id} this Session selected no longer exists")
-        }
-        Err(StoreError::PermissionDenied) => format!(
-            "Tag {tag_name} is no longer allowed to use the GitHub Workspace {workspace_id} this Session selected"
-        ),
-        Err(StoreError::FailedPrecondition(detail)) => format!(
-            "The GitHub Workspace {workspace_id} this Session selected cannot be used: {detail}"
-        ),
-        Err(error) => return Err(error),
-    };
-    // A later turn whose selected Workspace became unusable fails at admission with the reason,
-    // so its surface replies instead of retrying the message (TypeScript fails it at
-    // resolution). It does not run, so it never fixes the Session's Workspace.
-    accepted.workspace = None;
-    Ok((Some(selection::REFUSED), Some(reason)))
 }
 
 struct AcceptedTag {
@@ -2029,7 +1902,7 @@ async fn tag_policy_in(
         surface,
     )
     .await?;
-    crate::github_workspaces::admission_in(transaction, &mut workspace, &policy.snapshot).await?;
+    crate::remote_workspaces::admission_in(transaction, &mut workspace).await?;
     crate::workspace_mounts::admission_in(
         transaction,
         &mut workspace,
@@ -2167,7 +2040,7 @@ pub(crate) async fn current_work_policy_in(
             accepted.workspace = starter.workspace.clone();
         }
     }
-    crate::github_workspaces::refs::inherit(&mut accepted.workspace, &source.workspace);
+    crate::remote_workspaces::pins::inherit(&mut accepted.workspace, &source.workspace);
     crate::workspaces::inherit_resolved_ref(&mut accepted.workspace, source.workspace.as_ref());
     accepted.validate_shared_execution()?;
     let mut result = source.clone();
@@ -2237,7 +2110,7 @@ async fn insert_accepted_task(
     } = accepted;
     let selection = execution::select(&policy.snapshot, requested_execution)?;
     let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_selection,workspace_github_source,workspace_mounts,workspace_mcp_servers,accepted_at_ms,workspace_base_ref) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)")
+    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_selection,workspace_remote,workspace_mounts,workspace_mcp_servers,accepted_at_ms,workspace_base_ref) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)")
         .bind(&id).bind(tag_id).bind(session_id).bind(prompt)
         .bind(policy.instructions).bind(serde_json::to_string(&policy.allowed_actions)?)
         .bind(revision).bind(TaskState::Queued as i64).bind(order)
@@ -2248,7 +2121,7 @@ async fn insert_accepted_task(
         .bind(policy.snapshot.encode_to_vec())
         .bind(policy.effective_digest)
         .bind(selection.encode_to_vec())
-        .bind(workspace.as_ref().and_then(|spec| spec.github_source.as_ref()).map(Message::encode_to_vec).unwrap_or_default())
+        .bind(workspace.as_ref().and_then(|spec| spec.remote.as_ref()).map(Message::encode_to_vec).unwrap_or_default())
         .bind(crate::workspace_mounts::encode(workspace.as_ref()))
         .bind(crate::workspaces::encode_mcp_servers(workspace.as_ref()))
         .bind(authority::system_now_ms())
@@ -2270,9 +2143,9 @@ pub(crate) async fn insert_task_from_snapshot(
     sqlx::query(
         "INSERT INTO supertag_v2_tasks
            (task_id,tag_id,session_id,prompt,instructions,allowed_actions,tag_revision,state,accepted_order,
-            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits,execution_selection,workspace_github_source,workspace_mounts,workspace_mcp_servers,workspace_selection,accepted_at_ms,workspace_base_ref)
+            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits,execution_selection,workspace_remote,workspace_mounts,workspace_mcp_servers,accepted_at_ms,workspace_base_ref)
          SELECT $1, tag_id, $2, $3, instructions, allowed_actions, tag_revision, $4, $5,
-                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits,execution_selection,workspace_github_source,workspace_mounts,workspace_mcp_servers,workspace_selection,$7,workspace_base_ref
+                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits,execution_selection,workspace_remote,workspace_mounts,workspace_mcp_servers,$7,workspace_base_ref
          FROM supertag_v2_tasks WHERE task_id=$6",
     )
     .bind(&id).bind(session_id).bind(prompt).bind(TaskState::Queued as i64).bind(order)
@@ -2567,7 +2440,6 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
         output_policy: output_policy_from_row(row)?,
         input_artifacts: crate::task_artifact_inputs::from_row(row)?,
         waiting_for_holder: row.try_get("waiting_holder")?,
-        workspace_selection: row.try_get("workspace_selection")?,
         applied_execution_limits: row
             .try_get::<Option<Vec<u8>>, _>("applied_execution_limits")?
             .as_deref()

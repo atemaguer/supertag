@@ -469,33 +469,44 @@ fn rule(path: &str) -> Option<Rule> {
                 named("LiveInput", &value.input_id)
             })
         }
-        ("GithubWorkspaces", "Put") => rule!(
-            "github-workspace.put",
-            "GithubWorkspace",
-            PutGithubWorkspaceRequest,
-            |value| named(
-                "GithubWorkspace",
-                value
-                    .workspace
-                    .as_ref()
-                    .map_or("", |workspace| workspace.workspace_id.as_str())
-            )
-        ),
-        ("GithubWorkspaces", "Delete") => rule!(
-            "github-workspace.delete",
-            "GithubWorkspace",
-            DeleteGithubWorkspaceRequest,
+        ("Workspaces", "Put") => {
+            rule!("workspace.put", "Workspace", PutWorkspaceRequest, |value| {
+                named(
+                    "Workspace",
+                    value
+                        .workspace
+                        .as_ref()
+                        .map_or("", |workspace| workspace.workspace_id.as_str()),
+                )
+            })
+        }
+        ("Workspaces", "Delete") => rule!(
+            "workspace.delete",
+            "Workspace",
+            DeleteWorkspaceRequest,
             |value| if value.dry_run {
                 Some(Target::Skip)
             } else {
-                named("GithubWorkspace", &value.workspace_id)
+                named("Workspace", &value.workspace_id)
             }
         ),
-        ("GithubPublications", "Cancel") => rule!(
-            "github-publication.cancel",
-            "GithubPublication",
-            CancelGithubPublicationRequest,
-            |value| named("GithubPublication", &value.publication_id)
+        ("WorkspaceCredentials", "Put") => rule!(
+            "workspace-credential.put",
+            "WorkspaceCredential",
+            PutWorkspaceCredentialRequest,
+            |value| named(
+                "WorkspaceCredential",
+                value
+                    .credential
+                    .as_ref()
+                    .map_or("", |credential| credential.name.as_str())
+            )
+        ),
+        ("WorkspaceCredentials", "Delete") => rule!(
+            "workspace-credential.delete",
+            "WorkspaceCredential",
+            DeleteWorkspaceCredentialRequest,
+            |value| named("WorkspaceCredential", &value.name)
         ),
         ("ArtifactVolumeDirectory", "Put") => rule!(
             "artifact-volume.put",

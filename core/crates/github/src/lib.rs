@@ -1,10 +1,7 @@
-//! GitHub as the Control Plane uses it: App and token authentication, GitHub Workspace sources
-//! read with a source-read token, and pull request publication. The Gateway's GitHub connector
-//! shares the authentication; nothing here handles surface events.
+//! GitHub App and token authentication, which the Gateway's GitHub connector uses. Workspace
+//! source and delivery are git delivery's (`supertag-git-delivery`) and work with any git server.
 
 pub mod auth;
-pub mod publication;
-pub mod workspaces;
 
 pub use auth::{GithubAppConfig, GithubAuthentication, setup_app_jwt};
 

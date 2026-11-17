@@ -7,8 +7,6 @@ mod delivery_branches;
 mod deployment;
 mod enrollments;
 mod gateway_credentials;
-mod github_publications;
-mod github_workspaces;
 mod harness;
 mod harness_checks;
 mod health;
@@ -36,6 +34,7 @@ mod placement;
 mod policy;
 mod power;
 mod profiles;
+mod remote_workspaces;
 mod removed_hosts;
 mod replies;
 mod resources;
@@ -51,6 +50,7 @@ mod teams;
 mod tui;
 mod volumes;
 mod work_sessions;
+mod workspace_landings;
 mod workspace_mounts;
 
 const SKILL_CATALOG_HELP: &str = r#"Private host allowlist of Skill packages.
@@ -79,10 +79,7 @@ use supertag_gateway::{
     microsoft_teams::{MicrosoftTeams, MicrosoftTeamsConfig},
     slack::{Slack, SlackConfig, SlackEvents},
 };
-use supertag_github::{
-    GithubAppConfig, GithubAuthentication,
-    workspaces::{GithubWorkspaceAccount, GithubWorkspaceSources},
-};
+use supertag_github::{GithubAppConfig, GithubAuthentication};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     negotiation::{Negotiator, ProtocolChannel, connect, fence},
@@ -173,19 +170,12 @@ enum Command {
     Diff(manifests::ManifestArgs),
     /// Apply an organization manifest through the Control Plane.
     Apply(manifests::ManifestArgs),
-    /// Stop further provider writes of a GitHub publication.
-    GithubPublication {
-        #[command(flatten)]
-        connection: Connection,
-        #[command(subcommand)]
-        command: github_publications::PublicationCommand,
-    },
-    /// Select GitHub Workspace sources pinned to one repository and commit.
+    /// Declare remote Workspaces on any git server, their Workspace Credentials, and check them.
     Workspace {
         #[command(flatten)]
         connection: Connection,
         #[command(subcommand)]
-        command: github_workspaces::WorkspaceCommand,
+        command: remote_workspaces::WorkspaceCommand,
     },
     /// Resolve uncertain connector replies from provider evidence.
     Reply {
@@ -379,11 +369,12 @@ enum Command {
             long_help = "Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Control Plane reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto."
         )]
         artifact_s3_volumes: Option<PathBuf>,
-        /// Private scratch for GitHub source and publication bundles, using the GitHub account in
-        /// the `SUPERTAG_GITHUB_*` variables. Each bundle is deleted once its read or publication
-        /// ends; publication scratch a stopped Control Plane left is removed when it starts.
+        /// Private directory of git delivery, which reads remote Workspaces and lands Session
+        /// changes on them: scratch for each operation and remembered SSH host keys. Default:
+        /// git-delivery in SUPERTAG_STATE_DIR or ~/.supertag. Workspace Credentials come from the
+        /// credential vault there (SUPERTAG_CREDENTIAL_VAULT).
         #[arg(long)]
-        github_workspace_directory: Option<PathBuf>,
+        git_delivery_directory: Option<PathBuf>,
         /// Also write each committed audit entry as one JSON line to `stderr` or to this absolute
         /// file path, created owner-only. The database keeps every entry either way.
         #[arg(long, value_name = "stderr|PATH")]
@@ -950,14 +941,10 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => mailbox::run(connection, command).await?,
-        Command::GithubPublication {
-            connection,
-            command,
-        } => github_publications::run(connection, command).await?,
         Command::Workspace {
             connection,
             command,
-        } => github_workspaces::run(connection, command).await?,
+        } => remote_workspaces::run(connection, command).await?,
         Command::Team {
             connection,
             command,
@@ -1039,7 +1026,7 @@ async fn run(command: Command) -> Result<()> {
             checkpoint_directory,
             artifact_volumes,
             artifact_s3_volumes,
-            github_workspace_directory,
+            git_delivery_directory,
             audit_log,
         } => {
             control_plane(
@@ -1049,7 +1036,7 @@ async fn run(command: Command) -> Result<()> {
                     checkpoint_directory,
                     artifact_volumes,
                     artifact_s3_volumes,
-                    github_workspace: github_workspace_directory,
+                    git_delivery: git_delivery_directory,
                     audit_log,
                 },
             )
@@ -1445,7 +1432,7 @@ struct ControlPlaneOptions {
     checkpoint_directory: Option<PathBuf>,
     artifact_volumes: Vec<String>,
     artifact_s3_volumes: Option<PathBuf>,
-    github_workspace: Option<PathBuf>,
+    git_delivery: Option<PathBuf>,
     /// `--audit-log`: also write each committed audit entry to `stderr` or this file.
     audit_log: Option<String>,
 }
@@ -1554,24 +1541,11 @@ async fn control_plane(
             options.artifact_volumes,
             options.artifact_s3_volumes,
         )?)?;
-    let mut source_reader = None;
-    let publication = if let Some(directory) = options.github_workspace {
-        let sources = github_workspace_sources(directory.clone()).await?;
+    let delivery = git_delivery(options.git_delivery)?;
+    if let Some(delivery) = &delivery {
         transfers =
-            transfers.with_github_sources(std::sync::Arc::new(GithubSources(sources.clone())));
-        source_reader = Some(sources);
-        Some(
-            github_workspace_publisher(
-                directory,
-                std::sync::Arc::new(RelayedBundles(transfers.clone())),
-                channel.clone(),
-                service_token.clone(),
-            )
-            .await?,
-        )
-    } else {
-        None
-    };
+            transfers.with_workspace_git(std::sync::Arc::new(WorkspaceGit(delivery.clone())));
+    }
     let listener = TcpListener::bind(listen).await?;
     outln!("{}", listener.local_addr()?);
     let tunnel = bind_websocket(websocket).await?;
@@ -1597,6 +1571,7 @@ async fn control_plane(
         }
     });
     let shutdown = CancellationToken::new();
+    let transfers_for_landings = transfers.clone();
     let routes = api.routes(transfers, internal, shutdown.clone()).await;
     // Refuse every call from a peer that skipped protocol negotiation, then authenticate the
     // caller and check its role against the one authorization table.
@@ -1614,9 +1589,17 @@ async fn control_plane(
         shutdown.cancel();
         result
     };
-    let publication_loop = async {
-        if let Some(publication) = publication {
-            let result = publication.run(shutdown.clone()).await;
+    let landing_loop = async {
+        if let Some(delivery) = &delivery {
+            let result = delivery
+                .run_landings(
+                    channel.clone(),
+                    service_token.clone(),
+                    supertag_control_plane::GIT_DELIVERY_PRINCIPAL.into(),
+                    std::sync::Arc::new(RelayedBundles(transfers_for_landings.clone())),
+                    shutdown.clone(),
+                )
+                .await;
             shutdown.cancel();
             result
         } else {
@@ -1625,9 +1608,14 @@ async fn control_plane(
         }
     };
     let source_loop = async {
-        if let Some(sources) = source_reader {
-            let result = sources
-                .run_resolver(channel.clone(), service_token.clone(), shutdown.clone())
+        if let Some(delivery) = &delivery {
+            let result = delivery
+                .run_resolver(
+                    channel.clone(),
+                    service_token.clone(),
+                    supertag_control_plane::GIT_DELIVERY_PRINCIPAL.into(),
+                    shutdown.clone(),
+                )
                 .await;
             shutdown.cancel();
             result
@@ -1637,9 +1625,9 @@ async fn control_plane(
         }
     };
     let services = async {
-        let (grpc, publication, source) = tokio::join!(grpc, publication_loop, source_loop);
+        let (grpc, landing, source) = tokio::join!(grpc, landing_loop, source_loop);
         grpc?;
-        publication?;
+        landing?;
         source
     };
     tokio::pin!(services);
@@ -1688,14 +1676,14 @@ impl supertag_api::transfers::CheckpointGarbage for CheckpointGarbage {
     }
 }
 
-/// GitHub Workspace sources, read with this Control Plane's GitHub account, for transfers.
-struct GithubSources(GithubWorkspaceSources);
+/// Git delivery for the API tier: remote Workspace sources and checks.
+struct WorkspaceGit(supertag_git_delivery::GitDelivery);
 
-/// The GitHub publisher's bundles, relayed from the Worker Host holding each delivery.
+/// Git delivery's delivered bundles, relayed from the Worker Host holding each delivery.
 struct RelayedBundles(ApiTransfers);
 
 #[tonic::async_trait]
-impl supertag_github::publication::BundleReader for RelayedBundles {
+impl supertag_git_delivery::BundleReader for RelayedBundles {
     async fn read(
         &self,
         holder: &supertag_protocol::v2::BlobHolder,
@@ -1709,22 +1697,23 @@ impl supertag_github::publication::BundleReader for RelayedBundles {
 }
 
 #[tonic::async_trait]
-impl supertag_api::transfers::WorkspaceSources for GithubSources {
+impl supertag_api::transfers::WorkspaceGit for WorkspaceGit {
     async fn fetch(
         &self,
-        workspace: &supertag_protocol::v2::GithubWorkspace,
+        workspace: &supertag_protocol::v2::Workspace,
+        commit: &str,
         cancel: &CancellationToken,
     ) -> Result<supertag_api::transfers::FetchedSource> {
-        let fetched = self.0.fetch(workspace, cancel).await?;
+        let fetched = self.0.fetch(workspace, commit, cancel).await?;
         Ok(supertag_api::transfers::FetchedSource {
             bundle: fetched.bundle,
-            keep: Box::new(fetched._directory),
+            keep: Box::new(fetched.directory),
         })
     }
 
     async fn advertised_output_remote(
         &self,
-        workspace: &supertag_protocol::v2::GithubWorkspace,
+        workspace: &supertag_protocol::v2::Workspace,
         commit: &str,
         cancel: &CancellationToken,
     ) -> Result<Option<String>> {
@@ -1732,6 +1721,34 @@ impl supertag_api::transfers::WorkspaceSources for GithubSources {
             .advertised_output_remote(workspace, commit, cancel)
             .await
     }
+
+    async fn check(
+        &self,
+        workspace: &supertag_protocol::v2::Workspace,
+        cancel: &CancellationToken,
+    ) -> Result<supertag_protocol::v2::WorkspaceCheck> {
+        self.0.check(workspace, cancel).await
+    }
+}
+
+/// Git delivery in `directory`, else in the state directory the credential vault uses. Without
+/// either, the Control Plane serves no remote Workspace.
+fn git_delivery(directory: Option<PathBuf>) -> Result<Option<supertag_git_delivery::GitDelivery>> {
+    let directory = match directory {
+        Some(directory) => directory,
+        None => match nonempty_env("SUPERTAG_STATE_DIR")
+            .map(PathBuf::from)
+            .or_else(|| nonempty_env("HOME").map(|home| PathBuf::from(home).join(".supertag")))
+        {
+            Some(state) => state.join("git-delivery"),
+            None => return Ok(None),
+        },
+    };
+    let vault = supertag_credential_vault::CredentialVault::from_process_environment()?;
+    Ok(Some(supertag_git_delivery::GitDelivery::new(
+        &directory,
+        supertag_git_delivery::Credentials::new(vault),
+    )?))
 }
 
 /// Serves the state owner to the API tier until `shutdown`.
@@ -1810,10 +1827,10 @@ async fn state_owner(
         .add_service(plane.attempt_workstreams_service())
         .add_service(plane.mailbox_service())
         .add_service(plane.inbox_service())
-        .add_service(plane.github_workspaces_service())
-        .add_service(plane.github_source_resolver_service())
-        .add_service(plane.github_publications_service())
-        .add_service(plane.github_publisher_service())
+        .add_service(plane.workspaces_service())
+        .add_service(plane.workspace_credentials_service())
+        .add_service(plane.workspace_landings_service())
+        .add_service(plane.git_delivery_service())
         .add_service(plane.reply_progress_service())
         .add_service(plane.operator_notifications_service())
         .add_service(
@@ -2333,59 +2350,6 @@ async fn slack_connector(
         return connector.with_test_reply_url(&url);
     }
     Ok(connector)
-}
-
-async fn github_workspace_account() -> Result<GithubWorkspaceAccount> {
-    let account_id = required_env("SUPERTAG_GITHUB_ACCOUNT_ID")?;
-    let mut secrets = SurfaceSecrets::new("GitHub", "SUPERTAG_GITHUB", "github", &account_id);
-    Ok(GithubWorkspaceAccount {
-        account_id,
-        repository_id: required_env("SUPERTAG_GITHUB_REPOSITORY_ID")?
-            .parse()
-            .context("invalid GitHub repository ID")?,
-        repository: required_env("SUPERTAG_GITHUB_REPOSITORY")?,
-        authentication: github_authentication(&mut secrets).await?,
-    })
-}
-async fn github_workspace_publisher(
-    directory: PathBuf,
-    bundles: std::sync::Arc<dyn supertag_github::publication::BundleReader>,
-    channel: ProtocolChannel,
-    token: String,
-) -> Result<supertag_github::publication::GithubPublisher> {
-    let publisher = supertag_github::publication::GithubPublisher::new(
-        github_workspace_account().await?,
-        &directory,
-        bundles,
-        channel,
-        token,
-    )?;
-    #[cfg(feature = "test-fixtures")]
-    if let Ok(api) = std::env::var("SUPERTAG_TEST_GITHUB_API_URL") {
-        return publisher.with_test_endpoints(
-            api.parse()?,
-            required_env("SUPERTAG_TEST_GITHUB_GIT_URL")?.parse()?,
-        );
-    }
-    Ok(publisher)
-}
-async fn github_workspace_sources(directory: PathBuf) -> Result<GithubWorkspaceSources> {
-    use std::os::unix::fs::DirBuilderExt as _;
-    if !directory.exists() {
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&directory)
-            .context("create private GitHub Workspace directory")?;
-    }
-    let sources = GithubWorkspaceSources::new(github_workspace_account().await?, &directory)?;
-    #[cfg(feature = "test-fixtures")]
-    if let Ok(api) = std::env::var("SUPERTAG_TEST_GITHUB_API_URL") {
-        return sources.with_test_endpoints(
-            api.parse()?,
-            required_env("SUPERTAG_TEST_GITHUB_GIT_URL")?.parse()?,
-        );
-    }
-    Ok(sources)
 }
 
 async fn github_connector(
@@ -2968,9 +2932,9 @@ fn task_json(task: &Task) -> serde_json::Value {
             "ref": (!spec.base_ref.is_empty()).then_some(&spec.base_ref),
             "mounts": workspace_mounts::describe(&spec.mounts),
             "mcp_servers": spec.mcp_servers,
-            "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
+            "remote": spec.remote.clone().map(remote_workspaces::describe),
+            "merge_commit": (!spec.merge_commit.is_empty()).then_some(&spec.merge_commit),
         })),
-        "workspace_selection": task.workspace_selection,
         "workspace_mount_writes": workspace_mounts::describe_writes(&task.workspace_mount_writes),
         "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
         "artifacts": task.artifacts.iter().map(|selection| json!({

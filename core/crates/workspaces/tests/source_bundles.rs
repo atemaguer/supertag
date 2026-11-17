@@ -87,6 +87,8 @@ async fn source_bundle_delivers_exact_git_parent_without_mutating_source() -> an
                 session_id: "session".into(),
                 expected_head: Some(base.clone()),
                 setup: None,
+                merge_commit: None,
+                author: None,
             },
             &cancel,
         )

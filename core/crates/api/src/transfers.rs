@@ -45,24 +45,33 @@ const WORKSPACE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 #[path = "transfers_review_tests.rs"]
 mod review_tests;
 
-/// Reads GitHub Workspace sources for Worker Hosts. The process that runs this tier supplies
-/// the GitHub implementation, which holds the GitHub credential.
+/// Git delivery as the API tier uses it: reads remote Workspace sources for Worker Hosts and
+/// checks Workspaces. The process that runs this tier supplies it, with the Workspace
+/// Credentials it holds; no credential reaches a Worker Host.
 #[tonic::async_trait]
-pub trait WorkspaceSources: Send + Sync + 'static {
-    /// Fetches the accepted source of `workspace` as a Git bundle.
+pub trait WorkspaceGit: Send + Sync + 'static {
+    /// Fetches `commit` of `workspace`'s remote as a verified git bundle.
     async fn fetch(
         &self,
-        workspace: &GithubWorkspace,
+        workspace: &Workspace,
+        commit: &str,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<FetchedSource>;
 
-    /// The remote URL advertising `commit` for `workspace`, if any.
+    /// The remote URL when it advertises `commit` on a branch or tag, if any.
     async fn advertised_output_remote(
         &self,
-        workspace: &GithubWorkspace,
+        workspace: &Workspace,
         commit: &str,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<Option<String>>;
+
+    /// Reads the remote and checks pushing, without changing it.
+    async fn check(
+        &self,
+        workspace: &Workspace,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<WorkspaceCheck>;
 }
 
 /// A fetched source bundle and the private state that must outlive its download.
@@ -89,7 +98,7 @@ pub struct ApiTransfers {
     api: Api,
     checkpoints: Option<PathBuf>,
     capacity: Arc<Semaphore>,
-    github_sources: Option<Arc<dyn WorkspaceSources>>,
+    git: Option<Arc<dyn WorkspaceGit>>,
     volumes: volumes::ArtifactVolumeMappings,
     relay: Arc<RelayHub>,
     /// Uploads hold it shared and garbage collection exclusively, so a file is never deleted
@@ -117,7 +126,7 @@ impl ApiTransfers {
             api,
             checkpoints,
             capacity: Arc::new(Semaphore::new(16)),
-            github_sources: None,
+            git: None,
             volumes: volumes::ArtifactVolumeMappings::default(),
             relay: Arc::default(),
             checkpoint_files: Arc::default(),
@@ -249,21 +258,35 @@ impl ApiTransfers {
         Ok(())
     }
 
-    pub fn with_github_sources(mut self, sources: Arc<dyn WorkspaceSources>) -> Self {
-        self.github_sources = Some(sources);
+    pub fn with_workspace_git(mut self, git: Arc<dyn WorkspaceGit>) -> Self {
+        self.git = Some(git);
         self
+    }
+
+    pub(crate) fn workspace_git(&self) -> Option<&Arc<dyn WorkspaceGit>> {
+        self.git.as_ref()
+    }
+
+    pub(crate) fn api(&self) -> &Api {
+        &self.api
     }
 
     async fn get_source(
         &self,
-        request: Request<InspectAttemptRequest>,
-    ) -> Result<GithubWorkspace, Status> {
+        request: Request<DownloadWorkspaceSourceRequest>,
+    ) -> Result<WorkspaceSourceBundle, Status> {
         self.api
             .forward_host(request, true, |channel, request| async {
                 workspace_client(channel).get_source(request).await
             })
             .await
             .map(Response::into_inner)
+    }
+
+    fn git(&self) -> Result<&Arc<dyn WorkspaceGit>, Status> {
+        self.git.as_ref().ok_or_else(|| {
+            Status::failed_precondition("git delivery does not run on this Control Plane")
+        })
     }
 
     pub fn service(self) -> TransfersServer<Self> {
@@ -491,7 +514,7 @@ impl ApiTransfers {
 
 #[tonic::async_trait]
 impl Transfers for ApiTransfers {
-    type DownloadWorkspaceSourceStream = ReceiverStream<Result<GithubWorkspaceDownload, Status>>;
+    type DownloadWorkspaceSourceStream = ReceiverStream<Result<WorkspaceSourceDownload, Status>>;
 
     async fn verify_workspace_output_remote(
         &self,
@@ -505,29 +528,32 @@ impl Transfers for ApiTransfers {
             return Err(Status::invalid_argument("invalid Git output commit"));
         }
         let source_request = || {
-            let mut request = Request::new(attempt.clone());
+            let mut request = Request::new(DownloadWorkspaceSourceRequest {
+                attempt: Some(attempt.clone()),
+                merge: false,
+            });
             *request.metadata_mut() = metadata.clone();
             request
         };
-        let workspace = self.get_source(source_request()).await?;
-        let sources = self.github_sources.as_ref().ok_or_else(|| {
-            Status::failed_precondition(
-                "GitHub Workspace source is not configured on this Control Plane",
-            )
-        })?;
+        let source = self.get_source(source_request()).await?;
+        let workspace = source
+            .workspace
+            .clone()
+            .ok_or_else(|| Status::internal("Workspace source is incomplete"))?;
+        let git = self.git()?;
         let _permit = self.acquire()?;
         let cancel = tokio_util::sync::CancellationToken::new();
         let _cancel_on_drop = cancel.clone().drop_guard();
         let remote = timeout(
             Duration::from_secs(30),
-            sources.advertised_output_remote(&workspace, &input.commit, &cancel),
+            git.advertised_output_remote(&workspace, &input.commit, &cancel),
         )
         .await
-        .map_err(|_| Status::deadline_exceeded("GitHub output verification timed out"))?
-        .map_err(|_| Status::unavailable("GitHub output remote could not be verified"))?;
-        if self.get_source(source_request()).await? != workspace {
+        .map_err(|_| Status::deadline_exceeded("Workspace output verification timed out"))?
+        .map_err(|_| Status::unavailable("Workspace output remote could not be verified"))?;
+        if self.get_source(source_request()).await? != source {
             return Err(Status::permission_denied(
-                "GitHub source is no longer authorized",
+                "Workspace source is no longer authorized",
             ));
         }
         Ok(Response::new(VerifyWorkspaceOutputRemoteResponse {
@@ -537,38 +563,41 @@ impl Transfers for ApiTransfers {
 
     async fn download_workspace_source(
         &self,
-        request: Request<InspectAttemptRequest>,
+        request: Request<DownloadWorkspaceSourceRequest>,
     ) -> Result<Response<Self::DownloadWorkspaceSourceStream>, Status> {
-        let attempt = request.get_ref().clone();
+        let input = request.get_ref().clone();
         let metadata = request.metadata().clone();
-        // This authoritative check precedes credential resolution or provider I/O.
-        let workspace = self.get_source(request).await?;
-        let sources = self.github_sources.as_ref().ok_or_else(|| {
-            Status::failed_precondition(
-                "GitHub Workspace source is not configured on this Control Plane",
-            )
-        })?;
+        // This authoritative check precedes credential resolution or remote I/O.
+        let source = self.get_source(request).await?;
+        let workspace = source
+            .workspace
+            .clone()
+            .ok_or_else(|| Status::internal("Workspace source is incomplete"))?;
+        let git = self.git()?;
         let permit = self.acquire()?;
         let cancel = tokio_util::sync::CancellationToken::new();
         let _cancel_on_drop = cancel.clone().drop_guard();
         let fetched = Arc::new(
             timeout(
                 WORKSPACE_TRANSFER_TIMEOUT,
-                sources.fetch(&workspace, &cancel),
+                git.fetch(&workspace, &source.commit, &cancel),
             )
             .await
-            .map_err(|_| Status::deadline_exceeded("GitHub source retrieval timed out"))?
-            .map_err(|_| Status::unavailable("GitHub source could not be retrieved safely"))?,
+            .map_err(|_| Status::deadline_exceeded("Workspace source retrieval timed out"))?
+            .map_err(|error| {
+                Status::unavailable(format!("Workspace source could not be read: {error:#}"))
+            })?,
         );
         let reference = BlobReference {
             sha256: fetched.bundle.sha256.clone(),
             byte_length: fetched.bundle.byte_length,
         };
-        let header = GithubWorkspaceDownload {
-            part: Some(github_workspace_download::Part::Reference(
-                GithubWorkspaceBundle {
-                    workspace: Some(workspace.clone()),
+        let header = WorkspaceSourceDownload {
+            part: Some(workspace_source_download::Part::Reference(
+                WorkspaceSourceBundle {
+                    workspace: Some(workspace),
                     bundle: Some(reference.clone()),
+                    commit: source.commit.clone(),
                 },
             )),
         };
@@ -576,17 +605,17 @@ impl Transfers for ApiTransfers {
         let service = self.clone();
         let authorize = move || {
             let service = service.clone();
-            let workspace = workspace.clone();
+            let source = source.clone();
             let keep = fetched.clone();
-            let mut request = Request::new(attempt.clone());
+            let mut request = Request::new(input.clone());
             *request.metadata_mut() = metadata.clone();
             async move {
                 let _keep = keep;
-                if service.get_source(request).await? == workspace {
+                if service.get_source(request).await? == source {
                     Ok(())
                 } else {
                     Err(Status::permission_denied(
-                        "GitHub source is no longer authorized",
+                        "Workspace source is no longer authorized",
                     ))
                 }
             }
@@ -597,8 +626,8 @@ impl Transfers for ApiTransfers {
             permit,
             reference,
             header,
-            |bytes| GithubWorkspaceDownload {
-                part: Some(github_workspace_download::Part::Chunk(bytes)),
+            |bytes| WorkspaceSourceDownload {
+                part: Some(workspace_source_download::Part::Chunk(bytes)),
             },
             authorize,
             WORKSPACE_TRANSFER_TIMEOUT,

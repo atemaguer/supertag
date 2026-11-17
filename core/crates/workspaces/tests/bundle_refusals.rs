@@ -161,6 +161,8 @@ async fn refused_from(
                 session_id: "session".into(),
                 expected_head: Some(head.into()),
                 setup: None,
+                merge_commit: None,
+                author: None,
             },
             &CancellationToken::new(),
         )
@@ -182,6 +184,8 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
                 session_id: "session".into(),
                 expected_head: None,
                 setup: None,
+                merge_commit: None,
+                author: None,
             },
             &CancellationToken::new(),
         )
@@ -333,6 +337,8 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
                 session_id: "session".into(),
                 expected_head: Some(head),
                 setup: None,
+                merge_commit: None,
+                author: None,
             },
             &CancellationToken::new(),
         )

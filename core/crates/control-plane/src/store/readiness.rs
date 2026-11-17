@@ -165,7 +165,7 @@ impl Store {
                 .await?;
         }
         if readiness == HostReadiness::Ready {
-            crate::github_publications::wake_held_by_in(&mut transaction, host.id(), now).await?;
+            crate::workspace_landings::wake_held_by_in(&mut transaction, host.id(), now).await?;
         }
         let view = status_in(&mut transaction, host.id(), now).await?;
         transaction.commit().await?;

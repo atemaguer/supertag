@@ -50,8 +50,8 @@ impl CredentialDirectory for Directory {
 impl WorkspaceDirectory for Directory {
     async fn get_source(
         &self,
-        _: Request<InspectAttemptRequest>,
-    ) -> Result<Response<GithubWorkspace>, Status> {
+        _: Request<DownloadWorkspaceSourceRequest>,
+    ) -> Result<Response<WorkspaceSourceBundle>, Status> {
         Err(Status::unimplemented("review artifact fixture"))
     }
     async fn get_review_artifact(

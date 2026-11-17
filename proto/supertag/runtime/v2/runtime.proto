@@ -3,7 +3,7 @@ syntax = "proto3";
 package supertag.runtime.v2;
 
 import "supertag/runtime/v2/policy.proto";
-import "supertag/runtime/v2/github_workspaces.proto";
+import "supertag/runtime/v2/workspaces.proto";
 import "supertag/runtime/v2/mcp.proto";
 
 // The Control Plane's public endpoint serves these services to operators,
@@ -540,8 +540,7 @@ enum WorkSessionCloseReason {
   // Closed after 14 days without activity: no turn, continuation, or delivery change.
   // Continuing it reopens it when the Tag is under its limit.
   WORK_SESSION_CLOSE_REASON_IDLE = 6;
-  // The pull request its GitHub delivery opened was merged.
-  WORK_SESSION_CLOSE_REASON_MERGED = 7;
+  reserved 7;
 }
 
 // An operator or client closes a Work Session it may see. `delivery_pulled` records that its
@@ -999,7 +998,9 @@ service Transfers {
   rpc DownloadCompleteWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
   rpc DownloadWorkspaceArtifact(GetWorkspaceArtifactRequest) returns (stream WorkspaceDownload);
   rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
-  rpc DownloadWorkspaceSource(InspectAttemptRequest) returns (stream GithubWorkspaceDownload);
+  // The Task's Workspace source, or with `merge` the commit its merge follow-up must merge,
+  // read from the remote by the Control Plane and relayed as a bundle.
+  rpc DownloadWorkspaceSource(DownloadWorkspaceSourceRequest) returns (stream WorkspaceSourceDownload);
   rpc VerifyWorkspaceOutputRemote(VerifyWorkspaceOutputRemoteRequest) returns (VerifyWorkspaceOutputRemoteResponse);
 }
 
@@ -1012,7 +1013,9 @@ service CheckpointDirectory {
 
 // Internal authorization and commit for work product the API tier stores.
 service WorkspaceDirectory {
-  rpc GetSource(InspectAttemptRequest) returns (GithubWorkspace);
+  // The remote Workspace and the commit a live Attempt may download: its base commit, or with
+  // `merge` its merge follow-up's target commit. The bundle is left empty.
+  rpc GetSource(DownloadWorkspaceSourceRequest) returns (WorkspaceSourceBundle);
   rpc GetContinuation(InspectAttemptRequest) returns (WorkspaceContinuation);
   rpc ReserveDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
   rpc CommitDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
@@ -1912,9 +1915,7 @@ message Task {
   // The turn succeeded quietly: it found nothing that needs attention, so nothing was posted and
   // its conversation does not show it. Its result says why.
   bool quiet = 22;
-  // How a surface message selected this Task's GitHub Workspace: request, origin or default.
-  // Absent when the Tag's configured Workspace (or none) was used.
-  optional string workspace_selection = 3500;
+  reserved 3500;
   // Limits the current Attempt's adapter confirmed it applies, and how; absent until it does.
   AppliedExecutionLimits applied_execution_limits = 5001;
   // What each Attempt's read-write Workspace copies wrote back to their Volumes. Set only by
@@ -2581,8 +2582,9 @@ message WorkspaceSpec {
   // The full commit Tasks start from. A Tag either pins it or names `base_ref`, never both; a
   // Task of a Tag that names `base_ref` has it empty until its first Attempt resolves the branch.
   string base_commit = 2;
-  // Set by admission from the catalog, never accepted from PutTag input.
-  GithubWorkspace github_source = 3;
+  // A remote Workspace's settings, set by admission from the catalog, never accepted from PutTag
+  // input. Absent for a Workspace a Worker Host maps from a local repository.
+  Workspace remote = 3;
   repeated WorkspaceCopyMount mounts = 4;
   // Servers the Workspace's `.mcp.json` declares that its Tasks may use. Each Attempt reads them
   // from a Worker-owned snapshot of `base_commit`, never from the Task worktree.
@@ -2591,6 +2593,15 @@ message WorkspaceSpec {
   // Attempt resolves it on its Worker Host through `ResolveWorkspaceRef`, and every Task of the
   // Session keeps that commit.
   string base_ref = 5;
+  // Set only on a merge follow-up Task: the target commit its Session must merge. The Worker
+  // Host starts the merge in the checkout, leaving conflict markers, and records the Task's
+  // commit with this commit as its second parent.
+  string merge_commit = 6;
+  // The Tag's name and SuperTag no-reply address that author the Session's commits, and the
+  // requester as a `Co-authored-by` trailer value. Set by admission, never accepted from input.
+  string author_name = 7;
+  string author_email = 8;
+  string co_author = 9;
 }
 
 message WorkspaceCopyMount {
@@ -2661,9 +2672,17 @@ message AttemptWorkspaceMountWrites {
   repeated WorkspaceMountWrite writes = 2;
 }
 
-message GithubWorkspaceBundle {
-  GithubWorkspace workspace = 1;
+message WorkspaceSourceBundle {
+  Workspace workspace = 1;
   BlobReference bundle = 2;
+  // The commit the bundle holds: the Workspace's pinned commit, or the Task's merge commit.
+  string commit = 3;
+}
+
+message DownloadWorkspaceSourceRequest {
+  InspectAttemptRequest attempt = 1;
+  // The Task's `merge_commit` instead of its base commit.
+  bool merge = 2;
 }
 
 message VerifyWorkspaceOutputRemoteRequest {
@@ -2675,9 +2694,9 @@ message VerifyWorkspaceOutputRemoteResponse {
   optional string remote = 1;
 }
 
-message GithubWorkspaceDownload {
+message WorkspaceSourceDownload {
   oneof part {
-    GithubWorkspaceBundle reference = 1;
+    WorkspaceSourceBundle reference = 1;
     bytes chunk = 2;
   }
 }

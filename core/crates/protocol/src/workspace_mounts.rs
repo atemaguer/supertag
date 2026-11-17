@@ -240,7 +240,7 @@ pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionPro
     };
     mount_harness(harness)
         && profile.shared_execution.is_none()
-        && spec.github_source.is_none()
+        && spec.remote.is_none()
         && mount_actions(&spec.mounts, &task.allowed_actions)
         && spec.mounts.iter().all(|mount| {
             let Some(volume) = &mount.volume else {

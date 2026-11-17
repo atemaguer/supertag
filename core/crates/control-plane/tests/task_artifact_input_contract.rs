@@ -111,7 +111,11 @@ async fn exercise(url: &str) {
                 mounts: vec![],
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
-                github_source: None,
+                remote: None,
+                merge_commit: String::new(),
+                author_name: String::new(),
+                author_email: String::new(),
+                co_author: String::new(),
             }),
             ..Default::default()
         })

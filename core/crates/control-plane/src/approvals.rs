@@ -406,15 +406,6 @@ impl Store {
                 "approval request already has a decision".into(),
             ));
         }
-        if scope == ApprovalScope::Objective
-            && crate::github_publications::approval_eligibility_in(&mut tx, &value)
-                .await?
-                .is_some()
-        {
-            return Err(invalid(
-                "publication approval is bound to one exact destination and commit",
-            ));
-        }
         if scope == ApprovalScope::Objective && value.objective_id.is_none() {
             return Err(invalid("Objective scope requires an Objective"));
         }
@@ -916,13 +907,6 @@ async fn effective_state(
     }
     if value.valid_until_ms.is_some_and(|until| until <= now) {
         return Ok(ApprovalState::Expired);
-    }
-    if let Some(eligible) = crate::github_publications::approval_eligibility_in(tx, value).await? {
-        return Ok(if eligible {
-            state
-        } else {
-            ApprovalState::Expired
-        });
     }
     if let Some(objective) = &value.objective_id {
         let status: i64 =

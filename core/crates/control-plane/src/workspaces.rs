@@ -438,7 +438,17 @@ pub(crate) fn same_session_workspace(
     previous: Option<&WorkspaceSpec>,
     next: Option<&WorkspaceSpec>,
 ) -> bool {
-    match (previous, next) {
+    // A merge follow-up's commit and the commit authorship belong to one Task, not the Session.
+    let session = |spec: &WorkspaceSpec| WorkspaceSpec {
+        merge_commit: String::new(),
+        author_name: String::new(),
+        author_email: String::new(),
+        co_author: String::new(),
+        ..spec.clone()
+    };
+    let previous = previous.map(session);
+    let next = next.map(session);
+    match (previous.as_ref(), next.as_ref()) {
         (Some(previous), Some(next)) if !next.base_ref.is_empty() => {
             let unresolved = |spec: &WorkspaceSpec| WorkspaceSpec {
                 base_commit: String::new(),
@@ -454,25 +464,32 @@ pub(crate) fn workspace_from_row(row: &AnyRow) -> Result<Option<WorkspaceSpec>> 
     let id: Option<String> = row.try_get("workspace_id")?;
     let base: Option<String> = row.try_get("workspace_base_commit")?;
     let base_ref: Option<String> = row.try_get("workspace_base_ref")?;
-    // Tag rows have no source pin: admission resolves their configured catalog.
-    let bytes = match row.try_get::<Vec<u8>, _>("workspace_github_source") {
+    // Tag rows have no remote copy: admission resolves their configured catalog.
+    let bytes = match row.try_get::<Vec<u8>, _>("workspace_remote") {
         Ok(bytes) => bytes,
         Err(sqlx::Error::ColumnNotFound(_)) => Vec::new(),
         Err(error) => return Err(error.into()),
     };
-    let github_source = if bytes.is_empty() {
+    let remote = if bytes.is_empty() {
         None
     } else {
         Some(crate::policy::decode(&bytes)?)
+    };
+    let merge_commit = match row.try_get::<String, _>("workspace_merge_commit") {
+        Ok(commit) => commit,
+        Err(sqlx::Error::ColumnNotFound(_)) => String::new(),
+        Err(error) => return Err(error.into()),
     };
     match (id, base) {
         (Some(workspace_id), Some(base_commit)) => Ok(Some(WorkspaceSpec {
             workspace_id,
             base_commit,
-            github_source,
+            remote,
+            merge_commit,
             mounts: crate::workspace_mounts::decode(row.try_get("workspace_mounts")?)?,
             mcp_servers: decode_mcp_servers(row.try_get("workspace_mcp_servers")?)?,
             base_ref: base_ref.unwrap_or_default(),
+            ..Default::default()
         })),
         (None, None) => Ok(None),
         _ => Err(sqlx::Error::Protocol("incomplete stored workspace policy".into()).into()),
@@ -522,12 +539,12 @@ fn require_running(row: &AnyRow, now: i64) -> Result<()> {
 impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
     async fn get_source(
         &self,
-        request: Request<InspectAttemptRequest>,
-    ) -> std::result::Result<Response<GithubWorkspace>, Status> {
+        request: Request<DownloadWorkspaceSourceRequest>,
+    ) -> std::result::Result<Response<WorkspaceSourceBundle>, Status> {
         let host = self.host_authority(&request)?;
         Ok(Response::new(
             self.store
-                .get_github_workspace_source(&host, request.get_ref())
+                .get_workspace_source(&host, request.get_ref())
                 .await?,
         ))
     }

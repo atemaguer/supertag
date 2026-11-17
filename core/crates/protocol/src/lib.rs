@@ -12,6 +12,7 @@ pub mod file_scope;
 pub use crash_points::crash_now;
 pub use crash_points::{CRASH_MARKER_ENV, CRASH_POINT_ENV, crash_point};
 pub mod git_outputs;
+pub mod git_remote;
 pub mod output_policy;
 pub mod task_artifact_inputs;
 pub mod terminal_text;
@@ -46,9 +47,6 @@ pub fn waiting_for_holder(holder: &str) -> String {
         "Waiting for Worker Host {holder}, which holds this Session's last delivery and is not connected to the Control Plane; start that host, or cancel the Task"
     )
 }
-/// Why a GitHub publication went back to Queued: the Worker Host holding its Workspace bundle was
-/// not connected. The Control Plane retries such a publication as soon as that host reports Ready.
-pub const GITHUB_PUBLICATION_HOLDER_OFFLINE: &str = "the Worker Host holding the Workspace bundle is not connected; no provider write was dispatched";
 pub const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
 pub const CHECKPOINT_CHUNK_BYTES: usize = 256 * 1024;
 /// A Session resumes a native checkpoint only up to half the cap, leaving room for one more long

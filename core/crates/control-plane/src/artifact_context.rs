@@ -21,36 +21,18 @@ fn resource(origin: &SurfacePolicyOrigin) -> Option<(String, Vec<u8>)> {
     ))
 }
 async fn related(
-    tx: &mut Transaction<'_, Any>,
+    _tx: &mut Transaction<'_, Any>,
     source: &Task,
     destination: &SurfacePolicyOrigin,
 ) -> Result<bool> {
     let wanted = resource(destination).ok_or_else(unavailable)?;
-    if source
+    Ok(source
         .policy_snapshot
         .as_ref()
         .and_then(|p| p.origin.as_ref())
         .and_then(resource)
         .as_ref()
-        == Some(&wanted)
-    {
-        return Ok(true);
-    }
-    // A GitHub Workspace is an admitted inspected resource, not a model claim.
-    if let Some(github) = source
-        .workspace
-        .as_ref()
-        .and_then(|w| w.github_source.as_ref())
-        .and_then(|w| w.source.as_ref())
-    {
-        let canonical:Option<String>=sqlx::query_scalar("SELECT account_id FROM supertag_v2_managed_connector_aliases WHERE connector_account_id=$1").bind(&github.account_id).fetch_optional(&mut **tx).await?;
-        if canonical.as_deref().unwrap_or(&github.account_id) == destination.account_id
-            && matches!(destination.scope.as_ref().and_then(|s|s.provider.as_ref()),Some(surface_location_scope::Provider::Github(scope)) if scope.repository_id==github.repository_id)
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+        == Some(&wanted))
 }
 async fn select_in(
     tx: &mut Transaction<'_, Any>,

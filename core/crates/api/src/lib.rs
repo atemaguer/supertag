@@ -18,8 +18,6 @@ mod attempt_safety;
 pub mod authorize;
 mod conversations;
 mod enrollments;
-mod github_publications;
-mod github_workspaces;
 pub mod in_process;
 mod inbox;
 mod inputs;
@@ -44,6 +42,7 @@ pub mod transfers;
 mod watch;
 mod work_sessions;
 mod workspace_mounts;
+mod workspaces;
 
 pub use authorize::{Caller, Role};
 pub use conversations::ApiConversations;
@@ -200,7 +199,7 @@ impl Api {
             transfers.attempt_artifacts_service(),
             transfers.artifact_transfer_service(),
             transfers.host_relay_service(),
-            transfers.service(),
+            transfers.clone().service(),
             self.objectives_service(),
             self.live_inputs_service(),
             self.attempt_inputs_service(),
@@ -208,8 +207,9 @@ impl Api {
             self.attempt_workstreams_service(),
             self.mailbox_service(),
             self.inbox_service(),
-            self.github_workspaces_service(),
-            self.github_publications_service(),
+            transfers.workspaces_service(),
+            self.workspace_credentials_service(),
+            self.workspace_landings_service(),
             self.artifact_publications_service(),
             self.policy_service(),
             self.manifest_relationships_service(),

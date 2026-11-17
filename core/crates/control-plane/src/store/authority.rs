@@ -516,7 +516,7 @@ impl ClaimScope {
         accepted_order: i64,
     ) -> Result<Option<AttemptExecutionSelection>> {
         let has_workspace = task.workspace.as_ref().is_none_or(|spec| {
-            let sources = if spec.github_source.is_some() {
+            let sources = if spec.remote.is_some() {
                 &self.gateway_workspace_ids
             } else {
                 &self.workspace_ids
@@ -538,7 +538,7 @@ impl ClaimScope {
                         // A followed branch is resolved by the host that runs the Attempt.
                         || (spec.base_commit.is_empty()
                             && !spec.base_ref.is_empty()
-                            && spec.github_source.is_none())
+                            && spec.remote.is_none())
             })
             && supports_execution_limits(self.harness, task)
             && supports_runtime_actions(self.harness, task)

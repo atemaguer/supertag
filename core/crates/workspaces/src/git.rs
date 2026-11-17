@@ -150,23 +150,100 @@ impl Repository {
             bare: true,
         };
         if repository.verify_commit(base, cancel).await.is_err() {
-            check_cancelled(cancel)?;
-            let source_objects = source_objects(source)?;
-            reject_object_links(&source_objects)?;
-            let pack = repository
-                .command(
-                    &["pack-objects", "--stdout", "--revs"],
-                    format!("{base}\n").as_bytes(),
-                    &[("GIT_OBJECT_DIRECTORY", source_objects.into_os_string())],
-                    cancel,
-                )
-                .await?;
-            repository
-                .command(&["index-pack", "--stdin", "--strict"], &pack, &[], cancel)
-                .await?;
-            repository.verify_commit(base, cancel).await?;
+            repository.import_from_source(source, base, cancel).await?;
         }
         Ok(repository)
+    }
+
+    /// Copies `commit` and its history from a local source repository's object store, without
+    /// reading its configuration, refs, or hooks.
+    pub(crate) async fn import_from_source(
+        &self,
+        source: &Path,
+        commit: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        if self.verify_commit(commit, cancel).await.is_ok() {
+            return Ok(());
+        }
+        check_cancelled(cancel)?;
+        let source_objects = source_objects(source)?;
+        reject_object_links(&source_objects)?;
+        let pack = self
+            .command(
+                &["pack-objects", "--stdout", "--revs"],
+                format!("{commit}\n").as_bytes(),
+                &[("GIT_OBJECT_DIRECTORY", source_objects.into_os_string())],
+                cancel,
+            )
+            .await?;
+        self.command(&["index-pack", "--stdin", "--strict"], &pack, &[], cancel)
+            .await?;
+        self.verify_commit(commit, cancel).await
+    }
+
+    /// Merges `theirs` into `ours` without a work tree: the merged tree, conflicting files holding
+    /// conflict markers, and the conflicting paths. Nothing is resolved.
+    pub(crate) async fn merge_tree(
+        &self,
+        ours: &str,
+        theirs: &str,
+        cancel: &CancellationToken,
+    ) -> Result<(String, Vec<String>)> {
+        validate_oid(ours)?;
+        validate_oid(theirs)?;
+        paths::verify_directory(&self.git_dir)?;
+        let mut command = Command::new("/usr/bin/git");
+        command
+            .current_dir(&self.root)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+            .env("LANG", "C")
+            .env("LC_ALL", "C")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_ATTR_NOSYSTEM", "1")
+            .env("GIT_NO_REPLACE_OBJECTS", "1")
+            .env("GIT_NO_LAZY_FETCH", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .arg(format!("--git-dir={}", self.git_dir.display()))
+            .args([
+                "-c",
+                "core.attributesFile=/dev/null",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ])
+            .args([
+                "merge-tree",
+                "--write-tree",
+                "-z",
+                "--name-only",
+                "--no-messages",
+                ours,
+                theirs,
+            ]);
+        // `merge-tree` exits 1 for a merge with conflicts; its output is still the merged tree.
+        let output = run_status(command, cancel, MAX_OUTPUT, COMMAND_TIMEOUT).await?;
+        ensure!(
+            matches!(output.0, Some(0) | Some(1)),
+            "merging the target into the Session failed"
+        );
+        let mut fields = output.1.split(|byte| *byte == 0);
+        let tree = std::str::from_utf8(fields.next().unwrap_or_default())?
+            .trim()
+            .to_owned();
+        validate_oid(&tree)?;
+        let conflicts = fields
+            .map(|name| String::from_utf8_lossy(name).into_owned())
+            .take_while(|name| !name.is_empty())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        ensure!(
+            output.0 == Some(0) || !conflicts.is_empty(),
+            "the merge conflicted without naming files"
+        );
+        Ok((tree, conflicts))
     }
 
     async fn command(
@@ -302,11 +379,13 @@ impl Repository {
         Ok(entries)
     }
 
+    /// Writes a checkout of `start`, or with `index_tree` of that tree on top of `start` (a merge
+    /// follow-up's merge), and verifies every file against `entries`.
     pub(crate) async fn checkout(
         &self,
         directory: &Path,
-        base: &str,
-        start: &str,
+        (base, start): (&str, &str),
+        index_tree: Option<&str>,
         entries: &BTreeMap<String, TreeEntry>,
         cancel: &CancellationToken,
     ) -> Result<()> {
@@ -317,7 +396,7 @@ impl Repository {
             paths::validate_link(&entry.path, &target)?;
         }
         let checkout = self
-            .checkout_metadata(directory, base, start, cancel)
+            .checkout_metadata_with(directory, base, start, index_tree, cancel)
             .await?;
         // Git writes the files on several workers.
         let workers = format!("checkout.workers={}", parallelism());
@@ -394,8 +473,25 @@ impl Repository {
         start: &str,
         cancel: &CancellationToken,
     ) -> Result<Self> {
+        self.checkout_metadata_with(directory, base, start, None, cancel)
+            .await
+    }
+
+    /// As [`Self::checkout_metadata`], with the index holding `index_tree` instead of `start`'s
+    /// tree, and that tree's objects copied too.
+    async fn checkout_metadata_with(
+        &self,
+        directory: &Path,
+        base: &str,
+        start: &str,
+        index_tree: Option<&str>,
+        cancel: &CancellationToken,
+    ) -> Result<Self> {
         validate_oid(base)?;
         validate_oid(start)?;
+        if let Some(tree) = index_tree {
+            validate_oid(tree)?;
+        }
         paths::create_private_root(directory)?;
         let git_dir = directory.join(".git");
         initialize(&git_dir, self.oid_length, false)?;
@@ -433,7 +529,7 @@ impl Repository {
         if !shallow.is_empty() {
             crate::write_synced(&checkout.git_dir.join("shallow"), shallow.as_bytes())?;
         }
-        let objects = self
+        let mut objects = self
             .command(
                 &["rev-list", "--objects", "--no-walk", "--stdin"],
                 list.as_bytes(),
@@ -441,6 +537,25 @@ impl Repository {
                 cancel,
             )
             .await?;
+        if let Some(tree) = index_tree {
+            objects.extend_from_slice(format!("{tree}\n").as_bytes());
+            let listed = self
+                .command(&["ls-tree", "-r", "-t", "-z", tree], &[], &[], cancel)
+                .await?;
+            for entry in listed
+                .split(|byte| *byte == 0)
+                .filter(|entry| !entry.is_empty())
+            {
+                let header = entry
+                    .split(|byte| *byte == b'\t')
+                    .next()
+                    .unwrap_or_default();
+                if let Some(oid) = std::str::from_utf8(header)?.split(' ').nth(2) {
+                    validate_oid(oid)?;
+                    objects.extend_from_slice(format!("{oid}\n").as_bytes());
+                }
+            }
+        }
         let pack = self
             .command(&["pack-objects", "--stdout"], &objects, &[], cancel)
             .await?;
@@ -451,7 +566,12 @@ impl Repository {
             .command(&["update-ref", "HEAD", start], &[], &[], cancel)
             .await?;
         checkout
-            .command(&["read-tree", "--reset", start], &[], &[], cancel)
+            .command(
+                &["read-tree", "--reset", index_tree.unwrap_or(start)],
+                &[],
+                &[],
+                cancel,
+            )
             .await?;
         check_cancelled(cancel)?;
         Ok(checkout)
@@ -772,29 +892,41 @@ impl Repository {
     pub(crate) async fn commit(
         &self,
         tree: &str,
-        parent: &str,
-        subject: &str,
+        parents: &[&str],
+        message: &str,
+        author: Option<&crate::CommitAuthor>,
         seconds: u64,
         cancel: &CancellationToken,
     ) -> Result<String> {
         let date = OsString::from(format!("{seconds} +0000"));
+        let usable = |value: &str| {
+            !value.is_empty()
+                && value.len() <= 256
+                && !value
+                    .chars()
+                    .any(|c| c.is_control() || c == '<' || c == '>')
+        };
+        let (name, email) = match author {
+            Some(author) if usable(&author.name) && usable(&author.email) => {
+                (author.name.as_str(), author.email.as_str())
+            }
+            _ => ("SuperTag", "supertag@localhost"),
+        };
         let environment = [
-            ("GIT_AUTHOR_NAME", "SuperTag".into()),
-            ("GIT_AUTHOR_EMAIL", "supertag@localhost".into()),
-            ("GIT_COMMITTER_NAME", "SuperTag".into()),
-            ("GIT_COMMITTER_EMAIL", "supertag@localhost".into()),
+            ("GIT_AUTHOR_NAME", OsString::from(name)),
+            ("GIT_AUTHOR_EMAIL", OsString::from(email)),
+            ("GIT_COMMITTER_NAME", OsString::from(name)),
+            ("GIT_COMMITTER_EMAIL", OsString::from(email)),
             ("GIT_AUTHOR_DATE", date.clone()),
             ("GIT_COMMITTER_DATE", date),
         ];
-        output_oid(
-            self.command(
-                &["commit-tree", tree, "-p", parent, "-m", subject],
-                &[],
-                &environment,
-                cancel,
-            )
-            .await?,
-        )
+        let mut args = vec!["commit-tree", tree];
+        for parent in parents {
+            validate_oid(parent)?;
+            args.extend(["-p", parent]);
+        }
+        args.extend(["-m", message]);
+        output_oid(self.command(&args, &[], &environment, cancel).await?)
     }
 
     pub(crate) async fn patch(
@@ -1381,6 +1513,43 @@ pub(crate) async fn run(
             let ((), stdout, stderr, status) = tokio::try_join!(async { stdin.write_all(input).await?; stdin.shutdown().await?; drop(stdin); Ok::<_, anyhow::Error>(()) }, limited(stdout, maximum), limited(stderr, 65_536), async { Ok::<_, anyhow::Error>(child.wait().await?) })?;
             if !status.success() { return Err(GitExit { code: status.code(), stderr: String::from_utf8_lossy(&stderr).trim().into() }.into()); }
             Ok(stdout)
+        } => result,
+    };
+    if result.is_err() {
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+        let _ = child.wait().await;
+    }
+    result
+}
+
+/// Runs `command` without input and returns its exit code and output whatever the code, for a
+/// command whose failure code carries meaning.
+pub(crate) async fn run_status(
+    mut command: Command,
+    cancel: &CancellationToken,
+    maximum: usize,
+    timeout: Duration,
+) -> Result<(Option<i32>, Vec<u8>)> {
+    check_cancelled(cancel)?;
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    command.as_std_mut().process_group(0);
+    let mut child = command.spawn().context("start trusted Git executable")?;
+    let pid = child.id().context("Git child has no process ID")?;
+    let stdout = child.stdout.take().context("Git stdout unavailable")?;
+    let stderr = child.stderr.take().context("Git stderr unavailable")?;
+    let result = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(anyhow::anyhow!("workspace operation cancelled")),
+        _ = tokio::time::sleep(timeout) => Err(anyhow::anyhow!("Git command exceeded its deadline")),
+        result = async {
+            let (stdout, _, status) = tokio::try_join!(limited(stdout, maximum), limited(stderr, 65_536), async { Ok::<_, anyhow::Error>(child.wait().await?) })?;
+            Ok((status.code(), stdout))
         } => result,
     };
     if result.is_err() {

@@ -82,6 +82,8 @@ fn request(task: &str, attempt: &str, head: Option<String>) -> PrepareRequest {
         session_id: "session".into(),
         expected_head: head,
         setup: None,
+        merge_commit: None,
+        author: None,
     }
 }
 fn complete() -> FinalizeRequest {
@@ -823,6 +825,8 @@ fn supertag_protocol_path(path: &str) -> bool {
 fn setup_request(task: &str, attempt: &str, command: &str) -> PrepareRequest {
     PrepareRequest {
         setup: Some(command.into()),
+        merge_commit: None,
+        author: None,
         session_id: task.into(),
         ..request(task, attempt, None)
     }

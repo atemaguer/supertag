@@ -1,0 +1,23 @@
+[package]
+name = "supertag-git-delivery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64 = "0.22"
+libc.workspace = true
+supertag-credential-vault.workspace = true
+supertag-protocol.workspace = true
+supertag-workspaces = { path = "../workspaces" }
+tempfile.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true

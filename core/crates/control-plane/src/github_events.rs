@@ -28,8 +28,9 @@ impl Store {
         }
         name("GitHub delivery ID", &input.delivery_id)?;
         name("Tag ID", &input.tag_id)?;
+        // A merged pull request starts no work. Routing it back to the Session that opened it
+        // belongs to the review adapter, which does not exist yet.
         if input.action == GithubEventAction::Merged as i32 {
-            self.close_merged(account, input).await?;
             return Ok(AcceptGithubEventResponse { task: None });
         }
         text("GitHub prompt", &input.prompt, 128 * 1024)?;
@@ -186,60 +187,6 @@ impl Store {
         .await?;
         tx.commit().await?;
         Ok(AcceptGithubEventResponse { task: Some(task) })
-    }
-}
-
-impl Store {
-    /// A merged pull request closes each open Work Session whose GitHub delivery opened it. A
-    /// GitHub repository ID and pull request number name one pull request, and a Session delivers
-    /// to at most one, so the match is exact. Replays and Sessions already closed change nothing.
-    async fn close_merged(&self, account: &str, input: &AcceptGithubEventRequest) -> Result<()> {
-        if input.kind != GithubEventKind::PullRequest as i32
-            || !input.is_pull_request
-            || !input.prompt.is_empty()
-            || !repository(&input.repository)
-            || [input.repository_id, input.number]
-                .iter()
-                .any(|id| *id == 0 || *id > i64::MAX as u64)
-        {
-            return Err(invalid("invalid merged GitHub pull request event"));
-        }
-        let (mut tx, _) = self.write().await?;
-        let route: Option<String> = sqlx::query_scalar("SELECT repository FROM supertag_v2_github_repositories WHERE account_id=$1 AND repository_id=$2")
-            .bind(account).bind(input.repository_id as i64).fetch_optional(&mut *tx).await?;
-        if route.is_some_and(|repository| repository != input.repository.to_ascii_lowercase()) {
-            return Err(StoreError::Conflict(
-                "GitHub repository route is already bound to a different repository name".into(),
-            ));
-        }
-        // Only open Work Sessions can close, and a Tag has few open, so their pull requests are
-        // read and compared here rather than indexed.
-        let rows = sqlx::query(
-            "SELECT ws.work_session_id, ps.pull_request FROM supertag_v2_work_sessions ws
-             JOIN supertag_v2_github_publication_sessions ps ON ps.tag_id = ws.tag_id
-             WHERE ws.closed_at_ms IS NULL AND EXISTS (
-                 SELECT 1 FROM supertag_v2_work_session_tasks wst
-                 JOIN supertag_v2_tasks t ON t.task_id = wst.task_id
-                 WHERE wst.work_session_id = ws.work_session_id AND t.session_id = ps.session_id)",
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-        let now = self.execution_now_ms();
-        for row in rows {
-            let receipt: supertag_protocol::v2::GithubPullRequestReceipt =
-                crate::policy::decode(&row.try_get::<Vec<u8>, _>("pull_request")?)?;
-            if receipt.repository_id == input.repository_id && receipt.number == input.number {
-                crate::work_sessions::close_in(
-                    &mut tx,
-                    &row.try_get::<String, _>("work_session_id")?,
-                    supertag_protocol::v2::WorkSessionCloseReason::Merged,
-                    now,
-                )
-                .await?;
-            }
-        }
-        tx.commit().await?;
-        Ok(())
     }
 }
 

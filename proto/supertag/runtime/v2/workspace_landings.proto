@@ -1,0 +1,135 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+import "supertag/runtime/v2/runtime.proto";
+import "supertag/runtime/v2/workspaces.proto";
+
+// Operators see where each Session's changes landed, separately from the Task's own result:
+// a Task succeeds whether or not its changes reached the remote.
+service WorkspaceLandings {
+  rpc Get(GetWorkspaceLandingRequest) returns (WorkspaceLanding);
+  rpc List(ListWorkspaceLandingsRequest) returns (ListWorkspaceLandingsResponse);
+}
+
+// Internal to the Control Plane: git delivery pins each Session's source and lands verified
+// commits. A claim names what to push; git delivery holds the credentials.
+service GitDelivery {
+  rpc ListPendingSources(ListPendingWorkspaceSourcesRequest) returns (ListPendingWorkspaceSourcesResponse);
+  rpc PinSource(PinWorkspaceSourceRequest) returns (WorkspaceSourcePin);
+  rpc Claim(ClaimWorkspaceLandingRequest) returns (ClaimWorkspaceLandingResponse);
+  rpc Renew(WorkspaceLandingLease) returns (ClaimWorkspaceLandingResponse);
+  rpc Record(RecordWorkspaceLandingRequest) returns (WorkspaceLanding);
+}
+
+enum WorkspaceLandingMode {
+  WORKSPACE_LANDING_MODE_UNSPECIFIED = 0;
+  WORKSPACE_LANDING_MODE_BRANCH = 1;
+  WORKSPACE_LANDING_MODE_MERGE = 2;
+}
+
+enum WorkspaceLandingState {
+  WORKSPACE_LANDING_STATE_UNSPECIFIED = 0;
+  // Waiting for git delivery, or for the Worker Host holding the delivery to reconnect.
+  WORKSPACE_LANDING_STATE_QUEUED = 1;
+  WORKSPACE_LANDING_STATE_CLAIMED = 2;
+  WORKSPACE_LANDING_STATE_LANDED = 3;
+  // The Session's changes conflict with the target. Nothing was pushed to the target, and the
+  // Session received a follow-up Task to merge the target and resolve the conflicts.
+  WORKSPACE_LANDING_STATE_CONFLICT = 4;
+  // Refused until someone acts, such as a branch moved outside SuperTag or a missing credential.
+  WORKSPACE_LANDING_STATE_HELD = 5;
+  // A newer delivery of the same Session replaced it before it landed.
+  WORKSPACE_LANDING_STATE_SUPERSEDED = 6;
+}
+
+message WorkspaceLanding {
+  string landing_id = 1;
+  string task_id = 2;
+  string tag_id = 3;
+  string session_id = 4;
+  string workspace_id = 5;
+  string remote = 6;
+  WorkspaceLandingMode mode = 7;
+  // The Session's branch, `supertag/session/ID`.
+  string branch = 8;
+  // The merge target; empty for branch mode.
+  string target = 9;
+  WorkspaceDeliveryReference delivery = 10;
+  WorkspaceLandingState state = 11;
+  string reason = 12;
+  // Landed: the commit the Session's branch (branch mode) or the target (merge mode) names.
+  string landed_commit = 13;
+  // Conflict: the target commit the Session must merge, and the conflicting paths.
+  string target_commit = 14;
+  repeated string conflicts = 15;
+  optional string follow_up_task_id = 16;
+  int64 created_order = 17;
+  // A merge commit's author: the Tag's name and a SuperTag no-reply address.
+  string author_name = 18;
+  string author_email = 19;
+  // The requester, as a `Co-authored-by` trailer value. Empty when there is none.
+  string co_author = 20;
+}
+
+message GetWorkspaceLandingRequest { string landing_id = 1; }
+message ListWorkspaceLandingsRequest {
+  string task_id = 1;
+  uint32 limit = 2;
+  int64 before_order = 3;
+  string session_id = 4;
+}
+message ListWorkspaceLandingsResponse {
+  repeated WorkspaceLanding landings = 1;
+  int64 next_before_order = 2;
+}
+
+// A Session's source, pinned once: every Task of the Session starts from the same commit.
+message WorkspaceSourcePin {
+  string pin_id = 1;
+  string tag_id = 2;
+  string session_id = 3;
+  Workspace selector = 4;
+  string selector_digest = 5;
+  Workspace resolved = 6;
+  uint64 created_order = 7;
+}
+message ListPendingWorkspaceSourcesRequest {
+  uint64 after_order = 1;
+  uint32 limit = 2;
+}
+message ListPendingWorkspaceSourcesResponse {
+  repeated WorkspaceSourcePin pins = 1;
+  uint64 next_after_order = 2;
+}
+message PinWorkspaceSourceRequest {
+  string pin_id = 1;
+  string selector_digest = 2;
+  string resolved_ref = 3;
+  string commit = 4;
+  // Set instead of a commit when the source cannot be read; the Session's queued Tasks fail
+  // with it.
+  string error = 5;
+}
+
+message ClaimWorkspaceLandingRequest { string operation_id = 1; }
+message WorkspaceLandingLease { string landing_id = 1; string lease_token = 2; }
+message ClaimWorkspaceLandingResponse {
+  WorkspaceLanding landing = 1;
+  string lease_token = 2;
+  uint64 valid_for_ms = 3;
+  // The Worker Host holding the delivery's bundle, which git delivery reads through the relay.
+  BlobHolder holder = 4;
+  // The push credential's name; empty when the remote needs none.
+  string credential = 5;
+}
+message RecordWorkspaceLandingRequest {
+  WorkspaceLandingLease lease = 1;
+  string operation_id = 2;
+  // Queued (retry later), Landed, Conflict, or Held.
+  WorkspaceLandingState state = 3;
+  string reason = 4;
+  string landed_commit = 5;
+  string target_commit = 6;
+  repeated string conflicts = 7;
+  // Queued only: how long to wait before the next try.
+  uint64 retry_after_ms = 8;
+}

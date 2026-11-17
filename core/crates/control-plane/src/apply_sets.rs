@@ -68,7 +68,7 @@ async fn revision(tx: &mut Transaction<'_, Any>, kind: &str, id: &str) -> Result
         "Role" | "PermissionSet" | "ContextSet" => {
             crate::policy::policy_revision_in(tx, kind, id).await
         }
-        "Workspace" => crate::github_workspaces::revision_in(tx, id).await,
+        "Workspace" => crate::remote_workspaces::revision_in(tx, id).await,
         "Volume" => crate::artifact_volumes::revision_in(tx, id).await,
         "Schedule" => crate::schedules::revision_in(tx, id).await,
         _ => Err(invalid("unsupported apply set kind")),
@@ -98,7 +98,7 @@ async fn remove(
         "Role" => crate::policy::retire_role_in(tx, id, expected).await,
         "PermissionSet" => crate::policy::delete_permission_set_in(tx, id, expected).await,
         "ContextSet" => crate::policy::delete_context_set_in(tx, id, expected).await,
-        "Workspace" => crate::github_workspaces::delete_in(tx, id, expected).await,
+        "Workspace" => crate::remote_workspaces::delete_in(tx, id, expected).await,
         "Volume" => crate::artifact_volumes::delete_in(tx, id, expected).await,
         "Schedule" => crate::schedules::prune_in(tx, id, expected, now_ms).await,
         _ => Err(invalid("unsupported apply set kind")),
