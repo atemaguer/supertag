@@ -45,11 +45,13 @@ button {
 button:disabled {
   cursor: default;
 }
+/* Keyboard focus on what you press shows as a subtle ring. */
 button:focus-visible,
+a:focus-visible,
 summary:focus-visible,
 [tabindex]:not(input):not(textarea):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
 }
 /* Text fields show focus by their caret and, where bordered, their border; never an offset outline. */
 input:focus,
