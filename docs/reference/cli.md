@@ -1676,6 +1676,8 @@ Start local services or configured Worker Hosts in the background and return whe
 
 With --foreground, supervise them in this terminal until interrupted. A service with restart: unless-stopped makes up install a per-user service unit (launchd on macOS, systemd on Linux) that runs the supervisor and starts it again after a failure or login.
 
+Running services are left alone when nothing changed. Changed settings restart them; so does another build of SuperTag, such as the release before an upgrade, which up stops and starts again with this CLI's executable.
+
 Usage: supertag up [OPTIONS]
 
 Options:
@@ -1776,21 +1778,27 @@ Options:
 ## `supertag down`
 
 ```text
-Stop this machine's SuperTag services, draining local Worker Hosts first
+Stop this machine's SuperTag services, draining local Worker Hosts first.
+
+When the Control Plane cannot be reached or speaks another protocol, as after an upgrade, down stops the services without draining. Worker Hosts still stop gracefully, and their running Task Attempts follow the recovery rules.
 
 Usage: supertag down [OPTIONS]
 
 Options:
       --state-directory <STATE_DIRECTORY>
           Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
+
   -f, --file <FILE>
           supertag.yaml, or a directory that holds one, naming the service unit to remove
+
       --remove-services
           Also uninstall the per-user service unit
+
       --force
           Do not wait for running Task Attempts
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ## `supertag logs`

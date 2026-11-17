@@ -107,6 +107,11 @@ impl ControlPlane {
         })
     }
 
+    /// The schema versions opening the store migrated an existing database from and to.
+    pub fn schema_migration(&self) -> Option<(i64, i64)> {
+        self.store.migrated()
+    }
+
     /// Also writes every committed audit entry to `sink`.
     pub fn with_audit_sink(mut self, sink: crate::AuditSink) -> Self {
         self.store = self.store.with_audit_sink(sink);

@@ -102,9 +102,29 @@ TypeScript, and Python bindings live beside the SDKs in [`sdks/`](../../sdks/REA
 
 ## Upgrade
 
-Run the installer script again, or install a newer archive the same way. Then restart this
-machine's services with `supertag up`, which waits for running Task Attempts before replacing a
-service. For a hosted deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-deployment).
+Run the installer script again, or install a newer archive the same way. Then run `supertag up`.
+It sees that the services on this machine run another build and restarts them with the new one:
+
+```text
+SuperTag 0.3.0 runs in /Users/you/.supertag, a different build than this CLI, so it restarts with this one.
+Stopped SuperTag 0.3.0 services (protocol 2) without draining through the Control Plane, because this CLI speaks protocol 3. Their Worker Hosts stopped gracefully; Task Attempts they were running follow the recovery rules.
+Restarted SuperTag: 0.3.0 (protocol 2) → 0.3.1 (protocol 3).
+Started SuperTag in the background (process 4242).
+Migrated the database schema from version 82 to 83.
+```
+
+When the old services speak the same protocol, `up` first drains their Worker Hosts and waits
+for running Task Attempts, as `supertag down` does. When they speak another protocol, the new CLI
+cannot drain through their Control Plane. It stops them with a signal instead, and each Worker
+Host still stops gracefully. A per-user service unit is restarted with the new executable.
+
+The new Control Plane migrates the database when it starts, and `up` prints each migration. A
+migrated database belongs to the new release: an older release refuses to start against it,
+naming the schema version it found. To go back, restore the backup you took before the upgrade.
+See [Back up](control-plane.md#back-up) for the local database.
+
+`supertag down` also stops services from another release, without draining when it must. For a
+hosted deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-deployment).
 
 ## Check the CLI and the local services
 

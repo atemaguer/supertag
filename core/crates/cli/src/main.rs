@@ -303,6 +303,10 @@ enum Command {
     /// With --foreground, supervise them in this terminal until interrupted. A service with
     /// restart: unless-stopped makes up install a per-user service unit (launchd on macOS,
     /// systemd on Linux) that runs the supervisor and starts it again after a failure or login.
+    ///
+    /// Running services are left alone when nothing changed. Changed settings restart them; so
+    /// does another build of SuperTag, such as the release before an upgrade, which up stops
+    /// and starts again with this CLI's executable.
     Up {
         /// Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present.
         #[arg(short = 'f', long = "file")]
@@ -326,6 +330,10 @@ enum Command {
         control_plane_listen: SocketAddr,
     },
     /// Stop this machine's SuperTag services, draining local Worker Hosts first.
+    ///
+    /// When the Control Plane cannot be reached or speaks another protocol, as after an
+    /// upgrade, down stops the services without draining. Worker Hosts still stop gracefully,
+    /// and their running Task Attempts follow the recovery rules.
     Down(lifecycle::DownArgs),
     /// Print this machine's service logs.
     Logs(lifecycle::LogsArgs),
@@ -1424,6 +1432,10 @@ async fn control_plane(
         operator_principal.clone(),
     )
     .await?;
+    if let Some((from, to)) = plane.schema_migration() {
+        // `supertag up` repeats this line after it starts or upgrades the local services.
+        errln!("{} {from} to {to}.", lifecycle::MIGRATED);
+    }
     if let Some(audit_log) = &options.audit_log {
         plane = plane.with_audit_sink(supertag_control_plane::AuditSink::parse(audit_log)?);
     }

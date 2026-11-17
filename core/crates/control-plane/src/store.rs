@@ -90,6 +90,8 @@ pub struct Store {
     _process_lock: Option<Arc<std::fs::File>>,
     /// Where committed audit entries are also written, besides the database.
     pub(crate) audit_sink: Option<Arc<crate::AuditSink>>,
+    /// The schema versions this process migrated an existing database from and to.
+    migrated: Option<(i64, i64)>,
 }
 
 impl Store {
@@ -166,6 +168,16 @@ impl Store {
             let versions: Vec<i64> = sqlx::query_scalar("SELECT version FROM supertag_v2_schema")
                 .fetch_all(&mut *transaction)
                 .await?;
+            if let [version] = versions.as_slice()
+                && *version > SCHEMA_VERSION
+            {
+                drop(transaction);
+                pool.close().await;
+                anyhow::bail!(
+                    "the database's schema version {version} is newer than this SuperTag release ({}) understands ({SCHEMA_VERSION}): a newer release migrated it, and an older one cannot run against it. Install that release or a newer one",
+                    supertag_protocol::negotiation::build_version()
+                );
+            }
             if !matches!(versions.as_slice(), [version] if (1..=SCHEMA_VERSION).contains(version)) {
                 drop(transaction);
                 pool.close().await;
@@ -385,7 +397,14 @@ impl Store {
             ephemeral_watch_since: Arc::default(),
             _process_lock: process_lock,
             audit_sink: None,
+            migrated: (version > 0 && version < SCHEMA_VERSION)
+                .then_some((version, SCHEMA_VERSION)),
         })
+    }
+
+    /// The schema versions this process migrated an existing database from and to, if it did.
+    pub fn migrated(&self) -> Option<(i64, i64)> {
+        self.migrated
     }
 
     pub async fn close(&self) {
@@ -2471,5 +2490,114 @@ mod durability_tests {
             matches!(journal.as_str(), "delete" | "wal"),
             "journal mode {journal} does not keep a durable commit"
         );
+    }
+}
+
+#[cfg(test)]
+mod schema_upgrade_tests {
+    use sqlx::{AnyConnection, Connection, Executor};
+
+    use super::Store;
+
+    /// Every migration file of one dialect, in order.
+    fn migrations(dialect: &str) -> Vec<String> {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("migrations")
+            .join(dialect);
+        let mut paths: Vec<_> = std::fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        paths.sort();
+        paths
+            .iter()
+            .map(|path| std::fs::read_to_string(path).unwrap())
+            .collect()
+    }
+
+    /// An upgrade migrates the database a previous release left and says so once; an older
+    /// release refuses a database a newer one migrated, naming why.
+    async fn contract(url: &str, dialect: &str) {
+        sqlx::any::install_default_drivers();
+        let migrations = migrations(dialect);
+        let latest = migrations.len() as i64;
+        // The database as the release before the latest migration left it.
+        let mut connection = AnyConnection::connect(url).await.unwrap();
+        for migration in &migrations[..migrations.len() - 1] {
+            sqlx::raw_sql(migration)
+                .execute(&mut connection)
+                .await
+                .unwrap();
+        }
+        let store = Store::open(url).await.unwrap();
+        assert_eq!(store.migrated(), Some((latest - 1, latest)));
+        store.close().await;
+        drop(store);
+        let store = Store::open(url).await.unwrap();
+        assert_eq!(
+            store.migrated(),
+            None,
+            "an unchanged database is not migrated"
+        );
+        store.close().await;
+        drop(store);
+
+        connection
+            .execute("UPDATE supertag_v2_schema SET version=version+1")
+            .await
+            .unwrap();
+        connection.close().await.unwrap();
+        let refused = Store::open(url)
+            .await
+            .err()
+            .expect("an older release opened a newer database");
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains(&format!(
+                "the database's schema version {} is newer than this SuperTag release ({}) understands ({latest})",
+                latest + 1,
+                env!("CARGO_PKG_VERSION")
+            )),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_upgrade_reports_its_migration_and_an_older_release_refuses_a_newer_schema() {
+        let directory = tempfile::tempdir().unwrap();
+        let url = format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("state.db").display()
+        );
+        contract(&url, "sqlite").await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+    async fn postgres_upgrade_reports_its_migration_and_an_older_release_refuses_a_newer_schema() {
+        let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+            .expect("PostgreSQL test URL file required");
+        let admin_url = std::fs::read_to_string(path).unwrap();
+        let name = format!("supertag_rust_upgrade_{}", uuid::Uuid::new_v4().simple());
+        let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
+        admin
+            .execute(format!("CREATE DATABASE {name}").as_str())
+            .await
+            .unwrap();
+        let mut url = url::Url::parse(admin_url.trim()).unwrap();
+        url.set_path(&name);
+        let local = tokio::task::LocalSet::new();
+        let result = local
+            .run_until(async move {
+                tokio::task::spawn_local(async move { contract(url.as_str(), "postgresql").await })
+                    .await
+            })
+            .await;
+        admin
+            .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+            .await
+            .unwrap();
+        admin.close().await.unwrap();
+        result.expect("PostgreSQL upgrade contract failed");
     }
 }

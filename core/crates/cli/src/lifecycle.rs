@@ -20,8 +20,9 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Args, ValueEnum};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use supertag_protocol::v2::{
-    GetHostRequest, SetHostDrainingRequest, operator_client::OperatorClient,
+use supertag_protocol::{
+    negotiation::{NegotiationError, PROTOCOL_VERSIONS},
+    v2::{GetHostRequest, SetHostDrainingRequest, operator_client::OperatorClient},
 };
 
 use crate::{
@@ -44,6 +45,10 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(90);
 /// How long `down` waits for a draining host's running Task Attempts, as the TypeScript CLI did.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(300);
 const DRAIN_PROGRESS: Duration = Duration::from_secs(10);
+/// How the Control Plane's log starts the line that says it migrated the database.
+pub const MIGRATED: &str = "Migrated the database schema from version";
+/// How much of the end of the Control Plane's log `up` reads for that line.
+const MIGRATION_LOG_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SupervisorMode {
@@ -84,6 +89,72 @@ pub struct SupervisorStatus {
     pub started_at_ms: u64,
     pub endpoint: Option<String>,
     pub services: Vec<ServiceStatus>,
+    /// The protocol versions the supervisor's build speaks. Releases through 0.3.0 did not
+    /// record them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protocols: Vec<u32>,
+    /// The executable the supervisor runs. Releases through 0.3.0 did not record it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable: Option<Executable>,
+}
+
+/// One build of the `supertag` executable: where it is and which file it was when it started.
+/// Two builds of one version differ in their file, so `up` can tell an upgraded binary apart.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Executable {
+    pub path: String,
+    pub size: u64,
+    pub modified_ms: u64,
+}
+
+/// This process's executable as it was when first asked, before an upgrade can replace it.
+fn this_executable() -> Option<&'static Executable> {
+    static EXECUTABLE: OnceLock<Option<Executable>> = OnceLock::new();
+    EXECUTABLE
+        .get_or_init(|| {
+            let path = std::env::current_exe().ok()?;
+            let path = path.canonicalize().unwrap_or(path);
+            let metadata = fs::metadata(&path).ok()?;
+            let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+            Some(Executable {
+                path: path.to_string_lossy().into_owned(),
+                size: metadata.len(),
+                modified_ms: modified.as_millis() as u64,
+            })
+        })
+        .as_ref()
+}
+
+/// Called when a supervisor starts, so it records the executable it was started from even if
+/// an upgrade replaces the file before it is ready.
+pub fn remember_build() {
+    let _ = this_executable();
+}
+
+/// Whether a supervisor runs this CLI's build: its version, protocols and executable.
+pub fn same_build(status: &SupervisorStatus) -> bool {
+    status.version == env!("CARGO_PKG_VERSION")
+        && status.protocols == PROTOCOL_VERSIONS
+        && this_executable().is_none_or(|this| status.executable.as_ref() == Some(this))
+}
+
+/// `protocol 3`, or `protocols 2, 3`.
+fn spoken(protocols: &[u32]) -> String {
+    let items: Vec<String> = protocols.iter().map(u32::to_string).collect();
+    match items.as_slice() {
+        [one] => format!("protocol {one}"),
+        _ => format!("protocols {}", items.join(", ")),
+    }
+}
+
+/// `0.3.0 (protocol 2)`, or `0.3.0` when the protocols are unknown.
+fn release(version: &str, protocols: &[u32]) -> String {
+    let version = crate::terminal::text(version);
+    if protocols.is_empty() {
+        version
+    } else {
+        format!("{version} ({})", spoken(protocols))
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -133,6 +204,8 @@ pub fn record(
         started_at_ms: started_at_ms(),
         endpoint: endpoint.map(str::to_owned),
         services,
+        protocols: PROTOCOL_VERSIONS.to_vec(),
+        executable: this_executable().cloned(),
     };
     write_private(directory, STATUS, &serde_json::to_vec_pretty(&status)?)
 }
@@ -225,7 +298,7 @@ pub enum Supervisor {
     Stopped,
     /// Holds the state lock but has not recorded its services yet.
     Starting,
-    Running(SupervisorStatus),
+    Running(Box<SupervisorStatus>),
 }
 
 /// Inspect the supervisor without starting anything. The state lock is authoritative; the
@@ -247,7 +320,7 @@ pub fn inspect(state: &Path) -> Result<Supervisor> {
     }
     drop(lock);
     Ok(match read_status(&directory)? {
-        Some(status) if alive(status.pid) => Supervisor::Running(status),
+        Some(status) if alive(status.pid) => Supervisor::Running(Box::new(status)),
         _ => Supervisor::Starting,
     })
 }
@@ -329,7 +402,26 @@ pub async fn up(options: Background) -> Result<()> {
         _ => None,
     };
     let manager = ServiceManager::for_platform();
+    // What `up` replaced when the running services were another build: their release.
+    let mut upgraded = None;
     match inspect(&options.state)? {
+        Supervisor::Running(status) if !same_build(&status) => {
+            // Another build, usually the release before an upgrade: stop it whatever protocol it
+            // speaks, and start this one under the same settings.
+            outln!(
+                "SuperTag {} runs in {}, a different build than this CLI, so it restarts with this one.",
+                release(&status.version, &status.protocols),
+                options.state.display()
+            );
+            let undrained = stop(&options.state, Some(&status), options.force).await?;
+            if let Some(undrained) = &undrained {
+                outln!("{}", undrained.notice(&status));
+            }
+            let protocols = undrained
+                .and_then(|undrained| undrained.peer)
+                .map_or(status.protocols.clone(), |(_, protocols)| protocols);
+            upgraded = Some(release(&status.version, &protocols));
+        }
         Supervisor::Running(status) => {
             let unit_current = match (&unit, &manager) {
                 (Some(definition), Ok(manager)) => manager.current(definition)?,
@@ -352,7 +444,9 @@ pub async fn up(options: Background) -> Result<()> {
                 return Ok(());
             }
             outln!("SuperTag's settings changed, so it restarts.");
-            stop(&options.state, Some(&status), options.force).await?;
+            if let Some(undrained) = stop(&options.state, Some(&status), options.force).await? {
+                outln!("{}", undrained.notice(&status));
+            }
         }
         Supervisor::Starting => {
             bail!(
@@ -367,6 +461,7 @@ pub async fn up(options: Background) -> Result<()> {
         .mode(0o700)
         .create(options.state.join("logs").join("hosts"))?;
     let state = private_directory(&options.state)?;
+    let since = now_ms();
     let status = if let Some(definition) = unit {
         let manager = manager?;
         if let Some(other) = manager.other_state(&definition)? {
@@ -375,7 +470,6 @@ pub async fn up(options: Background) -> Result<()> {
                 manager.path(&definition.name).display()
             );
         }
-        let since = now_ms();
         for line in manager.install(&definition)? {
             outln!("{line}");
         }
@@ -414,7 +508,21 @@ pub async fn up(options: Background) -> Result<()> {
         "service" => "under its service unit",
         _ => "in the background",
     };
+    if let Some(previous) = upgraded {
+        let this = release(env!("CARGO_PKG_VERSION"), PROTOCOL_VERSIONS);
+        if previous == this {
+            let path = this_executable().map_or_else(String::new, |executable| {
+                format!(" at {}", crate::terminal::text(&executable.path))
+            });
+            outln!("Restarted SuperTag {this} with this CLI's build{path}.");
+        } else {
+            outln!("Restarted SuperTag: {previous} → {this}.");
+        }
+    }
     outln!("Started SuperTag {how} (process {}).", status.pid);
+    for line in migrations(&state, since) {
+        outln!("{line}");
+    }
     summary(&state, &status);
     outln!(
         "Follow the logs with supertag logs -f, list services with supertag ps, and stop with supertag down."
@@ -557,6 +665,32 @@ async fn change_concurrency(
     Ok(())
 }
 
+/// The Control Plane's lines since `since` that say it migrated the database, so `up` can
+/// report an upgrade's schema change.
+fn migrations(state: &Path, since: u64) -> Vec<String> {
+    let Ok(mut file) = File::open(log_path(state, CONTROL_PLANE)) else {
+        return Vec::new();
+    };
+    let length = file.metadata().map_or(0, |metadata| metadata.len());
+    if file
+        .seek(SeekFrom::Start(length.saturating_sub(MIGRATION_LOG_BYTES)))
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() {
+        return Vec::new();
+    }
+    let since = timestamp(UNIX_EPOCH + Duration::from_millis(since));
+    String::from_utf8_lossy(&bytes)
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .filter(|(at, line)| *at >= since.as_str() && line.starts_with(MIGRATED))
+        .map(|(_, line)| crate::terminal::text(line))
+        .collect()
+}
+
 fn summary(state: &Path, status: &SupervisorStatus) {
     if let Some(endpoint) = &status.endpoint {
         outln!("Control Plane: {endpoint}");
@@ -665,13 +799,64 @@ fn log_tail(state: &Path, service: &str) -> String {
     lines[lines.len().saturating_sub(20)..].join("\n")
 }
 
-/// Drain this supervisor's local Worker Hosts, then stop it and wait for its state lock.
-/// Returns false when a host still runs work and `force` was not given.
-async fn stop(state: &Path, status: Option<&SupervisorStatus>, force: bool) -> Result<()> {
-    let directory = private_directory(state)?;
-    if let Some(status) = status {
-        drain(&directory, status, force).await?;
+/// Why `stop` stopped a supervisor without draining its hosts through its Control Plane.
+struct Undrained {
+    /// The Control Plane's release and protocols, when it refused this CLI's protocol.
+    peer: Option<(String, Vec<u32>)>,
+    error: anyhow::Error,
+}
+
+impl Undrained {
+    fn new(error: anyhow::Error) -> Self {
+        let peer = match error.downcast_ref::<NegotiationError>() {
+            Some(NegotiationError::Mismatch(mismatch)) => mismatch
+                .peer_build()
+                .zip(mismatch.peer_versions())
+                .map(|(build, versions)| (build.to_owned(), versions.to_vec())),
+            _ => None,
+        };
+        Self { peer, error }
     }
+
+    /// What `down` or `up` says after stopping the services this way.
+    fn notice(&self, status: &SupervisorStatus) -> String {
+        let why = match (&self.peer, self.error.downcast_ref::<NegotiationError>()) {
+            (Some((build, protocols)), _) => {
+                return format!(
+                    "Stopped SuperTag {} services ({}) without draining through the Control Plane, because this CLI speaks {}. Their Worker Hosts stopped gracefully; Task Attempts they were running follow the recovery rules.",
+                    crate::terminal::text(build),
+                    spoken(protocols),
+                    spoken(PROTOCOL_VERSIONS)
+                );
+            }
+            (None, Some(NegotiationError::Mismatch(_))) => {
+                format!("this CLI speaks {}", spoken(PROTOCOL_VERSIONS))
+            }
+            _ => "this CLI could not reach it".to_owned(),
+        };
+        format!(
+            "Stopped SuperTag {} services without draining through the Control Plane, because {why}: {}. Their Worker Hosts stopped gracefully; Task Attempts they were running follow the recovery rules.",
+            release(&status.version, &status.protocols),
+            crate::terminal::text(&format!("{:#}", self.error)).trim_end_matches('.')
+        )
+    }
+}
+
+/// Drain this supervisor's local Worker Hosts, then stop it and wait for its state lock. When
+/// its Control Plane cannot be reached or speaks another protocol, as after an upgrade, the
+/// supervisor is stopped without draining and the reason is returned: it still stops its Worker
+/// Hosts gracefully, as it does for every stop. Fails when a host still runs work after the
+/// drain timeout and `force` was not given.
+async fn stop(
+    state: &Path,
+    status: Option<&SupervisorStatus>,
+    force: bool,
+) -> Result<Option<Undrained>> {
+    let directory = private_directory(state)?;
+    let undrained = match status {
+        Some(status) => drain(&directory, status, force).await?.map(Undrained::new),
+        None => None,
+    };
     let manager = ServiceManager::for_platform().ok();
     let unit = status
         .filter(|status| status.mode == "service")
@@ -699,7 +884,7 @@ async fn stop(state: &Path, status: Option<&SupervisorStatus>, force: bool) -> R
     let deadline = Instant::now() + STOP_TIMEOUT;
     loop {
         if matches!(inspect(&directory)?, Supervisor::Stopped) {
-            return Ok(());
+            return Ok(undrained);
         }
         ensure!(
             Instant::now() < deadline,
@@ -711,7 +896,13 @@ async fn stop(state: &Path, status: Option<&SupervisorStatus>, force: bool) -> R
 }
 
 /// Take no new Task Attempts on this supervisor's local hosts and wait for running ones.
-async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Result<()> {
+/// Returns why the Control Plane could not drain them, when it could not be reached or
+/// refused this CLI's protocol; fails only when running work outlasts the drain timeout.
+async fn drain(
+    directory: &Path,
+    status: &SupervisorStatus,
+    force: bool,
+) -> Result<Option<anyhow::Error>> {
     let hosts: BTreeSet<String> = status
         .services
         .iter()
@@ -719,12 +910,19 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
         .filter_map(|service| service.host_id.clone())
         .collect();
     if hosts.is_empty() || status.endpoint.is_none() {
-        return Ok(());
+        return Ok(None);
     }
-    let (endpoint, token) = local::connection(directory)?;
-    let channel =
-        crate::network::operator_channel(&crate::network::endpoint(endpoint).await?).await?;
-    let mut client = OperatorClient::new(channel);
+    let connected = async {
+        let (endpoint, token) = local::connection(directory)?;
+        let target = crate::network::endpoint(endpoint).await?;
+        // Keep the negotiation error unwrapped, so the caller can name the peer's release.
+        let channel = crate::network::operator_channel(&target).await?;
+        Ok::<_, anyhow::Error>((OperatorClient::new(channel), token))
+    };
+    let (mut client, token) = match connected.await {
+        Ok(connected) => connected,
+        Err(error) => return Ok(Some(error)),
+    };
     for host_id in &hosts {
         match client
             .set_host_draining(crate::request(
@@ -736,16 +934,19 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
             )?)
             .await
         {
-            Ok(_) => {}
+            // Recorded at once, so the next supervisor returns it to service even if a later
+            // host cannot be drained.
+            Ok(_) => mark_drained(directory, &BTreeSet::from([host_id.clone()]))?,
             Err(error) if error.code() == tonic::Code::NotFound => continue,
             Err(error) => {
-                return Err(error).with_context(|| format!("drain Worker Host {host_id}"));
+                return Ok(Some(
+                    anyhow::Error::from(error).context(format!("drain Worker Host {host_id}")),
+                ));
             }
         }
     }
-    mark_drained(directory, &hosts)?;
     if force {
-        return Ok(());
+        return Ok(None);
     }
     let started = Instant::now();
     let mut reported: Option<Instant> = None;
@@ -767,7 +968,9 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
                 Ok(host) => host.into_inner().active_attempts,
                 Err(error) if error.code() == tonic::Code::NotFound => 0,
                 Err(error) => {
-                    return Err(error).with_context(|| format!("read Worker Host {host_id}"));
+                    return Ok(Some(
+                        anyhow::Error::from(error).context(format!("read Worker Host {host_id}")),
+                    ));
                 }
             };
             if attempts > 0 {
@@ -775,7 +978,7 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
             }
         }
         if running.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         if started.elapsed() >= drain_timeout() {
             bail!(
@@ -796,7 +999,7 @@ async fn drain(directory: &Path, status: &SupervisorStatus, force: bool) -> Resu
                     "Stopped waiting for {}; running Task Attempts follow the recovery rules.",
                     running.join(", ")
                 );
-                return Ok(());
+                return Ok(None);
             }
             _ = tokio::time::sleep(Duration::from_millis(500)) => {}
         }
@@ -863,8 +1066,10 @@ pub async fn down(args: DownArgs) -> Result<()> {
     }
     let stopped = match &status {
         Supervisor::Running(status) => {
-            stop(&state, Some(status), args.force).await?;
-            outln!("Stopped SuperTag (process {}).", status.pid);
+            match stop(&state, Some(status), args.force).await? {
+                None => outln!("Stopped SuperTag (process {}).", status.pid),
+                Some(undrained) => outln!("{}", undrained.notice(status)),
+            }
             true
         }
         Supervisor::Starting => {
@@ -994,6 +1199,8 @@ struct SupervisorRow {
     pid: u32,
     mode: String,
     version: String,
+    /// Whether it runs this CLI's build; `supertag up` restarts it with this one when not.
+    matches_cli: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     unit: Option<String>,
 }
@@ -1019,6 +1226,7 @@ pub async fn ps(args: PsArgs) -> Result<()> {
                 pid: status.pid,
                 mode: status.mode.clone(),
                 version: status.version.clone(),
+                matches_cli: same_build(status),
                 unit,
             });
             let hosts = host_states(&state, status).await;
@@ -1176,6 +1384,11 @@ fn format_ps(report: &PsReport, supervisor: &Supervisor) -> String {
                 text(&row.version),
                 row.pid
             ));
+            if !row.matches_cli {
+                out.push_str(
+                    "It runs a different build than this CLI; supertag up restarts it with this one.\n",
+                );
+            }
         }
         (None, Supervisor::Starting) => {
             out.push_str(&format!("SuperTag is starting in {state_directory}.\n"));
@@ -1470,6 +1683,7 @@ mod tests {
                 pid: 1,
                 mode: "service".into(),
                 version: hostile.into(),
+                matches_cli: true,
                 unit: Some(hostile.into()),
             }),
             services: vec![row(hostile), row("gateway")],

@@ -19,6 +19,11 @@ path = "fixtures/adapter.rs"
 required-features = ["test-fixtures"]
 
 [[bin]]
+name = "supertag-old-supervisor"
+path = "fixtures/old_supervisor.rs"
+required-features = ["test-fixtures"]
+
+[[bin]]
 name = "supertag-example-connector"
 path = "fixtures/example_connector.rs"
 required-features = ["test-fixtures"]

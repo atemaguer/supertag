@@ -69,6 +69,16 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- Upgrading from 0.3.0 no longer strands the old services. `supertag up` restarts services that
+  run another build of SuperTag with this CLI's executable, including under a per-user service
+  unit, and prints `Restarted SuperTag: 0.3.0 (protocol 2) → …` and any database migration the
+  new Control Plane ran. Before, it said the services ran with these settings and left the old
+  release running. `supertag down` stops services whose Control Plane speaks another protocol or
+  cannot be reached, without draining through it; Worker Hosts still stop gracefully. Before, it
+  failed with the protocol mismatch, and only the old CLI could stop them. `supertag ps` and
+  `supertag version` say when the services run another build. An older release started against a
+  database a newer one migrated now names both schema versions instead of `unsupported Rust
+  database schema`.
 - Security: a Codex Task with `files:write` or `commands:execute` could write the Workspace's
   `.git`, a directory or a linked worktree's `.git` file, when the Workspace sat under `/tmp` or
   `$TMPDIR`. Claude Code's and OpenCode's file tools could write `.git` in any Workspace.

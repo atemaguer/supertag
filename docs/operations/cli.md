@@ -83,7 +83,9 @@ for the file.
 | `supertag version` | Prints this CLI's version and the version of the running services |
 
 Run `supertag up` again after editing `supertag.yaml`. It restarts only the services that
-changed and waits for their running Task Attempts unless you pass `--force`.
+changed and waits for their running Task Attempts unless you pass `--force`. After you install a
+new CLI, `supertag up` restarts services that run another build with the new one; see
+[Upgrade](install.md#upgrade).
 
 ### Run as a service
 

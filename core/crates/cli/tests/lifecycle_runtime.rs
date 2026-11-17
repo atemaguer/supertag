@@ -558,6 +558,8 @@ fn restart_unless_stopped_installs_a_launchd_unit_that_down_stops_and_removes() 
     assert_eq!(service(&ps, "builder")?["state"], "running", "{ps}");
     let first = pids(&ps);
     assert!(machine.ok(&["up"])?.contains("left alone"));
+    let mut status: Value =
+        serde_json::from_str(&fs::read_to_string(machine.state.join("supervisor.json"))?)?;
 
     let down = machine.ok(&["down"])?;
     assert!(
@@ -571,6 +573,41 @@ fn restart_unless_stopped_installs_a_launchd_unit_that_down_stops_and_removes() 
     );
     let calls = fs::read_to_string(launchd.join("calls"))?;
     assert!(calls.contains("bootout gui/"), "{calls}");
+
+    // The unit runs an earlier release, as after an upgrade replaced the binary: `up` stops
+    // it through launchd and starts the unit again with this build.
+    let object = status.as_object_mut().context("status")?;
+    object.remove("protocols");
+    object.remove("executable");
+    let template = machine.home.join("old-status.json");
+    fs::write(&template, serde_json::to_vec(&status)?)?;
+    let mut old = old_supervisor(&machine, &template)?;
+    fs::write(
+        launchd.join("ai.supertag.unit-test.pid"),
+        format!("{}\n", old.id()),
+    )?;
+    // Reap it as soon as it exits: launchctl waits for the process to be gone.
+    let old = std::thread::spawn(move || old.wait());
+    let upgraded = machine.ok(&["up"])?;
+    ensure!(
+        old.join().expect("reaper")?.success(),
+        "the old supervisor did not stop cleanly"
+    );
+    let version = env!("CARGO_PKG_VERSION");
+    assert!(
+        upgraded.contains(&format!(
+            "Restarted SuperTag: {version} (protocol 2) → {version} (protocol 3)."
+        )) && upgraded.contains("under its service unit"),
+        "{upgraded}"
+    );
+    let ps = machine.ps()?;
+    assert_eq!(ps["supervisor"]["mode"], "service", "{ps}");
+    assert_eq!(ps["supervisor"]["matches_cli"], true, "{ps}");
+    let calls = fs::read_to_string(launchd.join("calls"))?;
+    assert_eq!(calls.matches("bootstrap gui/").count(), 2, "{calls}");
+    let restarted = pids(&ps);
+    machine.ok(&["down"])?;
+    wait_gone(&restarted)?;
 
     let removed = machine.ok(&["down", "--remove-services"])?;
     assert!(removed.contains("Removed service unit"), "{removed}");
@@ -1112,5 +1149,183 @@ fn up_refuses_a_unit_that_cannot_load_the_file_and_warns_about_shell_variables()
     let running = pids(&machine.ps()?);
     machine.ok(&["down", "--remove-services"])?;
     wait_gone(&running)?;
+    Ok(())
+}
+
+const OLD_SUPERVISOR: &str = env!("CARGO_BIN_EXE_supertag-old-supervisor");
+
+/// Starts a supervisor as an earlier release ran it: protocol 2, and a `supervisor.json` without
+/// the build this CLI records.
+fn old_supervisor(machine: &Machine, template: &Path) -> Result<Child> {
+    let _ = fs::remove_file(machine.state.join("old-supervisor-stopped"));
+    let mut child = Command::new(OLD_SUPERVISOR)
+        .arg(&machine.state)
+        .arg(template)
+        .arg("2")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let line = first_line(&mut child)?;
+    ensure!(
+        line.trim() == "ready",
+        "old supervisor did not start: {line}"
+    );
+    Ok(child)
+}
+
+/// Replaces the local database with one the release before the latest migration left.
+fn previous_schema(machine: &Machine) -> Result<i64> {
+    let directory =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../control-plane/migrations/sqlite");
+    let mut migrations: Vec<PathBuf> = fs::read_dir(directory)?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<_>>()?;
+    migrations.sort();
+    let database = machine.state.join("runtime.sqlite3");
+    for suffix in ["", "-wal", "-shm", ".lock"] {
+        let _ = fs::remove_file(format!("{}{suffix}", database.display()));
+    }
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let mut connection = sqlx::SqliteConnection::connect_with(
+            &sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&database)
+                .create_if_missing(true),
+        )
+        .await?;
+        for migration in &migrations[..migrations.len() - 1] {
+            sqlx::raw_sql(&fs::read_to_string(migration)?)
+                .execute(&mut connection)
+                .await?;
+        }
+        connection.close().await?;
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fs::set_permissions(&database, fs::Permissions::from_mode(0o600))?;
+    Ok(migrations.len() as i64)
+}
+
+/// After an upgrade the running services are another build that speaks an older protocol:
+/// `down` stops them without draining through their Control Plane, and `up` restarts them with
+/// this build, migrating the database.
+#[test]
+fn down_and_up_replace_services_from_an_older_release() -> Result<()> {
+    let machine = Machine::new()?;
+    let up = ["up", "--adapter", ADAPTER];
+    machine.ok(&up)?;
+    let mut status: Value =
+        serde_json::from_str(&fs::read_to_string(machine.state.join("supervisor.json"))?)?;
+    assert_eq!(status["protocols"], json!([3]), "{status}");
+    assert!(status["executable"]["path"].is_string(), "{status}");
+    assert_eq!(machine.ps()?["supervisor"]["matches_cli"], true);
+    machine.ok(&["down", "--force"])?;
+    // What SuperTag 0.3.0 recorded: the same settings, without its protocols or executable.
+    let object = status.as_object_mut().context("status")?;
+    object.remove("protocols");
+    object.remove("executable");
+    let template = machine.home.join("old-status.json");
+    fs::write(&template, serde_json::to_vec(&status)?)?;
+
+    // `down` cannot drain through a protocol 2 Control Plane, so it stops it with a signal.
+    let mut old = old_supervisor(&machine, &template)?;
+    let ps = machine.ok(&["ps"])?;
+    assert!(
+        ps.contains("It runs a different build than this CLI; supertag up restarts it"),
+        "{ps}"
+    );
+    let version: Value = serde_json::from_str(&machine.ok(&["version", "--output", "json"])?)?;
+    assert_eq!(version["local_services"]["matches_cli"], false, "{version}");
+    let down = machine.ok(&["down"])?;
+    let version = env!("CARGO_PKG_VERSION");
+    assert!(
+        down.contains(&format!("Stopped SuperTag {version} services (protocol 2) without draining through the Control Plane, because this CLI speaks protocol 3.")),
+        "{down}"
+    );
+    ensure!(
+        old.wait()?.success(),
+        "the old supervisor did not stop cleanly"
+    );
+    assert_eq!(
+        fs::read_to_string(machine.state.join("old-supervisor-stopped"))?,
+        "SIGTERM\n"
+    );
+    assert!(machine.ok(&["ps"])?.contains("not running"));
+    // Nor when its Control Plane cannot be reached at all.
+    let mut old = old_supervisor(&machine, &template)?;
+    fs::remove_file(machine.state.join("endpoint"))?;
+    let down = machine.ok(&["down", "--force"])?;
+    assert!(
+        down.contains(&format!("Stopped SuperTag {version} services without draining through the Control Plane, because this CLI could not reach it: local SuperTag services are not running.")),
+        "{down}"
+    );
+    ensure!(
+        old.wait()?.success(),
+        "the old supervisor did not stop cleanly"
+    );
+
+    // `up` with unchanged settings restarts another build with this one, and the new Control
+    // Plane migrates the database the old one left.
+    let mut old = old_supervisor(&machine, &template)?;
+    let latest = previous_schema(&machine)?;
+    let upgraded = machine.ok(&up)?;
+    ensure!(
+        old.wait()?.success(),
+        "the old supervisor did not stop cleanly"
+    );
+    for expected in [
+        format!("SuperTag {version} runs in"),
+        "a different build than this CLI, so it restarts with this one.".to_owned(),
+        format!("Stopped SuperTag {version} services (protocol 2) without draining"),
+        format!("Restarted SuperTag: {version} (protocol 2) → {version} (protocol 3)."),
+        "Started SuperTag in the background".to_owned(),
+        format!(
+            "Migrated the database schema from version {} to {latest}.",
+            latest - 1
+        ),
+    ] {
+        assert!(
+            upgraded.contains(&expected),
+            "missing {expected:?}: {upgraded}"
+        );
+    }
+    assert!(!upgraded.contains("left alone"), "{upgraded}");
+    let ps = machine.ps()?;
+    assert_eq!(ps["supervisor"]["matches_cli"], true, "{ps}");
+    for name in ["control-plane", "gateway", "local"] {
+        assert_eq!(service(&ps, name)?["state"], "running", "{ps}");
+    }
+    assert_eq!(service(&ps, "local")?["connected"], true, "{ps}");
+    let running = pids(&ps);
+
+    // This build is what runs now, so the next `up` leaves it alone.
+    let again = machine.ok(&up)?;
+    assert!(again.contains("left alone"), "{again}");
+    assert!(!again.contains("Migrated"), "{again}");
+    assert_eq!(pids(&machine.ps()?), running);
+    let down = machine.ok(&["down"])?;
+    assert!(down.contains("Stopped SuperTag (process"), "{down}");
+    wait_gone(&running)?;
+
+    // A release older than the database refuses it, saying why, instead of starting.
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let mut connection = sqlx::SqliteConnection::connect_with(
+            &sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(machine.state.join("runtime.sqlite3")),
+        )
+        .await?;
+        connection
+            .execute("UPDATE supertag_v2_schema SET version=version+1")
+            .await?;
+        connection.close().await?;
+        Ok::<_, anyhow::Error>(())
+    })?;
+    let refused = machine.fails(&up)?;
+    assert!(
+        refused.contains(&format!(
+            "Control Plane did not report readiness: the database's schema version {} is newer than this SuperTag release ({version}) understands ({latest})",
+            latest + 1
+        )),
+        "{refused}"
+    );
+    assert!(machine.ok(&["ps"])?.contains("not running"));
     Ok(())
 }

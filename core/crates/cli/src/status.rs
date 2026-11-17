@@ -414,7 +414,7 @@ pub fn version(args: VersionArgs) -> Result<()> {
     let local_services = match lifecycle::inspect(&state)? {
         Supervisor::Running(status) => LocalVersion {
             running: true,
-            matches_cli: Some(status.version == cli),
+            matches_cli: Some(lifecycle::same_build(&status)),
             version: Some(status.version),
             pid: Some(status.pid),
         },
@@ -438,7 +438,7 @@ pub fn version(args: VersionArgs) -> Result<()> {
                     outln!("Local services: {version} (process {pid})");
                     if report.local_services.matches_cli == Some(false) {
                         outln!(
-                            "The local services run a different version; restart them with supertag down and supertag up."
+                            "The local services run a different build; supertag up restarts them with this CLI's."
                         );
                     }
                 }

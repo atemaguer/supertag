@@ -109,6 +109,7 @@ impl Logs {
 }
 
 pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Result<()> {
+    lifecycle::remember_build();
     ensure!(
         options.control_plane_listen.ip().is_loopback(),
         "local Control Plane must listen on loopback"
@@ -657,11 +658,33 @@ async fn start_child(
     time::timeout(START_TIMEOUT, (&mut stdout).take(256).read_line(&mut line))
         .await
         .with_context(|| format!("{name} did not become ready"))??;
-    ensure!(line.ends_with('\n'), "{name} did not report readiness");
+    if !line.ends_with('\n') {
+        // Say why when it exited, such as a database a newer release migrated.
+        let exited = time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .is_ok();
+        time::sleep(Duration::from_millis(200)).await;
+        let reason = exited
+            .then(|| last_error(&lifecycle::log_path(&logs.state, service)))
+            .flatten()
+            .map(|reason| format!(": {reason}"))
+            .unwrap_or_default();
+        bail!("{name} did not report readiness{reason}");
+    }
     tokio::spawn(async move {
         let _ = tokio::io::copy(&mut stdout, &mut tokio::io::sink()).await;
     });
     Ok(line.trim().to_owned())
+}
+
+/// The last error a service logged, without its timestamp.
+fn last_error(log: &Path) -> Option<String> {
+    let text = fs::read(log).ok()?;
+    let text = String::from_utf8_lossy(&text);
+    text.lines().rev().take(50).find_map(|line| {
+        line.split_once("Error: ")
+            .map(|(_, error)| error.to_owned())
+    })
 }
 
 /// Append a child's stderr to the named service's log.
@@ -1428,6 +1451,7 @@ pub async fn configured(
     state: PathBuf,
     shutdown: impl Future<Output = ()>,
 ) -> Result<()> {
+    lifecycle::remember_build();
     DirBuilder::new()
         .recursive(true)
         .mode(0o700)
