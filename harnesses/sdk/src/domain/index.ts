@@ -11,7 +11,6 @@ export * from "./mailbox.js";
 export * from "./mcp-grant.js";
 export * from "./mount-manifest.js";
 export * from "./role.js";
-export * from "./task-findings.js";
 export * from "./volume.js";
 export * from "./workspace.js";
 
@@ -206,8 +205,6 @@ export interface TaskResult {
     readonly reference?: string;
   }[];
   readonly unresolved: readonly string[];
-  /** Review findings about this Task. The Control Plane assigns their ids. */
-  readonly findings: readonly import("./task-findings.js").TaskFinding[];
   readonly references: readonly TaskReference[];
   readonly artifacts: readonly import("./artifact-catalog.js").ArtifactSelection[];
 }
