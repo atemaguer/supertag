@@ -93,6 +93,8 @@ pub struct Store {
     pub(crate) audit_sink: Option<Arc<crate::AuditSink>>,
     /// The schema versions this process migrated an existing database from and to.
     migrated: Option<(i64, i64)>,
+    /// Wakes open conversation follows after a change.
+    pub(crate) live: Arc<crate::conversations::Live>,
 }
 
 impl Store {
@@ -400,6 +402,7 @@ impl Store {
             audit_sink: None,
             migrated: (version > 0 && version < SCHEMA_VERSION)
                 .then_some((version, SCHEMA_VERSION)),
+            live: Arc::default(),
         })
     }
 
@@ -706,6 +709,7 @@ impl Store {
     }
 
     pub async fn cancel_task(&self, task_id: &str) -> Result<Task> {
+        let _wake = self.wake_follows();
         name("Task ID", task_id)?;
         let (mut transaction, _) = self.write().await?;
         let task = task_in(&mut transaction, task_id).await?;
@@ -807,6 +811,7 @@ impl Store {
         context_contracts: &[ContextContract],
         execution_profile: Option<&HarnessExecutionProfile>,
     ) -> Result<Option<Assignment>> {
+        let _wake = self.wake_follows();
         name("operation ID", operation_id)?;
         let profile = execution::normalize_profile(execution_profile)?;
         let profile_bytes = profile.encode_to_vec();
@@ -954,6 +959,7 @@ impl Store {
     }
 
     pub async fn start_task(&self, host: &HostAuthority, input: &StartTaskRequest) -> Result<Task> {
+        let _wake = self.wake_follows();
         let (mut transaction, _) = self.write().await?;
         let now = self.execution_now_ms();
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
@@ -1030,6 +1036,7 @@ impl Store {
         host: &HostAuthority,
         input: &AppendEventRequest,
     ) -> Result<TaskEvent> {
+        let _wake = self.wake_follows();
         let sequence =
             i64::try_from(input.sequence).map_err(|_| invalid("event sequence is too large"))?;
         if sequence == 0 {
@@ -1122,6 +1129,7 @@ impl Store {
         host: &HostAuthority,
         input: &FinishTaskRequest,
     ) -> Result<Task> {
+        let _wake = self.wake_follows();
         text("result", &input.result, 262_144)?;
         if !input.succeeded && input.checkpoint_sha256.is_some() {
             return Err(invalid(

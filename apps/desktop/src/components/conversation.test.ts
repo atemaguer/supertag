@@ -216,3 +216,64 @@ it("resizes the Task activity pane between its limits, remembers it, and resets 
   await open();
   expect(frame().style.width).toBe("336px");
 });
+
+it("shows the Tag's messages and its result as the conversation's follow pushes them", async () => {
+  const turn = (state: string, events: Message["events"] = [], result?: string): Message => ({
+    order: 1,
+    events,
+    task: { taskId: "t1", tagId: "lead", sessionId: "c1", prompt: "Fix the build", state, result },
+  });
+  let push:
+    | ((update: Parameters<Parameters<NonNullable<ControlPlane["follow"]>>[1]>[0]) => void)
+    | undefined;
+  const stop = vi.fn(async () => {});
+  const messages = vi.fn<ControlPlane["messages"]>(async () => ({
+    conversationId: "c1",
+    messages: [turn("queued")],
+  }));
+  const controlPlane: ControlPlane = {
+    tags: async () => [tag],
+    conversations: async () => [],
+    messages,
+    send: async () => turn("queued"),
+    events: async () => [],
+    saveArtifact: async () => false,
+    markRead: async () => {
+      throw new Error("not listed");
+    },
+    follow: async (_read, receive) => {
+      push = receive;
+      return stop;
+    },
+    scope: "test",
+    readCache: async () => undefined,
+    writeCache: async () => {},
+  };
+  act(() => root.render(createElement(Pane, { controlPlane })));
+  await flush();
+  const reads = messages.mock.calls.length;
+  const changed = (message: Message) =>
+    act(() =>
+      push?.({
+        kind: "changed",
+        messages: { conversationId: "c1", incremental: true, messages: [message] },
+      }),
+    );
+  act(() => push?.({ kind: "ready" }));
+  act(() =>
+    push?.({ kind: "changed", waits: [{ taskId: "t1", reason: "No Worker Host is bound" }] }),
+  );
+  expect(host.querySelector(".task-wait")?.textContent).toBe("No Worker Host is bound");
+  const intent = { sequence: 1, kind: "message" as const, text: "I'll look at the build." };
+  changed(turn("running", [intent]));
+  expect(host.querySelector(".task-wait")).toBeNull();
+  expect(host.textContent).toContain("I'll look at the build.");
+  changed(turn("succeeded", [intent], "The build passes."));
+  expect(host.textContent).toContain("The build passes.");
+  // Pushed changes need no reads of the conversation.
+  expect(messages).toHaveBeenCalledTimes(reads);
+  act(() => root.unmount());
+  root = createRoot(host);
+  await flush();
+  expect(stop).toHaveBeenCalled();
+});

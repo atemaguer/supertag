@@ -43,6 +43,7 @@ mod work_sessions;
 mod workspace_mounts;
 
 pub use authorize::{Caller, Role};
+pub use conversations::ApiConversations;
 pub use watch::ApiWatch;
 
 use std::{future::Future, sync::Arc, time::Duration};
@@ -185,7 +186,7 @@ impl Api {
             self.operator_service(),
             self.operator_access_service(),
             self.enrollments_service(),
-            self.conversations_service(),
+            self.conversations_service(shutdown.clone()),
             self.worker_host_service(),
             transfers.artifact_catalog_service(),
             transfers.artifact_volumes_service(),

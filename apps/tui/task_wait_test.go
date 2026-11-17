@@ -17,21 +17,17 @@ const heldSlot = "Waiting: Worker Host laptop's only Claude Code slot is held by
 func TestASentMessageSaysWhyItWaitsUntilAWorkerHostTakesItUp(t *testing.T) {
 	privateCache(t)
 	tagRefresh = time.Hour
-	waitRefresh = 10 * time.Millisecond
-	t.Cleanup(func() { waitRefresh = 3 * time.Second })
 	fake, url := outboxPlane(t)
+	queued := func(tag, task string) *v2.ConversationMessage {
+		return &v2.ConversationMessage{Order: 1, Task: &v2.Task{TaskId: task, TagId: tag, Prompt: "Hi there", State: v2.TaskState_TASK_STATE_QUEUED}}
+	}
 	fake.mu.Lock()
 	fake.send = func(req *v2.SendMessageRequest) (*v2.ConversationMessage, error) {
 		return &v2.ConversationMessage{Order: 1, SentAtMs: time.Now().UnixMilli(),
 			Task: &v2.Task{TaskId: "task-1", TagId: "lead", Prompt: req.GetText(), State: v2.TaskState_TASK_STATE_QUEUED}}, nil
 	}
-	fake.message = func(tag, task string) *v2.ConversationMessage {
-		return &v2.ConversationMessage{Order: 1, Task: &v2.Task{TaskId: task, TagId: tag, Prompt: "Hi there", State: v2.TaskState_TASK_STATE_QUEUED}}
-	}
+	fake.message = queued
 	fake.events = func(string, uint64) []*v2.TaskEvent { return nil }
-	fake.diagnose = func(task string) *v2.TaskPlacementDiagnosis {
-		return &v2.TaskPlacementDiagnosis{TaskId: task, State: v2.TaskState_TASK_STATE_QUEUED, Requirement: "capacity", Summary: heldSlot}
-	}
 	fake.mu.Unlock()
 	a, err := newApp(t.Context(), dial("test"), []client.Target{{URL: url, Token: "secret"}}, 0)
 	if err != nil {
@@ -41,8 +37,14 @@ func TestASentMessageSaysWhyItWaitsUntilAWorkerHostTakesItUp(t *testing.T) {
 	a.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	driven(t, a, a.Init(), func() bool { return a.inner.cache.confirmed && a.inner.conversation("lead").loaded })
 	fake.mu.Lock()
-	fake.messages = func(string) *v2.ListMessagesResponse {
-		return &v2.ListMessagesResponse{ConversationId: "conversation-lead", Messages: []*v2.ConversationMessage{fake.message("lead", "task-1")}}
+	page := &v2.ListMessagesResponse{ConversationId: "conversation-lead", Messages: []*v2.ConversationMessage{queued("lead", "task-1")}}
+	fake.messages = func(string) *v2.ListMessagesResponse { return page }
+	// The conversation's follow pushes the turn, then why it still waits.
+	fake.follow = func(*v2.FollowConversationRequest) []*v2.FollowConversationResponse {
+		return []*v2.FollowConversationResponse{
+			{Messages: page},
+			{Waits: []*v2.TurnWait{{TaskId: "task-1", Reason: heldSlot}}},
+		}
 	}
 	fake.mu.Unlock()
 	a.inner.input.SetValue("Hi there")
@@ -75,17 +77,5 @@ func TestTheWaitShowsOnlyWhileTheTurnIsQueued(t *testing.T) {
 	turn.started = true
 	if waitLine(turn, 80) != "" {
 		t.Fatal("a started turn still shows why it waited")
-	}
-}
-
-func TestAClientThatMayNotReadPlacementSeesNoReason(t *testing.T) {
-	_, url := outboxPlane(t)
-	c, err := client.New(client.Target{URL: url, Token: "secret"}, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wait, err := c.TaskWait(t.Context(), "task-1")
-	if err != nil || wait != "" {
-		t.Fatalf("a refused diagnosis gave %q, %v", wait, err)
 	}
 }

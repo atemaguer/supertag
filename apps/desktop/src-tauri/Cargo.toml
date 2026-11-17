@@ -38,3 +38,4 @@ supertag-control-plane = { path = "../../../core/crates/control-plane" }
 supertag-api = { path = "../../../core/crates/api" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 tokio-stream = { version = "0.1", features = ["net"] }
+tokio-util = "0.7"

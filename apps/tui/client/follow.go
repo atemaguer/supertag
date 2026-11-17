@@ -49,6 +49,9 @@ const (
 	EventJoined
 	// EventError ends the follow with a failure to follow (Text).
 	EventError
+	// EventHostWait says why the queued turn still waits for a Worker Host (Text), once it has
+	// waited a moment; empty Text says the reason no longer holds.
+	EventHostWait
 )
 
 // FollowEvent is one thing to show while following a message.

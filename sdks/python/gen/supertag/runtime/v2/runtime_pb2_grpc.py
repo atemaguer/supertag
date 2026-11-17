@@ -874,6 +874,11 @@ class ConversationsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.MarkConversationReadRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Conversation.FromString,
                 _registered_method=True)
+        self.FollowConversation = channel.unary_stream(
+                '/supertag.runtime.v2.Conversations/FollowConversation',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.FollowConversationRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.FollowConversationResponse.FromString,
+                _registered_method=True)
 
 
 class ConversationsServicer:
@@ -914,6 +919,16 @@ class ConversationsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def FollowConversation(self, request, context):
+        """Follows the caller's conversation with a Tag as it changes. The first response holds what
+        changed since the client's copy, as ListMessages does with `after`; each later one holds what
+        changed since the response before it: new messages, and turns whose state, events or result
+        changed. A response with nothing set is a heartbeat, sent at least every 15 seconds.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ConversationsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -941,6 +956,11 @@ def add_ConversationsServicer_to_server(servicer, server):
                     servicer.MarkConversationRead,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.MarkConversationReadRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Conversation.SerializeToString,
+            ),
+            'FollowConversation': grpc.unary_stream_rpc_method_handler(
+                    servicer.FollowConversation,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.FollowConversationRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.FollowConversationResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1080,6 +1100,33 @@ class Conversations:
             '/supertag.runtime.v2.Conversations/MarkConversationRead',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.MarkConversationReadRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Conversation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def FollowConversation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.Conversations/FollowConversation',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.FollowConversationRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.FollowConversationResponse.FromString,
             options,
             channel_credentials,
             insecure,

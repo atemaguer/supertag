@@ -2223,6 +2223,34 @@ class SendMessageRequest(_message.Message):
     output_policy: TaskOutputPolicy
     def __init__(self, tag_id: _Optional[str] = ..., text: _Optional[str] = ..., operation_id: _Optional[str] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ...) -> None: ...
 
+class FollowConversationRequest(_message.Message):
+    __slots__ = ("tag_id", "conversation_id", "after", "refresh_task_ids")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    AFTER_FIELD_NUMBER: _ClassVar[int]
+    REFRESH_TASK_IDS_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    conversation_id: str
+    after: int
+    refresh_task_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, tag_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., after: _Optional[int] = ..., refresh_task_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class FollowConversationResponse(_message.Message):
+    __slots__ = ("messages", "waits")
+    MESSAGES_FIELD_NUMBER: _ClassVar[int]
+    WAITS_FIELD_NUMBER: _ClassVar[int]
+    messages: ListMessagesResponse
+    waits: _containers.RepeatedCompositeFieldContainer[TurnWait]
+    def __init__(self, messages: _Optional[_Union[ListMessagesResponse, _Mapping]] = ..., waits: _Optional[_Iterable[_Union[TurnWait, _Mapping]]] = ...) -> None: ...
+
+class TurnWait(_message.Message):
+    __slots__ = ("task_id", "reason")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    reason: str
+    def __init__(self, task_id: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
+
 class MarkConversationReadRequest(_message.Message):
     __slots__ = ("tag_id", "order")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]

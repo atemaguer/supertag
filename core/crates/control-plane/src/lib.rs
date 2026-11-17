@@ -112,6 +112,16 @@ impl ControlPlane {
         self.store.migrated()
     }
 
+    /// Ends every open conversation follow once `shutdown` is cancelled, so draining does not
+    /// wait on them.
+    pub fn close_follows_on(&self, shutdown: tokio_util::sync::CancellationToken) {
+        let store = self.store.clone();
+        tokio::spawn(async move {
+            shutdown.cancelled().await;
+            store.close_follows();
+        });
+    }
+
     /// Also writes every committed audit entry to `sink`.
     pub fn with_audit_sink(mut self, sink: crate::AuditSink) -> Self {
         self.store = self.store.with_audit_sink(sink);

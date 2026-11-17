@@ -406,6 +406,9 @@ func (m *model) applyRuntimeTurn(history *runtimeHistory, turn *runtimeTurn, eve
 	switch event.Kind {
 	case client.EventJoined:
 		turn.joined = true
+	case client.EventHostWait:
+		turn.wait = event.Text
+		return nil
 	case client.EventStarted:
 		turn.started = true
 		return nil

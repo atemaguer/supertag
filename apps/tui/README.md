@@ -22,9 +22,12 @@ messages, and follows replies. Watch keeps the rail and open conversation curren
 The TUI resumes Watch after an interruption and polls while reconnecting. Each message of a
 history page carries what its turn showed, every message the Tag wrote and its latest activity,
 so a finished turn reads nothing more. Rereading a conversation asks only for what changed since
-the copy on screen: the messages after its latest and the turns it holds unfinished. A running
-turn reads its new events through `Operator.ListEvents` each second, and reads the turn itself
-once its events go quiet; a queued turn reads only the turn. A history page reads its messages'
+the copy on screen: the messages after its latest and the turns it holds unfinished. While a turn
+is followed, `Conversations.FollowConversation` pushes each change of its conversation as the
+Control Plane records it: a new state, each message the Tag writes, its latest activity, the
+result, and why a queued turn still waits for a Worker Host. One stream per Tag serves every
+followed turn of that conversation, and it reopens from what it holds after a drop. While it is
+down, or for an Objective's Task, the follow reads the turn each second instead. A history page reads its messages'
 work Sessions concurrently, and each conversation stays in memory, so returning to it shows it at
 once.
 
@@ -198,8 +201,9 @@ shows as text.
 
 It talks to the Control Plane through the generated runtime v2 Go client in
 `sdks/go`. `Conversations` sends messages, lists your conversations with their previews and
-unread replies, reads their history and what changed in it, and marks them read.
-`Operator.ListEvents` reads a running turn's new events. `Operator.PutTag` creates Tags.
+unread replies, reads their history and what changed in it, follows it as it changes, and marks
+them read. `Operator.ListEvents` reads a running turn's new events while its conversation's
+stream is down. `Operator.PutTag` creates Tags.
 `Enrollments.WhoAmI` names the principal the cache is kept for. `Objectives` lists the open Objectives, describes the selected
 one, and creates Objectives. `Inbox` lists the inbox, answers questions and decides approval
 requests. `WorkSessions` reads a work Session's delivery and activity. `Teams` lists and reads the

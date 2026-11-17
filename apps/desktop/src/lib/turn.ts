@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ControlPlane, TaskEvent } from "../control-plane";
 
-/** How often a running turn's events are read. */
-const LIVE_INTERVAL = 1_000;
-
 /** What a turn shows from its recorded events, beside its prompt and result. */
 export interface TurnView {
   /** The messages the Tag wrote while it worked, in order, without the ones its result repeats. */
@@ -62,84 +59,31 @@ export function mergeEvents(
 }
 
 /**
- * The events a turn shows. Its history message carries them, so a finished turn reads nothing
- * more; a running turn reads its newer events every second, and a turn whose message left
- * earlier events out reads them once.
+ * The events a turn shows. Its message carries them, and the conversation's follow pushes each
+ * change to the message, so only a turn whose message left earlier events out reads them, once.
  */
 export function useTurnEvents(
   events: ControlPlane["events"] | undefined,
   turn: { taskId?: string; events?: readonly TaskEvent[]; eventsTruncated?: boolean },
-  running: boolean,
 ): readonly TaskEvent[] {
   const { taskId, eventsTruncated } = turn;
   const carried = turn.events ?? noEvents;
-  const latest = carried.at(-1)?.sequence ?? 0;
   const [read, setRead] = useState<readonly TaskEvent[]>(noEvents);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer carried page starts where it ends.
   useEffect(() => {
-    if (!events || !taskId || (!running && !eventsTruncated)) return;
+    if (!events || !taskId || !eventsTruncated) return;
     let stopped = false;
-    let timer: number | undefined;
-    let after = eventsTruncated ? 0 : latest;
-    async function poll() {
-      try {
-        const page = await events?.(taskId ?? "", after);
-        if (stopped || !page) return;
-        const next = page.filter((event) => event.sequence > after);
-        const last = next.at(-1);
-        if (last) {
-          after = last.sequence;
-          setRead((prior) => mergeEvents(prior, next));
-        }
-      } catch {
+    void events(taskId, 0)
+      .then((page) => {
+        if (!stopped) setRead((prior) => mergeEvents(prior, page));
+      })
+      .catch(() => {
         // Events are presentation only; the turn's state and result still show.
-      }
-      if (running && !stopped) timer = window.setTimeout(() => void poll(), LIVE_INTERVAL);
-    }
-    void poll();
+      });
     return () => {
       stopped = true;
-      window.clearTimeout(timer);
     };
-  }, [events, taskId, running, eventsTruncated]);
+  }, [events, taskId, eventsTruncated]);
   return useMemo(() => mergeEvents(carried, read), [carried, read]);
 }
 
 const noEvents: readonly TaskEvent[] = [];
-
-/** A queued turn usually starts at once, so its wait is read only after this. */
-const WAIT_DELAY = 2_000;
-const WAIT_INTERVAL = 5_000;
-
-/**
- * Why a queued turn waits, read after a moment and again while it stays queued, or undefined
- * when it runs, nothing keeps it waiting, or the reason cannot be read.
- */
-export function useTaskWait(
-  read: ControlPlane["taskWait"],
-  taskId: string,
-  queued: boolean,
-): string | undefined {
-  const [wait, setWait] = useState<string>();
-  useEffect(() => {
-    setWait(undefined);
-    if (!read || !queued) return;
-    let stopped = false;
-    let timer: number | undefined;
-    async function poll() {
-      try {
-        const reason = await read?.(taskId);
-        if (!stopped) setWait(reason ?? undefined);
-      } catch {
-        // The reason is presentation only; the message still shows as sent.
-      }
-      if (!stopped) timer = window.setTimeout(() => void poll(), WAIT_INTERVAL);
-    }
-    timer = window.setTimeout(() => void poll(), WAIT_DELAY);
-    return () => {
-      stopped = true;
-      window.clearTimeout(timer);
-    };
-  }, [read, taskId, queued]);
-  return queued ? wait : undefined;
-}

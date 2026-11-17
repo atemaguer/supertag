@@ -104,10 +104,13 @@ export interface ControlPlane {
   /** All of a Task's events after a sequence, oldest first. */
   events(taskId: string, afterSequence: number): Promise<TaskEvent[]>;
   /**
-   * Why a queued Task waits, such as an uncertain Task Attempt that keeps a Worker Host's only
-   * slot, or null when nothing keeps it from running or the caller may not read Worker Hosts.
+   * Pushes the changes of the caller's conversation with `read.tagId` after the copy `read`
+   * describes, until the returned stop is called.
    */
-  taskWait?(taskId: string): Promise<string | null>;
+  follow?(
+    read: ReadMessages,
+    receive: (update: FollowUpdate) => void,
+  ): Promise<() => Promise<void>>;
   saveArtifact(artifactId: string, path: string): Promise<boolean>;
   /**
    * The Control Plane and principal this connection acts as. What is cached under one scope is
@@ -123,6 +126,20 @@ export interface ControlPlane {
 }
 
 export type CacheKey = "roster" | "outbox" | `tag:${string}`;
+
+/** Why a queued turn still waits for a Worker Host; an empty reason clears an earlier one. */
+export interface TurnWait {
+  taskId: string;
+  reason: string;
+}
+
+/**
+ * What a conversation follow pushes: `ready` once its stream is open, `lost` when it dropped (it
+ * reopens on its own), and `changed` with the messages that changed and why queued turns wait.
+ */
+export type FollowUpdate =
+  | { kind: "ready" | "lost" }
+  | { kind: "changed"; messages?: MessagePage; waits?: TurnWait[] };
 
 export type WatchUpdate =
   | { kind: "ready" | "resync" | "lost" | "tag" }
@@ -178,7 +195,15 @@ export function controlPlaneSession(connectionId: string, scope: string): Contro
     markRead: (tagId, order) => invoke("mark_conversation_read", { connectionId, tagId, order }),
     events: (taskId, afterSequence) =>
       invoke("list_task_events", { connectionId, taskId, afterSequence }),
-    taskWait: (taskId) => invoke("explain_task_wait", { connectionId, taskId }),
+    async follow(read, receive) {
+      const onUpdate = new Channel<FollowUpdate>(receive);
+      const followId = await invoke<string>("start_conversation_follow", {
+        connectionId,
+        read,
+        onUpdate,
+      });
+      return () => invoke<void>("stop_conversation_follow", { followId });
+    },
     saveArtifact: (artifactId, path) =>
       invoke("save_result_artifact", { connectionId, artifactId, path }),
     readCache: (key) => invoke("read_cache", { connectionId, key }),

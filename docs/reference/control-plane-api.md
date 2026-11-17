@@ -68,7 +68,7 @@ name in `supertag audit`.
 | Service | For |
 | --- | --- |
 | `Operator` | Tags, Tasks, Worker Hosts, Auth Keys, Task events and usage, reply deliveries, and recovery decisions |
-| `Conversations` | Your conversation with each Tag: its messages, sending one, and how far you have read |
+| `Conversations` | Your conversation with each Tag: its messages, sending one, following it as it changes, and how far you have read |
 | `OperatorEvents` | `Watch`: change notices with a resume token |
 | `Objectives` | Create an Objective, read and list them, change limits, pause, resume, cancel, review, and complete |
 | `ObjectiveOverviews` | The readable progress overview that `describe objective` prints |
@@ -132,9 +132,25 @@ Each has a preview of its latest message, when it was active, how many finished 
 not read, and whether one of its Tasks is queued or running. `MarkConversationRead` records the
 latest finished turn you have read.
 
-The last event of a message is its turn's latest. To follow a running turn, call
-`Operator.ListEvents` with that sequence as `after_sequence`. `ListEvents` also returns every
-event of a turn, including the activity a conversation page leaves out.
+## Follow a conversation
+
+`Conversations.FollowConversation` streams a conversation as it changes, so a client shows each
+message the Tag writes, each change of state, and the result as soon as the Control Plane records
+them, without polling. Send it what `ListMessages` takes to read changes: the `conversation_id`
+and latest `order` of the copy you keep, and its unfinished turns. The first response holds what
+changed since that copy, exactly as `ListMessages` would return it; a client without a copy sends
+none and gets the newest page. Each later response holds only the messages that changed since the
+one before. A response with nothing set is a heartbeat, sent at least every 15 seconds.
+
+For an operator, a response also says why a queued turn still waits for a Worker Host, such as an
+uncertain Task Attempt that holds a host's only slot, once the turn has waited about two seconds.
+An empty reason says the earlier one no longer holds.
+
+After a dropped stream, follow again from the copy you kept. `ListMessages` with `after` reads
+the same changes in one call.
+
+A message carries its turn's messages and only its latest activity or plan. `Operator.ListEvents`
+returns every event of a turn, including the activity a conversation page leaves out.
 
 ## Watch for changes
 

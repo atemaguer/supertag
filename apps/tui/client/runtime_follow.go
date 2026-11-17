@@ -70,11 +70,37 @@ type runtimeFollow struct {
 	reads     int
 	children  map[string]uint64
 	workSince time.Time
+	// stream is the conversation's pushed follow; nil for an Objective's Task, which is read on
+	// a timer.
+	stream *conversationStream
+	// worksRead is when the turn's work Sessions were last read. While the turn runs, a pushed
+	// change reads them at most once a second.
+	worksRead time.Time
+	// worksDue says a pushed change skipped reading the work Sessions, so the next read comes
+	// within a second even if nothing else changes.
+	worksDue bool
+	// working says the turn has work Sessions to follow, which are read on a timer.
+	working bool
+	// hostWait is why the turn waits for a Worker Host, as last shown.
+	hostWait string
 }
+
+// streamOpen is how long a follow waits for its conversation's stream to open before it reads
+// the turn itself.
+var streamOpen = 2 * time.Second
+
+// streamFallback is how long a follow waits for a pushed change before it reads anyway.
+var streamFallback = 15 * time.Second
 
 func (f *Follower) followRuntime(ctx context.Context, tag, id string, shown *Shown, objective bool, emit func(...FollowEvent)) error {
 	state := runtimeFollow{tag: tag, task: id, delegated: shown.joinedOnPage, shown: shown, objective: objective,
 		children: map[string]uint64{}, source: id, after: shown.after}
+	if !objective {
+		stream, release := f.Client.followConversation(tag)
+		defer release()
+		state.stream = stream
+		stream.awaitLive(ctx, streamOpen)
+	}
 	interval := f.Interval
 	if interval <= 0 {
 		interval = time.Second
@@ -97,7 +123,7 @@ func (f *Follower) followRuntime(ctx context.Context, tag, id string, shown *Sho
 			if more {
 				continue
 			}
-			pause(ctx, interval)
+			state.waitChange(ctx, interval)
 			continue
 		}
 		if !transient(err) {
@@ -112,13 +138,44 @@ func (f *Follower) followRuntime(ctx context.Context, tag, id string, shown *Sho
 	return nil
 }
 
+// waitChange waits for the next pushed change of the conversation, or interval when the stream
+// is down, the turn has work Sessions to follow, or a skipped read is due.
+func (state *runtimeFollow) waitChange(ctx context.Context, interval time.Duration) {
+	if state.stream == nil {
+		pause(ctx, interval)
+		return
+	}
+	wait := streamFallback
+	if !state.stream.isLive() || state.working || state.worksDue {
+		wait = interval
+	}
+	state.stream.wait(ctx, wait)
+}
+
+// read is the followed conversation's message id: as last pushed while the stream is open,
+// otherwise read now.
+func (state *runtimeFollow) read(ctx context.Context, runtime *runtimeClient, id string) (*v2.ConversationMessage, bool, error) {
+	if state.stream != nil {
+		if message, _, ok := state.stream.message(id); ok {
+			return message, true, nil
+		}
+	}
+	read := runtime.getMessage
+	if state.objective {
+		read = runtime.getObjectiveTask
+	}
+	message, err := read(ctx, state.tag, id)
+	return message, false, err
+}
+
 // pollRuntime reads what changed of the followed turn. While the turn runs, a poll reads only its
 // new events with Operator.ListEvents, until a poll finds none; the next then reads the turn
 // itself, its state, the events it carries and its work Sessions. A queued or finished turn reads
 // no events: the message carries every message its Tag wrote.
 func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit func(...FollowEvent)) (done, more bool, err error) {
 	runtime := f.Client.runtime
-	if state.running && !state.quiet && !state.shown.replied && state.reads < messageReadEvery {
+	pushed := state.stream != nil && state.stream.isLive()
+	if !pushed && state.running && !state.quiet && !state.shown.replied && state.reads < messageReadEvery {
 		state.reads++
 		events, err := runtime.listEvents(ctx, state.source, state.after)
 		if err != nil {
@@ -132,12 +189,8 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 			return false, false, nil
 		}
 	}
-	read := runtime.getMessage
-	if state.objective {
-		read = runtime.getObjectiveTask
-	}
 	state.reads = 0
-	message, err := read(ctx, state.tag, state.task)
+	message, pushed, err := state.read(ctx, runtime, state.task)
 	if err != nil {
 		return false, false, err
 	}
@@ -148,7 +201,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 	if joined := view.GetJoinedTaskId(); joined != "" && joined != state.task {
 		emit(state.shown.join()...)
 		source = joined
-		original, err := read(ctx, state.tag, source)
+		original, _, err := state.read(ctx, runtime, source)
 		if err != nil {
 			return false, false, err
 		}
@@ -162,6 +215,12 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 	}
 	if state.source != source {
 		state.source, state.after = source, 0
+	}
+	if state.stream != nil {
+		if wait := state.stream.hostWait(source); wait != state.hostWait && !state.shown.started && !state.shown.replied {
+			state.hostWait = wait
+			emit(FollowEvent{Kind: EventHostWait, Text: wait})
+		}
 	}
 	if message.GetWorkSessionReportId() != "" {
 		// The report is rendered through its Work Session, including when its
@@ -195,10 +254,17 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 			emit(state.shown.reply(reply)...)
 		}
 	}
+	if pushed && !state.shown.replied && time.Since(state.worksRead) < time.Second {
+		// A busy turn's pushes read its work Sessions at most once a second.
+		state.worksDue = true
+		return false, false, nil
+	}
+	state.worksRead, state.worksDue = time.Now(), false
 	works, err := runtime.messageWorkSessions(ctx, message)
 	if err != nil {
 		return false, false, err
 	}
+	state.working = len(works) > 0
 	settled := state.shown.replied
 	for _, work := range works {
 		// Show working before activity, but wait until every event page has

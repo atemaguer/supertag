@@ -1653,6 +1653,7 @@ async fn state_owner(
     incoming: supertag_api::in_process::Incoming,
     shutdown: CancellationToken,
 ) -> Result<()> {
+    plane.close_follows_on(shutdown.clone());
     // Refuse every call from a peer that skipped protocol negotiation.
     let mut builder = tonic::transport::Server::builder()
         .layer(fence(ServiceRole::ControlPlane))

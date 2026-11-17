@@ -143,6 +143,9 @@ const (
 	// ConversationsMarkConversationReadProcedure is the fully-qualified name of the Conversations's
 	// MarkConversationRead RPC.
 	ConversationsMarkConversationReadProcedure = "/supertag.runtime.v2.Conversations/MarkConversationRead"
+	// ConversationsFollowConversationProcedure is the fully-qualified name of the Conversations's
+	// FollowConversation RPC.
+	ConversationsFollowConversationProcedure = "/supertag.runtime.v2.Conversations/FollowConversation"
 	// OperatorEventsWatchProcedure is the fully-qualified name of the OperatorEvents's Watch RPC.
 	OperatorEventsWatchProcedure = "/supertag.runtime.v2.OperatorEvents/Watch"
 	// ManifestRelationshipsReconcileTagProcedure is the fully-qualified name of the
@@ -994,6 +997,11 @@ type ConversationsClient interface {
 	GetMessage(context.Context, *connect.Request[runtimev2.GetMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
 	// Records that the caller has read its conversation with a Tag up to a message.
 	MarkConversationRead(context.Context, *connect.Request[runtimev2.MarkConversationReadRequest]) (*connect.Response[runtimev2.Conversation], error)
+	// Follows the caller's conversation with a Tag as it changes. The first response holds what
+	// changed since the client's copy, as ListMessages does with `after`; each later one holds what
+	// changed since the response before it: new messages, and turns whose state, events or result
+	// changed. A response with nothing set is a heartbeat, sent at least every 15 seconds.
+	FollowConversation(context.Context, *connect.Request[runtimev2.FollowConversationRequest]) (*connect.ServerStreamForClient[runtimev2.FollowConversationResponse], error)
 }
 
 // NewConversationsClient constructs a client for the supertag.runtime.v2.Conversations service. By
@@ -1037,6 +1045,12 @@ func NewConversationsClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(conversationsMethods.ByName("MarkConversationRead")),
 			connect.WithClientOptions(opts...),
 		),
+		followConversation: connect.NewClient[runtimev2.FollowConversationRequest, runtimev2.FollowConversationResponse](
+			httpClient,
+			baseURL+ConversationsFollowConversationProcedure,
+			connect.WithSchema(conversationsMethods.ByName("FollowConversation")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -1047,6 +1061,7 @@ type conversationsClient struct {
 	sendMessage          *connect.Client[runtimev2.SendMessageRequest, runtimev2.ConversationMessage]
 	getMessage           *connect.Client[runtimev2.GetMessageRequest, runtimev2.ConversationMessage]
 	markConversationRead *connect.Client[runtimev2.MarkConversationReadRequest, runtimev2.Conversation]
+	followConversation   *connect.Client[runtimev2.FollowConversationRequest, runtimev2.FollowConversationResponse]
 }
 
 // ListConversations calls supertag.runtime.v2.Conversations.ListConversations.
@@ -1074,6 +1089,11 @@ func (c *conversationsClient) MarkConversationRead(ctx context.Context, req *con
 	return c.markConversationRead.CallUnary(ctx, req)
 }
 
+// FollowConversation calls supertag.runtime.v2.Conversations.FollowConversation.
+func (c *conversationsClient) FollowConversation(ctx context.Context, req *connect.Request[runtimev2.FollowConversationRequest]) (*connect.ServerStreamForClient[runtimev2.FollowConversationResponse], error) {
+	return c.followConversation.CallServerStream(ctx, req)
+}
+
 // ConversationsHandler is an implementation of the supertag.runtime.v2.Conversations service.
 type ConversationsHandler interface {
 	// The caller's conversations, one per Tag it has talked to, with what a conversation list
@@ -1084,6 +1104,11 @@ type ConversationsHandler interface {
 	GetMessage(context.Context, *connect.Request[runtimev2.GetMessageRequest]) (*connect.Response[runtimev2.ConversationMessage], error)
 	// Records that the caller has read its conversation with a Tag up to a message.
 	MarkConversationRead(context.Context, *connect.Request[runtimev2.MarkConversationReadRequest]) (*connect.Response[runtimev2.Conversation], error)
+	// Follows the caller's conversation with a Tag as it changes. The first response holds what
+	// changed since the client's copy, as ListMessages does with `after`; each later one holds what
+	// changed since the response before it: new messages, and turns whose state, events or result
+	// changed. A response with nothing set is a heartbeat, sent at least every 15 seconds.
+	FollowConversation(context.Context, *connect.Request[runtimev2.FollowConversationRequest], *connect.ServerStream[runtimev2.FollowConversationResponse]) error
 }
 
 // NewConversationsHandler builds an HTTP handler from the service implementation. It returns the
@@ -1123,6 +1148,12 @@ func NewConversationsHandler(svc ConversationsHandler, opts ...connect.HandlerOp
 		connect.WithSchema(conversationsMethods.ByName("MarkConversationRead")),
 		connect.WithHandlerOptions(opts...),
 	)
+	conversationsFollowConversationHandler := connect.NewServerStreamHandler(
+		ConversationsFollowConversationProcedure,
+		svc.FollowConversation,
+		connect.WithSchema(conversationsMethods.ByName("FollowConversation")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Conversations/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConversationsListConversationsProcedure:
@@ -1135,6 +1166,8 @@ func NewConversationsHandler(svc ConversationsHandler, opts ...connect.HandlerOp
 			conversationsGetMessageHandler.ServeHTTP(w, r)
 		case ConversationsMarkConversationReadProcedure:
 			conversationsMarkConversationReadHandler.ServeHTTP(w, r)
+		case ConversationsFollowConversationProcedure:
+			conversationsFollowConversationHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1162,6 +1195,10 @@ func (UnimplementedConversationsHandler) GetMessage(context.Context, *connect.Re
 
 func (UnimplementedConversationsHandler) MarkConversationRead(context.Context, *connect.Request[runtimev2.MarkConversationReadRequest]) (*connect.Response[runtimev2.Conversation], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.MarkConversationRead is not implemented"))
+}
+
+func (UnimplementedConversationsHandler) FollowConversation(context.Context, *connect.Request[runtimev2.FollowConversationRequest], *connect.ServerStream[runtimev2.FollowConversationResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.FollowConversation is not implemented"))
 }
 
 // OperatorEventsClient is a client for the supertag.runtime.v2.OperatorEvents service.

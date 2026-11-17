@@ -274,7 +274,9 @@ pub(super) async fn control_plane_fixture(
             .add_service(control_plane.negotiation_service())
             .add_service(control_plane.operator_service())
             .add_service(control_plane.enrollments_service())
-            .add_service(control_plane.conversations_service())
+            .add_service(
+                control_plane.conversations_service(tokio_util::sync::CancellationToken::new()),
+            )
             .serve_with_incoming(supertag_transport::incoming(listener, Some(websocket))),
     );
     let mut operator = OperatorClient::new(
@@ -971,6 +973,75 @@ async fn an_operator_creates_a_tag_once_with_the_lead_tag_defaults() {
             .collect::<Vec<_>>(),
         ["engineer", "reviewer"]
     );
+    control_plane_task.abort();
+    cp_task.abort();
+}
+
+#[tokio::test]
+async fn a_conversation_follow_pushes_sent_messages_through_the_api_tier() {
+    use tauri::ipc::{Channel, InvokeResponseBody};
+
+    let directory = tempfile::tempdir().unwrap();
+    let (address, control_plane_task, cp_task) = control_plane_fixture(
+        &directory.path().join("state.sqlite"),
+        "engineer",
+        "operator-test-token",
+        false,
+    )
+    .await;
+    let client = ControlPlaneState::default();
+    let connection = client
+        .save_control_plane(
+            &directory.path().join("control-planes.json"),
+            address,
+            "Engineering".into(),
+            "operator-test-token".into(),
+        )
+        .await
+        .unwrap();
+    let id = connection.connection_id();
+    let (send, mut receive) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+    let updates = Channel::new(move |body| {
+        let InvokeResponseBody::Json(value) = body else {
+            panic!("expected JSON IPC")
+        };
+        send.send(serde_json::from_str(&value).unwrap()).unwrap();
+        Ok(())
+    });
+    let follow = client
+        .start_follow(
+            id,
+            ReadMessages {
+                tag_id: "engineer".into(),
+                ..Default::default()
+            },
+            updates,
+        )
+        .await
+        .unwrap();
+    let wait = Duration::from_secs(5);
+    let next = async |receive: &mut tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>| {
+        tokio::time::timeout(wait, receive.recv()).await.unwrap().unwrap()
+    };
+    assert_eq!(next(&mut receive).await["kind"], "ready");
+    let sent = client
+        .send(
+            id,
+            "engineer".into(),
+            "Explain the change".into(),
+            "follow-operation".into(),
+        )
+        .await
+        .unwrap();
+    let changed = next(&mut receive).await;
+    assert_eq!(changed["kind"], "changed");
+    assert_eq!(changed["messages"]["incremental"], false);
+    assert_eq!(
+        changed["messages"]["messages"][0]["task"]["taskId"],
+        sent.task.task_id.as_str()
+    );
+    assert_eq!(changed["messages"]["messages"][0]["task"]["state"], "queued");
+    client.stop_follow(&follow).await;
     control_plane_task.abort();
     cp_task.abort();
 }

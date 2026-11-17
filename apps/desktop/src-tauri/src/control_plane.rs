@@ -7,7 +7,6 @@ use supertag_protocol::{
     v2::{
         self, ServiceRole, conversations_client::ConversationsClient,
         enrollments_client::EnrollmentsClient, operator_client::OperatorClient,
-        placement_client::PlacementClient,
     },
 };
 use supertag_transport::{Target, tunneled_uri};
@@ -20,10 +19,12 @@ use tonic::{
 
 mod artifacts;
 pub mod cache;
+mod follow;
 mod local;
 mod new_tag;
 mod profiles;
 mod watch;
+pub use follow::FollowUpdate;
 pub use new_tag::{NewTag, TagOptions};
 pub use profiles::{ControlPlaneActivation, ControlPlaneList};
 pub use watch::WatchUpdate;
@@ -54,6 +55,7 @@ struct Connection {
     origin: Option<String>,
     watch: Option<watch::Registration>,
     watch_epoch: u64,
+    follows: follow::Follows,
     cache_scope: Option<cache::CacheScope>,
 }
 
@@ -64,6 +66,7 @@ impl Connection {
         self.origin = None;
         self.watch = None;
         self.watch_epoch = 0;
+        self.follows = follow::Follows::default();
         self.cache_scope = None;
         self.generation
     }
@@ -346,29 +349,6 @@ impl ControlPlaneState {
             .map_err(rpc_error)?
             .into_inner();
         self.current(&session, Message::try_from(value)?).await
-    }
-
-    /// Why a queued Task waits, such as a busy Worker Host or an uncertain Task Attempt that
-    /// keeps its only slot, or `None` when nothing keeps it from running or the caller may not
-    /// read placement.
-    pub async fn task_wait(&self, connection_id: &str, task_id: String) -> Result<Option<String>> {
-        let session = self.session(connection_id).await?;
-        let diagnosis = PlacementClient::new(session.channel.clone())
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES)
-            .diagnose_task(session.request(v2::DiagnoseTaskPlacementRequest { task_id }))
-            .await;
-        let wait = match diagnosis {
-            Ok(diagnosis) => {
-                let diagnosis = diagnosis.into_inner();
-                (diagnosis.state() == v2::TaskState::Queued && !diagnosis.requirement.is_empty())
-                    .then_some(diagnosis.summary)
-            }
-            // A client device does not read Worker Hosts; its message just waits.
-            Err(status) if status.code() == Code::PermissionDenied => None,
-            Err(status) => return Err(rpc_error(status)),
-        };
-        self.current(&session, wait).await
     }
 
     /// A Task's events after `after_sequence`, oldest first, read page by page.

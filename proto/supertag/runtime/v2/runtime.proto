@@ -41,6 +41,11 @@ service Conversations {
   rpc GetMessage(GetMessageRequest) returns (ConversationMessage);
   // Records that the caller has read its conversation with a Tag up to a message.
   rpc MarkConversationRead(MarkConversationReadRequest) returns (Conversation);
+  // Follows the caller's conversation with a Tag as it changes. The first response holds what
+  // changed since the client's copy, as ListMessages does with `after`; each later one holds what
+  // changed since the response before it: new messages, and turns whose state, events or result
+  // changed. A response with nothing set is a heartbeat, sent at least every 15 seconds.
+  rpc FollowConversation(FollowConversationRequest) returns (stream FollowConversationResponse);
 }
 
 // Operator-visible invalidation notices. Task event replay has its own cursor.
@@ -1651,6 +1656,31 @@ message SendMessageRequest {
   string operation_id = 4;
   ExecutionLimits execution_limits = 5;
   TaskOutputPolicy output_policy = 6;
+}
+
+// As ListMessagesRequest with `after`: the conversation the client's copy came from, the latest
+// message order it holds, and the turns it holds unfinished. A client without a copy sends none,
+// and the first response is the newest page.
+message FollowConversationRequest {
+  string tag_id = 1;
+  string conversation_id = 2;
+  uint64 after = 3;
+  // At most 128.
+  repeated string refresh_task_ids = 4;
+}
+
+message FollowConversationResponse {
+  // Set when messages changed. With `incremental` it holds only the messages that changed;
+  // otherwise it is the newest page, which replaces any copy the client kept.
+  ListMessagesResponse messages = 1;
+  // Why queued turns still wait for a Worker Host, once a turn has waited a moment; an empty
+  // reason says an earlier one no longer holds. Sent to operators only.
+  repeated TurnWait waits = 2;
+}
+
+message TurnWait {
+  string task_id = 1;
+  string reason = 2;
 }
 
 message MarkConversationReadRequest {

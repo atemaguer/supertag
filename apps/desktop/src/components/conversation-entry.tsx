@@ -1,7 +1,7 @@
 import { Check, Copy, ListTree } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ControlPlane, Message as TagMessage, TaskEvent } from "../control-plane";
-import { turnView, useTaskWait, useTurnEvents } from "../lib/turn";
+import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import { ExternalLink } from "./external-link";
 import { ResultFiles } from "./result-files";
@@ -36,23 +36,21 @@ export function turnNotice(
   )[taskState];
 }
 
-/** A conversation entry that shows its turn's messages and activity, and reads newer ones while it runs. */
+/**
+ * A conversation entry that shows its turn's messages and what it is doing, as the conversation's
+ * follow pushes them, and why it still waits for a Worker Host while it is queued.
+ */
 export function LiveConversationEntry(
   props: Omit<Parameters<typeof ConversationEntry>[0], "events"> & {
     readEvents: ControlPlane["events"];
-    readWait?: ControlPlane["taskWait"];
   },
 ) {
-  const { message, readWait, ...entry } = props;
+  const { message, wait, ...entry } = props;
   const { task, workSessionReportId, liveInput } = message;
   const joined = workSessionReportId === undefined && liveInput?.state === "accepted";
-  const events = useTurnEvents(
-    props.readEvents,
-    joined ? {} : { ...message, taskId: task.taskId },
-    RUNNING.has(task.state),
-  );
-  const wait = useTaskWait(readWait, task.taskId, !joined && task.state === "queued");
-  return <ConversationEntry {...entry} message={message} events={events} wait={wait} />;
+  const events = useTurnEvents(props.readEvents, joined ? {} : { ...message, taskId: task.taskId });
+  const waiting = !joined && task.state === "queued" ? wait : undefined;
+  return <ConversationEntry {...entry} message={message} events={events} wait={waiting} />;
 }
 
 export function ConversationEntry({

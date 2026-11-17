@@ -3,8 +3,8 @@ mod control_plane;
 use std::path::PathBuf;
 
 use control_plane::{
-    ControlPlaneActivation, ControlPlaneList, ControlPlaneState, Conversation, Event, Message,
-    Messages, NewTag, ReadMessages, Tag, TagOptions, WatchUpdate,
+    ControlPlaneActivation, ControlPlaneList, ControlPlaneState, Conversation, Event, FollowUpdate,
+    Message, Messages, NewTag, ReadMessages, Tag, TagOptions, WatchUpdate,
 };
 use tauri::{Manager, State, ipc::Channel, webview::PageLoadEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -198,13 +198,25 @@ async fn list_task_events(
     state.events(&connection_id, task_id, after_sequence).await
 }
 
+/// Pushes the changes of the caller's conversation with a Tag after the copy `read` describes,
+/// until `stop_conversation_follow`.
 #[tauri::command]
-async fn explain_task_wait(
+async fn start_conversation_follow(
     state: State<'_, ControlPlaneState>,
     connection_id: String,
-    task_id: String,
-) -> Result<Option<String>, String> {
-    state.task_wait(&connection_id, task_id).await
+    read: ReadMessages,
+    on_update: Channel<FollowUpdate>,
+) -> Result<String, String> {
+    state.start_follow(&connection_id, read, on_update).await
+}
+
+#[tauri::command]
+async fn stop_conversation_follow(
+    state: State<'_, ControlPlaneState>,
+    follow_id: String,
+) -> Result<(), String> {
+    state.stop_follow(&follow_id).await;
+    Ok(())
 }
 
 /// An entry the app cached for the current connection: `roster`, `outbox`, or `tag:` and a Tag.
@@ -315,7 +327,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             send_message,
             get_message,
             list_task_events,
-            explain_task_wait,
+            start_conversation_follow,
+            stop_conversation_follow,
             read_cache,
             write_cache,
             mark_conversation_read,

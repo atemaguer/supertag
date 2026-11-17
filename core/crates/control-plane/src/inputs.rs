@@ -23,6 +23,7 @@ impl Store {
         principal: &str,
         request: &QueueInputRequest,
     ) -> Result<LiveInput> {
+        let _wake = self.wake_follows();
         validate_operator(principal)?;
         name("Task ID", &request.task_id)?;
         name("operation ID", &request.operation_id)?;
@@ -160,6 +161,7 @@ impl Store {
             .bind(LiveInputState::Dispatching as i64).bind(now.saturating_add(ACKNOWLEDGEMENT_MS))
             .bind(&id).execute(&mut *tx).await?;
         input.state = LiveInputState::Dispatching.into();
+        let _wake = self.wake_follows();
         // A lost response is uncertain. No later take returns this text again.
         tx.commit().await?;
         Ok(TakeInputResponse {
@@ -173,6 +175,7 @@ impl Store {
         host: &HostAuthority,
         request: &SettleInputRequest,
     ) -> Result<LiveInput> {
+        let _wake = self.wake_follows();
         name("live input ID", &request.input_id)?;
         let attempt = request
             .attempt
@@ -241,6 +244,7 @@ impl Store {
         principal: &str,
         request: &ResolveInputRequest,
     ) -> Result<LiveInput> {
+        let _wake = self.wake_follows();
         validate_operator(principal)?;
         name("live input ID", &request.input_id)?;
         name("operation ID", &request.operation_id)?;

@@ -1,4 +1,7 @@
+mod follow;
 mod work_sessions;
+
+pub(crate) use follow::Live;
 
 pub(crate) use work_sessions::{work_session_child_in, work_session_in};
 
@@ -147,6 +150,7 @@ impl Store {
         principal: &str,
         input: &SendMessageRequest,
     ) -> Result<ConversationMessage> {
+        let _wake = self.wake_follows();
         let execution_limits = crate::budget_pool::normalize(input.execution_limits.as_ref())?;
         let output_policy =
             supertag_protocol::output_policy::normalize(input.output_policy.as_ref())
@@ -940,6 +944,20 @@ impl conversations_server::Conversations for ControlPlane {
         Ok(Response::new(
             self.store
                 .mark_conversation_read(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    type FollowConversationStream = follow::Updates;
+
+    async fn follow_conversation(
+        &self,
+        request: Request<FollowConversationRequest>,
+    ) -> std::result::Result<Response<Self::FollowConversationStream>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .follow_conversation(&principal, request.into_inner())
                 .await?,
         ))
     }

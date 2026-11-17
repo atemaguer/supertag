@@ -1,12 +1,13 @@
 import { useEffect } from "react";
 
-export function usePolling(read: (signal: AbortSignal) => Promise<void>, interval: number) {
+/** Reads at once, then every `interval` while the window is visible; once when it is undefined. */
+export function usePolling(read: (signal: AbortSignal) => Promise<void>, interval?: number) {
   useEffect(() => {
     const controller = new AbortController();
     let timer: number | undefined;
     async function poll(initial = false) {
       if (initial || !document.hidden) await read(controller.signal);
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && interval !== undefined) {
         timer = window.setTimeout(() => void poll(), interval);
       }
     }

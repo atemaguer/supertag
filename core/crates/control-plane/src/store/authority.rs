@@ -35,6 +35,7 @@ impl Store {
     }
 
     pub async fn sweep_expired_attempts(&self) -> Result<u64> {
+        let _wake = self.wake_follows();
         let (mut transaction, _) = self.write().await?;
         let changed = expire_due_attempts(&mut transaction, self.execution_now_ms()).await?;
         if changed > 0 {
@@ -98,6 +99,7 @@ impl Store {
         principal: &str,
         input: &ResolveAttemptRequest,
     ) -> Result<AttemptResolution> {
+        let _wake = self.wake_follows();
         name("principal", principal)?;
         let operator_id = principal
             .strip_prefix("operator:")
@@ -225,6 +227,7 @@ impl Store {
         host: &HostAuthority,
         input: &ReclaimAttemptRequest,
     ) -> Result<AttemptResolution> {
+        let _wake = self.wake_follows();
         let attempt = input
             .attempt
             .as_ref()

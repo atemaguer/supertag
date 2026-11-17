@@ -23,6 +23,7 @@ import {
   openConversation,
   storedHistory,
 } from "../lib/conversation-cache";
+import { useConversationFollow } from "../lib/follow";
 import {
   earlierHistory,
   emptyHistory,
@@ -158,9 +159,27 @@ export function ConversationPane({
     },
     [controlPlane, tagId, setHistory],
   );
+  // The conversation's follow pushes each change as it happens. The Watch and a timer read the
+  // history only while the follow is down.
+  const follow = useConversationFollow(
+    controlPlane,
+    tagId,
+    () => refreshRequest(tagId, currentHistory.current),
+    (page) => {
+      revision.current++;
+      const previous = currentHistory.current;
+      const next = latestHistory(previous, page);
+      if (previous.conversationId && previous.conversationId !== next.conversationId)
+        setActiveTask(undefined);
+      setHistory(next);
+      setError("");
+    },
+  );
+  const followLive = follow.live;
   const historyChanged = useCallback(
-    (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
-    [tagId],
+    (update: WatchUpdate) =>
+      update.kind === "conversation" && update.tagId === tagId && !followLive.current,
+    [tagId, followLive],
   );
   const requestHistory = useWatchRefresh(refresh, interval, watch, historyChanged);
 
@@ -316,7 +335,7 @@ export function ConversationPane({
                     key={message.task.taskId}
                     message={message}
                     readEvents={controlPlane.events}
-                    readWait={controlPlane.taskWait}
+                    wait={follow.waits.get(message.task.taskId)}
                     activeTask={activeTask}
                     delivery={
                       message.task.taskId === lastSent ? deliveryStatus(message) : undefined
@@ -395,6 +414,8 @@ export function ConversationPane({
               key={activeTask}
               controlPlane={controlPlane}
               taskId={activeTask}
+              latest={latestEvent(messages, activeTask)}
+              pushed={follow.connected}
               onClose={() => {
                 setActiveTask(undefined);
                 activityTrigger.current?.focus();
@@ -494,13 +515,26 @@ function EmptyConversation({ tag }: { tag: Tag }) {
   );
 }
 
+/** The sequence of the latest event a turn's message carries, which changes as the turn works. */
+function latestEvent(messages: readonly TagMessage[], taskId: string) {
+  return messages.find((message) => message.task.taskId === taskId)?.events?.at(-1)?.sequence;
+}
+
+/**
+ * Every activity line of a Task. It reads newer ones whenever the conversation's follow pushes a
+ * change to the turn (`latest`), and on a timer only while the follow is down.
+ */
 function ActivityPane({
   controlPlane,
   taskId,
+  latest,
+  pushed,
   onClose,
 }: {
   controlPlane: ControlPlane;
   taskId: string;
+  latest?: number;
+  pushed: boolean;
   onClose(): void;
 }) {
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -531,7 +565,14 @@ function ActivityPane({
     },
     [controlPlane, taskId],
   );
-  usePolling(refresh, interval);
+  usePolling(refresh, pushed ? undefined : interval);
+  // Reads again as the turn's latest event moves.
+  useEffect(() => {
+    if (latest === undefined) return;
+    const controller = new AbortController();
+    void refresh(controller.signal);
+    return () => controller.abort();
+  }, [latest, refresh]);
 
   const status =
     error || (loading ? "Loading activity…" : events.length ? "" : "No activity recorded yet.");
