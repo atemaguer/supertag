@@ -30,8 +30,7 @@ pub(crate) const PAUSED: i64 = ScheduleState::Paused as i64;
 pub(crate) const DONE: i64 = ScheduleState::Done as i64;
 pub(crate) const CANCELLED: i64 = ScheduleState::Cancelled as i64;
 
-/// The runtime action that lets a turn schedule. Every Task may, unless a Permission Set grants
-/// it with `approvalRequired: true`: Schedules have no approval flow, so that denies it.
+/// The runtime action that offers a root turn the `schedule` and `cancel_schedule` tools.
 pub(crate) const SCHEDULE_CREATE_ACTION: &str = "schedule:create";
 
 const NOTE_MAX_CHARS: usize = 4_000;
@@ -409,21 +408,21 @@ async fn scheduling_turn_in(
     Ok((task, attempt.clone()))
 }
 
-/// A root turn may schedule: not a Work Session's Task, a report, or a Mailbox delivery, and
-/// not denied by an approval requirement on `schedule:create`.
+/// A root turn may schedule when its admitted actions include `schedule:create`: not a Work
+/// Session's Task, a report, or a Mailbox delivery.
 pub(crate) async fn may_schedule_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<bool> {
-    if crate::work_sessions::reserved_session(&task.session_id)
+    if !task
+        .allowed_actions
+        .iter()
+        .any(|action| action == SCHEDULE_CREATE_ACTION)
+        || crate::work_sessions::reserved_session(&task.session_id)
         || crate::mailbox::private_session(&task.session_id)
-        || crate::work_sessions::task_scope_in(tx, &task.task_id)
-            .await?
-            .is_some()
     {
         return Ok(false);
     }
-    Ok(!crate::policy::runtime_authority(task)
-        .approvals
-        .iter()
-        .any(|requirement| requirement.action == SCHEDULE_CREATE_ACTION))
+    Ok(crate::work_sessions::task_scope_in(tx, &task.task_id)
+        .await?
+        .is_none())
 }
 
 /// The conversation's principal when the Session is a conversation's.

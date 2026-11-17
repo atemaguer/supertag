@@ -126,16 +126,25 @@ async fn contract(url: String) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open(&url, &clock).await;
     let host = support::register_host(&store, "worker").await;
-    for tag in ["lead", "gated", "watcher", "temp", "releaser"] {
+    for tag in ["lead", "watcher", "temp", "releaser"] {
         store
-            .put_tag(tag, "Help", vec!["files:read".into()])
+            .put_tag(
+                tag,
+                "Help",
+                vec!["files:read".into(), "schedule:create".into()],
+            )
             .await
             .unwrap();
     }
+    // A Tag without `schedule:create` cannot schedule.
+    store
+        .put_tag("plain", "Help", vec!["files:read".into()])
+        .await
+        .unwrap();
     one_off_fires_once_in_the_conversation(&store, &host, &clock).await;
     recurrence_catches_up_once_and_coalesces(&store, &host, &clock).await;
     tag_schedules_take_effect_when_the_turn_succeeds(&store, &host, &clock).await;
-    approval_requirement_denies_scheduling(&store, &host).await;
+    a_tag_without_the_action_cannot_schedule(&store, &host).await;
     limits_refuse(&store, &clock).await;
     objectives_wait_on_schedules(&store, &host, &clock).await;
     retiring_a_tag_cancels_its_schedules(&store).await;
@@ -525,63 +534,10 @@ async fn tag_schedules_take_effect_when_the_turn_succeeds(
     }
 }
 
-async fn approval_requirement_denies_scheduling(store: &Store, host: &HostAuthority) {
-    store
-        .put_permission_set(
-            ALICE,
-            &PutPermissionSetRequest {
-                operation_id: "no-schedules".into(),
-                permission_set: Some(PermissionSet {
-                    set_id: "no-schedules".into(),
-                    name: "no-schedules".into(),
-                    approvers: vec![ALICE.into()],
-                    permissions: vec![PolicyPermission {
-                        target: PolicyPermissionTarget::Runtime as i32,
-                        action: "schedule:create".into(),
-                        approval_required: true,
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    store
-        .put_role(
-            ALICE,
-            &PutRoleRequest {
-                operation_id: "gated-role".into(),
-                role: Some(Role {
-                    role_id: "gated".into(),
-                    name: "gated".into(),
-                    purpose: "Work without timers".into(),
-                    instructions: "Do not schedule.".into(),
-                    permission_set_ids: vec!["no-schedules".into()],
-                    status: RoleStatus::Active as i32,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    store
-        .assign_role(
-            ALICE,
-            &AssignRoleRequest {
-                operation_id: "assign-gated".into(),
-                role: "gated".into(),
-                tag_id: "gated".into(),
-            },
-        )
-        .await
-        .unwrap();
-    submit(store, "gated", "gated").await;
+async fn a_tag_without_the_action_cannot_schedule(store: &Store, host: &HostAuthority) {
+    submit(store, "plain", "plain").await;
     let (task, turn) = next(store, host).await.unwrap();
-    // The action is never a harness capability.
-    assert!(!task.allowed_actions.iter().any(|a| a == "schedule:create"));
+    assert_eq!(task.allowed_actions, ["files:read"]);
     assert!(
         !store
             .attempt_capabilities(host, &turn)
@@ -591,7 +547,7 @@ async fn approval_requirement_denies_scheduling(store: &Store, host: &HostAuthor
     );
     assert!(matches!(
         store
-            .create_attempt_schedule(host, &staged(&turn, "gated", "1h"))
+            .create_attempt_schedule(host, &staged(&turn, "plain", "1h"))
             .await,
         Err(StoreError::PermissionDenied)
     ));

@@ -19,6 +19,8 @@ const ACTIONS = new Set([
   "web:search",
   WORKSTREAM_POST_ACTION,
   MAILBOX_SEND_ACTION,
+  // Offers the `schedule` coordination tools, not a native tool.
+  "schedule:create",
 ]);
 
 export function validateActions(actions: readonly string[], allowUnsandboxedCommands: boolean) {

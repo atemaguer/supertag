@@ -262,6 +262,8 @@ async fn a_tag_schedules_a_follow_up_that_the_sweep_fires(database: String) -> R
         "Release engineering",
         "--allow",
         "files:read",
+        "--allow",
+        "schedule:create",
     ]))
     .await?;
     let submitted = json(cli(&[

@@ -166,12 +166,12 @@ Runtime permissions use the same Permission Set but have a different target:
 | `web:fetch` | Fetch a known web resource |
 | `web:search` | Search the web |
 | `browser:use` | Use browser or computer-control tools. No built-in harness supports it yet |
-| `schedule:create` | Create a [Schedule](coordination.md#schedules) with the `schedule` tool. Allowed without a grant |
+| `schedule:create` | Set and cancel [Schedules](coordination.md#schedules), wake-ups for the Tag itself, with the `schedule` and `cancel_schedule` tools |
 
-Every root turn may schedule, so `schedule:create` needs no grant. Schedules have no approval
-flow: a Permission Set that grants `schedule:create` with `approvalRequired: true` denies the
-`schedule` and `cancel_schedule` tools to the Tags it applies to. The action never reaches a
-harness.
+`schedule:create` is granted like any other runtime action. The Permission Set `supertag init`
+writes includes it, and so do Tags created from the desktop app and the terminal UI. Leave it out
+of a Tag's Permission Sets and the Tag cannot schedule. It enables only SuperTag's own tools, never
+a harness tool.
 
 Other `namespace:action` names can be stored but enable nothing in the built-in harnesses. Published actions should describe authority, not a particular harness API.
 

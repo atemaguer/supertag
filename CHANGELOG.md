@@ -26,7 +26,9 @@ within the pre-1.0 compatibility policy described in
   "Scheduled". Recurrences use cron in a time zone, at least an hour apart; missed occurrences
   fire once. An active Schedule keeps an Objective from counting as idle. Operators use
   `supertag schedule create`, `pause`, and `resume`, and `get`, `describe`, and `delete
-  schedule`. A Permission Set that requires approval for `schedule:create` turns it off.
+  schedule`. A Tag schedules only when it holds the new `schedule:create` runtime action:
+  `supertag init` and the desktop and terminal UI New Tag forms grant it, and operators add it
+  to a Permission Set to let an existing Tag schedule.
 - A Tag's conversation shows each message the Tag writes while it works, as soon as it writes
   it: every Tag opens longer work with one short sentence saying what it is about to do. A status
   line under the turn shows its current step, such as a command it runs, in the terminal UI and

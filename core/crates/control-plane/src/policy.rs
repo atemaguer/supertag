@@ -1576,9 +1576,6 @@ fn project_runtime(
         .iter()
         .filter(|action| {
             action.as_str() != DELEGATE_WRITE
-                // Scheduling is a coordination tool every root turn has; it is never a harness
-                // capability.
-                && action.as_str() != crate::schedules::SCHEDULE_CREATE_ACTION
                 && requirements.get(action.as_str()).is_none_or(|requirement| {
                     supported_runtime_gate(action)
                         && (requirement.approvers.is_empty()

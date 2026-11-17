@@ -8,8 +8,8 @@ use tonic::Code;
 use super::{ControlPlaneState, MAX_PAGES, Result, Session, Tag, harness_name, rpc_error};
 
 /// The runtime actions `supertag init` gives its lead Tag through its Permission Set: edit files
-/// and run commands in its Workspace.
-const NEW_TAG_ACTIONS: [&str; 2] = ["commands:execute", "files:write"];
+/// and run commands in its Workspace, and schedule its own follow-ups.
+const NEW_TAG_ACTIONS: [&str; 3] = ["commands:execute", "files:write", "schedule:create"];
 
 /// What a new Tag can run on: the harnesses and Workspaces the Control Plane's Worker Hosts offer.
 #[derive(Serialize, Debug, Default, PartialEq, Eq)]
@@ -148,7 +148,10 @@ mod tests {
         assert_eq!(request.tag_id, "reviewer");
         assert_eq!(request.name.as_deref(), Some("Reviewer"));
         assert_eq!(request.harness_kind, v2::HarnessKind::ClaudeCode as i32);
-        assert_eq!(request.allowed_actions, ["commands:execute", "files:write"]);
+        assert_eq!(
+            request.allowed_actions,
+            ["commands:execute", "files:write", "schedule:create"]
+        );
         assert_eq!(request.workspace.unwrap().workspace_id, "supertag");
         assert_eq!(request.expected_revision, Some(0));
 

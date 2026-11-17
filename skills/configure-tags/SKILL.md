@@ -85,10 +85,9 @@ supertag apply -f team.yaml
 
 A grant with `approvalRequired: true` waits in the operator inbox for each call.
 
-Every Tag may set [Schedules](../../docs/reference/coordination.md#schedules), wake-ups for itself,
-without a grant. To stop a Tag scheduling, grant
-`{ target: runtime, action: schedule:create, approvalRequired: true }`: Schedules have no
-approval flow, so the requirement denies the tool.
+A Tag sets [Schedules](../../docs/reference/coordination.md#schedules), wake-ups for itself,
+only when it holds `{ target: runtime, action: schedule:create }`. `supertag init` grants it to
+the lead; add it to a set to let another Tag follow up on its own, and leave it out to stop one.
 
 Two harness rules decide whether `commands:execute` works:
 

@@ -43,6 +43,7 @@ impl Policy {
                     | "web:fetch"
                     | "workstream:post"
                     | "mailbox:send"
+                    | "schedule:create"
             )),
             "Codex adapter cannot enforce the requested allowed actions"
         );
@@ -675,6 +676,22 @@ mod tests {
         }
         // Codex cannot run without reading the Workspace, so it refuses a Task with no file access.
         assert!(Policy::from_actions(&actions(&["web:search"]), true).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn schedule_create_offers_tools_and_changes_no_sandbox_permission() -> Result<()> {
+        let plain = Policy::from_actions(&actions(&["files:read"]), false)?;
+        let scheduling = Policy::from_actions(&actions(&["files:read", "schedule:create"]), false)?;
+        assert_eq!(
+            (
+                scheduling.write,
+                scheduling.commands,
+                scheduling.search,
+                scheduling.network
+            ),
+            (plain.write, plain.commands, plain.search, plain.network)
+        );
         Ok(())
     }
 }

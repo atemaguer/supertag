@@ -432,8 +432,8 @@ tool the turn does not get; it does not only leave it out of the list.
 
 | Turn | Tools |
 | --- | --- |
-| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule`, `cancel_schedule`, and the [Session reads](#recalling-other-sessions) |
-| A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule`, `cancel_schedule`, and the Session reads |
+| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), and the [Session reads](#recalling-other-sessions) |
+| A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), and the Session reads |
 | A Tag's inbox | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the Session reads |
 | A work Session's report turn | the Session reads |
 | A work Session's turn | `ask` |
@@ -542,8 +542,8 @@ An active Schedule is a wait: an Objective whose owner scheduled a check is not 
 resets the [idle rule](#the-idle-rule), as a person's message does.
 
 Limits: a Tag holds at most 25 Schedules that have not finished, and one turn creates at most 3.
-A Permission Set that grants `schedule:create` with `approvalRequired: true` denies the tools;
-see [the IAM reference](iam.md#current-action-vocabulary).
+A turn gets the tools only when its Tag holds the `schedule:create` runtime action; see
+[the IAM reference](iam.md#current-action-vocabulary).
 
 Operators manage Schedules with `supertag schedule create`, `pause`, and `resume`, and with
 `supertag get schedule`, `describe schedule`, and `delete schedule`; see

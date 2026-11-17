@@ -4844,8 +4844,8 @@ type AttemptCapabilities struct {
 	// With `may_ask_objective_question`: the Objective is ongoing, so only an operator ends it
 	// and its owner may report it ready for review or blocked, never completed.
 	ObjectiveOngoing bool `protobuf:"varint,12,opt,name=objective_ongoing,json=objectiveOngoing,proto3" json:"objective_ongoing,omitempty"`
-	// A root turn may schedule a later turn of its Tag in its Session (AttemptSchedules), unless
-	// the Tag's policy requires approval for `schedule:create`.
+	// A root turn whose admitted actions include `schedule:create` may schedule a later turn of
+	// its Tag in its Session (AttemptSchedules).
 	MaySchedule bool `protobuf:"varint,13,opt,name=may_schedule,json=maySchedule,proto3" json:"may_schedule,omitempty"`
 	// The Control Plane's IANA time zone, in which `schedule` reads a time that names none.
 	TimeZone      string `protobuf:"bytes,14,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`

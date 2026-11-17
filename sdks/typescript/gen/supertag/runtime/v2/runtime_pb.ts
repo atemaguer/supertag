@@ -1371,8 +1371,8 @@ export type AttemptCapabilities = Message<"supertag.runtime.v2.AttemptCapabiliti
   objectiveOngoing: boolean;
 
   /**
-   * A root turn may schedule a later turn of its Tag in its Session (AttemptSchedules), unless
-   * the Tag's policy requires approval for `schedule:create`.
+   * A root turn whose admitted actions include `schedule:create` may schedule a later turn of
+   * its Tag in its Session (AttemptSchedules).
    *
    * @generated from field: bool may_schedule = 13;
    */

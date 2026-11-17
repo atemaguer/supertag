@@ -478,8 +478,8 @@ message AttemptCapabilities {
   // With `may_ask_objective_question`: the Objective is ongoing, so only an operator ends it
   // and its owner may report it ready for review or blocked, never completed.
   bool objective_ongoing = 12;
-  // A root turn may schedule a later turn of its Tag in its Session (AttemptSchedules), unless
-  // the Tag's policy requires approval for `schedule:create`.
+  // A root turn whose admitted actions include `schedule:create` may schedule a later turn of
+  // its Tag in its Session (AttemptSchedules).
   bool may_schedule = 13;
   // The Control Plane's IANA time zone, in which `schedule` reads a time that names none.
   string time_zone = 14;

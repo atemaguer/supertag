@@ -963,7 +963,10 @@ async fn an_operator_creates_a_tag_once_with_the_lead_tag_defaults() {
     assert_eq!(created.harness_kind, "claude_code");
     assert_eq!(created.revision, 1);
     assert!(!created.lead);
-    assert_eq!(created.allowed_actions, ["commands:execute", "files:write"]);
+    assert_eq!(
+        created.allowed_actions,
+        ["commands:execute", "files:write", "schedule:create"]
+    );
     assert_eq!(
         client.create_tag(id, new_tag()).await.unwrap_err(),
         "A Tag with that ID or name already exists."

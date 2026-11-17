@@ -60,6 +60,8 @@ const ACTIONS: Readonly<Record<string, readonly string[]>> = {
   "web:fetch": ["WebFetch"],
   [WORKSTREAM_POST_ACTION]: [],
   "mailbox:send": [],
+  // Offers the `schedule` coordination tools, not a native tool.
+  "schedule:create": [],
 };
 
 export class UnsupportedPermissionError extends Error {}

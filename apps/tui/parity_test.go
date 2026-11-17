@@ -468,7 +468,7 @@ func TestNewTagCreatesATagWithTheLeadTagsDefaults(t *testing.T) {
 	req := fake.putTags[0]
 	if req.GetTagId() != "release-reviewer" || req.GetName() != "Release Reviewer" || req.GetHarnessKind() != v2.HarnessKind_HARNESS_KIND_CODEX ||
 		req.GetWorkspace().GetWorkspaceId() != "supertag" || req.ExpectedRevision == nil || req.GetExpectedRevision() != 0 ||
-		strings.Join(req.GetAllowedActions(), ",") != "commands:execute,files:write" {
+		strings.Join(req.GetAllowedActions(), ",") != "commands:execute,files:write,schedule:create" {
 		t.Fatalf("PutTag = %v", req)
 	}
 	if m.pane != paneConversation || m.selectedTag() != "release-reviewer" {

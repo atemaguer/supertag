@@ -701,6 +701,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
     let mut permissions = vec![
         json!({ "target": "runtime", "action": "commands:execute" }),
         json!({ "target": "runtime", "action": "files:write" }),
+        json!({ "target": "runtime", "action": "schedule:create" }),
     ];
     // Current Codex models run commands only in code mode, which SuperTag starts only for a Task
     // that may also fetch from the web: without it the lead could not run commands at all.
@@ -818,7 +819,15 @@ mod tests {
                 .iter()
                 .map(|permission| permission["action"].as_str().unwrap())
                 .collect();
-            assert_eq!(actions, ["commands:execute", "files:write", "web:fetch"]);
+            assert_eq!(
+                actions,
+                [
+                    "commands:execute",
+                    "files:write",
+                    "schedule:create",
+                    "web:fetch"
+                ]
+            );
             // The local host runs three Task Attempts per harness at once.
             assert_eq!(document["services"][machine_name()]["concurrency"], 3);
             let sources = provision
@@ -847,7 +856,7 @@ mod tests {
         let document = document(&answers, &repository);
         let permissions =
             &document["services"]["control-plane"]["provision"][0]["spec"]["permissions"];
-        assert_eq!(permissions.as_array().unwrap().len(), 2, "{permissions}");
+        assert_eq!(permissions.as_array().unwrap().len(), 3, "{permissions}");
         assert!(
             !permissions.to_string().contains("web:fetch"),
             "{permissions}"

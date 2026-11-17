@@ -13,8 +13,9 @@ import (
 )
 
 // newTagActions are the runtime actions `supertag init` gives its lead Tag through its Permission
-// Set: edit files and run commands in its Workspace. A Tag created here gets the same.
-var newTagActions = []string{"commands:execute", "files:write"}
+// Set: edit files, run commands in its Workspace, and schedule its own follow-ups. A Tag created
+// here gets the same.
+var newTagActions = []string{"commands:execute", "files:write", "schedule:create"}
 
 // Harnesses are the harnesses a Tag can name, in the order they are offered, with their names.
 var Harnesses = []struct{ Kind, Label string }{

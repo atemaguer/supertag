@@ -198,6 +198,7 @@ const CURSOR_ACTIONS: &[&str] = &[
     "web:search",
     "workstream:post",
     "mailbox:send",
+    "schedule:create",
 ];
 
 /// Why `harness` cannot run a Task with these accepted actions, or `None` when it can. Cursor's
