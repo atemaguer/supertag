@@ -289,6 +289,7 @@ spec: {purpose: Observe releases.}
     )?;
     command(&gateway, &["apply", "-f", external.to_str().unwrap()], true).await?;
     lead_tag(root, &gateway).await?;
+    declared_schedules(root, &gateway).await?;
     command(
         &gateway,
         &["mailbox-grant", "allow", "observer", "builder"],
@@ -524,6 +525,88 @@ async fn lead_tag(root: &Path, gateway: &str) -> Result<()> {
         true,
     )
     .await?;
+    Ok(())
+}
+
+/// A `kind: Schedule` manifest declares a recurring Schedule in the operator's conversation with a
+/// Tag: applying it again changes nothing, a changed note updates it, and pruning cancels it.
+async fn declared_schedules(root: &Path, gateway: &str) -> Result<()> {
+    let manifest = |file: &str, note: &str| {
+        let path = root.join(file);
+        std::fs::write(
+            &path,
+            format!(
+                "apiVersion: supertag/v1\nkind: Schedule\nmetadata: {{name: weekly-summary}}\nspec:\n  tag: observer\n  every: \"0 9 * * MON\"\n  timeZone: Europe/Berlin\n  note: {note}\n"
+            ),
+        )
+        .map(|()| path)
+    };
+    let first = manifest("schedule.yaml", "Summarize open work")?;
+    let first = first.to_str().unwrap();
+    let preview = command(gateway, &["diff", "-f", first, "--set", "schedules"], true).await?;
+    ensure!(
+        preview.contains("create Schedule/weekly-summary"),
+        "{preview}"
+    );
+    command(gateway, &["apply", "-f", first, "--set", "schedules"], true).await?;
+    let read: Value = serde_json::from_str(
+        &command(gateway, &["get", "schedule", "weekly-summary"], true).await?,
+    )?;
+    ensure!(
+        read["state"] == "SCHEDULE_STATE_ACTIVE"
+            && read["tag_id"] == "observer"
+            && read["every"]["time_zone"] == "Europe/Berlin",
+        "{read}"
+    );
+    ensure!(
+        command(gateway, &["diff", "-f", first, "--set", "schedules"], true)
+            .await?
+            .trim()
+            == "No changes."
+    );
+    let changed = manifest("schedule-changed.yaml", "Summarize the week")?;
+    let changed = changed.to_str().unwrap();
+    let preview = command(
+        gateway,
+        &["diff", "-f", changed, "--set", "schedules"],
+        true,
+    )
+    .await?;
+    ensure!(
+        preview.contains("update Schedule/weekly-summary"),
+        "{preview}"
+    );
+    command(
+        gateway,
+        &["apply", "-f", changed, "--set", "schedules"],
+        true,
+    )
+    .await?;
+    let read: Value = serde_json::from_str(
+        &command(gateway, &["get", "schedule", "weekly-summary"], true).await?,
+    )?;
+    ensure!(read["note"] == "Summarize the week", "{read}");
+    // Applying the set without it prunes it: the Schedule is cancelled.
+    let without = root.join("schedule-none.yaml");
+    std::fs::write(
+        &without,
+        "apiVersion: supertag/v1\nkind: Tag\nmetadata: {name: observer}\nspec: {}\n",
+    )?;
+    let without = without.to_str().unwrap();
+    let pruned = command(
+        gateway,
+        &["apply", "-f", without, "--set", "schedules", "--prune"],
+        true,
+    )
+    .await?;
+    ensure!(
+        pruned.contains("deleted Schedule/weekly-summary"),
+        "{pruned}"
+    );
+    let read: Value = serde_json::from_str(
+        &command(gateway, &["get", "schedule", "weekly-summary"], true).await?,
+    )?;
+    ensure!(read["state"] == "SCHEDULE_STATE_CANCELLED", "{read}");
     Ok(())
 }
 

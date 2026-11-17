@@ -22,7 +22,8 @@ use crate::{
 };
 
 /// Prunable kinds, in removal order: dependents before what they use.
-const KINDS: [&str; 8] = [
+const KINDS: [&str; 9] = [
+    "Schedule",
     "SurfaceLocation",
     "Team",
     "Tag",
@@ -69,6 +70,7 @@ async fn revision(tx: &mut Transaction<'_, Any>, kind: &str, id: &str) -> Result
         }
         "Workspace" => crate::github_workspaces::revision_in(tx, id).await,
         "Volume" => crate::artifact_volumes::revision_in(tx, id).await,
+        "Schedule" => crate::schedules::revision_in(tx, id).await,
         _ => Err(invalid("unsupported apply set kind")),
     }
 }
@@ -98,6 +100,7 @@ async fn remove(
         "ContextSet" => crate::policy::delete_context_set_in(tx, id, expected).await,
         "Workspace" => crate::github_workspaces::delete_in(tx, id, expected).await,
         "Volume" => crate::artifact_volumes::delete_in(tx, id, expected).await,
+        "Schedule" => crate::schedules::prune_in(tx, id, expected, now_ms).await,
         _ => Err(invalid("unsupported apply set kind")),
     }
 }

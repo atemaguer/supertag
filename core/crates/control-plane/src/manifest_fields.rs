@@ -15,7 +15,7 @@ use crate::{
     store::{Result, invalid, name},
 };
 
-const KINDS: [&str; 9] = [
+const KINDS: [&str; 10] = [
     "SurfaceAccount",
     "Volume",
     "Workspace",
@@ -25,6 +25,7 @@ const KINDS: [&str; 9] = [
     "Tag",
     "Team",
     "SurfaceLocation",
+    "Schedule",
 ];
 const MAX_RESOURCES: usize = 1024;
 const MAX_FIELDS: usize = 32;

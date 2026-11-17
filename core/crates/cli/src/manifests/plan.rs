@@ -29,6 +29,7 @@ pub(super) struct Catalog<'a> {
     objectives: objectives_client::ObjectivesClient<ProtocolChannel>,
     relationships: manifest_relationships_client::ManifestRelationshipsClient<ProtocolChannel>,
     placement: placement_client::PlacementClient<ProtocolChannel>,
+    schedules: schedules_client::SchedulesClient<ProtocolChannel>,
     manager: &'a str,
     create_only: bool,
     /// The revision the current resource was planned against, if it exists.
@@ -70,6 +71,7 @@ enum Write {
     ObjectiveLimits(SetObjectiveLimitsRequest),
     Relationships(ReconcileTagRelationshipsRequest),
     RunsOn(SetTagRunsOnRequest),
+    Schedule(PutScheduleRequest),
 }
 
 pub(super) struct Change {
@@ -178,6 +180,7 @@ impl<'a> Catalog<'a> {
             objectives: client!(objectives_client, ObjectivesClient),
             relationships: client!(manifest_relationships_client, ManifestRelationshipsClient),
             placement: client!(placement_client, PlacementClient),
+            schedules: client!(schedules_client, SchedulesClient),
             manager,
             create_only,
             observed: None,
@@ -674,6 +677,79 @@ impl<'a> Catalog<'a> {
             }
             Resource::Objective(spec) => {
                 return self.plan_objective(spec, name, declarations).await;
+            }
+            Resource::Schedule(spec) => {
+                let prior = lookup(self.schedules.get(request(
+                    GetScheduleRequest {
+                        schedule_id: name.into(),
+                    },
+                    token,
+                )?))
+                .await?;
+                self.observed = prior.as_ref().map(|value| value.revision);
+                if self.create_only && prior.is_some() {
+                    return Ok(None);
+                }
+                self.require_tag(declarations, &spec.tag).await?;
+                let old = prior.as_ref();
+                let every = |value: &Schedule| {
+                    value
+                        .every
+                        .as_ref()
+                        .map(|every| every.cron.as_bytes().to_vec())
+                        .unwrap_or_default()
+                };
+                let zone = |value: &Schedule| {
+                    value
+                        .every
+                        .as_ref()
+                        .map(|every| every.time_zone.as_bytes().to_vec())
+                        .unwrap_or_default()
+                };
+                self.planned_fields = vec![
+                    field(
+                        "spec.tag",
+                        old.map(|v| v.tag_id.as_bytes().to_vec()),
+                        spec.tag.as_bytes().to_vec(),
+                    ),
+                    field("spec.every", old.map(every), spec.every.as_bytes().to_vec()),
+                    field(
+                        "spec.note",
+                        old.map(|v| v.note.as_bytes().to_vec()),
+                        spec.note.trim().as_bytes().to_vec(),
+                    ),
+                ];
+                if let Some(time_zone) = &spec.time_zone {
+                    self.planned_fields.push(field(
+                        "spec.timeZone",
+                        old.map(zone),
+                        time_zone.as_bytes().to_vec(),
+                    ));
+                }
+                let unchanged = old.is_some_and(|value| {
+                    matches!(value.state(), ScheduleState::Active | ScheduleState::Paused)
+                        && value.tag_id == spec.tag
+                        && value.note == spec.note.trim()
+                        && value.every.as_ref().is_some_and(|every| {
+                            every.cron == spec.every.trim()
+                                && spec
+                                    .time_zone
+                                    .as_deref()
+                                    .is_none_or(|zone| every.time_zone == zone)
+                        })
+                });
+                (!unchanged).then(|| {
+                    (
+                        prior.is_some(),
+                        Write::Schedule(PutScheduleRequest {
+                            schedule_id: name.into(),
+                            tag_id: spec.tag,
+                            note: spec.note,
+                            every: spec.every,
+                            time_zone: spec.time_zone,
+                        }),
+                    )
+                })
             }
         };
         Ok(changes)
@@ -1413,6 +1489,11 @@ impl<'a> Catalog<'a> {
                 .set_tag_runs_on(request(input, token)?)
                 .await
                 .map(|_| None),
+            Write::Schedule(input) => self
+                .schedules
+                .put(request(input, token)?)
+                .await
+                .map(|value| Some(value.into_inner().revision)),
         };
         let revision = result.with_context(|| format!("apply {}", change.label))?;
         if let Some(key) = &change.key

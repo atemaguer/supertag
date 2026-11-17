@@ -30,4 +30,9 @@ EXECUTE FUNCTION supertag_v2_watch_schedule();
 CREATE TRIGGER supertag_v2_watch_schedule_deleted AFTER DELETE ON supertag_v2_schedules
 FOR EACH ROW EXECUTE FUNCTION supertag_v2_watch_schedule();
 
+-- A Schedule's revision changes when its spec or state changes (declared again, paused, resumed,
+-- cancelled), never when it fires, so an apply set prunes a declared Schedule only while it is
+-- as the set left it.
+ALTER TABLE supertag_v2_schedules ADD COLUMN revision BIGINT NOT NULL DEFAULT 1;
+
 UPDATE supertag_v2_schema SET version=96 WHERE version=95;

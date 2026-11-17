@@ -57,6 +57,7 @@ enum Kind {
     Team,
     SurfaceLocation,
     Objective,
+    Schedule,
 }
 
 #[derive(Deserialize)]
@@ -152,6 +153,16 @@ struct TeamSpec {
     max_concurrency: Option<u32>,
 }
 
+/// A recurring Schedule that wakes a Tag in the applying operator's conversation with it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ScheduleSpec {
+    tag: String,
+    every: String,
+    time_zone: Option<String>,
+    note: String,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct ObjectiveSpec {
@@ -178,6 +189,7 @@ enum Resource {
     Team(TeamSpec),
     SurfaceLocation(SurfaceLocation),
     Objective(ObjectiveSpec),
+    Schedule(ScheduleSpec),
 }
 
 struct Manifest {
@@ -290,6 +302,7 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
             Resource::SurfaceLocation(value.into())
         }
         Kind::Objective => Resource::Objective(typed(spec, kind)?),
+        Kind::Schedule => Resource::Schedule(typed(spec, kind)?),
     };
     Ok(Manifest {
         kind,

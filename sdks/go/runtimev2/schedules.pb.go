@@ -161,7 +161,10 @@ type Schedule struct {
 	LastTaskId    *string `protobuf:"bytes,14,opt,name=last_task_id,json=lastTaskId,proto3,oneof" json:"last_task_id,omitempty"`
 	LastFiredAtMs *int64  `protobuf:"varint,15,opt,name=last_fired_at_ms,json=lastFiredAtMs,proto3,oneof" json:"last_fired_at_ms,omitempty"`
 	// The principal whose conversation it fires in, when it fires in a conversation.
-	Audience      *string `protobuf:"bytes,16,opt,name=audience,proto3,oneof" json:"audience,omitempty"`
+	Audience *string `protobuf:"bytes,16,opt,name=audience,proto3,oneof" json:"audience,omitempty"`
+	// Changes when its spec or state changes (declared again, paused, resumed, cancelled), not
+	// when it fires.
+	Revision      uint64 `protobuf:"varint,17,opt,name=revision,proto3" json:"revision,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -306,6 +309,13 @@ func (x *Schedule) GetAudience() string {
 		return *x.Audience
 	}
 	return ""
+}
+
+func (x *Schedule) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
 }
 
 // Exactly one of `at` and `every`.
@@ -945,7 +955,7 @@ const file_supertag_runtime_v2_schedules_proto_rawDesc = "" +
 	"#supertag/runtime/v2/schedules.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"E\n" +
 	"\x12ScheduleRecurrence\x12\x12\n" +
 	"\x04cron\x18\x01 \x01(\tR\x04cron\x12\x1b\n" +
-	"\ttime_zone\x18\x02 \x01(\tR\btimeZone\"\xb6\x05\n" +
+	"\ttime_zone\x18\x02 \x01(\tR\btimeZone\"\xd2\x05\n" +
 	"\bSchedule\x12\x1f\n" +
 	"\vschedule_id\x18\x01 \x01(\tR\n" +
 	"scheduleId\x12\x15\n" +
@@ -968,7 +978,8 @@ const file_supertag_runtime_v2_schedules_proto_rawDesc = "" +
 	"\flast_task_id\x18\x0e \x01(\tH\x03R\n" +
 	"lastTaskId\x88\x01\x01\x12,\n" +
 	"\x10last_fired_at_ms\x18\x0f \x01(\x03H\x04R\rlastFiredAtMs\x88\x01\x01\x12\x1f\n" +
-	"\baudience\x18\x10 \x01(\tH\x05R\baudience\x88\x01\x01B\b\n" +
+	"\baudience\x18\x10 \x01(\tH\x05R\baudience\x88\x01\x01\x12\x1a\n" +
+	"\brevision\x18\x11 \x01(\x04R\brevisionB\b\n" +
 	"\x06_at_msB\x11\n" +
 	"\x0f_next_due_at_msB\x0f\n" +
 	"\r_objective_idB\x0f\n" +

@@ -32,7 +32,7 @@ class ScheduleRecurrence(_message.Message):
     def __init__(self, cron: _Optional[str] = ..., time_zone: _Optional[str] = ...) -> None: ...
 
 class Schedule(_message.Message):
-    __slots__ = ("schedule_id", "tag_id", "session_id", "note", "at_ms", "every", "state", "next_due_at_ms", "created_by", "created_at_ms", "objective_id", "fire_count", "missed_count", "last_task_id", "last_fired_at_ms", "audience")
+    __slots__ = ("schedule_id", "tag_id", "session_id", "note", "at_ms", "every", "state", "next_due_at_ms", "created_by", "created_at_ms", "objective_id", "fire_count", "missed_count", "last_task_id", "last_fired_at_ms", "audience", "revision")
     SCHEDULE_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -49,6 +49,7 @@ class Schedule(_message.Message):
     LAST_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     LAST_FIRED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
     schedule_id: str
     tag_id: str
     session_id: str
@@ -65,7 +66,8 @@ class Schedule(_message.Message):
     last_task_id: str
     last_fired_at_ms: int
     audience: str
-    def __init__(self, schedule_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., note: _Optional[str] = ..., at_ms: _Optional[int] = ..., every: _Optional[_Union[ScheduleRecurrence, _Mapping]] = ..., state: _Optional[_Union[ScheduleState, str]] = ..., next_due_at_ms: _Optional[int] = ..., created_by: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., objective_id: _Optional[str] = ..., fire_count: _Optional[int] = ..., missed_count: _Optional[int] = ..., last_task_id: _Optional[str] = ..., last_fired_at_ms: _Optional[int] = ..., audience: _Optional[str] = ...) -> None: ...
+    revision: int
+    def __init__(self, schedule_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., note: _Optional[str] = ..., at_ms: _Optional[int] = ..., every: _Optional[_Union[ScheduleRecurrence, _Mapping]] = ..., state: _Optional[_Union[ScheduleState, str]] = ..., next_due_at_ms: _Optional[int] = ..., created_by: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., objective_id: _Optional[str] = ..., fire_count: _Optional[int] = ..., missed_count: _Optional[int] = ..., last_task_id: _Optional[str] = ..., last_fired_at_ms: _Optional[int] = ..., audience: _Optional[str] = ..., revision: _Optional[int] = ...) -> None: ...
 
 class CreateScheduleRequest(_message.Message):
     __slots__ = ("operation_id", "tag_id", "note", "at", "every", "time_zone")

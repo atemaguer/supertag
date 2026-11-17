@@ -257,6 +257,7 @@ pub(crate) fn schedule_row(row: &AnyRow) -> Result<Schedule> {
         last_task_id: row.try_get("last_task_id")?,
         last_fired_at_ms: row.try_get("last_fired_at_ms")?,
         audience: row.try_get("audience_principal")?,
+        revision: row.try_get::<i64, _>("revision")? as u64,
     })
 }
 
@@ -658,7 +659,7 @@ impl Store {
                     ACTIVE
                 };
                 let next = next_after(cron, *zone, now)?;
-                sqlx::query("UPDATE supertag_v2_schedules SET note=$1,cron=$2,time_zone=$3,state=$4,next_due_at_ms=$5,updated_at_ms=$6 WHERE schedule_id=$7")
+                sqlx::query("UPDATE supertag_v2_schedules SET note=$1,cron=$2,time_zone=$3,state=$4,next_due_at_ms=$5,updated_at_ms=$6,revision=revision+1 WHERE schedule_id=$7")
                     .bind(&note).bind(cron).bind(zone.name()).bind(state).bind(next).bind(now).bind(id)
                     .execute(&mut *tx).await?;
                 schedule_in(&mut tx, id).await?.0
@@ -838,7 +839,7 @@ impl Store {
             }
             _ => return Err(invalid("unsupported Schedule change")),
         };
-        sqlx::query("UPDATE supertag_v2_schedules SET state=$1,next_due_at_ms=$2,updated_at_ms=$3 WHERE schedule_id=$4")
+        sqlx::query("UPDATE supertag_v2_schedules SET state=$1,next_due_at_ms=$2,updated_at_ms=$3,revision=revision+1 WHERE schedule_id=$4")
             .bind(target as i64).bind(next).bind(now).bind(id).execute(&mut *tx).await?;
         let (schedule, _) = schedule_in(&mut tx, id).await?;
         tx.commit().await?;
@@ -1244,6 +1245,46 @@ pub(crate) async fn close_objective_in(
         .bind(CANCELLED).bind(now).bind(objective_id).bind(STAGED).bind(ACTIVE).bind(PAUSED)
         .execute(&mut **tx).await?;
     Ok(())
+}
+
+/// An apply set prunes a declared Schedule it left at `expected`: it is cancelled.
+pub(crate) async fn prune_in(
+    tx: &mut Transaction<'_, Any>,
+    id: &str,
+    expected: u64,
+    now: i64,
+) -> Result<()> {
+    let revision: Option<i64> =
+        sqlx::query_scalar("SELECT revision FROM supertag_v2_schedules WHERE schedule_id=$1")
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    match revision {
+        None => Ok(()),
+        Some(revision) if revision as u64 != expected => Err(StoreError::Conflict(
+            "Schedule changed since it was applied".into(),
+        )),
+        Some(_) => {
+            sqlx::query("UPDATE supertag_v2_schedules SET state=$1,next_due_at_ms=NULL,updated_at_ms=$2,revision=revision+1 WHERE schedule_id=$3 AND state IN ($4,$5,$6)")
+                .bind(CANCELLED).bind(now).bind(id).bind(STAGED).bind(ACTIVE).bind(PAUSED)
+                .execute(&mut **tx).await?;
+            crate::apply_sets::forget(tx, "Schedule", id).await
+        }
+    }
+}
+
+/// A declared Schedule's revision, while it is not cancelled or done.
+pub(crate) async fn revision_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Option<u64>> {
+    let revision: Option<i64> = sqlx::query_scalar(
+        "SELECT revision FROM supertag_v2_schedules WHERE schedule_id=$1 AND state IN ($2,$3,$4)",
+    )
+    .bind(id)
+    .bind(STAGED)
+    .bind(ACTIVE)
+    .bind(PAUSED)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(revision.map(|value| value as u64))
 }
 
 /// A retired Tag's Schedules stop.

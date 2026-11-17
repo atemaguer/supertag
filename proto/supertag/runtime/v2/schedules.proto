@@ -91,6 +91,9 @@ message Schedule {
   optional int64 last_fired_at_ms = 15;
   // The principal whose conversation it fires in, when it fires in a conversation.
   optional string audience = 16;
+  // Changes when its spec or state changes (declared again, paused, resumed, cancelled), not
+  // when it fires.
+  uint64 revision = 17;
 }
 
 // Exactly one of `at` and `every`.
