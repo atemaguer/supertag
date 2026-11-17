@@ -101,6 +101,14 @@ impl Reporter {
         }
     }
 
+    /// Waits briefly for the Host's first accepted report. A lane's supervisor
+    /// reports the Host's presence, including its labels, before it starts lanes.
+    pub(crate) async fn first_report(&self, wait: Duration) {
+        if let Self::Host(presence) = self {
+            presence.first_report(wait).await;
+        }
+    }
+
     pub(crate) fn set(&self, state: State) {
         match self {
             Self::Host(presence) => presence.set(state),
@@ -137,6 +145,7 @@ pub(crate) struct Presence {
     profile: Profile,
     disk: DiskSpaceSource,
     labels: Vec<String>,
+    reported: watch::Receiver<bool>,
 }
 
 /// Declared labels plus this machine's operating system and architecture.
@@ -211,6 +220,7 @@ impl Presence {
     ) -> Self {
         let cancel = shutdown.child_token();
         let (state, mut receiver) = watch::channel(State::Pending);
+        let (reported_sender, reported) = watch::channel(false);
         let mut reporter = Self {
             state,
             cancel: cancel.clone(),
@@ -223,6 +233,7 @@ impl Presence {
             profile: profile.clone(),
             disk: disk.clone(),
             labels: labels.clone(),
+            reported,
         };
         reporter.task = Some(tokio::spawn(async move {
             let mut client = client;
@@ -249,6 +260,9 @@ impl Presence {
                     _ = cancel.cancelled() => return Ok(()),
                     response = client.report_host(request(report, &token)?) => response,
                 };
+                if response.is_ok() {
+                    reported_sender.send_replace(true);
+                }
                 if let Err(error) = response
                     && !retryable(&error)
                 {
@@ -260,6 +274,13 @@ impl Presence {
             }
         }));
         reporter
+    }
+
+    /// Waits briefly for the first accepted report, so the Control Plane knows
+    /// this host's labels before it places work on it.
+    pub(crate) async fn first_report(&self, wait: Duration) {
+        let mut reported = self.reported.clone();
+        let _ = tokio::time::timeout(wait, reported.wait_for(|reported| *reported)).await;
     }
 
     pub(crate) fn set(&self, state: State) {
