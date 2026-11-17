@@ -119,7 +119,9 @@ or `all`; a listed prerequisite that is missing then fails the test. The prerequ
 pulls `nginx:1.27-alpine`), `codex-sandbox` (on Linux, Codex's bubblewrap sandbox: the `bwrap`
 package and unprivileged user namespaces, with `SUPERTAG_TEST_CODEX_BINARY` set to a native
 Codex), `claude-sandbox` (Claude Code's sandbox runtime, installed by `pnpm install`, with
-`SUPERTAG_RUST_TEST_NODE`; on Linux also `bwrap`, `socat`, and `ripgrep`), and `linux-root`. The `linux-root` shared execution cases need root in a disposable Linux VM or
+`SUPERTAG_RUST_TEST_NODE`; on Linux also `bwrap`, `socat`, `ripgrep`, and nested user namespaces
+inside bubblewrap's, which Ubuntu's `bwrap-userns-restrict` AppArmor profile and GitHub's hosted
+runners do not allow, so CI does not require it), and `linux-root`. The `linux-root` shared execution cases need root in a disposable Linux VM or
 container, util-linux `setsid`, and `SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY` set to a built
 `supertag-shared-execution`. The `linux-root` job in `.github/workflows/core.yml` runs them.
 When you run tests in a container, start it with an init (`docker run --init`): processes a

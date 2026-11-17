@@ -630,7 +630,9 @@ a host that runs the Tag
 Codex code-mode commands run under the same profile, so they reach the network only through
 the managed proxy and the egress proxy as well.
 
-Claude Code's sandbox runs on macOS, and on Linux when `bubblewrap` and `socat` are installed. A
+Claude Code's sandbox runs on macOS, and on Linux when `bubblewrap` and `socat` are installed and
+a process may create a user namespace inside bubblewrap's. Ubuntu's `bwrap-userns-restrict`
+AppArmor profile forbids that, so such a host does not offer the sandbox. A
 Claude Code host reports whether it can run the sandbox, and only such a host takes a Task that
 may run commands under a network scope. Claude Code fails the Task Attempt instead of running
 commands unsandboxed when its sandbox does not start. The sandbox isolates only the network:

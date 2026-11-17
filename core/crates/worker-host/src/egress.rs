@@ -1268,19 +1268,61 @@ pub mod fixture {
     }
 }
 
-/// Whether Claude Code's own sandbox can run here: always on macOS (Seatbelt); on Linux it needs
-/// bubblewrap and socat on `PATH`. A Claude Code lane reports it so placement can send it Tasks
-/// whose commands must stay inside a network scope; the adapter still fails closed if the
-/// sandbox does not start.
+/// Whether Claude Code's own sandbox can run here: always on macOS (Seatbelt). On Linux it needs
+/// bubblewrap and socat on `PATH`, and a nested user namespace inside bubblewrap's, where the
+/// sandbox runtime's seccomp helper writes its own `setgroups`. Ubuntu's AppArmor policy for
+/// bubblewrap (`bwrap-userns-restrict`, as on GitHub's hosted runners) strips capabilities there,
+/// and the sandbox cannot start. A Claude Code lane reports the answer so placement sends it
+/// Tasks whose commands must stay inside a network scope only when it holds; the adapter still
+/// fails closed if the sandbox does not start. Checked once per process.
 pub fn claude_sandbox_available() -> bool {
-    match std::env::consts::OS {
+    static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *AVAILABLE.get_or_init(|| match std::env::consts::OS {
         "macos" => true,
-        "linux" => ["bwrap", "socat"].iter().all(|tool| {
-            std::env::var_os("PATH").is_some_and(|path| {
-                std::env::split_paths(&path).any(|directory| directory.join(tool).is_file())
-            })
-        }),
+        "linux" => linux_sandbox_available(),
         _ => false,
+    })
+}
+
+fn on_path(tool: &str) -> Option<std::path::PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|directory| directory.join(tool))
+        .find(|path| path.is_file())
+}
+
+/// Runs `unshare --user --map-root-user true` inside a bubblewrap user and network namespace,
+/// as the sandbox runtime's seccomp helper nests one, within five seconds.
+fn linux_sandbox_available() -> bool {
+    let (Some(bwrap), Some(_), Some(unshare)) =
+        (on_path("bwrap"), on_path("socat"), on_path("unshare"))
+    else {
+        return false;
+    };
+    let Ok(mut child) = std::process::Command::new(bwrap)
+        .args(["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"])
+        .args(["--unshare-user", "--unshare-net", "--die-with-parent", "--"])
+        .arg(unshare)
+        .args(["--user", "--map-root-user", "true"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
     }
 }
 

@@ -211,6 +211,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Linux Claude Code host offers Claude Code's sandbox only when a user namespace can be made
+  inside bubblewrap's, as the sandbox needs. A host whose AppArmor policy forbids it, such as
+  Ubuntu's `bwrap-userns-restrict`, no longer takes scoped command Tasks it would fail.
 - Text fields in the desktop app no longer draw a thick offset focus outline; keyboard focus on
   buttons and links is one subtle ring.
 - A Watch naming a kind the Control Plane doesn't know follows the kinds it does know instead of
