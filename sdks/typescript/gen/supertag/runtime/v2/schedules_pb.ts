@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/schedules.proto.
  */
 export const file_supertag_runtime_v2_schedules: GenFile = /*@__PURE__*/
-  fileDesc("CiNzdXBlcnRhZy9ydW50aW1lL3YyL3NjaGVkdWxlcy5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiI1ChJTY2hlZHVsZVJlY3VycmVuY2USDAoEY3JvbhgBIAEoCRIRCgl0aW1lX3pvbmUYAiABKAkijwQKCFNjaGVkdWxlEhMKC3NjaGVkdWxlX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEgwKBG5vdGUYBCABKAkSEgoFYXRfbXMYBSABKANIAIgBARI2CgVldmVyeRgGIAEoCzInLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGVSZWN1cnJlbmNlEjEKBXN0YXRlGAcgASgOMiIuc3VwZXJ0YWcucnVudGltZS52Mi5TY2hlZHVsZVN0YXRlEhsKDm5leHRfZHVlX2F0X21zGAggASgDSAGIAQESEgoKY3JlYXRlZF9ieRgJIAEoCRIVCg1jcmVhdGVkX2F0X21zGAogASgDEhkKDG9iamVjdGl2ZV9pZBgLIAEoCUgCiAEBEhIKCmZpcmVfY291bnQYDCABKAQSFAoMbWlzc2VkX2NvdW50GA0gASgEEhkKDGxhc3RfdGFza19pZBgOIAEoCUgDiAEBEh0KEGxhc3RfZmlyZWRfYXRfbXMYDyABKANIBIgBARIVCghhdWRpZW5jZRgQIAEoCUgFiAEBQggKBl9hdF9tc0IRCg9fbmV4dF9kdWVfYXRfbXNCDwoNX29iamVjdGl2ZV9pZEIPCg1fbGFzdF90YXNrX2lkQhMKEV9sYXN0X2ZpcmVkX2F0X21zQgsKCV9hdWRpZW5jZSKMAQoVQ3JlYXRlU2NoZWR1bGVSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIOCgZ0YWdfaWQYAiABKAkSDAoEbm90ZRgDIAEoCRIKCgJhdBgEIAEoCRINCgVldmVyeRgFIAEoCRIWCgl0aW1lX3pvbmUYBiABKAlIAIgBAUIMCgpfdGltZV96b25lIikKEkdldFNjaGVkdWxlUmVxdWVzdBITCgtzY2hlZHVsZV9pZBgBIAEoCSJQChRMaXN0U2NoZWR1bGVzUmVxdWVzdBITCgZ0YWdfaWQYASABKAlIAIgBARIYChBpbmNsdWRlX2ZpbmlzaGVkGAIgASgIQgkKB190YWdfaWQiSQoVTGlzdFNjaGVkdWxlc1Jlc3BvbnNlEjAKCXNjaGVkdWxlcxgBIAMoCzIdLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGUiwAEKHENyZWF0ZUF0dGVtcHRTY2hlZHVsZVJlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgCIAEoCRIMCgRub3RlGAMgASgJEgoKAmF0GAQgASgJEg0KBWV2ZXJ5GAUgASgJEhYKCXRpbWVfem9uZRgGIAEoCUgAiAEBQgwKCl90aW1lX3pvbmUicAocQ2FuY2VsQXR0ZW1wdFNjaGVkdWxlUmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSEwoLc2NoZWR1bGVfaWQYAiABKAkijQEKF0F0dGVtcHRTY2hlZHVsZVJlc3BvbnNlEi8KCHNjaGVkdWxlGAEgASgLMh0uc3VwZXJ0YWcucnVudGltZS52Mi5TY2hlZHVsZRIuCgdwZW5kaW5nGAIgAygLMh0uc3VwZXJ0YWcucnVudGltZS52Mi5TY2hlZHVsZRIRCgl0aW1lX3pvbmUYAyABKAkqtwEKDVNjaGVkdWxlU3RhdGUSHgoaU0NIRURVTEVfU1RBVEVfVU5TUEVDSUZJRUQQABIZChVTQ0hFRFVMRV9TVEFURV9TVEFHRUQQARIZChVTQ0hFRFVMRV9TVEFURV9BQ1RJVkUQAhIZChVTQ0hFRFVMRV9TVEFURV9QQVVTRUQQAxIXChNTQ0hFRFVMRV9TVEFURV9ET05FEAQSHAoYU0NIRURVTEVfU1RBVEVfQ0FOQ0VMTEVEEAUygwQKCVNjaGVkdWxlcxJTCgZDcmVhdGUSKi5zdXBlcnRhZy5ydW50aW1lLnYyLkNyZWF0ZVNjaGVkdWxlUmVxdWVzdBodLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGUSTQoDR2V0Eicuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRTY2hlZHVsZVJlcXVlc3QaHS5zdXBlcnRhZy5ydW50aW1lLnYyLlNjaGVkdWxlEl0KBExpc3QSKS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RTY2hlZHVsZXNSZXF1ZXN0Giouc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0U2NoZWR1bGVzUmVzcG9uc2USTwoFUGF1c2USJy5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFNjaGVkdWxlUmVxdWVzdBodLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGUSUAoGUmVzdW1lEicuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRTY2hlZHVsZVJlcXVlc3QaHS5zdXBlcnRhZy5ydW50aW1lLnYyLlNjaGVkdWxlElAKBkRlbGV0ZRInLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0U2NoZWR1bGVSZXF1ZXN0Gh0uc3VwZXJ0YWcucnVudGltZS52Mi5TY2hlZHVsZTLoAQoQQXR0ZW1wdFNjaGVkdWxlcxJpCgZDcmVhdGUSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkNyZWF0ZUF0dGVtcHRTY2hlZHVsZVJlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHRTY2hlZHVsZVJlc3BvbnNlEmkKBkNhbmNlbBIxLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FuY2VsQXR0ZW1wdFNjaGVkdWxlUmVxdWVzdBosLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdFNjaGVkdWxlUmVzcG9uc2Uy6AEKEEhhcm5lc3NTY2hlZHVsZXMSaQoGQ3JlYXRlEjEuc3VwZXJ0YWcucnVudGltZS52Mi5DcmVhdGVBdHRlbXB0U2NoZWR1bGVSZXF1ZXN0Giwuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0U2NoZWR1bGVSZXNwb25zZRJpCgZDYW5jZWwSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhbmNlbEF0dGVtcHRTY2hlZHVsZVJlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHRTY2hlZHVsZVJlc3BvbnNlYgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CiNzdXBlcnRhZy9ydW50aW1lL3YyL3NjaGVkdWxlcy5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiI1ChJTY2hlZHVsZVJlY3VycmVuY2USDAoEY3JvbhgBIAEoCRIRCgl0aW1lX3pvbmUYAiABKAkijwQKCFNjaGVkdWxlEhMKC3NjaGVkdWxlX2lkGAEgASgJEg4KBnRhZ19pZBgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEgwKBG5vdGUYBCABKAkSEgoFYXRfbXMYBSABKANIAIgBARI2CgVldmVyeRgGIAEoCzInLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGVSZWN1cnJlbmNlEjEKBXN0YXRlGAcgASgOMiIuc3VwZXJ0YWcucnVudGltZS52Mi5TY2hlZHVsZVN0YXRlEhsKDm5leHRfZHVlX2F0X21zGAggASgDSAGIAQESEgoKY3JlYXRlZF9ieRgJIAEoCRIVCg1jcmVhdGVkX2F0X21zGAogASgDEhkKDG9iamVjdGl2ZV9pZBgLIAEoCUgCiAEBEhIKCmZpcmVfY291bnQYDCABKAQSFAoMbWlzc2VkX2NvdW50GA0gASgEEhkKDGxhc3RfdGFza19pZBgOIAEoCUgDiAEBEh0KEGxhc3RfZmlyZWRfYXRfbXMYDyABKANIBIgBARIVCghhdWRpZW5jZRgQIAEoCUgFiAEBQggKBl9hdF9tc0IRCg9fbmV4dF9kdWVfYXRfbXNCDwoNX29iamVjdGl2ZV9pZEIPCg1fbGFzdF90YXNrX2lkQhMKEV9sYXN0X2ZpcmVkX2F0X21zQgsKCV9hdWRpZW5jZSKMAQoVQ3JlYXRlU2NoZWR1bGVSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIOCgZ0YWdfaWQYAiABKAkSDAoEbm90ZRgDIAEoCRIKCgJhdBgEIAEoCRINCgVldmVyeRgFIAEoCRIWCgl0aW1lX3pvbmUYBiABKAlIAIgBAUIMCgpfdGltZV96b25lIikKEkdldFNjaGVkdWxlUmVxdWVzdBITCgtzY2hlZHVsZV9pZBgBIAEoCSJ8ChJQdXRTY2hlZHVsZVJlcXVlc3QSEwoLc2NoZWR1bGVfaWQYASABKAkSDgoGdGFnX2lkGAIgASgJEgwKBG5vdGUYAyABKAkSDQoFZXZlcnkYBCABKAkSFgoJdGltZV96b25lGAUgASgJSACIAQFCDAoKX3RpbWVfem9uZSI/ChdCYWNrZmlsbFNjaGVkdWxlUmVxdWVzdBITCgtzY2hlZHVsZV9pZBgBIAEoCRIPCgdmcm9tX21zGAIgASgDIm4KGEJhY2tmaWxsU2NoZWR1bGVSZXNwb25zZRIvCghzY2hlZHVsZRgBIAEoCzIdLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGUSEAoIdGFza19pZHMYAiADKAkSDwoHc2tpcHBlZBgDIAEoDSJQChRMaXN0U2NoZWR1bGVzUmVxdWVzdBITCgZ0YWdfaWQYASABKAlIAIgBARIYChBpbmNsdWRlX2ZpbmlzaGVkGAIgASgIQgkKB190YWdfaWQiSQoVTGlzdFNjaGVkdWxlc1Jlc3BvbnNlEjAKCXNjaGVkdWxlcxgBIAMoCzIdLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGUiwAEKHENyZWF0ZUF0dGVtcHRTY2hlZHVsZVJlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgCIAEoCRIMCgRub3RlGAMgASgJEgoKAmF0GAQgASgJEg0KBWV2ZXJ5GAUgASgJEhYKCXRpbWVfem9uZRgGIAEoCUgAiAEBQgwKCl90aW1lX3pvbmUicAocQ2FuY2VsQXR0ZW1wdFNjaGVkdWxlUmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSEwoLc2NoZWR1bGVfaWQYAiABKAkijQEKF0F0dGVtcHRTY2hlZHVsZVJlc3BvbnNlEi8KCHNjaGVkdWxlGAEgASgLMh0uc3VwZXJ0YWcucnVudGltZS52Mi5TY2hlZHVsZRIuCgdwZW5kaW5nGAIgAygLMh0uc3VwZXJ0YWcucnVudGltZS52Mi5TY2hlZHVsZRIRCgl0aW1lX3pvbmUYAyABKAkqtwEKDVNjaGVkdWxlU3RhdGUSHgoaU0NIRURVTEVfU1RBVEVfVU5TUEVDSUZJRUQQABIZChVTQ0hFRFVMRV9TVEFURV9TVEFHRUQQARIZChVTQ0hFRFVMRV9TVEFURV9BQ1RJVkUQAhIZChVTQ0hFRFVMRV9TVEFURV9QQVVTRUQQAxIXChNTQ0hFRFVMRV9TVEFURV9ET05FEAQSHAoYU0NIRURVTEVfU1RBVEVfQ0FOQ0VMTEVEEAUyuwUKCVNjaGVkdWxlcxJTCgZDcmVhdGUSKi5zdXBlcnRhZy5ydW50aW1lLnYyLkNyZWF0ZVNjaGVkdWxlUmVxdWVzdBodLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGUSTQoDR2V0Eicuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRTY2hlZHVsZVJlcXVlc3QaHS5zdXBlcnRhZy5ydW50aW1lLnYyLlNjaGVkdWxlEl0KBExpc3QSKS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RTY2hlZHVsZXNSZXF1ZXN0Giouc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0U2NoZWR1bGVzUmVzcG9uc2USTwoFUGF1c2USJy5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFNjaGVkdWxlUmVxdWVzdBodLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGUSUAoGUmVzdW1lEicuc3VwZXJ0YWcucnVudGltZS52Mi5HZXRTY2hlZHVsZVJlcXVlc3QaHS5zdXBlcnRhZy5ydW50aW1lLnYyLlNjaGVkdWxlElAKBkRlbGV0ZRInLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0U2NoZWR1bGVSZXF1ZXN0Gh0uc3VwZXJ0YWcucnVudGltZS52Mi5TY2hlZHVsZRJNCgNQdXQSJy5zdXBlcnRhZy5ydW50aW1lLnYyLlB1dFNjaGVkdWxlUmVxdWVzdBodLnN1cGVydGFnLnJ1bnRpbWUudjIuU2NoZWR1bGUSZwoIQmFja2ZpbGwSLC5zdXBlcnRhZy5ydW50aW1lLnYyLkJhY2tmaWxsU2NoZWR1bGVSZXF1ZXN0Gi0uc3VwZXJ0YWcucnVudGltZS52Mi5CYWNrZmlsbFNjaGVkdWxlUmVzcG9uc2Uy6AEKEEF0dGVtcHRTY2hlZHVsZXMSaQoGQ3JlYXRlEjEuc3VwZXJ0YWcucnVudGltZS52Mi5DcmVhdGVBdHRlbXB0U2NoZWR1bGVSZXF1ZXN0Giwuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0U2NoZWR1bGVSZXNwb25zZRJpCgZDYW5jZWwSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhbmNlbEF0dGVtcHRTY2hlZHVsZVJlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLkF0dGVtcHRTY2hlZHVsZVJlc3BvbnNlMugBChBIYXJuZXNzU2NoZWR1bGVzEmkKBkNyZWF0ZRIxLnN1cGVydGFnLnJ1bnRpbWUudjIuQ3JlYXRlQXR0ZW1wdFNjaGVkdWxlUmVxdWVzdBosLnN1cGVydGFnLnJ1bnRpbWUudjIuQXR0ZW1wdFNjaGVkdWxlUmVzcG9uc2USaQoGQ2FuY2VsEjEuc3VwZXJ0YWcucnVudGltZS52Mi5DYW5jZWxBdHRlbXB0U2NoZWR1bGVSZXF1ZXN0Giwuc3VwZXJ0YWcucnVudGltZS52Mi5BdHRlbXB0U2NoZWR1bGVSZXNwb25zZWIGcHJvdG8z", [file_supertag_runtime_v2_runtime]);
 
 /**
  * A five-field cron expression, or @hourly, @daily, or @weekly, evaluated in an IANA time zone.
@@ -218,6 +218,103 @@ export const GetScheduleRequestSchema: GenMessage<GetScheduleRequest> = /*@__PUR
   messageDesc(file_supertag_runtime_v2_schedules, 3);
 
 /**
+ * A recurring Schedule with a chosen ID: 1 to 63 lowercase letters, digits, and hyphens.
+ * `every` and `time_zone` are as in CreateScheduleRequest.
+ *
+ * @generated from message supertag.runtime.v2.PutScheduleRequest
+ */
+export type PutScheduleRequest = Message<"supertag.runtime.v2.PutScheduleRequest"> & {
+  /**
+   * @generated from field: string schedule_id = 1;
+   */
+  scheduleId: string;
+
+  /**
+   * @generated from field: string tag_id = 2;
+   */
+  tagId: string;
+
+  /**
+   * @generated from field: string note = 3;
+   */
+  note: string;
+
+  /**
+   * @generated from field: string every = 4;
+   */
+  every: string;
+
+  /**
+   * @generated from field: optional string time_zone = 5;
+   */
+  timeZone?: string | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.PutScheduleRequest.
+ * Use `create(PutScheduleRequestSchema)` to create a new message.
+ */
+export const PutScheduleRequestSchema: GenMessage<PutScheduleRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_schedules, 4);
+
+/**
+ * A repeated backfill finds the occurrences it replayed already have turns, and queues none.
+ *
+ * @generated from message supertag.runtime.v2.BackfillScheduleRequest
+ */
+export type BackfillScheduleRequest = Message<"supertag.runtime.v2.BackfillScheduleRequest"> & {
+  /**
+   * @generated from field: string schedule_id = 1;
+   */
+  scheduleId: string;
+
+  /**
+   * The earliest occurrence to replay, in milliseconds since the epoch; at most 366 days ago.
+   *
+   * @generated from field: int64 from_ms = 2;
+   */
+  fromMs: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.BackfillScheduleRequest.
+ * Use `create(BackfillScheduleRequestSchema)` to create a new message.
+ */
+export const BackfillScheduleRequestSchema: GenMessage<BackfillScheduleRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_schedules, 5);
+
+/**
+ * @generated from message supertag.runtime.v2.BackfillScheduleResponse
+ */
+export type BackfillScheduleResponse = Message<"supertag.runtime.v2.BackfillScheduleResponse"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.Schedule schedule = 1;
+   */
+  schedule?: Schedule | undefined;
+
+  /**
+   * The turns it queued, oldest occurrence first; empty when none was missed.
+   *
+   * @generated from field: repeated string task_ids = 2;
+   */
+  taskIds: string[];
+
+  /**
+   * Occurrences in the range beyond the first 24 that it did not queue.
+   *
+   * @generated from field: uint32 skipped = 3;
+   */
+  skipped: number;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.BackfillScheduleResponse.
+ * Use `create(BackfillScheduleResponseSchema)` to create a new message.
+ */
+export const BackfillScheduleResponseSchema: GenMessage<BackfillScheduleResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_schedules, 6);
+
+/**
  * Without `include_finished`, only staged, active, and paused Schedules.
  *
  * @generated from message supertag.runtime.v2.ListSchedulesRequest
@@ -239,7 +336,7 @@ export type ListSchedulesRequest = Message<"supertag.runtime.v2.ListSchedulesReq
  * Use `create(ListSchedulesRequestSchema)` to create a new message.
  */
 export const ListSchedulesRequestSchema: GenMessage<ListSchedulesRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_schedules, 4);
+  messageDesc(file_supertag_runtime_v2_schedules, 7);
 
 /**
  * Next due first.
@@ -258,7 +355,7 @@ export type ListSchedulesResponse = Message<"supertag.runtime.v2.ListSchedulesRe
  * Use `create(ListSchedulesResponseSchema)` to create a new message.
  */
 export const ListSchedulesResponseSchema: GenMessage<ListSchedulesResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_schedules, 5);
+  messageDesc(file_supertag_runtime_v2_schedules, 8);
 
 /**
  * The `schedule` tool. It fires in the turn's own Session (for a conversation, the
@@ -303,7 +400,7 @@ export type CreateAttemptScheduleRequest = Message<"supertag.runtime.v2.CreateAt
  * Use `create(CreateAttemptScheduleRequestSchema)` to create a new message.
  */
 export const CreateAttemptScheduleRequestSchema: GenMessage<CreateAttemptScheduleRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_schedules, 6);
+  messageDesc(file_supertag_runtime_v2_schedules, 9);
 
 /**
  * The `cancel_schedule` tool, for a Schedule of the turn's own Tag.
@@ -327,7 +424,7 @@ export type CancelAttemptScheduleRequest = Message<"supertag.runtime.v2.CancelAt
  * Use `create(CancelAttemptScheduleRequestSchema)` to create a new message.
  */
 export const CancelAttemptScheduleRequestSchema: GenMessage<CancelAttemptScheduleRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_schedules, 7);
+  messageDesc(file_supertag_runtime_v2_schedules, 10);
 
 /**
  * @generated from message supertag.runtime.v2.AttemptScheduleResponse
@@ -358,7 +455,7 @@ export type AttemptScheduleResponse = Message<"supertag.runtime.v2.AttemptSchedu
  * Use `create(AttemptScheduleResponseSchema)` to create a new message.
  */
 export const AttemptScheduleResponseSchema: GenMessage<AttemptScheduleResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_schedules, 8);
+  messageDesc(file_supertag_runtime_v2_schedules, 11);
 
 /**
  * @generated from enum supertag.runtime.v2.ScheduleState
@@ -472,6 +569,31 @@ export const Schedules: GenService<{
     methodKind: "unary";
     input: typeof GetScheduleRequestSchema;
     output: typeof ScheduleSchema;
+  },
+  /**
+   * Creates or replaces a recurring Schedule by its ID, as a `kind: Schedule` manifest declares
+   * it. Operators only. It fires in the caller's conversation with the Tag. Replacing one keeps
+   * its history and moves its next time to the next occurrence of the new recurrence.
+   *
+   * @generated from rpc supertag.runtime.v2.Schedules.Put
+   */
+  put: {
+    methodKind: "unary";
+    input: typeof PutScheduleRequestSchema;
+    output: typeof ScheduleSchema;
+  },
+  /**
+   * Queues one turn for each occurrence of a recurring Schedule from `from_ms` until now that
+   * queued none: missed while SuperTag was down, or coalesced into a turn still queued. The
+   * automatic catch-up fires only once for a run of missed occurrences; a backfill replays them
+   * deliberately. At most 24 turns.
+   *
+   * @generated from rpc supertag.runtime.v2.Schedules.Backfill
+   */
+  backfill: {
+    methodKind: "unary";
+    input: typeof BackfillScheduleRequestSchema;
+    output: typeof BackfillScheduleResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_schedules, 0);

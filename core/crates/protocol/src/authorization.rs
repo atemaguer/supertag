@@ -98,6 +98,7 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("Schedules", "Pause", OC),
     ("Schedules", "Resume", OC),
     ("Schedules", "Delete", OC),
+    ("Schedules", "Backfill", OC),
     // A client lists and deletes the shared notes and its own conversations' notes.
     ("Memories", "*", O),
     ("Memories", "List", OC),

@@ -445,6 +445,200 @@ func (x *GetScheduleRequest) GetScheduleId() string {
 	return ""
 }
 
+// A recurring Schedule with a chosen ID: 1 to 63 lowercase letters, digits, and hyphens.
+// `every` and `time_zone` are as in CreateScheduleRequest.
+type PutScheduleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ScheduleId    string                 `protobuf:"bytes,1,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
+	TagId         string                 `protobuf:"bytes,2,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`
+	Note          string                 `protobuf:"bytes,3,opt,name=note,proto3" json:"note,omitempty"`
+	Every         string                 `protobuf:"bytes,4,opt,name=every,proto3" json:"every,omitempty"`
+	TimeZone      *string                `protobuf:"bytes,5,opt,name=time_zone,json=timeZone,proto3,oneof" json:"time_zone,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PutScheduleRequest) Reset() {
+	*x = PutScheduleRequest{}
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutScheduleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutScheduleRequest) ProtoMessage() {}
+
+func (x *PutScheduleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutScheduleRequest.ProtoReflect.Descriptor instead.
+func (*PutScheduleRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *PutScheduleRequest) GetScheduleId() string {
+	if x != nil {
+		return x.ScheduleId
+	}
+	return ""
+}
+
+func (x *PutScheduleRequest) GetTagId() string {
+	if x != nil {
+		return x.TagId
+	}
+	return ""
+}
+
+func (x *PutScheduleRequest) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+func (x *PutScheduleRequest) GetEvery() string {
+	if x != nil {
+		return x.Every
+	}
+	return ""
+}
+
+func (x *PutScheduleRequest) GetTimeZone() string {
+	if x != nil && x.TimeZone != nil {
+		return *x.TimeZone
+	}
+	return ""
+}
+
+// A repeated backfill finds the occurrences it replayed already have turns, and queues none.
+type BackfillScheduleRequest struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	ScheduleId string                 `protobuf:"bytes,1,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
+	// The earliest occurrence to replay, in milliseconds since the epoch; at most 366 days ago.
+	FromMs        int64 `protobuf:"varint,2,opt,name=from_ms,json=fromMs,proto3" json:"from_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackfillScheduleRequest) Reset() {
+	*x = BackfillScheduleRequest{}
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackfillScheduleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackfillScheduleRequest) ProtoMessage() {}
+
+func (x *BackfillScheduleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackfillScheduleRequest.ProtoReflect.Descriptor instead.
+func (*BackfillScheduleRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *BackfillScheduleRequest) GetScheduleId() string {
+	if x != nil {
+		return x.ScheduleId
+	}
+	return ""
+}
+
+func (x *BackfillScheduleRequest) GetFromMs() int64 {
+	if x != nil {
+		return x.FromMs
+	}
+	return 0
+}
+
+type BackfillScheduleResponse struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Schedule *Schedule              `protobuf:"bytes,1,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	// The turns it queued, oldest occurrence first; empty when none was missed.
+	TaskIds []string `protobuf:"bytes,2,rep,name=task_ids,json=taskIds,proto3" json:"task_ids,omitempty"`
+	// Occurrences in the range beyond the first 24 that it did not queue.
+	Skipped       uint32 `protobuf:"varint,3,opt,name=skipped,proto3" json:"skipped,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackfillScheduleResponse) Reset() {
+	*x = BackfillScheduleResponse{}
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackfillScheduleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackfillScheduleResponse) ProtoMessage() {}
+
+func (x *BackfillScheduleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackfillScheduleResponse.ProtoReflect.Descriptor instead.
+func (*BackfillScheduleResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *BackfillScheduleResponse) GetSchedule() *Schedule {
+	if x != nil {
+		return x.Schedule
+	}
+	return nil
+}
+
+func (x *BackfillScheduleResponse) GetTaskIds() []string {
+	if x != nil {
+		return x.TaskIds
+	}
+	return nil
+}
+
+func (x *BackfillScheduleResponse) GetSkipped() uint32 {
+	if x != nil {
+		return x.Skipped
+	}
+	return 0
+}
+
 // Without `include_finished`, only staged, active, and paused Schedules.
 type ListSchedulesRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -456,7 +650,7 @@ type ListSchedulesRequest struct {
 
 func (x *ListSchedulesRequest) Reset() {
 	*x = ListSchedulesRequest{}
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -468,7 +662,7 @@ func (x *ListSchedulesRequest) String() string {
 func (*ListSchedulesRequest) ProtoMessage() {}
 
 func (x *ListSchedulesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -481,7 +675,7 @@ func (x *ListSchedulesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSchedulesRequest.ProtoReflect.Descriptor instead.
 func (*ListSchedulesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListSchedulesRequest) GetTagId() string {
@@ -508,7 +702,7 @@ type ListSchedulesResponse struct {
 
 func (x *ListSchedulesResponse) Reset() {
 	*x = ListSchedulesResponse{}
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -520,7 +714,7 @@ func (x *ListSchedulesResponse) String() string {
 func (*ListSchedulesResponse) ProtoMessage() {}
 
 func (x *ListSchedulesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -533,7 +727,7 @@ func (x *ListSchedulesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSchedulesResponse.ProtoReflect.Descriptor instead.
 func (*ListSchedulesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{5}
+	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListSchedulesResponse) GetSchedules() []*Schedule {
@@ -559,7 +753,7 @@ type CreateAttemptScheduleRequest struct {
 
 func (x *CreateAttemptScheduleRequest) Reset() {
 	*x = CreateAttemptScheduleRequest{}
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -571,7 +765,7 @@ func (x *CreateAttemptScheduleRequest) String() string {
 func (*CreateAttemptScheduleRequest) ProtoMessage() {}
 
 func (x *CreateAttemptScheduleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -584,7 +778,7 @@ func (x *CreateAttemptScheduleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAttemptScheduleRequest.ProtoReflect.Descriptor instead.
 func (*CreateAttemptScheduleRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{6}
+	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CreateAttemptScheduleRequest) GetAttempt() *InspectAttemptRequest {
@@ -640,7 +834,7 @@ type CancelAttemptScheduleRequest struct {
 
 func (x *CancelAttemptScheduleRequest) Reset() {
 	*x = CancelAttemptScheduleRequest{}
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -652,7 +846,7 @@ func (x *CancelAttemptScheduleRequest) String() string {
 func (*CancelAttemptScheduleRequest) ProtoMessage() {}
 
 func (x *CancelAttemptScheduleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -665,7 +859,7 @@ func (x *CancelAttemptScheduleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelAttemptScheduleRequest.ProtoReflect.Descriptor instead.
 func (*CancelAttemptScheduleRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{7}
+	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CancelAttemptScheduleRequest) GetAttempt() *InspectAttemptRequest {
@@ -695,7 +889,7 @@ type AttemptScheduleResponse struct {
 
 func (x *AttemptScheduleResponse) Reset() {
 	*x = AttemptScheduleResponse{}
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -707,7 +901,7 @@ func (x *AttemptScheduleResponse) String() string {
 func (*AttemptScheduleResponse) ProtoMessage() {}
 
 func (x *AttemptScheduleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_schedules_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -720,7 +914,7 @@ func (x *AttemptScheduleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttemptScheduleResponse.ProtoReflect.Descriptor instead.
 func (*AttemptScheduleResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{8}
+	return file_supertag_runtime_v2_schedules_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *AttemptScheduleResponse) GetSchedule() *Schedule {
@@ -792,7 +986,24 @@ const file_supertag_runtime_v2_schedules_proto_rawDesc = "" +
 	"_time_zone\"5\n" +
 	"\x12GetScheduleRequest\x12\x1f\n" +
 	"\vschedule_id\x18\x01 \x01(\tR\n" +
-	"scheduleId\"h\n" +
+	"scheduleId\"\xa6\x01\n" +
+	"\x12PutScheduleRequest\x12\x1f\n" +
+	"\vschedule_id\x18\x01 \x01(\tR\n" +
+	"scheduleId\x12\x15\n" +
+	"\x06tag_id\x18\x02 \x01(\tR\x05tagId\x12\x12\n" +
+	"\x04note\x18\x03 \x01(\tR\x04note\x12\x14\n" +
+	"\x05every\x18\x04 \x01(\tR\x05every\x12 \n" +
+	"\ttime_zone\x18\x05 \x01(\tH\x00R\btimeZone\x88\x01\x01B\f\n" +
+	"\n" +
+	"_time_zone\"S\n" +
+	"\x17BackfillScheduleRequest\x12\x1f\n" +
+	"\vschedule_id\x18\x01 \x01(\tR\n" +
+	"scheduleId\x12\x17\n" +
+	"\afrom_ms\x18\x02 \x01(\x03R\x06fromMs\"\x8a\x01\n" +
+	"\x18BackfillScheduleResponse\x129\n" +
+	"\bschedule\x18\x01 \x01(\v2\x1d.supertag.runtime.v2.ScheduleR\bschedule\x12\x19\n" +
+	"\btask_ids\x18\x02 \x03(\tR\ataskIds\x12\x18\n" +
+	"\askipped\x18\x03 \x01(\rR\askipped\"h\n" +
 	"\x14ListSchedulesRequest\x12\x1a\n" +
 	"\x06tag_id\x18\x01 \x01(\tH\x00R\x05tagId\x88\x01\x01\x12)\n" +
 	"\x10include_finished\x18\x02 \x01(\bR\x0fincludeFinishedB\t\n" +
@@ -822,14 +1033,16 @@ const file_supertag_runtime_v2_schedules_proto_rawDesc = "" +
 	"\x15SCHEDULE_STATE_ACTIVE\x10\x02\x12\x19\n" +
 	"\x15SCHEDULE_STATE_PAUSED\x10\x03\x12\x17\n" +
 	"\x13SCHEDULE_STATE_DONE\x10\x04\x12\x1c\n" +
-	"\x18SCHEDULE_STATE_CANCELLED\x10\x052\x83\x04\n" +
+	"\x18SCHEDULE_STATE_CANCELLED\x10\x052\xbb\x05\n" +
 	"\tSchedules\x12S\n" +
 	"\x06Create\x12*.supertag.runtime.v2.CreateScheduleRequest\x1a\x1d.supertag.runtime.v2.Schedule\x12M\n" +
 	"\x03Get\x12'.supertag.runtime.v2.GetScheduleRequest\x1a\x1d.supertag.runtime.v2.Schedule\x12]\n" +
 	"\x04List\x12).supertag.runtime.v2.ListSchedulesRequest\x1a*.supertag.runtime.v2.ListSchedulesResponse\x12O\n" +
 	"\x05Pause\x12'.supertag.runtime.v2.GetScheduleRequest\x1a\x1d.supertag.runtime.v2.Schedule\x12P\n" +
 	"\x06Resume\x12'.supertag.runtime.v2.GetScheduleRequest\x1a\x1d.supertag.runtime.v2.Schedule\x12P\n" +
-	"\x06Delete\x12'.supertag.runtime.v2.GetScheduleRequest\x1a\x1d.supertag.runtime.v2.Schedule2\xe8\x01\n" +
+	"\x06Delete\x12'.supertag.runtime.v2.GetScheduleRequest\x1a\x1d.supertag.runtime.v2.Schedule\x12M\n" +
+	"\x03Put\x12'.supertag.runtime.v2.PutScheduleRequest\x1a\x1d.supertag.runtime.v2.Schedule\x12g\n" +
+	"\bBackfill\x12,.supertag.runtime.v2.BackfillScheduleRequest\x1a-.supertag.runtime.v2.BackfillScheduleResponse2\xe8\x01\n" +
 	"\x10AttemptSchedules\x12i\n" +
 	"\x06Create\x121.supertag.runtime.v2.CreateAttemptScheduleRequest\x1a,.supertag.runtime.v2.AttemptScheduleResponse\x12i\n" +
 	"\x06Cancel\x121.supertag.runtime.v2.CancelAttemptScheduleRequest\x1a,.supertag.runtime.v2.AttemptScheduleResponse2\xe8\x01\n" +
@@ -850,53 +1063,61 @@ func file_supertag_runtime_v2_schedules_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_schedules_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_supertag_runtime_v2_schedules_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_supertag_runtime_v2_schedules_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_supertag_runtime_v2_schedules_proto_goTypes = []any{
 	(ScheduleState)(0),                   // 0: supertag.runtime.v2.ScheduleState
 	(*ScheduleRecurrence)(nil),           // 1: supertag.runtime.v2.ScheduleRecurrence
 	(*Schedule)(nil),                     // 2: supertag.runtime.v2.Schedule
 	(*CreateScheduleRequest)(nil),        // 3: supertag.runtime.v2.CreateScheduleRequest
 	(*GetScheduleRequest)(nil),           // 4: supertag.runtime.v2.GetScheduleRequest
-	(*ListSchedulesRequest)(nil),         // 5: supertag.runtime.v2.ListSchedulesRequest
-	(*ListSchedulesResponse)(nil),        // 6: supertag.runtime.v2.ListSchedulesResponse
-	(*CreateAttemptScheduleRequest)(nil), // 7: supertag.runtime.v2.CreateAttemptScheduleRequest
-	(*CancelAttemptScheduleRequest)(nil), // 8: supertag.runtime.v2.CancelAttemptScheduleRequest
-	(*AttemptScheduleResponse)(nil),      // 9: supertag.runtime.v2.AttemptScheduleResponse
-	(*InspectAttemptRequest)(nil),        // 10: supertag.runtime.v2.InspectAttemptRequest
+	(*PutScheduleRequest)(nil),           // 5: supertag.runtime.v2.PutScheduleRequest
+	(*BackfillScheduleRequest)(nil),      // 6: supertag.runtime.v2.BackfillScheduleRequest
+	(*BackfillScheduleResponse)(nil),     // 7: supertag.runtime.v2.BackfillScheduleResponse
+	(*ListSchedulesRequest)(nil),         // 8: supertag.runtime.v2.ListSchedulesRequest
+	(*ListSchedulesResponse)(nil),        // 9: supertag.runtime.v2.ListSchedulesResponse
+	(*CreateAttemptScheduleRequest)(nil), // 10: supertag.runtime.v2.CreateAttemptScheduleRequest
+	(*CancelAttemptScheduleRequest)(nil), // 11: supertag.runtime.v2.CancelAttemptScheduleRequest
+	(*AttemptScheduleResponse)(nil),      // 12: supertag.runtime.v2.AttemptScheduleResponse
+	(*InspectAttemptRequest)(nil),        // 13: supertag.runtime.v2.InspectAttemptRequest
 }
 var file_supertag_runtime_v2_schedules_proto_depIdxs = []int32{
 	1,  // 0: supertag.runtime.v2.Schedule.every:type_name -> supertag.runtime.v2.ScheduleRecurrence
 	0,  // 1: supertag.runtime.v2.Schedule.state:type_name -> supertag.runtime.v2.ScheduleState
-	2,  // 2: supertag.runtime.v2.ListSchedulesResponse.schedules:type_name -> supertag.runtime.v2.Schedule
-	10, // 3: supertag.runtime.v2.CreateAttemptScheduleRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	10, // 4: supertag.runtime.v2.CancelAttemptScheduleRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	2,  // 5: supertag.runtime.v2.AttemptScheduleResponse.schedule:type_name -> supertag.runtime.v2.Schedule
-	2,  // 6: supertag.runtime.v2.AttemptScheduleResponse.pending:type_name -> supertag.runtime.v2.Schedule
-	3,  // 7: supertag.runtime.v2.Schedules.Create:input_type -> supertag.runtime.v2.CreateScheduleRequest
-	4,  // 8: supertag.runtime.v2.Schedules.Get:input_type -> supertag.runtime.v2.GetScheduleRequest
-	5,  // 9: supertag.runtime.v2.Schedules.List:input_type -> supertag.runtime.v2.ListSchedulesRequest
-	4,  // 10: supertag.runtime.v2.Schedules.Pause:input_type -> supertag.runtime.v2.GetScheduleRequest
-	4,  // 11: supertag.runtime.v2.Schedules.Resume:input_type -> supertag.runtime.v2.GetScheduleRequest
-	4,  // 12: supertag.runtime.v2.Schedules.Delete:input_type -> supertag.runtime.v2.GetScheduleRequest
-	7,  // 13: supertag.runtime.v2.AttemptSchedules.Create:input_type -> supertag.runtime.v2.CreateAttemptScheduleRequest
-	8,  // 14: supertag.runtime.v2.AttemptSchedules.Cancel:input_type -> supertag.runtime.v2.CancelAttemptScheduleRequest
-	7,  // 15: supertag.runtime.v2.HarnessSchedules.Create:input_type -> supertag.runtime.v2.CreateAttemptScheduleRequest
-	8,  // 16: supertag.runtime.v2.HarnessSchedules.Cancel:input_type -> supertag.runtime.v2.CancelAttemptScheduleRequest
-	2,  // 17: supertag.runtime.v2.Schedules.Create:output_type -> supertag.runtime.v2.Schedule
-	2,  // 18: supertag.runtime.v2.Schedules.Get:output_type -> supertag.runtime.v2.Schedule
-	6,  // 19: supertag.runtime.v2.Schedules.List:output_type -> supertag.runtime.v2.ListSchedulesResponse
-	2,  // 20: supertag.runtime.v2.Schedules.Pause:output_type -> supertag.runtime.v2.Schedule
-	2,  // 21: supertag.runtime.v2.Schedules.Resume:output_type -> supertag.runtime.v2.Schedule
-	2,  // 22: supertag.runtime.v2.Schedules.Delete:output_type -> supertag.runtime.v2.Schedule
-	9,  // 23: supertag.runtime.v2.AttemptSchedules.Create:output_type -> supertag.runtime.v2.AttemptScheduleResponse
-	9,  // 24: supertag.runtime.v2.AttemptSchedules.Cancel:output_type -> supertag.runtime.v2.AttemptScheduleResponse
-	9,  // 25: supertag.runtime.v2.HarnessSchedules.Create:output_type -> supertag.runtime.v2.AttemptScheduleResponse
-	9,  // 26: supertag.runtime.v2.HarnessSchedules.Cancel:output_type -> supertag.runtime.v2.AttemptScheduleResponse
-	17, // [17:27] is the sub-list for method output_type
-	7,  // [7:17] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	2,  // 2: supertag.runtime.v2.BackfillScheduleResponse.schedule:type_name -> supertag.runtime.v2.Schedule
+	2,  // 3: supertag.runtime.v2.ListSchedulesResponse.schedules:type_name -> supertag.runtime.v2.Schedule
+	13, // 4: supertag.runtime.v2.CreateAttemptScheduleRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	13, // 5: supertag.runtime.v2.CancelAttemptScheduleRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	2,  // 6: supertag.runtime.v2.AttemptScheduleResponse.schedule:type_name -> supertag.runtime.v2.Schedule
+	2,  // 7: supertag.runtime.v2.AttemptScheduleResponse.pending:type_name -> supertag.runtime.v2.Schedule
+	3,  // 8: supertag.runtime.v2.Schedules.Create:input_type -> supertag.runtime.v2.CreateScheduleRequest
+	4,  // 9: supertag.runtime.v2.Schedules.Get:input_type -> supertag.runtime.v2.GetScheduleRequest
+	8,  // 10: supertag.runtime.v2.Schedules.List:input_type -> supertag.runtime.v2.ListSchedulesRequest
+	4,  // 11: supertag.runtime.v2.Schedules.Pause:input_type -> supertag.runtime.v2.GetScheduleRequest
+	4,  // 12: supertag.runtime.v2.Schedules.Resume:input_type -> supertag.runtime.v2.GetScheduleRequest
+	4,  // 13: supertag.runtime.v2.Schedules.Delete:input_type -> supertag.runtime.v2.GetScheduleRequest
+	5,  // 14: supertag.runtime.v2.Schedules.Put:input_type -> supertag.runtime.v2.PutScheduleRequest
+	6,  // 15: supertag.runtime.v2.Schedules.Backfill:input_type -> supertag.runtime.v2.BackfillScheduleRequest
+	10, // 16: supertag.runtime.v2.AttemptSchedules.Create:input_type -> supertag.runtime.v2.CreateAttemptScheduleRequest
+	11, // 17: supertag.runtime.v2.AttemptSchedules.Cancel:input_type -> supertag.runtime.v2.CancelAttemptScheduleRequest
+	10, // 18: supertag.runtime.v2.HarnessSchedules.Create:input_type -> supertag.runtime.v2.CreateAttemptScheduleRequest
+	11, // 19: supertag.runtime.v2.HarnessSchedules.Cancel:input_type -> supertag.runtime.v2.CancelAttemptScheduleRequest
+	2,  // 20: supertag.runtime.v2.Schedules.Create:output_type -> supertag.runtime.v2.Schedule
+	2,  // 21: supertag.runtime.v2.Schedules.Get:output_type -> supertag.runtime.v2.Schedule
+	9,  // 22: supertag.runtime.v2.Schedules.List:output_type -> supertag.runtime.v2.ListSchedulesResponse
+	2,  // 23: supertag.runtime.v2.Schedules.Pause:output_type -> supertag.runtime.v2.Schedule
+	2,  // 24: supertag.runtime.v2.Schedules.Resume:output_type -> supertag.runtime.v2.Schedule
+	2,  // 25: supertag.runtime.v2.Schedules.Delete:output_type -> supertag.runtime.v2.Schedule
+	2,  // 26: supertag.runtime.v2.Schedules.Put:output_type -> supertag.runtime.v2.Schedule
+	7,  // 27: supertag.runtime.v2.Schedules.Backfill:output_type -> supertag.runtime.v2.BackfillScheduleResponse
+	12, // 28: supertag.runtime.v2.AttemptSchedules.Create:output_type -> supertag.runtime.v2.AttemptScheduleResponse
+	12, // 29: supertag.runtime.v2.AttemptSchedules.Cancel:output_type -> supertag.runtime.v2.AttemptScheduleResponse
+	12, // 30: supertag.runtime.v2.HarnessSchedules.Create:output_type -> supertag.runtime.v2.AttemptScheduleResponse
+	12, // 31: supertag.runtime.v2.HarnessSchedules.Cancel:output_type -> supertag.runtime.v2.AttemptScheduleResponse
+	20, // [20:32] is the sub-list for method output_type
+	8,  // [8:20] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_schedules_proto_init() }
@@ -908,14 +1129,15 @@ func file_supertag_runtime_v2_schedules_proto_init() {
 	file_supertag_runtime_v2_schedules_proto_msgTypes[1].OneofWrappers = []any{}
 	file_supertag_runtime_v2_schedules_proto_msgTypes[2].OneofWrappers = []any{}
 	file_supertag_runtime_v2_schedules_proto_msgTypes[4].OneofWrappers = []any{}
-	file_supertag_runtime_v2_schedules_proto_msgTypes[6].OneofWrappers = []any{}
+	file_supertag_runtime_v2_schedules_proto_msgTypes[7].OneofWrappers = []any{}
+	file_supertag_runtime_v2_schedules_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_schedules_proto_rawDesc), len(file_supertag_runtime_v2_schedules_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   3,
 		},

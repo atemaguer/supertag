@@ -22,6 +22,15 @@ service Schedules {
   rpc Resume(GetScheduleRequest) returns (Schedule);
   // Cancels the Schedule. A turn it already queued stays queued.
   rpc Delete(GetScheduleRequest) returns (Schedule);
+  // Creates or replaces a recurring Schedule by its ID, as a `kind: Schedule` manifest declares
+  // it. Operators only. It fires in the caller's conversation with the Tag. Replacing one keeps
+  // its history and moves its next time to the next occurrence of the new recurrence.
+  rpc Put(PutScheduleRequest) returns (Schedule);
+  // Queues one turn for each occurrence of a recurring Schedule from `from_ms` until now that
+  // queued none: missed while SuperTag was down, or coalesced into a turn still queued. The
+  // automatic catch-up fires only once for a run of missed occurrences; a backfill replays them
+  // deliberately. At most 24 turns.
+  rpc Backfill(BackfillScheduleRequest) returns (BackfillScheduleResponse);
 }
 
 // Called by a Worker Host for the turn it runs. A Schedule created during a turn takes effect
@@ -102,6 +111,31 @@ message CreateScheduleRequest {
 
 message GetScheduleRequest {
   string schedule_id = 1;
+}
+
+// A recurring Schedule with a chosen ID: 1 to 63 lowercase letters, digits, and hyphens.
+// `every` and `time_zone` are as in CreateScheduleRequest.
+message PutScheduleRequest {
+  string schedule_id = 1;
+  string tag_id = 2;
+  string note = 3;
+  string every = 4;
+  optional string time_zone = 5;
+}
+
+// A repeated backfill finds the occurrences it replayed already have turns, and queues none.
+message BackfillScheduleRequest {
+  string schedule_id = 1;
+  // The earliest occurrence to replay, in milliseconds since the epoch; at most 366 days ago.
+  int64 from_ms = 2;
+}
+
+message BackfillScheduleResponse {
+  Schedule schedule = 1;
+  // The turns it queued, oldest occurrence first; empty when none was missed.
+  repeated string task_ids = 2;
+  // Occurrences in the range beyond the first 24 that it did not queue.
+  uint32 skipped = 3;
 }
 
 // Without `include_finished`, only staged, active, and paused Schedules.

@@ -77,6 +77,20 @@ impl schedules_server::Schedules for Api {
     ) -> Result<Response<Schedule>, Status> {
         schedules!(self, request, delete)
     }
+
+    async fn put(
+        &self,
+        request: Request<PutScheduleRequest>,
+    ) -> Result<Response<Schedule>, Status> {
+        schedules!(self, request, put)
+    }
+
+    async fn backfill(
+        &self,
+        request: Request<BackfillScheduleRequest>,
+    ) -> Result<Response<BackfillScheduleResponse>, Status> {
+        schedules!(self, request, backfill)
+    }
 }
 
 #[tonic::async_trait]

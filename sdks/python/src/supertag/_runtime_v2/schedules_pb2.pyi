@@ -89,6 +89,38 @@ class GetScheduleRequest(_message.Message):
     schedule_id: str
     def __init__(self, schedule_id: _Optional[str] = ...) -> None: ...
 
+class PutScheduleRequest(_message.Message):
+    __slots__ = ("schedule_id", "tag_id", "note", "every", "time_zone")
+    SCHEDULE_ID_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    NOTE_FIELD_NUMBER: _ClassVar[int]
+    EVERY_FIELD_NUMBER: _ClassVar[int]
+    TIME_ZONE_FIELD_NUMBER: _ClassVar[int]
+    schedule_id: str
+    tag_id: str
+    note: str
+    every: str
+    time_zone: str
+    def __init__(self, schedule_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., note: _Optional[str] = ..., every: _Optional[str] = ..., time_zone: _Optional[str] = ...) -> None: ...
+
+class BackfillScheduleRequest(_message.Message):
+    __slots__ = ("schedule_id", "from_ms")
+    SCHEDULE_ID_FIELD_NUMBER: _ClassVar[int]
+    FROM_MS_FIELD_NUMBER: _ClassVar[int]
+    schedule_id: str
+    from_ms: int
+    def __init__(self, schedule_id: _Optional[str] = ..., from_ms: _Optional[int] = ...) -> None: ...
+
+class BackfillScheduleResponse(_message.Message):
+    __slots__ = ("schedule", "task_ids", "skipped")
+    SCHEDULE_FIELD_NUMBER: _ClassVar[int]
+    TASK_IDS_FIELD_NUMBER: _ClassVar[int]
+    SKIPPED_FIELD_NUMBER: _ClassVar[int]
+    schedule: Schedule
+    task_ids: _containers.RepeatedScalarFieldContainer[str]
+    skipped: int
+    def __init__(self, schedule: _Optional[_Union[Schedule, _Mapping]] = ..., task_ids: _Optional[_Iterable[str]] = ..., skipped: _Optional[int] = ...) -> None: ...
+
 class ListSchedulesRequest(_message.Message):
     __slots__ = ("tag_id", "include_finished")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]

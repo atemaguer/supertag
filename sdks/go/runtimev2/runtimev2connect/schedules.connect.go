@@ -49,6 +49,10 @@ const (
 	SchedulesResumeProcedure = "/supertag.runtime.v2.Schedules/Resume"
 	// SchedulesDeleteProcedure is the fully-qualified name of the Schedules's Delete RPC.
 	SchedulesDeleteProcedure = "/supertag.runtime.v2.Schedules/Delete"
+	// SchedulesPutProcedure is the fully-qualified name of the Schedules's Put RPC.
+	SchedulesPutProcedure = "/supertag.runtime.v2.Schedules/Put"
+	// SchedulesBackfillProcedure is the fully-qualified name of the Schedules's Backfill RPC.
+	SchedulesBackfillProcedure = "/supertag.runtime.v2.Schedules/Backfill"
 	// AttemptSchedulesCreateProcedure is the fully-qualified name of the AttemptSchedules's Create RPC.
 	AttemptSchedulesCreateProcedure = "/supertag.runtime.v2.AttemptSchedules/Create"
 	// AttemptSchedulesCancelProcedure is the fully-qualified name of the AttemptSchedules's Cancel RPC.
@@ -72,6 +76,15 @@ type SchedulesClient interface {
 	Resume(context.Context, *connect.Request[runtimev2.GetScheduleRequest]) (*connect.Response[runtimev2.Schedule], error)
 	// Cancels the Schedule. A turn it already queued stays queued.
 	Delete(context.Context, *connect.Request[runtimev2.GetScheduleRequest]) (*connect.Response[runtimev2.Schedule], error)
+	// Creates or replaces a recurring Schedule by its ID, as a `kind: Schedule` manifest declares
+	// it. Operators only. It fires in the caller's conversation with the Tag. Replacing one keeps
+	// its history and moves its next time to the next occurrence of the new recurrence.
+	Put(context.Context, *connect.Request[runtimev2.PutScheduleRequest]) (*connect.Response[runtimev2.Schedule], error)
+	// Queues one turn for each occurrence of a recurring Schedule from `from_ms` until now that
+	// queued none: missed while SuperTag was down, or coalesced into a turn still queued. The
+	// automatic catch-up fires only once for a run of missed occurrences; a backfill replays them
+	// deliberately. At most 24 turns.
+	Backfill(context.Context, *connect.Request[runtimev2.BackfillScheduleRequest]) (*connect.Response[runtimev2.BackfillScheduleResponse], error)
 }
 
 // NewSchedulesClient constructs a client for the supertag.runtime.v2.Schedules service. By default,
@@ -121,17 +134,31 @@ func NewSchedulesClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(schedulesMethods.ByName("Delete")),
 			connect.WithClientOptions(opts...),
 		),
+		put: connect.NewClient[runtimev2.PutScheduleRequest, runtimev2.Schedule](
+			httpClient,
+			baseURL+SchedulesPutProcedure,
+			connect.WithSchema(schedulesMethods.ByName("Put")),
+			connect.WithClientOptions(opts...),
+		),
+		backfill: connect.NewClient[runtimev2.BackfillScheduleRequest, runtimev2.BackfillScheduleResponse](
+			httpClient,
+			baseURL+SchedulesBackfillProcedure,
+			connect.WithSchema(schedulesMethods.ByName("Backfill")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // schedulesClient implements SchedulesClient.
 type schedulesClient struct {
-	create *connect.Client[runtimev2.CreateScheduleRequest, runtimev2.Schedule]
-	get    *connect.Client[runtimev2.GetScheduleRequest, runtimev2.Schedule]
-	list   *connect.Client[runtimev2.ListSchedulesRequest, runtimev2.ListSchedulesResponse]
-	pause  *connect.Client[runtimev2.GetScheduleRequest, runtimev2.Schedule]
-	resume *connect.Client[runtimev2.GetScheduleRequest, runtimev2.Schedule]
-	delete *connect.Client[runtimev2.GetScheduleRequest, runtimev2.Schedule]
+	create   *connect.Client[runtimev2.CreateScheduleRequest, runtimev2.Schedule]
+	get      *connect.Client[runtimev2.GetScheduleRequest, runtimev2.Schedule]
+	list     *connect.Client[runtimev2.ListSchedulesRequest, runtimev2.ListSchedulesResponse]
+	pause    *connect.Client[runtimev2.GetScheduleRequest, runtimev2.Schedule]
+	resume   *connect.Client[runtimev2.GetScheduleRequest, runtimev2.Schedule]
+	delete   *connect.Client[runtimev2.GetScheduleRequest, runtimev2.Schedule]
+	put      *connect.Client[runtimev2.PutScheduleRequest, runtimev2.Schedule]
+	backfill *connect.Client[runtimev2.BackfillScheduleRequest, runtimev2.BackfillScheduleResponse]
 }
 
 // Create calls supertag.runtime.v2.Schedules.Create.
@@ -164,6 +191,16 @@ func (c *schedulesClient) Delete(ctx context.Context, req *connect.Request[runti
 	return c.delete.CallUnary(ctx, req)
 }
 
+// Put calls supertag.runtime.v2.Schedules.Put.
+func (c *schedulesClient) Put(ctx context.Context, req *connect.Request[runtimev2.PutScheduleRequest]) (*connect.Response[runtimev2.Schedule], error) {
+	return c.put.CallUnary(ctx, req)
+}
+
+// Backfill calls supertag.runtime.v2.Schedules.Backfill.
+func (c *schedulesClient) Backfill(ctx context.Context, req *connect.Request[runtimev2.BackfillScheduleRequest]) (*connect.Response[runtimev2.BackfillScheduleResponse], error) {
+	return c.backfill.CallUnary(ctx, req)
+}
+
 // SchedulesHandler is an implementation of the supertag.runtime.v2.Schedules service.
 type SchedulesHandler interface {
 	// Wakes the Tag in the caller's conversation with it.
@@ -177,6 +214,15 @@ type SchedulesHandler interface {
 	Resume(context.Context, *connect.Request[runtimev2.GetScheduleRequest]) (*connect.Response[runtimev2.Schedule], error)
 	// Cancels the Schedule. A turn it already queued stays queued.
 	Delete(context.Context, *connect.Request[runtimev2.GetScheduleRequest]) (*connect.Response[runtimev2.Schedule], error)
+	// Creates or replaces a recurring Schedule by its ID, as a `kind: Schedule` manifest declares
+	// it. Operators only. It fires in the caller's conversation with the Tag. Replacing one keeps
+	// its history and moves its next time to the next occurrence of the new recurrence.
+	Put(context.Context, *connect.Request[runtimev2.PutScheduleRequest]) (*connect.Response[runtimev2.Schedule], error)
+	// Queues one turn for each occurrence of a recurring Schedule from `from_ms` until now that
+	// queued none: missed while SuperTag was down, or coalesced into a turn still queued. The
+	// automatic catch-up fires only once for a run of missed occurrences; a backfill replays them
+	// deliberately. At most 24 turns.
+	Backfill(context.Context, *connect.Request[runtimev2.BackfillScheduleRequest]) (*connect.Response[runtimev2.BackfillScheduleResponse], error)
 }
 
 // NewSchedulesHandler builds an HTTP handler from the service implementation. It returns the path
@@ -222,6 +268,18 @@ func NewSchedulesHandler(svc SchedulesHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(schedulesMethods.ByName("Delete")),
 		connect.WithHandlerOptions(opts...),
 	)
+	schedulesPutHandler := connect.NewUnaryHandler(
+		SchedulesPutProcedure,
+		svc.Put,
+		connect.WithSchema(schedulesMethods.ByName("Put")),
+		connect.WithHandlerOptions(opts...),
+	)
+	schedulesBackfillHandler := connect.NewUnaryHandler(
+		SchedulesBackfillProcedure,
+		svc.Backfill,
+		connect.WithSchema(schedulesMethods.ByName("Backfill")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Schedules/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SchedulesCreateProcedure:
@@ -236,6 +294,10 @@ func NewSchedulesHandler(svc SchedulesHandler, opts ...connect.HandlerOption) (s
 			schedulesResumeHandler.ServeHTTP(w, r)
 		case SchedulesDeleteProcedure:
 			schedulesDeleteHandler.ServeHTTP(w, r)
+		case SchedulesPutProcedure:
+			schedulesPutHandler.ServeHTTP(w, r)
+		case SchedulesBackfillProcedure:
+			schedulesBackfillHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -267,6 +329,14 @@ func (UnimplementedSchedulesHandler) Resume(context.Context, *connect.Request[ru
 
 func (UnimplementedSchedulesHandler) Delete(context.Context, *connect.Request[runtimev2.GetScheduleRequest]) (*connect.Response[runtimev2.Schedule], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Schedules.Delete is not implemented"))
+}
+
+func (UnimplementedSchedulesHandler) Put(context.Context, *connect.Request[runtimev2.PutScheduleRequest]) (*connect.Response[runtimev2.Schedule], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Schedules.Put is not implemented"))
+}
+
+func (UnimplementedSchedulesHandler) Backfill(context.Context, *connect.Request[runtimev2.BackfillScheduleRequest]) (*connect.Response[runtimev2.BackfillScheduleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Schedules.Backfill is not implemented"))
 }
 
 // AttemptSchedulesClient is a client for the supertag.runtime.v2.AttemptSchedules service.

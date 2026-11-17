@@ -70,6 +70,16 @@ class SchedulesStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.GetScheduleRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.Schedule.FromString,
                 _registered_method=True)
+        self.Put = channel.unary_unary(
+                '/supertag.runtime.v2.Schedules/Put',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.PutScheduleRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.Schedule.FromString,
+                _registered_method=True)
+        self.Backfill = channel.unary_unary(
+                '/supertag.runtime.v2.Schedules/Backfill',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.BackfillScheduleRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.BackfillScheduleResponse.FromString,
+                _registered_method=True)
 
 
 class SchedulesServicer:
@@ -122,6 +132,25 @@ class SchedulesServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Put(self, request, context):
+        """Creates or replaces a recurring Schedule by its ID, as a `kind: Schedule` manifest declares
+        it. Operators only. It fires in the caller's conversation with the Tag. Replacing one keeps
+        its history and moves its next time to the next occurrence of the new recurrence.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Backfill(self, request, context):
+        """Queues one turn for each occurrence of a recurring Schedule from `from_ms` until now that
+        queued none: missed while SuperTag was down, or coalesced into a turn still queued. The
+        automatic catch-up fires only once for a run of missed occurrences; a backfill replays them
+        deliberately. At most 24 turns.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SchedulesServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -154,6 +183,16 @@ def add_SchedulesServicer_to_server(servicer, server):
                     servicer.Delete,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.GetScheduleRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.Schedule.SerializeToString,
+            ),
+            'Put': grpc.unary_unary_rpc_method_handler(
+                    servicer.Put,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.PutScheduleRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.Schedule.SerializeToString,
+            ),
+            'Backfill': grpc.unary_unary_rpc_method_handler(
+                    servicer.Backfill,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.BackfillScheduleRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_schedules__pb2.BackfillScheduleResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -324,6 +363,60 @@ class Schedules:
             '/supertag.runtime.v2.Schedules/Delete',
             supertag_dot_runtime_dot_v2_dot_schedules__pb2.GetScheduleRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_schedules__pb2.Schedule.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Put(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Schedules/Put',
+            supertag_dot_runtime_dot_v2_dot_schedules__pb2.PutScheduleRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_schedules__pb2.Schedule.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Backfill(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Schedules/Backfill',
+            supertag_dot_runtime_dot_v2_dot_schedules__pb2.BackfillScheduleRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_schedules__pb2.BackfillScheduleResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -149,6 +149,8 @@ async fn contract(url: String) {
     objectives_wait_on_schedules(&store, &host, &clock).await;
     retiring_a_tag_cancels_its_schedules(&store).await;
     replicas_fire_each_occurrence_once(&url, &store, &host, &clock).await;
+    declared_schedules_and_their_watch_notices(&url, &store, &clock).await;
+    backfill_replays_missed_occurrences(&store, &clock).await;
     store.close().await;
 }
 
@@ -935,4 +937,211 @@ async fn postgres_schedules_contract() {
         .unwrap();
     admin.close().await.unwrap();
     result.expect("PostgreSQL Schedules contract failed");
+}
+
+/// Cancels every Schedule still open, so a section starts with none due.
+async fn cancel_all(store: &Store) {
+    for schedule in store
+        .list_schedules(ALICE, &ListSchedulesRequest::default())
+        .await
+        .unwrap()
+        .schedules
+    {
+        store
+            .change_schedule(ALICE, &schedule.schedule_id, ScheduleState::Cancelled)
+            .await
+            .unwrap();
+    }
+}
+
+async fn declared_schedules_and_their_watch_notices(
+    url: &str,
+    store: &Store,
+    clock: &Arc<AtomicI64>,
+) {
+    cancel_all(store).await;
+    let start = NOW + 90 * 24 * HOUR;
+    clock.store(start, Ordering::SeqCst);
+    let put = |id: &str, tag: &str, note: &str, every: &str| PutScheduleRequest {
+        schedule_id: id.into(),
+        tag_id: tag.into(),
+        note: note.into(),
+        every: every.into(),
+        time_zone: Some("UTC".into()),
+    };
+    let declared = store
+        .put_schedule(
+            ALICE,
+            &put(
+                "weekly-summary",
+                "lead",
+                "Summarize open work",
+                "0 9 * * MON",
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(declared.schedule_id, "weekly-summary");
+    assert_eq!(declared.state(), ScheduleState::Active);
+    assert_eq!(declared.audience.as_deref(), Some(ALICE));
+    // Only operators declare Schedules, with a manifest-style ID and a recurrence.
+    assert!(matches!(
+        store
+            .put_schedule(
+                "client:laptop",
+                &put("weekly-summary", "lead", "x", "@daily")
+            )
+            .await,
+        Err(StoreError::PermissionDenied)
+    ));
+    for (id, every) in [("Bad_ID", "@daily"), ("one-off", "")] {
+        assert!(matches!(
+            store
+                .put_schedule(ALICE, &put(id, "lead", "x", every))
+                .await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+    // Declaring it again replaces its note and recurrence, keeping its ID and history.
+    let replaced = store
+        .put_schedule(
+            ALICE,
+            &put(
+                "weekly-summary",
+                "lead",
+                "Summarize the week",
+                "0 9 * * FRI",
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replaced.note, "Summarize the week");
+    assert_eq!(replaced.every.as_ref().unwrap().cron, "0 9 * * FRI");
+    assert_eq!(replaced.created_at_ms, declared.created_at_ms);
+    assert!(matches!(
+        store
+            .put_schedule(ALICE, &put("weekly-summary", "watcher", "x", "@daily"))
+            .await,
+        Err(StoreError::FailedPrecondition(reason)) if reason.contains("wakes Tag lead")
+    ));
+    // Pruned (deleted), then declared again, it is active again.
+    store
+        .change_schedule(ALICE, "weekly-summary", ScheduleState::Cancelled)
+        .await
+        .unwrap();
+    let again = store
+        .put_schedule(
+            ALICE,
+            &put(
+                "weekly-summary",
+                "lead",
+                "Summarize the week",
+                "0 9 * * FRI",
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(again.state(), ScheduleState::Active);
+
+    // The watch feed announced its creation and each change, for its principal.
+    let pool = sqlx::AnyPool::connect(url).await.unwrap();
+    let notices: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT reason, tag_id, owner FROM supertag_v2_watch_notices
+         WHERE kind=7 AND resource_id='weekly-summary' ORDER BY position",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    assert_eq!(notices.first(), Some(&(1, "lead".into(), ALICE.into())));
+    assert!(notices.len() >= 4, "{notices:?}");
+    assert!(notices.iter().skip(1).all(|(reason, _, _)| *reason == 2));
+    store
+        .change_schedule(ALICE, "weekly-summary", ScheduleState::Cancelled)
+        .await
+        .unwrap();
+}
+
+async fn backfill_replays_missed_occurrences(store: &Store, clock: &Arc<AtomicI64>) {
+    cancel_all(store).await;
+    let start = NOW + 120 * 24 * HOUR;
+    clock.store(start, Ordering::SeqCst);
+    let hourly = store
+        .create_schedule(
+            ALICE,
+            &create("lead", "backfill", "Check the queue", "", "@hourly"),
+        )
+        .await
+        .unwrap();
+    let first = hourly.next_due_at_ms.unwrap();
+    // Down for three and a half hours: the sweep fires once and counts the rest as missed.
+    clock.store(first + 3 * HOUR + 30 * MINUTE, Ordering::SeqCst);
+    assert_eq!(store.sweep_schedules().await.unwrap(), 1);
+    assert_eq!(
+        store
+            .get_schedule(ALICE, &hourly.schedule_id)
+            .await
+            .unwrap()
+            .missed_count,
+        3
+    );
+    let backfill = |from_ms: i64| BackfillScheduleRequest {
+        schedule_id: hourly.schedule_id.clone(),
+        from_ms,
+    };
+    // The first occurrence fired; the three after it queued no turn, and are replayed.
+    let replayed = store
+        .backfill_schedule(ALICE, &backfill(start))
+        .await
+        .unwrap();
+    assert_eq!(replayed.task_ids.len(), 3);
+    assert_eq!(replayed.skipped, 0);
+    let task = store.get_task(&replayed.task_ids[0]).await.unwrap();
+    assert!(
+        task.prompt.starts_with("Backfilled wake-up."),
+        "{}",
+        task.prompt
+    );
+    assert!(
+        task.prompt.contains("\"Check the queue\""),
+        "{}",
+        task.prompt
+    );
+    // Repeating it finds nothing left to replay.
+    assert!(
+        store
+            .backfill_schedule(ALICE, &backfill(start))
+            .await
+            .unwrap()
+            .task_ids
+            .is_empty()
+    );
+    // Another principal cannot see it; a future or too-old start is refused; a one-off has no
+    // occurrences to replay.
+    assert!(matches!(
+        store.backfill_schedule(BOB, &backfill(start)).await,
+        Err(StoreError::NotFound(_))
+    ));
+    for from in [start + 10 * 24 * HOUR, start - 400 * 24 * HOUR] {
+        assert!(matches!(
+            store.backfill_schedule(ALICE, &backfill(from)).await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+    let once = store
+        .create_schedule(ALICE, &create("lead", "backfill-once", "Ping", "2h", ""))
+        .await
+        .unwrap();
+    assert!(matches!(
+        store
+            .backfill_schedule(
+                ALICE,
+                &BackfillScheduleRequest {
+                    schedule_id: once.schedule_id,
+                    from_ms: start,
+                },
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
 }

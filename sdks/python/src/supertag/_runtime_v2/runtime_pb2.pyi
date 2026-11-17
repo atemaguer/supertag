@@ -27,6 +27,7 @@ class WatchKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WATCH_KIND_OBJECTIVE: _ClassVar[WatchKind]
     WATCH_KIND_TEAM: _ClassVar[WatchKind]
     WATCH_KIND_WORKSTREAM_POST: _ClassVar[WatchKind]
+    WATCH_KIND_SCHEDULE: _ClassVar[WatchKind]
     WATCH_KIND_MEMORY: _ClassVar[WatchKind]
 
 class WatchReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
@@ -333,6 +334,7 @@ WATCH_KIND_CONVERSATION_MESSAGE: WatchKind
 WATCH_KIND_OBJECTIVE: WatchKind
 WATCH_KIND_TEAM: WatchKind
 WATCH_KIND_WORKSTREAM_POST: WatchKind
+WATCH_KIND_SCHEDULE: WatchKind
 WATCH_KIND_MEMORY: WatchKind
 WATCH_REASON_UNSPECIFIED: WatchReason
 WATCH_REASON_CREATED: WatchReason

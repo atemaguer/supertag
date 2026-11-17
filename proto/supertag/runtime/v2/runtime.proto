@@ -211,6 +211,9 @@ enum WatchKind {
   WATCH_KIND_OBJECTIVE = 4;
   WATCH_KIND_TEAM = 5;
   WATCH_KIND_WORKSTREAM_POST = 6;
+  // A Schedule was created or changed: paused, resumed, fired, done, or cancelled. The change's
+  // tag_id names its Tag.
+  WATCH_KIND_SCHEDULE = 7;
   // A Tag's note was kept, rewritten, or deleted (Memories). The change's id names the note and
   // its tag_id the Tag; a private note reaches only its person.
   WATCH_KIND_MEMORY = 8;

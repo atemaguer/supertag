@@ -49,6 +49,8 @@ const PER_TAG: i64 = 25;
 const PER_TURN: i64 = 3;
 /// Due Schedules one sweep fires; the rest fire on the next pass.
 const SWEEP_BATCH: i64 = 64;
+/// Turns one backfill queues at most.
+const BACKFILL_MAX: usize = 24;
 /// Missed occurrences counted before a recurrence skips to the next future one.
 const MISSED_SCAN: u64 = 100_000;
 
@@ -309,6 +311,8 @@ struct NewSchedule<'a> {
     state: i64,
     created_by: &'a str,
     origin: Option<(&'a str, &'a str)>,
+    /// A chosen ID, as a manifest declares it; otherwise a new one.
+    id: Option<&'a str>,
 }
 
 async fn insert_in(
@@ -316,7 +320,9 @@ async fn insert_in(
     value: NewSchedule<'_>,
     now_ms: i64,
 ) -> Result<Schedule> {
-    let id = format!("sch_{}", Uuid::new_v4().simple());
+    let id = value
+        .id
+        .map_or_else(|| format!("sch_{}", Uuid::new_v4().simple()), str::to_owned);
     let objective = objective_of_in(tx, value.tag, value.session).await?;
     let (at, cron, zone) = match value.when {
         When::At(due) => (Some(*due), None, None),
@@ -551,6 +557,7 @@ impl Store {
                 state: ACTIVE,
                 created_by: principal,
                 origin: None,
+                id: None,
             },
             now,
         )
@@ -565,6 +572,181 @@ impl Store {
         .await?;
         tx.commit().await?;
         Ok(schedule)
+    }
+
+    /// Creates or replaces a recurring Schedule by its ID, as a `kind: Schedule` manifest
+    /// declares it. It fires in the operator's conversation with the Tag.
+    pub async fn put_schedule(
+        &self,
+        principal: &str,
+        input: &PutScheduleRequest,
+    ) -> Result<Schedule> {
+        crate::policy::operator(principal)?;
+        let id = input.schedule_id.as_str();
+        if id.is_empty()
+            || id.len() > 63
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            return Err(invalid(
+                "a Schedule ID has 1 to 63 lowercase letters, digits, and hyphens",
+            ));
+        }
+        name("Tag ID", &input.tag_id)?;
+        let note = note(&input.note)?;
+        if input.every.trim().is_empty() {
+            return Err(invalid("a declared Schedule recurs: set every"));
+        }
+        let now = self.execution_now_ms();
+        let when = parse_when(
+            "",
+            &input.every,
+            input.time_zone.as_deref(),
+            self.time_zone(),
+            now,
+        )?;
+        let When::Every { cron, zone } = &when else {
+            return Err(invalid("a declared Schedule recurs: set every"));
+        };
+        let (mut tx, _) = self.write().await?;
+        crate::tags::require_active(&mut tx, &input.tag_id).await?;
+        let prior = sqlx::query("SELECT * FROM supertag_v2_schedules WHERE schedule_id=$1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let schedule = match prior {
+            None => {
+                tag_limit_in(&mut tx, &input.tag_id).await?;
+                let session = crate::conversations::session_in(&mut tx, principal, &input.tag_id)
+                    .await?
+                    .unwrap_or_else(crate::conversations::new_session_id);
+                insert_in(
+                    &mut tx,
+                    NewSchedule {
+                        tag: &input.tag_id,
+                        session: &session,
+                        audience: Some(principal),
+                        note: &note,
+                        when: &when,
+                        state: ACTIVE,
+                        created_by: principal,
+                        origin: None,
+                        id: Some(id),
+                    },
+                    now,
+                )
+                .await?
+            }
+            Some(row) => {
+                let prior = schedule_row(&row)?;
+                if prior.tag_id != input.tag_id {
+                    return Err(StoreError::FailedPrecondition(format!(
+                        "Schedule {id} wakes Tag {}; delete it to declare it for another Tag",
+                        prior.tag_id
+                    )));
+                }
+                if prior.every.is_none() {
+                    return Err(StoreError::FailedPrecondition(format!(
+                        "Schedule {id} is a one-off; delete it to declare a recurring one"
+                    )));
+                }
+                // A cancelled or finished one is declared again; a paused one stays paused.
+                let state = if prior.state() == ScheduleState::Paused {
+                    PAUSED
+                } else {
+                    ACTIVE
+                };
+                let next = next_after(cron, *zone, now)?;
+                sqlx::query("UPDATE supertag_v2_schedules SET note=$1,cron=$2,time_zone=$3,state=$4,next_due_at_ms=$5,updated_at_ms=$6 WHERE schedule_id=$7")
+                    .bind(&note).bind(cron).bind(zone.name()).bind(state).bind(next).bind(now).bind(id)
+                    .execute(&mut *tx).await?;
+                schedule_in(&mut tx, id).await?.0
+            }
+        };
+        tx.commit().await?;
+        Ok(schedule)
+    }
+
+    /// Replays a recurring Schedule's occurrences from `from_ms` until now that queued no turn.
+    pub async fn backfill_schedule(
+        &self,
+        principal: &str,
+        input: &BackfillScheduleRequest,
+    ) -> Result<BackfillScheduleResponse> {
+        crate::store::actor(principal)?;
+        name("Schedule ID", &input.schedule_id)?;
+        let now = self.execution_now_ms();
+        if input.from_ms >= now || input.from_ms < now - AT_MAX_MS {
+            return Err(invalid(
+                "backfill from a time in the past, at most 366 days ago",
+            ));
+        }
+        let (mut tx, _) = self.write().await?;
+        let (schedule, row) = schedule_in(&mut tx, &input.schedule_id).await?;
+        if !visible(principal, &schedule) {
+            return Err(StoreError::NotFound("Schedule was not found".into()));
+        }
+        let Some(every) = schedule.every.clone() else {
+            return Err(StoreError::FailedPrecondition(
+                "only a recurring Schedule has occurrences to backfill".into(),
+            ));
+        };
+        if !matches!(
+            schedule.state(),
+            ScheduleState::Active | ScheduleState::Paused
+        ) {
+            return Err(StoreError::FailedPrecondition(format!(
+                "a {} Schedule is not backfilled",
+                state_name(schedule.state())
+            )));
+        }
+        let zone = zone(Some(&every.time_zone), self.time_zone())?;
+        // Occurrences from `from_ms` (and since the Schedule existed) until now.
+        let start = input.from_ms.max(schedule.created_at_ms) - 1;
+        let mut occurrences = vec![];
+        let mut cursor = next_after(&every.cron, zone, start)?;
+        while let Some(due) = cursor
+            && due <= now
+            && occurrences.len() < MISSED_SCAN as usize
+        {
+            occurrences.push(due);
+            cursor = next_after(&every.cron, zone, due)?;
+        }
+        let mut missing = vec![];
+        for due in occurrences {
+            let fired: Option<Option<String>> = sqlx::query_scalar(
+                "SELECT task_id FROM supertag_v2_schedule_fires WHERE schedule_id=$1 AND due_at_ms=$2",
+            )
+            .bind(&schedule.schedule_id)
+            .bind(due)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if !matches!(fired, Some(Some(_))) {
+                missing.push(due);
+            }
+        }
+        let skipped = missing.len().saturating_sub(BACKFILL_MAX) as u32;
+        let mut task_ids = vec![];
+        for due in missing.into_iter().take(BACKFILL_MAX) {
+            let text = format!(
+                "Backfilled wake-up. An operator asked to replay the occurrence of this Schedule due {} (it queued no turn then). The note: \"{}\". It is now {}. This Schedule recurs ({}, {}). Do what the note asks for that occurrence. Your reply is posted as a normal message; if nothing needs attention, call stay_quiet with one line saying why, and nothing is posted.",
+                local(due, zone),
+                schedule.note,
+                local(now, zone),
+                every.cron,
+                zone.name(),
+            );
+            let task = queue_turn_in(&mut tx, &schedule, &row, due, &text, now).await?;
+            task_ids.push(task.task_id);
+        }
+        let (schedule, _) = schedule_in(&mut tx, &input.schedule_id).await?;
+        tx.commit().await?;
+        Ok(BackfillScheduleResponse {
+            schedule: Some(schedule),
+            task_ids,
+            skipped,
+        })
     }
 
     pub async fn get_schedule(&self, principal: &str, id: &str) -> Result<Schedule> {
@@ -719,6 +901,7 @@ impl Store {
                         state: STAGED,
                         created_by: &format!("tag:{}", task.tag_id),
                         origin: Some((&task.task_id, &attempt.attempt_id)),
+                        id: None,
                     },
                     now,
                 )
@@ -894,6 +1077,28 @@ async fn fire_in(
             return Ok(false);
         }
     }
+    let received = crate::attention::schedule_line_in(tx, &schedule.schedule_id).await?;
+    let prompt = prompt(
+        &schedule,
+        row,
+        (due, next),
+        missed,
+        (now, default),
+        received.as_deref(),
+    )?;
+    queue_turn_in(tx, &schedule, row, due, &prompt, now).await?;
+    Ok(true)
+}
+
+/// Queues one turn of a Schedule for its occurrence `due` and records the fire.
+async fn queue_turn_in(
+    tx: &mut Transaction<'_, Any>,
+    schedule: &Schedule,
+    row: &AnyRow,
+    due: i64,
+    prompt: &str,
+    now: i64,
+) -> Result<Task> {
     let session = match &schedule.audience {
         // A conversation's next turn goes to its latest Session.
         Some(principal) => {
@@ -910,17 +1115,8 @@ async fn fire_in(
         }
         None => schedule.session_id.clone(),
     };
-    let received = crate::attention::schedule_line_in(tx, &schedule.schedule_id).await?;
-    let prompt = prompt(
-        &schedule,
-        row,
-        (due, next),
-        missed,
-        (now, default),
-        received.as_deref(),
-    )?;
     let order = next_order(tx).await?;
-    let task = Box::pin(insert_task(tx, order, &schedule.tag_id, &session, &prompt)).await?;
+    let task = Box::pin(insert_task(tx, order, &schedule.tag_id, &session, prompt)).await?;
     crate::objectives::objective_link_task_in(tx, &task).await?;
     // A planned continuation is a fresh opportunity to make progress, like a person's message.
     sqlx::query("UPDATE supertag_v2_objectives SET idle_wake_count=0 WHERE objective_id IN (SELECT objective_id FROM supertag_v2_objective_sessions WHERE tag_id=$1 AND session_id=$2)")
@@ -946,11 +1142,12 @@ async fn fire_in(
             }
         }
     }
-    sqlx::query("INSERT INTO supertag_v2_schedule_fires (schedule_id,due_at_ms,task_id,fired_at_ms) VALUES ($1,$2,$3,$4)")
+    // A backfill turns an occurrence that coalesced (a fire without a turn) into one with a turn.
+    sqlx::query("INSERT INTO supertag_v2_schedule_fires (schedule_id,due_at_ms,task_id,fired_at_ms) VALUES ($1,$2,$3,$4) ON CONFLICT (schedule_id,due_at_ms) DO UPDATE SET task_id=excluded.task_id, fired_at_ms=excluded.fired_at_ms")
         .bind(&schedule.schedule_id).bind(due).bind(&task.task_id).bind(now).execute(&mut **tx).await?;
     sqlx::query("UPDATE supertag_v2_schedules SET fire_count=fire_count+1,last_task_id=$1,last_fired_at_ms=$2 WHERE schedule_id=$3")
         .bind(&task.task_id).bind(now).bind(&schedule.schedule_id).execute(&mut **tx).await?;
-    Ok(true)
+    Ok(task)
 }
 
 /// The fired turn's prompt. The conversation hides it; `describe task` shows it.
@@ -1156,6 +1353,30 @@ impl schedules_server::Schedules for ControlPlane {
         request: Request<GetScheduleRequest>,
     ) -> std::result::Result<Response<Schedule>, Status> {
         self.change(request, ScheduleState::Cancelled).await
+    }
+
+    async fn put(
+        &self,
+        request: Request<PutScheduleRequest>,
+    ) -> std::result::Result<Response<Schedule>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .put_schedule(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+
+    async fn backfill(
+        &self,
+        request: Request<BackfillScheduleRequest>,
+    ) -> std::result::Result<Response<BackfillScheduleResponse>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .backfill_schedule(&principal, request.get_ref())
+                .await?,
+        ))
     }
 }
 
