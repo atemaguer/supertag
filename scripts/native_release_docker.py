@@ -8,7 +8,9 @@ Accepts a clean exact source HEAD. Nothing is uploaded, installed on the host, o
 published. Docker may emulate the selected architecture; the binaries and all
 runtime helpers are executed under that architecture before output is accepted.
 With --cargo-cache, that host directory is also mounted writable as the build's Cargo
-registry and target directory (see native_release.py --cargo-cache).
+registry and target directory (see native_release.py --cargo-cache). With --builder-cache, the
+builder image's layers come from, and with --save-builder-cache go back to, the GitHub Actions
+cache, so a release run rebuilds the image only when its Dockerfile or entrypoint changes.
 """
 import argparse
 import json
@@ -32,7 +34,38 @@ def verify_source(repo, commit):
             "source has tracked changes")
 
 
-def package(repo, commit, output, platform, profile="release", cargo_cache=None):
+def build_command(target, image, context, builder_cache=None, save_builder_cache=False):
+    """The command that builds the builder image. Without a cache scope it is a plain local
+    `docker build`. With one, buildx reads the image's layers from the GitHub Actions cache under
+    that scope, writes them back only when asked, and loads the image into Docker."""
+    if builder_cache is None:
+        require(not save_builder_cache, "saving the builder cache needs a cache scope")
+        return ["docker", "build", "--platform", target, "--tag", image, str(context)]
+    require(re.fullmatch(r"[A-Za-z0-9._-]{1,100}", builder_cache), "invalid builder cache scope")
+    command = ["docker", "buildx", "build", "--platform", target, "--tag", image, "--load",
+               "--cache-from", f"type=gha,scope={builder_cache}"]
+    if save_builder_cache:
+        command += ["--cache-to", f"type=gha,scope={builder_cache},mode=max"]
+    return command + [str(context)]
+
+
+def build_builder(root, platform, builder_cache=None, save_builder_cache=False):
+    """Builds the platform's builder image from a context under `root`. Returns the image's tag,
+    its ID, and the context directory."""
+    context = root / "context"
+    context.mkdir()
+    for source, name in ((REPO / "deploy/docker/rust-release.Dockerfile", "Dockerfile"),
+                         (REPO / "scripts/native_release_container.sh", "native_release_container.sh")):
+        shutil.copyfile(source, context / name)
+    target = "linux/" + platform.removeprefix("linux-")
+    image = "supertag-native-release-builder:" + platform + "-" + digest(context / "Dockerfile")[:12]
+    subprocess.run(build_command(target, image, context, builder_cache, save_builder_cache), check=True)
+    image_id = subprocess.check_output(["docker", "image", "inspect", "--format", "{{.Id}}", image], text=True).strip()
+    return image, image_id, context
+
+
+def package(repo, commit, output, platform, profile="release", cargo_cache=None,
+            builder_cache=None, save_builder_cache=False):
     require(platform in ("linux-amd64", "linux-arm64"), "Docker release platform must be Linux amd64 or arm64")
     require(profile in ("dev", "release"), "unknown release profile")
     verify_source(repo, commit)
@@ -51,14 +84,7 @@ def package(repo, commit, output, platform, profile="release", cargo_cache=None)
         root = Path(temporary)
         bundle = root / "source.bundle"
         subprocess.run(["git", "bundle", "create", bundle, "HEAD"], cwd=repo, check=True)
-        context = root / "context"
-        context.mkdir()
-        for source, name in ((REPO / "deploy/docker/rust-release.Dockerfile", "Dockerfile"),
-                             (REPO / "scripts/native_release_container.sh", "native_release_container.sh")):
-            shutil.copyfile(source, context / name)
-        image = "supertag-native-release-builder:" + platform + "-" + digest(context / "Dockerfile")[:12]
-        subprocess.run(["docker", "build", "--platform", target, "--tag", image, context], check=True)
-        image_id = subprocess.check_output(["docker", "image", "inspect", "--format", "{{.Id}}", image], text=True).strip()
+        image, image_id, context = build_builder(root, platform, builder_cache, save_builder_cache)
         try:
             subprocess.run(["docker", "run", "--rm", "--init", "--name", identifier,
                 "--platform", target, "--cpus", "2", "--memory", "6g",
@@ -96,14 +122,27 @@ def package(repo, commit, output, platform, profile="release", cargo_cache=None)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=REPO)
-    parser.add_argument("--commit", required=True)
+    parser.add_argument("--commit")
     parser.add_argument("--platform", choices=("linux-amd64", "linux-arm64"), required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--profile", choices=("dev", "release"), default="release")
     parser.add_argument("--cargo-cache", type=Path, help="host directory mounted as the build's Cargo registry and target directory")
+    parser.add_argument("--builder-cache", metavar="SCOPE",
+                        help="read the builder image's layers from the GitHub Actions cache under SCOPE (needs buildx and the Actions runtime variables)")
+    parser.add_argument("--save-builder-cache", action="store_true",
+                        help="also write the builder image's layers back under --builder-cache's scope")
+    parser.add_argument("--builder-only", action="store_true",
+                        help="build the builder image and stop, such as to fill the builder cache")
     args = parser.parse_args()
+    if not args.builder_only and (args.commit is None or args.output is None):
+        parser.error("--commit and --output are required unless --builder-only")
     try:
-        print(package(args.repo.resolve(), args.commit, args.output, args.platform, args.profile, args.cargo_cache))
+        if args.builder_only:
+            with tempfile.TemporaryDirectory(prefix="supertag-release-builder-") as temporary:
+                print(build_builder(Path(temporary), args.platform, args.builder_cache, args.save_builder_cache)[0])
+            return
+        print(package(args.repo.resolve(), args.commit, args.output, args.platform, args.profile, args.cargo_cache,
+                      args.builder_cache, args.save_builder_cache))
     except (ArchiveError, OSError, ValueError, subprocess.SubprocessError) as error:
         parser.exit(1, f"container release: {error}\n")
 

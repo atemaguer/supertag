@@ -137,12 +137,36 @@ jobs:
           cache-bin: false
           # Pull requests labelled release-check reuse the cache without adding their own.
           save-if: ${{ github.event_name != 'pull_request' }}
+      # The Linux builder image (Rust, Node, Go, Python and pnpm on Debian 12) comes from the
+      # GitHub Actions cache through buildx, one scope per platform. Its layers are keyed by
+      # content: the digest-pinned base image and each Dockerfile step, so a changed Dockerfile or
+      # entrypoint misses only from the changed step on. Release-builder-cache.yml fills the cache
+      # on main, where tag runs can read it. Pull requests read it but never write it.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        if: runner.os == 'Linux'
+      - name: Let buildx reach the Actions cache
+        if: runner.os == 'Linux'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RUNTIME_URL', 'ACTIONS_CACHE_URL',
+                                'ACTIONS_RESULTS_URL', 'ACTIONS_CACHE_SERVICE_V2']) {
+              const value = process.env[name];
+              if (!value) continue;
+              if (name === 'ACTIONS_RUNTIME_TOKEN') core.setSecret(value);
+              core.exportVariable(name, value);
+            }
       - name: Build and execute the Linux archive in Debian 12
         if: runner.os == 'Linux'
+        env:
+          SAVE_BUILDER_CACHE: ${{ github.event_name != 'pull_request' }}
         run: |
+          save=()
+          if [ "$SAVE_BUILDER_CACHE" = true ]; then save=(--save-builder-cache); fi
           python scripts/native_release_docker.py --repo "$GITHUB_WORKSPACE" \
             --commit "$SOURCE_COMMIT" --platform "$BUILD_PLATFORM" --profile "$BUILD_PROFILE" \
-            --output "$RUNNER_TEMP/native-release" --cargo-cache "$GITHUB_WORKSPACE/.release-cargo"
+            --output "$RUNNER_TEMP/native-release" --cargo-cache "$GITHUB_WORKSPACE/.release-cargo" \
+            --builder-cache "release-builder-$BUILD_PLATFORM" "${save[@]}"
       # Only a release run that signs receives the Apple credentials; pull requests and manual
       # checks build unsigned archives without them.
       - name: Build and execute the native macOS archive

@@ -70,6 +70,23 @@ class ReleasePlatformContracts(unittest.TestCase):
         run.assert_not_called()
         self.assertFalse((self.root/'out').exists())
 
+    def test_builder_image_builds_locally_or_through_the_actions_cache(self):
+        context = self.root / 'context'
+        self.assertEqual(docker_release.build_command('linux/amd64', 'builder:x', context),
+                         ['docker', 'build', '--platform', 'linux/amd64', '--tag', 'builder:x', str(context)])
+        read = docker_release.build_command('linux/arm64', 'builder:x', context, 'release-builder-linux-arm64')
+        self.assertEqual(read[:3], ['docker', 'buildx', 'build'])
+        self.assertIn('--load', read)
+        self.assertIn('type=gha,scope=release-builder-linux-arm64', read)
+        self.assertNotIn('--cache-to', read)
+        saved = docker_release.build_command('linux/arm64', 'builder:x', context, 'release-builder-linux-arm64', True)
+        self.assertEqual(saved[saved.index('--cache-to') + 1], 'type=gha,scope=release-builder-linux-arm64,mode=max')
+        self.assertEqual(saved[-1], str(context))
+        with self.assertRaisesRegex(ArchiveError, 'needs a cache scope'):
+            docker_release.build_command('linux/amd64', 'builder:x', context, None, True)
+        with self.assertRaisesRegex(ArchiveError, 'invalid builder cache scope'):
+            docker_release.build_command('linux/amd64', 'builder:x', context, 'scope,mode=max')
+
 
 if __name__ == '__main__':
     unittest.main()
