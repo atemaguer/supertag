@@ -1,3 +1,6 @@
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -30,7 +33,7 @@ const OPERATOR: &str = "fixture-operator-token";
 const GATEWAY: &str = "stcr_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn cli(args: &[&str]) -> Command {
-    let mut command = Command::new(CLI);
+    let mut command = reaped(Command::new(CLI));
     command
         .args(args)
         .env_clear()

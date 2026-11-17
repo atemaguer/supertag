@@ -2,6 +2,9 @@
 //! Plane's public Connector contract and delivers the Task's reply exactly once. The connector
 //! is `fixtures/example_connector.rs`; it depends only on the protocol, not on any SuperTag
 //! service code.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -32,7 +35,7 @@ struct Tokens {
 }
 
 fn command(program: &str, args: &[&str], tokens: &Tokens) -> Command {
-    let mut command = Command::new(program);
+    let mut command = reaped(Command::new(program));
     command
         .args(args)
         .env_clear()

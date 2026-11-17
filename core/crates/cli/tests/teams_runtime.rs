@@ -1,3 +1,6 @@
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -25,7 +28,7 @@ const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
 const WAIT: Duration = Duration::from_secs(15);
 
 fn command(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()

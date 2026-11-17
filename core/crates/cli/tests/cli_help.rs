@@ -3,6 +3,9 @@
 //! `docs/reference/cli.md` records the help of every visible command. A change to a command,
 //! flag, or description must update that page in the same change: rerun with
 //! `SUPERTAG_UPDATE_CLI_REFERENCE=1` and review the diff.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 
 use std::{path::PathBuf, process::Command};
 
@@ -16,7 +19,7 @@ fn reference_path() -> PathBuf {
 }
 
 fn supertag(args: &[&str]) -> Result<std::process::Output> {
-    Ok(Command::new(BINARY)
+    Ok(reaped(Command::new(BINARY))
         .args(args)
         .env_clear()
         .env("HOME", std::env::temp_dir())

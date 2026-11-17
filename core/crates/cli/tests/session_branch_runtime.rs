@@ -1,5 +1,8 @@
 //! Delivered Workspace commits reach the operator's repository as one branch per Session:
 //! `supertag fetch` imports them on demand, and the local supervisor imports them on its own.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -55,7 +58,7 @@ impl Credentials {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .args(args)
             .env_clear()
@@ -420,7 +423,7 @@ async fn local_supervisor_advances_one_session_branch_for_each_task(
         )?,
     )?;
     let log = root.join("supervisor.log");
-    let mut supervisor = std::process::Command::new(BINARY)
+    let mut supervisor = reaped(std::process::Command::new(BINARY))
         .args(["up", "--foreground", "--state-directory"])
         .arg(&state)
         .arg("--file")
@@ -447,7 +450,7 @@ async fn local_supervisor_advances_one_session_branch_for_each_task(
             fs::read_to_string(&log)?
         );
         let cli = |args: &[&str]| {
-            let mut command = Command::new(BINARY);
+            let mut command = reaped(Command::new(BINARY));
             command
                 .args(args)
                 .arg("--state-directory")

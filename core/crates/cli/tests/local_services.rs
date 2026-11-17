@@ -1,4 +1,7 @@
 //! The ordinary native `up -f` entry point owns every service and its private enrollment.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "support/database_password.rs"]
 mod database_password;
 #[path = "support/protocol.rs"]
@@ -41,7 +44,7 @@ impl Process {
         env: &[(&str, &str)],
     ) -> Result<Self> {
         let log = state.with_extension(format!("{}.log", Uuid::new_v4().simple()));
-        let mut command = Command::new(BIN);
+        let mut command = reaped(Command::new(BIN));
         command.args(["up", "--foreground"]);
         if let Some(explicit) = explicit {
             command.arg("--state-directory").arg(explicit);
@@ -349,7 +352,7 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state(
     gone(&owned).await?;
     // SIGKILL cannot remove the endpoint; the supervisor lock is still the liveness authority.
     assert!(state.join("endpoint").exists());
-    let rejected = Command::new(BIN)
+    let rejected = reaped(Command::new(BIN))
         .args(["get", "task", "--state-directory"])
         .arg(&state)
         .arg("no-task")
@@ -385,7 +388,7 @@ async fn operator_commands_default_to_the_local_control_plane(database: String) 
     supervisor.ready()?;
     uses_database(&state, &database)?;
     let get_tags = |env: &[(&str, &str)], extra: &[&std::ffi::OsStr]| {
-        Command::new(BIN)
+        reaped(Command::new(BIN))
             .args(["get", "tags"])
             .args(extra)
             .env_clear()
@@ -1090,7 +1093,7 @@ impl Central {
             ensure!(!line.trim().is_empty(), "service did not bind");
             Ok(format!("http://{}", line.trim()))
         };
-        let mut plane = Command::new(BIN)
+        let mut plane = reaped(Command::new(BIN))
             .args(["control-plane", "--listen", "127.0.0.1:0"])
             .arg("--checkpoint-directory")
             .arg(checkpoints.path().join("checkpoints"))
@@ -1287,7 +1290,7 @@ impl SharedHost {
     /// supervisor; returns what it printed.
     fn up(&self, settings: &Value) -> Result<String> {
         let file = configure(self.temp.path(), &self.control_plane, settings)?;
-        let output = Command::new(BIN)
+        let output = reaped(Command::new(BIN))
             .args(["up", "--state-directory"])
             .arg(&self.state)
             .arg("--file")
@@ -2287,7 +2290,7 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
             "control-plane":{"type":"control-plane","notify":"webhook:http://hooks.example/private-token"}
         }}),
     )?;
-    let output = Command::new(BIN)
+    let output = reaped(Command::new(BIN))
         .args(["up", "--foreground", "--state-directory"])
         .arg(temp.path().join("invalid-state"))
         .arg("--file")
@@ -2314,7 +2317,7 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
     supervisor.ready()?;
     uses_database(&state, &database)?;
     let cli = |args: &[&str]| -> Result<String> {
-        let output = Command::new(BIN)
+        let output = reaped(Command::new(BIN))
             .arg(args[0])
             .arg("--state-directory")
             .arg(&state)
@@ -2329,7 +2332,7 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
         Ok(String::from_utf8(output.stdout)?)
     };
     // `test` takes the connection after its subcommand.
-    let output = Command::new(BIN)
+    let output = reaped(Command::new(BIN))
         .args(["test", "notification", "--state-directory"])
         .arg(&state)
         .env_clear()
@@ -2449,7 +2452,7 @@ async fn slack_notify_destination_posts_as_a_slack_surface_without_a_location() 
         &[("SUPERTAG_TEST_SLACK_API_URL", url.as_str())],
     )?;
     supervisor.ready()?;
-    let output = Command::new(BIN)
+    let output = reaped(Command::new(BIN))
         .args(["test", "notification", "--state-directory"])
         .arg(&state)
         .env_clear()

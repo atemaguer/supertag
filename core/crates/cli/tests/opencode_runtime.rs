@@ -1,4 +1,7 @@
 //! Real Control Plane and Worker Host processes with a provider-shaped OpenCode CLI.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -151,7 +154,7 @@ impl Credentials {
         }
     }
     fn command(&self) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .env_clear()
             .env("PATH", "/usr/bin:/bin")

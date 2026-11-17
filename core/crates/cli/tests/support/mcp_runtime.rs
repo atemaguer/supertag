@@ -5,6 +5,7 @@
 //! a Worker-owned snapshot after the harness rewrote the worktree) and
 //! `tests/mcp-oauth-login.test.ts` (refresh on a refused token, `mcp-login` hold and Inbox item).
 use super::*;
+use crate::children::reaped;
 use std::{io::Write, os::unix::fs::OpenOptionsExt};
 
 fn private_file(path: &Path, contents: &[u8]) -> Result<()> {
@@ -239,7 +240,7 @@ async fn exercise_oauth_mcp(directory: &Path, database: &str) -> Result<()> {
     let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let native = claude_fixture(directory)?;
     let journal = directory.join("oauth-provider.jsonl");
-    let mut provider = Command::new(&node);
+    let mut provider = reaped(Command::new(&node));
     provider
         .arg(repo_path(
             "harnesses/claude-code/fixtures/rust-mcp-oauth-provider.mjs",

@@ -24,6 +24,9 @@
 //! server with `fsync`, `synchronous_commit`, and `full_page_writes` on, and sets
 //! `SUPERTAG_RUST_TEST_REQUIRE_DURABLE_POSTGRES=1` so each case refuses a server
 //! with test durability settings.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "support/protocol.rs"]
 mod protocol;
 #[path = "support/provider_delivery_crash.rs"]
@@ -197,7 +200,7 @@ impl Credentials {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         // Never inherit an operator's real credentials, TLS settings, or state location.
         command
             .env_clear()

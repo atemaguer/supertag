@@ -3,6 +3,9 @@
 //! rotation. Mirrors tests/workspace-advertisement.test.ts (repeated `--workspace NAME=PATH`),
 //! tests/workspace-git-resolver.test.ts (two Workspace names on one checkout),
 //! tests/auth-key-cli.test.ts, and tests/worker-host-cli.test.ts (`rotate worker-host-credential`).
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -98,7 +101,7 @@ impl Services {
 }
 
 fn bare(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()

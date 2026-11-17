@@ -1,4 +1,7 @@
 //! Operator publication and consumption approvals through real split services.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "support/held_artifacts.rs"]
 mod held_artifacts;
 #[path = "../../../test-support/prerequisites.rs"]
@@ -42,7 +45,7 @@ impl Credentials {
         }
     }
     fn command(&self, args: &[&str]) -> Command {
-        let mut c = Command::new(BINARY);
+        let mut c = reaped(Command::new(BINARY));
         c.args(args)
             .env_clear()
             .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &self.gateway)

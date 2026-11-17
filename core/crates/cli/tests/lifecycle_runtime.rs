@@ -1,5 +1,8 @@
 //! Native lifecycle commands through the shipped binary: `init`, `up` in the background and
 //! under a service unit, `down`, `ps`, `logs`, `status`, `version`, and `config`.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 use std::{
     fs,
     io::{BufRead, BufReader},
@@ -47,7 +50,7 @@ impl Machine {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(BIN);
+        let mut command = reaped(Command::new(BIN));
         command
             .args(args)
             .env_clear()
@@ -805,7 +808,7 @@ impl SplitServices {
             || supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let (gateway_token, operator, host) = (enrolled(), token(), enrolled());
         let base = |args: &[&str]| {
-            let mut command = Command::new(BIN);
+            let mut command = reaped(Command::new(BIN));
             command.args(args).env_clear().env("PATH", "/usr/bin:/bin");
             command
         };
@@ -842,7 +845,7 @@ impl SplitServices {
     }
 
     fn cli(&self, args: &[&str]) -> Result<String> {
-        let output = Command::new(BIN)
+        let output = reaped(Command::new(BIN))
             .args(args)
             .env_clear()
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
@@ -906,7 +909,7 @@ fn exercise_status(database: &str) -> Result<()> {
         "{text}"
     );
     // Without an operator token, status fails without echoing anything secret.
-    let output = Command::new(BIN)
+    let output = reaped(Command::new(BIN))
         .args(["status", "--control-plane", &gateway])
         .env_clear()
         .output()?;
@@ -1164,7 +1167,7 @@ const OLD_SUPERVISOR: &str = env!("CARGO_BIN_EXE_supertag-old-supervisor");
 /// the build this CLI records.
 fn old_supervisor(machine: &Machine, template: &Path) -> Result<Child> {
     let _ = fs::remove_file(machine.state.join("old-supervisor-stopped"));
-    let mut child = Command::new(OLD_SUPERVISOR)
+    let mut child = reaped(Command::new(OLD_SUPERVISOR))
         .arg(&machine.state)
         .arg(template)
         .arg("2")

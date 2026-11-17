@@ -1,4 +1,7 @@
 //! Exercises the shipped binary entry points in independent OS processes.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -64,7 +67,7 @@ impl Credentials {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         // Never inherit an operator's real credentials, TLS settings, or state location.
         command
             .env_clear()
@@ -640,7 +643,7 @@ async fn separate_processes_preserve_work_and_cancel_execution(database: String)
 }
 
 fn local_command() -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command.env_clear().stdin(Stdio::null());
     command
 }

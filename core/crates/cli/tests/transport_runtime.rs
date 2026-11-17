@@ -5,6 +5,9 @@
 //!
 //! Ports `tests/worklet-transport-adoption-gates.test.ts` (16 hosts, partition,
 //! reconnect, no repeated accepted work) to the Rust services.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "support/protocol.rs"]
 mod protocol;
 use std::{
@@ -147,7 +150,7 @@ impl Drop for Service {
 }
 
 fn binary(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     // Never inherit an operator's credentials, TLS settings, or state location.
     command.args(args).env_clear();
     command

@@ -1,4 +1,7 @@
 //! Real split services fetch only the pinned source from a loopback GitHub/Git fixture.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "support/holding_host.rs"]
 mod holding_host;
 #[path = "../../../test-support/prerequisites.rs"]
@@ -345,7 +348,7 @@ async fn scenario(
     let operator_token = Uuid::new_v4().to_string();
     let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let command = |args: &[&str]| {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .args(args)
             .env_clear()
@@ -881,7 +884,7 @@ async fn verify_github_output(
     let task_id = field(&task, "task_id")?;
     // Every host process presents the same credential, so they share one artifact directory.
     let host = |state: &str, once: bool| {
-        let mut host = Command::new(BINARY);
+        let mut host = reaped(Command::new(BINARY));
         host.env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("SUPERTAG_HOST_TOKEN", host_token)

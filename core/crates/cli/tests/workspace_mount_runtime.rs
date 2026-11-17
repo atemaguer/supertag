@@ -1,6 +1,9 @@
 //! Separate Control Plane and Worker Host processes stage a read-only
 //! Workspace Volume copy for a real Codex Task, then remove it at cleanup, and
 //! write a read-write copy's changes back to its Volume.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -38,7 +41,7 @@ impl Credentials {
         }
     }
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .args(args)
             .env_clear()

@@ -3,6 +3,9 @@
 //! The admin operator token issues, rotates, and revokes an Operator Token with the CLI. A running
 //! Control Plane refuses the revoked token on new calls and ends a Watch stream and an artifact download
 //! it already opened. The audit log names every resource a call changed.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "support/held_artifacts.rs"]
 mod held_artifacts;
 #[path = "support/protocol.rs"]
@@ -54,7 +57,7 @@ impl Credentials {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .args(args)
             .env_clear()

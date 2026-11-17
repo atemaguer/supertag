@@ -12,6 +12,9 @@
 //! Attempt.
 //!
 //! SQLite serves one Control Plane process; a second process on the same file is refused.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 
 // This lane runs only on PostgreSQL, so it calls the runner without `database_tests!`.
 #[allow(unused_macros)]
@@ -79,7 +82,7 @@ impl Credentials {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         // Never inherit an operator's real credentials, TLS settings, or state location.
         command
             .env_clear()

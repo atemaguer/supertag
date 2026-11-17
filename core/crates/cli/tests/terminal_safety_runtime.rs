@@ -3,6 +3,8 @@
 //! Real services store values that hold terminal controls, bidirectional overrides, and line
 //! breaks. Readable views replace them with spaces and keep escape payloads visible. JSON keeps
 //! every value: unsafe characters are written as `\u` escapes that parse back to the original.
+#[path = "support/children.rs"]
+mod children;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]

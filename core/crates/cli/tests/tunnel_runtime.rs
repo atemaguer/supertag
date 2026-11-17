@@ -14,6 +14,9 @@
 //!   itself;
 //! - with Docker, the same deployment behind a real HTTP/1.1-only nginx that forwards only
 //!   WebSocket upgrades and closes connections idle longer than 25 seconds.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "support/holding_host.rs"]
 mod holding_host;
 #[path = "../../../test-support/prerequisites.rs"]
@@ -150,7 +153,7 @@ impl Drop for Service {
 }
 
 fn binary(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     // Never inherit an operator's credentials, TLS settings, or state location.
     command.args(args).env_clear();
     command

@@ -1,3 +1,6 @@
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -31,7 +34,7 @@ const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
 const WAIT: Duration = Duration::from_secs(20);
 
 fn command(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()
@@ -378,7 +381,7 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path(), &database).await?;
     let journal = directory.path().join("mcp-provider.jsonl");
-    let mut provider = Command::new(&node);
+    let mut provider = reaped(Command::new(&node));
     provider
         .arg(repo_path(
             "harnesses/claude-code/fixtures/rust-mcp-provider.mjs",

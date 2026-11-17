@@ -1,6 +1,9 @@
 //! Operator access through a Control Plane process: an audit entry commits
 //! with the change it records, Worker Hosts joining with an Auth Key are recorded under that key,
 //! and `supertag connect` saves a proven operator token for `--control-plane NAME`.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -30,7 +33,7 @@ const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const WAIT: Duration = Duration::from_secs(15);
 
 fn binary(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()

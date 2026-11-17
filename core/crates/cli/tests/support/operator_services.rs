@@ -1,5 +1,6 @@
 //! A Control Plane as a separate process, and the operator CLI run against it.
 #![allow(dead_code)]
+use crate::children::reaped;
 
 use std::{
     net::SocketAddr,
@@ -34,7 +35,7 @@ pub struct OperatorServices {
 }
 
 fn command(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()

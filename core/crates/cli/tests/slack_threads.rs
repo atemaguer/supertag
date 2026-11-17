@@ -1,5 +1,8 @@
 //! Signed HTTP Slack ingress through separate CP/Gateway/Host processes.
 //! Every provider interaction terminates at this test's loopback HTTP server.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "support/held_artifacts.rs"]
 mod held_artifacts;
 #[path = "../../../test-support/prerequisites.rs"]
@@ -67,7 +70,7 @@ impl Credentials {
         }
     }
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .args(args)
             .env_clear()

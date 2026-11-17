@@ -1,4 +1,7 @@
 //! Cursor's private adapter and runner through real split services and disposable Workspaces.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "support/holding_host.rs"]
 mod holding_host;
 #[path = "../../../test-support/prerequisites.rs"]
@@ -217,7 +220,7 @@ impl Credentials {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .args(args)
             .env_clear()

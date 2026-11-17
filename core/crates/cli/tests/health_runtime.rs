@@ -1,3 +1,6 @@
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 use std::{process::Stdio, time::Duration};
 
 use anyhow::{Context, Result, ensure};
@@ -33,7 +36,7 @@ async fn health_command_requires_the_requested_grpc_service_to_be_serving() -> R
         ] {
             let output = timeout(
                 Duration::from_secs(10),
-                Command::new(env!("CARGO_BIN_EXE_supertag"))
+                reaped(Command::new(env!("CARGO_BIN_EXE_supertag")))
                     .args([
                         "health",
                         "--endpoint",
@@ -71,7 +74,7 @@ async fn health_command_requires_the_requested_grpc_service_to_be_serving() -> R
         }
         let output = timeout(
             Duration::from_secs(10),
-            Command::new(env!("CARGO_BIN_EXE_supertag"))
+            reaped(Command::new(env!("CARGO_BIN_EXE_supertag")))
                 .args(["health", "--endpoint", "http://192.0.2.1:3434"])
                 .env_clear()
                 .stdin(Stdio::null())
@@ -113,7 +116,7 @@ async fn health_command_bounds_a_peer_that_never_answers() -> Result<()> {
     });
     let result = timeout(
         Duration::from_secs(10),
-        Command::new(env!("CARGO_BIN_EXE_supertag"))
+        reaped(Command::new(env!("CARGO_BIN_EXE_supertag")))
             .args(["health", "--endpoint", &endpoint, "--timeout-seconds", "1"])
             .env_clear()
             .stdin(Stdio::null())

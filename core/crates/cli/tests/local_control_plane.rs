@@ -1,5 +1,8 @@
 //! `supertag __local-control-plane`: the format the terminal UI's local discovery reads
 //! (`apps/tui/local_control_plane.go`).
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 use std::{
     fs,
     os::unix::fs::{DirBuilderExt, PermissionsExt},
@@ -10,7 +13,7 @@ use std::{
 use serde_json::{Value, json};
 
 fn discover(state: &Path) -> (bool, Value, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_supertag"))
+    let output = reaped(Command::new(env!("CARGO_BIN_EXE_supertag")))
         .arg("__local-control-plane")
         .env_clear()
         .env("PATH", "/usr/bin:/bin")

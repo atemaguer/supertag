@@ -1,5 +1,8 @@
 //! Slack surface credentials resolved by a real Gateway process from the credential vault.
 //! The HashiCorp Vault KV v2 endpoint is a loopback fixture; no credential leaves the test.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 use std::{
     collections::HashMap,
     fs::File,
@@ -131,7 +134,7 @@ impl Services {
         let directory = tempfile::tempdir()?;
         let gateway_token =
             supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .arg("control-plane")
             .env_clear()
@@ -161,7 +164,7 @@ impl Services {
     }
 
     fn gateway(&self, environment: &[(&str, &str)]) -> Result<Process> {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .args([
                 "gateway",
@@ -332,7 +335,7 @@ async fn operator_stores_slack_credentials_in_the_file_vault_for_the_gateway() -
     let state = services.directory.path().join("state");
     let state_text = state.to_str().context("state path")?;
     let id = format!("surface/slack/{ACCOUNT}");
-    let mut store = Command::new(BINARY)
+    let mut store = reaped(Command::new(BINARY))
         .args(["gateway", "credential", "store", &id])
         .env_clear()
         .env("SUPERTAG_STATE_DIR", &state)
@@ -374,7 +377,7 @@ async fn operator_stores_slack_credentials_in_the_file_vault_for_the_gateway() -
     ensure!(status == reqwest::StatusCode::OK, "{status}: {body}");
     drop(gateway);
 
-    let output = Command::new(BINARY)
+    let output = reaped(Command::new(BINARY))
         .args(["gateway", "credential", "delete", &id])
         .env_clear()
         .env("SUPERTAG_STATE_DIR", &state)
@@ -390,7 +393,7 @@ async fn operator_stores_slack_credentials_in_the_file_vault_for_the_gateway() -
     );
 
     // Malformed input is refused without echoing it.
-    let mut store = Command::new(BINARY)
+    let mut store = reaped(Command::new(BINARY))
         .args(["gateway", "credential", "store", &id])
         .env_clear()
         .env("SUPERTAG_STATE_DIR", &state)

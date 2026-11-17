@@ -1,3 +1,6 @@
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 use std::{path::Path, process::Stdio, time::Duration};
 
 use anyhow::{Context, Result, ensure};
@@ -14,7 +17,7 @@ const WAIT: Duration = Duration::from_secs(15);
 
 fn command(state: &Path, arguments: &[&str]) -> Command {
     let (name, arguments) = arguments.split_first().expect("command required");
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .arg(name)
         .arg("--state-directory")

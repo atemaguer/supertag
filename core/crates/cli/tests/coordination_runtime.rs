@@ -1,6 +1,9 @@
 //! Coordination and safety features through separate Control Plane, Gateway, and Worker Host
 //! processes: Objective overlap warnings, Worker-managed effect receipts, and a Slack message
 //! that selects an authorized GitHub Workspace.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -48,7 +51,7 @@ impl Credentials {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .args(args)
             .env_clear()

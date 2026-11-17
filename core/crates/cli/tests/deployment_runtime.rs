@@ -7,6 +7,9 @@
 //!
 //! Ports `tests/deployment-setup.test.ts` (setup, check, verify) and the deployed-organization
 //! part of `tests/shared-organization-*.test.ts` without model calls.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -196,7 +199,7 @@ impl Pki {
 }
 
 fn command(home: &Path, args: &[&str], env: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     // Never inherit an operator's credentials, TLS settings, or state location.
     command
         .args(args)

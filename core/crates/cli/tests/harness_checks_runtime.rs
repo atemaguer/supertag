@@ -1,6 +1,9 @@
 //! Harness sign-in checks and host startup checks through the shipped binary, with fake harness
 //! CLIs on PATH: `supertag sign-in`, and a configured host service that `supertag up` refuses to
 //! start when its Codex CLI or configured models cannot run Tasks.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -46,7 +49,7 @@ impl Machine {
     }
 
     fn run(&self, args: &[&str], env: &[(&str, &str)]) -> Result<Output> {
-        let mut child = Command::new(BIN)
+        let mut child = reaped(Command::new(BIN))
             .args(args)
             .env_clear()
             .env("HOME", &self.home)
@@ -441,7 +444,7 @@ fn a_signal_during_a_sign_in_probe_kills_it_and_removes_its_home() -> Result<()>
                 started.display()
             ),
         )?;
-        let mut child = Command::new(BIN)
+        let mut child = reaped(Command::new(BIN))
             .args(["sign-in", "opencode", "--model", "openai/fixture"])
             .env_clear()
             .env("HOME", &machine.home)

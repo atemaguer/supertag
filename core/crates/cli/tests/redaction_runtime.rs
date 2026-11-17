@@ -2,6 +2,9 @@
 //! `tests/event-redaction-structure.test.ts`): a real Control Plane and Worker Host
 //! run the fixture adapter, whose event and result repeat a prompt carrying a credential the host
 //! holds, a URL password, and a Basic authorization value.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -26,7 +29,7 @@ const WAIT: Duration = Duration::from_secs(30);
 const HOST_SECRET: &str = "sk-host-only-credential-4242";
 
 fn binary(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()

@@ -1,4 +1,7 @@
 //! `supertag mcp login` and `supertag mcp list` against a loopback OAuth authorization server.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 
 use std::{
     collections::HashMap,
@@ -143,7 +146,7 @@ fn private_file(path: &Path, contents: &str) -> Result<()> {
 }
 
 fn command(state: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()

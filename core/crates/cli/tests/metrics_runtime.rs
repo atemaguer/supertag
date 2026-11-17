@@ -1,6 +1,9 @@
 //! `supertag metrics` through separate Control Plane and Worker Host processes
 //! (`packages/store/coordination-metrics.test.ts`): every figure is an aggregate, so it counts
 //! past any list page limit, and a claimed Attempt is counted as `supertag spend` counts it.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -31,7 +34,7 @@ const WAIT: Duration = Duration::from_secs(30);
 const TASKS: usize = 120;
 
 fn binary(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()

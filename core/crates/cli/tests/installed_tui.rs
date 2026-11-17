@@ -1,3 +1,6 @@
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 use std::{
     fs,
     os::unix::fs::{PermissionsExt, symlink},
@@ -29,7 +32,7 @@ async fn launch(
     environment: Option<&Path>,
     expected: &str,
 ) -> Result<()> {
-    let mut command = Command::new(cli);
+    let mut command = reaped(Command::new(cli));
     command
         .args(["tui", "--control-plane", "http://127.0.0.1:9"])
         .current_dir(home)

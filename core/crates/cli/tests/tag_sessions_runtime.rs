@@ -2,6 +2,9 @@
 //! command, through separate Control Plane and Worker Host processes and the harness tools
 //! (`HarnessTagSessions`) its adapter calls.
 #![cfg(feature = "test-fixtures")]
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
@@ -29,7 +32,7 @@ const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
 const WAIT: Duration = Duration::from_secs(30);
 
 fn command(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()

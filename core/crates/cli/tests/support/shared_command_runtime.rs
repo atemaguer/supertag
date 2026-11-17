@@ -1,3 +1,4 @@
+use crate::children::reaped;
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
@@ -30,7 +31,7 @@ async fn cursor_shared_command_reaps_before_cancelled_task_cleanup_can_settle(
     std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))?;
     std::fs::write(root.join("workspace.txt"), "initial-content\n")?;
     let admin = Uuid::new_v4().to_string();
-    let mut command = Command::new(binary);
+    let mut command = reaped(Command::new(binary));
     command
         .env_clear()
         .env("SUPERTAG_EXECUTION_ADMIN_TOKEN", &admin)

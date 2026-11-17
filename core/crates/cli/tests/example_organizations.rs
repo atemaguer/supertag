@@ -2,6 +2,8 @@
 //! Plane process and the operator CLI, then round-trips: a second `diff` and `apply` report no
 //! changes. A field the Rust manifests no longer take fails the whole document, so this keeps the
 //! examples on the current manifest form.
+#[path = "support/children.rs"]
+mod children;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]

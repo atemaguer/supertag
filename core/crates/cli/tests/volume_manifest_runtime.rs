@@ -9,6 +9,8 @@
 //! that a Task mounts. A Workspace data Volume is a file Volume, or an S3 Volume that names the
 //! credential its Worker Hosts map; a path alias, or an S3 bucket and prefix, of artifact storage
 //! is refused in both directions.
+#[path = "support/children.rs"]
+mod children;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]

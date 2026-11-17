@@ -1,6 +1,9 @@
 //! `supertag setup surface`, `tag update --add-location|--remove-location`, and
 //! `activate|deactivate permission-set|context-set` through real Control Plane and Gateway
 //! processes. Provider APIs are loopback fixtures; no credential leaves the test.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -414,7 +417,7 @@ impl Services {
         let gateway_token =
             supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator_token = Uuid::new_v4().to_string();
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .arg("control-plane")
             .env_clear()
@@ -511,7 +514,7 @@ impl Services {
         environment: &[(&str, &str)],
         input: &str,
     ) -> Result<Output> {
-        let mut child = Command::new(BINARY)
+        let mut child = reaped(Command::new(BINARY))
             .args(args)
             .args(["--control-plane", &self.public, "--state-directory"])
             .arg(state)
@@ -563,7 +566,7 @@ impl Services {
     }
 
     fn json(&self, args: &[&str]) -> Result<Value> {
-        let output = Command::new(BINARY)
+        let output = reaped(Command::new(BINARY))
             .args(["--control-plane", &self.public])
             .args(args)
             .env_clear()
@@ -592,7 +595,7 @@ impl Services {
 
     /// A connector Gateway configured from the environment `supertag up` derives from an entry.
     fn connector(&self, flags: &[&str], environment: &[(&str, &str)]) -> Result<Process> {
-        let mut command = Command::new(BINARY);
+        let mut command = reaped(Command::new(BINARY));
         command
             .args(["gateway", "--control-plane", &self.private])
             .args(flags)
@@ -1625,7 +1628,7 @@ async fn local_up_serves_the_configured_surface(hashicorp: bool) -> Result<()> {
         ("SUPERTAG_TEST_SLACK_API_URL", slack_api.as_str()),
     ];
     let up = || -> Result<(Child, mpsc::Receiver<String>)> {
-        let mut child = Command::new(BINARY)
+        let mut child = reaped(Command::new(BINARY))
             .args(["up", "--foreground", "--state-directory"])
             .arg(&state)
             .env_clear()
@@ -1674,7 +1677,7 @@ async fn local_up_serves_the_configured_surface(hashicorp: bool) -> Result<()> {
         .await?;
     let listen = free_port()?;
     let cli = |args: &[&str]| -> Result<String> {
-        let output = Command::new(BINARY)
+        let output = reaped(Command::new(BINARY))
             .args(args)
             .arg("--state-directory")
             .arg(&state)

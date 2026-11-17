@@ -1,5 +1,8 @@
 //! Operator observation through real services: saved Control Plane profiles,
 //! `watch` across a Control Plane restart, `describe`, and `spend`.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[path = "support/protocol.rs"]
@@ -31,7 +34,7 @@ const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const WAIT: Duration = Duration::from_secs(20);
 
 fn command(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()

@@ -3,6 +3,9 @@
 //! tests/label-placement.test.ts "places Session Tasks only on bound Worker
 //! Hosts that carry the Tag's runsOn labels". Host services in supertag.yaml declare labels
 //! the same way, through the local supervisor.
+#[path = "support/children.rs"]
+mod children;
+use children::reaped;
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 #[macro_use]
@@ -39,7 +42,7 @@ database_tests! {
 }
 
 fn binary(args: &[&str]) -> Command {
-    let mut command = Command::new(BINARY);
+    let mut command = reaped(Command::new(BINARY));
     command
         .args(args)
         .env_clear()
@@ -591,7 +594,7 @@ async fn local_host_services_carry_their_declared_labels(database: String) -> Re
         }}))?,
     )?;
     let log = root.join("supervisor.log");
-    let mut supervisor = std::process::Command::new(BINARY)
+    let mut supervisor = reaped(std::process::Command::new(BINARY))
         .args(["up", "--foreground", "--state-directory"])
         .arg(&state)
         .arg("--file")
