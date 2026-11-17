@@ -11,6 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- `supertag describe task` and `supertag get task` show operators why a Worker Host failed a Task
+  (`failure_detail`: up to 8 redacted one-line reasons). People who aren't operators and surface
+  replies still see only the fixed failure message.
 - A Microsoft Teams message from a channel connected to a different Tag gets one notice in its
   thread naming the connected Tag, instead of no answer.
 - Slack and Lark event-ID receipts are deleted after 7 days. Message receipts are kept, so a late
