@@ -234,7 +234,9 @@ impl Store {
         name("Task ID", &input.task_id)?;
         if !matches!(
             input.kind(),
-            WorkspaceArtifactKind::Patch | WorkspaceArtifactKind::Bundle
+            WorkspaceArtifactKind::Patch
+                | WorkspaceArtifactKind::Bundle
+                | WorkspaceArtifactKind::CompleteBundle
         ) {
             return Err(invalid("workspace artifact kind required"));
         }

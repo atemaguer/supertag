@@ -7,8 +7,9 @@ use std::{
 };
 
 use sha2::{Digest, Sha256};
-use supertag_workspaces::session_branch::{
-    BranchCheckedOut, BranchMoved, Imported, SessionDelivery, import,
+use supertag_workspaces::{
+    MissingPrerequisite,
+    session_branch::{BranchCheckedOut, BranchMoved, Imported, SessionDelivery, import},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -163,6 +164,7 @@ async fn run(
         &fixture.operator,
         delivery,
         bundle,
+        false,
         &CancellationToken::new(),
     )
     .await
@@ -546,4 +548,86 @@ async fn a_bundle_with_a_malformed_object_is_refused() {
     assert_eq!(objects(&fixture), before);
     assert!(!fixture.has(&head));
     assert!(fixture.branch().is_none());
+}
+
+/// Commit `file` on `start` in the worker repository and bundle only `start..head`, as a Worker
+/// Host bundles a delivery.
+fn incremental(fixture: &mut Fixture, start: &str, file: &str) -> (SessionDelivery, PathBuf) {
+    let (mut delivery, complete) = fixture.deliver(start, file);
+    let reference = format!("refs/heads/supertag-deliveries/{}", delivery.delivery_id);
+    let path = complete.with_extension("incremental");
+    git(
+        &fixture.worker,
+        &[
+            "bundle",
+            "create",
+            path.to_str().unwrap(),
+            &reference,
+            &format!("^{start}"),
+        ],
+    );
+    let bytes = fs::read(&path).unwrap();
+    delivery.bundle_sha256 = format!("{:x}", Sha256::digest(&bytes));
+    delivery.bundle_byte_length = bytes.len() as u64;
+    (delivery, path)
+}
+
+/// A delivery's own bundle builds on its start commit. A repository that holds it imports the
+/// bundle; one that does not refuses it with `MissingPrerequisite` and changes nothing, then
+/// imports the holder's complete bundle of the same commit, which has no recorded digest.
+#[tokio::test]
+async fn an_incremental_delivery_needs_its_start_commit_or_a_complete_bundle() {
+    let mut fixture = Fixture::new();
+    let base = fixture.base.clone();
+    let (first, first_bundle) = incremental(&mut fixture, &base, "one.txt");
+    assert_eq!(
+        run(&fixture, &first, &first_bundle).await.unwrap(),
+        Imported::Created
+    );
+    // The second delivery builds on a commit the operator's repository holds now.
+    let (second, second_bundle) = incremental(&mut fixture, &first.head_commit, "two.txt");
+    assert_eq!(
+        run(&fixture, &second, &second_bundle).await.unwrap(),
+        Imported::Advanced
+    );
+    // A third, fetched into a fresh repository holding only the base, lacks its start.
+    let (third, third_bundle) = incremental(&mut fixture, &second.head_commit, "three.txt");
+    let fresh = Fixture::new();
+    let error = run(&fresh, &third, &third_bundle).await.unwrap_err();
+    let missing = error
+        .downcast_ref::<MissingPrerequisite>()
+        .unwrap_or_else(|| panic!("{error:#}"));
+    assert_eq!(missing.0, second.head_commit);
+    assert!(!fresh.has(&third.head_commit));
+    // The holder's complete bundle: its digest differs from the receipt, as complete bundles are
+    // built on demand, and it imports only as a complete bundle.
+    let reference = format!("refs/heads/supertag-deliveries/{}", third.delivery_id);
+    let complete = fixture.root.path().join("complete.bundle");
+    git(
+        &fixture.worker,
+        &["bundle", "create", complete.to_str().unwrap(), &reference],
+    );
+    assert!(run(&fresh, &third, &complete).await.is_err());
+    assert_eq!(
+        import(
+            &fresh.operator,
+            &third,
+            &complete,
+            true,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap(),
+        Imported::Created
+    );
+    // A bundle whose prerequisite is not the delivery's start is refused even when held.
+    let mut wrong = third.clone();
+    wrong.start_commit = base.clone();
+    assert!(
+        format!(
+            "{:#}",
+            run(&fixture, &wrong, &third_bundle).await.unwrap_err()
+        )
+        .contains("other than its start commit")
+    );
 }

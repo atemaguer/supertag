@@ -66,5 +66,5 @@ jobs:
           python -m venv "$RUNNER_TEMP/wheel"
           "$RUNNER_TEMP/wheel/bin/pip" install --quiet "$(ls dist/*.whl)[runtime]"
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/wheel/bin/python" -c 'import supertag._runtime_v2.runtime_pb2_grpc, supertag.control_plane_client'
+          "$RUNNER_TEMP/wheel/bin/python" -c 'import supertag._runtime_v2.runtime_pb2_grpc, supertag.gateway_client'
       - uses: pypa/gh-action-pypi-publish@release/v1

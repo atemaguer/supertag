@@ -1769,7 +1769,10 @@ type WorkspaceArtifactKind int32
 const (
 	WorkspaceArtifactKind_WORKSPACE_ARTIFACT_KIND_UNSPECIFIED WorkspaceArtifactKind = 0
 	WorkspaceArtifactKind_WORKSPACE_ARTIFACT_KIND_PATCH       WorkspaceArtifactKind = 1
-	WorkspaceArtifactKind_WORKSPACE_ARTIFACT_KIND_BUNDLE      WorkspaceArtifactKind = 2
+	// The delivery's own bundle: what its Attempt added to its start commit.
+	WorkspaceArtifactKind_WORKSPACE_ARTIFACT_KIND_BUNDLE WorkspaceArtifactKind = 2
+	// A complete bundle of the delivered commit, built on demand by the holding Worker Host.
+	WorkspaceArtifactKind_WORKSPACE_ARTIFACT_KIND_COMPLETE_BUNDLE WorkspaceArtifactKind = 3
 )
 
 // Enum value maps for WorkspaceArtifactKind.
@@ -1778,11 +1781,13 @@ var (
 		0: "WORKSPACE_ARTIFACT_KIND_UNSPECIFIED",
 		1: "WORKSPACE_ARTIFACT_KIND_PATCH",
 		2: "WORKSPACE_ARTIFACT_KIND_BUNDLE",
+		3: "WORKSPACE_ARTIFACT_KIND_COMPLETE_BUNDLE",
 	}
 	WorkspaceArtifactKind_value = map[string]int32{
-		"WORKSPACE_ARTIFACT_KIND_UNSPECIFIED": 0,
-		"WORKSPACE_ARTIFACT_KIND_PATCH":       1,
-		"WORKSPACE_ARTIFACT_KIND_BUNDLE":      2,
+		"WORKSPACE_ARTIFACT_KIND_UNSPECIFIED":     0,
+		"WORKSPACE_ARTIFACT_KIND_PATCH":           1,
+		"WORKSPACE_ARTIFACT_KIND_BUNDLE":          2,
+		"WORKSPACE_ARTIFACT_KIND_COMPLETE_BUNDLE": 3,
 	}
 )
 
@@ -7844,10 +7849,14 @@ type RelayRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	RelayId string                 `protobuf:"bytes,1,opt,name=relay_id,json=relayId,proto3" json:"relay_id,omitempty"`
 	// The Attempt that produced the blob; the host keeps its bytes under this Attempt.
-	AttemptId     string         `protobuf:"bytes,2,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
-	Blob          *BlobReference `protobuf:"bytes,3,opt,name=blob,proto3" json:"blob,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AttemptId string         `protobuf:"bytes,2,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	Blob      *BlobReference `protobuf:"bytes,3,opt,name=blob,proto3" json:"blob,omitempty"`
+	// Instead of a held blob: build a complete bundle of this delivery's head, its whole history,
+	// for a reader that lacks the delivery's start commit. It has no recorded digest; the reader
+	// checks it with Git against the delivered commit.
+	CompleteBundle *WorkspaceDeliveryReference `protobuf:"bytes,4,opt,name=complete_bundle,json=completeBundle,proto3" json:"complete_bundle,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RelayRequest) Reset() {
@@ -7897,6 +7906,13 @@ func (x *RelayRequest) GetAttemptId() string {
 func (x *RelayRequest) GetBlob() *BlobReference {
 	if x != nil {
 		return x.Blob
+	}
+	return nil
+}
+
+func (x *RelayRequest) GetCompleteBundle() *WorkspaceDeliveryReference {
+	if x != nil {
+		return x.CompleteBundle
 	}
 	return nil
 }
@@ -25289,12 +25305,13 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1d\n" +
 	"\n" +
 	"attempt_id\x18\x02 \x01(\tR\tattemptId\"\x13\n" +
-	"\x11AwaitRelayRequest\"\x80\x01\n" +
+	"\x11AwaitRelayRequest\"\xda\x01\n" +
 	"\fRelayRequest\x12\x19\n" +
 	"\brelay_id\x18\x01 \x01(\tR\arelayId\x12\x1d\n" +
 	"\n" +
 	"attempt_id\x18\x02 \x01(\tR\tattemptId\x126\n" +
-	"\x04blob\x18\x03 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\x04blob\"e\n" +
+	"\x04blob\x18\x03 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\x04blob\x12X\n" +
+	"\x0fcomplete_bundle\x18\x04 \x01(\v2/.supertag.runtime.v2.WorkspaceDeliveryReferenceR\x0ecompleteBundle\"e\n" +
 	"\n" +
 	"RelayFrame\x12\x1b\n" +
 	"\brelay_id\x18\x01 \x01(\tH\x00R\arelayId\x12\x16\n" +
@@ -26911,11 +26928,12 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"(WORKSPACE_MOUNT_WRITE_STATUS_UNSPECIFIED\x10\x00\x12)\n" +
 	"%WORKSPACE_MOUNT_WRITE_STATUS_COMPLETE\x10\x01\x12(\n" +
 	"$WORKSPACE_MOUNT_WRITE_STATUS_PARTIAL\x10\x02\x12(\n" +
-	"$WORKSPACE_MOUNT_WRITE_STATUS_REFUSED\x10\x03*\x87\x01\n" +
+	"$WORKSPACE_MOUNT_WRITE_STATUS_REFUSED\x10\x03*\xb4\x01\n" +
 	"\x15WorkspaceArtifactKind\x12'\n" +
 	"#WORKSPACE_ARTIFACT_KIND_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dWORKSPACE_ARTIFACT_KIND_PATCH\x10\x01\x12\"\n" +
-	"\x1eWORKSPACE_ARTIFACT_KIND_BUNDLE\x10\x02*\xf4\x01\n" +
+	"\x1eWORKSPACE_ARTIFACT_KIND_BUNDLE\x10\x02\x12+\n" +
+	"'WORKSPACE_ARTIFACT_KIND_COMPLETE_BUNDLE\x10\x03*\xf4\x01\n" +
 	"\x0fObjectiveStatus\x12 \n" +
 	"\x1cOBJECTIVE_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18OBJECTIVE_STATUS_WORKING\x10\x01\x12\x1c\n" +
@@ -27097,12 +27115,13 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\vSettleReply\x12'.supertag.runtime.v2.SettleReplyRequest\x1a\x1a.supertag.runtime.v2.Reply\x12a\n" +
 	"\x0eClaimConnector\x12*.supertag.runtime.v2.ClaimConnectorRequest\x1a#.supertag.runtime.v2.ConnectorLease\x12a\n" +
 	"\x0eRenewConnector\x12*.supertag.runtime.v2.RenewConnectorRequest\x1a#.supertag.runtime.v2.ConnectorLease\x12o\n" +
-	"\x10ReleaseConnector\x12,.supertag.runtime.v2.ReleaseConnectorRequest\x1a-.supertag.runtime.v2.ReleaseConnectorResponse2\xb3\a\n" +
+	"\x10ReleaseConnector\x12,.supertag.runtime.v2.ReleaseConnectorRequest\x1a-.supertag.runtime.v2.ReleaseConnectorResponse2\xa6\b\n" +
 	"\tTransfers\x12e\n" +
 	"\x10UploadCheckpoint\x12%.supertag.runtime.v2.CheckpointUpload\x1a(.supertag.runtime.v2.CheckpointReference(\x01\x12k\n" +
 	"\x12DownloadCheckpoint\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a'.supertag.runtime.v2.CheckpointDownload0\x01\x12q\n" +
 	"\x0fCommitWorkspace\x12-.supertag.runtime.v2.WorkspaceDeliveryRequest\x1a/.supertag.runtime.v2.WorkspaceDeliveryReference\x12i\n" +
-	"\x11DownloadWorkspace\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a&.supertag.runtime.v2.WorkspaceDownload0\x01\x12w\n" +
+	"\x11DownloadWorkspace\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a&.supertag.runtime.v2.WorkspaceDownload0\x01\x12q\n" +
+	"\x19DownloadCompleteWorkspace\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a&.supertag.runtime.v2.WorkspaceDownload0\x01\x12w\n" +
 	"\x19DownloadWorkspaceArtifact\x120.supertag.runtime.v2.GetWorkspaceArtifactRequest\x1a&.supertag.runtime.v2.WorkspaceDownload0\x01\x12q\n" +
 	"\x16DownloadReviewArtifact\x12-.supertag.runtime.v2.GetReviewArtifactRequest\x1a&.supertag.runtime.v2.WorkspaceDownload0\x01\x12u\n" +
 	"\x17DownloadWorkspaceSource\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a,.supertag.runtime.v2.GithubWorkspaceDownload0\x01\x12\x90\x01\n" +
@@ -27630,539 +27649,542 @@ var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	20,  // 73: supertag.runtime.v2.HostUncertainAttempt.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
 	109, // 74: supertag.runtime.v2.ListHostsResponse.hosts:type_name -> supertag.runtime.v2.WorkerHostStatus
 	294, // 75: supertag.runtime.v2.RelayRequest.blob:type_name -> supertag.runtime.v2.BlobReference
-	295, // 76: supertag.runtime.v2.HeldWorkspaceDelivery.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	115, // 77: supertag.runtime.v2.HeldWorkspaceDelivery.holder:type_name -> supertag.runtime.v2.BlobHolder
-	122, // 78: supertag.runtime.v2.HarnessWorkspaceRequest.read:type_name -> supertag.runtime.v2.WorkspaceRead
-	123, // 79: supertag.runtime.v2.HarnessWorkspaceRequest.write:type_name -> supertag.runtime.v2.WorkspaceWrite
-	124, // 80: supertag.runtime.v2.HarnessWorkspaceRequest.edit:type_name -> supertag.runtime.v2.WorkspaceEdit
-	125, // 81: supertag.runtime.v2.HarnessWorkspaceRequest.glob:type_name -> supertag.runtime.v2.WorkspaceGlob
-	126, // 82: supertag.runtime.v2.HarnessWorkspaceRequest.grep:type_name -> supertag.runtime.v2.WorkspaceGrep
-	127, // 83: supertag.runtime.v2.HarnessWorkspaceRequest.list:type_name -> supertag.runtime.v2.WorkspaceList
-	128, // 84: supertag.runtime.v2.HarnessWorkspaceRequest.command:type_name -> supertag.runtime.v2.WorkspaceCommand
-	14,  // 85: supertag.runtime.v2.WorkspaceGrep.mode:type_name -> supertag.runtime.v2.WorkspaceGrepMode
-	131, // 86: supertag.runtime.v2.RemoteWorkspaceCopyUpload.header:type_name -> supertag.runtime.v2.RemoteWorkspaceCopyHeader
-	130, // 87: supertag.runtime.v2.RemoteWorkspaceCopyUpload.file:type_name -> supertag.runtime.v2.RemoteWorkspaceCopyFile
-	130, // 88: supertag.runtime.v2.RemoteWorkspaceCopyDownload.file:type_name -> supertag.runtime.v2.RemoteWorkspaceCopyFile
-	135, // 89: supertag.runtime.v2.RemoteWorkspaceCopyDownload.listed:type_name -> supertag.runtime.v2.RemoteWorkspaceCopyListed
-	138, // 90: supertag.runtime.v2.RemoteWorkspaceAllocateRequest.owner:type_name -> supertag.runtime.v2.RemoteWorkspaceOwner
-	140, // 91: supertag.runtime.v2.RemoteWorkspaceAllocateRequest.environment:type_name -> supertag.runtime.v2.RemoteWorkspaceEnvironment
-	369, // 92: supertag.runtime.v2.RemoteWorkspaceAllocateRequest.file_scope:type_name -> supertag.runtime.v2.FileScope
-	294, // 93: supertag.runtime.v2.RemoteWorkspaceStageHeader.bundle:type_name -> supertag.runtime.v2.BlobReference
-	219, // 94: supertag.runtime.v2.RemoteWorkspaceStageHeader.input_files:type_name -> supertag.runtime.v2.ArtifactInputFile
-	146, // 95: supertag.runtime.v2.RemoteWorkspaceStageChunk.header:type_name -> supertag.runtime.v2.RemoteWorkspaceStageHeader
-	219, // 96: supertag.runtime.v2.RemoteWorkspaceStageResponse.input_files:type_name -> supertag.runtime.v2.ArtifactInputFile
-	294, // 97: supertag.runtime.v2.RemoteWorkspaceCaptureChunk.tree:type_name -> supertag.runtime.v2.BlobReference
-	138, // 98: supertag.runtime.v2.RemoteWorkspaceStopRequest.owner:type_name -> supertag.runtime.v2.RemoteWorkspaceOwner
-	153, // 99: supertag.runtime.v2.RemoteMcpServerInput.start:type_name -> supertag.runtime.v2.RemoteMcpServerStart
-	91,  // 100: supertag.runtime.v2.HarnessSendTagMessageRequest.review:type_name -> supertag.runtime.v2.CommitReviewSubmission
-	295, // 101: supertag.runtime.v2.HarnessReviewPatch.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	16,  // 102: supertag.runtime.v2.ResolveInputRequest.decision:type_name -> supertag.runtime.v2.LiveInputDecision
-	15,  // 103: supertag.runtime.v2.LiveInput.state:type_name -> supertag.runtime.v2.LiveInputState
-	247, // 104: supertag.runtime.v2.TakeInputRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	170, // 105: supertag.runtime.v2.TakeInputResponse.input:type_name -> supertag.runtime.v2.LiveInput
-	17,  // 106: supertag.runtime.v2.HarnessSettleLiveInputRequest.receipt:type_name -> supertag.runtime.v2.LiveInputReceipt
-	247, // 107: supertag.runtime.v2.SettleInputRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	17,  // 108: supertag.runtime.v2.SettleInputRequest.receipt:type_name -> supertag.runtime.v2.LiveInputReceipt
-	18,  // 109: supertag.runtime.v2.CreateAuthKeyRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
-	18,  // 110: supertag.runtime.v2.AuthKey.role:type_name -> supertag.runtime.v2.PrincipalRole
-	283, // 111: supertag.runtime.v2.PutTagRequest.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
-	20,  // 112: supertag.runtime.v2.PutTagRequest.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
-	66,  // 113: supertag.runtime.v2.PutTagRequest.approval_rules:type_name -> supertag.runtime.v2.ApprovalRule
-	370, // 114: supertag.runtime.v2.PutTagRequest.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
-	283, // 115: supertag.runtime.v2.Tag.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
-	20,  // 116: supertag.runtime.v2.Tag.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
-	66,  // 117: supertag.runtime.v2.Tag.approval_rules:type_name -> supertag.runtime.v2.ApprovalRule
-	370, // 118: supertag.runtime.v2.Tag.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
-	182, // 119: supertag.runtime.v2.Tag.attention:type_name -> supertag.runtime.v2.AttentionSummary
-	181, // 120: supertag.runtime.v2.ListTagsResponse.tags:type_name -> supertag.runtime.v2.Tag
-	181, // 121: supertag.runtime.v2.RetireTagResponse.tag:type_name -> supertag.runtime.v2.Tag
-	204, // 122: supertag.runtime.v2.ConversationMessage.task:type_name -> supertag.runtime.v2.Task
-	170, // 123: supertag.runtime.v2.ConversationMessage.live_input:type_name -> supertag.runtime.v2.LiveInput
-	262, // 124: supertag.runtime.v2.ConversationMessage.events:type_name -> supertag.runtime.v2.TaskEvent
-	7,   // 125: supertag.runtime.v2.ConversationMessage.work_session_close_reason:type_name -> supertag.runtime.v2.WorkSessionCloseReason
-	188, // 126: supertag.runtime.v2.ListConversationsResponse.conversations:type_name -> supertag.runtime.v2.Conversation
-	189, // 127: supertag.runtime.v2.ListMessagesResponse.messages:type_name -> supertag.runtime.v2.ConversationMessage
-	203, // 128: supertag.runtime.v2.SendMessageRequest.execution_limits:type_name -> supertag.runtime.v2.ExecutionLimits
-	222, // 129: supertag.runtime.v2.SendMessageRequest.output_policy:type_name -> supertag.runtime.v2.TaskOutputPolicy
-	193, // 130: supertag.runtime.v2.FollowConversationResponse.messages:type_name -> supertag.runtime.v2.ListMessagesResponse
-	197, // 131: supertag.runtime.v2.FollowConversationResponse.waits:type_name -> supertag.runtime.v2.TurnWait
-	198, // 132: supertag.runtime.v2.FollowConversationResponse.texts:type_name -> supertag.runtime.v2.TurnText
-	203, // 133: supertag.runtime.v2.SubmitTaskRequest.execution_limits:type_name -> supertag.runtime.v2.ExecutionLimits
-	222, // 134: supertag.runtime.v2.SubmitTaskRequest.output_policy:type_name -> supertag.runtime.v2.TaskOutputPolicy
-	217, // 135: supertag.runtime.v2.SubmitTaskRequest.input_artifacts:type_name -> supertag.runtime.v2.TaskArtifactInputSelection
-	202, // 136: supertag.runtime.v2.ExecutionLimits.max_reported_cost:type_name -> supertag.runtime.v2.ReportedCostLimit
-	19,  // 137: supertag.runtime.v2.Task.state:type_name -> supertag.runtime.v2.TaskState
-	283, // 138: supertag.runtime.v2.Task.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
-	295, // 139: supertag.runtime.v2.Task.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	20,  // 140: supertag.runtime.v2.Task.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
-	66,  // 141: supertag.runtime.v2.Task.approval_rules:type_name -> supertag.runtime.v2.ApprovalRule
-	371, // 142: supertag.runtime.v2.Task.policy_snapshot:type_name -> supertag.runtime.v2.TaskPolicySnapshot
-	203, // 143: supertag.runtime.v2.Task.execution_limits:type_name -> supertag.runtime.v2.ExecutionLimits
-	224, // 144: supertag.runtime.v2.Task.execution_selection:type_name -> supertag.runtime.v2.ExecutionSelection
-	228, // 145: supertag.runtime.v2.Task.attempt_execution:type_name -> supertag.runtime.v2.AttemptExecutionSelection
-	223, // 146: supertag.runtime.v2.Task.artifacts:type_name -> supertag.runtime.v2.ArtifactSelection
-	222, // 147: supertag.runtime.v2.Task.output_policy:type_name -> supertag.runtime.v2.TaskOutputPolicy
-	218, // 148: supertag.runtime.v2.Task.input_artifacts:type_name -> supertag.runtime.v2.AcceptedTaskArtifactInput
-	265, // 149: supertag.runtime.v2.Task.applied_execution_limits:type_name -> supertag.runtime.v2.AppliedExecutionLimits
-	289, // 150: supertag.runtime.v2.Task.workspace_mount_writes:type_name -> supertag.runtime.v2.AttemptWorkspaceMountWrites
-	205, // 151: supertag.runtime.v2.Task.execution_report:type_name -> supertag.runtime.v2.TaskExecutionReport
-	210, // 152: supertag.runtime.v2.Task.network_logs:type_name -> supertag.runtime.v2.AttemptNetworkLog
-	21,  // 153: supertag.runtime.v2.TaskExecutionReport.limit_outcome:type_name -> supertag.runtime.v2.ExecutionLimitOutcome
-	22,  // 154: supertag.runtime.v2.TaskExecutionReport.max_reported_tokens:type_name -> supertag.runtime.v2.ExecutionThreshold
-	22,  // 155: supertag.runtime.v2.TaskExecutionReport.max_reported_cost:type_name -> supertag.runtime.v2.ExecutionThreshold
-	22,  // 156: supertag.runtime.v2.TaskExecutionReport.max_native_agents:type_name -> supertag.runtime.v2.ExecutionThreshold
-	23,  // 157: supertag.runtime.v2.TaskExecutionReport.cleanup:type_name -> supertag.runtime.v2.AttemptCleanup
-	247, // 158: supertag.runtime.v2.ReportCleanupFailureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	208, // 159: supertag.runtime.v2.NetworkLog.requests:type_name -> supertag.runtime.v2.NetworkRequestRecord
-	209, // 160: supertag.runtime.v2.AttemptNetworkLog.log:type_name -> supertag.runtime.v2.NetworkLog
-	247, // 161: supertag.runtime.v2.ReportNetworkLogRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	209, // 162: supertag.runtime.v2.ReportNetworkLogRequest.log:type_name -> supertag.runtime.v2.NetworkLog
-	209, // 163: supertag.runtime.v2.TaskNetworkLog.log:type_name -> supertag.runtime.v2.NetworkLog
-	214, // 164: supertag.runtime.v2.ListNetworkLogsResponse.logs:type_name -> supertag.runtime.v2.TaskNetworkLog
-	247, // 165: supertag.runtime.v2.ResolveWorkspaceRefRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	219, // 166: supertag.runtime.v2.AcceptedTaskArtifactInput.files:type_name -> supertag.runtime.v2.ArtifactInputFile
-	363, // 167: supertag.runtime.v2.AcceptedTaskArtifactInput.publication:type_name -> supertag.runtime.v2.ArtifactPublicationPin
-	294, // 168: supertag.runtime.v2.ArtifactInputFile.blob:type_name -> supertag.runtime.v2.BlobReference
-	218, // 169: supertag.runtime.v2.AcceptedTaskArtifactInputs.inputs:type_name -> supertag.runtime.v2.AcceptedTaskArtifactInput
-	221, // 170: supertag.runtime.v2.TaskOutputPolicy.include:type_name -> supertag.runtime.v2.OutputPathPatterns
-	24,  // 171: supertag.runtime.v2.TaskOutputPolicy.git:type_name -> supertag.runtime.v2.OutputGitMode
-	372, // 172: supertag.runtime.v2.HarnessExecutionProfile.mcp_servers:type_name -> supertag.runtime.v2.McpServerCapability
-	226, // 173: supertag.runtime.v2.HarnessExecutionProfile.shared_execution:type_name -> supertag.runtime.v2.SharedExecutionCapability
-	285, // 174: supertag.runtime.v2.HarnessExecutionProfile.workspace_mounts:type_name -> supertag.runtime.v2.WorkspaceMountCapability
-	25,  // 175: supertag.runtime.v2.SharedExecutionCapability.tools:type_name -> supertag.runtime.v2.SharedExecutionTool
-	224, // 176: supertag.runtime.v2.AttemptExecutionSelection.selection:type_name -> supertag.runtime.v2.ExecutionSelection
-	26,  // 177: supertag.runtime.v2.AttemptExecutionSelection.model_source:type_name -> supertag.runtime.v2.ModelSource
-	20,  // 178: supertag.runtime.v2.AttemptExecutionSelection.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
-	226, // 179: supertag.runtime.v2.AttemptExecutionSelection.shared_execution:type_name -> supertag.runtime.v2.SharedExecutionCapability
-	372, // 180: supertag.runtime.v2.AttemptExecutionSelection.mcp_servers:type_name -> supertag.runtime.v2.McpServerCapability
-	372, // 181: supertag.runtime.v2.WorkspaceMcpRecord.servers:type_name -> supertag.runtime.v2.McpServerCapability
-	247, // 182: supertag.runtime.v2.RecordWorkspaceMcpRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	229, // 183: supertag.runtime.v2.RecordWorkspaceMcpRequest.record:type_name -> supertag.runtime.v2.WorkspaceMcpRecord
-	247, // 184: supertag.runtime.v2.ReserveMcpEffectRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	67,  // 185: supertag.runtime.v2.ReserveMcpEffectResponse.approval:type_name -> supertag.runtime.v2.Approval
-	247, // 186: supertag.runtime.v2.SettleMcpEffectRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	295, // 187: supertag.runtime.v2.SessionDelivery.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	262, // 188: supertag.runtime.v2.ListEventsResponse.events:type_name -> supertag.runtime.v2.TaskEvent
-	20,  // 189: supertag.runtime.v2.ClaimTaskRequest.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
-	271, // 190: supertag.runtime.v2.ClaimTaskRequest.context_contracts:type_name -> supertag.runtime.v2.ContextContract
-	225, // 191: supertag.runtime.v2.ClaimTaskRequest.execution_profile:type_name -> supertag.runtime.v2.HarnessExecutionProfile
-	244, // 192: supertag.runtime.v2.ClaimTaskResponse.assignment:type_name -> supertag.runtime.v2.Assignment
-	204, // 193: supertag.runtime.v2.Assignment.task:type_name -> supertag.runtime.v2.Task
-	245, // 194: supertag.runtime.v2.Assignment.joined:type_name -> supertag.runtime.v2.JoinedMessage
-	204, // 195: supertag.runtime.v2.AttemptAuthority.task:type_name -> supertag.runtime.v2.Task
-	27,  // 196: supertag.runtime.v2.ResolveAttemptRequest.decision:type_name -> supertag.runtime.v2.AttemptDecision
-	27,  // 197: supertag.runtime.v2.AttemptResolution.decision:type_name -> supertag.runtime.v2.AttemptDecision
-	247, // 198: supertag.runtime.v2.ReclaimAttemptRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	247, // 199: supertag.runtime.v2.ReportAppliedLimitsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	265, // 200: supertag.runtime.v2.ReportAppliedLimitsRequest.applied:type_name -> supertag.runtime.v2.AppliedExecutionLimits
-	250, // 201: supertag.runtime.v2.GetAttemptResolutionResponse.resolution:type_name -> supertag.runtime.v2.AttemptResolution
-	247, // 202: supertag.runtime.v2.ReportAttemptUsageRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	257, // 203: supertag.runtime.v2.ReportAttemptUsageRequest.native_usage:type_name -> supertag.runtime.v2.NativeTokenUsage
-	260, // 204: supertag.runtime.v2.ListNativeUsageResponse.reports:type_name -> supertag.runtime.v2.HarnessUsageRequest
-	257, // 205: supertag.runtime.v2.HarnessUsageRequest.native_usage:type_name -> supertag.runtime.v2.NativeTokenUsage
-	28,  // 206: supertag.runtime.v2.AppendEventRequest.kind:type_name -> supertag.runtime.v2.TaskEventKind
-	28,  // 207: supertag.runtime.v2.TaskEvent.kind:type_name -> supertag.runtime.v2.TaskEventKind
-	33,  // 208: supertag.runtime.v2.FinishTaskRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
-	295, // 209: supertag.runtime.v2.FinishTaskRequest.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	223, // 210: supertag.runtime.v2.FinishTaskRequest.artifacts:type_name -> supertag.runtime.v2.ArtifactSelection
-	203, // 211: supertag.runtime.v2.AppliedExecutionLimits.limits:type_name -> supertag.runtime.v2.ExecutionLimits
-	29,  // 212: supertag.runtime.v2.AppliedExecutionLimits.native_agents:type_name -> supertag.runtime.v2.ExecutionLimitEnforcement
-	29,  // 213: supertag.runtime.v2.AppliedExecutionLimits.reported_tokens:type_name -> supertag.runtime.v2.ExecutionLimitEnforcement
-	29,  // 214: supertag.runtime.v2.AppliedExecutionLimits.reported_cost:type_name -> supertag.runtime.v2.ExecutionLimitEnforcement
-	268, // 215: supertag.runtime.v2.AttemptHistory.entries:type_name -> supertag.runtime.v2.AttemptHistoryEntry
-	204, // 216: supertag.runtime.v2.HarnessRun.task:type_name -> supertag.runtime.v2.Task
-	277, // 217: supertag.runtime.v2.HarnessRun.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
-	79,  // 218: supertag.runtime.v2.HarnessRun.coordination:type_name -> supertag.runtime.v2.AttemptCapabilities
-	275, // 219: supertag.runtime.v2.HarnessRun.resolved_skills:type_name -> supertag.runtime.v2.ResolvedSkill
-	268, // 220: supertag.runtime.v2.HarnessRun.history:type_name -> supertag.runtime.v2.AttemptHistoryEntry
-	227, // 221: supertag.runtime.v2.HarnessRun.shared_execution:type_name -> supertag.runtime.v2.SharedExecutionAccessSummary
-	272, // 222: supertag.runtime.v2.ContextResolutionManifest.pins:type_name -> supertag.runtime.v2.ContextPin
-	273, // 223: supertag.runtime.v2.ContextResolutionManifest.omissions:type_name -> supertag.runtime.v2.OmittedContextItem
-	272, // 224: supertag.runtime.v2.ResolvedSkill.pin:type_name -> supertag.runtime.v2.ContextPin
-	247, // 225: supertag.runtime.v2.CommitContextResolutionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	274, // 226: supertag.runtime.v2.CommitContextResolutionRequest.manifest:type_name -> supertag.runtime.v2.ContextResolutionManifest
-	278, // 227: supertag.runtime.v2.GetCheckpointResponse.reference:type_name -> supertag.runtime.v2.CheckpointReference
-	247, // 228: supertag.runtime.v2.CommitCheckpointRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	278, // 229: supertag.runtime.v2.CommitCheckpointRequest.reference:type_name -> supertag.runtime.v2.CheckpointReference
-	280, // 230: supertag.runtime.v2.CheckpointUpload.begin:type_name -> supertag.runtime.v2.CommitCheckpointRequest
-	278, // 231: supertag.runtime.v2.CheckpointDownload.reference:type_name -> supertag.runtime.v2.CheckpointReference
-	373, // 232: supertag.runtime.v2.WorkspaceSpec.github_source:type_name -> supertag.runtime.v2.GithubWorkspace
-	284, // 233: supertag.runtime.v2.WorkspaceSpec.mounts:type_name -> supertag.runtime.v2.WorkspaceCopyMount
-	286, // 234: supertag.runtime.v2.WorkspaceCopyMount.volume:type_name -> supertag.runtime.v2.WorkspaceVolume
-	30,  // 235: supertag.runtime.v2.WorkspaceMountWrite.status:type_name -> supertag.runtime.v2.WorkspaceMountWriteStatus
-	287, // 236: supertag.runtime.v2.WorkspaceMountWrite.files:type_name -> supertag.runtime.v2.WorkspaceMountWrittenFile
-	288, // 237: supertag.runtime.v2.AttemptWorkspaceMountWrites.writes:type_name -> supertag.runtime.v2.WorkspaceMountWrite
-	373, // 238: supertag.runtime.v2.GithubWorkspaceBundle.workspace:type_name -> supertag.runtime.v2.GithubWorkspace
-	294, // 239: supertag.runtime.v2.GithubWorkspaceBundle.bundle:type_name -> supertag.runtime.v2.BlobReference
-	247, // 240: supertag.runtime.v2.VerifyWorkspaceOutputRemoteRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	290, // 241: supertag.runtime.v2.GithubWorkspaceDownload.reference:type_name -> supertag.runtime.v2.GithubWorkspaceBundle
-	294, // 242: supertag.runtime.v2.WorkspaceDeliveryReference.patch:type_name -> supertag.runtime.v2.BlobReference
-	294, // 243: supertag.runtime.v2.WorkspaceDeliveryReference.bundle:type_name -> supertag.runtime.v2.BlobReference
-	247, // 244: supertag.runtime.v2.WorkspaceDeliveryRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	295, // 245: supertag.runtime.v2.WorkspaceDeliveryRequest.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	295, // 246: supertag.runtime.v2.WorkspaceContinuation.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	115, // 247: supertag.runtime.v2.WorkspaceContinuation.holder:type_name -> supertag.runtime.v2.BlobHolder
-	295, // 248: supertag.runtime.v2.WorkspaceDownload.reference:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	31,  // 249: supertag.runtime.v2.GetWorkspaceArtifactRequest.kind:type_name -> supertag.runtime.v2.WorkspaceArtifactKind
-	247, // 250: supertag.runtime.v2.GetReviewArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	28,  // 251: supertag.runtime.v2.HarnessPublishRequest.kind:type_name -> supertag.runtime.v2.TaskEventKind
-	33,  // 252: supertag.runtime.v2.HarnessCompleteRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
-	277, // 253: supertag.runtime.v2.HarnessCompleteRequest.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
-	309, // 254: supertag.runtime.v2.CreateObjectiveRequest.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
-	32,  // 255: supertag.runtime.v2.Objective.status:type_name -> supertag.runtime.v2.ObjectiveStatus
-	309, // 256: supertag.runtime.v2.Objective.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
-	311, // 257: supertag.runtime.v2.ListTeamsResponse.teams:type_name -> supertag.runtime.v2.Team
-	316, // 258: supertag.runtime.v2.UpdateTeamRequest.members:type_name -> supertag.runtime.v2.TeamMembers
-	319, // 259: supertag.runtime.v2.ListWorkstreamPostsResponse.posts:type_name -> supertag.runtime.v2.WorkstreamPost
-	247, // 260: supertag.runtime.v2.ReadAttemptWorkstreamRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	311, // 261: supertag.runtime.v2.ReadAttemptWorkstreamResponse.team:type_name -> supertag.runtime.v2.Team
-	321, // 262: supertag.runtime.v2.ReadAttemptWorkstreamResponse.page:type_name -> supertag.runtime.v2.ListWorkstreamPostsResponse
-	247, // 263: supertag.runtime.v2.PostAttemptWorkstreamRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	319, // 264: supertag.runtime.v2.PostAttemptWorkstreamResponse.post:type_name -> supertag.runtime.v2.WorkstreamPost
-	67,  // 265: supertag.runtime.v2.PostAttemptWorkstreamResponse.approval:type_name -> supertag.runtime.v2.Approval
-	310, // 266: supertag.runtime.v2.ListObjectivesResponse.objectives:type_name -> supertag.runtime.v2.Objective
-	94,  // 267: supertag.runtime.v2.ListObjectiveCommitReviewsResponse.reviews:type_name -> supertag.runtime.v2.CommitReview
-	309, // 268: supertag.runtime.v2.SetObjectiveRuntimeActionsRequest.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
-	336, // 269: supertag.runtime.v2.AcceptEventRequest.destination:type_name -> supertag.runtime.v2.ReplyDestination
-	224, // 270: supertag.runtime.v2.AcceptEventRequest.requested_execution:type_name -> supertag.runtime.v2.ExecutionSelection
-	204, // 271: supertag.runtime.v2.AcceptSlackEventResponse.task:type_name -> supertag.runtime.v2.Task
-	34,  // 272: supertag.runtime.v2.AcceptGithubEventRequest.kind:type_name -> supertag.runtime.v2.GithubEventKind
-	35,  // 273: supertag.runtime.v2.AcceptGithubEventRequest.action:type_name -> supertag.runtime.v2.GithubEventAction
-	204, // 274: supertag.runtime.v2.AcceptGithubEventResponse.task:type_name -> supertag.runtime.v2.Task
-	36,  // 275: supertag.runtime.v2.AcceptLinearEventRequest.kind:type_name -> supertag.runtime.v2.LinearEventKind
-	37,  // 276: supertag.runtime.v2.AcceptLinearEventRequest.action:type_name -> supertag.runtime.v2.LinearEventAction
-	204, // 277: supertag.runtime.v2.AcceptLinearEventResponse.task:type_name -> supertag.runtime.v2.Task
-	38,  // 278: supertag.runtime.v2.AcceptLarkEventRequest.domain:type_name -> supertag.runtime.v2.LarkDomain
-	204, // 279: supertag.runtime.v2.AcceptLarkEventResponse.task:type_name -> supertag.runtime.v2.Task
-	204, // 280: supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse.task:type_name -> supertag.runtime.v2.Task
-	336, // 281: supertag.runtime.v2.Reply.destination:type_name -> supertag.runtime.v2.ReplyDestination
-	39,  // 282: supertag.runtime.v2.Reply.state:type_name -> supertag.runtime.v2.ReplyState
-	351, // 283: supertag.runtime.v2.Reply.result_card:type_name -> supertag.runtime.v2.ReplyResultCard
-	350, // 284: supertag.runtime.v2.ClaimReplyResponse.reply:type_name -> supertag.runtime.v2.Reply
-	39,  // 285: supertag.runtime.v2.SettleReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
-	39,  // 286: supertag.runtime.v2.ReplyDeliveryAudit.state:type_name -> supertag.runtime.v2.ReplyState
-	350, // 287: supertag.runtime.v2.ReplyDelivery.reply:type_name -> supertag.runtime.v2.Reply
-	358, // 288: supertag.runtime.v2.ReplyDelivery.audit:type_name -> supertag.runtime.v2.ReplyDeliveryAudit
-	39,  // 289: supertag.runtime.v2.ListReplyDeliveriesRequest.state:type_name -> supertag.runtime.v2.ReplyState
-	359, // 290: supertag.runtime.v2.ListReplyDeliveriesResponse.deliveries:type_name -> supertag.runtime.v2.ReplyDelivery
-	39,  // 291: supertag.runtime.v2.ResolveReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
-	176, // 292: supertag.runtime.v2.Operator.CreateAuthKey:input_type -> supertag.runtime.v2.CreateAuthKeyRequest
-	111, // 293: supertag.runtime.v2.Operator.ListHosts:input_type -> supertag.runtime.v2.ListHostsRequest
-	113, // 294: supertag.runtime.v2.Operator.GetHost:input_type -> supertag.runtime.v2.GetHostRequest
-	114, // 295: supertag.runtime.v2.Operator.SetHostDraining:input_type -> supertag.runtime.v2.SetHostDrainingRequest
-	180, // 296: supertag.runtime.v2.Operator.PutTag:input_type -> supertag.runtime.v2.PutTagRequest
-	183, // 297: supertag.runtime.v2.Operator.ListTags:input_type -> supertag.runtime.v2.ListTagsRequest
-	201, // 298: supertag.runtime.v2.Operator.SubmitTask:input_type -> supertag.runtime.v2.SubmitTaskRequest
-	236, // 299: supertag.runtime.v2.Operator.GetTask:input_type -> supertag.runtime.v2.GetTaskRequest
-	237, // 300: supertag.runtime.v2.Operator.GetSessionDelivery:input_type -> supertag.runtime.v2.GetSessionDeliveryRequest
-	258, // 301: supertag.runtime.v2.Operator.ListNativeUsage:input_type -> supertag.runtime.v2.ListNativeUsageRequest
-	239, // 302: supertag.runtime.v2.Operator.ListEvents:input_type -> supertag.runtime.v2.ListEventsRequest
-	241, // 303: supertag.runtime.v2.Operator.CancelTask:input_type -> supertag.runtime.v2.CancelTaskRequest
-	249, // 304: supertag.runtime.v2.Operator.ResolveAttempt:input_type -> supertag.runtime.v2.ResolveAttemptRequest
-	185, // 305: supertag.runtime.v2.Operator.GetTag:input_type -> supertag.runtime.v2.GetTagRequest
-	186, // 306: supertag.runtime.v2.Operator.RetireTag:input_type -> supertag.runtime.v2.RetireTagRequest
-	357, // 307: supertag.runtime.v2.Operator.GetReplyDelivery:input_type -> supertag.runtime.v2.GetReplyDeliveryRequest
-	360, // 308: supertag.runtime.v2.Operator.ListReplyDeliveries:input_type -> supertag.runtime.v2.ListReplyDeliveriesRequest
-	362, // 309: supertag.runtime.v2.Operator.ResolveReply:input_type -> supertag.runtime.v2.ResolveReplyRequest
-	190, // 310: supertag.runtime.v2.Conversations.ListConversations:input_type -> supertag.runtime.v2.ListConversationsRequest
-	192, // 311: supertag.runtime.v2.Conversations.ListMessages:input_type -> supertag.runtime.v2.ListMessagesRequest
-	194, // 312: supertag.runtime.v2.Conversations.SendMessage:input_type -> supertag.runtime.v2.SendMessageRequest
-	200, // 313: supertag.runtime.v2.Conversations.GetMessage:input_type -> supertag.runtime.v2.GetMessageRequest
-	199, // 314: supertag.runtime.v2.Conversations.MarkConversationRead:input_type -> supertag.runtime.v2.MarkConversationReadRequest
-	195, // 315: supertag.runtime.v2.Conversations.FollowConversation:input_type -> supertag.runtime.v2.FollowConversationRequest
-	56,  // 316: supertag.runtime.v2.OperatorEvents.Watch:input_type -> supertag.runtime.v2.WatchRequest
-	52,  // 317: supertag.runtime.v2.ManifestRelationships.ReconcileTag:input_type -> supertag.runtime.v2.ReconcileTagRelationshipsRequest
-	49,  // 318: supertag.runtime.v2.ManifestRelationships.ProvisionTags:input_type -> supertag.runtime.v2.ProvisionTagsRequest
-	46,  // 319: supertag.runtime.v2.ManifestRelationships.ReconcileApplySet:input_type -> supertag.runtime.v2.ReconcileApplySetRequest
-	42,  // 320: supertag.runtime.v2.ManifestRelationships.ReconcileManifestFields:input_type -> supertag.runtime.v2.ReconcileManifestFieldsRequest
-	308, // 321: supertag.runtime.v2.Objectives.CreateObjective:input_type -> supertag.runtime.v2.CreateObjectiveRequest
-	326, // 322: supertag.runtime.v2.Objectives.GetObjective:input_type -> supertag.runtime.v2.GetObjectiveRequest
-	327, // 323: supertag.runtime.v2.Objectives.ListObjectives:input_type -> supertag.runtime.v2.ListObjectivesRequest
-	329, // 324: supertag.runtime.v2.Objectives.ListCommitReviews:input_type -> supertag.runtime.v2.ListObjectiveCommitReviewsRequest
-	331, // 325: supertag.runtime.v2.Objectives.SetLimits:input_type -> supertag.runtime.v2.SetObjectiveLimitsRequest
-	332, // 326: supertag.runtime.v2.Objectives.SetRuntimeActions:input_type -> supertag.runtime.v2.SetObjectiveRuntimeActionsRequest
-	333, // 327: supertag.runtime.v2.Objectives.PauseObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
-	333, // 328: supertag.runtime.v2.Objectives.ResumeObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
-	333, // 329: supertag.runtime.v2.Objectives.CancelObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
-	334, // 330: supertag.runtime.v2.Objectives.ReviewObjective:input_type -> supertag.runtime.v2.ReviewObjectiveRequest
-	335, // 331: supertag.runtime.v2.Objectives.CompleteObjective:input_type -> supertag.runtime.v2.CompleteObjectiveRequest
-	61,  // 332: supertag.runtime.v2.Inbox.ListItems:input_type -> supertag.runtime.v2.ListInboxItemsRequest
-	75,  // 333: supertag.runtime.v2.Inbox.GetQuestion:input_type -> supertag.runtime.v2.GetQuestionRequest
-	76,  // 334: supertag.runtime.v2.Inbox.AnswerQuestion:input_type -> supertag.runtime.v2.AnswerQuestionRequest
-	68,  // 335: supertag.runtime.v2.Inbox.GetApproval:input_type -> supertag.runtime.v2.GetApprovalRequest
-	69,  // 336: supertag.runtime.v2.Inbox.ListApprovals:input_type -> supertag.runtime.v2.ListApprovalsRequest
-	71,  // 337: supertag.runtime.v2.Inbox.DecideApproval:input_type -> supertag.runtime.v2.DecideApprovalRequest
-	85,  // 338: supertag.runtime.v2.WorkSessions.Get:input_type -> supertag.runtime.v2.GetWorkSessionRequest
-	88,  // 339: supertag.runtime.v2.WorkSessions.List:input_type -> supertag.runtime.v2.ListWorkSessionsRequest
-	80,  // 340: supertag.runtime.v2.WorkSessions.Close:input_type -> supertag.runtime.v2.CloseWorkSessionRequest
-	84,  // 341: supertag.runtime.v2.AttemptWorkSessions.Start:input_type -> supertag.runtime.v2.StartWorkSessionRequest
-	86,  // 342: supertag.runtime.v2.AttemptWorkSessions.Continue:input_type -> supertag.runtime.v2.ContinueWorkSessionRequest
-	87,  // 343: supertag.runtime.v2.AttemptWorkSessions.Ask:input_type -> supertag.runtime.v2.AskWorkSessionQuestionRequest
-	81,  // 344: supertag.runtime.v2.AttemptWorkSessions.Close:input_type -> supertag.runtime.v2.CloseAttemptWorkSessionRequest
-	312, // 345: supertag.runtime.v2.Teams.CreateTeam:input_type -> supertag.runtime.v2.CreateTeamRequest
-	313, // 346: supertag.runtime.v2.Teams.GetTeam:input_type -> supertag.runtime.v2.GetTeamRequest
-	314, // 347: supertag.runtime.v2.Teams.ListTeams:input_type -> supertag.runtime.v2.ListTeamsRequest
-	317, // 348: supertag.runtime.v2.Teams.UpdateTeam:input_type -> supertag.runtime.v2.UpdateTeamRequest
-	318, // 349: supertag.runtime.v2.Teams.DeleteTeam:input_type -> supertag.runtime.v2.DeleteTeamRequest
-	320, // 350: supertag.runtime.v2.Teams.ListWorkstreamPosts:input_type -> supertag.runtime.v2.ListWorkstreamPostsRequest
-	322, // 351: supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream:input_type -> supertag.runtime.v2.ReadAttemptWorkstreamRequest
-	324, // 352: supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream:input_type -> supertag.runtime.v2.PostAttemptWorkstreamRequest
-	102, // 353: supertag.runtime.v2.Mailbox.ListMessages:input_type -> supertag.runtime.v2.ListMailboxMessagesRequest
-	97,  // 354: supertag.runtime.v2.Mailbox.ChangeGrant:input_type -> supertag.runtime.v2.ChangeMailboxGrantRequest
-	99,  // 355: supertag.runtime.v2.Mailbox.ListGrants:input_type -> supertag.runtime.v2.ListMailboxGrantsRequest
-	104, // 356: supertag.runtime.v2.AttemptMailbox.ReadMailbox:input_type -> supertag.runtime.v2.ReadMailboxRequest
-	95,  // 357: supertag.runtime.v2.AttemptMailbox.SendMessage:input_type -> supertag.runtime.v2.SendAttemptTagMessageRequest
-	178, // 358: supertag.runtime.v2.WorkerHost.RegisterHost:input_type -> supertag.runtime.v2.RegisterHostRequest
-	105, // 359: supertag.runtime.v2.WorkerHost.ReportHost:input_type -> supertag.runtime.v2.ReportHostRequest
-	242, // 360: supertag.runtime.v2.WorkerHost.ClaimTask:input_type -> supertag.runtime.v2.ClaimTaskRequest
-	246, // 361: supertag.runtime.v2.WorkerHost.StartTask:input_type -> supertag.runtime.v2.StartTaskRequest
-	247, // 362: supertag.runtime.v2.WorkerHost.InspectAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	247, // 363: supertag.runtime.v2.WorkerHost.GetAttemptCapabilities:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	247, // 364: supertag.runtime.v2.WorkerHost.GetAttemptHistory:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	247, // 365: supertag.runtime.v2.WorkerHost.GetContextPins:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	276, // 366: supertag.runtime.v2.WorkerHost.CommitContextResolution:input_type -> supertag.runtime.v2.CommitContextResolutionRequest
-	247, // 367: supertag.runtime.v2.WorkerHost.RenewAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	247, // 368: supertag.runtime.v2.WorkerHost.GetAttemptResolution:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	255, // 369: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:input_type -> supertag.runtime.v2.ReportAttemptUsageRequest
-	261, // 370: supertag.runtime.v2.WorkerHost.AppendEvent:input_type -> supertag.runtime.v2.AppendEventRequest
-	304, // 371: supertag.runtime.v2.WorkerHost.PublishText:input_type -> supertag.runtime.v2.PublishTaskTextRequest
-	78,  // 372: supertag.runtime.v2.WorkerHost.AskQuestion:input_type -> supertag.runtime.v2.AskQuestionRequest
-	263, // 373: supertag.runtime.v2.WorkerHost.FinishTask:input_type -> supertag.runtime.v2.FinishTaskRequest
-	251, // 374: supertag.runtime.v2.WorkerHost.ReclaimAttempt:input_type -> supertag.runtime.v2.ReclaimAttemptRequest
-	252, // 375: supertag.runtime.v2.WorkerHost.ReportAppliedLimits:input_type -> supertag.runtime.v2.ReportAppliedLimitsRequest
-	206, // 376: supertag.runtime.v2.WorkerHost.ReportCleanupFailure:input_type -> supertag.runtime.v2.ReportCleanupFailureRequest
-	211, // 377: supertag.runtime.v2.WorkerHost.ReportNetworkLog:input_type -> supertag.runtime.v2.ReportNetworkLogRequest
-	216, // 378: supertag.runtime.v2.WorkerHost.ResolveWorkspaceRef:input_type -> supertag.runtime.v2.ResolveWorkspaceRefRequest
-	167, // 379: supertag.runtime.v2.LiveInputs.QueueInput:input_type -> supertag.runtime.v2.QueueInputRequest
-	168, // 380: supertag.runtime.v2.LiveInputs.GetInput:input_type -> supertag.runtime.v2.GetInputRequest
-	169, // 381: supertag.runtime.v2.LiveInputs.ResolveInput:input_type -> supertag.runtime.v2.ResolveInputRequest
-	171, // 382: supertag.runtime.v2.AttemptInputs.TakeInput:input_type -> supertag.runtime.v2.TakeInputRequest
-	175, // 383: supertag.runtime.v2.AttemptInputs.SettleInput:input_type -> supertag.runtime.v2.SettleInputRequest
-	337, // 384: supertag.runtime.v2.Connector.AcceptEvent:input_type -> supertag.runtime.v2.AcceptEventRequest
-	338, // 385: supertag.runtime.v2.Connector.AcceptSlackEvent:input_type -> supertag.runtime.v2.AcceptSlackEventRequest
-	340, // 386: supertag.runtime.v2.Connector.AcceptGithubEvent:input_type -> supertag.runtime.v2.AcceptGithubEventRequest
-	342, // 387: supertag.runtime.v2.Connector.AcceptLinearEvent:input_type -> supertag.runtime.v2.AcceptLinearEventRequest
-	344, // 388: supertag.runtime.v2.Connector.AcceptLarkEvent:input_type -> supertag.runtime.v2.AcceptLarkEventRequest
-	346, // 389: supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity:input_type -> supertag.runtime.v2.AcceptMicrosoftTeamsActivityRequest
-	348, // 390: supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute:input_type -> supertag.runtime.v2.GetMicrosoftTeamsReplyRouteRequest
-	352, // 391: supertag.runtime.v2.Connector.ClaimReply:input_type -> supertag.runtime.v2.ClaimReplyRequest
-	355, // 392: supertag.runtime.v2.Connector.RenewReply:input_type -> supertag.runtime.v2.RenewReplyRequest
-	354, // 393: supertag.runtime.v2.Connector.SettleReply:input_type -> supertag.runtime.v2.SettleReplyRequest
-	364, // 394: supertag.runtime.v2.Connector.ClaimConnector:input_type -> supertag.runtime.v2.ClaimConnectorRequest
-	365, // 395: supertag.runtime.v2.Connector.RenewConnector:input_type -> supertag.runtime.v2.RenewConnectorRequest
-	366, // 396: supertag.runtime.v2.Connector.ReleaseConnector:input_type -> supertag.runtime.v2.ReleaseConnectorRequest
-	281, // 397: supertag.runtime.v2.Transfers.UploadCheckpoint:input_type -> supertag.runtime.v2.CheckpointUpload
-	247, // 398: supertag.runtime.v2.Transfers.DownloadCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	296, // 399: supertag.runtime.v2.Transfers.CommitWorkspace:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
-	247, // 400: supertag.runtime.v2.Transfers.DownloadWorkspace:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	299, // 401: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
-	300, // 402: supertag.runtime.v2.Transfers.DownloadReviewArtifact:input_type -> supertag.runtime.v2.GetReviewArtifactRequest
-	247, // 403: supertag.runtime.v2.Transfers.DownloadWorkspaceSource:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	291, // 404: supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote:input_type -> supertag.runtime.v2.VerifyWorkspaceOutputRemoteRequest
-	247, // 405: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	280, // 406: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
-	280, // 407: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
-	247, // 408: supertag.runtime.v2.WorkspaceDirectory.GetSource:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	247, // 409: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	296, // 410: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
-	296, // 411: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
-	299, // 412: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
-	300, // 413: supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact:input_type -> supertag.runtime.v2.GetReviewArtifactRequest
-	116, // 414: supertag.runtime.v2.HostRelay.Await:input_type -> supertag.runtime.v2.AwaitRelayRequest
-	118, // 415: supertag.runtime.v2.HostRelay.Deliver:input_type -> supertag.runtime.v2.RelayFrame
-	264, // 416: supertag.runtime.v2.Harness.Attach:input_type -> supertag.runtime.v2.HarnessAttachRequest
-	265, // 417: supertag.runtime.v2.Harness.ConfirmExecutionLimits:input_type -> supertag.runtime.v2.AppliedExecutionLimits
-	173, // 418: supertag.runtime.v2.Harness.TakeLiveInput:input_type -> supertag.runtime.v2.HarnessTakeLiveInputRequest
-	174, // 419: supertag.runtime.v2.Harness.SettleLiveInput:input_type -> supertag.runtime.v2.HarnessSettleLiveInputRequest
-	301, // 420: supertag.runtime.v2.Harness.Publish:input_type -> supertag.runtime.v2.HarnessPublishRequest
-	302, // 421: supertag.runtime.v2.Harness.PublishText:input_type -> supertag.runtime.v2.HarnessPublishTextRequest
-	260, // 422: supertag.runtime.v2.Harness.ReportUsage:input_type -> supertag.runtime.v2.HarnessUsageRequest
-	306, // 423: supertag.runtime.v2.Harness.Complete:input_type -> supertag.runtime.v2.HarnessCompleteRequest
-	121, // 424: supertag.runtime.v2.HarnessWorkspace.Execute:input_type -> supertag.runtime.v2.HarnessWorkspaceRequest
-	139, // 425: supertag.runtime.v2.RemoteWorkspaceProvider.Allocate:input_type -> supertag.runtime.v2.RemoteWorkspaceAllocateRequest
-	147, // 426: supertag.runtime.v2.RemoteWorkspaceProvider.Stage:input_type -> supertag.runtime.v2.RemoteWorkspaceStageChunk
-	149, // 427: supertag.runtime.v2.RemoteWorkspaceProvider.Capture:input_type -> supertag.runtime.v2.RemoteWorkspaceCaptureRequest
-	151, // 428: supertag.runtime.v2.RemoteWorkspaceProvider.Stop:input_type -> supertag.runtime.v2.RemoteWorkspaceStopRequest
-	154, // 429: supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer:input_type -> supertag.runtime.v2.RemoteMcpServerInput
-	132, // 430: supertag.runtime.v2.RemoteWorkspaceProvider.StageCopy:input_type -> supertag.runtime.v2.RemoteWorkspaceCopyUpload
-	134, // 431: supertag.runtime.v2.RemoteWorkspaceProvider.CaptureCopy:input_type -> supertag.runtime.v2.RemoteWorkspaceCaptureCopyRequest
-	142, // 432: supertag.runtime.v2.RemoteWorkspaceProvider.Snapshot:input_type -> supertag.runtime.v2.RemoteWorkspaceSnapshotRequest
-	144, // 433: supertag.runtime.v2.RemoteWorkspaceProvider.RemoveArtifact:input_type -> supertag.runtime.v2.RemoteWorkspaceRemoveArtifactRequest
-	156, // 434: supertag.runtime.v2.HarnessQuestions.AskQuestion:input_type -> supertag.runtime.v2.HarnessAskQuestionRequest
-	157, // 435: supertag.runtime.v2.HarnessWorkstreams.Read:input_type -> supertag.runtime.v2.HarnessReadWorkstreamRequest
-	158, // 436: supertag.runtime.v2.HarnessWorkstreams.Post:input_type -> supertag.runtime.v2.HarnessPostWorkstreamRequest
-	164, // 437: supertag.runtime.v2.HarnessMailbox.Read:input_type -> supertag.runtime.v2.HarnessReadMailboxRequest
-	163, // 438: supertag.runtime.v2.HarnessMailbox.SendMessage:input_type -> supertag.runtime.v2.HarnessSendTagMessageRequest
-	165, // 439: supertag.runtime.v2.HarnessMailbox.ReadReviewPatch:input_type -> supertag.runtime.v2.HarnessReadReviewPatchRequest
-	162, // 440: supertag.runtime.v2.HarnessWorkSessions.Start:input_type -> supertag.runtime.v2.HarnessStartWorkSessionRequest
-	160, // 441: supertag.runtime.v2.HarnessWorkSessions.Continue:input_type -> supertag.runtime.v2.HarnessContinueWorkSessionRequest
-	161, // 442: supertag.runtime.v2.HarnessWorkSessions.Ask:input_type -> supertag.runtime.v2.HarnessAskWorkSessionQuestionRequest
-	159, // 443: supertag.runtime.v2.HarnessWorkSessions.Close:input_type -> supertag.runtime.v2.HarnessCloseWorkSessionRequest
-	213, // 444: supertag.runtime.v2.NetworkLogs.List:input_type -> supertag.runtime.v2.ListNetworkLogsRequest
-	232, // 445: supertag.runtime.v2.AttemptMcpEffects.Reserve:input_type -> supertag.runtime.v2.ReserveMcpEffectRequest
-	234, // 446: supertag.runtime.v2.AttemptMcpEffects.Settle:input_type -> supertag.runtime.v2.SettleMcpEffectRequest
-	230, // 447: supertag.runtime.v2.AttemptMcpEffects.RecordWorkspaceMcp:input_type -> supertag.runtime.v2.RecordWorkspaceMcpRequest
-	177, // 448: supertag.runtime.v2.Operator.CreateAuthKey:output_type -> supertag.runtime.v2.AuthKey
-	112, // 449: supertag.runtime.v2.Operator.ListHosts:output_type -> supertag.runtime.v2.ListHostsResponse
-	109, // 450: supertag.runtime.v2.Operator.GetHost:output_type -> supertag.runtime.v2.WorkerHostStatus
-	109, // 451: supertag.runtime.v2.Operator.SetHostDraining:output_type -> supertag.runtime.v2.WorkerHostStatus
-	181, // 452: supertag.runtime.v2.Operator.PutTag:output_type -> supertag.runtime.v2.Tag
-	184, // 453: supertag.runtime.v2.Operator.ListTags:output_type -> supertag.runtime.v2.ListTagsResponse
-	204, // 454: supertag.runtime.v2.Operator.SubmitTask:output_type -> supertag.runtime.v2.Task
-	204, // 455: supertag.runtime.v2.Operator.GetTask:output_type -> supertag.runtime.v2.Task
-	238, // 456: supertag.runtime.v2.Operator.GetSessionDelivery:output_type -> supertag.runtime.v2.SessionDelivery
-	259, // 457: supertag.runtime.v2.Operator.ListNativeUsage:output_type -> supertag.runtime.v2.ListNativeUsageResponse
-	240, // 458: supertag.runtime.v2.Operator.ListEvents:output_type -> supertag.runtime.v2.ListEventsResponse
-	204, // 459: supertag.runtime.v2.Operator.CancelTask:output_type -> supertag.runtime.v2.Task
-	250, // 460: supertag.runtime.v2.Operator.ResolveAttempt:output_type -> supertag.runtime.v2.AttemptResolution
-	181, // 461: supertag.runtime.v2.Operator.GetTag:output_type -> supertag.runtime.v2.Tag
-	187, // 462: supertag.runtime.v2.Operator.RetireTag:output_type -> supertag.runtime.v2.RetireTagResponse
-	359, // 463: supertag.runtime.v2.Operator.GetReplyDelivery:output_type -> supertag.runtime.v2.ReplyDelivery
-	361, // 464: supertag.runtime.v2.Operator.ListReplyDeliveries:output_type -> supertag.runtime.v2.ListReplyDeliveriesResponse
-	359, // 465: supertag.runtime.v2.Operator.ResolveReply:output_type -> supertag.runtime.v2.ReplyDelivery
-	191, // 466: supertag.runtime.v2.Conversations.ListConversations:output_type -> supertag.runtime.v2.ListConversationsResponse
-	193, // 467: supertag.runtime.v2.Conversations.ListMessages:output_type -> supertag.runtime.v2.ListMessagesResponse
-	189, // 468: supertag.runtime.v2.Conversations.SendMessage:output_type -> supertag.runtime.v2.ConversationMessage
-	189, // 469: supertag.runtime.v2.Conversations.GetMessage:output_type -> supertag.runtime.v2.ConversationMessage
-	188, // 470: supertag.runtime.v2.Conversations.MarkConversationRead:output_type -> supertag.runtime.v2.Conversation
-	196, // 471: supertag.runtime.v2.Conversations.FollowConversation:output_type -> supertag.runtime.v2.FollowConversationResponse
-	57,  // 472: supertag.runtime.v2.OperatorEvents.Watch:output_type -> supertag.runtime.v2.WatchEvent
-	55,  // 473: supertag.runtime.v2.ManifestRelationships.ReconcileTag:output_type -> supertag.runtime.v2.ReconcileTagRelationshipsResponse
-	51,  // 474: supertag.runtime.v2.ManifestRelationships.ProvisionTags:output_type -> supertag.runtime.v2.ProvisionTagsResponse
-	48,  // 475: supertag.runtime.v2.ManifestRelationships.ReconcileApplySet:output_type -> supertag.runtime.v2.ReconcileApplySetResponse
-	44,  // 476: supertag.runtime.v2.ManifestRelationships.ReconcileManifestFields:output_type -> supertag.runtime.v2.ReconcileManifestFieldsResponse
-	310, // 477: supertag.runtime.v2.Objectives.CreateObjective:output_type -> supertag.runtime.v2.Objective
-	310, // 478: supertag.runtime.v2.Objectives.GetObjective:output_type -> supertag.runtime.v2.Objective
-	328, // 479: supertag.runtime.v2.Objectives.ListObjectives:output_type -> supertag.runtime.v2.ListObjectivesResponse
-	330, // 480: supertag.runtime.v2.Objectives.ListCommitReviews:output_type -> supertag.runtime.v2.ListObjectiveCommitReviewsResponse
-	310, // 481: supertag.runtime.v2.Objectives.SetLimits:output_type -> supertag.runtime.v2.Objective
-	310, // 482: supertag.runtime.v2.Objectives.SetRuntimeActions:output_type -> supertag.runtime.v2.Objective
-	310, // 483: supertag.runtime.v2.Objectives.PauseObjective:output_type -> supertag.runtime.v2.Objective
-	310, // 484: supertag.runtime.v2.Objectives.ResumeObjective:output_type -> supertag.runtime.v2.Objective
-	310, // 485: supertag.runtime.v2.Objectives.CancelObjective:output_type -> supertag.runtime.v2.Objective
-	310, // 486: supertag.runtime.v2.Objectives.ReviewObjective:output_type -> supertag.runtime.v2.Objective
-	310, // 487: supertag.runtime.v2.Objectives.CompleteObjective:output_type -> supertag.runtime.v2.Objective
-	62,  // 488: supertag.runtime.v2.Inbox.ListItems:output_type -> supertag.runtime.v2.ListInboxItemsResponse
-	77,  // 489: supertag.runtime.v2.Inbox.GetQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
-	204, // 490: supertag.runtime.v2.Inbox.AnswerQuestion:output_type -> supertag.runtime.v2.Task
-	67,  // 491: supertag.runtime.v2.Inbox.GetApproval:output_type -> supertag.runtime.v2.Approval
-	70,  // 492: supertag.runtime.v2.Inbox.ListApprovals:output_type -> supertag.runtime.v2.ListApprovalsResponse
-	67,  // 493: supertag.runtime.v2.Inbox.DecideApproval:output_type -> supertag.runtime.v2.Approval
-	82,  // 494: supertag.runtime.v2.WorkSessions.Get:output_type -> supertag.runtime.v2.WorkSession
-	89,  // 495: supertag.runtime.v2.WorkSessions.List:output_type -> supertag.runtime.v2.ListWorkSessionsResponse
-	82,  // 496: supertag.runtime.v2.WorkSessions.Close:output_type -> supertag.runtime.v2.WorkSession
-	82,  // 497: supertag.runtime.v2.AttemptWorkSessions.Start:output_type -> supertag.runtime.v2.WorkSession
-	82,  // 498: supertag.runtime.v2.AttemptWorkSessions.Continue:output_type -> supertag.runtime.v2.WorkSession
-	83,  // 499: supertag.runtime.v2.AttemptWorkSessions.Ask:output_type -> supertag.runtime.v2.WorkSessionQuestion
-	82,  // 500: supertag.runtime.v2.AttemptWorkSessions.Close:output_type -> supertag.runtime.v2.WorkSession
-	311, // 501: supertag.runtime.v2.Teams.CreateTeam:output_type -> supertag.runtime.v2.Team
-	311, // 502: supertag.runtime.v2.Teams.GetTeam:output_type -> supertag.runtime.v2.Team
-	315, // 503: supertag.runtime.v2.Teams.ListTeams:output_type -> supertag.runtime.v2.ListTeamsResponse
-	311, // 504: supertag.runtime.v2.Teams.UpdateTeam:output_type -> supertag.runtime.v2.Team
-	311, // 505: supertag.runtime.v2.Teams.DeleteTeam:output_type -> supertag.runtime.v2.Team
-	321, // 506: supertag.runtime.v2.Teams.ListWorkstreamPosts:output_type -> supertag.runtime.v2.ListWorkstreamPostsResponse
-	323, // 507: supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream:output_type -> supertag.runtime.v2.ReadAttemptWorkstreamResponse
-	325, // 508: supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream:output_type -> supertag.runtime.v2.PostAttemptWorkstreamResponse
-	103, // 509: supertag.runtime.v2.Mailbox.ListMessages:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
-	98,  // 510: supertag.runtime.v2.Mailbox.ChangeGrant:output_type -> supertag.runtime.v2.ChangeMailboxGrantResponse
-	101, // 511: supertag.runtime.v2.Mailbox.ListGrants:output_type -> supertag.runtime.v2.ListMailboxGrantsResponse
-	103, // 512: supertag.runtime.v2.AttemptMailbox.ReadMailbox:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
-	96,  // 513: supertag.runtime.v2.AttemptMailbox.SendMessage:output_type -> supertag.runtime.v2.SendTagMessageResponse
-	179, // 514: supertag.runtime.v2.WorkerHost.RegisterHost:output_type -> supertag.runtime.v2.HostRecord
-	109, // 515: supertag.runtime.v2.WorkerHost.ReportHost:output_type -> supertag.runtime.v2.WorkerHostStatus
-	243, // 516: supertag.runtime.v2.WorkerHost.ClaimTask:output_type -> supertag.runtime.v2.ClaimTaskResponse
-	204, // 517: supertag.runtime.v2.WorkerHost.StartTask:output_type -> supertag.runtime.v2.Task
-	204, // 518: supertag.runtime.v2.WorkerHost.InspectAttempt:output_type -> supertag.runtime.v2.Task
-	79,  // 519: supertag.runtime.v2.WorkerHost.GetAttemptCapabilities:output_type -> supertag.runtime.v2.AttemptCapabilities
-	269, // 520: supertag.runtime.v2.WorkerHost.GetAttemptHistory:output_type -> supertag.runtime.v2.AttemptHistory
-	274, // 521: supertag.runtime.v2.WorkerHost.GetContextPins:output_type -> supertag.runtime.v2.ContextResolutionManifest
-	274, // 522: supertag.runtime.v2.WorkerHost.CommitContextResolution:output_type -> supertag.runtime.v2.ContextResolutionManifest
-	248, // 523: supertag.runtime.v2.WorkerHost.RenewAttempt:output_type -> supertag.runtime.v2.AttemptAuthority
-	254, // 524: supertag.runtime.v2.WorkerHost.GetAttemptResolution:output_type -> supertag.runtime.v2.GetAttemptResolutionResponse
-	256, // 525: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
-	262, // 526: supertag.runtime.v2.WorkerHost.AppendEvent:output_type -> supertag.runtime.v2.TaskEvent
-	305, // 527: supertag.runtime.v2.WorkerHost.PublishText:output_type -> supertag.runtime.v2.PublishTaskTextResponse
-	77,  // 528: supertag.runtime.v2.WorkerHost.AskQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
-	204, // 529: supertag.runtime.v2.WorkerHost.FinishTask:output_type -> supertag.runtime.v2.Task
-	250, // 530: supertag.runtime.v2.WorkerHost.ReclaimAttempt:output_type -> supertag.runtime.v2.AttemptResolution
-	253, // 531: supertag.runtime.v2.WorkerHost.ReportAppliedLimits:output_type -> supertag.runtime.v2.ReportAppliedLimitsResponse
-	207, // 532: supertag.runtime.v2.WorkerHost.ReportCleanupFailure:output_type -> supertag.runtime.v2.ReportCleanupFailureResponse
-	212, // 533: supertag.runtime.v2.WorkerHost.ReportNetworkLog:output_type -> supertag.runtime.v2.ReportNetworkLogResponse
-	204, // 534: supertag.runtime.v2.WorkerHost.ResolveWorkspaceRef:output_type -> supertag.runtime.v2.Task
-	170, // 535: supertag.runtime.v2.LiveInputs.QueueInput:output_type -> supertag.runtime.v2.LiveInput
-	170, // 536: supertag.runtime.v2.LiveInputs.GetInput:output_type -> supertag.runtime.v2.LiveInput
-	170, // 537: supertag.runtime.v2.LiveInputs.ResolveInput:output_type -> supertag.runtime.v2.LiveInput
-	172, // 538: supertag.runtime.v2.AttemptInputs.TakeInput:output_type -> supertag.runtime.v2.TakeInputResponse
-	170, // 539: supertag.runtime.v2.AttemptInputs.SettleInput:output_type -> supertag.runtime.v2.LiveInput
-	204, // 540: supertag.runtime.v2.Connector.AcceptEvent:output_type -> supertag.runtime.v2.Task
-	339, // 541: supertag.runtime.v2.Connector.AcceptSlackEvent:output_type -> supertag.runtime.v2.AcceptSlackEventResponse
-	341, // 542: supertag.runtime.v2.Connector.AcceptGithubEvent:output_type -> supertag.runtime.v2.AcceptGithubEventResponse
-	343, // 543: supertag.runtime.v2.Connector.AcceptLinearEvent:output_type -> supertag.runtime.v2.AcceptLinearEventResponse
-	345, // 544: supertag.runtime.v2.Connector.AcceptLarkEvent:output_type -> supertag.runtime.v2.AcceptLarkEventResponse
-	347, // 545: supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity:output_type -> supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse
-	349, // 546: supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute:output_type -> supertag.runtime.v2.MicrosoftTeamsReplyRoute
-	353, // 547: supertag.runtime.v2.Connector.ClaimReply:output_type -> supertag.runtime.v2.ClaimReplyResponse
-	356, // 548: supertag.runtime.v2.Connector.RenewReply:output_type -> supertag.runtime.v2.ReplyLease
-	350, // 549: supertag.runtime.v2.Connector.SettleReply:output_type -> supertag.runtime.v2.Reply
-	368, // 550: supertag.runtime.v2.Connector.ClaimConnector:output_type -> supertag.runtime.v2.ConnectorLease
-	368, // 551: supertag.runtime.v2.Connector.RenewConnector:output_type -> supertag.runtime.v2.ConnectorLease
-	367, // 552: supertag.runtime.v2.Connector.ReleaseConnector:output_type -> supertag.runtime.v2.ReleaseConnectorResponse
-	278, // 553: supertag.runtime.v2.Transfers.UploadCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
-	282, // 554: supertag.runtime.v2.Transfers.DownloadCheckpoint:output_type -> supertag.runtime.v2.CheckpointDownload
-	295, // 555: supertag.runtime.v2.Transfers.CommitWorkspace:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	298, // 556: supertag.runtime.v2.Transfers.DownloadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDownload
-	298, // 557: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
-	298, // 558: supertag.runtime.v2.Transfers.DownloadReviewArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
-	293, // 559: supertag.runtime.v2.Transfers.DownloadWorkspaceSource:output_type -> supertag.runtime.v2.GithubWorkspaceDownload
-	292, // 560: supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote:output_type -> supertag.runtime.v2.VerifyWorkspaceOutputRemoteResponse
-	279, // 561: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:output_type -> supertag.runtime.v2.GetCheckpointResponse
-	278, // 562: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
-	278, // 563: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
-	373, // 564: supertag.runtime.v2.WorkspaceDirectory.GetSource:output_type -> supertag.runtime.v2.GithubWorkspace
-	297, // 565: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:output_type -> supertag.runtime.v2.WorkspaceContinuation
-	295, // 566: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	295, // 567: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	120, // 568: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:output_type -> supertag.runtime.v2.HeldWorkspaceDelivery
-	120, // 569: supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact:output_type -> supertag.runtime.v2.HeldWorkspaceDelivery
-	117, // 570: supertag.runtime.v2.HostRelay.Await:output_type -> supertag.runtime.v2.RelayRequest
-	119, // 571: supertag.runtime.v2.HostRelay.Deliver:output_type -> supertag.runtime.v2.RelayDelivered
-	270, // 572: supertag.runtime.v2.Harness.Attach:output_type -> supertag.runtime.v2.HarnessRun
-	266, // 573: supertag.runtime.v2.Harness.ConfirmExecutionLimits:output_type -> supertag.runtime.v2.ConfirmExecutionLimitsResponse
-	172, // 574: supertag.runtime.v2.Harness.TakeLiveInput:output_type -> supertag.runtime.v2.TakeInputResponse
-	170, // 575: supertag.runtime.v2.Harness.SettleLiveInput:output_type -> supertag.runtime.v2.LiveInput
-	262, // 576: supertag.runtime.v2.Harness.Publish:output_type -> supertag.runtime.v2.TaskEvent
-	303, // 577: supertag.runtime.v2.Harness.PublishText:output_type -> supertag.runtime.v2.HarnessPublishTextResponse
-	256, // 578: supertag.runtime.v2.Harness.ReportUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
-	307, // 579: supertag.runtime.v2.Harness.Complete:output_type -> supertag.runtime.v2.HarnessCompleteResponse
-	129, // 580: supertag.runtime.v2.HarnessWorkspace.Execute:output_type -> supertag.runtime.v2.HarnessWorkspaceResult
-	141, // 581: supertag.runtime.v2.RemoteWorkspaceProvider.Allocate:output_type -> supertag.runtime.v2.RemoteWorkspaceAllocation
-	148, // 582: supertag.runtime.v2.RemoteWorkspaceProvider.Stage:output_type -> supertag.runtime.v2.RemoteWorkspaceStageResponse
-	150, // 583: supertag.runtime.v2.RemoteWorkspaceProvider.Capture:output_type -> supertag.runtime.v2.RemoteWorkspaceCaptureChunk
-	152, // 584: supertag.runtime.v2.RemoteWorkspaceProvider.Stop:output_type -> supertag.runtime.v2.RemoteWorkspaceStopResponse
-	155, // 585: supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer:output_type -> supertag.runtime.v2.RemoteMcpServerOutput
-	133, // 586: supertag.runtime.v2.RemoteWorkspaceProvider.StageCopy:output_type -> supertag.runtime.v2.RemoteWorkspaceCopyStaged
-	136, // 587: supertag.runtime.v2.RemoteWorkspaceProvider.CaptureCopy:output_type -> supertag.runtime.v2.RemoteWorkspaceCopyDownload
-	143, // 588: supertag.runtime.v2.RemoteWorkspaceProvider.Snapshot:output_type -> supertag.runtime.v2.RemoteWorkspaceSnapshot
-	145, // 589: supertag.runtime.v2.RemoteWorkspaceProvider.RemoveArtifact:output_type -> supertag.runtime.v2.RemoteWorkspaceRemoveArtifactResponse
-	77,  // 590: supertag.runtime.v2.HarnessQuestions.AskQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
-	323, // 591: supertag.runtime.v2.HarnessWorkstreams.Read:output_type -> supertag.runtime.v2.ReadAttemptWorkstreamResponse
-	325, // 592: supertag.runtime.v2.HarnessWorkstreams.Post:output_type -> supertag.runtime.v2.PostAttemptWorkstreamResponse
-	103, // 593: supertag.runtime.v2.HarnessMailbox.Read:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
-	96,  // 594: supertag.runtime.v2.HarnessMailbox.SendMessage:output_type -> supertag.runtime.v2.SendTagMessageResponse
-	166, // 595: supertag.runtime.v2.HarnessMailbox.ReadReviewPatch:output_type -> supertag.runtime.v2.HarnessReviewPatch
-	82,  // 596: supertag.runtime.v2.HarnessWorkSessions.Start:output_type -> supertag.runtime.v2.WorkSession
-	82,  // 597: supertag.runtime.v2.HarnessWorkSessions.Continue:output_type -> supertag.runtime.v2.WorkSession
-	83,  // 598: supertag.runtime.v2.HarnessWorkSessions.Ask:output_type -> supertag.runtime.v2.WorkSessionQuestion
-	82,  // 599: supertag.runtime.v2.HarnessWorkSessions.Close:output_type -> supertag.runtime.v2.WorkSession
-	215, // 600: supertag.runtime.v2.NetworkLogs.List:output_type -> supertag.runtime.v2.ListNetworkLogsResponse
-	233, // 601: supertag.runtime.v2.AttemptMcpEffects.Reserve:output_type -> supertag.runtime.v2.ReserveMcpEffectResponse
-	235, // 602: supertag.runtime.v2.AttemptMcpEffects.Settle:output_type -> supertag.runtime.v2.SettleMcpEffectResponse
-	231, // 603: supertag.runtime.v2.AttemptMcpEffects.RecordWorkspaceMcp:output_type -> supertag.runtime.v2.RecordWorkspaceMcpResponse
-	448, // [448:604] is the sub-list for method output_type
-	292, // [292:448] is the sub-list for method input_type
-	292, // [292:292] is the sub-list for extension type_name
-	292, // [292:292] is the sub-list for extension extendee
-	0,   // [0:292] is the sub-list for field type_name
+	295, // 76: supertag.runtime.v2.RelayRequest.complete_bundle:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	295, // 77: supertag.runtime.v2.HeldWorkspaceDelivery.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	115, // 78: supertag.runtime.v2.HeldWorkspaceDelivery.holder:type_name -> supertag.runtime.v2.BlobHolder
+	122, // 79: supertag.runtime.v2.HarnessWorkspaceRequest.read:type_name -> supertag.runtime.v2.WorkspaceRead
+	123, // 80: supertag.runtime.v2.HarnessWorkspaceRequest.write:type_name -> supertag.runtime.v2.WorkspaceWrite
+	124, // 81: supertag.runtime.v2.HarnessWorkspaceRequest.edit:type_name -> supertag.runtime.v2.WorkspaceEdit
+	125, // 82: supertag.runtime.v2.HarnessWorkspaceRequest.glob:type_name -> supertag.runtime.v2.WorkspaceGlob
+	126, // 83: supertag.runtime.v2.HarnessWorkspaceRequest.grep:type_name -> supertag.runtime.v2.WorkspaceGrep
+	127, // 84: supertag.runtime.v2.HarnessWorkspaceRequest.list:type_name -> supertag.runtime.v2.WorkspaceList
+	128, // 85: supertag.runtime.v2.HarnessWorkspaceRequest.command:type_name -> supertag.runtime.v2.WorkspaceCommand
+	14,  // 86: supertag.runtime.v2.WorkspaceGrep.mode:type_name -> supertag.runtime.v2.WorkspaceGrepMode
+	131, // 87: supertag.runtime.v2.RemoteWorkspaceCopyUpload.header:type_name -> supertag.runtime.v2.RemoteWorkspaceCopyHeader
+	130, // 88: supertag.runtime.v2.RemoteWorkspaceCopyUpload.file:type_name -> supertag.runtime.v2.RemoteWorkspaceCopyFile
+	130, // 89: supertag.runtime.v2.RemoteWorkspaceCopyDownload.file:type_name -> supertag.runtime.v2.RemoteWorkspaceCopyFile
+	135, // 90: supertag.runtime.v2.RemoteWorkspaceCopyDownload.listed:type_name -> supertag.runtime.v2.RemoteWorkspaceCopyListed
+	138, // 91: supertag.runtime.v2.RemoteWorkspaceAllocateRequest.owner:type_name -> supertag.runtime.v2.RemoteWorkspaceOwner
+	140, // 92: supertag.runtime.v2.RemoteWorkspaceAllocateRequest.environment:type_name -> supertag.runtime.v2.RemoteWorkspaceEnvironment
+	369, // 93: supertag.runtime.v2.RemoteWorkspaceAllocateRequest.file_scope:type_name -> supertag.runtime.v2.FileScope
+	294, // 94: supertag.runtime.v2.RemoteWorkspaceStageHeader.bundle:type_name -> supertag.runtime.v2.BlobReference
+	219, // 95: supertag.runtime.v2.RemoteWorkspaceStageHeader.input_files:type_name -> supertag.runtime.v2.ArtifactInputFile
+	146, // 96: supertag.runtime.v2.RemoteWorkspaceStageChunk.header:type_name -> supertag.runtime.v2.RemoteWorkspaceStageHeader
+	219, // 97: supertag.runtime.v2.RemoteWorkspaceStageResponse.input_files:type_name -> supertag.runtime.v2.ArtifactInputFile
+	294, // 98: supertag.runtime.v2.RemoteWorkspaceCaptureChunk.tree:type_name -> supertag.runtime.v2.BlobReference
+	138, // 99: supertag.runtime.v2.RemoteWorkspaceStopRequest.owner:type_name -> supertag.runtime.v2.RemoteWorkspaceOwner
+	153, // 100: supertag.runtime.v2.RemoteMcpServerInput.start:type_name -> supertag.runtime.v2.RemoteMcpServerStart
+	91,  // 101: supertag.runtime.v2.HarnessSendTagMessageRequest.review:type_name -> supertag.runtime.v2.CommitReviewSubmission
+	295, // 102: supertag.runtime.v2.HarnessReviewPatch.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	16,  // 103: supertag.runtime.v2.ResolveInputRequest.decision:type_name -> supertag.runtime.v2.LiveInputDecision
+	15,  // 104: supertag.runtime.v2.LiveInput.state:type_name -> supertag.runtime.v2.LiveInputState
+	247, // 105: supertag.runtime.v2.TakeInputRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	170, // 106: supertag.runtime.v2.TakeInputResponse.input:type_name -> supertag.runtime.v2.LiveInput
+	17,  // 107: supertag.runtime.v2.HarnessSettleLiveInputRequest.receipt:type_name -> supertag.runtime.v2.LiveInputReceipt
+	247, // 108: supertag.runtime.v2.SettleInputRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	17,  // 109: supertag.runtime.v2.SettleInputRequest.receipt:type_name -> supertag.runtime.v2.LiveInputReceipt
+	18,  // 110: supertag.runtime.v2.CreateAuthKeyRequest.role:type_name -> supertag.runtime.v2.PrincipalRole
+	18,  // 111: supertag.runtime.v2.AuthKey.role:type_name -> supertag.runtime.v2.PrincipalRole
+	283, // 112: supertag.runtime.v2.PutTagRequest.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
+	20,  // 113: supertag.runtime.v2.PutTagRequest.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	66,  // 114: supertag.runtime.v2.PutTagRequest.approval_rules:type_name -> supertag.runtime.v2.ApprovalRule
+	370, // 115: supertag.runtime.v2.PutTagRequest.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
+	283, // 116: supertag.runtime.v2.Tag.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
+	20,  // 117: supertag.runtime.v2.Tag.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	66,  // 118: supertag.runtime.v2.Tag.approval_rules:type_name -> supertag.runtime.v2.ApprovalRule
+	370, // 119: supertag.runtime.v2.Tag.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
+	182, // 120: supertag.runtime.v2.Tag.attention:type_name -> supertag.runtime.v2.AttentionSummary
+	181, // 121: supertag.runtime.v2.ListTagsResponse.tags:type_name -> supertag.runtime.v2.Tag
+	181, // 122: supertag.runtime.v2.RetireTagResponse.tag:type_name -> supertag.runtime.v2.Tag
+	204, // 123: supertag.runtime.v2.ConversationMessage.task:type_name -> supertag.runtime.v2.Task
+	170, // 124: supertag.runtime.v2.ConversationMessage.live_input:type_name -> supertag.runtime.v2.LiveInput
+	262, // 125: supertag.runtime.v2.ConversationMessage.events:type_name -> supertag.runtime.v2.TaskEvent
+	7,   // 126: supertag.runtime.v2.ConversationMessage.work_session_close_reason:type_name -> supertag.runtime.v2.WorkSessionCloseReason
+	188, // 127: supertag.runtime.v2.ListConversationsResponse.conversations:type_name -> supertag.runtime.v2.Conversation
+	189, // 128: supertag.runtime.v2.ListMessagesResponse.messages:type_name -> supertag.runtime.v2.ConversationMessage
+	203, // 129: supertag.runtime.v2.SendMessageRequest.execution_limits:type_name -> supertag.runtime.v2.ExecutionLimits
+	222, // 130: supertag.runtime.v2.SendMessageRequest.output_policy:type_name -> supertag.runtime.v2.TaskOutputPolicy
+	193, // 131: supertag.runtime.v2.FollowConversationResponse.messages:type_name -> supertag.runtime.v2.ListMessagesResponse
+	197, // 132: supertag.runtime.v2.FollowConversationResponse.waits:type_name -> supertag.runtime.v2.TurnWait
+	198, // 133: supertag.runtime.v2.FollowConversationResponse.texts:type_name -> supertag.runtime.v2.TurnText
+	203, // 134: supertag.runtime.v2.SubmitTaskRequest.execution_limits:type_name -> supertag.runtime.v2.ExecutionLimits
+	222, // 135: supertag.runtime.v2.SubmitTaskRequest.output_policy:type_name -> supertag.runtime.v2.TaskOutputPolicy
+	217, // 136: supertag.runtime.v2.SubmitTaskRequest.input_artifacts:type_name -> supertag.runtime.v2.TaskArtifactInputSelection
+	202, // 137: supertag.runtime.v2.ExecutionLimits.max_reported_cost:type_name -> supertag.runtime.v2.ReportedCostLimit
+	19,  // 138: supertag.runtime.v2.Task.state:type_name -> supertag.runtime.v2.TaskState
+	283, // 139: supertag.runtime.v2.Task.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
+	295, // 140: supertag.runtime.v2.Task.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	20,  // 141: supertag.runtime.v2.Task.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	66,  // 142: supertag.runtime.v2.Task.approval_rules:type_name -> supertag.runtime.v2.ApprovalRule
+	371, // 143: supertag.runtime.v2.Task.policy_snapshot:type_name -> supertag.runtime.v2.TaskPolicySnapshot
+	203, // 144: supertag.runtime.v2.Task.execution_limits:type_name -> supertag.runtime.v2.ExecutionLimits
+	224, // 145: supertag.runtime.v2.Task.execution_selection:type_name -> supertag.runtime.v2.ExecutionSelection
+	228, // 146: supertag.runtime.v2.Task.attempt_execution:type_name -> supertag.runtime.v2.AttemptExecutionSelection
+	223, // 147: supertag.runtime.v2.Task.artifacts:type_name -> supertag.runtime.v2.ArtifactSelection
+	222, // 148: supertag.runtime.v2.Task.output_policy:type_name -> supertag.runtime.v2.TaskOutputPolicy
+	218, // 149: supertag.runtime.v2.Task.input_artifacts:type_name -> supertag.runtime.v2.AcceptedTaskArtifactInput
+	265, // 150: supertag.runtime.v2.Task.applied_execution_limits:type_name -> supertag.runtime.v2.AppliedExecutionLimits
+	289, // 151: supertag.runtime.v2.Task.workspace_mount_writes:type_name -> supertag.runtime.v2.AttemptWorkspaceMountWrites
+	205, // 152: supertag.runtime.v2.Task.execution_report:type_name -> supertag.runtime.v2.TaskExecutionReport
+	210, // 153: supertag.runtime.v2.Task.network_logs:type_name -> supertag.runtime.v2.AttemptNetworkLog
+	21,  // 154: supertag.runtime.v2.TaskExecutionReport.limit_outcome:type_name -> supertag.runtime.v2.ExecutionLimitOutcome
+	22,  // 155: supertag.runtime.v2.TaskExecutionReport.max_reported_tokens:type_name -> supertag.runtime.v2.ExecutionThreshold
+	22,  // 156: supertag.runtime.v2.TaskExecutionReport.max_reported_cost:type_name -> supertag.runtime.v2.ExecutionThreshold
+	22,  // 157: supertag.runtime.v2.TaskExecutionReport.max_native_agents:type_name -> supertag.runtime.v2.ExecutionThreshold
+	23,  // 158: supertag.runtime.v2.TaskExecutionReport.cleanup:type_name -> supertag.runtime.v2.AttemptCleanup
+	247, // 159: supertag.runtime.v2.ReportCleanupFailureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	208, // 160: supertag.runtime.v2.NetworkLog.requests:type_name -> supertag.runtime.v2.NetworkRequestRecord
+	209, // 161: supertag.runtime.v2.AttemptNetworkLog.log:type_name -> supertag.runtime.v2.NetworkLog
+	247, // 162: supertag.runtime.v2.ReportNetworkLogRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	209, // 163: supertag.runtime.v2.ReportNetworkLogRequest.log:type_name -> supertag.runtime.v2.NetworkLog
+	209, // 164: supertag.runtime.v2.TaskNetworkLog.log:type_name -> supertag.runtime.v2.NetworkLog
+	214, // 165: supertag.runtime.v2.ListNetworkLogsResponse.logs:type_name -> supertag.runtime.v2.TaskNetworkLog
+	247, // 166: supertag.runtime.v2.ResolveWorkspaceRefRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	219, // 167: supertag.runtime.v2.AcceptedTaskArtifactInput.files:type_name -> supertag.runtime.v2.ArtifactInputFile
+	363, // 168: supertag.runtime.v2.AcceptedTaskArtifactInput.publication:type_name -> supertag.runtime.v2.ArtifactPublicationPin
+	294, // 169: supertag.runtime.v2.ArtifactInputFile.blob:type_name -> supertag.runtime.v2.BlobReference
+	218, // 170: supertag.runtime.v2.AcceptedTaskArtifactInputs.inputs:type_name -> supertag.runtime.v2.AcceptedTaskArtifactInput
+	221, // 171: supertag.runtime.v2.TaskOutputPolicy.include:type_name -> supertag.runtime.v2.OutputPathPatterns
+	24,  // 172: supertag.runtime.v2.TaskOutputPolicy.git:type_name -> supertag.runtime.v2.OutputGitMode
+	372, // 173: supertag.runtime.v2.HarnessExecutionProfile.mcp_servers:type_name -> supertag.runtime.v2.McpServerCapability
+	226, // 174: supertag.runtime.v2.HarnessExecutionProfile.shared_execution:type_name -> supertag.runtime.v2.SharedExecutionCapability
+	285, // 175: supertag.runtime.v2.HarnessExecutionProfile.workspace_mounts:type_name -> supertag.runtime.v2.WorkspaceMountCapability
+	25,  // 176: supertag.runtime.v2.SharedExecutionCapability.tools:type_name -> supertag.runtime.v2.SharedExecutionTool
+	224, // 177: supertag.runtime.v2.AttemptExecutionSelection.selection:type_name -> supertag.runtime.v2.ExecutionSelection
+	26,  // 178: supertag.runtime.v2.AttemptExecutionSelection.model_source:type_name -> supertag.runtime.v2.ModelSource
+	20,  // 179: supertag.runtime.v2.AttemptExecutionSelection.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	226, // 180: supertag.runtime.v2.AttemptExecutionSelection.shared_execution:type_name -> supertag.runtime.v2.SharedExecutionCapability
+	372, // 181: supertag.runtime.v2.AttemptExecutionSelection.mcp_servers:type_name -> supertag.runtime.v2.McpServerCapability
+	372, // 182: supertag.runtime.v2.WorkspaceMcpRecord.servers:type_name -> supertag.runtime.v2.McpServerCapability
+	247, // 183: supertag.runtime.v2.RecordWorkspaceMcpRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	229, // 184: supertag.runtime.v2.RecordWorkspaceMcpRequest.record:type_name -> supertag.runtime.v2.WorkspaceMcpRecord
+	247, // 185: supertag.runtime.v2.ReserveMcpEffectRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	67,  // 186: supertag.runtime.v2.ReserveMcpEffectResponse.approval:type_name -> supertag.runtime.v2.Approval
+	247, // 187: supertag.runtime.v2.SettleMcpEffectRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	295, // 188: supertag.runtime.v2.SessionDelivery.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	262, // 189: supertag.runtime.v2.ListEventsResponse.events:type_name -> supertag.runtime.v2.TaskEvent
+	20,  // 190: supertag.runtime.v2.ClaimTaskRequest.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	271, // 191: supertag.runtime.v2.ClaimTaskRequest.context_contracts:type_name -> supertag.runtime.v2.ContextContract
+	225, // 192: supertag.runtime.v2.ClaimTaskRequest.execution_profile:type_name -> supertag.runtime.v2.HarnessExecutionProfile
+	244, // 193: supertag.runtime.v2.ClaimTaskResponse.assignment:type_name -> supertag.runtime.v2.Assignment
+	204, // 194: supertag.runtime.v2.Assignment.task:type_name -> supertag.runtime.v2.Task
+	245, // 195: supertag.runtime.v2.Assignment.joined:type_name -> supertag.runtime.v2.JoinedMessage
+	204, // 196: supertag.runtime.v2.AttemptAuthority.task:type_name -> supertag.runtime.v2.Task
+	27,  // 197: supertag.runtime.v2.ResolveAttemptRequest.decision:type_name -> supertag.runtime.v2.AttemptDecision
+	27,  // 198: supertag.runtime.v2.AttemptResolution.decision:type_name -> supertag.runtime.v2.AttemptDecision
+	247, // 199: supertag.runtime.v2.ReclaimAttemptRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	247, // 200: supertag.runtime.v2.ReportAppliedLimitsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	265, // 201: supertag.runtime.v2.ReportAppliedLimitsRequest.applied:type_name -> supertag.runtime.v2.AppliedExecutionLimits
+	250, // 202: supertag.runtime.v2.GetAttemptResolutionResponse.resolution:type_name -> supertag.runtime.v2.AttemptResolution
+	247, // 203: supertag.runtime.v2.ReportAttemptUsageRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	257, // 204: supertag.runtime.v2.ReportAttemptUsageRequest.native_usage:type_name -> supertag.runtime.v2.NativeTokenUsage
+	260, // 205: supertag.runtime.v2.ListNativeUsageResponse.reports:type_name -> supertag.runtime.v2.HarnessUsageRequest
+	257, // 206: supertag.runtime.v2.HarnessUsageRequest.native_usage:type_name -> supertag.runtime.v2.NativeTokenUsage
+	28,  // 207: supertag.runtime.v2.AppendEventRequest.kind:type_name -> supertag.runtime.v2.TaskEventKind
+	28,  // 208: supertag.runtime.v2.TaskEvent.kind:type_name -> supertag.runtime.v2.TaskEventKind
+	33,  // 209: supertag.runtime.v2.FinishTaskRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
+	295, // 210: supertag.runtime.v2.FinishTaskRequest.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	223, // 211: supertag.runtime.v2.FinishTaskRequest.artifacts:type_name -> supertag.runtime.v2.ArtifactSelection
+	203, // 212: supertag.runtime.v2.AppliedExecutionLimits.limits:type_name -> supertag.runtime.v2.ExecutionLimits
+	29,  // 213: supertag.runtime.v2.AppliedExecutionLimits.native_agents:type_name -> supertag.runtime.v2.ExecutionLimitEnforcement
+	29,  // 214: supertag.runtime.v2.AppliedExecutionLimits.reported_tokens:type_name -> supertag.runtime.v2.ExecutionLimitEnforcement
+	29,  // 215: supertag.runtime.v2.AppliedExecutionLimits.reported_cost:type_name -> supertag.runtime.v2.ExecutionLimitEnforcement
+	268, // 216: supertag.runtime.v2.AttemptHistory.entries:type_name -> supertag.runtime.v2.AttemptHistoryEntry
+	204, // 217: supertag.runtime.v2.HarnessRun.task:type_name -> supertag.runtime.v2.Task
+	277, // 218: supertag.runtime.v2.HarnessRun.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
+	79,  // 219: supertag.runtime.v2.HarnessRun.coordination:type_name -> supertag.runtime.v2.AttemptCapabilities
+	275, // 220: supertag.runtime.v2.HarnessRun.resolved_skills:type_name -> supertag.runtime.v2.ResolvedSkill
+	268, // 221: supertag.runtime.v2.HarnessRun.history:type_name -> supertag.runtime.v2.AttemptHistoryEntry
+	227, // 222: supertag.runtime.v2.HarnessRun.shared_execution:type_name -> supertag.runtime.v2.SharedExecutionAccessSummary
+	272, // 223: supertag.runtime.v2.ContextResolutionManifest.pins:type_name -> supertag.runtime.v2.ContextPin
+	273, // 224: supertag.runtime.v2.ContextResolutionManifest.omissions:type_name -> supertag.runtime.v2.OmittedContextItem
+	272, // 225: supertag.runtime.v2.ResolvedSkill.pin:type_name -> supertag.runtime.v2.ContextPin
+	247, // 226: supertag.runtime.v2.CommitContextResolutionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	274, // 227: supertag.runtime.v2.CommitContextResolutionRequest.manifest:type_name -> supertag.runtime.v2.ContextResolutionManifest
+	278, // 228: supertag.runtime.v2.GetCheckpointResponse.reference:type_name -> supertag.runtime.v2.CheckpointReference
+	247, // 229: supertag.runtime.v2.CommitCheckpointRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	278, // 230: supertag.runtime.v2.CommitCheckpointRequest.reference:type_name -> supertag.runtime.v2.CheckpointReference
+	280, // 231: supertag.runtime.v2.CheckpointUpload.begin:type_name -> supertag.runtime.v2.CommitCheckpointRequest
+	278, // 232: supertag.runtime.v2.CheckpointDownload.reference:type_name -> supertag.runtime.v2.CheckpointReference
+	373, // 233: supertag.runtime.v2.WorkspaceSpec.github_source:type_name -> supertag.runtime.v2.GithubWorkspace
+	284, // 234: supertag.runtime.v2.WorkspaceSpec.mounts:type_name -> supertag.runtime.v2.WorkspaceCopyMount
+	286, // 235: supertag.runtime.v2.WorkspaceCopyMount.volume:type_name -> supertag.runtime.v2.WorkspaceVolume
+	30,  // 236: supertag.runtime.v2.WorkspaceMountWrite.status:type_name -> supertag.runtime.v2.WorkspaceMountWriteStatus
+	287, // 237: supertag.runtime.v2.WorkspaceMountWrite.files:type_name -> supertag.runtime.v2.WorkspaceMountWrittenFile
+	288, // 238: supertag.runtime.v2.AttemptWorkspaceMountWrites.writes:type_name -> supertag.runtime.v2.WorkspaceMountWrite
+	373, // 239: supertag.runtime.v2.GithubWorkspaceBundle.workspace:type_name -> supertag.runtime.v2.GithubWorkspace
+	294, // 240: supertag.runtime.v2.GithubWorkspaceBundle.bundle:type_name -> supertag.runtime.v2.BlobReference
+	247, // 241: supertag.runtime.v2.VerifyWorkspaceOutputRemoteRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	290, // 242: supertag.runtime.v2.GithubWorkspaceDownload.reference:type_name -> supertag.runtime.v2.GithubWorkspaceBundle
+	294, // 243: supertag.runtime.v2.WorkspaceDeliveryReference.patch:type_name -> supertag.runtime.v2.BlobReference
+	294, // 244: supertag.runtime.v2.WorkspaceDeliveryReference.bundle:type_name -> supertag.runtime.v2.BlobReference
+	247, // 245: supertag.runtime.v2.WorkspaceDeliveryRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	295, // 246: supertag.runtime.v2.WorkspaceDeliveryRequest.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	295, // 247: supertag.runtime.v2.WorkspaceContinuation.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	115, // 248: supertag.runtime.v2.WorkspaceContinuation.holder:type_name -> supertag.runtime.v2.BlobHolder
+	295, // 249: supertag.runtime.v2.WorkspaceDownload.reference:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	31,  // 250: supertag.runtime.v2.GetWorkspaceArtifactRequest.kind:type_name -> supertag.runtime.v2.WorkspaceArtifactKind
+	247, // 251: supertag.runtime.v2.GetReviewArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	28,  // 252: supertag.runtime.v2.HarnessPublishRequest.kind:type_name -> supertag.runtime.v2.TaskEventKind
+	33,  // 253: supertag.runtime.v2.HarnessCompleteRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
+	277, // 254: supertag.runtime.v2.HarnessCompleteRequest.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
+	309, // 255: supertag.runtime.v2.CreateObjectiveRequest.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
+	32,  // 256: supertag.runtime.v2.Objective.status:type_name -> supertag.runtime.v2.ObjectiveStatus
+	309, // 257: supertag.runtime.v2.Objective.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
+	311, // 258: supertag.runtime.v2.ListTeamsResponse.teams:type_name -> supertag.runtime.v2.Team
+	316, // 259: supertag.runtime.v2.UpdateTeamRequest.members:type_name -> supertag.runtime.v2.TeamMembers
+	319, // 260: supertag.runtime.v2.ListWorkstreamPostsResponse.posts:type_name -> supertag.runtime.v2.WorkstreamPost
+	247, // 261: supertag.runtime.v2.ReadAttemptWorkstreamRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	311, // 262: supertag.runtime.v2.ReadAttemptWorkstreamResponse.team:type_name -> supertag.runtime.v2.Team
+	321, // 263: supertag.runtime.v2.ReadAttemptWorkstreamResponse.page:type_name -> supertag.runtime.v2.ListWorkstreamPostsResponse
+	247, // 264: supertag.runtime.v2.PostAttemptWorkstreamRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	319, // 265: supertag.runtime.v2.PostAttemptWorkstreamResponse.post:type_name -> supertag.runtime.v2.WorkstreamPost
+	67,  // 266: supertag.runtime.v2.PostAttemptWorkstreamResponse.approval:type_name -> supertag.runtime.v2.Approval
+	310, // 267: supertag.runtime.v2.ListObjectivesResponse.objectives:type_name -> supertag.runtime.v2.Objective
+	94,  // 268: supertag.runtime.v2.ListObjectiveCommitReviewsResponse.reviews:type_name -> supertag.runtime.v2.CommitReview
+	309, // 269: supertag.runtime.v2.SetObjectiveRuntimeActionsRequest.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
+	336, // 270: supertag.runtime.v2.AcceptEventRequest.destination:type_name -> supertag.runtime.v2.ReplyDestination
+	224, // 271: supertag.runtime.v2.AcceptEventRequest.requested_execution:type_name -> supertag.runtime.v2.ExecutionSelection
+	204, // 272: supertag.runtime.v2.AcceptSlackEventResponse.task:type_name -> supertag.runtime.v2.Task
+	34,  // 273: supertag.runtime.v2.AcceptGithubEventRequest.kind:type_name -> supertag.runtime.v2.GithubEventKind
+	35,  // 274: supertag.runtime.v2.AcceptGithubEventRequest.action:type_name -> supertag.runtime.v2.GithubEventAction
+	204, // 275: supertag.runtime.v2.AcceptGithubEventResponse.task:type_name -> supertag.runtime.v2.Task
+	36,  // 276: supertag.runtime.v2.AcceptLinearEventRequest.kind:type_name -> supertag.runtime.v2.LinearEventKind
+	37,  // 277: supertag.runtime.v2.AcceptLinearEventRequest.action:type_name -> supertag.runtime.v2.LinearEventAction
+	204, // 278: supertag.runtime.v2.AcceptLinearEventResponse.task:type_name -> supertag.runtime.v2.Task
+	38,  // 279: supertag.runtime.v2.AcceptLarkEventRequest.domain:type_name -> supertag.runtime.v2.LarkDomain
+	204, // 280: supertag.runtime.v2.AcceptLarkEventResponse.task:type_name -> supertag.runtime.v2.Task
+	204, // 281: supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse.task:type_name -> supertag.runtime.v2.Task
+	336, // 282: supertag.runtime.v2.Reply.destination:type_name -> supertag.runtime.v2.ReplyDestination
+	39,  // 283: supertag.runtime.v2.Reply.state:type_name -> supertag.runtime.v2.ReplyState
+	351, // 284: supertag.runtime.v2.Reply.result_card:type_name -> supertag.runtime.v2.ReplyResultCard
+	350, // 285: supertag.runtime.v2.ClaimReplyResponse.reply:type_name -> supertag.runtime.v2.Reply
+	39,  // 286: supertag.runtime.v2.SettleReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
+	39,  // 287: supertag.runtime.v2.ReplyDeliveryAudit.state:type_name -> supertag.runtime.v2.ReplyState
+	350, // 288: supertag.runtime.v2.ReplyDelivery.reply:type_name -> supertag.runtime.v2.Reply
+	358, // 289: supertag.runtime.v2.ReplyDelivery.audit:type_name -> supertag.runtime.v2.ReplyDeliveryAudit
+	39,  // 290: supertag.runtime.v2.ListReplyDeliveriesRequest.state:type_name -> supertag.runtime.v2.ReplyState
+	359, // 291: supertag.runtime.v2.ListReplyDeliveriesResponse.deliveries:type_name -> supertag.runtime.v2.ReplyDelivery
+	39,  // 292: supertag.runtime.v2.ResolveReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
+	176, // 293: supertag.runtime.v2.Operator.CreateAuthKey:input_type -> supertag.runtime.v2.CreateAuthKeyRequest
+	111, // 294: supertag.runtime.v2.Operator.ListHosts:input_type -> supertag.runtime.v2.ListHostsRequest
+	113, // 295: supertag.runtime.v2.Operator.GetHost:input_type -> supertag.runtime.v2.GetHostRequest
+	114, // 296: supertag.runtime.v2.Operator.SetHostDraining:input_type -> supertag.runtime.v2.SetHostDrainingRequest
+	180, // 297: supertag.runtime.v2.Operator.PutTag:input_type -> supertag.runtime.v2.PutTagRequest
+	183, // 298: supertag.runtime.v2.Operator.ListTags:input_type -> supertag.runtime.v2.ListTagsRequest
+	201, // 299: supertag.runtime.v2.Operator.SubmitTask:input_type -> supertag.runtime.v2.SubmitTaskRequest
+	236, // 300: supertag.runtime.v2.Operator.GetTask:input_type -> supertag.runtime.v2.GetTaskRequest
+	237, // 301: supertag.runtime.v2.Operator.GetSessionDelivery:input_type -> supertag.runtime.v2.GetSessionDeliveryRequest
+	258, // 302: supertag.runtime.v2.Operator.ListNativeUsage:input_type -> supertag.runtime.v2.ListNativeUsageRequest
+	239, // 303: supertag.runtime.v2.Operator.ListEvents:input_type -> supertag.runtime.v2.ListEventsRequest
+	241, // 304: supertag.runtime.v2.Operator.CancelTask:input_type -> supertag.runtime.v2.CancelTaskRequest
+	249, // 305: supertag.runtime.v2.Operator.ResolveAttempt:input_type -> supertag.runtime.v2.ResolveAttemptRequest
+	185, // 306: supertag.runtime.v2.Operator.GetTag:input_type -> supertag.runtime.v2.GetTagRequest
+	186, // 307: supertag.runtime.v2.Operator.RetireTag:input_type -> supertag.runtime.v2.RetireTagRequest
+	357, // 308: supertag.runtime.v2.Operator.GetReplyDelivery:input_type -> supertag.runtime.v2.GetReplyDeliveryRequest
+	360, // 309: supertag.runtime.v2.Operator.ListReplyDeliveries:input_type -> supertag.runtime.v2.ListReplyDeliveriesRequest
+	362, // 310: supertag.runtime.v2.Operator.ResolveReply:input_type -> supertag.runtime.v2.ResolveReplyRequest
+	190, // 311: supertag.runtime.v2.Conversations.ListConversations:input_type -> supertag.runtime.v2.ListConversationsRequest
+	192, // 312: supertag.runtime.v2.Conversations.ListMessages:input_type -> supertag.runtime.v2.ListMessagesRequest
+	194, // 313: supertag.runtime.v2.Conversations.SendMessage:input_type -> supertag.runtime.v2.SendMessageRequest
+	200, // 314: supertag.runtime.v2.Conversations.GetMessage:input_type -> supertag.runtime.v2.GetMessageRequest
+	199, // 315: supertag.runtime.v2.Conversations.MarkConversationRead:input_type -> supertag.runtime.v2.MarkConversationReadRequest
+	195, // 316: supertag.runtime.v2.Conversations.FollowConversation:input_type -> supertag.runtime.v2.FollowConversationRequest
+	56,  // 317: supertag.runtime.v2.OperatorEvents.Watch:input_type -> supertag.runtime.v2.WatchRequest
+	52,  // 318: supertag.runtime.v2.ManifestRelationships.ReconcileTag:input_type -> supertag.runtime.v2.ReconcileTagRelationshipsRequest
+	49,  // 319: supertag.runtime.v2.ManifestRelationships.ProvisionTags:input_type -> supertag.runtime.v2.ProvisionTagsRequest
+	46,  // 320: supertag.runtime.v2.ManifestRelationships.ReconcileApplySet:input_type -> supertag.runtime.v2.ReconcileApplySetRequest
+	42,  // 321: supertag.runtime.v2.ManifestRelationships.ReconcileManifestFields:input_type -> supertag.runtime.v2.ReconcileManifestFieldsRequest
+	308, // 322: supertag.runtime.v2.Objectives.CreateObjective:input_type -> supertag.runtime.v2.CreateObjectiveRequest
+	326, // 323: supertag.runtime.v2.Objectives.GetObjective:input_type -> supertag.runtime.v2.GetObjectiveRequest
+	327, // 324: supertag.runtime.v2.Objectives.ListObjectives:input_type -> supertag.runtime.v2.ListObjectivesRequest
+	329, // 325: supertag.runtime.v2.Objectives.ListCommitReviews:input_type -> supertag.runtime.v2.ListObjectiveCommitReviewsRequest
+	331, // 326: supertag.runtime.v2.Objectives.SetLimits:input_type -> supertag.runtime.v2.SetObjectiveLimitsRequest
+	332, // 327: supertag.runtime.v2.Objectives.SetRuntimeActions:input_type -> supertag.runtime.v2.SetObjectiveRuntimeActionsRequest
+	333, // 328: supertag.runtime.v2.Objectives.PauseObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	333, // 329: supertag.runtime.v2.Objectives.ResumeObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	333, // 330: supertag.runtime.v2.Objectives.CancelObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	334, // 331: supertag.runtime.v2.Objectives.ReviewObjective:input_type -> supertag.runtime.v2.ReviewObjectiveRequest
+	335, // 332: supertag.runtime.v2.Objectives.CompleteObjective:input_type -> supertag.runtime.v2.CompleteObjectiveRequest
+	61,  // 333: supertag.runtime.v2.Inbox.ListItems:input_type -> supertag.runtime.v2.ListInboxItemsRequest
+	75,  // 334: supertag.runtime.v2.Inbox.GetQuestion:input_type -> supertag.runtime.v2.GetQuestionRequest
+	76,  // 335: supertag.runtime.v2.Inbox.AnswerQuestion:input_type -> supertag.runtime.v2.AnswerQuestionRequest
+	68,  // 336: supertag.runtime.v2.Inbox.GetApproval:input_type -> supertag.runtime.v2.GetApprovalRequest
+	69,  // 337: supertag.runtime.v2.Inbox.ListApprovals:input_type -> supertag.runtime.v2.ListApprovalsRequest
+	71,  // 338: supertag.runtime.v2.Inbox.DecideApproval:input_type -> supertag.runtime.v2.DecideApprovalRequest
+	85,  // 339: supertag.runtime.v2.WorkSessions.Get:input_type -> supertag.runtime.v2.GetWorkSessionRequest
+	88,  // 340: supertag.runtime.v2.WorkSessions.List:input_type -> supertag.runtime.v2.ListWorkSessionsRequest
+	80,  // 341: supertag.runtime.v2.WorkSessions.Close:input_type -> supertag.runtime.v2.CloseWorkSessionRequest
+	84,  // 342: supertag.runtime.v2.AttemptWorkSessions.Start:input_type -> supertag.runtime.v2.StartWorkSessionRequest
+	86,  // 343: supertag.runtime.v2.AttemptWorkSessions.Continue:input_type -> supertag.runtime.v2.ContinueWorkSessionRequest
+	87,  // 344: supertag.runtime.v2.AttemptWorkSessions.Ask:input_type -> supertag.runtime.v2.AskWorkSessionQuestionRequest
+	81,  // 345: supertag.runtime.v2.AttemptWorkSessions.Close:input_type -> supertag.runtime.v2.CloseAttemptWorkSessionRequest
+	312, // 346: supertag.runtime.v2.Teams.CreateTeam:input_type -> supertag.runtime.v2.CreateTeamRequest
+	313, // 347: supertag.runtime.v2.Teams.GetTeam:input_type -> supertag.runtime.v2.GetTeamRequest
+	314, // 348: supertag.runtime.v2.Teams.ListTeams:input_type -> supertag.runtime.v2.ListTeamsRequest
+	317, // 349: supertag.runtime.v2.Teams.UpdateTeam:input_type -> supertag.runtime.v2.UpdateTeamRequest
+	318, // 350: supertag.runtime.v2.Teams.DeleteTeam:input_type -> supertag.runtime.v2.DeleteTeamRequest
+	320, // 351: supertag.runtime.v2.Teams.ListWorkstreamPosts:input_type -> supertag.runtime.v2.ListWorkstreamPostsRequest
+	322, // 352: supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream:input_type -> supertag.runtime.v2.ReadAttemptWorkstreamRequest
+	324, // 353: supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream:input_type -> supertag.runtime.v2.PostAttemptWorkstreamRequest
+	102, // 354: supertag.runtime.v2.Mailbox.ListMessages:input_type -> supertag.runtime.v2.ListMailboxMessagesRequest
+	97,  // 355: supertag.runtime.v2.Mailbox.ChangeGrant:input_type -> supertag.runtime.v2.ChangeMailboxGrantRequest
+	99,  // 356: supertag.runtime.v2.Mailbox.ListGrants:input_type -> supertag.runtime.v2.ListMailboxGrantsRequest
+	104, // 357: supertag.runtime.v2.AttemptMailbox.ReadMailbox:input_type -> supertag.runtime.v2.ReadMailboxRequest
+	95,  // 358: supertag.runtime.v2.AttemptMailbox.SendMessage:input_type -> supertag.runtime.v2.SendAttemptTagMessageRequest
+	178, // 359: supertag.runtime.v2.WorkerHost.RegisterHost:input_type -> supertag.runtime.v2.RegisterHostRequest
+	105, // 360: supertag.runtime.v2.WorkerHost.ReportHost:input_type -> supertag.runtime.v2.ReportHostRequest
+	242, // 361: supertag.runtime.v2.WorkerHost.ClaimTask:input_type -> supertag.runtime.v2.ClaimTaskRequest
+	246, // 362: supertag.runtime.v2.WorkerHost.StartTask:input_type -> supertag.runtime.v2.StartTaskRequest
+	247, // 363: supertag.runtime.v2.WorkerHost.InspectAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	247, // 364: supertag.runtime.v2.WorkerHost.GetAttemptCapabilities:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	247, // 365: supertag.runtime.v2.WorkerHost.GetAttemptHistory:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	247, // 366: supertag.runtime.v2.WorkerHost.GetContextPins:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	276, // 367: supertag.runtime.v2.WorkerHost.CommitContextResolution:input_type -> supertag.runtime.v2.CommitContextResolutionRequest
+	247, // 368: supertag.runtime.v2.WorkerHost.RenewAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	247, // 369: supertag.runtime.v2.WorkerHost.GetAttemptResolution:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	255, // 370: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:input_type -> supertag.runtime.v2.ReportAttemptUsageRequest
+	261, // 371: supertag.runtime.v2.WorkerHost.AppendEvent:input_type -> supertag.runtime.v2.AppendEventRequest
+	304, // 372: supertag.runtime.v2.WorkerHost.PublishText:input_type -> supertag.runtime.v2.PublishTaskTextRequest
+	78,  // 373: supertag.runtime.v2.WorkerHost.AskQuestion:input_type -> supertag.runtime.v2.AskQuestionRequest
+	263, // 374: supertag.runtime.v2.WorkerHost.FinishTask:input_type -> supertag.runtime.v2.FinishTaskRequest
+	251, // 375: supertag.runtime.v2.WorkerHost.ReclaimAttempt:input_type -> supertag.runtime.v2.ReclaimAttemptRequest
+	252, // 376: supertag.runtime.v2.WorkerHost.ReportAppliedLimits:input_type -> supertag.runtime.v2.ReportAppliedLimitsRequest
+	206, // 377: supertag.runtime.v2.WorkerHost.ReportCleanupFailure:input_type -> supertag.runtime.v2.ReportCleanupFailureRequest
+	211, // 378: supertag.runtime.v2.WorkerHost.ReportNetworkLog:input_type -> supertag.runtime.v2.ReportNetworkLogRequest
+	216, // 379: supertag.runtime.v2.WorkerHost.ResolveWorkspaceRef:input_type -> supertag.runtime.v2.ResolveWorkspaceRefRequest
+	167, // 380: supertag.runtime.v2.LiveInputs.QueueInput:input_type -> supertag.runtime.v2.QueueInputRequest
+	168, // 381: supertag.runtime.v2.LiveInputs.GetInput:input_type -> supertag.runtime.v2.GetInputRequest
+	169, // 382: supertag.runtime.v2.LiveInputs.ResolveInput:input_type -> supertag.runtime.v2.ResolveInputRequest
+	171, // 383: supertag.runtime.v2.AttemptInputs.TakeInput:input_type -> supertag.runtime.v2.TakeInputRequest
+	175, // 384: supertag.runtime.v2.AttemptInputs.SettleInput:input_type -> supertag.runtime.v2.SettleInputRequest
+	337, // 385: supertag.runtime.v2.Connector.AcceptEvent:input_type -> supertag.runtime.v2.AcceptEventRequest
+	338, // 386: supertag.runtime.v2.Connector.AcceptSlackEvent:input_type -> supertag.runtime.v2.AcceptSlackEventRequest
+	340, // 387: supertag.runtime.v2.Connector.AcceptGithubEvent:input_type -> supertag.runtime.v2.AcceptGithubEventRequest
+	342, // 388: supertag.runtime.v2.Connector.AcceptLinearEvent:input_type -> supertag.runtime.v2.AcceptLinearEventRequest
+	344, // 389: supertag.runtime.v2.Connector.AcceptLarkEvent:input_type -> supertag.runtime.v2.AcceptLarkEventRequest
+	346, // 390: supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity:input_type -> supertag.runtime.v2.AcceptMicrosoftTeamsActivityRequest
+	348, // 391: supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute:input_type -> supertag.runtime.v2.GetMicrosoftTeamsReplyRouteRequest
+	352, // 392: supertag.runtime.v2.Connector.ClaimReply:input_type -> supertag.runtime.v2.ClaimReplyRequest
+	355, // 393: supertag.runtime.v2.Connector.RenewReply:input_type -> supertag.runtime.v2.RenewReplyRequest
+	354, // 394: supertag.runtime.v2.Connector.SettleReply:input_type -> supertag.runtime.v2.SettleReplyRequest
+	364, // 395: supertag.runtime.v2.Connector.ClaimConnector:input_type -> supertag.runtime.v2.ClaimConnectorRequest
+	365, // 396: supertag.runtime.v2.Connector.RenewConnector:input_type -> supertag.runtime.v2.RenewConnectorRequest
+	366, // 397: supertag.runtime.v2.Connector.ReleaseConnector:input_type -> supertag.runtime.v2.ReleaseConnectorRequest
+	281, // 398: supertag.runtime.v2.Transfers.UploadCheckpoint:input_type -> supertag.runtime.v2.CheckpointUpload
+	247, // 399: supertag.runtime.v2.Transfers.DownloadCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	296, // 400: supertag.runtime.v2.Transfers.CommitWorkspace:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
+	247, // 401: supertag.runtime.v2.Transfers.DownloadWorkspace:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	247, // 402: supertag.runtime.v2.Transfers.DownloadCompleteWorkspace:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	299, // 403: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
+	300, // 404: supertag.runtime.v2.Transfers.DownloadReviewArtifact:input_type -> supertag.runtime.v2.GetReviewArtifactRequest
+	247, // 405: supertag.runtime.v2.Transfers.DownloadWorkspaceSource:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	291, // 406: supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote:input_type -> supertag.runtime.v2.VerifyWorkspaceOutputRemoteRequest
+	247, // 407: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	280, // 408: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
+	280, // 409: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
+	247, // 410: supertag.runtime.v2.WorkspaceDirectory.GetSource:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	247, // 411: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	296, // 412: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
+	296, // 413: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
+	299, // 414: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
+	300, // 415: supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact:input_type -> supertag.runtime.v2.GetReviewArtifactRequest
+	116, // 416: supertag.runtime.v2.HostRelay.Await:input_type -> supertag.runtime.v2.AwaitRelayRequest
+	118, // 417: supertag.runtime.v2.HostRelay.Deliver:input_type -> supertag.runtime.v2.RelayFrame
+	264, // 418: supertag.runtime.v2.Harness.Attach:input_type -> supertag.runtime.v2.HarnessAttachRequest
+	265, // 419: supertag.runtime.v2.Harness.ConfirmExecutionLimits:input_type -> supertag.runtime.v2.AppliedExecutionLimits
+	173, // 420: supertag.runtime.v2.Harness.TakeLiveInput:input_type -> supertag.runtime.v2.HarnessTakeLiveInputRequest
+	174, // 421: supertag.runtime.v2.Harness.SettleLiveInput:input_type -> supertag.runtime.v2.HarnessSettleLiveInputRequest
+	301, // 422: supertag.runtime.v2.Harness.Publish:input_type -> supertag.runtime.v2.HarnessPublishRequest
+	302, // 423: supertag.runtime.v2.Harness.PublishText:input_type -> supertag.runtime.v2.HarnessPublishTextRequest
+	260, // 424: supertag.runtime.v2.Harness.ReportUsage:input_type -> supertag.runtime.v2.HarnessUsageRequest
+	306, // 425: supertag.runtime.v2.Harness.Complete:input_type -> supertag.runtime.v2.HarnessCompleteRequest
+	121, // 426: supertag.runtime.v2.HarnessWorkspace.Execute:input_type -> supertag.runtime.v2.HarnessWorkspaceRequest
+	139, // 427: supertag.runtime.v2.RemoteWorkspaceProvider.Allocate:input_type -> supertag.runtime.v2.RemoteWorkspaceAllocateRequest
+	147, // 428: supertag.runtime.v2.RemoteWorkspaceProvider.Stage:input_type -> supertag.runtime.v2.RemoteWorkspaceStageChunk
+	149, // 429: supertag.runtime.v2.RemoteWorkspaceProvider.Capture:input_type -> supertag.runtime.v2.RemoteWorkspaceCaptureRequest
+	151, // 430: supertag.runtime.v2.RemoteWorkspaceProvider.Stop:input_type -> supertag.runtime.v2.RemoteWorkspaceStopRequest
+	154, // 431: supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer:input_type -> supertag.runtime.v2.RemoteMcpServerInput
+	132, // 432: supertag.runtime.v2.RemoteWorkspaceProvider.StageCopy:input_type -> supertag.runtime.v2.RemoteWorkspaceCopyUpload
+	134, // 433: supertag.runtime.v2.RemoteWorkspaceProvider.CaptureCopy:input_type -> supertag.runtime.v2.RemoteWorkspaceCaptureCopyRequest
+	142, // 434: supertag.runtime.v2.RemoteWorkspaceProvider.Snapshot:input_type -> supertag.runtime.v2.RemoteWorkspaceSnapshotRequest
+	144, // 435: supertag.runtime.v2.RemoteWorkspaceProvider.RemoveArtifact:input_type -> supertag.runtime.v2.RemoteWorkspaceRemoveArtifactRequest
+	156, // 436: supertag.runtime.v2.HarnessQuestions.AskQuestion:input_type -> supertag.runtime.v2.HarnessAskQuestionRequest
+	157, // 437: supertag.runtime.v2.HarnessWorkstreams.Read:input_type -> supertag.runtime.v2.HarnessReadWorkstreamRequest
+	158, // 438: supertag.runtime.v2.HarnessWorkstreams.Post:input_type -> supertag.runtime.v2.HarnessPostWorkstreamRequest
+	164, // 439: supertag.runtime.v2.HarnessMailbox.Read:input_type -> supertag.runtime.v2.HarnessReadMailboxRequest
+	163, // 440: supertag.runtime.v2.HarnessMailbox.SendMessage:input_type -> supertag.runtime.v2.HarnessSendTagMessageRequest
+	165, // 441: supertag.runtime.v2.HarnessMailbox.ReadReviewPatch:input_type -> supertag.runtime.v2.HarnessReadReviewPatchRequest
+	162, // 442: supertag.runtime.v2.HarnessWorkSessions.Start:input_type -> supertag.runtime.v2.HarnessStartWorkSessionRequest
+	160, // 443: supertag.runtime.v2.HarnessWorkSessions.Continue:input_type -> supertag.runtime.v2.HarnessContinueWorkSessionRequest
+	161, // 444: supertag.runtime.v2.HarnessWorkSessions.Ask:input_type -> supertag.runtime.v2.HarnessAskWorkSessionQuestionRequest
+	159, // 445: supertag.runtime.v2.HarnessWorkSessions.Close:input_type -> supertag.runtime.v2.HarnessCloseWorkSessionRequest
+	213, // 446: supertag.runtime.v2.NetworkLogs.List:input_type -> supertag.runtime.v2.ListNetworkLogsRequest
+	232, // 447: supertag.runtime.v2.AttemptMcpEffects.Reserve:input_type -> supertag.runtime.v2.ReserveMcpEffectRequest
+	234, // 448: supertag.runtime.v2.AttemptMcpEffects.Settle:input_type -> supertag.runtime.v2.SettleMcpEffectRequest
+	230, // 449: supertag.runtime.v2.AttemptMcpEffects.RecordWorkspaceMcp:input_type -> supertag.runtime.v2.RecordWorkspaceMcpRequest
+	177, // 450: supertag.runtime.v2.Operator.CreateAuthKey:output_type -> supertag.runtime.v2.AuthKey
+	112, // 451: supertag.runtime.v2.Operator.ListHosts:output_type -> supertag.runtime.v2.ListHostsResponse
+	109, // 452: supertag.runtime.v2.Operator.GetHost:output_type -> supertag.runtime.v2.WorkerHostStatus
+	109, // 453: supertag.runtime.v2.Operator.SetHostDraining:output_type -> supertag.runtime.v2.WorkerHostStatus
+	181, // 454: supertag.runtime.v2.Operator.PutTag:output_type -> supertag.runtime.v2.Tag
+	184, // 455: supertag.runtime.v2.Operator.ListTags:output_type -> supertag.runtime.v2.ListTagsResponse
+	204, // 456: supertag.runtime.v2.Operator.SubmitTask:output_type -> supertag.runtime.v2.Task
+	204, // 457: supertag.runtime.v2.Operator.GetTask:output_type -> supertag.runtime.v2.Task
+	238, // 458: supertag.runtime.v2.Operator.GetSessionDelivery:output_type -> supertag.runtime.v2.SessionDelivery
+	259, // 459: supertag.runtime.v2.Operator.ListNativeUsage:output_type -> supertag.runtime.v2.ListNativeUsageResponse
+	240, // 460: supertag.runtime.v2.Operator.ListEvents:output_type -> supertag.runtime.v2.ListEventsResponse
+	204, // 461: supertag.runtime.v2.Operator.CancelTask:output_type -> supertag.runtime.v2.Task
+	250, // 462: supertag.runtime.v2.Operator.ResolveAttempt:output_type -> supertag.runtime.v2.AttemptResolution
+	181, // 463: supertag.runtime.v2.Operator.GetTag:output_type -> supertag.runtime.v2.Tag
+	187, // 464: supertag.runtime.v2.Operator.RetireTag:output_type -> supertag.runtime.v2.RetireTagResponse
+	359, // 465: supertag.runtime.v2.Operator.GetReplyDelivery:output_type -> supertag.runtime.v2.ReplyDelivery
+	361, // 466: supertag.runtime.v2.Operator.ListReplyDeliveries:output_type -> supertag.runtime.v2.ListReplyDeliveriesResponse
+	359, // 467: supertag.runtime.v2.Operator.ResolveReply:output_type -> supertag.runtime.v2.ReplyDelivery
+	191, // 468: supertag.runtime.v2.Conversations.ListConversations:output_type -> supertag.runtime.v2.ListConversationsResponse
+	193, // 469: supertag.runtime.v2.Conversations.ListMessages:output_type -> supertag.runtime.v2.ListMessagesResponse
+	189, // 470: supertag.runtime.v2.Conversations.SendMessage:output_type -> supertag.runtime.v2.ConversationMessage
+	189, // 471: supertag.runtime.v2.Conversations.GetMessage:output_type -> supertag.runtime.v2.ConversationMessage
+	188, // 472: supertag.runtime.v2.Conversations.MarkConversationRead:output_type -> supertag.runtime.v2.Conversation
+	196, // 473: supertag.runtime.v2.Conversations.FollowConversation:output_type -> supertag.runtime.v2.FollowConversationResponse
+	57,  // 474: supertag.runtime.v2.OperatorEvents.Watch:output_type -> supertag.runtime.v2.WatchEvent
+	55,  // 475: supertag.runtime.v2.ManifestRelationships.ReconcileTag:output_type -> supertag.runtime.v2.ReconcileTagRelationshipsResponse
+	51,  // 476: supertag.runtime.v2.ManifestRelationships.ProvisionTags:output_type -> supertag.runtime.v2.ProvisionTagsResponse
+	48,  // 477: supertag.runtime.v2.ManifestRelationships.ReconcileApplySet:output_type -> supertag.runtime.v2.ReconcileApplySetResponse
+	44,  // 478: supertag.runtime.v2.ManifestRelationships.ReconcileManifestFields:output_type -> supertag.runtime.v2.ReconcileManifestFieldsResponse
+	310, // 479: supertag.runtime.v2.Objectives.CreateObjective:output_type -> supertag.runtime.v2.Objective
+	310, // 480: supertag.runtime.v2.Objectives.GetObjective:output_type -> supertag.runtime.v2.Objective
+	328, // 481: supertag.runtime.v2.Objectives.ListObjectives:output_type -> supertag.runtime.v2.ListObjectivesResponse
+	330, // 482: supertag.runtime.v2.Objectives.ListCommitReviews:output_type -> supertag.runtime.v2.ListObjectiveCommitReviewsResponse
+	310, // 483: supertag.runtime.v2.Objectives.SetLimits:output_type -> supertag.runtime.v2.Objective
+	310, // 484: supertag.runtime.v2.Objectives.SetRuntimeActions:output_type -> supertag.runtime.v2.Objective
+	310, // 485: supertag.runtime.v2.Objectives.PauseObjective:output_type -> supertag.runtime.v2.Objective
+	310, // 486: supertag.runtime.v2.Objectives.ResumeObjective:output_type -> supertag.runtime.v2.Objective
+	310, // 487: supertag.runtime.v2.Objectives.CancelObjective:output_type -> supertag.runtime.v2.Objective
+	310, // 488: supertag.runtime.v2.Objectives.ReviewObjective:output_type -> supertag.runtime.v2.Objective
+	310, // 489: supertag.runtime.v2.Objectives.CompleteObjective:output_type -> supertag.runtime.v2.Objective
+	62,  // 490: supertag.runtime.v2.Inbox.ListItems:output_type -> supertag.runtime.v2.ListInboxItemsResponse
+	77,  // 491: supertag.runtime.v2.Inbox.GetQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
+	204, // 492: supertag.runtime.v2.Inbox.AnswerQuestion:output_type -> supertag.runtime.v2.Task
+	67,  // 493: supertag.runtime.v2.Inbox.GetApproval:output_type -> supertag.runtime.v2.Approval
+	70,  // 494: supertag.runtime.v2.Inbox.ListApprovals:output_type -> supertag.runtime.v2.ListApprovalsResponse
+	67,  // 495: supertag.runtime.v2.Inbox.DecideApproval:output_type -> supertag.runtime.v2.Approval
+	82,  // 496: supertag.runtime.v2.WorkSessions.Get:output_type -> supertag.runtime.v2.WorkSession
+	89,  // 497: supertag.runtime.v2.WorkSessions.List:output_type -> supertag.runtime.v2.ListWorkSessionsResponse
+	82,  // 498: supertag.runtime.v2.WorkSessions.Close:output_type -> supertag.runtime.v2.WorkSession
+	82,  // 499: supertag.runtime.v2.AttemptWorkSessions.Start:output_type -> supertag.runtime.v2.WorkSession
+	82,  // 500: supertag.runtime.v2.AttemptWorkSessions.Continue:output_type -> supertag.runtime.v2.WorkSession
+	83,  // 501: supertag.runtime.v2.AttemptWorkSessions.Ask:output_type -> supertag.runtime.v2.WorkSessionQuestion
+	82,  // 502: supertag.runtime.v2.AttemptWorkSessions.Close:output_type -> supertag.runtime.v2.WorkSession
+	311, // 503: supertag.runtime.v2.Teams.CreateTeam:output_type -> supertag.runtime.v2.Team
+	311, // 504: supertag.runtime.v2.Teams.GetTeam:output_type -> supertag.runtime.v2.Team
+	315, // 505: supertag.runtime.v2.Teams.ListTeams:output_type -> supertag.runtime.v2.ListTeamsResponse
+	311, // 506: supertag.runtime.v2.Teams.UpdateTeam:output_type -> supertag.runtime.v2.Team
+	311, // 507: supertag.runtime.v2.Teams.DeleteTeam:output_type -> supertag.runtime.v2.Team
+	321, // 508: supertag.runtime.v2.Teams.ListWorkstreamPosts:output_type -> supertag.runtime.v2.ListWorkstreamPostsResponse
+	323, // 509: supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream:output_type -> supertag.runtime.v2.ReadAttemptWorkstreamResponse
+	325, // 510: supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream:output_type -> supertag.runtime.v2.PostAttemptWorkstreamResponse
+	103, // 511: supertag.runtime.v2.Mailbox.ListMessages:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
+	98,  // 512: supertag.runtime.v2.Mailbox.ChangeGrant:output_type -> supertag.runtime.v2.ChangeMailboxGrantResponse
+	101, // 513: supertag.runtime.v2.Mailbox.ListGrants:output_type -> supertag.runtime.v2.ListMailboxGrantsResponse
+	103, // 514: supertag.runtime.v2.AttemptMailbox.ReadMailbox:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
+	96,  // 515: supertag.runtime.v2.AttemptMailbox.SendMessage:output_type -> supertag.runtime.v2.SendTagMessageResponse
+	179, // 516: supertag.runtime.v2.WorkerHost.RegisterHost:output_type -> supertag.runtime.v2.HostRecord
+	109, // 517: supertag.runtime.v2.WorkerHost.ReportHost:output_type -> supertag.runtime.v2.WorkerHostStatus
+	243, // 518: supertag.runtime.v2.WorkerHost.ClaimTask:output_type -> supertag.runtime.v2.ClaimTaskResponse
+	204, // 519: supertag.runtime.v2.WorkerHost.StartTask:output_type -> supertag.runtime.v2.Task
+	204, // 520: supertag.runtime.v2.WorkerHost.InspectAttempt:output_type -> supertag.runtime.v2.Task
+	79,  // 521: supertag.runtime.v2.WorkerHost.GetAttemptCapabilities:output_type -> supertag.runtime.v2.AttemptCapabilities
+	269, // 522: supertag.runtime.v2.WorkerHost.GetAttemptHistory:output_type -> supertag.runtime.v2.AttemptHistory
+	274, // 523: supertag.runtime.v2.WorkerHost.GetContextPins:output_type -> supertag.runtime.v2.ContextResolutionManifest
+	274, // 524: supertag.runtime.v2.WorkerHost.CommitContextResolution:output_type -> supertag.runtime.v2.ContextResolutionManifest
+	248, // 525: supertag.runtime.v2.WorkerHost.RenewAttempt:output_type -> supertag.runtime.v2.AttemptAuthority
+	254, // 526: supertag.runtime.v2.WorkerHost.GetAttemptResolution:output_type -> supertag.runtime.v2.GetAttemptResolutionResponse
+	256, // 527: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
+	262, // 528: supertag.runtime.v2.WorkerHost.AppendEvent:output_type -> supertag.runtime.v2.TaskEvent
+	305, // 529: supertag.runtime.v2.WorkerHost.PublishText:output_type -> supertag.runtime.v2.PublishTaskTextResponse
+	77,  // 530: supertag.runtime.v2.WorkerHost.AskQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
+	204, // 531: supertag.runtime.v2.WorkerHost.FinishTask:output_type -> supertag.runtime.v2.Task
+	250, // 532: supertag.runtime.v2.WorkerHost.ReclaimAttempt:output_type -> supertag.runtime.v2.AttemptResolution
+	253, // 533: supertag.runtime.v2.WorkerHost.ReportAppliedLimits:output_type -> supertag.runtime.v2.ReportAppliedLimitsResponse
+	207, // 534: supertag.runtime.v2.WorkerHost.ReportCleanupFailure:output_type -> supertag.runtime.v2.ReportCleanupFailureResponse
+	212, // 535: supertag.runtime.v2.WorkerHost.ReportNetworkLog:output_type -> supertag.runtime.v2.ReportNetworkLogResponse
+	204, // 536: supertag.runtime.v2.WorkerHost.ResolveWorkspaceRef:output_type -> supertag.runtime.v2.Task
+	170, // 537: supertag.runtime.v2.LiveInputs.QueueInput:output_type -> supertag.runtime.v2.LiveInput
+	170, // 538: supertag.runtime.v2.LiveInputs.GetInput:output_type -> supertag.runtime.v2.LiveInput
+	170, // 539: supertag.runtime.v2.LiveInputs.ResolveInput:output_type -> supertag.runtime.v2.LiveInput
+	172, // 540: supertag.runtime.v2.AttemptInputs.TakeInput:output_type -> supertag.runtime.v2.TakeInputResponse
+	170, // 541: supertag.runtime.v2.AttemptInputs.SettleInput:output_type -> supertag.runtime.v2.LiveInput
+	204, // 542: supertag.runtime.v2.Connector.AcceptEvent:output_type -> supertag.runtime.v2.Task
+	339, // 543: supertag.runtime.v2.Connector.AcceptSlackEvent:output_type -> supertag.runtime.v2.AcceptSlackEventResponse
+	341, // 544: supertag.runtime.v2.Connector.AcceptGithubEvent:output_type -> supertag.runtime.v2.AcceptGithubEventResponse
+	343, // 545: supertag.runtime.v2.Connector.AcceptLinearEvent:output_type -> supertag.runtime.v2.AcceptLinearEventResponse
+	345, // 546: supertag.runtime.v2.Connector.AcceptLarkEvent:output_type -> supertag.runtime.v2.AcceptLarkEventResponse
+	347, // 547: supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity:output_type -> supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse
+	349, // 548: supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute:output_type -> supertag.runtime.v2.MicrosoftTeamsReplyRoute
+	353, // 549: supertag.runtime.v2.Connector.ClaimReply:output_type -> supertag.runtime.v2.ClaimReplyResponse
+	356, // 550: supertag.runtime.v2.Connector.RenewReply:output_type -> supertag.runtime.v2.ReplyLease
+	350, // 551: supertag.runtime.v2.Connector.SettleReply:output_type -> supertag.runtime.v2.Reply
+	368, // 552: supertag.runtime.v2.Connector.ClaimConnector:output_type -> supertag.runtime.v2.ConnectorLease
+	368, // 553: supertag.runtime.v2.Connector.RenewConnector:output_type -> supertag.runtime.v2.ConnectorLease
+	367, // 554: supertag.runtime.v2.Connector.ReleaseConnector:output_type -> supertag.runtime.v2.ReleaseConnectorResponse
+	278, // 555: supertag.runtime.v2.Transfers.UploadCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
+	282, // 556: supertag.runtime.v2.Transfers.DownloadCheckpoint:output_type -> supertag.runtime.v2.CheckpointDownload
+	295, // 557: supertag.runtime.v2.Transfers.CommitWorkspace:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	298, // 558: supertag.runtime.v2.Transfers.DownloadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDownload
+	298, // 559: supertag.runtime.v2.Transfers.DownloadCompleteWorkspace:output_type -> supertag.runtime.v2.WorkspaceDownload
+	298, // 560: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
+	298, // 561: supertag.runtime.v2.Transfers.DownloadReviewArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
+	293, // 562: supertag.runtime.v2.Transfers.DownloadWorkspaceSource:output_type -> supertag.runtime.v2.GithubWorkspaceDownload
+	292, // 563: supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote:output_type -> supertag.runtime.v2.VerifyWorkspaceOutputRemoteResponse
+	279, // 564: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:output_type -> supertag.runtime.v2.GetCheckpointResponse
+	278, // 565: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
+	278, // 566: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
+	373, // 567: supertag.runtime.v2.WorkspaceDirectory.GetSource:output_type -> supertag.runtime.v2.GithubWorkspace
+	297, // 568: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:output_type -> supertag.runtime.v2.WorkspaceContinuation
+	295, // 569: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	295, // 570: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	120, // 571: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:output_type -> supertag.runtime.v2.HeldWorkspaceDelivery
+	120, // 572: supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact:output_type -> supertag.runtime.v2.HeldWorkspaceDelivery
+	117, // 573: supertag.runtime.v2.HostRelay.Await:output_type -> supertag.runtime.v2.RelayRequest
+	119, // 574: supertag.runtime.v2.HostRelay.Deliver:output_type -> supertag.runtime.v2.RelayDelivered
+	270, // 575: supertag.runtime.v2.Harness.Attach:output_type -> supertag.runtime.v2.HarnessRun
+	266, // 576: supertag.runtime.v2.Harness.ConfirmExecutionLimits:output_type -> supertag.runtime.v2.ConfirmExecutionLimitsResponse
+	172, // 577: supertag.runtime.v2.Harness.TakeLiveInput:output_type -> supertag.runtime.v2.TakeInputResponse
+	170, // 578: supertag.runtime.v2.Harness.SettleLiveInput:output_type -> supertag.runtime.v2.LiveInput
+	262, // 579: supertag.runtime.v2.Harness.Publish:output_type -> supertag.runtime.v2.TaskEvent
+	303, // 580: supertag.runtime.v2.Harness.PublishText:output_type -> supertag.runtime.v2.HarnessPublishTextResponse
+	256, // 581: supertag.runtime.v2.Harness.ReportUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
+	307, // 582: supertag.runtime.v2.Harness.Complete:output_type -> supertag.runtime.v2.HarnessCompleteResponse
+	129, // 583: supertag.runtime.v2.HarnessWorkspace.Execute:output_type -> supertag.runtime.v2.HarnessWorkspaceResult
+	141, // 584: supertag.runtime.v2.RemoteWorkspaceProvider.Allocate:output_type -> supertag.runtime.v2.RemoteWorkspaceAllocation
+	148, // 585: supertag.runtime.v2.RemoteWorkspaceProvider.Stage:output_type -> supertag.runtime.v2.RemoteWorkspaceStageResponse
+	150, // 586: supertag.runtime.v2.RemoteWorkspaceProvider.Capture:output_type -> supertag.runtime.v2.RemoteWorkspaceCaptureChunk
+	152, // 587: supertag.runtime.v2.RemoteWorkspaceProvider.Stop:output_type -> supertag.runtime.v2.RemoteWorkspaceStopResponse
+	155, // 588: supertag.runtime.v2.RemoteWorkspaceProvider.RunMcpServer:output_type -> supertag.runtime.v2.RemoteMcpServerOutput
+	133, // 589: supertag.runtime.v2.RemoteWorkspaceProvider.StageCopy:output_type -> supertag.runtime.v2.RemoteWorkspaceCopyStaged
+	136, // 590: supertag.runtime.v2.RemoteWorkspaceProvider.CaptureCopy:output_type -> supertag.runtime.v2.RemoteWorkspaceCopyDownload
+	143, // 591: supertag.runtime.v2.RemoteWorkspaceProvider.Snapshot:output_type -> supertag.runtime.v2.RemoteWorkspaceSnapshot
+	145, // 592: supertag.runtime.v2.RemoteWorkspaceProvider.RemoveArtifact:output_type -> supertag.runtime.v2.RemoteWorkspaceRemoveArtifactResponse
+	77,  // 593: supertag.runtime.v2.HarnessQuestions.AskQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
+	323, // 594: supertag.runtime.v2.HarnessWorkstreams.Read:output_type -> supertag.runtime.v2.ReadAttemptWorkstreamResponse
+	325, // 595: supertag.runtime.v2.HarnessWorkstreams.Post:output_type -> supertag.runtime.v2.PostAttemptWorkstreamResponse
+	103, // 596: supertag.runtime.v2.HarnessMailbox.Read:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
+	96,  // 597: supertag.runtime.v2.HarnessMailbox.SendMessage:output_type -> supertag.runtime.v2.SendTagMessageResponse
+	166, // 598: supertag.runtime.v2.HarnessMailbox.ReadReviewPatch:output_type -> supertag.runtime.v2.HarnessReviewPatch
+	82,  // 599: supertag.runtime.v2.HarnessWorkSessions.Start:output_type -> supertag.runtime.v2.WorkSession
+	82,  // 600: supertag.runtime.v2.HarnessWorkSessions.Continue:output_type -> supertag.runtime.v2.WorkSession
+	83,  // 601: supertag.runtime.v2.HarnessWorkSessions.Ask:output_type -> supertag.runtime.v2.WorkSessionQuestion
+	82,  // 602: supertag.runtime.v2.HarnessWorkSessions.Close:output_type -> supertag.runtime.v2.WorkSession
+	215, // 603: supertag.runtime.v2.NetworkLogs.List:output_type -> supertag.runtime.v2.ListNetworkLogsResponse
+	233, // 604: supertag.runtime.v2.AttemptMcpEffects.Reserve:output_type -> supertag.runtime.v2.ReserveMcpEffectResponse
+	235, // 605: supertag.runtime.v2.AttemptMcpEffects.Settle:output_type -> supertag.runtime.v2.SettleMcpEffectResponse
+	231, // 606: supertag.runtime.v2.AttemptMcpEffects.RecordWorkspaceMcp:output_type -> supertag.runtime.v2.RecordWorkspaceMcpResponse
+	450, // [450:607] is the sub-list for method output_type
+	293, // [293:450] is the sub-list for method input_type
+	293, // [293:293] is the sub-list for extension type_name
+	293, // [293:293] is the sub-list for extension extendee
+	0,   // [0:293] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_runtime_proto_init() }

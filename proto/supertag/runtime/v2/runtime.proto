@@ -980,6 +980,9 @@ service Transfers {
   // Records a delivery whose patch and bundle the calling Worker Host already holds.
   rpc CommitWorkspace(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
   rpc DownloadWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
+  // The same continuation as a complete bundle the holding Worker Host builds, for a host that
+  // lacks the delivery's start commit.
+  rpc DownloadCompleteWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
   rpc DownloadWorkspaceArtifact(GetWorkspaceArtifactRequest) returns (stream WorkspaceDownload);
   rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
   rpc DownloadWorkspaceSource(InspectAttemptRequest) returns (stream GithubWorkspaceDownload);
@@ -1025,6 +1028,10 @@ message RelayRequest {
   // The Attempt that produced the blob; the host keeps its bytes under this Attempt.
   string attempt_id = 2;
   BlobReference blob = 3;
+  // Instead of a held blob: build a complete bundle of this delivery's head, its whole history,
+  // for a reader that lacks the delivery's start commit. It has no recorded digest; the reader
+  // checks it with Git against the delivered commit.
+  WorkspaceDeliveryReference complete_bundle = 4;
 }
 
 message RelayFrame {
@@ -2664,7 +2671,10 @@ message WorkspaceDownload {
 enum WorkspaceArtifactKind {
   WORKSPACE_ARTIFACT_KIND_UNSPECIFIED = 0;
   WORKSPACE_ARTIFACT_KIND_PATCH = 1;
+  // The delivery's own bundle: what its Attempt added to its start commit.
   WORKSPACE_ARTIFACT_KIND_BUNDLE = 2;
+  // A complete bundle of the delivered commit, built on demand by the holding Worker Host.
+  WORKSPACE_ARTIFACT_KIND_COMPLETE_BUNDLE = 3;
 }
 
 message GetWorkspaceArtifactRequest {

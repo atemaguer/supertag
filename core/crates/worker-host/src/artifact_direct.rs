@@ -464,6 +464,56 @@ impl SourceStorage {
         self.current()
     }
 
+    /// Records which Workspace state directory holds `attempt`'s delivered commit, so any lane
+    /// of this host can build a complete bundle of it for a reader that lacks its start commit.
+    pub(crate) fn retain_workspace(&self, attempt: &str, state_directory: &Path) -> Result<()> {
+        self.current()?;
+        ensure!(
+            state_directory.is_absolute(),
+            "Workspace state directory must be absolute"
+        );
+        let parent = self.root.join(attempt_dir(attempt));
+        private_directory(&parent)?;
+        let path = parent.join(WORKSPACE_POINTER);
+        let value = state_directory
+            .to_str()
+            .context("Workspace state directory is not UTF-8")?;
+        if let Some(mut file) = open_private(&path)? {
+            let mut prior = String::new();
+            std::io::Read::read_to_string(&mut file, &mut prior)?;
+            ensure!(prior == value, "attempt's Workspace changed");
+            return Ok(());
+        }
+        let mut staged = tempfile::NamedTempFile::new_in(&parent)?;
+        staged.write_all(value.as_bytes())?;
+        staged.as_file().sync_all()?;
+        match staged.persist_noclobber(&path) {
+            Ok(_) => {}
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.error.into()),
+        }
+        supertag_workspaces::packages::open_directory(&parent)?.sync_all()?;
+        self.current()
+    }
+
+    /// The Workspace state directory [`Self::retain_workspace`] recorded for `attempt`.
+    pub(crate) fn workspace_of(&self, attempt: &str) -> Result<PathBuf> {
+        self.current()?;
+        let parent = self.root.join(attempt_dir(attempt));
+        check_directory(&parent.symlink_metadata()?)?;
+        let mut file =
+            open_private(&parent.join(WORKSPACE_POINTER))?.context("no Workspace recorded")?;
+        ensure!(
+            file.metadata()?.is_file() && file.metadata()?.len() <= 4096,
+            "invalid Workspace record"
+        );
+        let mut value = String::new();
+        std::io::Read::read_to_string(&mut file, &mut value)?;
+        let path = PathBuf::from(value);
+        ensure!(path.is_absolute(), "invalid Workspace record");
+        Ok(path)
+    }
+
     /// The verified bytes of one blob this host holds for `attempt`.
     pub(crate) fn read_held(&self, attempt: &str, blob: &BlobReference) -> Result<Vec<u8>> {
         ensure!(
@@ -498,6 +548,10 @@ impl SourceStorage {
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
+
+/// The file in an Attempt's storage directory that names its Workspace state directory. It is
+/// not a blob name, which is always 64 hex digits.
+const WORKSPACE_POINTER: &str = "workspace";
 
 fn attempt_dir(attempt: &str) -> String {
     format!("attempt-{}", digest(attempt.as_bytes()))
@@ -815,14 +869,33 @@ mod relay {
                 return false;
             };
             let attempt = request.attempt_id;
-            let read = match request.blob {
-                Some(blob) => {
+            let read = match (request.blob, request.complete_bundle) {
+                (Some(blob), None) => {
                     tokio::task::spawn_blocking(move || storage.read_held(&attempt, &blob))
                         .await
                         .map_err(anyhow::Error::from)
                         .and_then(|result| result)
                 }
-                None => Err(anyhow::anyhow!("relay request names no blob")),
+                // A complete bundle of a delivered commit, built from the Workspace that holds
+                // it, which may belong to another lane of this host. Only read there.
+                (None, Some(delivery)) => async {
+                    let state = storage.workspace_of(&attempt)?;
+                    supertag_workspaces::complete_delivery_bundle(
+                        &state,
+                        &delivery.head_commit,
+                        &delivery.delivery_id,
+                        &CancellationToken::new(),
+                    )
+                    .await
+                }
+                .await
+                .inspect_err(|error| {
+                    crate::failures::note_unrecorded(
+                        "could not build a complete Workspace bundle",
+                        error,
+                    )
+                }),
+                _ => Err(anyhow::anyhow!("relay request names no blob")),
             };
             let deliver = async {
                 match read {
@@ -1008,6 +1081,7 @@ mod tests {
                         sha256: "0".repeat(64),
                         byte_length: 1,
                     }),
+                    complete_bundle: None,
                 },
             ));
         }

@@ -920,6 +920,48 @@ impl Workspace {
     }
 }
 
+/// The complete bundle of a delivered commit from the Workspace state directory that holds it,
+/// for a reader that lacks the delivery's start commit. Another process may own the state: this
+/// only reads its repository. The bundle names the commit as the delivery's own ref, so it reads
+/// as the delivery's bundle with its whole history.
+pub async fn complete_delivery_bundle(
+    state_dir: &Path,
+    head: &str,
+    delivery_id: &str,
+    cancel: &CancellationToken,
+) -> Result<Vec<u8>> {
+    check_cancelled(cancel)?;
+    git::validate_oid(head)?;
+    ensure!(
+        delivery_id.len() == 64
+            && delivery_id
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "invalid delivery ID"
+    );
+    let root = paths::planned_path(state_dir)?;
+    paths::verify_directory(&root)?;
+    let record: ConfigRecord =
+        read_json(&root.join("config.json"))?.context("workspace state has no configuration")?;
+    ensure!(
+        record.base_commit.len() == head.len(),
+        "delivered commit uses a different object format than the Workspace"
+    );
+    let repository = git::Repository::existing(&root, head.len())?;
+    let bundle = repository
+        .complete_bundle(
+            head,
+            &format!("refs/heads/supertag-deliveries/{delivery_id}"),
+            cancel,
+        )
+        .await?;
+    ensure!(
+        bundle.len() <= 268_435_456,
+        "complete delivery bundle exceeds its size limit"
+    );
+    Ok(bundle)
+}
+
 fn identity(task_id: &str, attempt_id: &str) -> String {
     sha256(&serde_json::to_vec(&(task_id, attempt_id)).expect("string tuple serializes"))
 }

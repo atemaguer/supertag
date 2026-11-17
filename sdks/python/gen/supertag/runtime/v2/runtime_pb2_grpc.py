@@ -5110,6 +5110,11 @@ class TransfersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
                 _registered_method=True)
+        self.DownloadCompleteWorkspace = channel.unary_stream(
+                '/supertag.runtime.v2.Transfers/DownloadCompleteWorkspace',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+                _registered_method=True)
         self.DownloadWorkspaceArtifact = channel.unary_stream(
                 '/supertag.runtime.v2.Transfers/DownloadWorkspaceArtifact',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
@@ -5161,6 +5166,14 @@ class TransfersServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def DownloadCompleteWorkspace(self, request, context):
+        """The same continuation as a complete bundle the holding Worker Host builds, for a host that
+        lacks the delivery's start commit.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def DownloadWorkspaceArtifact(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -5205,6 +5218,11 @@ def add_TransfersServicer_to_server(servicer, server):
             ),
             'DownloadWorkspace': grpc.unary_stream_rpc_method_handler(
                     servicer.DownloadWorkspace,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
+            ),
+            'DownloadCompleteWorkspace': grpc.unary_stream_rpc_method_handler(
+                    servicer.DownloadCompleteWorkspace,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
             ),
@@ -5336,6 +5354,33 @@ class Transfers:
             request,
             target,
             '/supertag.runtime.v2.Transfers/DownloadWorkspace',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DownloadCompleteWorkspace(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.Transfers/DownloadCompleteWorkspace',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
             options,

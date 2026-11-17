@@ -13,14 +13,17 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Code, Request, Status};
 use uuid::Uuid;
 
-/// Reads a Workspace delivery's bundle from the Worker Host that holds it. The Control Plane
-/// stores no delivery bytes; its relay writes them to `destination`, which the publisher deletes.
+/// Reads a complete bundle of a Workspace delivery's commit, which the Worker Host holding the
+/// delivery builds on demand: the publisher's scratch repository starts empty, and a delivery's
+/// own bundle carries only what its Attempt added. The Control Plane stores no delivery bytes;
+/// its relay writes them to `destination`, which the publisher deletes. A holder that is not
+/// connected fails with `Status::unavailable`.
 #[tonic::async_trait]
 pub trait BundleReader: Send + Sync + 'static {
     async fn read(
         &self,
         holder: &BlobHolder,
-        bundle: &BlobReference,
+        delivery: &WorkspaceDeliveryReference,
         destination: &Path,
     ) -> Result<()>;
 }

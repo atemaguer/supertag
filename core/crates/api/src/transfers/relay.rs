@@ -52,7 +52,8 @@ struct Pending {
     host_id: String,
     link: u64,
     generation: u64,
-    blob: BlobReference,
+    /// The most bytes the answer may carry: the blob's receipt, or the Workspace blob limit.
+    limit: u64,
     chunks: mpsc::Sender<Result<Vec<u8>, Status>>,
     attached: oneshot::Sender<()>,
 }
@@ -184,14 +185,47 @@ impl RelayHub {
         holder: &BlobHolder,
         blob: &BlobReference,
     ) -> Result<Incoming, RelayError> {
+        self.ask(
+            holder,
+            RelayRequest {
+                blob: Some(blob.clone()),
+                ..Default::default()
+            },
+            blob.byte_length,
+        )
+        .await
+    }
+
+    /// Asks the holding host to build a complete bundle of `delivery`'s head, for a reader that
+    /// lacks the delivery's start commit. Its size is bounded only by the Workspace blob limit:
+    /// it has no receipt, and the reader checks it with Git.
+    pub(crate) async fn open_complete_bundle(
+        &self,
+        holder: &BlobHolder,
+        delivery: &WorkspaceDeliveryReference,
+    ) -> Result<Incoming, RelayError> {
+        self.ask(
+            holder,
+            RelayRequest {
+                complete_bundle: Some(delivery.clone()),
+                ..Default::default()
+            },
+            supertag_protocol::MAX_WORKSPACE_BLOB_BYTES as u64,
+        )
+        .await
+    }
+
+    async fn ask(
+        &self,
+        holder: &BlobHolder,
+        mut request: RelayRequest,
+        limit: u64,
+    ) -> Result<Incoming, RelayError> {
         let relay_id = uuid::Uuid::new_v4().to_string();
         let (chunks, incoming) = mpsc::channel(4);
         let (attached, answered) = oneshot::channel();
-        let request = RelayRequest {
-            relay_id: relay_id.clone(),
-            attempt_id: holder.attempt_id.clone(),
-            blob: Some(blob.clone()),
-        };
+        request.relay_id = relay_id.clone();
+        request.attempt_id = holder.attempt_id.clone();
         let (link, active) = {
             let mut state = self.state.lock().expect("relay state");
             let state = &mut *state;
@@ -223,7 +257,7 @@ impl RelayHub {
                     host_id: holder.host_id.clone(),
                     link,
                     generation,
-                    blob: blob.clone(),
+                    limit,
                     chunks,
                     attached,
                 },
@@ -281,7 +315,7 @@ impl RelayHub {
         }
         .ok_or_else(|| Status::not_found("relay request is not waiting for this Worker Host"))?;
         let _ = pending.attached.send(());
-        let limit = pending.blob.byte_length;
+        let limit = pending.limit;
         let mut length = 0u64;
         loop {
             let frame = match frames.message().await {

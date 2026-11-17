@@ -1692,10 +1692,12 @@ impl supertag_github::publication::BundleReader for RelayedBundles {
     async fn read(
         &self,
         holder: &supertag_protocol::v2::BlobHolder,
-        bundle: &supertag_protocol::v2::BlobReference,
+        delivery: &supertag_protocol::v2::WorkspaceDeliveryReference,
         destination: &std::path::Path,
     ) -> Result<()> {
-        self.0.relay_to_file(holder, bundle, destination).await
+        self.0
+            .relay_complete_bundle_to_file(holder, delivery, destination)
+            .await
     }
 }
 

@@ -261,6 +261,7 @@ class WorkspaceArtifactKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: _ClassVar[WorkspaceArtifactKind]
     WORKSPACE_ARTIFACT_KIND_PATCH: _ClassVar[WorkspaceArtifactKind]
     WORKSPACE_ARTIFACT_KIND_BUNDLE: _ClassVar[WorkspaceArtifactKind]
+    WORKSPACE_ARTIFACT_KIND_COMPLETE_BUNDLE: _ClassVar[WorkspaceArtifactKind]
 
 class ObjectiveStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -476,6 +477,7 @@ WORKSPACE_MOUNT_WRITE_STATUS_REFUSED: WorkspaceMountWriteStatus
 WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_PATCH: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_BUNDLE: WorkspaceArtifactKind
+WORKSPACE_ARTIFACT_KIND_COMPLETE_BUNDLE: WorkspaceArtifactKind
 OBJECTIVE_STATUS_UNSPECIFIED: ObjectiveStatus
 OBJECTIVE_STATUS_WORKING: ObjectiveStatus
 OBJECTIVE_STATUS_BLOCKED: ObjectiveStatus
@@ -1491,14 +1493,16 @@ class AwaitRelayRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class RelayRequest(_message.Message):
-    __slots__ = ("relay_id", "attempt_id", "blob")
+    __slots__ = ("relay_id", "attempt_id", "blob", "complete_bundle")
     RELAY_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     BLOB_FIELD_NUMBER: _ClassVar[int]
+    COMPLETE_BUNDLE_FIELD_NUMBER: _ClassVar[int]
     relay_id: str
     attempt_id: str
     blob: BlobReference
-    def __init__(self, relay_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., blob: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
+    complete_bundle: WorkspaceDeliveryReference
+    def __init__(self, relay_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., blob: _Optional[_Union[BlobReference, _Mapping]] = ..., complete_bundle: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
 
 class RelayFrame(_message.Message):
     __slots__ = ("relay_id", "chunk", "failure")

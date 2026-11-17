@@ -169,19 +169,53 @@ impl ApiTransfers {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
+    /// Writes a complete bundle of `delivery`'s commit, which `holder` builds on demand, into
+    /// `destination`. The GitHub publisher reads deliveries this way: its scratch repository
+    /// starts empty. The bundle has no recorded digest; the caller checks it with Git against the
+    /// delivered commit and deletes the file.
+    pub async fn relay_complete_bundle_to_file(
+        &self,
+        holder: &BlobHolder,
+        delivery: &WorkspaceDeliveryReference,
+        destination: &Path,
+    ) -> Result<()> {
+        let incoming = self
+            .relay
+            .open_complete_bundle(holder, delivery)
+            .await
+            .map_err(|error| relay_status(error, &holder.host_id, "Workspace delivery"))?;
+        self.write_relayed(
+            incoming,
+            Expected::Unrecorded {
+                limit: supertag_protocol::MAX_WORKSPACE_BLOB_BYTES as u64,
+            },
+            destination,
+        )
+        .await
+    }
+
     /// Writes one blob held by `holder` into `destination`, verifying its length and digest.
-    /// The GitHub publisher uses this to read a delivery bundle; the caller deletes the file.
     pub async fn relay_to_file(
         &self,
         holder: &BlobHolder,
         blob: &BlobReference,
         destination: &Path,
     ) -> Result<()> {
-        let mut incoming = self
+        let incoming = self
             .relay
             .open(holder, blob)
             .await
             .map_err(|error| relay_status(error, &holder.host_id, "Workspace delivery"))?;
+        self.write_relayed(incoming, Expected::Receipt(blob.clone()), destination)
+            .await
+    }
+
+    async fn write_relayed(
+        &self,
+        mut incoming: relay::Incoming,
+        expected: Expected,
+        destination: &Path,
+    ) -> Result<()> {
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -194,7 +228,7 @@ impl ApiTransfers {
             while let Some(chunk) = incoming.next().await? {
                 length += chunk.len() as u64;
                 ensure!(
-                    length <= blob.byte_length,
+                    length <= expected.limit(),
                     "relayed blob exceeds its receipt"
                 );
                 digest.update(&chunk);
@@ -205,10 +239,12 @@ impl ApiTransfers {
         timeout(WORKSPACE_TRANSFER_TIMEOUT, read)
             .await
             .map_err(|_| anyhow::anyhow!("relayed blob read timed out"))??;
-        ensure!(
-            length == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
-            "relayed blob does not match its receipt"
-        );
+        if let Expected::Receipt(blob) = &expected {
+            ensure!(
+                length == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
+                "relayed blob does not match its receipt"
+            );
+        }
         file.sync_all().await?;
         Ok(())
     }
@@ -397,26 +433,40 @@ impl ApiTransfers {
         Authorization: std::future::Future<Output = Result<(), Status>> + Send,
     {
         validate_workspace_delivery(&reference)?;
-        let blob = match kind {
-            WorkspaceArtifactKind::Patch => reference.patch.clone(),
-            WorkspaceArtifactKind::Bundle => reference.bundle.clone(),
-            _ => return Err(Status::invalid_argument("workspace artifact kind required")),
-        }
-        .expect("validated blob reference");
         let permit = self.acquire()?;
-        let source = Source::Relay(
-            self.relay
+        let (source, expected) = if kind == WorkspaceArtifactKind::CompleteBundle {
+            let incoming = self
+                .relay
+                .open_complete_bundle(&holder, &reference)
+                .await
+                .map_err(|error| relay_status(error, &holder.host_id, "Workspace delivery"))?;
+            (
+                Source::Relay(incoming),
+                Expected::Unrecorded {
+                    limit: supertag_protocol::MAX_WORKSPACE_BLOB_BYTES as u64,
+                },
+            )
+        } else {
+            let blob = match kind {
+                WorkspaceArtifactKind::Patch => reference.patch.clone(),
+                WorkspaceArtifactKind::Bundle => reference.bundle.clone(),
+                _ => return Err(Status::invalid_argument("workspace artifact kind required")),
+            }
+            .expect("validated blob reference");
+            let incoming = self
+                .relay
                 .open(&holder, &blob)
                 .await
-                .map_err(|error| relay_status(error, &holder.host_id, "Workspace delivery"))?,
-        );
+                .map_err(|error| relay_status(error, &holder.host_id, "Workspace delivery"))?;
+            (Source::Relay(incoming), Expected::Receipt(blob))
+        };
         let header = WorkspaceDownload {
             part: Some(workspace_download::Part::Reference(reference)),
         };
         Ok(Response::new(download_stream(
             source,
             permit,
-            blob,
+            expected,
             header,
             |bytes| WorkspaceDownload {
                 part: Some(workspace_download::Part::Chunk(bytes)),
@@ -631,33 +681,17 @@ impl Transfers for ApiTransfers {
         &self,
         request: Request<InspectAttemptRequest>,
     ) -> Result<Response<Self::DownloadWorkspaceStream>, Status> {
-        let attempt = request.get_ref().clone();
-        let metadata = request.metadata().clone();
-        let Some((reference, holder)) = self.get_workspace_reference(request).await? else {
-            return Ok(Response::new(empty_stream()));
-        };
-        let service = self.clone();
-        let expected = reference.clone();
-        let authorize = move || {
-            let service = service.clone();
-            let expected = expected.clone();
-            let mut request = Request::new(attempt.clone());
-            *request.metadata_mut() = metadata.clone();
-            async move {
-                if service
-                    .get_workspace_reference(request)
-                    .await?
-                    .is_some_and(|(current, _)| current == expected)
-                {
-                    Ok(())
-                } else {
-                    Err(Status::permission_denied(
-                        "Session bundle is no longer authorized",
-                    ))
-                }
-            }
-        };
-        self.workspace_download(reference, holder, WorkspaceArtifactKind::Bundle, authorize)
+        self.continuation(request, WorkspaceArtifactKind::Bundle)
+            .await
+    }
+
+    type DownloadCompleteWorkspaceStream = ReceiverStream<Result<WorkspaceDownload, Status>>;
+
+    async fn download_complete_workspace(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<Self::DownloadCompleteWorkspaceStream>, Status> {
+        self.continuation(request, WorkspaceArtifactKind::CompleteBundle)
             .await
     }
 
@@ -720,6 +754,45 @@ impl Transfers for ApiTransfers {
             }
         };
         self.workspace_download(delivery, holder, kind, authorize)
+            .await
+    }
+}
+
+impl ApiTransfers {
+    /// A Session's continuation for the Attempt about to run: the previous delivery's own bundle,
+    /// or a complete bundle of it for a host that lacks its start commit.
+    async fn continuation(
+        &self,
+        request: Request<InspectAttemptRequest>,
+        kind: WorkspaceArtifactKind,
+    ) -> Result<Response<ReceiverStream<Result<WorkspaceDownload, Status>>>, Status> {
+        let attempt = request.get_ref().clone();
+        let metadata = request.metadata().clone();
+        let Some((reference, holder)) = self.get_workspace_reference(request).await? else {
+            return Ok(Response::new(empty_stream()));
+        };
+        let service = self.clone();
+        let expected = reference.clone();
+        let authorize = move || {
+            let service = service.clone();
+            let expected = expected.clone();
+            let mut request = Request::new(attempt.clone());
+            *request.metadata_mut() = metadata.clone();
+            async move {
+                if service
+                    .get_workspace_reference(request)
+                    .await?
+                    .is_some_and(|(current, _)| current == expected)
+                {
+                    Ok(())
+                } else {
+                    Err(Status::permission_denied(
+                        "Session bundle is no longer authorized",
+                    ))
+                }
+            }
+        };
+        self.workspace_download(reference, holder, kind, authorize)
             .await
     }
 }
@@ -883,10 +956,32 @@ fn empty_stream<T>() -> ReceiverStream<T> {
     ReceiverStream::new(receive)
 }
 
+/// What a download must match: its blob's receipt, or, for a bundle the holder builds on demand,
+/// only a size limit. Git checks such a bundle against the delivered commit.
+pub(crate) enum Expected {
+    Receipt(BlobReference),
+    Unrecorded { limit: u64 },
+}
+
+impl From<BlobReference> for Expected {
+    fn from(blob: BlobReference) -> Self {
+        Self::Receipt(blob)
+    }
+}
+
+impl Expected {
+    fn limit(&self) -> u64 {
+        match self {
+            Self::Receipt(blob) => blob.byte_length,
+            Self::Unrecorded { limit } => *limit,
+        }
+    }
+}
+
 fn download_stream<T, Chunk, Check, Authorization>(
     mut source: Source,
     permit: tokio::sync::OwnedSemaphorePermit,
-    expected: BlobReference,
+    expected: impl Into<Expected>,
     header: T,
     chunk: Chunk,
     authorize: Check,
@@ -898,6 +993,7 @@ where
     Check: Fn() -> Authorization + Send + Sync + 'static,
     Authorization: std::future::Future<Output = Result<(), Status>> + Send,
 {
+    let expected = expected.into();
     let (send, receive) = mpsc::channel(2);
     tokio::spawn(async move {
         let _permit = permit;
@@ -918,7 +1014,7 @@ where
                     break;
                 };
                 length += bytes.len() as u64;
-                if length > expected.byte_length {
+                if length > expected.limit() {
                     return Err(Status::data_loss("blob size does not match its receipt"));
                 }
                 digest.update(&bytes);
@@ -926,8 +1022,9 @@ where
                     return Ok(());
                 }
             }
-            if length != expected.byte_length
-                || format!("{:x}", digest.finalize()) != expected.sha256
+            if let Expected::Receipt(expected) = &expected
+                && (length != expected.byte_length
+                    || format!("{:x}", digest.finalize()) != expected.sha256)
             {
                 return Err(Status::data_loss("blob digest does not match its receipt"));
             }

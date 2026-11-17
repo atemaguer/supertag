@@ -23,7 +23,7 @@ use anyhow::{Context, Result, bail, ensure};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
-use crate::{check_cancelled, git, sha256, verify_bundle_head};
+use crate::{MissingPrerequisite, check_cancelled, git, sha256, verify_bundle_head};
 
 /// The largest bundle an import reads, the same bound as every Workspace delivery blob.
 pub const MAX_BUNDLE_BYTES: u64 = 268_435_456;
@@ -104,10 +104,18 @@ impl std::error::Error for BranchCheckedOut {}
 
 /// Verify `bundle` against `delivery`, then add the delivered commit to `repository` and point
 /// the Session branch at it, only forward.
+///
+/// `bundle` is either the delivery's own bundle, checked against its receipt's digest, or, when
+/// `complete`, a complete bundle of the delivered commit the holding Worker Host built for a
+/// repository that lacks the delivery's start commit. A complete bundle has no recorded digest:
+/// Git's own hashing binds it to the delivered commit. A delivery's own bundle may build on its
+/// start commit (see `Workspace::import_bundle`); when this repository lacks it, the import fails
+/// with [`MissingPrerequisite`] and changes nothing.
 pub async fn import(
     repository: &Path,
     delivery: &SessionDelivery,
     bundle: &Path,
+    complete: bool,
     cancel: &CancellationToken,
 ) -> Result<Imported> {
     check_cancelled(cancel)?;
@@ -119,11 +127,33 @@ pub async fn import(
     );
     let bytes = read_bundle(bundle)?;
     ensure!(
-        bytes.len() as u64 == delivery.bundle_byte_length
-            && sha256(&bytes) == delivery.bundle_sha256,
+        complete
+            || (bytes.len() as u64 == delivery.bundle_byte_length
+                && sha256(&bytes) == delivery.bundle_sha256),
         "delivery bundle differs from its receipt"
     );
     verify_bundle_head(&bytes, &delivery.head_commit, &reference)?;
+    let prerequisites = git::bundle_prerequisites(bundle)?;
+    ensure!(
+        !complete || prerequisites.is_empty(),
+        "a complete delivery bundle names prerequisite commits"
+    );
+    for prerequisite in &prerequisites {
+        let held = status(
+            repository,
+            &[
+                "rev-parse",
+                "-q",
+                "--verify",
+                &format!("{prerequisite}^{{commit}}"),
+            ],
+            cancel,
+        )
+        .await?;
+        if held.is_none() {
+            return Err(MissingPrerequisite(prerequisite.clone()).into());
+        }
+    }
 
     let format = output(repository, &["rev-parse", "--show-object-format"], cancel).await?;
     let length = match format.as_str() {
@@ -177,6 +207,29 @@ pub async fn import(
         "bundle did not add exactly the delivered commit"
     );
     strict_check(repository, isolated, &quarantine, staging.path(), cancel).await?;
+    if !prerequisites.is_empty() {
+        // Only the delivery's start commit, or the head's parents when it changed nothing.
+        let allowed: std::collections::BTreeSet<String> =
+            if delivery.head_commit == delivery.start_commit {
+                output_in(
+                    repository,
+                    isolated,
+                    &["rev-list", "--parents", "-n", "1", &delivery.head_commit],
+                    cancel,
+                )
+                .await?
+                .split_whitespace()
+                .skip(1)
+                .map(str::to_owned)
+                .collect()
+            } else {
+                std::collections::BTreeSet::from([delivery.start_commit.clone()])
+            };
+        ensure!(
+            prerequisites == allowed,
+            "delivery bundle needs commits other than its start commit"
+        );
+    }
     ensure!(
         output_in(
             repository,

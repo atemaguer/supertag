@@ -365,6 +365,9 @@ const (
 	// TransfersDownloadWorkspaceProcedure is the fully-qualified name of the Transfers's
 	// DownloadWorkspace RPC.
 	TransfersDownloadWorkspaceProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspace"
+	// TransfersDownloadCompleteWorkspaceProcedure is the fully-qualified name of the Transfers's
+	// DownloadCompleteWorkspace RPC.
+	TransfersDownloadCompleteWorkspaceProcedure = "/supertag.runtime.v2.Transfers/DownloadCompleteWorkspace"
 	// TransfersDownloadWorkspaceArtifactProcedure is the fully-qualified name of the Transfers's
 	// DownloadWorkspaceArtifact RPC.
 	TransfersDownloadWorkspaceArtifactProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspaceArtifact"
@@ -3999,6 +4002,9 @@ type TransfersClient interface {
 	// Records a delivery whose patch and bundle the calling Worker Host already holds.
 	CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
+	// The same continuation as a complete bundle the holding Worker Host builds, for a host that
+	// lacks the delivery's start commit.
+	DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.GithubWorkspaceDownload], error)
@@ -4040,6 +4046,12 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("DownloadWorkspace")),
 			connect.WithClientOptions(opts...),
 		),
+		downloadCompleteWorkspace: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload](
+			httpClient,
+			baseURL+TransfersDownloadCompleteWorkspaceProcedure,
+			connect.WithSchema(transfersMethods.ByName("DownloadCompleteWorkspace")),
+			connect.WithClientOptions(opts...),
+		),
 		downloadWorkspaceArtifact: connect.NewClient[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload](
 			httpClient,
 			baseURL+TransfersDownloadWorkspaceArtifactProcedure,
@@ -4073,6 +4085,7 @@ type transfersClient struct {
 	downloadCheckpoint          *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload]
 	commitWorkspace             *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
 	downloadWorkspace           *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
+	downloadCompleteWorkspace   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
 	downloadWorkspaceArtifact   *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload]
 	downloadReviewArtifact      *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
 	downloadWorkspaceSource     *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspaceDownload]
@@ -4097,6 +4110,11 @@ func (c *transfersClient) CommitWorkspace(ctx context.Context, req *connect.Requ
 // DownloadWorkspace calls supertag.runtime.v2.Transfers.DownloadWorkspace.
 func (c *transfersClient) DownloadWorkspace(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error) {
 	return c.downloadWorkspace.CallServerStream(ctx, req)
+}
+
+// DownloadCompleteWorkspace calls supertag.runtime.v2.Transfers.DownloadCompleteWorkspace.
+func (c *transfersClient) DownloadCompleteWorkspace(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error) {
+	return c.downloadCompleteWorkspace.CallServerStream(ctx, req)
 }
 
 // DownloadWorkspaceArtifact calls supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact.
@@ -4126,6 +4144,9 @@ type TransfersHandler interface {
 	// Records a delivery whose patch and bundle the calling Worker Host already holds.
 	CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
+	// The same continuation as a complete bundle the holding Worker Host builds, for a host that
+	// lacks the delivery's start commit.
+	DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.GithubWorkspaceDownload]) error
@@ -4163,6 +4184,12 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(transfersMethods.ByName("DownloadWorkspace")),
 		connect.WithHandlerOptions(opts...),
 	)
+	transfersDownloadCompleteWorkspaceHandler := connect.NewServerStreamHandler(
+		TransfersDownloadCompleteWorkspaceProcedure,
+		svc.DownloadCompleteWorkspace,
+		connect.WithSchema(transfersMethods.ByName("DownloadCompleteWorkspace")),
+		connect.WithHandlerOptions(opts...),
+	)
 	transfersDownloadWorkspaceArtifactHandler := connect.NewServerStreamHandler(
 		TransfersDownloadWorkspaceArtifactProcedure,
 		svc.DownloadWorkspaceArtifact,
@@ -4197,6 +4224,8 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 			transfersCommitWorkspaceHandler.ServeHTTP(w, r)
 		case TransfersDownloadWorkspaceProcedure:
 			transfersDownloadWorkspaceHandler.ServeHTTP(w, r)
+		case TransfersDownloadCompleteWorkspaceProcedure:
+			transfersDownloadCompleteWorkspaceHandler.ServeHTTP(w, r)
 		case TransfersDownloadWorkspaceArtifactProcedure:
 			transfersDownloadWorkspaceArtifactHandler.ServeHTTP(w, r)
 		case TransfersDownloadReviewArtifactProcedure:
@@ -4228,6 +4257,10 @@ func (UnimplementedTransfersHandler) CommitWorkspace(context.Context, *connect.R
 
 func (UnimplementedTransfersHandler) DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadWorkspace is not implemented"))
+}
+
+func (UnimplementedTransfersHandler) DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadCompleteWorkspace is not implemented"))
 }
 
 func (UnimplementedTransfersHandler) DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {

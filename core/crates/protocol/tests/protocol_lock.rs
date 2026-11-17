@@ -97,11 +97,11 @@ fn every_client_speaks_the_current_protocol_version() {
     let current = *PROTOCOL_VERSIONS.last().expect("a protocol version");
     for (file, declaration) in [
         (
-            "sdks/typescript/src/control-plane-client.ts",
+            "sdks/typescript/src/gateway-client.ts",
             format!("const PROTOCOL_VERSIONS = [{current}];"),
         ),
         (
-            "sdks/python/src/supertag/control_plane_client.py",
+            "sdks/python/src/supertag/gateway_client.py",
             format!("_PROTOCOL_VERSIONS = ({current},)"),
         ),
         (

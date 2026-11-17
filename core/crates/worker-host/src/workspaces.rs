@@ -145,12 +145,8 @@ impl Workspaces {
         let mapping = self
             .mapping(workspace_id)
             .context("Task workspace is not configured on this Worker Host")?;
-        let identity = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(&(workspace_id, base_commit))?)
-        );
         Workspace::open(WorkspaceConfig {
-            state_dir: self.directory.join(identity),
+            state_dir: self.state_directory(workspace_id, base_commit)?,
             source: match &mapping.source {
                 WorkspaceSource::Local(source) => source.clone(),
                 WorkspaceSource::ControlPlane => self
@@ -159,6 +155,14 @@ impl Workspaces {
             },
             base_commit: base_commit.to_owned(),
         })
+    }
+
+    /// The state directory of one Workspace and base commit on this lane.
+    fn state_directory(&self, workspace_id: &str, base_commit: &str) -> Result<PathBuf> {
+        Ok(self.directory.join(format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(workspace_id, base_commit))?)
+        )))
     }
 
     fn source_directory(&self, workspace_id: &str, base_commit: &str) -> PathBuf {
@@ -289,8 +293,9 @@ impl Workspaces {
                 temporary.as_file().sync_all()?;
                 let bundle = reference
                     .bundle
+                    .clone()
                     .context("approved continuation has no bundle")?;
-                workspace
+                let imported = workspace
                     .import_bundle(
                         temporary.path(),
                         &bundle.sha256,
@@ -298,7 +303,30 @@ impl Workspaces {
                         Some(&reference.start_commit),
                         cancel,
                     )
-                    .await?;
+                    .await;
+                match imported {
+                    // The continuation builds on a commit this host never received: take a
+                    // complete bundle of it from the host holding it.
+                    Err(error) if error.is::<supertag_workspaces::MissingPrerequisite>() => {
+                        let complete = tokio::select! {
+                            complete = transfers.download_complete_workspace(attempt, token, &reference) => complete?,
+                            _ = cancel.cancelled() => return Err(Status::cancelled("workspace preparation cancelled").into()),
+                        };
+                        let mut temporary = NamedTempFile::new_in(self.directory.canonicalize()?)?;
+                        temporary.write_all(&complete)?;
+                        temporary.as_file().sync_all()?;
+                        workspace
+                            .import_bundle(
+                                temporary.path(),
+                                &format!("{:x}", Sha256::digest(&complete)),
+                                &reference.head_commit,
+                                Some(&reference.start_commit),
+                                cancel,
+                            )
+                            .await?;
+                    }
+                    result => result?,
+                }
                 Some(reference.head_commit)
             }
         };
@@ -666,9 +694,19 @@ impl Transfers {
         let patch = read_blob(&pending.delivery.patch_path, &patch_blob)?;
         let bundle = read_blob(&pending.delivery.bundle_path, &bundle_blob)?;
         let attempt_id = attempt.attempt_id.clone();
+        // The delivery's files live in its Workspace state directory, `<state>/artifacts/<id>/`.
+        let state = pending
+            .delivery
+            .bundle_path
+            .ancestors()
+            .nth(3)
+            .map(Path::to_path_buf)
+            .ok_or_else(|| Status::internal("Workspace delivery has no state directory"))?;
         tokio::task::spawn_blocking(move || {
             storage.retain_blob(&attempt_id, &patch_blob, &patch)?;
-            storage.retain_blob(&attempt_id, &bundle_blob, &bundle)
+            storage.retain_blob(&attempt_id, &bundle_blob, &bundle)?;
+            // Any lane of this host can then build a complete bundle of the delivery.
+            storage.retain_workspace(&attempt_id, &state)
         })
         .await
         .map_err(|error| {
@@ -777,6 +815,54 @@ impl Transfers {
             ));
         }
         Ok(Some((reference, Some(bytes))))
+    }
+
+    /// A complete bundle of the Session's approved continuation `expected`, which the Worker
+    /// Host holding it builds on demand, for this host that lacks the delivery's start commit.
+    /// It has no recorded digest; importing it checks it with Git against the delivered commit.
+    async fn download_complete_workspace(
+        &self,
+        attempt: &Attempt,
+        token: &str,
+        expected: &WorkspaceDeliveryReference,
+    ) -> Result<Vec<u8>, Status> {
+        let mut upstream = request(attempt.inspect(), token).map_err(|error| {
+            crate::failures::noted(
+                Status::internal("cannot authenticate workspace download"),
+                &error,
+            )
+        })?;
+        upstream.set_timeout(Duration::from_secs(120));
+        let mut stream =
+            TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .download_complete_workspace(upstream)
+                .await?
+                .into_inner();
+        match stream.message().await? {
+            Some(WorkspaceDownload {
+                part: Some(workspace_download::Part::Reference(reference)),
+            }) if &reference == expected => {}
+            _ => {
+                return Err(Status::data_loss(
+                    "complete workspace bundle belongs to another continuation",
+                ));
+            }
+        }
+        let mut bytes = Vec::new();
+        while let Some(message) = stream.message().await? {
+            let Some(workspace_download::Part::Chunk(chunk)) = message.part else {
+                return Err(Status::data_loss("unexpected workspace download record"));
+            };
+            if chunk.is_empty()
+                || chunk.len() > CHECKPOINT_CHUNK_BYTES
+                || bytes.len() + chunk.len() > MAX_WORKSPACE_BLOB_BYTES
+            {
+                return Err(Status::data_loss("invalid workspace bundle chunk"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
     }
 }
 

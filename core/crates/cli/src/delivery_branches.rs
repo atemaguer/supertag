@@ -160,14 +160,80 @@ async fn import(
     );
     let blob = delivery.bundle.as_ref().context("delivery has no bundle")?;
     let staging = tempfile::tempdir()?;
-    let path = staging.path().join("delivery.bundle");
+    let branch = supertag_protocol::session_branch(&accepted.tag_id, &accepted.session_id);
+    let session = SessionDelivery {
+        branch: branch.clone(),
+        delivery_id: delivery.delivery_id.clone(),
+        base_commit: delivery.base_commit.clone(),
+        start_commit: delivery.start_commit.clone(),
+        head_commit: delivery.head_commit.clone(),
+        bundle_sha256: blob.sha256.clone(),
+        bundle_byte_length: blob.byte_length,
+    };
+    // The delivery's own bundle builds on its start commit. A repository without it gets a
+    // complete bundle of the delivered commit, which the holding Worker Host builds on demand.
+    let own = staging.path().join("delivery.bundle");
+    download(
+        channel,
+        token,
+        accepted,
+        WorkspaceArtifactKind::Bundle,
+        &own,
+    )
+    .await?;
+    let imported =
+        match session_branch::import(repository, &session, &own, false, &CancellationToken::new())
+            .await
+        {
+            Err(error) if error.is::<supertag_workspaces::MissingPrerequisite>() => {
+                let complete = staging.path().join("complete.bundle");
+                download(
+                    channel,
+                    token,
+                    accepted,
+                    WorkspaceArtifactKind::CompleteBundle,
+                    &complete,
+                )
+                .await?;
+                session_branch::import(
+                    repository,
+                    &session,
+                    &complete,
+                    true,
+                    &CancellationToken::new(),
+                )
+                .await?
+            }
+            result => result?,
+        };
+    Ok((branch, imported))
+}
+
+/// Downloads one bundle of an accepted delivery into `path`: its own bundle, checked against its
+/// receipt, or a complete bundle, bounded only by the Workspace blob limit, which Git checks when
+/// it is imported.
+async fn download(
+    channel: &ProtocolChannel,
+    token: &str,
+    accepted: &Accepted,
+    kind: WorkspaceArtifactKind,
+    path: &Path,
+) -> Result<()> {
+    let delivery = &accepted.delivery;
+    let receipt = match kind {
+        WorkspaceArtifactKind::Bundle => {
+            Some(delivery.bundle.as_ref().context("delivery has no bundle")?)
+        }
+        _ => None,
+    };
+    let limit = receipt.map_or(MAX_WORKSPACE_BLOB_BYTES as u64, |blob| blob.byte_length);
     let mut client = TransfersClient::new(channel.clone())
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let mut upstream = request(
         GetWorkspaceArtifactRequest {
             task_id: accepted.task_id.clone(),
-            kind: WorkspaceArtifactKind::Bundle as i32,
+            kind: kind as i32,
         },
         token,
     )?;
@@ -183,7 +249,7 @@ async fn import(
         }
         _ => bail!("workspace download did not include a receipt"),
     }
-    let mut file = std::fs::File::create_new(&path)?;
+    let mut file = std::fs::File::create_new(path)?;
     let mut size = 0u64;
     let mut digest = Sha256::new();
     while let Some(message) = stream.message().await? {
@@ -194,36 +260,21 @@ async fn import(
         ensure!(
             !chunk.is_empty()
                 && chunk.len() <= CHECKPOINT_CHUNK_BYTES
-                && size <= blob.byte_length
+                && size <= limit
                 && size <= MAX_WORKSPACE_BLOB_BYTES as u64,
             "bundle exceeds its receipt"
         );
         digest.update(&chunk);
         file.write_all(&chunk)?;
     }
-    ensure!(
-        size == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
-        "bundle differs from its receipt"
-    );
+    if let Some(blob) = receipt {
+        ensure!(
+            size == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
+            "bundle differs from its receipt"
+        );
+    }
     file.sync_all()?;
-    drop(file);
-    let branch = supertag_protocol::session_branch(&accepted.tag_id, &accepted.session_id);
-    let imported = session_branch::import(
-        repository,
-        &SessionDelivery {
-            branch: branch.clone(),
-            delivery_id: delivery.delivery_id.clone(),
-            base_commit: delivery.base_commit.clone(),
-            start_commit: delivery.start_commit.clone(),
-            head_commit: delivery.head_commit.clone(),
-            bundle_sha256: blob.sha256.clone(),
-            bundle_byte_length: blob.byte_length,
-        },
-        &path,
-        &CancellationToken::new(),
-    )
-    .await?;
-    Ok((branch, imported))
+    Ok(())
 }
 
 /// Where the local supervisor imports deliveries: each mapped Workspace whose delivery is

@@ -3040,6 +3040,7 @@ dependencies = [
  "ring",
  "rustls-pki-types",
  "serde_json",
+ "sha2 0.10.9",
  "supertag-protocol",
  "supertag-workspaces",
  "tempfile",

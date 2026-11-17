@@ -202,19 +202,21 @@ impl Provider {
     ) -> Result<Prepared> {
         self.scope(job)?;
         let delivery = job.delivery.as_ref().context("delivery required")?;
-        let bundle = delivery.bundle.as_ref().context("bundle required")?;
         let holder = holder.context("delivery has no holding Worker Host")?;
         let directory = tempfile::Builder::new()
             .prefix(SCRATCH_PREFIX)
             .tempdir_in(&self.directory)?;
         let relayed = directory.path().join("bundle");
-        self.bundles.read(holder, bundle, &relayed).await?;
+        self.bundles.read(holder, delivery, &relayed).await?;
+        // A complete bundle has no recorded digest: importing it checks every object with Git
+        // against the delivered commit.
+        let bytes = std::fs::read(&relayed)?;
         let repository = source::materialize(
             &directory.path().join("verified"),
             &TransferArtifact {
                 path: relayed,
-                sha256: bundle.sha256.clone(),
-                byte_length: bundle.byte_length,
+                sha256: format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&bytes)),
+                byte_length: bytes.len() as u64,
             },
             &delivery.head_commit,
             cancel,

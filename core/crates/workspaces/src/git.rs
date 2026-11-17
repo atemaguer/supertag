@@ -91,6 +91,46 @@ impl Repository {
         })
     }
 
+    /// The repository of a Workspace state directory another process may own, for reading only:
+    /// nothing here writes to it, so it needs neither the state's lock nor its gate.
+    pub(crate) fn existing(root: &Path, oid_length: usize) -> Result<Self> {
+        let git_dir = root.join("repository.git");
+        paths::verify_directory(&git_dir)?;
+        Ok(Self {
+            root: root.to_owned(),
+            git_dir,
+            oid_length,
+            bare: true,
+        })
+    }
+
+    /// A complete bundle of `head`, its whole history, naming it as `reference`. Built with
+    /// `pack-objects` and a written header, so no ref is created in the repository.
+    pub(crate) async fn complete_bundle(
+        &self,
+        head: &str,
+        reference: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<u8>> {
+        self.verify_commit(head, cancel).await?;
+        let pack = self
+            .command(
+                &["pack-objects", "--stdout", "--revs"],
+                format!("{head}\n").as_bytes(),
+                &[],
+                cancel,
+            )
+            .await?;
+        let mut bundle = if self.oid_length == 64 {
+            format!("# v3 git bundle\n@object-format=sha256\n{head} {reference}\n\n")
+        } else {
+            format!("# v2 git bundle\n{head} {reference}\n\n")
+        }
+        .into_bytes();
+        bundle.extend(pack);
+        Ok(bundle)
+    }
+
     pub(crate) fn path(&self) -> &Path {
         &self.git_dir
     }
