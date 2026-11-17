@@ -941,7 +941,7 @@ button:disabled {
 .user-turn .bubble.tail {
   border-bottom-right-radius: 6px;
 }
-/* The typing bubble: a message bubble with large dots, with what the Tag does now under it. */
+/* The typing bubble: a one-line message bubble of dots, with what the Tag does now under it. */
 .typing {
   max-width: var(--bubble-max);
 }
@@ -961,9 +961,9 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 116px;
-  min-height: 76px;
-  padding: 24px;
+  /* As tall as a one-line message bubble, so it lines up with a short reply. */
+  min-height: calc(14px * 1.55 + 20px);
+  padding: 0 16px;
   color: #a39ea6;
 }
 .typing-button:hover .typing-bubble {
@@ -973,9 +973,9 @@ button:disabled {
   box-shadow: 0 0 0 1px #776358;
 }
 .typing-bubble .working-dots {
-  --dot: 14px;
-  --dot-gap: 9px;
-  --dot-lift: -5px;
+  --dot: 7px;
+  --dot-gap: 5px;
+  --dot-lift: -3px;
 }
 .typing-caption {
   max-width: 100%;
