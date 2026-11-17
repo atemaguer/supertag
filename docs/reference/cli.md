@@ -3231,10 +3231,11 @@ Wake a Tag later in your conversation with it, or pause and resume a Schedule
 Usage: supertag schedule [OPTIONS] <COMMAND>
 
 Commands:
-  create  Wake a Tag later in your conversation with it, once (--at) or on a recurrence (--every). The note is what the Tag is asked to do when it wakes
-  pause   Stop a Schedule firing until it is resumed
-  resume  Let a paused Schedule fire again. A recurrence continues at its next occurrence; a one-off whose time passed fires at once
-  help    Print this message or the help of the given subcommand(s)
+  create    Wake a Tag later in your conversation with it, once (--at) or on a recurrence (--every). The note is what the Tag is asked to do when it wakes
+  pause     Stop a Schedule firing until it is resumed
+  resume    Let a paused Schedule fire again. A recurrence continues at its next occurrence; a one-off whose time passed fires at once
+  backfill  Replay a recurring Schedule's occurrences that queued no turn, such as those missed while SuperTag was down, one turn each, at most 24
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -3308,6 +3309,27 @@ Options:
           Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag schedule backfill`
+
+```text
+Replay a recurring Schedule's occurrences that queued no turn, such as those missed while SuperTag was down, one turn each, at most 24
+
+Usage: supertag schedule backfill [OPTIONS] --from <FROM> <SCHEDULE_ID>
+
+Arguments:
+  <SCHEDULE_ID>  Schedule ID
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --from <FROM>
+          The earliest occurrence to replay: an RFC 3339 time such as 2026-11-10T09:00:00Z, or a duration ago such as 3d or 12h
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
           Print help
 ```
@@ -4530,7 +4552,7 @@ Stream change notices, reconnecting from the last resume token
 Usage: supertag watch [OPTIONS] [KIND]...
 
 Arguments:
-  [KIND]...  Only these kinds of change; omit for every kind. `watch objective ID` follows one Objective's progress as a timeline until it closes. `watch inbox-item` prints each item waiting on a person once, as it appears [possible values: tag, task, conversation-message, objective, team, workstream-post, inbox-item, memory]
+  [KIND]...  Only these kinds of change; omit for every kind. `watch objective ID` follows one Objective's progress as a timeline until it closes. `watch inbox-item` prints each item waiting on a person once, as it appears [possible values: tag, task, conversation-message, objective, team, workstream-post, inbox-item, schedule, memory]
 
 Options:
       --gateway <URL|NAME>
