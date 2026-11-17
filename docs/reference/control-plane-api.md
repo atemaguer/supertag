@@ -176,6 +176,8 @@ returns every event of a turn, including the activity a conversation page leaves
 marks, Objectives, Teams, Workstream posts, and a Tag's notes (`WATCH_KIND_MEMORY`: a note kept,
 rewritten, or deleted; a private note reaches only its person). Each notice carries a resume token; reconnect with the last one to
 continue without a gap. A notice says what changed, not its new contents: read the resource.
+A Watch request may name the kinds it follows. A kind the Control Plane does not know, such as one a
+newer client asks for, is ignored rather than refused.
 
 ## Stability
 

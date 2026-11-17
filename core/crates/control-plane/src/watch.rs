@@ -152,14 +152,22 @@ fn frame(feed_id: &str, position: i64, update: watch_event::Update) -> WatchEven
     }
 }
 
-fn kinds(input: &[i32]) -> Result<u8, Status> {
-    input.iter().try_fold(0, |mask, kind| {
-        let kind = WatchKind::try_from(*kind)
-            .ok()
-            .filter(|kind| *kind != WatchKind::Unspecified)
-            .ok_or_else(|| Status::invalid_argument("unknown Watch kind"))?;
-        Ok(mask | (1 << kind as i32))
-    })
+/// The kinds a Watch follows, as a bit per kind; zero follows every kind. A kind this Control Plane
+/// does not know, which a newer client may ask for, is ignored rather than refused, so the client
+/// keeps the kinds both know. A request naming only unknown kinds follows nothing but heartbeats
+/// (bit 0, which no kind uses).
+fn kinds(input: &[i32]) -> u64 {
+    input
+        .iter()
+        .fold(0, |mask, kind| match WatchKind::try_from(*kind) {
+            Ok(kind) if kind != WatchKind::Unspecified => mask | (1 << kind as i32),
+            _ => mask | 1,
+        })
+}
+
+/// Whether a Watch following `mask` passes a notice of `kind`.
+fn follows(mask: u64, kind: i32) -> bool {
+    mask == 0 || ((0..64).contains(&kind) && mask & (1 << kind) != 0)
 }
 
 fn draining() -> Status {
@@ -180,7 +188,7 @@ impl operator_events_server::OperatorEvents for OperatorWatch {
         // A client sees its own work, and the Tags its Auth Key allows and Teams as they change.
         let client_tags = self.plane.store.client_tags(&principal).await?;
         let input = request.into_inner();
-        let mask = kinds(&input.kinds)?;
+        let mask = kinds(&input.kinds);
         let cursor = Cursor::parse(&input.resume_token)?;
         let store = self.plane.store.clone();
         let shutdown = self.shutdown.clone();
@@ -230,7 +238,7 @@ impl operator_events_server::OperatorEvents for OperatorWatch {
                                     || notice.change.kind == WatchKind::Memory as i32)
                                 && client_tags.as_ref().is_none_or(|tags| tags.contains(&notice.change.tag_id))));
                     if (crate::store::sees_owner(&principal, &notice.owner) || shared)
-                        && (mask == 0 || mask & (1 << notice.change.kind) != 0)
+                        && follows(mask, notice.change.kind)
                     {
                         if shutdown.is_cancelled() {
                             Err(draining())?;

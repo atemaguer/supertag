@@ -684,3 +684,23 @@ async fn client_team_notices(url: &str) -> anyhow::Result<()> {
     assert_eq!(first_team(client).await?, "solo");
     Ok(())
 }
+
+/// A newer client may ask for a kind this Control Plane does not know: the Watch keeps the kinds
+/// both know instead of refusing, and asking only for unknown kinds follows nothing. Every kind,
+/// including Memory's (8), has its own bit.
+#[test]
+fn unknown_watch_kinds_are_ignored_not_refused() {
+    let known = [WatchKind::Tag as i32, WatchKind::Memory as i32];
+    let mask = super::kinds(&[known[0], 4_000, known[1], 0]);
+    assert!(super::follows(mask, WatchKind::Tag as i32));
+    assert!(super::follows(mask, WatchKind::Memory as i32));
+    assert!(!super::follows(mask, WatchKind::Task as i32));
+    assert!(!super::follows(mask, WatchKind::Team as i32));
+    let unknown = super::kinds(&[4_000, -1]);
+    assert_ne!(unknown, 0, "only unknown kinds must not mean every kind");
+    assert!(!super::follows(unknown, WatchKind::Tag as i32));
+    assert!(!super::follows(unknown, WatchKind::Memory as i32));
+    // No kinds follows every kind, and a notice's kind past the mask never panics.
+    assert!(super::follows(super::kinds(&[]), WatchKind::Memory as i32));
+    assert!(!super::follows(mask, 70));
+}
