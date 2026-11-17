@@ -101,6 +101,7 @@ async function invoke({
   sessionId = "session",
   allowUnsandboxedCommands = false,
   history = [],
+  hostRefusal,
 }: {
   prompt?: string;
   checkpoint?: SessionCheckpoint;
@@ -128,6 +129,8 @@ async function invoke({
   sessionId?: string;
   allowUnsandboxedCommands?: boolean;
   history?: AttemptHistoryEntry[];
+  /** Fail the limit confirmation as a Worker Host that refuses the call would. */
+  hostRefusal?: string;
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "supertag-rust-claude-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -196,6 +199,7 @@ async function invoke({
           confirmExecutionLimits(request, context) {
             expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
             expect(usage).toHaveLength(0);
+            if (hostRefusal) throw new ConnectError(hostRefusal, Code.PermissionDenied);
             appliedLimits.push(request);
             return {};
           },
@@ -1515,3 +1519,17 @@ it("keeps WebFetch and sandboxed commands inside the Task's network scope", asyn
   ).toMatchObject({ SSL_CERT_FILE: "/s/bundle.pem", NODE_EXTRA_CA_CERTS: "/s/ca.pem" });
   expect(() => egressCertificateEnvironment({})).toThrow("egress proxy");
 });
+
+it("names a failed Worker Host call in the result, redacted with the Attempt's values", async () => {
+  const run = await invoke({
+    prompt: "budget-success",
+    executionLimits: budgetUsd,
+    hostRefusal: `execution authority expired\u0007 for ${token}`,
+  });
+  expect(run.completions[0]).toMatchObject({ succeeded: false });
+  const result = run.completions[0]?.result ?? "";
+  expect(result).toMatch(
+    /^Claude checkpoint validation failed: Worker Host call failed: \[permission_denied\] execution authority expired {2}for \S+\. Native execution did not start\.$/,
+  );
+  expect(result).not.toContain(token);
+}, 30000);

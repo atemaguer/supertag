@@ -208,6 +208,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Claude Code or OpenCode Task that fails because a call to its Worker Host failed names that
+  call's status in its result, as Cursor Tasks already do, such as `Claude checkpoint validation
+  failed: Worker Host call failed: [permission_denied] … Native execution did not start.`, rather
+  than only fixed text.
 - OpenCode path scopes deny every letter-case spelling of hidden and read-only paths, so `SeCrEtS/key` no longer gets past a hidden `secrets/` on case-insensitive file systems.
 - On Linux, a Worker Host no longer leaves the processes it stops for a harness as zombies. Its
   guardian kills descendants that left the adapter's process group and now reaps the last ones

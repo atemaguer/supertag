@@ -22,6 +22,7 @@
     "@supertag/worker-sdk": "workspace:*"
   },
   "devDependencies": {
+    "@connectrpc/connect": "2.2.0",
     "@connectrpc/connect-node": "2.2.0"
   }
 }

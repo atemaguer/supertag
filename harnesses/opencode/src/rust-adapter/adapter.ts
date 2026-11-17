@@ -21,6 +21,7 @@ import {
   TURN_GUIDANCE,
   tagPortfolio,
   withObjectiveReport,
+  workerHostFailure,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import {
   type OpenCodeCopy,
@@ -386,6 +387,28 @@ function coordinationSecrets(tools: readonly OpenCodeMcpTool[]): string[] {
 }
 
 /** The Rust Worker Host owns the Attempt lease and the enclosing native process group. */
+/**
+ * The result of a failed Attempt. Native and transport errors may contain credentials or output
+ * from a provider, so only fixed text crosses the Harness, or a failed Worker Host call's status,
+ * redacted with this Attempt's values.
+ */
+export function failureResult(
+  error: unknown,
+  stopped: boolean,
+  started: boolean,
+  secrets: readonly string[],
+): string {
+  if (error instanceof SafeOpenCodeFailure) return error.message;
+  if (stopped) return "OpenCode execution stopped.";
+  const hostFailure = workerHostFailure(error);
+  const detail = hostFailure
+    ? `: ${redact(hostFailure, secrets).replaceAll("\0", "").slice(0, 600)}`
+    : "";
+  return started
+    ? `OpenCode execution failed${detail}${detail ? "" : "."}`
+    : `OpenCode adapter configuration failed${detail}. Native execution did not start.`;
+}
+
 export async function runAdapter(
   bootstrap: AdapterBootstrap,
   signal: AbortSignal,
@@ -399,6 +422,8 @@ export async function runAdapter(
     Partial<Pick<HarnessCompleteRequest, "objectiveSignal">>;
   let active = true;
   let started = false;
+  // Values a failure reason must not carry; filled as the run learns them.
+  const secrets: string[] = [bootstrap.token];
   try {
     const { model } = taskModel(run, configuration);
     const cancellation = AbortSignal.any([signal, AbortSignal.timeout(configuration.timeoutMs)]);
@@ -413,7 +438,7 @@ export async function runAdapter(
       tagPortfolio(run),
       run.coordination?.mayReadTagSessions ?? false,
     );
-    const secrets = [...native.secrets];
+    secrets.push(...native.secrets);
     const coordination = await startCoordination(bridge, run, {
       taskId: task.taskId,
       tagId: task.tagId,
@@ -498,15 +523,7 @@ export async function runAdapter(
     }
   } catch (error) {
     if (error instanceof ExecutionCleanupError) throw error;
-    // Native and transport errors may contain credentials or output from a provider.
-    const result =
-      error instanceof SafeOpenCodeFailure
-        ? error.message
-        : signal.aborted
-          ? "OpenCode execution stopped."
-          : started
-            ? "OpenCode execution failed."
-            : "OpenCode adapter configuration failed. Native execution did not start.";
+    const result = failureResult(error, signal.aborted, started, secrets);
     outcome = { succeeded: false, result, waitingApprovalIds: [] };
   }
   await receipt(() => client.complete(outcome, options()));

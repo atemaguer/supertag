@@ -13,10 +13,11 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import * as rustHarness from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it, vi } from "vitest";
 import { openCodePatterns, openCodePermissions, runOpenCode } from "./src/index.js";
-import { nativeRequest, taskModel } from "./src/rust-adapter/adapter.js";
+import { failureResult, nativeRequest, taskModel } from "./src/rust-adapter/adapter.js";
 import { verifiedCompletionParts } from "./src/rust-adapter/completion.js";
 import { verifyWorkspaceLinks } from "./src/rust-adapter/workspace.js";
 
@@ -672,4 +673,20 @@ it("requires a completed stop from the last assistant in the exact exported Sess
     { ...snapshot, messages: [{ info, parts: [{ ...parts[0], sessionID: "ses_other" }] }] },
   ])
     expect(() => verifiedCompletionParts(JSON.stringify(invalid), nativeSessionId)).toThrow();
+});
+
+it("names a failed Worker Host call in the result, redacted with the Attempt's values", () => {
+  const secret = "opencode-provider-key-fixture";
+  const refused = new ConnectError(`authority expired for ${secret}\u0007`, Code.PermissionDenied);
+  expect(failureResult(refused, false, true, [secret])).toBe(
+    "OpenCode execution failed: Worker Host call failed: [permission_denied] authority expired for [REDACTED] ",
+  );
+  expect(failureResult(refused, false, false, [secret])).toMatch(
+    /^OpenCode adapter configuration failed: Worker Host call failed: .*\. Native execution did not start\.$/,
+  );
+  // Anything else may hold provider output or credentials: fixed text only.
+  expect(failureResult(new Error(`EACCES ${secret}`), false, true, [secret])).toBe(
+    "OpenCode execution failed.",
+  );
+  expect(failureResult(refused, true, true, [secret])).toBe("OpenCode execution stopped.");
 });

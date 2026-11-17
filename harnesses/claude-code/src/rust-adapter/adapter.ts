@@ -36,6 +36,7 @@ import {
   TURN_GUIDANCE,
   tagPortfolio,
   withObjectiveReport,
+  workerHostFailure,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { claudeToolActivity, streamedText } from "../activity.js";
 import { ClaudeProcessTree } from "../process-tree.js";
@@ -993,15 +994,20 @@ export async function runAdapter(
     }
     if (error instanceof ExecutionCleanupError) throw error;
     if (completionProposed) throw error;
-    // Provider failures can contain credentials. Only this fixed description crosses Harness.
+    // Provider failures can contain credentials, so only a fixed description crosses Harness,
+    // or a failed Worker Host call's status, redacted with this Attempt's values.
+    const hostFailure = workerHostFailure(error);
+    const detail = hostFailure
+      ? `: ${redact(hostFailure, secrets).replaceAll("\0", "").slice(0, 600)}`
+      : "";
     const failure =
       error instanceof UnsupportedPermissionError || error instanceof SafeAdapterFailure
         ? error.message
         : !started
-          ? `Claude ${phase} failed. Native execution did not start.`
+          ? `Claude ${phase} failed${detail}. Native execution did not start.`
           : wasStopped
             ? "Claude execution stopped. No checkpoint was accepted."
-            : `Claude ${phase} failed. No checkpoint was accepted.`;
+            : `Claude ${phase} failed${detail}. No checkpoint was accepted.`;
     await receipt(() => client.complete({ succeeded: false, result: failure }, options()));
   } finally {
     clearTimeout(timeout);
