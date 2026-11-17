@@ -2064,6 +2064,9 @@ message HarnessExecutionProfile {
   // Names of the network credentials this host injects through its egress proxy. Only names;
   // the values never leave the host.
   repeated string network_credentials = 1900;
+  // This Claude Code lane can run Claude Code's own sandbox (macOS, or Linux with bubblewrap and
+  // socat), which sends sandboxed commands' traffic only to the egress proxy.
+  bool network_sandbox = 1901;
 }
 
 enum SharedExecutionTool {

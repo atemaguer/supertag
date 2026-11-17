@@ -463,14 +463,16 @@ class NetworkScope(_message.Message):
     def __init__(self, any_origin: _Optional[bool] = ..., rules: _Optional[_Iterable[_Union[NetworkRule, _Mapping]]] = ...) -> None: ...
 
 class NetworkRule(_message.Message):
-    __slots__ = ("origins", "methods", "credential")
+    __slots__ = ("origins", "methods", "credential", "paths")
     ORIGINS_FIELD_NUMBER: _ClassVar[int]
     METHODS_FIELD_NUMBER: _ClassVar[int]
     CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
+    PATHS_FIELD_NUMBER: _ClassVar[int]
     origins: _containers.RepeatedScalarFieldContainer[str]
     methods: _containers.RepeatedScalarFieldContainer[str]
     credential: str
-    def __init__(self, origins: _Optional[_Iterable[str]] = ..., methods: _Optional[_Iterable[str]] = ..., credential: _Optional[str] = ...) -> None: ...
+    paths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, origins: _Optional[_Iterable[str]] = ..., methods: _Optional[_Iterable[str]] = ..., credential: _Optional[str] = ..., paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class PutPermissionSetRequest(_message.Message):
     __slots__ = ("operation_id", "permission_set", "expected_revision")

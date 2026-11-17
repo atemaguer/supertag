@@ -1681,9 +1681,10 @@ type PolicyPermission struct {
 	Reference        string                 `protobuf:"bytes,6,opt,name=reference,proto3" json:"reference,omitempty"`
 	Resource         string                 `protobuf:"bytes,7,opt,name=resource,proto3" json:"resource,omitempty"`
 	ApprovalRequired bool                   `protobuf:"varint,8,opt,name=approval_required,json=approvalRequired,proto3" json:"approval_required,omitempty"`
-	// Path scopes, on runtime files:write and files:read only. Workspace-relative directories or
+	// Path scopes, on runtime files:write and files:read. Workspace-relative directories or
 	// exact paths. On files:write, the only Workspace paths it may write; empty means the whole
-	// Workspace. files:read takes none: reads cover the whole Workspace minus `exclude`.
+	// Workspace. files:read takes none: reads cover the whole Workspace minus `exclude`. On
+	// web:fetch, URL path prefixes such as `/repos/acme/`; empty means any path. Needs `hosts`.
 	Paths []string `protobuf:"bytes,9,rep,name=paths,proto3" json:"paths,omitempty"`
 	// Workspace-relative paths never written (files:write: they stay readable) or never read or
 	// written (files:read, where `*`, `**` and `?` globs are allowed). Excludes win over `paths`.
@@ -1691,8 +1692,9 @@ type PolicyPermission struct {
 	// Directories outside the Workspace, absolute or starting with `~/`: writable on
 	// files:write, readable on files:read.
 	AdditionalDirectories []string `protobuf:"bytes,11,rep,name=additional_directories,json=additionalDirectories,proto3" json:"additional_directories,omitempty"`
-	// Network scopes, on runtime web:fetch only. `https://NAME[:PORT]` origins the Task may reach;
-	// empty means any origin.
+	// Network scopes, on runtime web:fetch only. `https://NAME[:PORT]` or `https://*.NAME[:PORT]`
+	// origins the Task may reach; empty means any origin. On web:fetch, `paths` above are URL path
+	// prefixes on these origins.
 	Hosts []string `protobuf:"bytes,12,rep,name=hosts,proto3" json:"hosts,omitempty"`
 	// HTTP methods allowed on `hosts`, uppercase; empty means any method.
 	Methods []string `protobuf:"bytes,13,rep,name=methods,proto3" json:"methods,omitempty"`
@@ -2772,7 +2774,9 @@ type NetworkRule struct {
 	// Uppercase HTTP methods. Empty: any method.
 	Methods []string `protobuf:"bytes,2,rep,name=methods,proto3" json:"methods,omitempty"`
 	// A credential name the Worker Host injects into matching requests, or empty.
-	Credential    string `protobuf:"bytes,3,opt,name=credential,proto3" json:"credential,omitempty"`
+	Credential string `protobuf:"bytes,3,opt,name=credential,proto3" json:"credential,omitempty"`
+	// URL path prefixes a request's path must start with, at a `/` boundary. Empty: any path.
+	Paths         []string `protobuf:"bytes,4,rep,name=paths,proto3" json:"paths,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2826,6 +2830,13 @@ func (x *NetworkRule) GetCredential() string {
 		return x.Credential
 	}
 	return ""
+}
+
+func (x *NetworkRule) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
 }
 
 type PutPermissionSetRequest struct {
@@ -4019,13 +4030,14 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\fNetworkScope\x12\x1d\n" +
 	"\n" +
 	"any_origin\x18\x01 \x01(\bR\tanyOrigin\x126\n" +
-	"\x05rules\x18\x02 \x03(\v2 .supertag.runtime.v2.NetworkRuleR\x05rules\"a\n" +
+	"\x05rules\x18\x02 \x03(\v2 .supertag.runtime.v2.NetworkRuleR\x05rules\"w\n" +
 	"\vNetworkRule\x12\x18\n" +
 	"\aorigins\x18\x01 \x03(\tR\aorigins\x12\x18\n" +
 	"\amethods\x18\x02 \x03(\tR\amethods\x12\x1e\n" +
 	"\n" +
 	"credential\x18\x03 \x01(\tR\n" +
-	"credential\"\xcf\x01\n" +
+	"credential\x12\x14\n" +
+	"\x05paths\x18\x04 \x03(\tR\x05paths\"\xcf\x01\n" +
 	"\x17PutPermissionSetRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12I\n" +
 	"\x0epermission_set\x18\x02 \x01(\v2\".supertag.runtime.v2.PermissionSetR\rpermissionSet\x120\n" +

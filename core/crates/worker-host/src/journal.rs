@@ -1086,6 +1086,7 @@ mod tests {
                 workspace_mounts: vec![],
                 mcp_login_servers: vec![],
                 network_credentials: vec![],
+                network_sandbox: false,
             }),
             ..Default::default()
         };

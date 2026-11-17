@@ -513,17 +513,19 @@ outside the Workspace.
 
 ### Network scopes
 
-A network scope narrows a Permission Set's `web:fetch` grant to named origins and HTTP methods.
+A network scope narrows a Permission Set's `web:fetch` grant to named origins, HTTP methods, and
+URL paths.
 It can also name a credential that the Worker Host adds to those requests. The Task's commands
 never see the secret, only a placeholder. Network scopes live only in Permission Sets. A Tag's
 own `allowedActions` `web:fetch` reaches every origin.
 
-A runtime `web:fetch` permission takes three optional fields:
+A runtime `web:fetch` permission takes four optional fields:
 
 | Field | Meaning |
 | --- | --- |
-| `hosts` | Origins the Task may reach, `https://NAME` or `https://NAME:PORT`. Omitted: any origin |
+| `hosts` | Origins the Task may reach, `https://NAME`, `https://NAME:PORT`, or `https://*.NAME` for every subdomain of `NAME`. Omitted: any origin |
 | `methods` | HTTP methods allowed on those origins: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`. Omitted: any method |
+| `paths` | URL path prefixes allowed on those origins, such as `/repos/acme`. Omitted: any path. Needs `hosts` |
 | `credential` | A credential configured on the Worker Host, added to requests this permission allows. Needs `hosts` |
 
 ```yaml
@@ -540,28 +542,36 @@ spec:
       action: web:fetch
       hosts: ["https://api.github.com"]
       methods: [GET]
+      paths: [/repos/acme]
       credential: github
     - { target: runtime, action: commands:execute }
     - { target: runtime, action: files:write }
 ```
 
-Read as one statement: *the Task may read packages from PyPI, and read the GitHub API with the
-host's GitHub token, and nothing else on the network.*
+Read as one statement: *the Task may read packages from PyPI, and read the `acme` organization's
+repositories through the GitHub API with the host's GitHub token, and nothing else on the
+network.*
 
 Entries follow these rules:
 
 - An origin matches its exact host name, in any letter case, and its exact port. The default port
   443 is dropped, so `https://pypi.org:443` is `https://pypi.org`. `https://pypi.org` does not
   cover `https://www.pypi.org`.
+- `https://*.example.com` matches `a.example.com` and `a.b.example.com`, but not `example.com`;
+  list both when the Task needs both. A wildcard is allowed only as the first label.
 - Only `https://` origins are allowed, so a credential never travels in clear text. An origin
-  has no path, query, user name, or wildcard, and is not an IP address or `localhost`.
+  has no path, query, or user name, and is not an IP address or `localhost`.
+- A path prefix matches at a `/` boundary: `/repos/acme` matches `/repos/acme` and
+  `/repos/acme/app`, but not `/repos/acmex`. A prefix is literal and starts with `/`. A request
+  whose path holds a `.` or `..` segment or a percent-encoded dot or slash never matches a
+  prefix, so two spellings of one URL cannot pass different prefixes.
 - `GET` does not imply `HEAD`; list both.
 - A permission lists at most 64 hosts.
 
 `supertag apply` and `supertag diff` refuse an invalid entry and say why.
 
 Every Permission Set a Task receives applies, and their grants combine. A request is allowed when
-any grant allows its origin and method. A `web:fetch` grant with neither `hosts` nor `methods`,
+any grant allows its origin, method, and path. A `web:fetch` grant with neither `hosts` nor `methods`,
 including a Tag's own `web:fetch`, allows every request; then only the credential bindings still
 matter. A credential is added only to a request that a grant naming it allows. A request that
 carries a credential's placeholder anywhere else is refused.
@@ -605,7 +615,8 @@ Commands get the authority's certificate in `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE
 | Harness | Scope with `hosts` or `methods` | Scope that only names credentials |
 | --- | --- | --- |
 | Codex, local Worker Host | operating system: the sandbox allows only loopback, Codex's managed network proxy allows only the scope's hosts, and it forwards every connection through the egress proxy | commands reach the network directly, and the proxy variables point at the egress proxy |
-| Claude Code, OpenCode, Cursor, custom harnesses | not supported: the Task waits | not supported: the Task waits |
+| Claude Code | `WebFetch`: tool, SuperTag's tool hook checks each URL. Commands: operating system, Claude Code's own sandbox sends their traffic only to the egress proxy, on a host that can run it. A scope that names a credential is not supported: the Task waits | not supported: the Task waits |
+| OpenCode, Cursor, custom harnesses | not supported: the Task waits | not supported: the Task waits |
 | Remote Workspaces and shared execution | not supported: the Task waits | not supported: the Task waits |
 
 A Task waits too when no Worker Host offers a credential its scope names.
@@ -618,6 +629,19 @@ a host that runs the Tag
 
 Codex code-mode commands run under the same profile, so they reach the network only through
 the managed proxy and the egress proxy as well.
+
+Claude Code's sandbox runs on macOS, and on Linux when `bubblewrap` and `socat` are installed. A
+Claude Code host reports whether it can run the sandbox, and only such a host takes a Task that
+may run commands under a network scope. Claude Code fails the Task Attempt instead of running
+commands unsandboxed when its sandbox does not start. The sandbox isolates only the network:
+commands still need `allow-unsandboxed-commands`. Go programs on macOS, such as `gh`, may not
+trust the proxy's certificate from inside the sandbox.
+
+Claude Code's sandbox connects to the egress proxy without the Task Attempt's proxy password, so
+the proxy of a Claude Code Task Attempt accepts any process on the Worker Host. Such a proxy
+never carries a credential, and it still allows only the Task's scope. A process that can reach
+the Worker Host's loopback, such as another Task's Codex commands, could use it while the Task
+Attempt runs.
 
 ### Network log
 

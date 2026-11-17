@@ -75,6 +75,10 @@ async fn report(
 }
 
 async fn task(store: &Store, tag: &str, harness: HarnessKind) -> String {
+    task_with(store, tag, harness, "fetcher").await
+}
+
+async fn task_with(store: &Store, tag: &str, harness: HarnessKind, role: &str) -> String {
     store
         .put_tag_spec(PutTagRequest {
             tag_id: tag.into(),
@@ -90,7 +94,7 @@ async fn task(store: &Store, tag: &str, harness: HarnessKind) -> String {
             OP,
             &AssignRoleRequest {
                 operation_id: format!("assign-{tag}"),
-                role: "fetcher".into(),
+                role: role.into(),
                 tag_id: tag.into(),
             },
         )
@@ -141,7 +145,14 @@ async fn contract(url: &str) {
             fetch(&["https://pypi.org/simple"], &[], ""),
             "without a path",
         ),
-        (fetch(&["https://*.github.com"], &[], ""), "wildcard"),
+        (fetch(&["https://api.*.github.com"], &[], ""), "first label"),
+        (
+            PolicyPermission {
+                paths: strings(&["/repos"]),
+                ..fetch(&[], &["GET"], "")
+            },
+            "need hosts",
+        ),
         (fetch(&[], &["CONNECT"], ""), "is not one of"),
         (fetch(&[], &[], "github"), "needs hosts"),
         (
@@ -228,7 +239,7 @@ async fn contract(url: &str) {
     assert!(
         diagnosis
             .summary
-            .contains("Claude Code cannot force web requests"),
+            .contains("Claude Code's sandbox cannot authenticate to SuperTag's egress proxy"),
         "{}",
         diagnosis.summary
     );
@@ -357,6 +368,73 @@ async fn contract(url: &str) {
     assert!(network.any_origin);
     assert_eq!(network.rules.len(), 1);
     assert_eq!(network.rules[0].credential, "github");
+    // Without credentials, Claude Code applies a scope where its own sandbox runs.
+    put_set(
+        &store,
+        "pypi",
+        vec![fetch(
+            &["https://pypi.org", "https://*.pythonhosted.org"],
+            &["GET"],
+            "",
+        )],
+    )
+    .await
+    .unwrap();
+    store
+        .put_role(
+            OP,
+            &PutRoleRequest {
+                operation_id: "pypi-role".into(),
+                role: Some(Role {
+                    role_id: "pypi".into(),
+                    name: "pypi".into(),
+                    purpose: "Install packages".into(),
+                    permission_set_ids: strings(&["pypi"]),
+                    status: RoleStatus::Active.into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let packages = task_with(&store, "claude-pypi", HarnessKind::ClaudeCode, "pypi").await;
+    assert!(
+        claim(&store, &claude, HarnessKind::ClaudeCode, &unsandboxed)
+            .await
+            .is_none()
+    );
+    let diagnosis = store.diagnose_task_placement(&packages).await.unwrap();
+    assert_eq!(diagnosis.requirement, "network-scope");
+    assert!(
+        diagnosis
+            .summary
+            .contains("cannot run Claude Code's sandbox"),
+        "{}",
+        diagnosis.summary
+    );
+    let sandboxed_claude = support::register_host(&store, "claude-sandboxed").await;
+    let sandboxed = HarnessExecutionProfile {
+        allow_unsandboxed_commands: true,
+        network_sandbox: true,
+        ..Default::default()
+    };
+    report(
+        &store,
+        &sandboxed_claude,
+        HarnessKind::ClaudeCode,
+        sandboxed.clone(),
+    )
+    .await;
+    let claimed = claim(
+        &store,
+        &sandboxed_claude,
+        HarnessKind::ClaudeCode,
+        &sandboxed,
+    )
+    .await
+    .unwrap();
+    assert_eq!(claimed.task.unwrap().task_id, packages);
     store.close().await;
 }
 

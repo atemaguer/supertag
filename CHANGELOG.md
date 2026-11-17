@@ -21,6 +21,12 @@ within the pre-1.0 compatibility policy described in
   thread naming the connected Tag, instead of no answer.
 - Slack and Lark event-ID receipts are deleted after 7 days. Message receipts are kept, so a late
   redelivery still reaches its original Task.
+- Network scopes take `https://*.example.com` wildcards for every subdomain and `paths`, URL
+  path prefixes such as `/repos/acme`, on a `web:fetch` grant. Claude Code Tasks with a network
+  scope run their commands in Claude Code's own sandbox, which sends their traffic only to the
+  Worker Host's egress proxy, and SuperTag checks each `WebFetch` URL; such a scope cannot name a
+  credential. A Claude Code host reports whether it can run the sandbox: on Linux it needs
+  bubblewrap and socat.
 - Merging a pull request that a work Session delivered closes that Session (`closed: pull request
   merged`). A pull request closed without merging leaves it open for a revision.
 - A pull request publication queued because its Worker Host was offline retries as soon as that

@@ -20,6 +20,7 @@ fn rule(origins: &[String], methods: &[&str], credential: &str) -> NetworkRule {
         origins: origins.to_vec(),
         methods: methods.iter().map(|method| (*method).to_owned()).collect(),
         credential: credential.to_owned(),
+        paths: vec![],
     }
 }
 
@@ -152,7 +153,7 @@ async fn injects_a_bound_credential_and_logs_each_decision() {
         reasons,
         [
             "credential github is not allowed for this origin and method",
-            "the method is not allowed for this origin",
+            "the method or path is not allowed for this origin",
             "origin is not in the Task's network scope",
             "only https:// origins are allowed",
         ],

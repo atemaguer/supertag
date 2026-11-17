@@ -39,6 +39,7 @@ import {
   HarnessWorkSessions,
   HarnessWorkstreams,
   LiveInputReceipt,
+  NetworkRules,
   ObjectiveSignal,
   type ResolvedSkill,
   type SessionCheckpoint,
@@ -50,7 +51,14 @@ import {
   TaskState,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it } from "vitest";
-import { mountRoots, nativeDenyRules, permissionHook } from "./src/rust-adapter/adapter.js";
+import {
+  egressCertificateEnvironment,
+  mountRoots,
+  NO_SCOPE,
+  nativeDenyRules,
+  networkSandbox,
+  permissionHook,
+} from "./src/rust-adapter/adapter.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const native = join(here, "fixtures/rust-native-claude.mjs");
@@ -1441,3 +1449,69 @@ it("publishes Claude's sentence of intent as a message and its tool call as an a
     [TaskEventKind.MESSAGE, "fixture first turn"],
   ]);
 }, 30000);
+
+it("keeps WebFetch and sandboxed commands inside the Task's network scope", async () => {
+  const scope = {
+    anyOrigin: false,
+    rules: [
+      {
+        origins: ["https://pypi.org", "https://*.pythonhosted.org"],
+        methods: ["GET"],
+        credential: "",
+        paths: [],
+      },
+    ],
+  };
+  const hook = permissionHook(
+    ["WebFetch"],
+    "/",
+    new AbortController().signal,
+    new Set(),
+    [],
+    new Map(),
+    { read: [], write: [] },
+    { ...NO_SCOPE, network: new NetworkRules(scope) },
+  );
+  for (const [url, decision] of [
+    ["https://pypi.org/simple/requests/", "allow"],
+    ["https://files.pythonhosted.org/packages/x.whl", "allow"],
+    ["https://example.org/", "deny"],
+    ["http://pypi.org/", "deny"],
+    ["not a url", "deny"],
+  ]) {
+    const result = await hook(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "session",
+        cwd: "/",
+        transcript_path: "",
+        tool_name: "WebFetch",
+        tool_input: { url, prompt: "read it" },
+        tool_use_id: "tool",
+      },
+      "tool",
+      { signal: new AbortController().signal },
+    );
+    expect(result, url).toMatchObject({ hookSpecificOutput: { permissionDecision: decision } });
+  }
+  expect(networkSandbox(scope, "http://supertag:pw@127.0.0.1:4100")).toEqual({
+    enabled: true,
+    failIfUnavailable: true,
+    autoAllowBashIfSandboxed: true,
+    allowUnsandboxedCommands: false,
+    network: {
+      allowedDomains: ["*.pythonhosted.org", "pypi.org"],
+      strictAllowlist: true,
+      httpProxyPort: 4100,
+      socksProxyPort: 4100,
+    },
+    filesystem: { disabled: true },
+  });
+  expect(
+    egressCertificateEnvironment({
+      SUPERTAG_EGRESS_CA_BUNDLE: "/s/bundle.pem",
+      SUPERTAG_EGRESS_CA_CERTIFICATE: "/s/ca.pem",
+    }),
+  ).toMatchObject({ SSL_CERT_FILE: "/s/bundle.pem", NODE_EXTRA_CA_CERTS: "/s/ca.pem" });
+  expect(() => egressCertificateEnvironment({})).toThrow("egress proxy");
+});

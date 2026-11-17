@@ -21,6 +21,11 @@ import {
   fileScopeRefusal,
   harnessClient,
   LiveInputReceipt,
+  NetworkRules,
+  type NetworkScopeLike,
+  networkCredentials,
+  networkHostNames,
+  networkScopeOf,
   type OutsideDirectories,
   receipt,
   redact,
@@ -196,6 +201,53 @@ export interface HookScope {
   readonly outside: OutsideDirectories;
   /** The Task Attempt's output directory, which stays writable under any scope. */
   readonly output?: string | undefined;
+  /** The Task's network scope, which `WebFetch` must stay inside. */
+  readonly network?: NetworkRules | undefined;
+}
+
+/**
+ * Claude Code's sandbox settings for a Task with a network scope. Sandboxed commands reach only
+ * the Worker Host's egress proxy, which enforces the scope; filesystem isolation stays off, so
+ * commands keep needing the host's allow-unsandboxed-commands opt-in. Claude Code fails the run
+ * instead of running commands unsandboxed when its sandbox cannot start.
+ */
+export function networkSandbox(scope: NetworkScopeLike, proxy: string) {
+  const port = Number(new URL(proxy).port);
+  if (!Number.isInteger(port) || port <= 0)
+    throw new SafeAdapterFailure(
+      "The Worker Host's egress proxy address is invalid. Native execution did not start.",
+    );
+  return {
+    enabled: true,
+    failIfUnavailable: true,
+    autoAllowBashIfSandboxed: true,
+    allowUnsandboxedCommands: false,
+    network: {
+      allowedDomains: networkHostNames(scope),
+      strictAllowlist: true,
+      httpProxyPort: port,
+      socksProxyPort: port,
+    },
+    filesystem: { disabled: true },
+  };
+}
+
+/** Certificate variables for commands behind the egress proxy, which intercepts TLS. */
+export function egressCertificateEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const bundle = environment["SUPERTAG_EGRESS_CA_BUNDLE"];
+  const certificate = environment["SUPERTAG_EGRESS_CA_CERTIFICATE"];
+  if (!bundle || !certificate)
+    throw new SafeAdapterFailure(
+      "Claude Code cannot apply this Task's network scope without the Worker Host's egress proxy. Native execution did not start.",
+    );
+  return {
+    SSL_CERT_FILE: bundle,
+    REQUESTS_CA_BUNDLE: bundle,
+    CURL_CA_BUNDLE: bundle,
+    PIP_CERT: bundle,
+    GIT_SSL_CAINFO: bundle,
+    NODE_EXTRA_CA_CERTS: certificate,
+  };
 }
 
 export const NO_SCOPE: HookScope = {
@@ -321,6 +373,17 @@ export function permissionHook(
         hook.mcp_server.name === server;
     }
     let reason: string | undefined;
+    if (allowed && hook.tool_name === "WebFetch" && scope.network) {
+      const url = (hook.tool_input as Record<string, unknown>)["url"];
+      let parsed: URL | undefined;
+      try {
+        parsed = typeof url === "string" ? new URL(url) : undefined;
+      } catch {
+        parsed = undefined;
+      }
+      allowed = parsed !== undefined && scope.network.allows("GET", parsed);
+      if (!allowed) reason = "outside the Task's network scope";
+    }
     if (allowed && ["Read", "Write", "Edit", "Glob", "Grep"].includes(hook.tool_name)) {
       const input = hook.tool_input as Record<string, unknown>;
       const path = ["Read", "Write", "Edit"].includes(hook.tool_name)
@@ -367,7 +430,9 @@ export function permissionHook(
         permissionDecisionReason: allowed
           ? "Accepted Task permission"
           : reason
-            ? `The path is ${reason}`
+            ? hook.tool_name === "WebFetch"
+              ? `The URL is ${reason}`
+              : `The path is ${reason}`
             : "Outside the accepted Task permissions or allowed paths",
       },
     };
@@ -481,6 +546,11 @@ export async function runAdapter(
     const refusal = fileScopeRefusal(task, "claude-code");
     if (refusal) throw new SafeAdapterFailure(`${refusal}. Native execution did not start.`);
     const fileScope = fileScopeOf(task);
+    const networkScope = networkScopeOf(task);
+    if (networkScope && networkCredentials(networkScope).length > 0)
+      throw new SafeAdapterFailure(
+        "Claude Code's sandbox cannot authenticate to SuperTag's egress proxy, so it cannot carry network credentials. Native execution did not start.",
+      );
     const model = task.attemptExecution
       ? task.attemptExecution.selection?.model
       : (task.policySnapshot?.execution?.models[0] ?? configuration.model);
@@ -526,7 +596,20 @@ export async function runAdapter(
       rules: new FileScopeRules(fileScope),
       outside,
       output: env["SUPERTAG_OUTPUT_DIR"],
+      network: networkScope ? new NetworkRules(networkScope) : undefined,
     };
+    // Commands under a network scope run in Claude Code's sandbox, which sends their traffic
+    // only to the Worker Host's egress proxy.
+    let sandbox: ReturnType<typeof networkSandbox> | undefined;
+    if (networkScope && tools.includes("Bash")) {
+      const proxy = environment["SUPERTAG_EGRESS_PROXY"];
+      if (!proxy)
+        throw new SafeAdapterFailure(
+          "Claude Code cannot apply this Task's network scope without the Worker Host's egress proxy. Native execution did not start.",
+        );
+      sandbox = networkSandbox(networkScope, proxy);
+      Object.assign(env, egressCertificateEnvironment(environment));
+    }
     phase = "checkpoint validation";
     const restored = restoreCheckpoint(run.checkpoint, task, cwd);
     nativeSessionId = restored?.nativeSessionId;
@@ -588,6 +671,7 @@ export async function runAdapter(
         autoMemoryEnabled: false,
         autoDreamEnabled: false,
         ...(fileScope ? { permissions: { deny: nativeDenyRules(cwd, fileScope) } } : {}),
+        ...(sandbox ? { sandbox } : {}),
       },
       systemPrompt: [task.instructions, TURN_GUIDANCE, tagPortfolio(run)]
         .filter(Boolean)

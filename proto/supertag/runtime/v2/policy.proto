@@ -156,9 +156,10 @@ message PolicyPermission {
   string reference = 6;
   string resource = 7;
   bool approval_required = 8;
-  // Path scopes, on runtime files:write and files:read only. Workspace-relative directories or
+  // Path scopes, on runtime files:write and files:read. Workspace-relative directories or
   // exact paths. On files:write, the only Workspace paths it may write; empty means the whole
-  // Workspace. files:read takes none: reads cover the whole Workspace minus `exclude`.
+  // Workspace. files:read takes none: reads cover the whole Workspace minus `exclude`. On
+  // web:fetch, URL path prefixes such as `/repos/acme/`; empty means any path. Needs `hosts`.
   repeated string paths = 9;
   // Workspace-relative paths never written (files:write: they stay readable) or never read or
   // written (files:read, where `*`, `**` and `?` globs are allowed). Excludes win over `paths`.
@@ -166,8 +167,9 @@ message PolicyPermission {
   // Directories outside the Workspace, absolute or starting with `~/`: writable on
   // files:write, readable on files:read.
   repeated string additional_directories = 11;
-  // Network scopes, on runtime web:fetch only. `https://NAME[:PORT]` origins the Task may reach;
-  // empty means any origin.
+  // Network scopes, on runtime web:fetch only. `https://NAME[:PORT]` or `https://*.NAME[:PORT]`
+  // origins the Task may reach; empty means any origin. On web:fetch, `paths` above are URL path
+  // prefixes on these origins.
   repeated string hosts = 12;
   // HTTP methods allowed on `hosts`, uppercase; empty means any method.
   repeated string methods = 13;
@@ -303,6 +305,8 @@ message NetworkRule {
   repeated string methods = 2;
   // A credential name the Worker Host injects into matching requests, or empty.
   string credential = 3;
+  // URL path prefixes a request's path must start with, at a `/` boundary. Empty: any path.
+  repeated string paths = 4;
 }
 
 message PutPermissionSetRequest {

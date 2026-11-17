@@ -74,6 +74,13 @@ pub fn normalize_permission(action: &str, fields: PermissionPaths<'_>) -> Result
         exclude,
         additional_directories,
     } = fields;
+    // On web:fetch, `paths` are URL path prefixes, which `network_scope` checks.
+    if action == crate::network_scope::WEB_FETCH
+        && exclude.is_empty()
+        && additional_directories.is_empty()
+    {
+        return Ok(());
+    }
     let scoped = !paths.is_empty() || !exclude.is_empty() || !additional_directories.is_empty();
     if !scoped {
         return Ok(());

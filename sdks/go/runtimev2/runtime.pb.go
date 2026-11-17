@@ -15019,8 +15019,11 @@ type HarnessExecutionProfile struct {
 	// Names of the network credentials this host injects through its egress proxy. Only names;
 	// the values never leave the host.
 	NetworkCredentials []string `protobuf:"bytes,1900,rep,name=network_credentials,json=networkCredentials,proto3" json:"network_credentials,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// This Claude Code lane can run Claude Code's own sandbox (macOS, or Linux with bubblewrap and
+	// socat), which sends sandboxed commands' traffic only to the egress proxy.
+	NetworkSandbox bool `protobuf:"varint,1901,opt,name=network_sandbox,json=networkSandbox,proto3" json:"network_sandbox,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *HarnessExecutionProfile) Reset() {
@@ -15128,6 +15131,13 @@ func (x *HarnessExecutionProfile) GetNetworkCredentials() []string {
 		return x.NetworkCredentials
 	}
 	return nil
+}
+
+func (x *HarnessExecutionProfile) GetNetworkSandbox() bool {
+	if x != nil {
+		return x.NetworkSandbox
+	}
+	return false
 }
 
 type SharedExecutionCapability struct {
@@ -25701,7 +25711,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x05model\x18\x01 \x01(\tH\x00R\x05model\x88\x01\x01\x12\x1b\n" +
 	"\x06effort\x18\x02 \x01(\tH\x01R\x06effort\x88\x01\x01B\b\n" +
 	"\x06_modelB\t\n" +
-	"\a_effort\"\xa9\x05\n" +
+	"\a_effort\"\xd3\x05\n" +
 	"\x17HarnessExecutionProfile\x12\x1b\n" +
 	"\tmodel_ids\x18\x01 \x03(\tR\bmodelIds\x12(\n" +
 	"\rdefault_model\x18\x02 \x01(\tH\x00R\fdefaultModel\x88\x01\x01\x12<\n" +
@@ -25714,7 +25724,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x14task_artifact_inputs\x18\b \x01(\bR\x12taskArtifactInputs\x12X\n" +
 	"\x10workspace_mounts\x18\t \x03(\v2-.supertag.runtime.v2.WorkspaceMountCapabilityR\x0fworkspaceMounts\x12+\n" +
 	"\x11mcp_login_servers\x18\x88\x0e \x03(\tR\x0fmcpLoginServers\x120\n" +
-	"\x13network_credentials\x18\xec\x0e \x03(\tR\x12networkCredentialsB\x10\n" +
+	"\x13network_credentials\x18\xec\x0e \x03(\tR\x12networkCredentials\x12(\n" +
+	"\x0fnetwork_sandbox\x18\xed\x0e \x01(\bR\x0enetworkSandboxB\x10\n" +
 	"\x0e_default_model\"\xa9\x01\n" +
 	"\x19SharedExecutionCapability\x12%\n" +
 	"\x0eenvironment_id\x18\x01 \x01(\tR\renvironmentId\x12>\n" +

@@ -27,7 +27,13 @@ pub struct PermissionNetwork<'a> {
     pub hosts: &'a mut Vec<String>,
     pub methods: &'a mut Vec<String>,
     pub credential: &'a mut String,
+    /// URL path prefixes; on a web:fetch permission these are the permission's `paths`.
+    pub paths: &'a mut Vec<String>,
 }
+
+/// URL path prefixes per permission.
+pub const MAX_PATHS: usize = 64;
+const MAX_PATH_BYTES: usize = 512;
 
 /// Validate and canonicalize one runtime permission's network fields in place. The error names the
 /// entry and how to fix it.
@@ -36,15 +42,36 @@ pub fn normalize_permission(action: &str, fields: PermissionNetwork<'_>) -> Resu
         hosts,
         methods,
         credential,
+        paths,
     } = fields;
     *credential = credential.trim().to_owned();
-    if hosts.is_empty() && methods.is_empty() && credential.is_empty() {
-        return Ok(());
-    }
     if action != WEB_FETCH {
+        // A file grant's `paths` are Workspace paths, checked by `file_scope`.
+        if hosts.is_empty() && methods.is_empty() && credential.is_empty() {
+            return Ok(());
+        }
         return Err(format!(
             "{action} takes no hosts, methods, or credential: only runtime web:fetch permissions are network-scoped"
         ));
+    }
+    if hosts.is_empty() && methods.is_empty() && credential.is_empty() && paths.is_empty() {
+        return Ok(());
+    }
+    if paths.len() > MAX_PATHS {
+        return Err(format!(
+            "web:fetch paths may list at most {MAX_PATHS} prefixes"
+        ));
+    }
+    *paths = paths
+        .iter()
+        .map(|value| canonical_path(value))
+        .collect::<Result<BTreeSet<_>, _>>()?
+        .into_iter()
+        .collect();
+    if !paths.is_empty() && hosts.is_empty() {
+        return Err(
+            "web:fetch paths need hosts: name the origins whose paths they limit".to_owned(),
+        );
     }
     if hosts.len() > MAX_HOSTS {
         return Err(format!(
@@ -107,7 +134,58 @@ pub fn validate_credential_name(name: &str) -> Result<(), String> {
     }
 }
 
+/// A URL path prefix: absolute, without a query, fragment, `.` or `..` segment, backslash,
+/// percent-encoded dot or slash, or a trailing `/` (except `/` itself).
+pub fn canonical_path(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    let refuse = |why: &str| Err(format!("web:fetch path {raw:?} {why}"));
+    if !value.starts_with('/') {
+        return refuse("must start with /, such as /repos/acme/");
+    }
+    if value.len() > MAX_PATH_BYTES {
+        return refuse("is longer than 512 bytes");
+    }
+    if value.contains(['?', '#', '\\', '*'])
+        || value.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return refuse("must be a literal path without a query, fragment, wildcard, or spaces");
+    }
+    if !canonical_request_path(value) {
+        return refuse("must not contain . or .. segments or percent-encoded dots or slashes");
+    }
+    let trimmed = value.trim_end_matches('/');
+    Ok(if trimmed.is_empty() {
+        "/".to_owned()
+    } else {
+        trimmed.to_owned()
+    })
+}
+
+/// Whether a request path, without its query, can be compared with path prefixes: no `.` or `..`
+/// segment, backslash, or percent-encoded dot, slash, or backslash, so two spellings of one
+/// resource cannot pass different prefixes.
+pub fn canonical_request_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    !path.contains('\\')
+        && !["%2e", "%2f", "%5c", "%00"]
+            .iter()
+            .any(|encoded| lower.contains(encoded))
+        && !path
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
+}
+
+/// Whether `path` lies under `prefix` at a `/` boundary.
+pub fn path_matches(prefix: &str, path: &str) -> bool {
+    prefix == "/"
+        || path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// `https://name` or `https://name:port`, lowercased, without the default port or a trailing `/`.
+/// `https://*.name` names every subdomain of `name`, at any depth, but not `name` itself.
 pub fn canonical_origin(raw: &str) -> Result<String, String> {
     let refuse = |why: &str| Err(format!("web:fetch host {raw:?} {why}"));
     let value = raw.trim();
@@ -148,8 +226,14 @@ pub fn canonical_origin(raw: &str) -> Result<String, String> {
         None => (rest, None),
     };
     let host = host.to_ascii_lowercase();
+    let (wildcard, host) = match host.strip_prefix("*.") {
+        Some(rest) => (true, rest.to_owned()),
+        None => (false, host),
+    };
     if host.contains('*') {
-        return refuse("contains a wildcard; name each host");
+        return refuse(
+            "may hold a wildcard only as its first label, such as https://*.example.com",
+        );
     }
     if host.len() > MAX_HOST_BYTES || !host.is_ascii() {
         return refuse("must be an ASCII host name of at most 253 characters");
@@ -179,6 +263,7 @@ pub fn canonical_origin(raw: &str) -> Result<String, String> {
     if labels.last() == Some(&"localhost") {
         return refuse("names this machine; a network scope reaches only the internet");
     }
+    let host = if wildcard { format!("*.{host}") } else { host };
     Ok(match port {
         Some(port) if port != 443 => format!("https://{host}:{port}"),
         _ => format!("https://{host}"),
@@ -191,6 +276,7 @@ pub struct Grant<'a> {
     pub hosts: &'a [String],
     pub methods: &'a [String],
     pub credential: &'a str,
+    pub paths: &'a [String],
     /// Whether this grant's action is admitted. A gated grant adds nothing.
     pub admitted: bool,
 }
@@ -208,24 +294,30 @@ pub fn compose<'a>(
         if grant.action != WEB_FETCH || !grant.admitted {
             continue;
         }
-        if grant.hosts.is_empty() && grant.methods.is_empty() && grant.credential.is_empty() {
+        if grant.hosts.is_empty()
+            && grant.methods.is_empty()
+            && grant.credential.is_empty()
+            && grant.paths.is_empty()
+        {
             any = true;
         } else {
             rules.insert((
                 grant.hosts.to_vec(),
                 grant.methods.to_vec(),
                 grant.credential.to_owned(),
+                grant.paths.to_vec(),
             ));
         }
     }
     let rules: Vec<NetworkRule> = rules
         .into_iter()
         // With every request allowed, a rule matters only for the credential it binds.
-        .filter(|(_, _, credential)| !any || !credential.is_empty())
-        .map(|(origins, methods, credential)| NetworkRule {
+        .filter(|(_, _, credential, _)| !any || !credential.is_empty())
+        .map(|(origins, methods, credential, paths)| NetworkRule {
             origins,
             methods,
             credential,
+            paths,
         })
         .collect();
     (!rules.is_empty()).then_some(NetworkScope {
@@ -287,8 +379,9 @@ pub struct Rules {
     rules: Vec<CompiledRule>,
 }
 
-/// A rule's origins as `(host, port)`, its methods, and its credential.
-type CompiledRule = (Vec<(String, u16)>, Vec<String>, String);
+/// A rule's origins as `(host, port)` (a host starting `*.` names subdomains), its methods, its
+/// credential, and its path prefixes.
+type CompiledRule = (Vec<(String, u16)>, Vec<String>, String, Vec<String>);
 
 fn origin_parts(origin: &str) -> Option<(String, u16)> {
     let rest = origin.strip_prefix("https://")?;
@@ -313,6 +406,7 @@ impl From<&NetworkScope> for Rules {
                             .collect(),
                         rule.methods.clone(),
                         rule.credential.clone(),
+                        rule.paths.clone(),
                     )
                 })
                 .collect(),
@@ -323,9 +417,23 @@ impl From<&NetworkScope> for Rules {
 impl Rules {
     fn origin_matches(origins: &[(String, u16)], host: &str, port: u16) -> bool {
         origins.is_empty()
-            || origins
-                .iter()
-                .any(|(name, number)| *number == port && name.eq_ignore_ascii_case(host))
+            || origins.iter().any(|(name, number)| {
+                *number == port
+                    && match name.strip_prefix("*.") {
+                        Some(parent) => {
+                            host.len() > parent.len() + 1
+                                && host[host.len() - parent.len()..].eq_ignore_ascii_case(parent)
+                                && host.as_bytes()[host.len() - parent.len() - 1] == b'.'
+                        }
+                        None => name.eq_ignore_ascii_case(host),
+                    }
+            })
+    }
+
+    fn path_allowed(paths: &[String], path: &str) -> bool {
+        paths.is_empty()
+            || (canonical_request_path(path)
+                && paths.iter().any(|prefix| path_matches(prefix, path)))
     }
 
     fn method_matches(methods: &[String], method: &str) -> bool {
@@ -338,24 +446,28 @@ impl Rules {
             || self
                 .rules
                 .iter()
-                .any(|(origins, _, _)| Self::origin_matches(origins, host, port))
+                .any(|(origins, _, _, _)| Self::origin_matches(origins, host, port))
     }
 
-    /// Whether a request with `method` to `host:port` is allowed.
-    pub fn allows(&self, host: &str, port: u16, method: &str) -> bool {
+    /// Whether a request with `method` for `path` (without its query) to `host:port` is allowed.
+    pub fn allows(&self, host: &str, port: u16, method: &str, path: &str) -> bool {
         self.any_origin
-            || self.rules.iter().any(|(origins, methods, _)| {
-                Self::origin_matches(origins, host, port) && Self::method_matches(methods, method)
+            || self.rules.iter().any(|(origins, methods, _, paths)| {
+                Self::origin_matches(origins, host, port)
+                    && Self::method_matches(methods, method)
+                    && Self::path_allowed(paths, path)
             })
     }
 
-    /// Whether `credential` may be injected into a request with `method` to `host:port`.
-    pub fn binds(&self, credential: &str, host: &str, port: u16, method: &str) -> bool {
-        self.rules.iter().any(|(origins, methods, name)| {
+    /// Whether `credential` may be injected into a request with `method` for `path` to
+    /// `host:port`.
+    pub fn binds(&self, credential: &str, host: &str, port: u16, method: &str, path: &str) -> bool {
+        self.rules.iter().any(|(origins, methods, name, paths)| {
             name == credential
                 && !origins.is_empty()
                 && Self::origin_matches(origins, host, port)
                 && Self::method_matches(methods, method)
+                && Self::path_allowed(paths, path)
         })
     }
 }
@@ -373,14 +485,26 @@ fn harness_name(harness: HarnessKind) -> &'static str {
 
 /// Why `harness` can never apply this Task's network scope, whatever host runs it, or `None`.
 ///
-/// Only Codex's sandbox forces every command connection through SuperTag's egress proxy. The
-/// other harnesses run commands unsandboxed or fetch from the harness process itself.
+/// Codex's sandbox forces every command connection through SuperTag's egress proxy, and so does
+/// Claude Code's sandbox where the host can run it (see [`reason`]); Claude Code cannot carry
+/// credentials. The other harnesses run commands unsandboxed or fetch from the harness process.
 pub fn harness_reason(task: &Task, harness: HarnessKind) -> Option<String> {
     let scope = of_task(task)?;
     if harness == HarnessKind::Codex {
         return None;
     }
     let name = harness_name(harness);
+    // Claude Code's sandbox reaches the egress proxy without its password, so it can apply the
+    // allow-list but never carry a credential.
+    if harness == HarnessKind::ClaudeCode {
+        let bound = credentials(scope);
+        return (!bound.is_empty()).then(|| {
+            format!(
+                "Claude Code's sandbox cannot authenticate to SuperTag's egress proxy, so it cannot carry network credentials ({}); run the Tag on Codex, or remove credential from its web:fetch grants",
+                bound.into_iter().collect::<Vec<_>>().join(", ")
+            )
+        });
+    }
     Some(if narrows(scope) {
         format!(
             "{name} cannot force web requests through SuperTag's egress proxy, so it cannot keep the Task to the origins its Permission Sets name ({}); run the Tag on Codex, or remove hosts and methods from its web:fetch grants",
@@ -425,6 +549,18 @@ pub fn reason(
         return Some(reason);
     }
     let scope = of_task(task)?;
+    // Claude Code checks WebFetch in its tool hook; commands need its sandbox.
+    if harness == HarnessKind::ClaudeCode
+        && task
+            .allowed_actions
+            .iter()
+            .any(|action| action == "commands:execute")
+        && !profile.network_sandbox
+    {
+        return Some(
+            "this Worker Host cannot run Claude Code's sandbox, which keeps commands to the Task's network scope; on Linux install bubblewrap and socat, or run the Tag on Codex".to_owned(),
+        );
+    }
     if profile.remote_file_workspace || profile.shared_execution.is_some() {
         return Some(
             "a remote or shared execution environment cannot send its traffic through SuperTag's egress proxy yet; run the Tag on a local Codex Worker Host".to_owned(),
@@ -463,6 +599,9 @@ pub fn summary(scope: &NetworkScope) -> String {
         let mut details = vec![];
         if !rule.methods.is_empty() {
             details.push(rule.methods.join(", "));
+        }
+        if !rule.paths.is_empty() {
+            details.push(format!("paths {}", rule.paths.join(", ")));
         }
         if !rule.credential.is_empty() {
             details.push(format!("credential {}", rule.credential));
@@ -503,6 +642,7 @@ mod tests {
                 hosts: &mut hosts,
                 methods: &mut methods,
                 credential: &mut credential,
+                paths: &mut vec![],
             },
         )?;
         Ok((hosts, methods, credential))
@@ -575,7 +715,14 @@ mod tests {
             "",
             "user information",
         );
-        refused(WEB_FETCH, &["https://*.pypi.org"], &[], "", "wildcard");
+        refused(WEB_FETCH, &["https://*.org"], &[], "", "fully qualified");
+        refused(
+            WEB_FETCH,
+            &["https://api.*.pypi.org"],
+            &[],
+            "",
+            "first label",
+        );
         refused(WEB_FETCH, &["https://10.0.0.1"], &[], "", "IP address");
         refused(WEB_FETCH, &["https://[::1]"], &[], "", "IP address");
         refused(
@@ -631,6 +778,7 @@ mod tests {
             hosts,
             methods,
             credential,
+            paths: &[],
             admitted: true,
         }
     }
@@ -649,16 +797,16 @@ mod tests {
         assert!(!scope.any_origin);
         assert_eq!(scope.rules.len(), 2);
         let rules = Rules::from(&scope);
-        assert!(rules.allows("pypi.org", 443, "GET"));
-        assert!(rules.allows("PyPI.org", 443, "GET"));
-        assert!(!rules.allows("pypi.org", 443, "POST"));
-        assert!(!rules.allows("pypi.org", 8443, "GET"));
-        assert!(!rules.allows("www.pypi.org", 443, "GET"));
+        assert!(rules.allows("pypi.org", 443, "GET", "/"));
+        assert!(rules.allows("PyPI.org", 443, "GET", "/"));
+        assert!(!rules.allows("pypi.org", 443, "POST", "/"));
+        assert!(!rules.allows("pypi.org", 8443, "GET", "/"));
+        assert!(!rules.allows("www.pypi.org", 443, "GET", "/"));
         assert!(rules.allows_origin("api.github.com", 443));
         assert!(!rules.allows_origin("github.com", 443));
-        assert!(rules.binds("github", "api.github.com", 443, "GET"));
-        assert!(!rules.binds("github", "api.github.com", 443, "POST"));
-        assert!(!rules.binds("github", "pypi.org", 443, "GET"));
+        assert!(rules.binds("github", "api.github.com", 443, "GET", "/"));
+        assert!(!rules.binds("github", "api.github.com", 443, "POST", "/"));
+        assert!(!rules.binds("github", "pypi.org", 443, "GET", "/"));
         assert_eq!(
             host_names(&scope),
             ["api.github.com", "pypi.org"].map(str::to_owned).into()
@@ -676,7 +824,7 @@ mod tests {
         .unwrap();
         assert!(scope.any_origin);
         assert_eq!(scope.rules.len(), 1);
-        assert!(Rules::from(&scope).allows("example.org", 443, "DELETE"));
+        assert!(Rules::from(&scope).allows("example.org", 443, "DELETE", "/"));
         assert!(!narrows(&scope));
 
         // A Tag's direct web:fetch has the same effect; with no credential nothing is scoped.
@@ -684,8 +832,8 @@ mod tests {
         // Methods alone narrow every origin.
         let scope = compose([grant(&none, &get, "")], false).unwrap();
         let rules = Rules::from(&scope);
-        assert!(rules.allows("example.org", 443, "GET"));
-        assert!(!rules.allows("example.org", 443, "POST"));
+        assert!(rules.allows("example.org", 443, "GET", "/"));
+        assert!(!rules.allows("example.org", 443, "POST", "/"));
         // A gated grant adds nothing.
         let mut gated = grant(&none, &none, "");
         gated.admitted = false;
@@ -715,9 +863,9 @@ mod tests {
         let mut profile = HarnessExecutionProfile::default();
         assert!(harness_reason(&task, HarnessKind::Codex).is_none());
         assert!(
-            harness_reason(&task, HarnessKind::ClaudeCode)
+            harness_reason(&task, HarnessKind::Opencode)
                 .unwrap()
-                .contains("Claude Code cannot force web requests")
+                .contains("OpenCode cannot force web requests")
         );
         assert!(
             reason(&task, HarnessKind::Codex, &profile)
@@ -732,6 +880,125 @@ mod tests {
         task.allowed_actions = strings(&["files:read"]);
         assert!(of_task(&task).is_none());
         assert!(supports(&task, HarnessKind::ClaudeCode, &profile));
+    }
+
+    #[test]
+    fn wildcards_name_subdomains_and_paths_name_prefixes() {
+        assert_eq!(
+            canonical_origin("https://*.GitHubUserContent.com/").unwrap(),
+            "https://*.githubusercontent.com"
+        );
+        let mut paths = strings(&["/repos/acme/", "/repos/acme", "/user"]);
+        let mut hosts = strings(&["https://api.github.com"]);
+        normalize_permission(
+            WEB_FETCH,
+            PermissionNetwork {
+                hosts: &mut hosts,
+                methods: &mut vec![],
+                credential: &mut String::new(),
+                paths: &mut paths,
+            },
+        )
+        .unwrap();
+        assert_eq!(paths, strings(&["/repos/acme", "/user"]));
+        for (path, needle) in [
+            ("repos", "start with /"),
+            ("/a/../b", ". or .."),
+            ("/a%2Fb", "percent"),
+            ("/a?b", "query"),
+        ] {
+            let error = canonical_path(path).unwrap_err();
+            assert!(error.contains(needle), "{error}");
+        }
+        let error = normalize_permission(
+            WEB_FETCH,
+            PermissionNetwork {
+                hosts: &mut vec![],
+                methods: &mut vec![],
+                credential: &mut String::new(),
+                paths: &mut strings(&["/x"]),
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("need hosts"), "{error}");
+
+        let wild = strings(&["https://*.githubusercontent.com"]);
+        let api = strings(&["https://api.github.com"]);
+        let get = strings(&["GET"]);
+        let prefixes = strings(&["/repos/acme"]);
+        let mut scoped = grant(&api, &get, "github");
+        scoped.paths = &prefixes;
+        let scope = compose([grant(&wild, &get, ""), scoped], false).unwrap();
+        let rules = Rules::from(&scope);
+        assert!(rules.allows("raw.githubusercontent.com", 443, "GET", "/x"));
+        assert!(rules.allows("a.b.githubusercontent.com", 443, "GET", "/x"));
+        assert!(!rules.allows("githubusercontent.com", 443, "GET", "/x"));
+        assert!(!rules.allows("evilgithubusercontent.com", 443, "GET", "/x"));
+        assert!(rules.allows("api.github.com", 443, "GET", "/repos/acme"));
+        assert!(rules.allows("api.github.com", 443, "GET", "/repos/acme/app/issues"));
+        assert!(!rules.allows("api.github.com", 443, "GET", "/repos/acmex"));
+        assert!(!rules.allows("api.github.com", 443, "GET", "/repos/other"));
+        assert!(!rules.allows("api.github.com", 443, "GET", "/repos/acme/../other"));
+        assert!(!rules.allows("api.github.com", 443, "GET", "/repos/acme/%2e%2e/other"));
+        assert!(rules.allows_origin("api.github.com", 443));
+        assert!(rules.binds("github", "api.github.com", 443, "GET", "/repos/acme/app"));
+        assert!(!rules.binds("github", "api.github.com", 443, "GET", "/user"));
+        assert_eq!(
+            host_names(&scope),
+            ["*.githubusercontent.com", "api.github.com"]
+                .map(str::to_owned)
+                .into()
+        );
+        assert!(
+            summary(&scope)
+                .contains("https://api.github.com (GET; paths /repos/acme; credential github)"),
+            "{}",
+            summary(&scope)
+        );
+    }
+
+    #[test]
+    fn claude_code_applies_scopes_without_credentials_where_its_sandbox_runs() {
+        let pypi = strings(&["https://pypi.org"]);
+        let github = strings(&["https://api.github.com"]);
+        let get = strings(&["GET"]);
+        let task = |scope: NetworkScope, actions: &[&str]| Task {
+            allowed_actions: strings(actions),
+            policy_snapshot: Some(crate::v2::TaskPolicySnapshot {
+                runtime_authority: Some(crate::v2::TaskRuntimeAuthority {
+                    network: Some(scope),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let plain = compose([grant(&pypi, &get, "")], false).unwrap();
+        let commands = task(plain.clone(), &["commands:execute", WEB_FETCH]);
+        let mut profile = HarnessExecutionProfile::default();
+        assert!(harness_reason(&commands, HarnessKind::ClaudeCode).is_none());
+        assert!(
+            reason(&commands, HarnessKind::ClaudeCode, &profile)
+                .unwrap()
+                .contains("cannot run Claude Code's sandbox")
+        );
+        // WebFetch alone is checked by the tool hook.
+        assert!(supports(
+            &task(plain, &[WEB_FETCH]),
+            HarnessKind::ClaudeCode,
+            &profile
+        ));
+        profile.network_sandbox = true;
+        assert!(supports(&commands, HarnessKind::ClaudeCode, &profile));
+        let bound = task(
+            compose([grant(&github, &get, "github")], false).unwrap(),
+            &[WEB_FETCH],
+        );
+        assert!(
+            harness_reason(&bound, HarnessKind::ClaudeCode)
+                .unwrap()
+                .contains("cannot carry network credentials (github)")
+        );
     }
 
     #[test]

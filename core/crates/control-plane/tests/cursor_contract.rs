@@ -363,6 +363,7 @@ async fn contract(url: &str) {
     let profile = HarnessExecutionProfile {
         mcp_login_servers: vec![],
         network_credentials: vec![],
+        network_sandbox: false,
         workspace_mounts: vec![],
         declared_task_outputs: false,
         model_ids: vec!["fixture-model".into()],

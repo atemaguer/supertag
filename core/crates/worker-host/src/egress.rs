@@ -89,6 +89,10 @@ pub struct Config {
     /// Tests only: resolve these names to these addresses instead of DNS.
     #[doc(hidden)]
     pub resolve: BTreeMap<String, SocketAddr>,
+    /// Whether a client must present the Attempt's proxy password. Claude Code's sandbox connects
+    /// to a proxy port it is given without credentials, so its Attempts' proxies accept any local
+    /// client and therefore carry no credentials.
+    pub require_password: bool,
     /// Tests only: allow loopback and private destinations.
     #[doc(hidden)]
     pub allow_private: bool,
@@ -102,6 +106,7 @@ impl Config {
         Self {
             scope,
             credentials,
+            require_password: true,
             resolve: BTreeMap::new(),
             allow_private: false,
             extra_roots: vec![],
@@ -201,6 +206,7 @@ struct LogState {
 struct State {
     rules: Rules,
     credentials: Vec<Credential>,
+    require_password: bool,
     password: String,
     authority: Authority,
     connector: tokio_rustls::TlsConnector,
@@ -222,6 +228,7 @@ impl EgressProxy {
         let Config {
             scope,
             credentials,
+            require_password,
             resolve,
             allow_private,
             extra_roots,
@@ -238,6 +245,7 @@ impl EgressProxy {
         let state = Arc::new(State {
             rules: Rules::from(&scope),
             credentials,
+            require_password,
             password: format!(
                 "{}{}",
                 uuid::Uuid::new_v4().simple(),
@@ -254,6 +262,11 @@ impl EgressProxy {
             .context("start the egress proxy")?;
         let address = listener.local_addr()?;
         let stop = CancellationToken::new();
+        // Claude Code's sandbox names the proxy `localhost`, which a client may resolve to ::1;
+        // listen there on the same port too when it is free.
+        if let Ok(loopback6) = TcpListener::bind(("::1", address.port())).await {
+            tokio::spawn(serve(loopback6, state.clone(), stop.clone()));
+        }
         let task = tokio::spawn(serve(listener, state.clone(), stop.clone()));
         Ok(Self {
             address,
@@ -422,7 +435,7 @@ async fn connection(state: Arc<State>, mut stream: TcpStream) {
         Ok(Ok(head)) => head,
         _ => return,
     };
-    if !authorized(&head, &state.password) {
+    if state.require_password && !authorized(&head, &state.password) {
         // Not this Attempt's client: nothing to log against the Task.
         let response = "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"supertag\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         let _ = stream.write_all(response.as_bytes()).await;
@@ -724,8 +737,9 @@ impl State {
         if !matches {
             return denied(self, "the request's Host differs from the CONNECT target");
         }
-        if !self.rules.allows(&tunnel.host, tunnel.port, &method) {
-            return denied(self, "the method is not allowed for this origin");
+        let bare = request.uri().path().to_owned();
+        if !self.rules.allows(&tunnel.host, tunnel.port, &method, &bare) {
+            return denied(self, "the method or path is not allowed for this origin");
         }
         if request.headers().contains_key(header::UPGRADE) {
             return denied(
@@ -734,7 +748,8 @@ impl State {
             );
         }
         let injected = match self.inject(request.headers_mut(), |name| {
-            self.rules.binds(name, &tunnel.host, tunnel.port, &method)
+            self.rules
+                .binds(name, &tunnel.host, tunnel.port, &method, &bare)
         }) {
             Ok(injected) => injected,
             Err(reason) => return denied(self, &reason),
@@ -1017,6 +1032,7 @@ pub(crate) async fn start_for_attempt(
     credentials: &[HostCredential],
     state_directory: &std::path::Path,
     attempt_id: &str,
+    harness: supertag_protocol::v2::HarnessKind,
 ) -> Result<AttemptEgress> {
     let bound = supertag_protocol::network_scope::credentials(scope);
     let mut selected = Vec::new();
@@ -1027,7 +1043,13 @@ pub(crate) async fn start_for_attempt(
             .with_context(|| format!("this Worker Host has no network credential {name}"))?;
         selected.push(credential.for_attempt());
     }
-    let proxy = EgressProxy::start(Config::new(scope.clone(), selected)).await?;
+    let mut config = Config::new(scope.clone(), selected);
+    config.require_password = harness != supertag_protocol::v2::HarnessKind::ClaudeCode;
+    ensure!(
+        config.require_password || config.credentials.is_empty(),
+        "Claude Code's sandbox cannot authenticate to the egress proxy, so it carries no network credentials"
+    );
+    let proxy = EgressProxy::start(config).await?;
     use sha2::Digest as _;
     let directory = state_directory
         .join("egress")

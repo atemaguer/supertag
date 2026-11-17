@@ -2171,6 +2171,7 @@ async fn run_assignment(
                 &options.network_credentials,
                 &options.state_directory,
                 &attempt.attempt_id,
+                options.harness,
             )
             .await
             .context("start the Attempt's egress proxy")?,

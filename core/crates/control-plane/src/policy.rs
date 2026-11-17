@@ -248,6 +248,7 @@ impl Resource for PermissionSet {
                             hosts: &mut p.hosts,
                             methods: &mut p.methods,
                             credential: &mut p.credential,
+                            paths: &mut p.paths,
                         },
                     )
                     .map_err(|reason| invalid(&reason))?;
@@ -293,7 +294,7 @@ fn permission_key(p: &PolicyPermission) -> String {
             &p.surface_account_id,
             &p.scope,
             &p.resource,
-            ("network", &p.hosts, &p.methods, &p.credential),
+            ("network", &p.hosts, &p.methods, &p.credential, &p.paths),
         ))
         .expect("permission key serializes");
     }
@@ -1538,6 +1539,11 @@ pub(crate) async fn admission_in(
                 hosts: &p.hosts,
                 methods: &p.methods,
                 credential: &p.credential,
+                paths: if p.action == supertag_protocol::network_scope::WEB_FETCH {
+                    &p.paths
+                } else {
+                    &[]
+                },
                 // A gated grant is not admitted, so it adds no access of its own.
                 admitted: !p.approval_required,
             }),

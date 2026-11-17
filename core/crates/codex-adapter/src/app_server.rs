@@ -1425,6 +1425,7 @@ mod tests {
                     origins: vec!["https://example.com".into()],
                     methods: vec!["GET".into()],
                     credential: String::new(),
+                    paths: vec![],
                 }],
             },
             vec![],
@@ -1473,11 +1474,14 @@ mod tests {
             .stdin(Stdio::null())
             .output()
             .await?;
+        let log = proxy.stop().await;
         // terminal-safe: probe output for the operator.
-        println!("status: {}", output.status);
-        println!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-        println!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-        println!("egress log: {:#?}", proxy.stop().await);
+        println!(
+            "status: {}\nstdout:\n{}\nstderr:\n{}\negress log: {log:#?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         Ok(())
     }
 
@@ -1507,6 +1511,7 @@ mod tests {
                     origins: vec![base.clone()],
                     methods: vec!["GET".into()],
                     credential: "github".into(),
+                    paths: vec![],
                 }],
             },
             vec![egress::Credential::new(
