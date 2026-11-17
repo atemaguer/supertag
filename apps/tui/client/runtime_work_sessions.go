@@ -276,8 +276,6 @@ func CloseReason(work *v2.WorkSession) string {
 		return "Objective closed"
 	case v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_UPGRADE:
 		return "finished before the upgrade"
-	case v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_MERGED:
-		return "pull request merged"
 	}
 	return "closed"
 }
