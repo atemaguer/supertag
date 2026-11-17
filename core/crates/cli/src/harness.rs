@@ -701,6 +701,8 @@ pub async fn run_codex(args: CodexAdapterArgs) -> Result<()> {
         .iter()
         .copied()
         .chain(["PATH", "TMPDIR", "LANG"])
+        // The Attempt's egress proxy, for a Task with a network scope.
+        .chain(supertag_worker_host::egress::ADAPTER_VARIABLES)
         .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(name), value)))
         .collect();
     supertag_codex_adapter::run(

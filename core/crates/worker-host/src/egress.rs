@@ -964,6 +964,13 @@ pub const PROXY_VARIABLE: &str = "SUPERTAG_EGRESS_PROXY";
 pub const CA_CERTIFICATE_VARIABLE: &str = "SUPERTAG_EGRESS_CA_CERTIFICATE";
 pub const CA_BUNDLE_VARIABLE: &str = "SUPERTAG_EGRESS_CA_BUNDLE";
 pub const PLACEHOLDERS_VARIABLE: &str = "SUPERTAG_EGRESS_PLACEHOLDERS";
+/// Every variable [`adapter_environment`] sets.
+pub const ADAPTER_VARIABLES: [&str; 4] = [
+    PROXY_VARIABLE,
+    CA_CERTIFICATE_VARIABLE,
+    CA_BUNDLE_VARIABLE,
+    PLACEHOLDERS_VARIABLE,
+];
 
 pub fn adapter_environment(
     proxy: &EgressProxy,

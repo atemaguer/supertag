@@ -2897,6 +2897,34 @@ fn task_json(task: &Task) -> serde_json::Value {
             "outside_write": scope.outside_write,
             "outside_read": scope.outside_read,
         })),
+        "network_scope": supertag_protocol::network_scope::of_task(task).map(|scope| json!({
+            "summary": supertag_protocol::network_scope::summary(scope),
+            "any_origin": scope.any_origin,
+            "rules": scope.rules.iter().map(|rule| json!({
+                "origins": rule.origins,
+                "methods": rule.methods,
+                "credential": (!rule.credential.is_empty()).then_some(&rule.credential),
+            })).collect::<Vec<_>>(),
+        })),
+        "network_log": task.network_logs.iter().map(|attempt| {
+            let log = attempt.log.clone().unwrap_or_default();
+            json!({
+                "attempt_id": attempt.attempt_id,
+                "allowed": log.allowed,
+                "denied": log.denied,
+                "unrecorded": log.unrecorded,
+                "requests": log.requests.iter().map(|record| json!({
+                    "at_ms": record.at_ms,
+                    "method": record.method,
+                    "origin": record.origin,
+                    "path": record.path,
+                    "allowed": record.allowed,
+                    "reason": (!record.reason.is_empty()).then_some(&record.reason),
+                    "status": (record.status != 0).then_some(record.status),
+                    "credential": (!record.credential.is_empty()).then_some(&record.credential),
+                })).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
         "workspace": task.workspace.as_ref().map(|spec| json!({
             "workspace_id": spec.workspace_id,
             // The commit the Task starts from: pinned by its Tag, or resolved from `ref` when the

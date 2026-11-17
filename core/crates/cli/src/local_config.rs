@@ -1259,6 +1259,68 @@ secrets:
         assert!(c.hosts[0].key.is_some());
     }
     #[test]
+    fn network_credentials_reach_only_codex_lanes_by_name() {
+        let c = parse(
+            br#"services:
+  control-plane: {type: control-plane}
+  laptop:
+    type: host
+    harnesses: [codex, claude-code]
+    allow-unsandboxed-commands: [claude-code]
+    network-credentials:
+      github: {secret: github-token, environment: GITHUB_TOKEN}
+secrets:
+  github-token: {environment: GITHUB_PAT}
+"#,
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        let host = &c.hosts[0];
+        assert_eq!(host.network_credentials.len(), 1);
+        assert_eq!(host.network_credentials[0].0, "github");
+        let codex = &host.harnesses[0];
+        assert_eq!(
+            codex.network_credentials().unwrap(),
+            [("github".to_owned(), "GITHUB_TOKEN".to_owned())]
+        );
+        assert_eq!(
+            codex.execution_profile().unwrap().network_credentials,
+            ["github"]
+        );
+        assert!(host.harnesses[1].network_credentials().unwrap().is_empty());
+        for (yaml, needle) in [
+            (
+                "harnesses: [claude-code]\n    network-credentials: {github: {secret: t, environment: GITHUB_TOKEN}}",
+                "only for the codex harness",
+            ),
+            (
+                "harnesses: [codex]\n    network-credentials: {github: {secret: missing, environment: GITHUB_TOKEN}}",
+                "names no secret",
+            ),
+            (
+                "harnesses: [codex]\n    network-credentials: {github: {secret: t, environment: HTTPS_PROXY}}",
+                "",
+            ),
+            (
+                "harnesses: [codex]\n    network-credentials: {GitHub: {secret: t, environment: GITHUB_TOKEN}}",
+                "",
+            ),
+        ] {
+            let error = parse(
+                format!(
+                    "services:\n  control-plane: {{type: control-plane}}\n  laptop:\n    type: host\n    {yaml}\nsecrets:\n  t: {{environment: T}}\n"
+                )
+                .as_bytes(),
+                Path::new("/trusted"),
+                |_| None,
+            )
+            .err()
+            .unwrap_or_else(|| panic!("accepted {yaml}"));
+            assert!(format!("{error:#}").contains(needle), "{error:#}");
+        }
+    }
+    #[test]
     fn audit_log_is_stderr_or_a_path_resolved_from_the_file() {
         let audit_log = |value: &str| {
             parse(

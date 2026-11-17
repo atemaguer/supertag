@@ -132,6 +132,12 @@ struct GrantSpec {
     exclude: Vec<String>,
     #[serde(default)]
     additional_directories: Vec<String>,
+    #[serde(default)]
+    hosts: Vec<String>,
+    #[serde(default)]
+    methods: Vec<String>,
+    #[serde(default)]
+    credential: String,
 }
 
 impl From<PermissionSpec> for PermissionSet {
@@ -159,6 +165,9 @@ impl From<PermissionSpec> for PermissionSet {
                     paths: grant.paths,
                     exclude: grant.exclude,
                     additional_directories: grant.additional_directories,
+                    hosts: grant.hosts,
+                    methods: grant.methods,
+                    credential: grant.credential,
                     ..Default::default()
                 })
                 .collect(),
@@ -540,15 +549,20 @@ pub(crate) fn permission_json(set: PermissionSet) -> Value {
             "action":grant.action, "surface_account_id":grant.surface_account_id, "scope":grant.scope,
             "reference":grant.reference, "resource":grant.resource, "approval_required":grant.approval_required,
         });
-        // Path scopes appear only on the file grants that have them.
+        // Path and network scopes appear only on the grants that have them.
         for (key, values) in [
             ("paths", grant.paths),
             ("exclude", grant.exclude),
             ("additional_directories", grant.additional_directories),
+            ("hosts", grant.hosts),
+            ("methods", grant.methods),
         ] {
             if !values.is_empty() {
                 value[key] = json!(values);
             }
+        }
+        if !grant.credential.is_empty() {
+            value["credential"] = json!(grant.credential);
         }
         value
     }).collect::<Vec<_>>();
