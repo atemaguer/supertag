@@ -5,7 +5,12 @@ export {
   createWorkspaceOperations,
   type WorkspaceOperation,
 } from "./operations.js";
-export { createProcessSeal, type PrivilegedRun, type ProcessSeal } from "./process-seal.js";
+export {
+  createProcessSeal,
+  PROCESS_SEAL_PROGRAMS,
+  type PrivilegedRun,
+  type ProcessSeal,
+} from "./process-seal.js";
 export {
   BUILD_TIMEOUT_MS,
   createSandboxWorkspaceSession,

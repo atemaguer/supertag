@@ -171,7 +171,20 @@ try:
         group = int(recorded.read(32))
 except (OSError, ValueError):
     sys.exit(0)
-if group > 1:
+# The record is in the sandbox, so only a group it can prove is this command's is stopped: the
+# group's leader leads its own session, and its parent is the wrapper started for this record.
+def stat(pid):
+    with open("/proc/%d/stat" % pid, "rb") as handle:
+        raw = handle.read(4096)
+    return raw[raw.rindex(b")") + 2:].split()
+try:
+    leader = stat(group)
+    ppid, pgrp, session = int(leader[1]), int(leader[2]), int(leader[3])
+    with open("/proc/%d/cmdline" % ppid, "rb") as handle:
+        parent = handle.read(1 << 20).split(b"\0")
+except (OSError, ValueError, IndexError):
+    sys.exit(0)
+if group > 1 and pgrp == group and session == group and record.encode() in parent:
     try:
         os.killpg(group, signal.SIGKILL)
     except OSError:

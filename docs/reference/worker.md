@@ -160,11 +160,17 @@ A Cursor or Claude Code Task can keep its Workspace in an E2B or Modal sandbox
 stay on the host. Only the checkout moves into the sandbox; keys never do. A Task with
 `commands:execute` runs its commands in the sandbox, which has no network access, so the host
 needs no `--allow-unsandboxed-commands` (and cannot take it). Each command runs in its own process
-group with its own time limit, enforced inside the sandbox. Before Capture, the provider stops every
-process in the sandbox except the ones the sandbox started with, and confirms none is left; a
-sandbox it cannot confirm fails the Task Attempt. Capture leaves out every `.git` entry and every
-untracked path the checkout's ignore rules match, except the Task output directory. A Task whose
-Permission Sets hide paths does not run commands on such a host. A repository's
+group with its own time limit, enforced inside the sandbox. After a Task ran commands or a
+Workspace MCP server, the provider stops every process in the sandbox except the ones the sandbox
+started with, confirms none is left, and captures the Workspace in the same process; a sandbox it
+cannot confirm fails the Task Attempt. This keeps an honest Task's leftovers (a dev server, a
+watcher) from changing the Workspace while it is read. It is not a security boundary: on Modal,
+and on E2B through sudo, the Task is root in its sandbox and could defeat it. What protects the
+host is that nothing runs on it: the Worker Host checks the returned files, and stopping the
+sandbox ends everything in it. Capture leaves out every `.git` entry and every untracked path
+the checkout's `.gitignore` files match, except the Task output directory. A Task whose
+Permission Sets hide paths does not run commands on such a host, and a Task with `web:fetch`,
+`web:search`, or `browser:use` does not run on it at all: those tools would run on the host. A repository's
 `.devcontainer` settings choose the sandbox image, user, and setup; see
 [Devcontainer settings](devcontainer-subset.md).
 

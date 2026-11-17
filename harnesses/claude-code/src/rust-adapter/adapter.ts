@@ -548,9 +548,13 @@ export async function runAdapter(
       task.allowedActions,
       remote || (configuration.allowUnsandboxedCommands ?? false),
     );
-    const tools = remote
-      ? admitted.filter((name) => name === "WebFetch" || name === "WebSearch")
-      : admitted;
+    // WebFetch and WebSearch would run here, on the Worker Host and its network, so a remote
+    // Workspace offers none; placement keeps web actions off remote lanes.
+    if (remote && task.allowedActions.some((action) => action.startsWith("web:")))
+      throw new SafeAdapterFailure(
+        "A remote Workspace cannot carry web actions yet. Native execution did not start.",
+      );
+    const tools = remote ? [] : admitted;
     const refusal = fileScopeRefusal(task, remote ? "claude-code-remote" : "claude-code");
     if (refusal) throw new SafeAdapterFailure(`${refusal}. Native execution did not start.`);
     const fileScope = fileScopeOf(task);

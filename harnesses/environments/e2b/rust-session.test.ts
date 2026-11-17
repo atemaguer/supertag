@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmod,
@@ -70,14 +70,32 @@ function wait(child: ChildProcess) {
  */
 function fakePrivileged(sealExit = 0) {
   return vi.fn(async (argv: string[]) => {
-    const sealing = argv.length > 5;
-    return sealing
-      ? { exitCode: sealExit, stdout: sealExit === 0 ? "sealed 2\n" : "" }
-      : { exitCode: 0, stdout: '[[1,"7"],[2,"9"]]\n' };
+    const seal = argv.findIndex((value) => value.includes("sealed %d"));
+    if (seal < 0)
+      return {
+        exitCode: 0,
+        stdout: `${JSON.stringify({
+          interpreter: "/fixture/python3",
+          processes: [
+            [1, "7"],
+            [2, "9"],
+          ],
+        })}\n`,
+      };
+    if (sealExit !== 0) return { exitCode: sealExit, stdout: "" };
+    // What follows the seal runs in its process: the capture program, which is safe to run here.
+    const then = argv.slice(seal + 2);
+    if (!then.length) return { exitCode: 0, stdout: "sealed 2\n" };
+    const result = spawnSync("python3", then.slice(1), { encoding: "utf8" });
+    return { exitCode: result.status, stdout: `sealed 2\n${result.stdout}` };
   });
 }
 
-async function fixture(preparedRoot?: string, privileged?: ReturnType<typeof fakePrivileged>) {
+/** `false` leaves the sandbox without a privileged run, so it can never be sealed. */
+async function fixture(
+  preparedRoot?: string,
+  privileged: ReturnType<typeof fakePrivileged> | false = fakePrivileged(),
+) {
   const builds: E2BWorkspaceTemplateBuild[] = [];
   const templates = {
     build: vi.fn(async (spec: E2BWorkspaceTemplateBuild) => {
@@ -395,7 +413,7 @@ it("allocates once with exact ownership, bounded lifetime, and no network or env
 });
 
 it("admits commands only in a sandbox it can seal", async () => {
-  const { session } = await fixture();
+  const { session } = await fixture(undefined, false);
   await expect(
     session.allocate({
       owner,
@@ -417,7 +435,13 @@ it("records the sandbox's processes, seals it before capture, and returns no ign
   });
   expect(session.admitsCommands()).toBe(true);
   expect(privileged).toHaveBeenCalledTimes(1);
-  expect(privileged.mock.calls[0]?.[0].slice(0, 4)).toEqual(["python3", "-I", "-S", "-c"]);
+  expect(privileged.mock.calls[0]?.[0].slice(0, 5)).toEqual([
+    "/usr/bin/env",
+    "-i",
+    "PATH=/usr/local/bin:/usr/bin:/bin",
+    "LANG=C.UTF-8",
+    "python3",
+  ]);
   await session.stage(header, bytes);
   await expect(
     session.execute({
@@ -436,12 +460,17 @@ it("records the sandbox's processes, seals it before capture, and returns no ign
     }),
   ).resolves.toEqual({ text: "done\n", isError: false });
   const captured = await session.capture(undefined, ["out/report.txt"]);
-  // Sealing ran with the recorded processes, after the command and before the tree was read.
+  // Sealing ran with the recorded processes and interpreter, and the capture in its process.
   expect(privileged).toHaveBeenCalledTimes(2);
-  expect(JSON.parse(privileged.mock.calls[1]?.[0].at(-1) ?? "")).toEqual([
-    [1, "7"],
-    [2, "9"],
-  ]);
+  const sealArgv = privileged.mock.calls[1]?.[0] ?? [];
+  expect(sealArgv[4]).toBe("/fixture/python3");
+  expect(sealArgv).toContain(
+    JSON.stringify([
+      [1, "7"],
+      [2, "9"],
+    ]),
+  );
+  expect(sealArgv).toContain("capture");
   const paths = unpack(captured.bytes).map((entry) => entry.path);
   // A tracked file stays even when the ignore rules match it; a named path stays too.
   expect(paths).toEqual(
@@ -467,14 +496,32 @@ it("refuses to capture a sandbox it cannot seal", async () => {
   await session.stop({ owner });
 });
 
-it("never seals a sandbox whose Task cannot run commands", async () => {
+it("records every sandbox, but seals only one that ran a Task-driven process", async () => {
   const privileged = fakePrivileged();
   const { session } = await fixture(undefined, privileged);
   const { header, bytes } = await bundle();
   await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:write"] });
+  expect(privileged).toHaveBeenCalledTimes(1);
+  expect(session.admitsCommands()).toBe(false);
   await session.stage(header, bytes);
   await session.capture();
-  expect(privileged).not.toHaveBeenCalled();
+  // File tools start no process that outlives its call, so nothing needs sealing.
+  expect(privileged).toHaveBeenCalledTimes(1);
+  await session.stop({ owner });
+});
+
+it("refuses to capture a sandbox that ran a Workspace MCP server and cannot be sealed", async () => {
+  const { session } = await fixture(undefined, fakePrivileged(4));
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await session.stage({ ...header, mcpCommit: header.startCommit }, bytes);
+  const server = await session.startMcpServer({
+    name: "probe",
+    command: "sh",
+    args: ["-c", "cat"],
+  });
+  await session.stopMcpServer(server);
+  await expect(session.capture()).rejects.toThrow(/captured/u);
   await session.stop({ owner });
 });
 

@@ -33,7 +33,7 @@ within the pre-1.0 compatibility policy described in
   process the Task left running is stopped before the Workspace returns. Files your ignore rules
   match (such as `node_modules/`) and any `.git` directory a command creates stay in the sandbox;
   the Task output directory always returns. A Task whose Permission Sets hide paths does not run
-  commands in a remote sandbox.
+  commands in a remote sandbox, and one with `web:fetch` or `web:search` doesn't run there.
 - See and delete what a Tag remembers: the desktop app lists a Tag's notes in its details panel,
   opened from the Tag's name, and the terminal UI under Notes in the command palette. Each note
   records when a turn last had it in its context (`last_seen_at` in `supertag describe memory`),
@@ -250,6 +250,10 @@ within the pre-1.0 compatibility policy described in
 - A Linux Claude Code host offers Claude Code's sandbox only when a user namespace can be made
   inside bubblewrap's, as the sandbox needs. A host whose AppArmor policy forbids it, such as
   Ubuntu's `bwrap-userns-restrict`, no longer takes scoped command Tasks it would fail.
+- Claude Code no longer expands `@path` mentions in a Task's prompt, its joined messages, or its
+  check-ins. A prompt that named a file, including untrusted text from a collaboration surface,
+  put that file's contents in the model's context, whatever the Task's permissions; every message
+  is now delivered as written.
 - Text fields in the desktop app no longer draw a thick offset focus outline; keyboard focus on
   buttons and links is one subtle ring.
 - A Watch naming a kind the Control Plane doesn't know follows the kinds it does know instead of

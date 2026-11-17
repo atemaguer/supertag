@@ -715,11 +715,12 @@ function userMessage(content: string, live = false): SDKUserMessage {
     // marks it isMeta, and excludes meta input from queued-message UUID attribution.
     // A stdin write cannot acknowledge that path. Keep the Control Plane's labelled,
     // untrusted Team envelope, but omit native origin until the CLI exposes a usable receipt.
-    // Live input is delivered as written: no slash-command dispatch or `@path` expansion. Its
-    // uuid lets replies name the input they answer.
-    ...(live
-      ? { priority: "next" as const, client_composed: true as const, uuid: randomUUID() }
-      : {}),
+    // Every message is delivered as written: no slash-command dispatch or `@path` expansion.
+    // Expansion would read any host file a prompt names (probed 2026-11-17 on Claude Code
+    // 2.1.323: `@/absolute/path` in a streamed prompt reached the model even with no tools),
+    // and prompts carry untrusted surface text. A live message's uuid lets replies name it.
+    client_composed: true as const,
+    ...(live ? { priority: "next" as const, uuid: randomUUID() } : {}),
   };
 }
 

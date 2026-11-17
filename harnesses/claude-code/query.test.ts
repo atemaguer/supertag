@@ -301,10 +301,11 @@ describe("live input", () => {
     let delivered: Awaited<ReturnType<Input["next"]>> | undefined;
     let status: Promise<string> | undefined;
     let closedAfterFollowUp = false;
+    let first: Awaited<ReturnType<Input["next"]>> | undefined;
     const run = (({ prompt }) =>
       (async function* () {
         const input = promptOf(prompt);
-        await input.next();
+        first = await input.next();
         yield working;
         status = live.send("Team coordination: use the new schema");
         delivered = await input.next();
@@ -326,6 +327,9 @@ describe("live input", () => {
       client_composed: true,
     });
     expect(await status).toBe("accepted");
+    // The Task's own prompt is client-composed too: Claude Code never expands an `@path` in it.
+    expect(first?.value).toMatchObject({ message: { content: "test" }, client_composed: true });
+    expect(first?.value?.priority).toBeUndefined();
     expect(closedAfterFollowUp).toBe(true);
     // The finished query released the stream.
     expect(await live.send("late")).toBe("rejected");

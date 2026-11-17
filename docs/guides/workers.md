@@ -207,7 +207,8 @@ has no built-in tool that could run on the host:
 | `--shared-execution-endpoint` | A long-lived shared execution environment, served by `supertag-shared-execution`, that several Cursor Sessions share (Cursor only) |
 
 A Task that may run commands (`commands:execute`) runs them in its sandbox, so such a host needs
-no `allow-unsandboxed-commands` (and cannot take it). The sandbox has no network access. Each
+no `allow-unsandboxed-commands` (and cannot take it). The sandbox has no network access, and a
+Task with `web:fetch` or `web:search` doesn't run on such a host. Each
 command stops at its own time limit inside the sandbox. Before the Workspace returns, SuperTag
 stops every process the Task left running there. Files your ignore rules match, such as
 `node_modules/`, and any `.git` directory a command creates stay in the sandbox and are not

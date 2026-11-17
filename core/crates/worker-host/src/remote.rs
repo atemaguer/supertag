@@ -22,6 +22,9 @@ use crate::{
     workspaces::{PreparedWorkspace, Workspaces},
 };
 
+/// Runtime actions a remote Workspace cannot carry: each would run on the Worker Host.
+pub(crate) const REMOTE_REFUSED_ACTIONS: [&str; 3] = ["web:fetch", "web:search", "browser:use"];
+
 /// The longest sandbox lifetime the E2B and Modal provider sessions grant.
 pub(crate) const MAX_SANDBOX_LIFETIME: Duration = Duration::from_secs(3600);
 /// Sandbox life kept after the harness stops, for capture and cleanup.
@@ -84,7 +87,17 @@ pub(crate) async fn prepare(
         .remote_provider
         .as_ref()
         .context("remote Workspace provider is unavailable")?;
-    // Commands run in the sandbox; the provider seals it before Capture.
+    // A remote sandbox carries files and commands only. A web or browser action would run on
+    // this host, outside the sandbox, so it is refused rather than dropped.
+    if let Some(action) = task
+        .allowed_actions
+        .iter()
+        .find(|action| REMOTE_REFUSED_ACTIONS.contains(&action.as_str()))
+    {
+        anyhow::bail!("a remote Workspace cannot carry {action} yet");
+    }
+    // Commands run in the sandbox; the provider seals it before Capture. Coordination actions
+    // stay with the Harness and never reach the provider.
     let allowed_actions = task
         .allowed_actions
         .iter()

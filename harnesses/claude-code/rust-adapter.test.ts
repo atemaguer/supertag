@@ -818,6 +818,19 @@ it("runs commands in a remote Workspace through its sandbox, with no built-in to
   await expect(readFile(join(run.workspace, "command-output.txt"))).rejects.toThrow();
 }, 30000);
 
+it("refuses web actions in a remote Workspace, which would run on the Worker Host", async () => {
+  for (const action of ["web:fetch", "web:search"]) {
+    const refused = await invoke({
+      prompt: "remote-command",
+      actions: ["files:read", "files:write", "commands:execute", action],
+      remoteWorkspace: true,
+    });
+    expect(refused.completions[0]?.succeeded).toBe(false);
+    expect(refused.completions[0]?.result).toContain("cannot carry web actions");
+    expect(refused.workspaceCalls).toHaveLength(0);
+  }
+}, 60000);
+
 it("keeps a remote Workspace's commands from reading hidden paths", async () => {
   const refused = await invoke({
     prompt: "remote-command",

@@ -369,6 +369,9 @@ export function createSandboxWorkspaceSession(
   let stagedCommit = "";
   /** Present when the Task may run commands: the sandbox is sealed before Capture. */
   let seal: ProcessSeal | undefined;
+  /** The Task may run commands; with any Workspace MCP server started, the seal is required. */
+  let commands = false;
+  let mcpStarted = false;
   /** This Attempt's Workspace copies, once the first is staged. */
   let copies: WorkspaceCopies | undefined;
   const mcpServers = new Set<ProcessHandle>();
@@ -565,12 +568,15 @@ export function createSandboxWorkspaceSession(
         sandboxId = sandbox.sandboxId;
         if (!sandboxId || sandboxId.length > 256 || /\p{Cc}/u.test(sandboxId))
           throw new Error("Invalid sandbox identity");
-        if (request.allowedActions.includes("commands:execute")) {
-          // Commands may leave processes behind; only a sandbox that can be sealed admits them.
-          if (!sandbox.runPrivileged) throw new Error("Sandbox cannot be sealed");
+        // Commands and Workspace MCP servers are Task-driven processes that may outlive their
+        // call, so every sandbox records its own processes first, before any of them exists.
+        if (sandbox.runPrivileged) {
           seal = createProcessSeal(sandbox.runPrivileged);
           await seal.record(signal);
         }
+        commands = request.allowedActions.includes("commands:execute");
+        // Only a sandbox that can be sealed admits commands.
+        if (commands && !seal) throw new Error("Sandbox cannot be sealed");
         root = preparing || fromArtifact ? preparedRoot : `/tmp/supertag-workspace-${randomUUID()}`;
         phase = "allocated";
         return { sandboxId };
@@ -713,7 +719,7 @@ export function createSandboxWorkspaceSession(
     },
     /** Whether this allocation admitted commands (its Task allows them and it can be sealed). */
     admitsCommands(): boolean {
-      return seal !== undefined;
+      return commands && seal !== undefined;
     },
     async execute(operation: WorkspaceOperation, caller?: AbortSignal) {
       if (phase !== "staged" || !tools) throw workspaceError("tools are not staged or were sealed");
@@ -776,6 +782,7 @@ export function createSandboxWorkspaceSession(
         lifetime.signal,
       );
       mcpServers.add(server);
+      mcpStarted = true;
       void server.wait().then(
         () => mcpServers.delete(server),
         () => mcpServers.delete(server),
@@ -824,22 +831,34 @@ export function createSandboxWorkspaceSession(
           )
         )
           throw workspaceError("capture keep list is invalid");
-        // Nothing a command left running may change the tree while it is read.
-        if (seal && !(await seal.seal(signal))) {
-          uncertain = true;
-          throw workspaceError("could not be sealed");
-        }
         // Staged inputs and Workspace copies never return in the tree.
-        const result = await runTransfer(
-          "capture",
-          [
-            stagedCommit,
-            JSON.stringify(keep),
-            stagedInputRoot,
-            ...(copies?.root() ? [copies.root() as string] : []),
-          ],
-          signal,
-        );
+        const captureArgs = [
+          stagedCommit,
+          JSON.stringify(keep),
+          stagedInputRoot,
+          ...(copies?.root() ? [copies.root() as string] : []),
+        ];
+        // Nothing a Task-driven process left running may change the tree while it is read: the
+        // seal and the capture run as one privileged process, with no gap between them.
+        let result: { exitCode: number | null; stdout: string };
+        if (commands || mcpStarted) {
+          if (!seal) {
+            uncertain = true;
+            throw workspaceError("could not be sealed");
+          }
+          const sealed = await seal.sealThen(
+            [TREE_PROGRAM, "capture", root, ...captureArgs],
+            TRANSFER_TIMEOUT_MS,
+            signal,
+          );
+          if (!sealed.sealed) {
+            uncertain = true;
+            throw workspaceError("could not be sealed");
+          }
+          result = sealed;
+        } else {
+          result = await runTransfer("capture", captureArgs, signal);
+        }
         const receipt = /^([1-9][0-9]{0,8}) ([0-9a-f]{64})$/u.exec(result.stdout.trim());
         if (result.exitCode !== 0 || !receipt?.[1] || !receipt[2])
           throw workspaceError("capture did not produce a receipt");
@@ -897,7 +916,7 @@ export type SandboxWorkspaceSession = ReturnType<typeof createSandboxWorkspaceSe
 // Run only trusted transfer code in the sandbox. Git objects are materialized
 // directly so workspace .gitattributes, hooks and local Git config cannot run
 // filters or change the accepted bytes. The repository stays outside checkout.
-const TREE_PROGRAM = String.raw`import contextlib, hashlib, json, os, stat, struct, subprocess, sys
+const TREE_PROGRAM = String.raw`import contextlib, hashlib, json, os, shutil, stat, struct, subprocess, sys, tempfile
 
 MAX_TREE = 256 * 1024 * 1024
 MAX_MANIFEST = 16 * 1024 * 1024
@@ -1141,21 +1160,33 @@ def stage_inputs(input_root):
     os.unlink(body_path)
 
 def ignored_paths(commit):
-    # Untracked paths the checkout's ignore rules match, against an index of the staged commit,
-    # so a tracked file is never left out. Directories end with "/".
-    index = os.path.join(root, "capture.index")
-    with contextlib.suppress(FileNotFoundError):
-        os.unlink(index)
-    os.environ["GIT_INDEX_FILE"] = index
+    # Untracked paths the checkout's .gitignore files match, against an index of the staged
+    # commit, so a tracked file is never left out. Directories end with "/". The Git directory
+    # is a fresh one made here, borrowing only objects.git's objects, so no Task-written config,
+    # info/exclude or core.excludesFile applies; the checkout's own .gitignore files do, as they
+    # do at local delivery. Skipping only ever leaves files out; it never adds or redirects one.
+    global git
+    scratch = tempfile.mkdtemp(prefix="capture-git-", dir=root)
+    saved = git
     try:
+        for part in ("objects", "objects/info", "refs"):
+            os.mkdir(os.path.join(scratch, part))
+        with open(os.path.join(scratch, "HEAD"), "w") as head:
+            head.write("ref: refs/heads/capture\n")
+        with open(os.path.join(scratch, "objects", "info", "alternates"), "w") as alternates:
+            alternates.write(os.path.join(root, "objects.git", "objects") + "\n")
+        git = ["git", "--git-dir=" + scratch] + saved[2:]
+        for setting in ("core.excludesFile=/dev/null", "core.untrackedCache=false"):
+            git.extend(("-c", setting))
+        os.environ["GIT_INDEX_FILE"] = os.path.join(scratch, "index")
         git_command(["read-tree", commit])
-        raw = git_command(["--work-tree=" + checkout, "-c", "core.untrackedCache=false",
+        raw = git_command(["--work-tree=" + checkout,
                            "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
                            "--directory", "--no-empty-directory"], MAX_MANIFEST)
     finally:
-        del os.environ["GIT_INDEX_FILE"]
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(index)
+        git = saved
+        os.environ.pop("GIT_INDEX_FILE", None)
+        shutil.rmtree(scratch, ignore_errors=True)
     files, directories = set(), set()
     for item in raw.split(b"\0"):
         if item:
@@ -1262,6 +1293,10 @@ def capture(commit, keep_json, *excluded):
                     check(fingerprint(os.fstat(directory_fd)) == expected)
     finally:
         os.close(root_fd)
+    if os.geteuid() == 0:
+        # Run as root after the seal; the provider's unprivileged reader fetches it.
+        owner = os.stat(checkout)
+        os.chown(destination, owner.st_uid, owner.st_gid)
     length, digest = file_hash(destination)
     print(length, digest)
 

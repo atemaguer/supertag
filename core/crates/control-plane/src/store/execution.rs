@@ -198,6 +198,20 @@ pub(crate) fn lane_requirement(
     if let Some(reason) = supertag_protocol::network_scope::reason(task, harness, profile) {
         return Some(("network-scope".into(), reason));
     }
+    // A remote sandbox has no network, and web tools would run on the Worker Host instead.
+    if profile.remote_file_workspace
+        && let Some(action) = task
+            .allowed_actions
+            .iter()
+            .find(|action| matches!(action.as_str(), "web:fetch" | "web:search" | "browser:use"))
+    {
+        return Some((
+            "remote-web".into(),
+            format!(
+                "a remote Workspace sandbox cannot carry {action} yet; run the Tag on a local Worker Host, or remove {action}"
+            ),
+        ));
+    }
     let name = match harness {
         HarnessKind::ClaudeCode => "claude-code",
         HarnessKind::Opencode => "opencode",
@@ -283,6 +297,18 @@ mod tests {
                 .remote_file_workspace
         );
         assert!(resolve_attempt(&task, HarnessKind::Opencode, &profile).is_none());
+        // Web tools would run on the Worker Host, outside the sandbox: refused there.
+        for action in ["web:fetch", "web:search"] {
+            let mut web = task.clone();
+            web.allowed_actions.push(action.into());
+            assert_eq!(
+                lane_requirement(&web, HarnessKind::ClaudeCode, &profile)
+                    .unwrap()
+                    .0,
+                "remote-web"
+            );
+            assert!(resolve_attempt(&web, HarnessKind::Cursor, &profile).is_none());
+        }
         // A local lane still needs the opt-in.
         assert_eq!(
             lane_requirement(&task, HarnessKind::Cursor, &Default::default())

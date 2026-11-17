@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -59,9 +59,25 @@ function fakePrivileged(sealExit = 0) {
       },
     });
   return vi.fn<ModalSandboxClient["exec"]>(async (command) => {
-    const sealing = command.length > 5;
-    const exitCode = sealing ? sealExit : 0;
-    const stdout = sealing ? (sealExit === 0 ? "sealed 1\n" : "") : '[[1,"3"],[2,"4"]]\n';
+    const seal = command.findIndex((value) => value.includes("sealed %d"));
+    let exitCode = 0;
+    let stdout = `${JSON.stringify({
+      interpreter: "/fixture/python3",
+      processes: [
+        [1, "3"],
+        [2, "4"],
+      ],
+    })}\n`;
+    if (seal >= 0) {
+      // What follows the seal runs in its process: the capture program, safe to run here.
+      const then = command.slice(seal + 2);
+      if (sealExit !== 0) [exitCode, stdout] = [sealExit, ""];
+      else if (!then.length) stdout = "sealed 1\n";
+      else {
+        const result = spawnSync("python3", then.slice(1), { encoding: "utf8" });
+        [exitCode, stdout] = [result.status ?? 1, `sealed 1\n${result.stdout}`];
+      }
+    }
     return {
       stdin: { async writeBytes() {}, async close() {} },
       stdout: stream(stdout),
@@ -73,7 +89,8 @@ function fakePrivileged(sealExit = 0) {
   });
 }
 
-async function fixture(privileged?: ReturnType<typeof fakePrivileged>) {
+/** `false` leaves the sandbox without a privileged exec, so it can never be sealed. */
+async function fixture(privileged: ReturnType<typeof fakePrivileged> | false = fakePrivileged()) {
   const roots = new Set<string>();
   const children: { child: ChildProcess; done: Promise<number>; running: boolean }[] = [];
   let allocated = false;
@@ -419,7 +436,7 @@ it("allocates once with create-time ownership and a bounded whole-second lifetim
 });
 
 it("admits commands only in a sandbox it can seal", async () => {
-  const f = await fixture();
+  const f = await fixture(false);
   await expect(
     f.session.allocate({
       owner,
