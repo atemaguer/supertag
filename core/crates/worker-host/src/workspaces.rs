@@ -295,6 +295,7 @@ impl Workspaces {
                         temporary.path(),
                         &bundle.sha256,
                         &reference.head_commit,
+                        Some(&reference.start_commit),
                         cancel,
                     )
                     .await?;

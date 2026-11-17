@@ -1,5 +1,6 @@
-//! A Worker Host imports a delivery bundle only when the bundle alone carries the delivered
-//! history: nothing is borrowed from the host's own repository and nothing extra is stored.
+//! A Worker Host imports a delivery bundle only when the bundle carries the delivered history
+//! beyond the delivery's start commit, which the host must already hold: nothing else is
+//! borrowed from the host's own repository and nothing extra is stored.
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -130,15 +131,25 @@ fn objects(state: &Path) -> Vec<(PathBuf, u64)> {
 }
 
 async fn refused(host: &(Workspace, PathBuf), path: &Path, sha: &str, head: &str) -> String {
+    refused_from(host, path, sha, head, None).await
+}
+
+async fn refused_from(
+    host: &(Workspace, PathBuf),
+    path: &Path,
+    sha: &str,
+    head: &str,
+    start: Option<&str>,
+) -> String {
     let (host, state) = host;
     let before = objects(state);
     let error = tokio::time::timeout(
         Duration::from_secs(60),
-        host.import_bundle(path, sha, head, &CancellationToken::new()),
+        host.import_bundle(path, sha, head, start, &CancellationToken::new()),
     )
     .await
     .expect("import must not block")
-    .expect_err("bundle must be refused");
+    .expect_err(&format!("bundle must be refused: {}", path.display()));
     // The host's object store is unchanged: no object, pack, or index was added.
     assert_eq!(objects(state), before);
     // Nothing was imported: a Task pinned to the head still cannot start.
@@ -219,10 +230,18 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
     let last = damaged.len() - 30;
     damaged[last] ^= 0xff;
     let path = fixture.write("damaged.bundle", &damaged);
-    let error = refused(&second, &path, &digest(&damaged), &head).await;
+    let error = refused_from(
+        &second,
+        &path,
+        &digest(&damaged),
+        &head,
+        Some(&delivery.start_commit),
+    )
+    .await;
     assert!(error.contains("damaged"), "{error}");
 
-    // A thin bundle that needs a prerequisite, even one this host has.
+    // A bundle that needs a prerequisite, even one this host has, other than the delivery's
+    // approved start commit; and one that names a prerequisite where none is accepted.
     git(&fixture.source, &["checkout", "--quiet", "-b", "candidate"]);
     fs::write(fixture.source.join("README.md"), "candidate\n").unwrap();
     git(&fixture.source, &["commit", "--quiet", "-am", "Candidate"]);
@@ -239,8 +258,10 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
         ],
     );
     let bytes = fs::read(&thin).unwrap();
+    let error = refused_from(&second, &thin, &digest(&bytes), &candidate, Some(&head)).await;
+    assert!(error.contains("start commit"), "{error}");
     let error = refused(&second, &thin, &digest(&bytes), &candidate).await;
-    assert!(error.contains("incomplete"), "{error}");
+    assert!(error.contains("accepts none"), "{error}");
 
     // A commit whose parent the pack omits borrows that parent from the host.
     let tree = git(&fixture.source, &["rev-parse", "candidate^{tree}"]);
@@ -298,6 +319,7 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
             &delivery.bundle_path,
             &delivery.bundle_sha256,
             &head,
+            Some(&delivery.start_commit),
             &CancellationToken::new(),
         )
         .await
@@ -320,4 +342,294 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
         fs::read_to_string(continued.path.join("README.md")).unwrap(),
         "delivered\n"
     );
+}
+
+/// An incremental delivery bundle (`start..head`) imports on a host that holds its start commit;
+/// one that does not is refused with `MissingPrerequisite` and keeps nothing, while a complete
+/// bundle of the same head imports there. Its pack may borrow only the start commit's history:
+/// an object outside `HEAD --not START`, and a delta against another Session's object, are
+/// refused.
+#[tokio::test]
+async fn incremental_delivery_bundles_build_on_a_start_commit_the_host_holds() {
+    let fixture = Fixture::new();
+    let first = fixture.host("first-host");
+    let deliver =
+        async |session: &str, expected: Option<String>, name: &str, file: &str, text: &str| {
+            let checkout = first
+                .prepare(
+                    PrepareRequest {
+                        task_id: name.into(),
+                        attempt_id: format!("{name}-attempt"),
+                        session_id: session.into(),
+                        expected_head: expected,
+                        setup: None,
+                    },
+                    &CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            fs::write(checkout.path.join(file), text).unwrap();
+            first
+                .finalize(
+                    &checkout,
+                    FinalizeRequest {
+                        output_directory: None,
+                        file_scope: None,
+                        summary: format!("Change: {name}"),
+                        outcome: Outcome::Completed,
+                    },
+                    &CancellationToken::new(),
+                )
+                .await
+                .unwrap()
+        };
+    let holder = format!(
+        "--git-dir={}",
+        fixture.path.join("first-host/repository.git").display()
+    );
+    // A bundle from the first host's repository: `head`, named as the delivery's ref, without
+    // the history of `excluded`.
+    let bundle = |name: &str, head: &str, excluded: &[&str]| -> (PathBuf, String) {
+        let path = fixture.path.join(name);
+        let reference = format!("refs/heads/bundles/{name}");
+        git(&fixture.path, &[&holder, "update-ref", &reference, head]);
+        let mut args = vec![holder.as_str(), "bundle", "create", path.to_str().unwrap()];
+        args.push(&reference);
+        let exclusions: Vec<String> = excluded.iter().map(|oid| format!("^{oid}")).collect();
+        args.extend(exclusions.iter().map(String::as_str));
+        git(&fixture.path, &args);
+        let sha = digest(&fs::read(&path).unwrap());
+        (path, sha)
+    };
+    // Large enough that Git stores later versions as deltas against earlier ones.
+    let text = |line: &str| format!("{}{line}\n", "shared content line\n".repeat(400));
+    let one = deliver("session", None, "one", "README.md", &text("one")).await;
+    let two = deliver(
+        "session",
+        Some(one.head_commit.clone()),
+        "two",
+        "README.md",
+        &text("two"),
+    )
+    .await;
+    let other = deliver(
+        "other",
+        None,
+        "other",
+        "SECRET.md",
+        &text("other session secret"),
+    )
+    .await;
+    // A later turn whose file is closest to the other Session's: Git deltas it against that.
+    let three = deliver(
+        "session",
+        Some(two.head_commit.clone()),
+        "three",
+        "SECRET.md",
+        &format!("{}more\n", text("other session secret")),
+    )
+    .await;
+    let (one_path, one_sha) = bundle("one.bundle", &one.head_commit, &[&one.start_commit]);
+    let (two_path, two_sha) = bundle("two.bundle", &two.head_commit, &[&two.start_commit]);
+    assert!(fs::metadata(&two_path).unwrap().len() < fs::metadata(&two.bundle_path).unwrap().len());
+
+    // A host holding the base imports the first, then the second on top of it.
+    let second = (
+        fixture.host("second-host"),
+        fixture.path.join("second-host"),
+    );
+    for (path, sha, delivery) in [(&one_path, &one_sha, &one), (&two_path, &two_sha, &two)] {
+        second
+            .0
+            .import_bundle(
+                path,
+                sha,
+                &delivery.head_commit,
+                Some(&delivery.start_commit),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+    }
+    assert!(
+        second
+            .0
+            .holds_commit(&two.head_commit, &CancellationToken::new())
+            .await
+    );
+
+    // A host holding only the base lacks the second delivery's start: refused, nothing kept.
+    let third = (fixture.host("third-host"), fixture.path.join("third-host"));
+    assert!(
+        third
+            .0
+            .holds_commit(&fixture.base, &CancellationToken::new())
+            .await
+    );
+    let before = objects(&third.1);
+    let error = third
+        .0
+        .import_bundle(
+            &two_path,
+            &two_sha,
+            &two.head_commit,
+            Some(&two.start_commit),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    let missing = error
+        .downcast_ref::<supertag_workspaces::MissingPrerequisite>()
+        .unwrap_or_else(|| panic!("{error:#}"));
+    assert_eq!(missing.0, one.head_commit);
+    assert_eq!(objects(&third.1), before);
+    // The complete bundle of the same head, as the holder sends when asked, imports there.
+    third
+        .0
+        .import_bundle(
+            &two.bundle_path,
+            &two.bundle_sha256,
+            &two.head_commit,
+            Some(&two.start_commit),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    // A fourth host holds the first delivery and the other Session's commit.
+    let fourth = (
+        fixture.host("fourth-host"),
+        fixture.path.join("fourth-host"),
+    );
+    for delivery in [&one, &other] {
+        fourth
+            .0
+            .import_bundle(
+                &delivery.bundle_path,
+                &delivery.bundle_sha256,
+                &delivery.head_commit,
+                Some(&delivery.start_commit),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+    }
+    fourth
+        .0
+        .import_bundle(
+            &two_path,
+            &two_sha,
+            &two.head_commit,
+            Some(&two.start_commit),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    // A pack carrying an object outside `HEAD --not START` beside the delivered ones.
+    let stray = String::from_utf8(git_input(
+        &fixture.path,
+        &[&holder, "hash-object", "-w", "--stdin"],
+        b"not part of the delivery\n",
+    ))
+    .unwrap()
+    .trim()
+    .to_owned();
+    let delivered = git(
+        &fixture.path,
+        &[
+            &holder,
+            "rev-list",
+            "--objects",
+            &three.head_commit,
+            &format!("^{}", three.start_commit),
+        ],
+    );
+    let mut listed: Vec<String> = delivered
+        .lines()
+        .map(|line| line.split(' ').next().unwrap().to_owned())
+        .collect();
+    listed.push(stray);
+    let pack = git_input(
+        &fixture.path,
+        &[&holder, "pack-objects", "--stdout"],
+        format!("{}\n", listed.join("\n")).as_bytes(),
+    );
+    let mut forged = format!(
+        "# v2 git bundle\n-{} start\n{} refs/heads/candidate\n\n",
+        three.start_commit, three.head_commit
+    )
+    .into_bytes();
+    forged.extend(pack);
+    let forged_path = fixture.write("stray.bundle", &forged);
+    let error = refused_from(
+        &fourth,
+        &forged_path,
+        &digest(&forged),
+        &three.head_commit,
+        Some(&three.start_commit),
+    )
+    .await;
+    assert!(error.contains("outside the delivered history"), "{error}");
+
+    // A pack that also carries the other Session's blob, which this host holds but which is not
+    // in the start commit's history. Unbundling a thin pack copies its delta bases in the same
+    // way, so a delta against that blob is refused by the same check.
+    let foreign = git(
+        &fixture.path,
+        &[
+            &holder,
+            "rev-parse",
+            &format!("{}:SECRET.md", other.head_commit),
+        ],
+    );
+    let objects = git(
+        &fixture.path,
+        &[
+            &holder,
+            "rev-list",
+            "--objects",
+            &three.head_commit,
+            &format!("^{}", three.start_commit),
+        ],
+    );
+    let mut listed: Vec<&str> = objects
+        .lines()
+        .map(|line| line.split(' ').next().unwrap())
+        .collect();
+    listed.push(&foreign);
+    let thin = git_input(
+        &fixture.path,
+        &[&holder, "pack-objects", "--stdout"],
+        format!("{}\n", listed.join("\n")).as_bytes(),
+    );
+    let mut forged = format!(
+        "# v2 git bundle\n-{} start\n{} refs/heads/candidate\n\n",
+        three.start_commit, three.head_commit
+    )
+    .into_bytes();
+    forged.extend(thin);
+    let forged_path = fixture.write("foreign.bundle", &forged);
+    let error = refused_from(
+        &fourth,
+        &forged_path,
+        &digest(&forged),
+        &three.head_commit,
+        Some(&three.start_commit),
+    )
+    .await;
+    assert!(error.contains("outside the delivered history"), "{error}");
+    // The honest incremental bundle still imports there.
+    let (three_path, three_sha) =
+        bundle("three.bundle", &three.head_commit, &[&three.start_commit]);
+    fourth
+        .0
+        .import_bundle(
+            &three_path,
+            &three_sha,
+            &three.head_commit,
+            Some(&three.start_commit),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
 }

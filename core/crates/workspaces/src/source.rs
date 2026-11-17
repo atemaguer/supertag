@@ -79,7 +79,7 @@ pub async fn materialize(
         copy.write_all(&bytes)?;
         copy.flush()?;
         repository
-            .import_bundle(copy.path(), commit, cancel)
+            .import_bundle(copy.path(), commit, None, cancel)
             .await?;
         repository.sync()?;
     }

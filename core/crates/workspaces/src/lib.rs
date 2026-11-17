@@ -14,6 +14,7 @@ pub mod session_branch;
 pub mod setup;
 pub mod source;
 mod transfer;
+pub use git::MissingPrerequisite;
 pub use lock::ExclusiveLock;
 pub use transfer::{
     PreparedExport, TransferArtifact, materialize_returned_files, verify_return_excludes,
@@ -749,11 +750,15 @@ impl Workspace {
             .is_ok()
     }
 
+    /// Imports a delivery's bundle. `start` is the delivery's start commit from its approved
+    /// receipt: an incremental bundle may build on it when this host holds it, and fails with
+    /// [`MissingPrerequisite`] when it does not.
     pub async fn import_bundle(
         &self,
         bundle_path: &Path,
         expected_sha256: &str,
         expected_head: &str,
+        start: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<()> {
         check_cancelled(cancel)?;
@@ -777,7 +782,7 @@ impl Workspace {
         copy.flush()?;
         let repository = self.repository(cancel).await?;
         repository
-            .import_bundle(copy.path(), expected_head, cancel)
+            .import_bundle(copy.path(), expected_head, start, cancel)
             .await?;
         repository
             .assert_ancestor(&self.inner.config.base_commit, expected_head, cancel)
@@ -1007,7 +1012,11 @@ fn verify_bundle_head(bytes: &[u8], head: &str, reference: &str) -> Result<()> {
         "unsupported bundle header"
     );
     let expected = format!("{head} {reference}");
-    let refs: Vec<_> = lines.filter(|line| !line.starts_with('@')).collect();
+    // Capabilities (`@`) and prerequisites (`-`, checked when the bundle is imported) aside,
+    // the header names exactly the delivered commit.
+    let refs: Vec<_> = lines
+        .filter(|line| !line.starts_with('@') && !line.starts_with('-'))
+        .collect();
     ensure!(
         refs == [expected.as_str()],
         "bundle does not bind the delivered commit to its receipt"

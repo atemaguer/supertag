@@ -1650,8 +1650,11 @@ async fn run_assignment(
             .prepare(&task, &attempt, transfers, token, &operation_cancel)
             .await
             .map_err(|error| {
-                error.downcast::<Status>().unwrap_or_else(|_| {
-                    Status::invalid_argument("Task workspace could not be prepared safely")
+                error.downcast::<Status>().unwrap_or_else(|error| {
+                    failures::noted(
+                        Status::invalid_argument("Task workspace could not be prepared safely"),
+                        &format!("{error:#}"),
+                    )
                 })
             })
     })

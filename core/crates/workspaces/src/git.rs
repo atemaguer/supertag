@@ -788,12 +788,25 @@ impl Repository {
         file: &Path,
         cancel: &CancellationToken,
     ) -> Result<()> {
+        self.bundle_excluding(head, id, file, &[], cancel).await
+    }
+
+    async fn bundle_excluding(
+        &self,
+        head: &str,
+        id: &str,
+        file: &Path,
+        exclusions: &[String],
+        cancel: &CancellationToken,
+    ) -> Result<()> {
         let reference = format!("refs/heads/supertag-deliveries/{id}");
         self.command(&["update-ref", &reference, head], &[], &[], cancel)
             .await?;
         let file = file.to_str().context("bundle path is not UTF-8")?;
-        self.command(&["bundle", "create", file, &reference], &[], &[], cancel)
-            .await?;
+        let excluded: Vec<String> = exclusions.iter().map(|oid| format!("^{oid}")).collect();
+        let mut args = vec!["bundle", "create", file, reference.as_str()];
+        args.extend(excluded.iter().map(String::as_str));
+        self.command(&args, &[], &[], cancel).await?;
         self.command(&["bundle", "verify", file], &[], &[], cancel)
             .await?;
         let heads = self
@@ -806,28 +819,61 @@ impl Repository {
         Ok(())
     }
 
+    /// Imports a delivery bundle whose head is `head`. A complete bundle is unpacked into an
+    /// empty quarantine repository, so a thin delta, or a tree or parent naming an object the
+    /// bundle does not carry, fails there instead of borrowing an object from this host's
+    /// repository.
+    ///
+    /// An incremental bundle (see [`Self::delivery_bundle`]) may borrow only the history of the
+    /// delivery's `start` commit, which the caller took from the approved delivery receipt. Its
+    /// prerequisites must be exactly `start`, or the head's parents when the delivery changed
+    /// nothing, and this host must already hold them: otherwise the import fails with
+    /// [`MissingPrerequisite`] and the caller asks for a complete bundle instead. Its quarantine
+    /// reads this repository as an alternate, and the pack must hold exactly the objects the
+    /// head reaches beyond its prerequisites.
     pub(crate) async fn import_bundle(
         &self,
         file: &Path,
         head: &str,
+        start: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<()> {
+        let prerequisites = bundle_prerequisites(file)?;
+        if !prerequisites.is_empty() {
+            let start = start.context(
+                "delivery bundle names prerequisite commits, and this import accepts none",
+            )?;
+            validate_oid(start)?;
+            for prerequisite in &prerequisites {
+                validate_oid(prerequisite)?;
+                if self.verify_commit(prerequisite, cancel).await.is_err() {
+                    return Err(MissingPrerequisite(prerequisite.clone()).into());
+                }
+            }
+        }
         let file = file.to_str().context("bundle path is not UTF-8")?;
-        // A delivery bundle is complete: it is unpacked into an empty quarantine repository, so
-        // a prerequisite, a thin delta, or a tree or parent naming an object the bundle does not
-        // carry fails there instead of borrowing that object from this host's repository.
         let temporary = self.root.join("temporary");
         paths::create_private_root(&temporary)?;
         let quarantine = tempfile::Builder::new()
             .prefix("import-")
             .tempdir_in(&temporary)?;
         let isolated = Self::empty(quarantine.path(), self.oid_length)?;
+        // Only an incremental bundle reads this repository, for its prerequisites' history.
+        let own_objects = self.git_dir.join("objects");
+        let borrowing: Vec<(&str, OsString)> = if prerequisites.is_empty() {
+            vec![]
+        } else {
+            vec![(
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                own_objects.clone().into_os_string(),
+            )]
+        };
         isolated
-            .command(&["bundle", "verify", file], &[], &[], cancel)
+            .command(&["bundle", "verify", file], &[], &borrowing, cancel)
             .await
             .context("delivery bundle is incomplete or damaged")?;
         let heads = isolated
-            .command(&["bundle", "list-heads", file], &[], &[], cancel)
+            .command(&["bundle", "list-heads", file], &[], &borrowing, cancel)
             .await?;
         let advertised = String::from_utf8(heads)?;
         ensure!(
@@ -837,14 +883,48 @@ impl Repository {
             "approved commit is not an advertised bundle head"
         );
         isolated
-            .command(&["bundle", "unbundle", file], &[], &[], cancel)
+            .command(&["bundle", "unbundle", file], &[], &borrowing, cancel)
             .await
             .context("delivery bundle pack is damaged or incomplete")?;
-        isolated.verify_commit(head, cancel).await?;
+        validate_oid(head)?;
+        let kind = isolated
+            .command(&["cat-file", "-t", head], &[], &borrowing, cancel)
+            .await?;
+        ensure!(kind == b"commit\n", "pinned Git object is not a commit");
+        if let Some(start) = start.filter(|_| !prerequisites.is_empty()) {
+            let allowed: BTreeSet<String> = if head == start {
+                parents_in(&isolated, head, &borrowing, cancel)
+                    .await?
+                    .into_iter()
+                    .collect()
+            } else {
+                ensure!(
+                    isolated
+                        .command(
+                            &["merge-base", "--is-ancestor", start, head],
+                            &[],
+                            &borrowing,
+                            cancel,
+                        )
+                        .await
+                        .is_ok(),
+                    "delivered commit does not descend from its start commit"
+                );
+                BTreeSet::from([start.to_owned()])
+            };
+            ensure!(
+                prerequisites == allowed,
+                "delivery bundle needs commits other than its start commit"
+            );
+        }
+        let mut range = vec!["rev-list", "--objects", head];
+        let excluded: Vec<String> = prerequisites.iter().map(|oid| format!("^{oid}")).collect();
+        range.extend(excluded.iter().map(String::as_str));
         let reachable = isolated
-            .command(&["rev-list", "--objects", head], &[], &[], cancel)
+            .command(&range, &[], &borrowing, cancel)
             .await
             .context("delivery bundle history is incomplete")?;
+        // The quarantine's own objects: what the bundle carried, never this repository's.
         let stored = isolated
             .command(
                 &[
@@ -864,18 +944,42 @@ impl Repository {
                 .map(str::to_owned)
                 .collect())
         };
+        let (reachable, stored) = (names(&reachable)?, names(&stored)?);
         ensure!(
-            names(&reachable)? == names(&stored)?,
-            "delivery bundle pack carries objects outside the delivered history"
+            reachable.is_subset(&stored),
+            "delivery bundle history is incomplete"
         );
+        // Unbundling an incremental bundle completes its thin pack with the delta bases it names,
+        // copied from this repository. They must belong to the prerequisites' history: a delta
+        // against any other object here, such as another Session's, is refused.
+        let extra: BTreeSet<&String> = stored.difference(&reachable).collect();
+        if !extra.is_empty() {
+            ensure!(
+                !prerequisites.is_empty(),
+                "delivery bundle pack carries objects outside the delivered history"
+            );
+            let mut history = vec!["rev-list", "--objects"];
+            history.extend(prerequisites.iter().map(String::as_str));
+            let history = names(&isolated.command(&history, &[], &borrowing, cancel).await?)?;
+            ensure!(
+                extra.iter().all(|object| history.contains(*object)),
+                "delivery bundle pack carries objects outside the delivered history"
+            );
+        }
+        let mut revisions = format!("{head}\n");
+        for prerequisite in &prerequisites {
+            revisions.push_str(&format!("^{prerequisite}\n"));
+        }
+        let mut objects = vec![(
+            "GIT_OBJECT_DIRECTORY",
+            isolated.git_dir.join("objects").into_os_string(),
+        )];
+        objects.extend(borrowing.iter().cloned());
         let pack = self
             .command(
                 &["pack-objects", "--stdout", "--revs"],
-                format!("{head}\n").as_bytes(),
-                &[(
-                    "GIT_OBJECT_DIRECTORY",
-                    isolated.git_dir.join("objects").into_os_string(),
-                )],
+                revisions.as_bytes(),
+                &objects,
                 cancel,
             )
             .await?;
@@ -892,6 +996,77 @@ impl Repository {
 /// How many workers write and verify a checkout: the machine's cores, at most 8.
 fn parallelism() -> usize {
     std::thread::available_parallelism().map_or(1, |cores| cores.get().min(8))
+}
+
+/// A delivery bundle names a prerequisite commit this host does not hold, so it cannot be
+/// imported here; the caller asks for a complete bundle instead.
+#[derive(Debug)]
+pub struct MissingPrerequisite(pub String);
+
+impl std::fmt::Display for MissingPrerequisite {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "delivery bundle needs commit {}, which this repository does not hold",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for MissingPrerequisite {}
+
+/// The prerequisite commits a bundle's header names, read without Git so a damaged or hostile
+/// header is refused before Git parses the pack. Version 2 and 3 headers.
+pub(crate) fn bundle_prerequisites(file: &Path) -> Result<BTreeSet<String>> {
+    use std::io::{BufRead, BufReader, Read};
+    let reader = BufReader::new(fs::File::open(file)?.take(1 << 20));
+    let mut lines = reader.split(b'\n');
+    let signature = lines.next().context("bundle is empty")??;
+    ensure!(
+        signature == b"# v2 git bundle" || signature == b"# v3 git bundle",
+        "not a Git bundle"
+    );
+    let mut prerequisites = BTreeSet::new();
+    for line in lines {
+        let line = line?;
+        if line.is_empty() {
+            return Ok(prerequisites);
+        }
+        if let Some(rest) = line.strip_prefix(b"-") {
+            let oid = std::str::from_utf8(rest)?
+                .split(' ')
+                .next()
+                .unwrap_or_default();
+            validate_oid(oid)?;
+            prerequisites.insert(oid.to_owned());
+        }
+    }
+    anyhow::bail!("bundle header is incomplete")
+}
+
+async fn parents_in(
+    repository: &Repository,
+    commit: &str,
+    extra: &[(&str, OsString)],
+    cancel: &CancellationToken,
+) -> Result<Vec<String>> {
+    validate_oid(commit)?;
+    let listed = repository
+        .command(
+            &["rev-list", "--parents", "-n", "1", commit],
+            &[],
+            extra,
+            cancel,
+        )
+        .await?;
+    let line = String::from_utf8(listed)?;
+    let mut oids = line.split_whitespace().map(str::to_owned);
+    ensure!(oids.next().as_deref() == Some(commit), "commit is missing");
+    oids.map(|oid| {
+        validate_oid(&oid)?;
+        Ok(oid)
+    })
+    .collect()
 }
 
 pub(crate) fn validate_oid(value: &str) -> Result<()> {

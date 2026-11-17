@@ -224,9 +224,18 @@ async fn isolated_capture_is_durable_exact_and_continues_only_an_explicit_pin() 
     assert!(!unchanged.committed);
     assert_eq!(unchanged.changed_files, 0);
     assert_eq!(unchanged.head_commit, delivery.head_commit);
+    // A reviewer's repository already holds the Workspace's base, the bundle's prerequisite.
     let imported = fixture._root.path().join("review");
-    fs::create_dir(&imported).unwrap();
-    git(&imported, &["init", "--quiet"]);
+    git(
+        fixture._root.path(),
+        &[
+            "clone",
+            "--quiet",
+            "--no-local",
+            fixture.source.to_str().unwrap(),
+            imported.to_str().unwrap(),
+        ],
+    );
     git(
         &imported,
         &[
@@ -575,6 +584,7 @@ async fn an_approved_bundle_restores_continuation_on_another_host_and_cleanup_ke
                 &delivery.bundle_path,
                 &"0".repeat(64),
                 &delivery.head_commit,
+                Some(&delivery.start_commit),
                 &CancellationToken::new()
             )
             .await
@@ -585,6 +595,7 @@ async fn an_approved_bundle_restores_continuation_on_another_host_and_cleanup_ke
             &delivery.bundle_path,
             &delivery.bundle_sha256,
             &delivery.head_commit,
+            Some(&delivery.start_commit),
             &CancellationToken::new(),
         )
         .await
@@ -594,6 +605,7 @@ async fn an_approved_bundle_restores_continuation_on_another_host_and_cleanup_ke
             &delivery.bundle_path,
             &delivery.bundle_sha256,
             &delivery.head_commit,
+            Some(&delivery.start_commit),
             &CancellationToken::new(),
         )
         .await
