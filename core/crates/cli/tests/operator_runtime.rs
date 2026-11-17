@@ -575,7 +575,7 @@ async fn tui_save_task_file(
     tmux.wait_for("Evidence is ready.").await?;
     tmux.wait_for("Save from Ctrl+k").await?;
     tmux.run(&["send-keys", "-t", "runtime", "C-k"]).await?;
-    tmux.wait_for("Commands").await?;
+    tmux.wait_for("Search Tags, conversations, settings").await?;
     tmux.run(&["send-keys", "-t", "runtime", "-l", "Task files"])
         .await?;
     tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
