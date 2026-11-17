@@ -6,6 +6,7 @@ mod checkpoint;
 mod config;
 mod coordination;
 mod events;
+pub mod launcher;
 mod memory;
 mod pricing;
 mod questions;
@@ -14,7 +15,13 @@ mod schedules;
 mod skills;
 mod tag_sessions;
 
-use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    collections::BTreeMap,
+    ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
 
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
@@ -343,7 +350,13 @@ async fn execute(
     } else {
         String::new()
     };
-    verify_version(options, &environment).await?;
+    // The native binary behind the npm launcher, so no Node process starts with every Codex.
+    let executable = launcher::resolve(
+        &options.executable,
+        environment.get(OsStr::new("PATH")).map(OsString::as_os_str),
+    )
+    .map_or_else(|| options.executable.clone(), |found| found.path);
+    verify_version(&executable, &environment).await?;
     if let Some(applied) = applied_limits {
         harness
             .confirm_execution_limits(request(applied, token)?)
@@ -351,7 +364,7 @@ async fn execute(
             .context("could not confirm Codex execution limits")?;
     }
 
-    let mut command = Command::new(&options.executable);
+    let mut command = Command::new(&executable);
     command
         .args(arguments)
         .current_dir(&workspace)
@@ -522,10 +535,10 @@ async fn read_line(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<Option<Ve
 }
 
 async fn verify_version(
-    options: &CodexOptions,
+    executable: &Path,
     environment: &BTreeMap<OsString, OsString>,
 ) -> Result<()> {
-    let mut command = Command::new(&options.executable);
+    let mut command = Command::new(executable);
     command
         .arg("--version")
         .env_clear()
@@ -535,7 +548,8 @@ async fn verify_version(
         .stderr(Stdio::null())
         .kill_on_drop(true);
     let mut child = command.spawn().context("Codex executable is unavailable")?;
-    let outcome = time::timeout(RPC_TIMEOUT, async {
+    // A cold start of the Codex process, not one exchange: it gets the startup bound.
+    let outcome = time::timeout(STARTUP_TIMEOUT, async {
         let mut output = Vec::new();
         child
             .stdout

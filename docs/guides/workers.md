@@ -177,7 +177,10 @@ A Task that names a model runs only on a host that lists it. See
 
 Codex runs through an adapter built into `supertag`, using Codex's app-server. It reports token
 usage as it goes, so a Task's `--max-reported-tokens` limit stops the turn when the reported
-count reaches it. `--codex-path` names another Codex executable.
+count reaches it. `--codex-path` names another Codex executable. When `codex` is the launcher
+that `npm install -g @openai/codex` installs, SuperTag runs the native binary behind it, so Node
+need not be on the Worker Host's PATH. `supertag sign-in codex` and `supertag init` print the
+binary they use.
 
 ### Claude Code, Cursor, and OpenCode
 

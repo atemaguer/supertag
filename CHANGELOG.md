@@ -147,6 +147,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- Codex installed with `npm install -g @openai/codex` no longer fails with "Codex version probe
+  timed out". SuperTag runs the native Codex binary behind the npm launcher instead of starting
+  Node for every Codex process, and gives the version probe the 30-second startup bound.
+  `supertag sign-in codex` and `supertag init` print which Codex binary they use.
 - A Codex Task no longer fails with "Codex did not answer initialize within 5s" on a busy
   machine. The first exchange with the Codex app server, which also waits for the process to
   start, now has 30 seconds; later exchanges keep 5.

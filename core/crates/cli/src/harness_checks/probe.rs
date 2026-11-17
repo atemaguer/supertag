@@ -118,6 +118,26 @@ pub fn find_on_path(command: &str, path: Option<&OsStr>) -> Option<PathBuf> {
         .find(|candidate| executable(candidate))
 }
 
+/// The Codex binary a Worker Host with `variables` runs: the native binary behind the npm
+/// launcher when that is what PATH holds, as the Codex adapter resolves it.
+pub fn codex_executable(
+    variables: &Variables,
+) -> Option<supertag_codex_adapter::launcher::Executable> {
+    supertag_codex_adapter::launcher::resolve(
+        Path::new("codex"),
+        variables.get(OsStr::new("PATH")).map(OsString::as_os_str),
+    )
+}
+
+/// `command` on `path`, resolving Codex's npm launcher to its native binary.
+pub fn find_command(command: &str, path: Option<&OsStr>) -> Option<PathBuf> {
+    if command == "codex" {
+        return supertag_codex_adapter::launcher::resolve(Path::new(command), path)
+            .map(|found| found.path);
+    }
+    find_on_path(command, path)
+}
+
 pub struct Probe {
     child: Child,
     pid: libc::pid_t,

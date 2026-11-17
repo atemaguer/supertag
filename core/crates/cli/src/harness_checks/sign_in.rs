@@ -95,7 +95,8 @@ pub async fn codex(
         }
         key = probe::text(variables, "OPENAI_API_KEY");
     }
-    let (Some(key), Some(executable)) = (key, executable("codex", variables)) else {
+    let executable = probe::codex_executable(variables).map(|found| found.path);
+    let (Some(key), Some(executable)) = (key, executable) else {
         return false;
     };
     let Some(directory) = private_directory("supertag-codex-signin-") else {

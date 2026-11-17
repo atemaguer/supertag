@@ -202,10 +202,11 @@ async fn sign_in_once(
             };
         }
     };
-    SignInResult {
-        signed_in,
-        detail: None,
-    }
+    // Say which Codex binary the check, and the Worker Host, run.
+    let detail = (harness == Harness::Codex)
+        .then(|| probe::codex_executable(variables).map(|found| found.describe()))
+        .flatten();
+    SignInResult { signed_in, detail }
 }
 
 pub struct SignInResult {

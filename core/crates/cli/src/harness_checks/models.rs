@@ -44,7 +44,7 @@ pub async fn check_cli(
     variables: &Variables,
     stop: impl Future<Output = ()>,
 ) -> Option<String> {
-    let Some(path) = probe::find_on_path(
+    let Some(path) = probe::find_command(
         requirement.command,
         variables
             .get(std::ffi::OsStr::new("PATH"))
@@ -244,7 +244,7 @@ pub async fn check_codex_models(
     if models.is_empty() {
         return ModelCheck::Ok;
     }
-    let listed = match probe::find_on_path(
+    let listed = match probe::find_command(
         CODEX.command,
         variables
             .get(std::ffi::OsStr::new("PATH"))

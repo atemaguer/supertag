@@ -117,9 +117,11 @@ impl SignIns {
             &self.environment,
             self.supervisor,
         )?;
-        let signed_in = harness_checks::probe_sign_in(harness.check(), model, &variables)
-            .await
-            .signed_in;
+        let result = harness_checks::probe_sign_in(harness.check(), model, &variables).await;
+        if let Some(detail) = &result.detail {
+            outln!("  {detail}");
+        }
+        let signed_in = result.signed_in;
         self.results
             .push((harness, model.map(str::to_owned), signed_in));
         Ok(signed_in)
