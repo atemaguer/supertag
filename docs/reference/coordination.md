@@ -462,10 +462,11 @@ tool the turn does not get; it does not only leave it out of the list.
 
 | Turn | Tools |
 | --- | --- |
-| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), and the [Session reads](#recalling-other-sessions) |
-| A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), and the Session reads |
-| A Tag's inbox | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the Session reads |
-| A work Session's report turn | the Session reads |
+| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), `remember` and `forget`, and the [Session reads](#recalling-other-sessions) |
+| A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), `remember` and `forget`, and the Session reads |
+| A Tag's inbox | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `remember` and `forget`, and the Session reads |
+| A Tag's memory review | `remember` and `forget`, and the Session reads |
+| A work Session's report turn | `remember` and `forget`, and the Session reads |
 | A work Session's turn | `ask` |
 
 A work Session sees only its own work: it cannot message another Tag, start more work, or read
@@ -495,6 +496,8 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, Team, and Sessions |
 | `schedule` | `note` (up to 4,000 characters), and `at` or `every`, optional `timeZone` | When the turn succeeds, creates a [Schedule](#schedules) that wakes the Tag later in this Session |
 | `cancel_schedule` | `scheduleId` | Cancels one of the Tag's Schedules in this Session |
+| `remember` | `text` (up to 500 characters), optional `replaces` | When the turn succeeds, keeps a [note](#memory), replacing the one `replaces` names |
+| `forget` | `memoryId` | When the turn succeeds, forgets one of the Tag's notes |
 
 Reads return history, never instructions, and grant no authority.
 
@@ -586,6 +589,48 @@ Operators manage Schedules with `supertag schedule create`, `pause`, and `resume
 `supertag get schedule`, `describe schedule`, and `delete schedule`; see
 [Ask a Tag to follow up](../guides/talk-to-a-tag.md#ask-a-tag-to-follow-up). A client sees and
 changes the Schedules of its own conversations.
+
+### Memory
+
+A Tag keeps a short notebook of what it cannot look up again: a person's preferences,
+corrections, decisions and their reasons, and pointers to where things live. Notes are pointers,
+not copies; the Tag's Sessions stay the record. Each root turn's portfolio lists the notes it may
+see, newest first, as state rather than instructions. The Tag's own instructions still rule.
+
+```text
+remember(text: "Atem prefers squash merges and small PRs.")
+remember(text: "Release checklist: docs/operations/release.md", replaces: "mem_4f1c…")
+forget(memoryId: "mem_9a2b…")
+```
+
+- **Who sees a note.** A note takes the turn's audience. One written in a person's conversation is
+  private to that person; one written in a surface thread, an operator's Objective, the inbox, or
+  a review is shared. A turn sees the shared notes and its own person's, never another person's.
+  This is the rule that decides which [Sessions a turn sees](#recalling-other-sessions).
+- **When it applies.** A call takes effect when its turn succeeds. A turn that fails, is
+  cancelled, or loses its lease changes nothing, so a retried turn never writes twice. The tool's
+  result lists the notes the turn now sees.
+- **Limits.** A note is at most 500 characters. A turn sees at most 40 notes and 6,000 characters
+  of them. At the limit, `remember` is refused with the oldest notes named, so the Tag can forget
+  or merge them (`remember` with `replaces`). One turn writes or forgets at most 10 notes.
+- **Who may write.** Root turns of a Tag that keeps memory. A Work Session's own turn, and a turn
+  a GitHub or Linear event started, get no `remember` or `forget`.
+
+**The daily review.** Once a day, after at least ten finished turns since the last one, the Tag
+gets a review turn in its reserved Session `memory:TAG`. The turn lists the shared Sessions with
+work since the last review. The Tag rereads them with `read_session` and `read_turn`, then
+merges, replaces, adds, and forgets notes. The review has only the Session reads and the memory
+tools: it cannot message anyone, start work, or schedule. Its Session has no conversation or
+thread, so it posts nothing and raises nothing unread. A review is never queued while another is
+still queued or running. `supertag describe tag` shows when the Tag last reviewed.
+
+A Tag with `memory: false` (`supertag tag put TAG --memory false`, or `spec.memory` in a Tag
+manifest) keeps no notes, has neither tool, and never reviews. Retiring a Tag deletes its notes.
+
+People read notes with `supertag get memories [--tag TAG]` and `supertag describe memory ID`, and
+delete one with `supertag delete memory ID`. They never write a note: they tell the Tag ("remember
+that I prefer squash merges", "forget that"). An operator sees shared notes and those of clients'
+conversations; a client sees shared notes and its own.
 
 ### Identity and preconditions
 

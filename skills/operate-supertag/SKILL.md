@@ -79,6 +79,10 @@ a Schedule with `supertag schedule create --tag TAG --at 1h "NOTE"`. That wakes 
 this thread; `supertag get schedules` lists them. See
 [Schedules](../../docs/reference/coordination.md#schedules).
 
+A Tag keeps short notes ([Memory](../../docs/reference/coordination.md#memory)) of what a person
+tells it to remember. `supertag get memories --tag TAG` lists them and `supertag delete memory ID`
+removes one; to change a note, tell the Tag.
+
 ```sh
 supertag get objective
 supertag describe objective OBJECTIVE_ID

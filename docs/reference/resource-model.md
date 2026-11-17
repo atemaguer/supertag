@@ -86,6 +86,9 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
   expression in a time zone). When it is due, the Control Plane queues an ordinary Task; it never
   starts a run. A Tag creates one with its `schedule` tool; an operator or client creates one in
   its own conversation with `supertag schedule create`. See [Schedules](coordination.md#schedules).
+- **Memory** is a Tag's notebook: short notes it keeps with its `remember` and `forget` tools,
+  each shared or private to one person's conversation. People list and delete notes; they never
+  write them. See [Memory](coordination.md#memory).
 - **Task Attempt** records one execution or retry of a Task on a Worker Host.
 - An **approval request** records one ask for a decision on a gated action, with its scope and
   decider. It is operational state listed with `supertag get approval`, not an applied resource.
@@ -106,8 +109,8 @@ A **connection generation** is the increasing number that identifies the current
 Most of these records are inspectable but not declaratively applied. An Objective, with the Team
 it names, may also be declared in a manifest; see [Declared Objectives](#declared-objectives).
 Otherwise an Objective comes from `supertag objective create` or a person's `/goal` message,
-a Team from `supertag team create`, and a Schedule from a Tag's `schedule` tool or
-`supertag schedule create`. A Team's Workstream exists with the Team. Status is never
+a Team from `supertag team create`, a Schedule from a Tag's `schedule` tool or
+`supertag schedule create`, and a note of a Tag's Memory from its `remember` tool. A Team's Workstream exists with the Team. Status is never
 declared: owners and operators record it explicitly. The execution records report what the service
 did.
 
@@ -147,6 +150,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | `spec.acceptsMessagesFrom` | Tag name | Mailbox grants where this Tag is the recipient |
 | `spec.lead` | `true` or `false` | Whether this is the Control Plane's **lead Tag**. Omitted keeps the current value. |
 | `spec.maxWorkSessions` | 1 to 64 | How many work Sessions the Tag may have open at once, 8 by default. Omitted keeps the current value. See [Open work Sessions](coordination.md#open-work-sessions). |
+| `spec.memory` | `true` or `false` | Whether the Tag keeps [Memory](coordination.md#memory): notes it writes and a daily review. Omitted keeps the current value; a new Tag keeps memory. |
 
 Where a Tag answers is a separate `SurfaceLocation` resource, a Tag **location**. It names the
 Tag, a channel, repository, chat, or team of a Surface Account, and the Permission Sets and Context Sets

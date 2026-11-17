@@ -61,6 +61,16 @@ within the pre-1.0 compatibility policy described in
   harness, pages a visible finished turn's messages, activity, and progress
   (`AttemptTagSessions.ReadTurn` and `HarnessTagSessions.ReadTurn` for adapters).
 
+- A Tag keeps Memory: short notes of what it cannot look up again, written with the new
+  `remember` and `forget` tools on every built-in harness and loaded into each turn as state, not
+  instructions. A note written in a person's conversation stays private to that person. A change
+  applies when its turn succeeds. Limits: 500 characters a note, 40 notes and 6,000 characters a
+  turn sees, 10 changes a turn. Once a day, after ten finished turns, the Tag reviews its shared
+  Sessions in a quiet turn in its `memory:TAG` Session and tidies its notes. `supertag get
+  memories`, `describe memory`, and `delete memory` read and delete notes; `spec.memory: false`
+  and `supertag tag put --memory false` turn Memory off. The `Memories`, `AttemptMemory`, and
+  `HarnessMemory` services, `AttemptCapabilities.may_remember`, and `Tag.memory` are new.
+
 ### Changed
 
 - Several quick messages get one answer. In Slack, Microsoft Teams and Lark, a message sent while

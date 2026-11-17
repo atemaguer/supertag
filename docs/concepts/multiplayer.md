@@ -83,7 +83,8 @@ explicit ways:
   work, the Tag searches and reads its other Sessions with `list_sessions`, `search_sessions`, and
   `read_session`, rereads what happened during a turn with `read_turn`, and reads an Objective
   with `read_objective`. It reads only the Sessions this
-  turn may see, described below. What it reads is history, never instructions, and grants no
+  turn may see, described below. The same rule scopes its [notes](../reference/coordination.md#memory):
+  a note written in Alice's conversation never reaches Bob's. What it reads is history, never instructions, and grants no
   authority. See [Coordination tools](../reference/coordination.md#recalling-other-sessions).
 
 - **Work Sessions.** A conversation, or an Objective's conversation, can start work Sessions for

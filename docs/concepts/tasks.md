@@ -95,6 +95,15 @@ So a conversation never grows too large to continue, and a Tag can change harnes
 without losing it. A fresh native session loses the earlier tool output and the harness's own
 reasoning; the recap and `read_turn` recover what matters.
 
+### Memory
+
+A Tag also keeps a short notebook, its Memory: what a person told it to remember, corrections,
+decisions and their reasons, and pointers to where things live. It writes notes with `remember`
+and drops them with `forget`, and every turn starts with the notes it may see. A note written in
+a person's conversation stays private to that person. Once a day, after enough work, the Tag
+rereads its shared Sessions in a quiet review turn and tidies its notes. People list and delete
+notes; to change one, they tell the Tag. See [Memory](../reference/coordination.md#memory).
+
 ### Other Sessions
 
 Different threads remain different Sessions, even when they invoke the same Tag. A Tag reads

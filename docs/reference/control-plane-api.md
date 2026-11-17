@@ -75,6 +75,7 @@ name in `supertag audit`.
 | `Inbox` | Inbox items, questions and their answers, and approval decisions |
 | `WorkSessions` | Work Sessions started from a parent Session, how many their Tag has open, and closing one |
 | `Schedules` | [Schedules](coordination.md#schedules) that wake a Tag in your conversation: create, read, list, pause, resume, and delete |
+| `Memories` | A Tag's [notes](coordination.md#memory) you may see: list, read, and delete |
 | `Teams` | Teams and their Workstream posts |
 | `Mailbox` | Messages between Tags and Mailbox grants |
 | `LiveInputs` | Messages to a running Task, and resolving an uncertain delivery |

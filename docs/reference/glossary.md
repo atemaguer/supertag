@@ -27,6 +27,9 @@ whole system rather than another first-class resource.
   [the coordination reference](coordination.md#objectives).
 - <a id="task"></a>**Task** — one request or assignment accepted for a Tag under a recorded policy. See
   [the task concepts](../concepts/tasks.md).
+- <a id="memory"></a>**Memory** — a Tag's short notes of what it cannot look up again, such as a
+  person's preferences and pointers to where things live. Each is shared or private to one
+  person, and a daily review keeps them tidy. See [Memory](coordination.md#memory).
 - <a id="schedule"></a>**Schedule** — a durable wake-up for one Tag in one Session, once or on a
   recurrence. When it is due, the Tag gets a new turn and its reply appears as an ordinary
   message. See [Schedules](coordination.md#schedules).

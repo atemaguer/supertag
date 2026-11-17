@@ -2530,6 +2530,8 @@ Options:
           Make this the Control Plane's lead Tag, or with false, stop it being the lead. Omit to keep it as it is. At most one Tag is the lead [possible values: true, false]
       --max-work-sessions <MAX_WORK_SESSIONS>
           How many Work Sessions the Tag may have open at once, across all its conversations, from 1 to 64. Omit to keep it as it is; a new Tag gets 8
+      --memory [<MEMORY>]
+          Keep memory: notes the Tag writes and a daily review of its work. With false, the Tag keeps no notes and does not review. Omit to keep it as it is; a new Tag keeps memory [possible values: true, false]
   -h, --help
           Print help
 ```
@@ -3458,6 +3460,7 @@ Commands:
   question              Read the full question an Objective Task asked [alias: questions]
   inbox-item            List the questions and work waiting for an operator [alias: inbox-items]
   schedule              Read one Schedule: its next time, recurrence, missed occurrences, and latest turn, or list the Schedules that have not finished [alias: schedules]
+  memory                Read one of a Tag's notes, or list the notes Tags keep: what each Tag wrote with its remember tool, shared or private to one person's conversation [alias: memories]
   help                  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -4249,6 +4252,27 @@ Options:
           Print help
 ```
 
+## `supertag get memory`
+
+```text
+Read one of a Tag's notes, or list the notes Tags keep: what each Tag wrote with its remember tool, shared or private to one person's conversation
+
+Usage: supertag get memory [OPTIONS] [ID]
+
+Arguments:
+  [ID]  Note ID. Omit to list
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --tag <TAG>
+          Only this Tag's notes
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
 ## `supertag describe`
 
 ```text
@@ -4257,7 +4281,7 @@ Describe one resource in readable text
 Usage: supertag describe [OPTIONS] <KIND> <ID>
 
 Arguments:
-  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, gateway, client, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, github-publication, reply, input, surface-account, surface-location, approval, question, schedule]
+  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, gateway, client, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, github-publication, reply, input, surface-account, surface-location, approval, question, schedule, memory]
   <ID>    The resource's ID or name
 
 Options:
@@ -4286,6 +4310,7 @@ Commands:
   workspace         Delete a GitHub Workspace source at its exact revision [alias: workspaces]
   surface-location  Remove a location's policy and stop new work on its connector alias [alias: surface-locations]
   schedule          Cancel a Schedule. A turn it already queued stays queued [alias: schedules]
+  memory            Delete one of a Tag's notes. To change a note, tell the Tag [alias: memories]
   help              Print this message or the help of the given subcommand(s)
 
 Options:
@@ -4460,6 +4485,27 @@ Options:
           Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --dry-run
           Check that the Schedule exists and show what would be deleted, without deleting it
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag delete memory`
+
+```text
+Delete one of a Tag's notes. To change a note, tell the Tag
+
+Usage: supertag delete memory [OPTIONS] <ID>
+
+Arguments:
+  <ID>  Note ID
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --dry-run
+          Check that the note exists and show what would be deleted, without deleting it
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help

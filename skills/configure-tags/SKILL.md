@@ -93,6 +93,11 @@ A Tag sets [Schedules](../../docs/reference/coordination.md#schedules), wake-ups
 only when it holds `{ target: runtime, action: schedule:create }`. `supertag init` grants it to
 the lead; add it to a set to let another Tag follow up on its own, and leave it out to stop one.
 
+Every Tag keeps [Memory](../../docs/reference/coordination.md#memory) unless its spec sets
+`memory: false` (or `supertag tag put TAG --memory false`): short notes it writes with `remember`
+and a daily review of its work. Turn it off for a Tag that must not carry anything between
+conversations.
+
 Two harness rules decide whether `commands:execute` works:
 
 - Claude Code, Cursor, and OpenCode run commands without a sandbox. Their Tasks that may run
