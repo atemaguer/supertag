@@ -641,6 +641,8 @@ database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     native_codex_plan_replaces_the_slack_acknowledgement_in_place;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    native_codex_takes_a_folded_slack_message_into_its_running_turn;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "exercises the real 30-second execution authority deadline"]
     control_plane_partition_expires_execution_and_requires_audited_retry_before_replay;
 }
@@ -3352,5 +3354,170 @@ async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
             ),
         ]
     );
+    Ok(())
+}
+
+/// A person's Slack message sent while the Tag's Codex turn runs is folded into that turn: the
+/// Control Plane records it as live input, the Worker Host hands it to the real Codex adapter,
+/// which steers the native turn (`turn/steer`) with it. Its own Task settles without a run, the
+/// acknowledgement says a follow-up is being read, and the thread gets one reply.
+async fn native_codex_takes_a_folded_slack_message_into_its_running_turn(
+    database: String,
+) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    use supertag_protocol::v2::LiveInputState;
+    let directory = TempDir::new()?;
+    let directory = directory.path();
+    let credentials = Credentials::new();
+    let mock = MockSlackApi::start().await?;
+    // Every Slack call is answered at once; the assertions read the recorded sequence.
+    mock.responses.add_permits(100);
+    let mut command = credentials.command();
+    command
+        .arg("control-plane")
+        .arg("--checkpoint-directory")
+        .arg(directory.join("checkpoints"))
+        .env("SUPERTAG_DATABASE_URL", &database);
+    let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
+    let private = control_plane.endpoint().await?;
+    let (gateway, _, http) =
+        slack_gateway_with(&credentials, &private, directory, &mock, &[]).await?;
+    let services = Services {
+        gateway: Some(gateway),
+        control_plane,
+        endpoint: private.clone(),
+    };
+    configure_slack_surface(&services, &credentials).await?;
+    let home = directory.join("fixture-home");
+    let codex_home = home.join(".codex");
+    std::fs::create_dir_all(&codex_home)?;
+    let auth = codex_home.join("auth.json");
+    std::fs::write(
+        &auth,
+        r#"{"tokens":{"access_token":"fixture-native-sign-in","refresh_token":"fixture-native-refresh"}}"#,
+    )?;
+    std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))?;
+    let fake = directory.join("codex-fixture");
+    std::fs::write(
+        &fake,
+        include_str!("../../codex-adapter/tests/fixtures/cli_app_server.py"),
+    )?;
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
+    let thread = "1794470500.000001";
+    assert_eq!(
+        signed_slack_mention(&http, "EvFOLD1", thread, "Wait for live input").await?,
+        reqwest::StatusCode::OK
+    );
+    mock.wait_for_requests(1).await?;
+    let mut command = credentials.command();
+    command
+        .args([
+            "worker-host",
+            "--control-plane",
+            &services.endpoint,
+            "--once",
+        ])
+        .args(["--harness", "codex", "--codex-model", "fixture-model"])
+        .arg("--codex-path")
+        .arg(&fake)
+        .arg("--state-directory")
+        .arg(directory.join("codex-host"))
+        .env("HOME", &home);
+    let mut host = Process::spawn(command, directory, "codex-host", false)?;
+    let mut db = crate::database::connect(&database).await?;
+    let tasks = async |db: &mut sqlx::AnyConnection| -> Result<Vec<(String, i64, Option<String>)>> {
+        Ok(sqlx::query_as(
+            "SELECT task_id,state,attempt_id FROM supertag_v2_tasks ORDER BY accepted_order",
+        )
+        .fetch_all(db)
+        .await?)
+    };
+    // The mention's turn runs and waits for live input.
+    let deadline = Instant::now() + WAIT;
+    let running = loop {
+        let listed = tasks(&mut db).await?;
+        if let Some((id, _, _)) = listed
+            .iter()
+            .find(|(_, state, _)| *state == TaskState::Running as i64)
+        {
+            break id.clone();
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "the Codex turn never ran: {listed:?}; Worker Host log: {}",
+            std::fs::read_to_string(&host.log).unwrap_or_default()
+        );
+        sleep(Duration::from_millis(20)).await;
+    };
+    // A reply in the thread while it runs.
+    let reply = serde_json::json!({
+        "type": "event_callback", "team_id": SLACK_TEAM, "event_id": "EvFOLD2",
+        "event": { "type": "message", "channel": SLACK_CHANNEL, "user": SLACK_USER,
+            "text": "Use the live correction", "ts": "1794470500.000002", "thread_ts": thread }
+    })
+    .to_string();
+    assert_eq!(
+        deliver_signed_slack_event(&http, &reply).await?,
+        reqwest::StatusCode::OK
+    );
+    if let Err(error) = host.successful_exit().await {
+        let log = std::fs::read_to_string(&host.log).unwrap_or_default();
+        return Err(error.context(format!("Codex Worker Host log: {log}")));
+    }
+    let listed = tasks(&mut db).await?;
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    let (first, follower) = (&listed[0], &listed[1]);
+    assert_eq!(first.0, running);
+    assert_eq!(first.1, TaskState::Succeeded as i64, "{listed:?}");
+    // The folded message settled through the running turn and never ran on its own.
+    assert_eq!(follower.1, TaskState::Succeeded as i64, "{listed:?}");
+    assert_eq!(follower.2, None, "the folded message launched its own run");
+    let (state, follower_id): (i64, String) = sqlx::query_as(
+        "SELECT state,follower_task_id FROM supertag_v2_live_inputs WHERE task_id=$1",
+    )
+    .bind(&running)
+    .fetch_one(&mut db)
+    .await?;
+    assert_eq!(state, LiveInputState::Accepted as i64);
+    assert_eq!(follower_id, follower.0);
+    // One acknowledgement, edited in place to the reply; nothing else is posted.
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let done = mock
+            .requests
+            .lock()
+            .await
+            .last()
+            .is_some_and(|request| request.body["text"] == "Native adapter steered");
+        if done {
+            break;
+        }
+        ensure!(Instant::now() < deadline, "the reply was not delivered");
+        sleep(Duration::from_millis(20)).await;
+    }
+    let requests: Vec<(String, Value)> = mock
+        .requests
+        .lock()
+        .await
+        .iter()
+        .map(|request| (request.path.clone(), request.body.clone()))
+        .collect();
+    let posts: Vec<_> = requests
+        .iter()
+        .filter(|(path, _)| path == "/chat.postMessage")
+        .collect();
+    assert_eq!(posts.len(), 1, "{requests:?}");
+    assert_eq!(posts[0].1["thread_ts"], thread);
+    assert_eq!(posts[0].1["text"], "Got it. I’m looking into this now.");
+    for (path, body) in &requests[1..requests.len() - 1] {
+        assert_eq!(path, "/chat.update", "{requests:?}");
+        assert_eq!(
+            body["text"], "Got it. I’m looking into this now.\n\nAlso reading your follow-up.",
+            "{requests:?}"
+        );
+    }
+    let (path, body) = requests.last().context("the reply")?;
+    assert_eq!(path, "/chat.update");
+    assert_eq!(body["ts"], SLACK_RECEIPT);
     Ok(())
 }
