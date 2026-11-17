@@ -11,6 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- `supertag metrics` reports how long the Control Plane takes to admit each surface's events
+  (admitted, failed, total and longest time, and how many took over 2 s), counted per Control
+  Plane process since it started.
 - `supertag describe task` and `supertag get task` show operators why a Worker Host failed a Task
   (`failure_detail`: up to 8 redacted one-line reasons). People who aren't operators and surface
   replies still see only the fixed failure message.
