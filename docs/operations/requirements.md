@@ -149,8 +149,8 @@ dependencies in the sandbox image. It needs `python3` and POSIX shell tools, wit
 executable.
 
 In this split mode, Cursor has no built-in tools. SDK custom tools provide read, write, edit,
-glob, grep, ls, and foreground commands in the sandbox, plus the Task's allowed external tools.
-Web search, subagents, and background commands are unavailable. A **Permission Set** selects
+glob, grep, and ls in the sandbox, plus the Task's allowed external tools. Web search, subagents,
+and commands are unavailable. A **Permission Set** selects
 allowed actions: write and edit require `files:write`. Such a host cannot take
 `--allow-unsandboxed-commands`, so the Control Plane does not place a Task with
 `commands:execute` on it; run those Tasks in a shared execution environment.
