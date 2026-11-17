@@ -11,6 +11,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Search opens a command palette (the search button beside +, or ⌘K) that finds Tags by name,
+  latest message or cached message text, and runs actions such as New Tag, Control Plane
+  switching and notification levels. It replaces the sidebar's search box. The terminal UI's
+  Ctrl-K palette has the same sections.
 - `supertag metrics` reports how long the Control Plane takes to admit each surface's events
   (admitted, failed, total and longest time, and how many took over 2 s), counted per Control
   Plane process since it started.
