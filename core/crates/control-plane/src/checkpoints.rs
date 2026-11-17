@@ -59,30 +59,16 @@ impl Store {
     /// through [`Store::take_checkpoint_garbage`].
     pub async fn sweep_checkpoints(&self) -> Result<()> {
         let now = self.execution_now_ms();
+        // Most passes find nothing: take the write lock only when there is work.
+        let mut tx = self.pool.begin().await?;
+        let work =
+            !expired_in(&mut tx, now).await?.is_empty() || !orphans_in(&mut tx).await?.is_empty();
+        tx.commit().await?;
+        if !work {
+            return Ok(());
+        }
         let (mut tx, _) = self.write().await?;
-        let expired = sqlx::query(&format!(
-            "SELECT s.tag_id,s.session_id FROM supertag_v2_session_checkpoints s
-             JOIN supertag_v2_checkpoints c ON c.attempt_id=s.attempt_id
-             JOIN supertag_v2_tasks t ON t.task_id=c.task_id
-             WHERE (t.completed_at_ms IS NULL OR t.completed_at_ms<$1) AND {IDLE_SESSION}
-             UNION
-             SELECT s.tag_id,s.session_id FROM supertag_v2_session_checkpoints s
-             JOIN supertag_v2_objectives o ON (o.owner_tag_id=s.tag_id AND o.session_id=s.session_id)
-                OR EXISTS (SELECT 1 FROM supertag_v2_objective_sessions os
-                           WHERE os.objective_id=o.objective_id AND os.tag_id=s.tag_id AND os.session_id=s.session_id)
-             WHERE o.status IN ($2,$3) AND o.updated_at_ms<$7 AND {IDLE_SESSION}
-             LIMIT $4"
-        ))
-        .bind(now - IDLE_MS)
-        .bind(ObjectiveStatus::Completed as i64)
-        .bind(ObjectiveStatus::Cancelled as i64)
-        .bind(SWEEP_BATCH)
-        .bind(TaskState::Claimed as i64)
-        .bind(TaskState::Running as i64)
-        .bind(now - ENDED_OBJECTIVE_MS)
-        .fetch_all(&mut *tx)
-        .await?;
-        for row in expired {
+        for row in expired_in(&mut tx, now).await? {
             let tag: String = row.try_get("tag_id")?;
             let session: String = row.try_get("session_id")?;
             sqlx::query(
@@ -94,16 +80,7 @@ impl Store {
             .await?;
             prune_session_in(&mut tx, &tag, &session, None, now).await?;
         }
-        let orphans = sqlx::query(&format!(
-            "SELECT c.attempt_id,c.sha256 FROM supertag_v2_checkpoints c
-             JOIN supertag_v2_tasks t ON t.task_id=c.task_id
-             WHERE NOT EXISTS (SELECT 1 FROM supertag_v2_session_checkpoints s WHERE s.attempt_id=c.attempt_id)
-               AND {NOT_RUNNING} LIMIT $2"
-        ))
-        .bind(TaskState::Running as i64)
-        .bind(SWEEP_BATCH)
-        .fetch_all(&mut *tx)
-        .await?;
+        let orphans = orphans_in(&mut tx).await?;
         discard_in(&mut tx, &orphans, now).await?;
         tx.commit().await?;
         Ok(())
@@ -259,6 +236,47 @@ async fn current_in(tx: &mut Transaction<'_, Any>, task: &AnyRow) -> Result<Opti
         .bind(task.try_get::<String, _>("tag_id")?)
         .bind(task.try_get::<String, _>("session_id")?)
         .fetch_optional(&mut **tx).await?)
+}
+
+/// Sessions whose checkpoint is due to go: idle for [`IDLE_MS`], or of an Objective ended for
+/// [`ENDED_OBJECTIVE_MS`], with no turn about to resume it.
+async fn expired_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<Vec<AnyRow>> {
+    Ok(sqlx::query(&format!(
+        "SELECT s.tag_id,s.session_id FROM supertag_v2_session_checkpoints s
+         JOIN supertag_v2_checkpoints c ON c.attempt_id=s.attempt_id
+         JOIN supertag_v2_tasks t ON t.task_id=c.task_id
+         WHERE (t.completed_at_ms IS NULL OR t.completed_at_ms<$1) AND {IDLE_SESSION}
+         UNION
+         SELECT s.tag_id,s.session_id FROM supertag_v2_session_checkpoints s
+         JOIN supertag_v2_objectives o ON (o.owner_tag_id=s.tag_id AND o.session_id=s.session_id)
+            OR EXISTS (SELECT 1 FROM supertag_v2_objective_sessions os
+                       WHERE os.objective_id=o.objective_id AND os.tag_id=s.tag_id AND os.session_id=s.session_id)
+         WHERE o.status IN ($2,$3) AND o.updated_at_ms<$7 AND {IDLE_SESSION}
+         LIMIT $4"
+    ))
+    .bind(now - IDLE_MS)
+    .bind(ObjectiveStatus::Completed as i64)
+    .bind(ObjectiveStatus::Cancelled as i64)
+    .bind(SWEEP_BATCH)
+    .bind(TaskState::Claimed as i64)
+    .bind(TaskState::Running as i64)
+    .bind(now - ENDED_OBJECTIVE_MS)
+    .fetch_all(&mut **tx)
+    .await?)
+}
+
+/// Checkpoint rows no Session points at, other than a running Attempt's.
+async fn orphans_in(tx: &mut Transaction<'_, Any>) -> Result<Vec<AnyRow>> {
+    Ok(sqlx::query(&format!(
+        "SELECT c.attempt_id,c.sha256 FROM supertag_v2_checkpoints c
+         JOIN supertag_v2_tasks t ON t.task_id=c.task_id
+         WHERE NOT EXISTS (SELECT 1 FROM supertag_v2_session_checkpoints s WHERE s.attempt_id=c.attempt_id)
+           AND {NOT_RUNNING} LIMIT $2"
+    ))
+    .bind(TaskState::Running as i64)
+    .bind(SWEEP_BATCH)
+    .fetch_all(&mut **tx)
+    .await?)
 }
 
 /// Deletes the Session's checkpoint rows other than `keep` and a running Attempt's, and queues

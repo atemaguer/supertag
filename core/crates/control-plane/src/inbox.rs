@@ -94,9 +94,10 @@ impl Store {
                 Some(viewer) => Some(crate::tag_sessions::portfolio_in(&mut tx, &viewer).await?),
                 None => None,
             };
-        let may_remember = crate::memories::may_remember_in(&mut tx, &task, kind).await?;
+        let (may_remember, notes) =
+            crate::memories::turn_memory_in(&mut tx, &task, kind, tag_portfolio.is_some()).await?;
         if let Some(portfolio) = tag_portfolio.as_mut()
-            && let Some(notes) = crate::memories::portfolio_in(&mut tx, &task, may_remember).await?
+            && let Some(notes) = notes
         {
             portfolio.push('\n');
             portfolio.push_str(&notes);
