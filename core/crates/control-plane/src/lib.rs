@@ -715,6 +715,18 @@ impl worker_host_server::WorkerHost for ControlPlane {
         Ok(Response::new(ReportNetworkLogResponse {}))
     }
 
+    async fn report_waiting_for_holder(
+        &self,
+        request: Request<ReportWaitingForHolderRequest>,
+    ) -> Result<Response<Task>, Status> {
+        let principal = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .report_waiting_for_holder(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
     async fn resolve_workspace_ref(
         &self,
         request: Request<ResolveWorkspaceRefRequest>,

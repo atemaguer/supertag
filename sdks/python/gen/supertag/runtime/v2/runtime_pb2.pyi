@@ -2435,7 +2435,7 @@ class ExecutionLimits(_message.Message):
     def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "quiet", "workspace_selection", "applied_execution_limits", "workspace_mount_writes", "execution_report", "network_logs")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "quiet", "workspace_selection", "applied_execution_limits", "workspace_mount_writes", "execution_report", "network_logs", "waiting_for_holder")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2463,6 +2463,7 @@ class Task(_message.Message):
     WORKSPACE_MOUNT_WRITES_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_REPORT_FIELD_NUMBER: _ClassVar[int]
     NETWORK_LOGS_FIELD_NUMBER: _ClassVar[int]
+    WAITING_FOR_HOLDER_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -2490,7 +2491,16 @@ class Task(_message.Message):
     workspace_mount_writes: _containers.RepeatedCompositeFieldContainer[AttemptWorkspaceMountWrites]
     execution_report: TaskExecutionReport
     network_logs: _containers.RepeatedCompositeFieldContainer[AttemptNetworkLog]
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., quiet: _Optional[bool] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ..., execution_report: _Optional[_Union[TaskExecutionReport, _Mapping]] = ..., network_logs: _Optional[_Iterable[_Union[AttemptNetworkLog, _Mapping]]] = ...) -> None: ...
+    waiting_for_holder: str
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., quiet: _Optional[bool] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ..., execution_report: _Optional[_Union[TaskExecutionReport, _Mapping]] = ..., network_logs: _Optional[_Iterable[_Union[AttemptNetworkLog, _Mapping]]] = ..., waiting_for_holder: _Optional[str] = ...) -> None: ...
+
+class ReportWaitingForHolderRequest(_message.Message):
+    __slots__ = ("attempt", "waiting")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    WAITING_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    waiting: bool
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., waiting: _Optional[bool] = ...) -> None: ...
 
 class TaskExecutionReport(_message.Message):
     __slots__ = ("limit_outcome", "max_reported_tokens", "max_reported_cost", "max_native_agents", "limits_applied", "usage_complete", "complete", "cleanup", "cleanup_failure", "failure_detail")

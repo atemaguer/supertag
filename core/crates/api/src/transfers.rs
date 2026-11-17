@@ -863,7 +863,8 @@ fn held(held: HeldWorkspaceDelivery) -> Result<(WorkspaceDeliveryReference, Blob
 fn relay_status(error: RelayError, host: &str, what: &str) -> Status {
     match error {
         RelayError::Offline => Status::unavailable(format!(
-            "{what} bytes are held by Worker Host {host}, which is not connected to the Control Plane"
+            "{what} bytes are held by Worker Host {host}, {}",
+            supertag_protocol::HOLDER_NOT_CONNECTED
         )),
         RelayError::Failed(status) => status,
     }

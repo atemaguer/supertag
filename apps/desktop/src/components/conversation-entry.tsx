@@ -38,7 +38,8 @@ export function turnNotice(
 
 /**
  * A conversation entry that shows its turn's messages and what it is doing, as the conversation's
- * follow pushes them, and why it still waits for a Worker Host while it is queued.
+ * follow pushes them, and why it still waits for a Worker Host while it is queued or, running, for
+ * the Worker Host holding its Session's last delivery.
  */
 export function LiveConversationEntry(
   props: Omit<Parameters<typeof ConversationEntry>[0], "events"> & {
@@ -50,7 +51,10 @@ export function LiveConversationEntry(
   // A message that joined a turn shows nothing of its own; the last of them shows that turn's reply.
   const turn = answers ?? (joined ? undefined : message);
   const events = useTurnEvents(props.readEvents, turn ? { ...turn, taskId: turn.task.taskId } : {});
-  const waiting = turn && turn.task.state === "queued" ? wait : undefined;
+  // A queued turn waits for a Worker Host; a running one may wait for the host holding its
+  // Session's last delivery. The follow clears a reason once it no longer holds.
+  const waiting =
+    turn && (turn.task.state === "queued" || turn.task.waitingForHolder) ? wait : undefined;
   return (
     <ConversationEntry
       {...entry}

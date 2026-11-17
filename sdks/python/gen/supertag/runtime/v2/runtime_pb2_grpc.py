@@ -3366,6 +3366,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveWorkspaceRefRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
                 _registered_method=True)
+        self.ReportWaitingForHolder = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ReportWaitingForHolder',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportWaitingForHolderRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+                _registered_method=True)
 
 
 class WorkerHostServicer:
@@ -3509,6 +3514,14 @@ class WorkerHostServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReportWaitingForHolder(self, request, context):
+        """The running Attempt waits for the Worker Host holding its Session's last delivery, which is
+        not connected, or no longer waits. The Control Plane names that host from the delivery.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerHostServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -3615,6 +3628,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
             'ResolveWorkspaceRef': grpc.unary_unary_rpc_method_handler(
                     servicer.ResolveWorkspaceRef,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveWorkspaceRefRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'ReportWaitingForHolder': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportWaitingForHolder,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportWaitingForHolderRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
             ),
     }
@@ -4184,6 +4202,33 @@ class WorkerHost:
             target,
             '/supertag.runtime.v2.WorkerHost/ResolveWorkspaceRef',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveWorkspaceRefRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportWaitingForHolder(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ReportWaitingForHolder',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportWaitingForHolderRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
             options,
             channel_credentials,

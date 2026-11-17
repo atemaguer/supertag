@@ -297,6 +297,13 @@ pub(crate) async fn fetch(channel: ProtocolChannel, token: &str, task_id: String
         .await?
         .into_inner();
     let mut value = task_json(&task);
+    // A running Attempt that waits for the Worker Host holding its Session's last delivery.
+    if let Some(holder) = &task.waiting_for_holder {
+        value["waiting_for"] = json!({
+            "requirement": "workspace-holder",
+            "summary": supertag_protocol::waiting_for_holder(holder),
+        });
+    }
     if task.state() == TaskState::Queued
         && let Ok(diagnosis) = PlacementClient::new(channel)
             .max_decoding_message_size(MAX_MESSAGE_BYTES)

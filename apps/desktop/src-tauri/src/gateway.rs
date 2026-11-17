@@ -593,6 +593,9 @@ pub struct Task {
     /// The turn finished quietly: its conversation does not show it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub quiet: bool,
+    /// The Worker Host holding the Session's last delivery, which the running turn waits for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_for_holder: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -633,6 +636,7 @@ impl From<v2::Task> for Task {
                 .collect(),
             created_at_ms: None,
             quiet: task.quiet,
+            waiting_for_holder: task.waiting_for_holder,
         }
     }
 }

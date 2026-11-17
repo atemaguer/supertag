@@ -54,6 +54,15 @@ it("says why a queued message waits, as the conversation's follow pushes it", ()
   // Once it runs, the reason goes even before the follow clears it.
   view.show({ ...queued, task: { ...queued.task, state: "running" } }, HELD);
   expect(view.host.querySelector(".task-wait")).toBeNull();
+
+  // A running turn that waits for the Worker Host holding its Session's last delivery says so.
+  const holder =
+    "Waiting for Worker Host laptop, which holds this Session's last delivery and is not connected to the Control Plane; start that host, or cancel the Task";
+  view.show(
+    { ...queued, task: { ...queued.task, state: "running", waitingForHolder: "laptop" } },
+    holder,
+  );
+  expect(view.host.querySelector(".task-wait")?.textContent).toBe(holder);
   view.close();
 });
 

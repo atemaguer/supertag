@@ -26,7 +26,8 @@ Task accepted, `execution-limits`, `runtime-actions`, or `context` (a required S
 eligible hosts have no free slot for the Task's harness, it is `capacity`, and the summary names
 each host's state: busy, offline, draining, or a slot kept by an uncertain Task Attempt, with the
 `supertag task resolve-attempt` command that frees it. It is `harness` when no eligible host runs
-the Task's harness. The desktop app and the terminal UI show this summary under a waiting message.
+the Task's harness. A running Task waiting for the Session's last delivery, held by a Worker Host
+that is not connected, reports `workspace-holder` with that host's name. The desktop app and the terminal UI show this summary under a waiting message.
 
 ## Placement by harness and model
 

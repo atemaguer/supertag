@@ -132,7 +132,10 @@ writes your repository. Your machine imports the delivery as the branch
   needs its start commit to import; `git bundle verify` names it.
 
 Each of these reads fails while the host that produced the delivery is offline, with an error
-naming that host.
+naming that host. The Session's next Task waits instead: its Task Attempt keeps its slot and
+retries until that host connects, and says it is waiting for that Worker Host wherever a waiting
+turn's reason shows. `supertag placement explain` and `supertag describe task` report the
+requirement `workspace-holder`. Start that host, or cancel the Task.
 
 A Task with no commits delivers nothing. For GitHub Workspaces, `github-publication` commands
 follow and stop publication of verified results.

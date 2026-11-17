@@ -651,7 +651,12 @@ impl Store {
         };
         transaction.commit().await?;
         let missing = missing_labels(&required, &carried);
-        let (requirement, summary) = if hosts.is_empty() {
+        let (requirement, summary) = if let Some(holder) = &task.waiting_for_holder {
+            (
+                "workspace-holder".to_owned(),
+                supertag_protocol::waiting_for_holder(holder),
+            )
+        } else if hosts.is_empty() {
             (
                 "worker-host".to_owned(),
                 format!("No Worker Host is bound to Tag {}", task.tag_id),

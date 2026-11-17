@@ -65,7 +65,7 @@ func TestASentMessageSaysWhyItWaitsUntilAWorkerHostTakesItUp(t *testing.T) {
 	}
 }
 
-func TestTheWaitShowsOnlyWhileTheTurnIsQueued(t *testing.T) {
+func TestTheWaitShowsWhileItHolds(t *testing.T) {
 	turn := &runtimeTurn{}
 	if waitLine(turn, 80) != "" {
 		t.Fatal("a turn without a reason shows one")
@@ -74,8 +74,14 @@ func TestTheWaitShowsOnlyWhileTheTurnIsQueued(t *testing.T) {
 	if waitLine(turn, 80) == "" {
 		t.Fatal("a queued turn hides its reason")
 	}
+	// A running turn that waits for the host holding its Session's last delivery says so.
 	turn.started = true
+	turn.wait = "Waiting for Worker Host laptop, which holds this Session's last delivery"
+	if !strings.Contains(waitLine(turn, 200), "Worker Host laptop") {
+		t.Fatal("a running turn hides why it waits")
+	}
+	turn.settled = true
 	if waitLine(turn, 80) != "" {
-		t.Fatal("a started turn still shows why it waited")
+		t.Fatal("a settled turn still shows why it waited")
 	}
 }

@@ -7,6 +7,9 @@
 //!
 //! A publication put back because its holding Worker Host was not connected retries as soon as
 //! that host reports Ready, instead of waiting out the Queued retry.
+//!
+//! A running Attempt whose Session continuation waits on that holder says so: the Task names the
+//! holder, and placement explains it, until the Attempt goes on or the Task finishes.
 
 mod support;
 
@@ -639,6 +642,109 @@ async fn wake_contract(url: String) {
     store.close().await;
 }
 
+async fn holder_wait_contract(url: String) {
+    let store = Store::open(&url).await.unwrap();
+    setup(&store).await;
+    let holder = support::register_host(&store, "holder").await;
+    let other = support::register_host(&store, "other").await;
+    let submit = |name: &str| SubmitTaskRequest {
+        tag_id: "engineer".into(),
+        session_id: "feature".into(),
+        operation_id: name.into(),
+        prompt: "Change the code".into(),
+        ..Default::default()
+    };
+    let first = store.submit_task(OP, &submit("first")).await.unwrap();
+    let attempt = run(&store, &holder, &first.task_id).await;
+    finish(&store, &holder, attempt, &"2".repeat(40)).await;
+    let second = store.submit_task(OP, &submit("second")).await.unwrap();
+    let attempt = run(&store, &other, &second.task_id).await;
+    let report = |waiting: bool| ReportWaitingForHolderRequest {
+        attempt: Some(attempt.clone()),
+        waiting,
+    };
+    // Another host cannot report for this Attempt.
+    assert!(
+        store
+            .report_waiting_for_holder(&holder, &report(true))
+            .await
+            .is_err()
+    );
+    // The Attempt waits for the host holding the first delivery, which the Control Plane names.
+    let waiting = store
+        .report_waiting_for_holder(&other, &report(true))
+        .await
+        .unwrap();
+    assert_eq!(waiting.waiting_for_holder.as_deref(), Some("holder"));
+    let diagnosis = store
+        .diagnose_task_placement(&second.task_id)
+        .await
+        .unwrap();
+    assert_eq!(diagnosis.requirement, "workspace-holder");
+    assert_eq!(
+        diagnosis.summary,
+        supertag_protocol::waiting_for_holder("holder")
+    );
+    // Once its Workspace is prepared the Attempt goes on, and the reason goes.
+    let going = store
+        .report_waiting_for_holder(&other, &report(false))
+        .await
+        .unwrap();
+    assert_eq!(going.waiting_for_holder, None);
+    // Finishing, here as a failure without a delivery, also clears it.
+    store
+        .report_waiting_for_holder(&other, &report(true))
+        .await
+        .unwrap();
+    store
+        .finish_task(
+            &other,
+            &FinishTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+                result: "The holder never came back".into(),
+                succeeded: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_task(&second.task_id)
+            .await
+            .unwrap()
+            .waiting_for_holder,
+        None
+    );
+    // A Session's first Attempt has no continuation to wait for.
+    let fresh = store
+        .submit_task(
+            OP,
+            &SubmitTaskRequest {
+                session_id: "fresh".into(),
+                ..submit("fresh")
+            },
+        )
+        .await
+        .unwrap();
+    let fresh_attempt = run(&store, &other, &fresh.task_id).await;
+    assert!(
+        store
+            .report_waiting_for_holder(
+                &other,
+                &ReportWaitingForHolderRequest {
+                    attempt: Some(fresh_attempt),
+                    waiting: true,
+                },
+            )
+            .await
+            .is_err()
+    );
+    store.close().await;
+}
+
 async fn on_postgres(
     name: &str,
     contract: fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>,
@@ -694,4 +800,16 @@ async fn sqlite_queued_publication_wakes_when_its_holder_reports_ready() {
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
 async fn postgres_queued_publication_wakes_when_its_holder_reports_ready() {
     on_postgres("wake", |url| Box::pin(wake_contract(url))).await;
+}
+
+#[tokio::test]
+async fn sqlite_a_running_attempt_names_the_holder_it_waits_for() {
+    let dir = tempfile::tempdir().unwrap();
+    holder_wait_contract(sqlite_url(&dir)).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_a_running_attempt_names_the_holder_it_waits_for() {
+    on_postgres("holder_wait", |url| Box::pin(holder_wait_contract(url))).await;
 }

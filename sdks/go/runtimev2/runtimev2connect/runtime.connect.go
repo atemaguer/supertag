@@ -307,6 +307,9 @@ const (
 	// WorkerHostResolveWorkspaceRefProcedure is the fully-qualified name of the WorkerHost's
 	// ResolveWorkspaceRef RPC.
 	WorkerHostResolveWorkspaceRefProcedure = "/supertag.runtime.v2.WorkerHost/ResolveWorkspaceRef"
+	// WorkerHostReportWaitingForHolderProcedure is the fully-qualified name of the WorkerHost's
+	// ReportWaitingForHolder RPC.
+	WorkerHostReportWaitingForHolderProcedure = "/supertag.runtime.v2.WorkerHost/ReportWaitingForHolder"
 	// LiveInputsQueueInputProcedure is the fully-qualified name of the LiveInputs's QueueInput RPC.
 	LiveInputsQueueInputProcedure = "/supertag.runtime.v2.LiveInputs/QueueInput"
 	// LiveInputsGetInputProcedure is the fully-qualified name of the LiveInputs's GetInput RPC.
@@ -2812,6 +2815,9 @@ type WorkerHostClient interface {
 	// resolution in a Session wins and is recorded on every unresolved Task of the Session; the
 	// returned Task carries the recorded commit.
 	ResolveWorkspaceRef(context.Context, *connect.Request[runtimev2.ResolveWorkspaceRefRequest]) (*connect.Response[runtimev2.Task], error)
+	// The running Attempt waits for the Worker Host holding its Session's last delivery, which is
+	// not connected, or no longer waits. The Control Plane names that host from the delivery.
+	ReportWaitingForHolder(context.Context, *connect.Request[runtimev2.ReportWaitingForHolderRequest]) (*connect.Response[runtimev2.Task], error)
 }
 
 // NewWorkerHostClient constructs a client for the supertag.runtime.v2.WorkerHost service. By
@@ -2951,6 +2957,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("ResolveWorkspaceRef")),
 			connect.WithClientOptions(opts...),
 		),
+		reportWaitingForHolder: connect.NewClient[runtimev2.ReportWaitingForHolderRequest, runtimev2.Task](
+			httpClient,
+			baseURL+WorkerHostReportWaitingForHolderProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ReportWaitingForHolder")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -2977,6 +2989,7 @@ type workerHostClient struct {
 	reportCleanupFailure    *connect.Client[runtimev2.ReportCleanupFailureRequest, runtimev2.ReportCleanupFailureResponse]
 	reportNetworkLog        *connect.Client[runtimev2.ReportNetworkLogRequest, runtimev2.ReportNetworkLogResponse]
 	resolveWorkspaceRef     *connect.Client[runtimev2.ResolveWorkspaceRefRequest, runtimev2.Task]
+	reportWaitingForHolder  *connect.Client[runtimev2.ReportWaitingForHolderRequest, runtimev2.Task]
 }
 
 // RegisterHost calls supertag.runtime.v2.WorkerHost.RegisterHost.
@@ -3084,6 +3097,11 @@ func (c *workerHostClient) ResolveWorkspaceRef(ctx context.Context, req *connect
 	return c.resolveWorkspaceRef.CallUnary(ctx, req)
 }
 
+// ReportWaitingForHolder calls supertag.runtime.v2.WorkerHost.ReportWaitingForHolder.
+func (c *workerHostClient) ReportWaitingForHolder(ctx context.Context, req *connect.Request[runtimev2.ReportWaitingForHolderRequest]) (*connect.Response[runtimev2.Task], error) {
+	return c.reportWaitingForHolder.CallUnary(ctx, req)
+}
+
 // WorkerHostHandler is an implementation of the supertag.runtime.v2.WorkerHost service.
 type WorkerHostHandler interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
@@ -3119,6 +3137,9 @@ type WorkerHostHandler interface {
 	// resolution in a Session wins and is recorded on every unresolved Task of the Session; the
 	// returned Task carries the recorded commit.
 	ResolveWorkspaceRef(context.Context, *connect.Request[runtimev2.ResolveWorkspaceRefRequest]) (*connect.Response[runtimev2.Task], error)
+	// The running Attempt waits for the Worker Host holding its Session's last delivery, which is
+	// not connected, or no longer waits. The Control Plane names that host from the delivery.
+	ReportWaitingForHolder(context.Context, *connect.Request[runtimev2.ReportWaitingForHolderRequest]) (*connect.Response[runtimev2.Task], error)
 }
 
 // NewWorkerHostHandler builds an HTTP handler from the service implementation. It returns the path
@@ -3254,6 +3275,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("ResolveWorkspaceRef")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostReportWaitingForHolderHandler := connect.NewUnaryHandler(
+		WorkerHostReportWaitingForHolderProcedure,
+		svc.ReportWaitingForHolder,
+		connect.WithSchema(workerHostMethods.ByName("ReportWaitingForHolder")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.WorkerHost/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkerHostRegisterHostProcedure:
@@ -3298,6 +3325,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostReportNetworkLogHandler.ServeHTTP(w, r)
 		case WorkerHostResolveWorkspaceRefProcedure:
 			workerHostResolveWorkspaceRefHandler.ServeHTTP(w, r)
+		case WorkerHostReportWaitingForHolderProcedure:
+			workerHostReportWaitingForHolderHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3389,6 +3418,10 @@ func (UnimplementedWorkerHostHandler) ReportNetworkLog(context.Context, *connect
 
 func (UnimplementedWorkerHostHandler) ResolveWorkspaceRef(context.Context, *connect.Request[runtimev2.ResolveWorkspaceRefRequest]) (*connect.Response[runtimev2.Task], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ResolveWorkspaceRef is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ReportWaitingForHolder(context.Context, *connect.Request[runtimev2.ReportWaitingForHolderRequest]) (*connect.Response[runtimev2.Task], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportWaitingForHolder is not implemented"))
 }
 
 // LiveInputsClient is a client for the supertag.runtime.v2.LiveInputs service.

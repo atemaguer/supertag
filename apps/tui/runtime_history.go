@@ -26,8 +26,9 @@ type runtimeTurn struct {
 	needsFollow bool
 	// started says a Worker Host took the turn up.
 	started bool
-	// wait is why the turn has not started, such as an uncertain Task Attempt that keeps a
-	// Worker Host's only slot; empty when not known.
+	// wait is why the turn waits: before it starts, such as for an uncertain Task Attempt that
+	// keeps a Worker Host's only slot, or once running, for the Worker Host holding its Session's
+	// last delivery; empty when not known.
 	wait string
 	// after is the sequence of the latest message the Tag wrote that the turn shows.
 	after uint64
@@ -488,7 +489,10 @@ func (m *model) applyRuntimeTurn(history *runtimeHistory, turn *runtimeTurn, eve
 		turn.wait = event.Text
 		return nil
 	case client.EventStarted:
+		// Why it waited for a Worker Host no longer holds; a running turn's later wait, for the
+		// host holding its Session's last delivery, arrives as its own reason.
 		turn.started = true
+		turn.wait = ""
 		return nil
 	case client.EventStatus:
 		if turn.settled {

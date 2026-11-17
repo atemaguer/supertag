@@ -1690,8 +1690,23 @@ async fn run_assignment(
     })
     .await;
     let (workspace, mut valid_until) = match prepared {
-        Ok(prepared) => prepared,
+        Ok(prepared) => {
+            if task.waiting_for_holder.is_some() {
+                report_waiting_for_holder(host, &attempt, token, false).await;
+            }
+            prepared
+        }
         Err(error) if retryable(&error) && !shutdown.is_cancelled() => {
+            // The host holding the Session's last delivery is not connected: say so once, so the
+            // Task shows what it waits for, then keep trying until that host is back.
+            if error.code() == Code::Unavailable
+                && error
+                    .message()
+                    .contains(supertag_protocol::HOLDER_NOT_CONNECTED)
+                && task.waiting_for_holder.is_none()
+            {
+                report_waiting_for_holder(host, &attempt, token, true).await;
+            }
             wait_for_work(shutdown).await;
             return Ok(());
         }
@@ -2790,6 +2805,28 @@ fn retryable(error: &Status) -> bool {
         error.code(),
         Code::Unavailable | Code::DeadlineExceeded | Code::Cancelled
     ) || supertag_protocol::local_transport_failure(error)
+}
+
+/// Records on the Task whether its Attempt waits for the Worker Host holding its Session's last
+/// delivery. Best effort: a lost report only leaves the reason unshown until the next try.
+async fn report_waiting_for_holder(
+    host: &mut RegisteredHost,
+    attempt: &Attempt,
+    token: &str,
+    waiting: bool,
+) {
+    let Ok(report) = request(
+        supertag_protocol::v2::ReportWaitingForHolderRequest {
+            attempt: Some(attempt.inspect()),
+            waiting,
+        },
+        token,
+    ) else {
+        return;
+    };
+    if let Err(error) = host.report_waiting_for_holder(report).await {
+        tracing::debug!("could not report waiting for the delivery holder: {error}");
+    }
 }
 
 async fn wait_for_work(shutdown: &CancellationToken) {

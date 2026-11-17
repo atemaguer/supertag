@@ -86,6 +86,47 @@ impl Store {
         Ok(delivery)
     }
 
+    /// The running Attempt waits for the Worker Host holding its Session's last delivery, which is
+    /// not connected, or no longer waits. The Task then names that host, taken from the delivery,
+    /// so `describe task`, `placement explain` and its conversation say what it waits for.
+    pub async fn report_waiting_for_holder(
+        &self,
+        host: &HostAuthority,
+        input: &ReportWaitingForHolderRequest,
+    ) -> Result<Task> {
+        let _wake = self.wake_follows();
+        let attempt = input
+            .attempt
+            .as_ref()
+            .ok_or_else(|| invalid("Attempt is required"))?;
+        let (mut tx, _) = self.write().await?;
+        let task = owned(
+            &mut tx,
+            host,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
+        )
+        .await?;
+        require_running(&task, self.execution_now_ms())?;
+        let holder = if input.waiting {
+            let delivery = continuation_in(&mut tx, &task)
+                .await?
+                .ok_or_else(|| invalid("Attempt has no Session continuation to wait for"))?;
+            Some(delivery_holder_in(&mut tx, &delivery).await?.host_id)
+        } else {
+            None
+        };
+        sqlx::query("UPDATE supertag_v2_tasks SET waiting_holder=$1 WHERE task_id=$2")
+            .bind(&holder)
+            .bind(&attempt.task_id)
+            .execute(&mut *tx)
+            .await?;
+        let task = crate::store::task_in(&mut tx, &attempt.task_id).await?;
+        tx.commit().await?;
+        Ok(task)
+    }
+
     pub async fn reserve_workspace_delivery(
         &self,
         host: &HostAuthority,

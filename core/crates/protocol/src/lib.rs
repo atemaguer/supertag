@@ -35,6 +35,17 @@ pub const FILE_DESCRIPTOR_SET: &[u8] =
 /// it asks for reaches the person at once as its own message, before the work that follows.
 pub const TURN_GUIDANCE: &str = "When a turn will take more than a moment, open it with one short sentence saying what you are about to do, as its own message, then do it. Answer a quick question directly.";
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
+/// How a relayed read says the Worker Host holding the bytes is not connected. A Worker Host whose
+/// continuation fails this way reports that it waits for that host.
+pub const HOLDER_NOT_CONNECTED: &str = "which is not connected to the Control Plane";
+
+/// Why a running Attempt waits before its harness starts: the Worker Host holding its Session's
+/// last delivery is not connected. Shown by `describe task`, `placement explain`, and clients.
+pub fn waiting_for_holder(holder: &str) -> String {
+    format!(
+        "Waiting for Worker Host {holder}, which holds this Session's last delivery and is not connected to the Control Plane; start that host, or cancel the Task"
+    )
+}
 /// Why a GitHub publication went back to Queued: the Worker Host holding its Workspace bundle was
 /// not connected. The Control Plane retries such a publication as soon as that host reports Ready.
 pub const GITHUB_PUBLICATION_HOLDER_OFFLINE: &str = "the Worker Host holding the Workspace bundle is not connected; no provider write was dispatched";

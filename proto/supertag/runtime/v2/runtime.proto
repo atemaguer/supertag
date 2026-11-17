@@ -812,6 +812,9 @@ service WorkerHost {
   // resolution in a Session wins and is recorded on every unresolved Task of the Session; the
   // returned Task carries the recorded commit.
   rpc ResolveWorkspaceRef(ResolveWorkspaceRefRequest) returns (Task);
+  // The running Attempt waits for the Worker Host holding its Session's last delivery, which is
+  // not connected, or no longer waits. The Control Plane names that host from the delivery.
+  rpc ReportWaitingForHolder(ReportWaitingForHolderRequest) returns (Task);
 }
 
 enum HostPhase {
@@ -1910,6 +1913,17 @@ message Task {
   // Each Attempt's network log from its Worker Host's egress proxy, for a Task with a network
   // scope. Set only by GetTask.
   repeated AttemptNetworkLog network_logs = 5300;
+  // The Worker Host holding the Session's last delivery, which the running Attempt waits for
+  // before its harness starts: that host is not connected. Cleared when the Attempt goes on or
+  // a new Attempt claims the Task.
+  optional string waiting_for_holder = 5400;
+}
+
+message ReportWaitingForHolderRequest {
+  InspectAttemptRequest attempt = 1;
+  // True while the Attempt waits for the holder of its Session's last delivery; false once its
+  // Workspace is prepared.
+  bool waiting = 2;
 }
 
 // How the current Attempt ended against its execution limits.

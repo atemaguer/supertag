@@ -922,6 +922,18 @@ impl WorkerHost for Api {
         .await
     }
 
+    async fn report_waiting_for_holder(
+        &self,
+        request: Request<ReportWaitingForHolderRequest>,
+    ) -> Result<Response<Task>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .report_waiting_for_holder(request)
+                .await
+        })
+        .await
+    }
+
     async fn resolve_workspace_ref(
         &self,
         request: Request<ResolveWorkspaceRefRequest>,

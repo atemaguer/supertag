@@ -294,6 +294,7 @@ impl Copy {
                     order: message.order,
                     sent_at_ms: message.sent_at_ms,
                     queued: task.state() == TaskState::Queued,
+                    holder: task.waiting_for_holder.clone(),
                 });
             }
             read.after = read.after.max(message.order);
@@ -320,6 +321,13 @@ impl Copy {
     fn queued(&self) -> impl Iterator<Item = &Unfinished> {
         self.unfinished.iter().filter(|turn| turn.queued)
     }
+
+    /// Running turns that wait for the Worker Host holding their Session's last delivery.
+    fn waiting_for_holder(&self) -> impl Iterator<Item = (&Unfinished, &str)> {
+        self.unfinished
+            .iter()
+            .filter_map(|turn| Some((turn, turn.holder.as_deref()?)))
+    }
 }
 
 struct Unfinished {
@@ -327,6 +335,8 @@ struct Unfinished {
     order: u64,
     sent_at_ms: i64,
     queued: bool,
+    /// The Worker Host holding the Session's last delivery, which the running turn waits for.
+    holder: Option<String>,
 }
 
 fn digest(message: &ConversationMessage) -> u64 {
@@ -349,6 +359,18 @@ impl Waits {
         let now_ms = store.execution_now_ms();
         let mut current: HashSet<&str> = HashSet::new();
         let mut changed = Vec::new();
+        // A running turn that waits for the holder of its Session's last delivery says so at once.
+        for (turn, holder) in copy.waiting_for_holder() {
+            let reason = supertag_protocol::waiting_for_holder(holder);
+            current.insert(&turn.task_id);
+            if self.sent.get(&turn.task_id) != Some(&reason) {
+                self.sent.insert(turn.task_id.clone(), reason.clone());
+                changed.push(TurnWait {
+                    task_id: turn.task_id.clone(),
+                    reason,
+                });
+            }
+        }
         for turn in copy.queued() {
             let task_id = &turn.task_id;
             if turn.sent_at_ms + WAIT_DELAY_MS > now_ms {
@@ -407,6 +429,12 @@ impl Waits {
                 self.checked.map_or(now, |checked| checked + WAIT_EVERY)
             };
             next = Some(next.map_or(at, |next| next.min(at)));
+        }
+        if copy
+            .waiting_for_holder()
+            .any(|(turn, _)| !self.sent.contains_key(&turn.task_id))
+        {
+            next = Some(now);
         }
         if next.is_none() && !self.sent.is_empty() {
             // A reason sent before is cleared on the next read.

@@ -31,6 +31,8 @@ export interface Task {
   createdAtMs?: number;
   /** The turn finished quietly: no person was waiting and it found nothing to say. */
   quiet?: boolean;
+  /** The Worker Host holding the Session's last delivery, which the running turn waits for. */
+  waitingForHolder?: string;
 }
 
 export interface Message {

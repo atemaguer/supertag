@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 94;
+        const SCHEMA_VERSION: i64 = 95;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -293,6 +293,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0092_failure_detail.sql"),
                 include_str!("../migrations/sqlite/0093_memory_watch.sql"),
                 include_str!("../migrations/sqlite/0094_start_rate.sql"),
+                include_str!("../migrations/sqlite/0095_waiting_holder.sql"),
             ]
         } else {
             [
@@ -392,6 +393,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0092_failure_detail.sql"),
                 include_str!("../migrations/postgresql/0093_memory_watch.sql"),
                 include_str!("../migrations/postgresql/0094_start_rate.sql"),
+                include_str!("../migrations/postgresql/0095_waiting_holder.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1091,7 +1093,7 @@ impl Store {
         let attempt = Uuid::new_v4().to_string();
         let lease = Uuid::new_v4().to_string();
         let attempt_execution = attempt_execution.encode_to_vec();
-        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL, failure_detail = NULL WHERE task_id = $8")
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL, failure_detail = NULL, waiting_holder = NULL WHERE task_id = $8")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
         // Later messages from the person join this run, so one reply answers them all.
@@ -1393,7 +1395,7 @@ impl Store {
             let quiet =
                 crate::attention::quiet_finish_in(&mut transaction, &task_row(&row)?, input)
                     .await?;
-            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL, finish_objective_signal = $3, finish_checkpoint_sha256 = $4, quiet = $5, failure_detail = $6 WHERE task_id = $7")
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL, finish_objective_signal = $3, finish_checkpoint_sha256 = $4, quiet = $5, failure_detail = $6, waiting_holder = NULL WHERE task_id = $7")
                 .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.checkpoint_sha256).bind(i64::from(quiet)).bind(&failure_detail).bind(&input.task_id)
                 .execute(&mut *transaction).await?;
         }
@@ -2562,6 +2564,7 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
         artifacts: crate::artifact_captures::submitted_from_row(row)?,
         output_policy: output_policy_from_row(row)?,
         input_artifacts: crate::task_artifact_inputs::from_row(row)?,
+        waiting_for_holder: row.try_get("waiting_holder")?,
         workspace_selection: row.try_get("workspace_selection")?,
         applied_execution_limits: row
             .try_get::<Option<Vec<u8>>, _>("applied_execution_limits")?
