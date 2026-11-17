@@ -277,8 +277,7 @@ async fn fence_execution_in(
 
 /// A removed ephemeral host can never report again, so its interrupted
 /// Attempts count as stopped: a running Task is queued to run elsewhere and a
-/// cancelled one finishes its cleanup. packages/control-plane/src/index.ts
-/// treats a removed host's running Attempt the same way.
+/// cancelled one finishes its cleanup.
 async fn settle_removed_host_in(
     transaction: &mut Transaction<'_, Any>,
     id: &str,

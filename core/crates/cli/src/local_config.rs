@@ -102,8 +102,8 @@ enum Service {
         labels: Vec<String>,
     },
 }
-/// `logging.audit`: where audit entries also go, besides the database, as in TypeScript's
-/// supertag.yaml: `stderr` or a JSON-lines file.
+/// `logging.audit`: where audit entries also go, besides the database: `stderr` or a JSON-lines
+/// file.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Logging {
@@ -244,7 +244,7 @@ pub struct Notifications {
 }
 impl Notifications {
     /// The Gateway's `--notify` values and `SUPERTAG_NOTIFY_SECRET_<NAME>` environment. A
-    /// missing secret fails only its own destination when it sends, as TypeScript does.
+    /// missing secret fails only its own destination when it sends.
     pub fn resolve(&self, environment: &Environment) -> (Vec<String>, Vec<(String, String)>) {
         let secrets = self
             .secrets
@@ -258,7 +258,7 @@ impl Notifications {
     }
 }
 impl Default for Notifications {
-    /// A local installation tells its operator on the desktop, as TypeScript does.
+    /// A local installation tells its operator on the desktop.
     fn default() -> Self {
         Self {
             destinations: vec!["desktop".into()],
@@ -288,8 +288,7 @@ pub struct Host {
 }
 /// The largest per-harness concurrency a Worker Host may declare.
 pub const MAX_CONCURRENCY: u32 = 16;
-/// A Task Attempt may run for 60 minutes unless its host service says otherwise, as in
-/// TypeScript's `DEFAULT_ATTEMPT_TIMEOUT_MS`.
+/// A Task Attempt may run for 60 minutes unless its host service says otherwise.
 pub const DEFAULT_ATTEMPT_TIMEOUT_SECONDS: u64 = 60 * 60;
 /// The longest Attempt time limit a host service may declare: one day, the longest lease a
 /// shared execution provider grants.
@@ -829,7 +828,7 @@ pub fn check_surface_edit(
 /// Check that a per-user service unit, which sees only `unit` and `env_file`, can run this
 /// configuration. Fails when the unit could not load the file at all, which would otherwise
 /// restart it in a loop; returns a warning naming variables the unit resolves differently or
-/// cannot see, as the TypeScript CLI's `unitWarnings` did.
+/// cannot see.
 pub fn unit_check(config: &Config, unit: &[(String, String)]) -> Result<Vec<String>> {
     let file = OpenOptions::new()
         .read(true)

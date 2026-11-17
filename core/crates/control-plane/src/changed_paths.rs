@@ -1,11 +1,9 @@
 //! Overlap warnings: two running Attempts of one Objective change the same path of one Workspace.
 //!
-//! TypeScript parity: `packages/control-plane/src/overlap-warnings.ts` (`detectOverlapWarnings`)
-//! and `apps/cli/src/worker-changed-paths.ts`. Worker Hosts report each running Attempt's changed
-//! paths; the Objective's conversation is told once per Attempt pair and newly shared batch of
-//! paths. Deliberate difference: a host reports through the Attempt's own execution authority on
-//! a per-Attempt timer rather than on its host heartbeat, so a report from a stale or replaced
-//! Attempt is refused.
+//! Worker Hosts report each running Attempt's changed paths; the Objective's conversation is told
+//! once per Attempt pair and newly shared batch of paths. A host reports through the Attempt's own
+//! execution authority on a per-Attempt timer, not on its host heartbeat, so a report from a stale
+//! or replaced Attempt is refused.
 use std::collections::BTreeSet;
 
 use sha2::{Digest, Sha256};

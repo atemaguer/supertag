@@ -1,9 +1,8 @@
 //! A reply shown while its Task runs, then replaced by the final reply, and the verified
 //! delivery card a work Session report carries.
 //!
-//! TypeScript parity: `packages/control-plane/src/index.ts` enqueues an acknowledgement on
-//! admission, replaces it with `progress.updated` text, and delivers the final result into the
-//! same message (`outbound-presentation.ts`). Here one row per Task holds only the newest
+//! An acknowledgement is enqueued on admission, replaced with `progress.updated` text, and the
+//! final result is delivered into the same message. One row per Task holds only the newest
 //! revision, so a slow or restarted Gateway skips stale progress instead of replaying it, and the
 //! Control Plane paces updates per message across Gateway restarts.
 //!
@@ -68,7 +67,7 @@ struct ProgressItem {
     status: String,
 }
 
-/// The text a `progress.updated` Task event shows, formatted as TypeScript `taskProgressText`.
+/// The text a `progress.updated` Task event shows.
 pub(crate) fn progress_text(event: &str) -> Option<String> {
     let event: ProgressEvent = serde_json::from_str(event).ok()?;
     if event.kind != "progress.updated" || event.progress.summary.trim().is_empty() {
@@ -163,10 +162,8 @@ pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<
 pub(crate) const FINAL_READY: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_reply_progress p WHERE p.task_id=supertag_v2_replies.task_id AND p.provider_receipt IS NOT NULL AND (p.lease_token IS NOT NULL OR p.next_at_ms>$3)) AND NOT EXISTS (SELECT 1 FROM supertag_v2_reply_progress p WHERE p.task_id=supertag_v2_replies.task_id AND p.provider_receipt IS NULL AND p.lease_token IS NOT NULL)";
 
 /// Failed and cancelled Tasks have no result reply, so their acknowledgement would keep
-/// promising work. TypeScript parity: a failed surface Task's final outbound reply is
-/// `failureText` (`packages/control-plane/src/index.ts`), which replaces the acknowledgement.
-/// Deliberate difference: TypeScript leaves a queued Task's acknowledgement when an operator
-/// cancels it; Rust says that it stopped.
+/// promising work. A failed Task's final reply is its error and a cancelled Task's says that it
+/// stopped; either replaces the acknowledgement.
 pub(crate) async fn enqueue_unsuccessful_in(
     tx: &mut Transaction<'_, Any>,
     account: &str,
@@ -202,7 +199,7 @@ pub(crate) async fn enqueue_unsuccessful_in(
     Ok(())
 }
 
-/// TypeScript `failureText`: the error on one line, at most 500 characters.
+/// A failed Task's error on one line, at most 500 characters.
 pub(crate) fn unsuccessful_text(cancelled: bool, error: Option<&str>) -> String {
     if cancelled {
         return "I stopped working on this because it was cancelled.".into();
@@ -243,8 +240,7 @@ pub(crate) async fn present_in(tx: &mut Transaction<'_, Any>, reply: &mut Reply)
     Ok(())
 }
 
-/// The verified delivery of the completed work Session a report Task reports on. TypeScript
-/// parity: `workSessionResultCard` in `packages/control-plane/src/work-sessions.ts`. The branch is
+/// The verified delivery of the completed work Session a report Task reports on. The branch is
 /// the GitHub publication branch; the pull request URL must be the published receipt's exact URL.
 pub(crate) async fn result_card_in(
     tx: &mut Transaction<'_, Any>,
@@ -590,8 +586,7 @@ mod tests {
             .unwrap()
     }
 
-    /// TypeScript parity: `tests/slack-session-report-card.test.ts`. Only a completed work
-    /// Session with a verified commit has a card, and only an exact published pull request URL.
+    /// Only a completed work Session with a verified commit has a card, and only an exact published pull request URL.
     async fn result_card_contract(url: &str) {
         let store = Store::open(url).await.unwrap();
         store.put_tag("builder", "Build", vec![]).await.unwrap();
@@ -779,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn progress_text_matches_the_typescript_format_and_ignores_other_events() {
+    fn progress_text_formats_progress_and_ignores_other_events() {
         assert_eq!(
             progress_text(r#"{"type":"progress.updated","progress":{"summary":"Fixing tests","items":[{"text":"Read","status":"completed"},{"text":"Patch","status":"active"},{"text":"CI","status":"blocked"},{"text":"Ship","status":"pending"}]}}"#).as_deref(),
             Some("Fixing tests\n\n✓ Read\n• Patch\n! CI\n○ Ship")

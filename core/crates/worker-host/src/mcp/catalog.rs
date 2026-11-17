@@ -106,7 +106,7 @@ fn decode(bytes: &[u8]) -> Result<Config> {
     Ok(config)
 }
 
-/// The official servers SuperTag knows, as in the TypeScript host service. An HTTP preset fixes
+/// The official servers SuperTag knows. An HTTP preset fixes
 /// the URL its resource mapping was written for, so Permission Set grants on its tools can name
 /// a `resource`. The Teams server's URL names the Microsoft tenant. The `lark` preset is a stdio
 /// server: it runs `lark-mcp` from the official `@larksuiteoapi/lark-mcp` package on the Worker
@@ -485,8 +485,7 @@ impl McpCatalog {
     }
 
     /// Loads the catalog. Servers with `"oauth": true` take their tokens from `logins`, the
-    /// store `supertag mcp login` writes. As in the TypeScript host service, a server this host
-    /// never logged in to refuses the start; one whose login lapsed is advertised as needing a
+    /// store `supertag mcp login` writes. A server this host never logged in to refuses the start; one whose login lapsed is advertised as needing a
     /// new login, so Tasks that need it wait.
     pub fn load(path: Option<&Path>, logins: Option<McpLoginStore>) -> Result<Self> {
         let Some(path) = path else {
@@ -901,7 +900,7 @@ fn stdio_server(
 }
 
 /// A host-local credential file a catalog field names: `{"file": PATH}` for a stdio server's
-/// variable, or a `*File` field of an HTTP server. As in TypeScript, a leading `~` is the home
+/// variable, or a `*File` field of an HTTP server. A leading `~` is the home
 /// directory and surrounding whitespace is not part of the value. The path must otherwise be
 /// absolute, and the file an owner-only regular file that is not a symbolic link. The catalog
 /// reads it when it loads, so a missing file refuses the start, and again at each use.
@@ -1204,7 +1203,7 @@ mod tests {
                 |_| None,
             )
         };
-        // Surrounding whitespace is trimmed, as TypeScript trims a file reference.
+        // Surrounding whitespace is trimmed from a file reference.
         let private = file("token", "  file-secret-value-1c9e \r\n", 0o600);
         let catalog = parse(json!({"file": private})).unwrap();
         let Transport::Stdio(server) = &catalog.servers["db"].transport else {
@@ -1255,7 +1254,7 @@ mod tests {
             path
         };
         let value = "credential-file-value-5d21";
-        // As in TypeScript, `~` and `~/PATH` are under the home directory.
+        // `~` and `~/PATH` are under the home directory.
         let home = PathBuf::from(std::env::var_os("HOME").unwrap());
         assert_eq!(
             CredentialFile::new(Path::new("~/keys/app.pem"), 64, false)
