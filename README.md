@@ -7,7 +7,7 @@
 
 **Persistent, proactive, multiplayer AI actors for engineering work.**
 
-**Define outcomes, not tasks.** Give a Tag an engineering outcome or an enduring responsibility. It carries the work across sessions, acts on its responsibilities without being asked, and works alongside your teammates and their Tags, on Claude Code, Codex, Cursor, or OpenCode and on machines you choose.
+**Tags** are persistent AI actors with their own identities, responsibilities, and work history. **Define outcomes, not tasks:** give a Tag an engineering outcome or an enduring responsibility. It carries the work across sessions, acts on its responsibilities without being asked, and works alongside your teammates and their Tags, on Claude Code, Codex, Cursor, or OpenCode and on machines you choose.
 
 [Define outcomes](#define-outcomes-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [Run your first Tag](#run-your-first-tag) · [Documentation](docs/README.md)
 
@@ -45,9 +45,8 @@ permission to edit the repository, and give a reviewer read-only access.
 
 ### Persistent
 
-A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work
-history. Its work runs as sessions of your coding agents, and the Tag is what persists across
-them. The same Tag can investigate today's issue, review the results tomorrow, and answer
+A Tag's work runs as sessions of your coding agents, and the Tag is what persists across them: its
+identity, responsibilities, permissions, and work history. The same Tag can investigate today's issue, review the results tomorrow, and answer
 questions about both next week, even when the next session runs on another coding agent or
 machine. It can recall its earlier Sessions and Objectives on its own.
 
