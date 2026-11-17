@@ -633,10 +633,13 @@ async fn supervise(
     processes: &crate::journal::Processes,
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
-        return Ok(failed("Worker Host is shutting down"));
+        return Ok(not_launched(bridge, "Worker Host is shutting down"));
     }
     if Instant::now() >= valid_until {
-        return Ok(failed("Execution authority expired before adapter launch"));
+        return Ok(not_launched(
+            bridge,
+            "Execution authority expired before adapter launch",
+        ));
     }
     // Sample the shared clock first so the deadline sent to the guardian is
     // no later than the remaining lifetime observed by this process.
@@ -693,7 +696,15 @@ async fn supervise(
     pending.record(spawned.as_ref().ok().and_then(Child::id))?;
     let mut child = match spawned {
         Ok(child) => child,
-        Err(_) => return Ok(failed("Harness adapter could not start")),
+        Err(error) => {
+            return Ok(not_launched(
+                bridge,
+                &format!(
+                    "Harness adapter could not start: {}",
+                    std::io::Error::from(error.kind())
+                ),
+            ));
+        }
     };
     let group = child.id().context("adapter process has no PID")?;
     let diagnostics = child
@@ -839,6 +850,16 @@ fn report_diagnostics(bridge: &Bridge, result: &str, stderr: &[u8]) {
     for line in text.lines() {
         warn(&format!("  | {line}"));
     }
+}
+
+/// An Attempt whose adapter never ran fails with `reason`, named in the Worker Host log.
+fn not_launched(bridge: &Bridge, reason: &str) -> HarnessCompleteRequest {
+    supertag_protocol::terminal_text::warn(&format!(
+        "Task {} Attempt {} failed before its harness adapter ran: {reason}",
+        bridge.task_id(),
+        bridge.assignment.attempt_id,
+    ));
+    failed(reason)
 }
 
 /// The secrets of this Worker Host's environment, plus `credentials` it holds itself.

@@ -280,23 +280,29 @@ impl Repository {
             .command(&["checkout-index", "--all", "--force"], &[], &[], cancel)
             .await?;
         // Verify bytes and modes after checkout rather than trusting config, name
-        // normalization, or a successful Git exit to imply the exact pinned tree.
-        let actual = paths::scan(directory, cancel)?;
-        ensure!(
-            actual.len() == entries.len(),
-            "materialized checkout differs from its pinned tree"
-        );
-        for (path, expected) in entries {
-            check_cancelled(cancel)?;
-            let actual = paths::read_checkout_file(directory, path)?;
+        // normalization, or a successful Git exit to imply the exact pinned tree. Reading and
+        // hashing every file runs on a blocking thread, so the caller's lease renewal goes on.
+        let (directory, entries, cancel) = (directory.to_owned(), entries.clone(), cancel.clone());
+        let oid_length = self.oid_length;
+        tokio::task::spawn_blocking(move || {
+            let actual = paths::scan(&directory, &cancel)?;
             ensure!(
-                actual.mode == expected.mode
-                    && blob_oid(&actual.bytes, self.oid_length) == expected.oid,
-                "materialized file differs from its pinned tree: {path}"
+                actual.len() == entries.len(),
+                "materialized checkout differs from its pinned tree"
             );
-        }
-        check_cancelled(cancel)?;
-        Ok(())
+            for (path, expected) in &entries {
+                check_cancelled(&cancel)?;
+                let actual = paths::read_checkout_file(&directory, path)?;
+                ensure!(
+                    actual.mode == expected.mode
+                        && blob_oid(&actual.bytes, oid_length) == expected.oid,
+                    "materialized file differs from its pinned tree: {path}"
+                );
+            }
+            check_cancelled(&cancel)
+        })
+        .await
+        .context("checkout verification stopped")?
     }
 
     /// Recreate minimal, trusted Git metadata without reading checkout metadata

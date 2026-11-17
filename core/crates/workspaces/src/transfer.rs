@@ -201,7 +201,7 @@ impl Workspace {
                 .await?
                 .checkout_metadata(staging.path(), &checkout.start_commit, cancel)
                 .await?;
-            paths::sync_tree(staging.path())?;
+            paths::sync_tree_off_runtime(staging.path().to_owned()).await?;
             verify_tree(staging.path(), &tree, cancel)?;
             let stage = directory.join("return-checkout");
             if fs::symlink_metadata(&stage).is_ok() {

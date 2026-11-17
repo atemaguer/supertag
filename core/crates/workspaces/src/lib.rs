@@ -446,7 +446,7 @@ impl Workspace {
                 ignored.into_iter().collect()
             }
         };
-        paths::sync_tree(&checkout.path)?;
+        paths::sync_tree_off_runtime(checkout.path.clone()).await?;
         File::open(checkout.path.parent().expect("checkout parent"))?.sync_all()?;
         check_cancelled(cancel)?;
         preparation.ready = true;
@@ -739,7 +739,7 @@ impl Workspace {
         let base = &self.inner.config.base_commit;
         let entries = repository.tree(base, cancel).await?;
         repository.checkout(&path, base, &entries, cancel).await?;
-        paths::sync_tree(&path)?;
+        paths::sync_tree_off_runtime(path.clone()).await?;
         Ok(path)
     }
 

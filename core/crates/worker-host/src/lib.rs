@@ -509,6 +509,7 @@ pub async fn run(
     };
     let outcome = async {
     let mut ready = Some(ready);
+    let mut announced_recovery: Option<String> = None;
     let retire = options.lane.as_ref().map(|lane| lane.retire.clone());
     while !shutdown.is_cancelled() {
         let entry = match journal.load()? {
@@ -619,10 +620,12 @@ pub async fn run(
                     Ok(false) if options.wait_for_recovery => {
                         if let Some(ready) = ready.take() {
                             ready();
-                            supertag_protocol::terminal_text::warn(&format!(
-                                "Task {} Attempt {} needs recovery before this host can claim work",
-                                attempt.task_id, attempt.attempt_id
-                            ));
+                        }
+                        // Once per Attempt, however this host came to wait: it claims no work
+                        // until the operator decides.
+                        if announced_recovery.as_deref() != Some(attempt.attempt_id.as_str()) {
+                            supertag_protocol::terminal_text::warn(&recovery_notice(&attempt));
+                            announced_recovery = Some(attempt.attempt_id.clone());
                         }
                         wait_for_work(&shutdown).await;
                     }
@@ -1014,6 +1017,12 @@ pub async fn run(
                         // Cleanup was observed, but the operator still owns the
                         // recovery decision. Preserve the checkout until its receipt.
                         // This host holds an outcome, so it never reclaims the Attempt itself.
+                        supertag_protocol::terminal_text::warn(&format!(
+                            "Task {} Attempt {} is uncertain: its execution lease lapsed before it finished, so the Control Plane cannot tell what it did (this host recorded it as {})",
+                            attempt.task_id,
+                            attempt.attempt_id,
+                            if succeeded { "succeeded" } else { "failed" },
+                        ));
                         journal.processes(&attempt).discard()?;
                         if prepared.is_some() {
                             journal.save(&Entry::Executing { attempt, prepared })?;
@@ -1101,6 +1110,16 @@ pub async fn run(
     }
     let stopped = presence.stop().await;
     outcome.and(stopped)
+}
+
+/// Names the uncertain Attempt that keeps this host from claiming work, and the command that
+/// resolves it.
+fn recovery_notice(attempt: &Attempt) -> String {
+    format!(
+        "Task {task} Attempt {id} needs recovery before this host can claim work. Once you confirm its execution stopped: supertag task resolve-attempt {task} {id} --decision retry --confirmed-stopped --evidence TEXT (or --decision failed)",
+        task = attempt.task_id,
+        id = attempt.attempt_id,
+    )
 }
 
 fn cleanup_terminal(
@@ -1535,6 +1554,8 @@ async fn run_assignment(
             // `workspace-setup` failure does.
             let message = if error.message().starts_with("Workspace setup") {
                 error.message()
+            } else if error.message() == AUTHORITY_EXPIRED {
+                "Execution authority expired while the Task workspace was prepared"
             } else {
                 "Task workspace could not be prepared safely"
             };
@@ -2063,7 +2084,7 @@ async fn run_assignment(
                 outputs,
             })
         } else {
-            save_finish(journal, attempt.clone(), outcome)
+            record_finish(journal, attempt.clone(), outcome)
         }
     }
     .await;
@@ -2192,7 +2213,24 @@ fn ensure_attempt(task: &Task, attempt: &Attempt) -> Result<()> {
     Ok(())
 }
 
+/// Records a Worker Host's own verdict on an Attempt. A failure is also named in the Worker
+/// Host log, so the operator reading it learns why without the Control Plane.
 fn save_finish(journal: &Journal, attempt: Attempt, outcome: HarnessCompleteRequest) -> Result<()> {
+    if !outcome.succeeded {
+        supertag_protocol::terminal_text::warn(&format!(
+            "Task {} Attempt {} failed: {}",
+            attempt.task_id, attempt.attempt_id, outcome.result
+        ));
+    }
+    record_finish(journal, attempt, outcome)
+}
+
+/// Records the adapter's outcome, which the adapter run already explained in the log.
+fn record_finish(
+    journal: &Journal,
+    attempt: Attempt,
+    outcome: HarnessCompleteRequest,
+) -> Result<()> {
     let prepared = journal
         .load()?
         .map(|entry| entry.prepared(&attempt))
@@ -2241,7 +2279,7 @@ async fn renew_running_attempt(
         .checked_add(Duration::from_millis(response.valid_for_ms))
         .ok_or_else(|| Status::data_loss("invalid authority duration"))?;
     if until <= Instant::now() {
-        return Err(Status::failed_precondition("execution authority expired"));
+        return Err(Status::failed_precondition(AUTHORITY_EXPIRED));
     }
     Ok(until)
 }
@@ -2289,10 +2327,10 @@ async fn with_cleanup_authority(
     result.context(cleanup_failure::CleanupUnconfirmed::default())
 }
 
-/// Keep the execution lease alive during repository preparation and transfer.
-/// The operation must observe `cancel` so native Git is reaped before returning.
 const DEVCONTAINER_REFUSAL: &str = "Remote Workspace devcontainer: ";
 
+/// Keep the execution lease alive during repository preparation and transfer.
+/// The operation must observe `cancel` so native Git is reaped before returning.
 async fn with_authority<T>(
     host: &mut RegisteredHost,
     attempt: &Attempt,
@@ -2301,29 +2339,105 @@ async fn with_authority<T>(
     cancel: &CancellationToken,
     operation: impl std::future::Future<Output = Result<T, Status>>,
 ) -> Result<(T, Instant), Status> {
-    let mut valid_until = renew_running_attempt(host, attempt, token).await?;
+    let valid_until = renew_running_attempt(host, attempt, token).await?;
+    let (host, attempt, token) = (host.clone(), attempt.clone(), token.to_owned());
+    keep_authority(
+        valid_until,
+        move || {
+            let (mut host, attempt, token) = (host.clone(), attempt.clone(), token.clone());
+            async move { renew_running_attempt(&mut host, &attempt, &token).await }
+        },
+        Duration::from_secs(2),
+        (shutdown, cancel),
+        operation,
+    )
+    .await
+}
+
+/// Runs `operation` while `renew` extends authority that lasts until `valid_until`, every
+/// `every`. Renewal runs as its own task, so an operation that blocks its thread, such as a
+/// large checkout's file I/O, cannot starve the lease it runs under.
+async fn keep_authority<T, F>(
+    mut valid_until: Instant,
+    mut renew: impl FnMut() -> F + Send + 'static,
+    every: Duration,
+    (shutdown, cancel): (&CancellationToken, &CancellationToken),
+    operation: impl std::future::Future<Output = Result<T, Status>>,
+) -> Result<(T, Instant), Status>
+where
+    F: std::future::Future<Output = Result<Instant, Status>> + Send + 'static,
+{
+    let (renewed, mut renewals) = tokio::sync::watch::channel(Ok(valid_until));
+    let stop = shutdown.child_token();
+    let renewal = AbortOnDrop(tokio::spawn(async move {
+        let mut until = valid_until;
+        let mut interval = time::interval(every);
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                _ = stop.cancelled() => return,
+                _ = interval.tick() => {}
+            }
+            let outcome = match time::timeout_at(until, renew()).await {
+                Ok(Ok(next)) => Ok(next),
+                Ok(Err(error)) if retryable(&error) => continue,
+                Ok(Err(error)) => Err(error),
+                Err(_) => Err(Status::failed_precondition(AUTHORITY_EXPIRED)),
+            };
+            let ended = outcome.is_err();
+            if let Ok(next) = outcome {
+                until = next;
+            }
+            if renewed.send(outcome).is_err() || ended {
+                return;
+            }
+        }
+    }));
     tokio::pin!(operation);
-    let mut interval = time::interval(Duration::from_secs(2));
-    interval.tick().await;
     let error = loop {
         tokio::select! {
             biased;
             _ = shutdown.cancelled() => break Status::cancelled("Worker Host is shutting down"),
-            _ = time::sleep_until(valid_until) => break Status::failed_precondition("execution authority expired"),
-            result = &mut operation => return result.map(|result| (result, valid_until)),
-            _ = interval.tick() => {
-                match time::timeout_at(valid_until, renew_running_attempt(host, attempt, token)).await {
-                    Ok(Ok(until)) => valid_until = until,
-                    Ok(Err(error)) if retryable(&error) => {},
-                    Ok(Err(error)) => break error,
-                    Err(_) => break Status::failed_precondition("execution authority expired"),
+            _ = time::sleep_until(valid_until) => break Status::failed_precondition(AUTHORITY_EXPIRED),
+            result = &mut operation => {
+                if let Ok(until) = &*renewals.borrow() {
+                    valid_until = valid_until.max(*until);
+                }
+                // An operation that held its thread past the lease must not report success:
+                // the Control Plane already took the Attempt's authority back.
+                if Instant::now() >= valid_until {
+                    cancel.cancel();
+                    return Err(Status::failed_precondition(AUTHORITY_EXPIRED));
+                }
+                return result.map(|result| (result, valid_until));
+            }
+            changed = renewals.changed() => {
+                if changed.is_err() {
+                    break Status::failed_precondition(AUTHORITY_EXPIRED);
+                }
+                match &*renewals.borrow_and_update() {
+                    Ok(until) => valid_until = *until,
+                    Err(error) => break error.clone(),
                 }
             }
         }
     };
+    drop(renewal);
     cancel.cancel();
     let _ = operation.await;
     Err(error)
+}
+
+/// What a lapsed execution lease reports.
+const AUTHORITY_EXPIRED: &str = "execution authority expired";
+
+/// Aborts a background task when its owner returns early.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 fn request<T>(message: T, token: &str) -> Result<Request<T>> {
@@ -2350,5 +2464,93 @@ async fn wait_for_work(shutdown: &CancellationToken) {
     tokio::select! {
         _ = time::sleep(Duration::from_millis(250)) => {}
         _ = shutdown.cancelled() => {}
+    }
+}
+
+#[cfg(test)]
+mod authority_tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use super::*;
+
+    const VALID: Duration = Duration::from_millis(300);
+
+    fn renewing(
+        count: Arc<AtomicUsize>,
+    ) -> impl FnMut() -> std::future::Ready<Result<Instant, Status>> {
+        move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(Ok(Instant::now() + VALID))
+        }
+    }
+
+    // A checkout's file I/O blocked the thread polling the operation for longer than the lease,
+    // and the lease lapsed: renewal must not depend on that thread.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn renewal_continues_while_the_operation_blocks_its_thread() {
+        let renewals = Arc::new(AtomicUsize::new(0));
+        let (shutdown, cancel) = (CancellationToken::new(), CancellationToken::new());
+        let result = keep_authority(
+            Instant::now() + VALID,
+            renewing(renewals.clone()),
+            Duration::from_millis(50),
+            (&shutdown, &cancel),
+            async {
+                std::thread::sleep(VALID * 3);
+                Ok::<_, Status>("prepared")
+            },
+        )
+        .await;
+        let (value, valid_until) = result.expect("authority kept");
+        assert_eq!(value, "prepared");
+        assert!(valid_until > Instant::now());
+        assert!(renewals.load(Ordering::SeqCst) >= 3);
+        assert!(!cancel.is_cancelled());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_operation_that_outlives_its_lease_reports_the_lapse() {
+        let (shutdown, cancel) = (CancellationToken::new(), CancellationToken::new());
+        let result = keep_authority(
+            Instant::now() + VALID,
+            || std::future::ready(Err::<Instant, _>(Status::unavailable("Control Plane down"))),
+            Duration::from_millis(50),
+            (&shutdown, &cancel),
+            async {
+                std::thread::sleep(VALID * 2);
+                Ok::<_, Status>(())
+            },
+        )
+        .await;
+        let error = result.expect_err("the lease lapsed");
+        assert_eq!(error.code(), Code::FailedPrecondition);
+        assert_eq!(error.message(), AUTHORITY_EXPIRED);
+    }
+
+    #[tokio::test]
+    async fn a_refused_renewal_cancels_the_operation() {
+        let (shutdown, cancel) = (CancellationToken::new(), CancellationToken::new());
+        let stopped = cancel.clone();
+        let result = keep_authority(
+            Instant::now() + Duration::from_secs(30),
+            || {
+                std::future::ready(Err::<Instant, _>(Status::failed_precondition(
+                    "execution authority ended",
+                )))
+            },
+            Duration::from_millis(20),
+            (&shutdown, &cancel),
+            async move {
+                stopped.cancelled().await;
+                Err::<(), _>(Status::cancelled("stopped"))
+            },
+        )
+        .await;
+        let error = result.expect_err("authority ended");
+        assert_eq!(error.message(), "execution authority ended");
+        assert!(cancel.is_cancelled());
     }
 }

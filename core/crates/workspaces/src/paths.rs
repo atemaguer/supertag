@@ -576,7 +576,19 @@ unsafe fn errno_pointer() -> *mut libc::c_int {
 }
 
 /// Sync owned regular files and directory entries without following symlinks.
+///
+/// Each entry gets a plain `fsync`, and the root one `sync_all` last. On macOS `sync_all` is
+/// `F_FULLFSYNC`, which also flushes the drive's cache of every earlier write, so one barrier
+/// covers the whole tree. A barrier per file costs about 10 ms each: tens of seconds for a
+/// checkout of a few thousand files.
 pub(crate) fn sync_tree(path: &Path) -> Result<()> {
+    fn fsync(file: &File) -> Result<()> {
+        // SAFETY: fsync reads only the descriptor, which `file` keeps open.
+        if unsafe { libc::fsync(file.as_raw_fd()) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(())
+    }
     fn sync(directory: &File) -> Result<()> {
         for name in names(directory)? {
             let stat = metadata_at(directory, &name)?;
@@ -594,16 +606,26 @@ pub(crate) fn sync_tree(path: &Path) -> Result<()> {
                     if fd < 0 {
                         return Err(std::io::Error::last_os_error().into());
                     }
-                    unsafe { File::from_raw_fd(fd) }.sync_all()?;
+                    fsync(&unsafe { File::from_raw_fd(fd) })?;
                 }
                 libc::S_IFLNK => {}
                 _ => bail!("owned workspace contains a special file"),
             }
         }
-        directory.sync_all()?;
-        Ok(())
+        fsync(directory)
     }
-    sync(&open_root(path)?)
+    let root = open_root(path)?;
+    sync(&root)?;
+    root.sync_all()?;
+    Ok(())
+}
+
+/// [`sync_tree`] on a blocking thread, so an async caller's other work (such as keeping its
+/// execution lease) goes on while a large tree syncs.
+pub(crate) async fn sync_tree_off_runtime(path: PathBuf) -> Result<()> {
+    tokio::task::spawn_blocking(move || sync_tree(&path))
+        .await
+        .context("tree sync stopped")?
 }
 
 pub(crate) fn scan(root: &Path, cancel: &CancellationToken) -> Result<BTreeMap<String, String>> {
