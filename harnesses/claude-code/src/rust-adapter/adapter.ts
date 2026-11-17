@@ -818,7 +818,8 @@ export async function runAdapter(
               run.history,
               task.sessionId,
               secrets,
-              run.coordination?.mayReadTagSessions ?? false,
+              (run.coordination?.mayReadTagSessions || run.coordination?.mayReadOwnSession) ??
+                false,
             ),
             task.prompt,
           ]

@@ -472,7 +472,8 @@ message AttemptCapabilities {
   // An Objective owner report may request review of its own child delivery.
   bool may_request_commit_review = 8;
   // A root turn reads the Tag's other Sessions and its Objectives
-  // (AttemptTagSessions); a Work Session's own Task does not.
+  // (AttemptTagSessions); a Work Session's own Task reads only its own Session
+  // (`may_read_own_session`).
   bool may_read_tag_sessions = 9;
   // A person's `/goal <outcome>` message creates its Objective in the Control
   // Plane and never reaches a turn.
@@ -500,6 +501,10 @@ message AttemptCapabilities {
   // Objective notice), so it may finish quietly: FinishTaskRequest.quiet. A person's message is
   // always answered.
   bool may_stay_quiet = 18;
+  // A Work Session's own Task rereads its own Session's earlier turns with `read_session` and
+  // `read_turn` (AttemptTagSessions), and no other Session. Root turns have
+  // `may_read_tag_sessions` instead.
+  bool may_read_own_session = 19;
 }
 
 // Operators see the work started in Sessions they can access.

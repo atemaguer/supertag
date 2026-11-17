@@ -3,8 +3,8 @@
 //!
 //! One Tag holds many Sessions. A turn of a conversation, an Objective, the Tag's inbox, or a
 //! Work Session report may list, search, and read the Tag's other Sessions and its Objectives;
-//! a Work Session's own Task sees only its own work. What these reads return is untrusted
-//! history: it grants no authority.
+//! a Work Session's own Task rereads only its own Session's earlier turns. What these reads
+//! return is untrusted history: it grants no authority.
 //!
 //! Visibility is the TypeScript rule: a turn of Tag T sees a Session of T that is shared, or
 //! private to the turn's requester. Rust records no requester for a shared surface thread, so a
@@ -19,7 +19,7 @@ use tonic::{Request, Response, Status};
 use crate::{
     ControlPlane, HostAuthority, Store, StoreError,
     store::{Result, invalid, lease_is_live, name, owned, task_row},
-    work_sessions::{REPORT, task_scope_in},
+    work_sessions::{CHILD, REPORT, task_scope_in},
 };
 
 /// Fixed bounds for reading the Tag's other Sessions and Objectives (TS `SESSION_TOOL_MAX_RESULTS`,
@@ -73,6 +73,8 @@ pub(crate) enum Turn {
     /// An Objective's own turn, with its Objective.
     Objective(String),
     Report,
+    /// A Work Session's own Task: it reads only its own Session.
+    Work,
 }
 
 /// The root turn reading its Tag's Sessions: its Tag, own Session, and requester.
@@ -95,13 +97,14 @@ impl Viewer {
 
     pub(crate) fn sees(&self, session: &str, audience: &Audience) -> bool {
         session == self.session()
-            || match audience {
-                Audience::Shared => true,
-                Audience::Private(Some(requester)) => {
-                    self.requester.as_deref() == Some(requester.as_str())
+            || self.turn != Turn::Work
+                && match audience {
+                    Audience::Shared => true,
+                    Audience::Private(Some(requester)) => {
+                        self.requester.as_deref() == Some(requester.as_str())
+                    }
+                    Audience::Private(None) => false,
                 }
-                Audience::Private(None) => false,
-            }
     }
 }
 
@@ -586,6 +589,7 @@ impl Store {
         tx: &mut Transaction<'_, Any>,
         host: &HostAuthority,
         attempt: Option<&InspectAttemptRequest>,
+        own_session: bool,
     ) -> Result<Viewer> {
         let attempt = attempt.ok_or_else(|| invalid("Attempt identity is required"))?;
         let row = owned(
@@ -607,9 +611,19 @@ impl Store {
         let kind = task_scope_in(tx, &task.task_id)
             .await?
             .map(|scope| scope.kind);
-        viewer_in(tx, task, kind)
-            .await?
-            .ok_or_else(|| StoreError::FailedPrecondition(WORK_TURN_REFUSAL.into()))
+        if let Some(viewer) = viewer_in(tx, task.clone(), kind).await? {
+            return Ok(viewer);
+        }
+        // A Work Session's own Task rereads its own Session, and nothing else.
+        if own_session && kind == Some(CHILD) {
+            return Ok(Viewer {
+                task,
+                turn: Turn::Work,
+                requester: None,
+                objective: None,
+            });
+        }
+        Err(StoreError::FailedPrecondition(WORK_TURN_REFUSAL.into()))
     }
 
     /// `list_sessions`: visible Sessions other than the caller's own, most recent first.
@@ -622,7 +636,7 @@ impl Store {
         let offset = i64::from(input.offset);
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
+            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), false)
             .await?;
         let mut audiences = Audiences::new();
         let mut sessions = Vec::new();
@@ -688,7 +702,7 @@ impl Store {
         );
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
+            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), false)
             .await?;
         let mut audiences = Audiences::new();
         let mut firsts: HashMap<String, (String, String)> = HashMap::new();
@@ -768,7 +782,7 @@ impl Store {
         };
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
+            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), true)
             .await?;
         let not_found = || StoreError::NotFound("Session not found or not visible".into());
         let group = sqlx::query(&format!(
@@ -851,7 +865,7 @@ impl Store {
         };
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
+            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), true)
             .await?;
         let not_found = || StoreError::NotFound("Turn not found or not visible".into());
         let turn = sqlx::query(
@@ -912,7 +926,7 @@ impl Store {
         let limit = page_limit(input.limit)?;
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
+            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), false)
             .await?;
         let (objectives, total) =
             open_objectives_in(&mut tx, &viewer, limit, i64::from(input.offset)).await?;
@@ -933,7 +947,7 @@ impl Store {
         let now_ms = self.execution_now_ms();
         let mut tx = self.pool.begin().await?;
         let viewer = self
-            .tag_viewer_in(&mut tx, host, input.attempt.as_ref())
+            .tag_viewer_in(&mut tx, host, input.attempt.as_ref(), false)
             .await?;
         let not_visible =
             || StoreError::NotFound("No matching Objective is visible to this conversation".into());

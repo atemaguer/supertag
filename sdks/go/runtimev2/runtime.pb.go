@@ -4925,7 +4925,8 @@ type AttemptCapabilities struct {
 	// An Objective owner report may request review of its own child delivery.
 	MayRequestCommitReview bool `protobuf:"varint,8,opt,name=may_request_commit_review,json=mayRequestCommitReview,proto3" json:"may_request_commit_review,omitempty"`
 	// A root turn reads the Tag's other Sessions and its Objectives
-	// (AttemptTagSessions); a Work Session's own Task does not.
+	// (AttemptTagSessions); a Work Session's own Task reads only its own Session
+	// (`may_read_own_session`).
 	MayReadTagSessions bool `protobuf:"varint,9,opt,name=may_read_tag_sessions,json=mayReadTagSessions,proto3" json:"may_read_tag_sessions,omitempty"`
 	// The Tag's open Objectives and how to recall its other Sessions, for the
 	// turn's context. State, not instructions. Empty when `may_read_tag_sessions` is false.
@@ -4948,9 +4949,13 @@ type AttemptCapabilities struct {
 	// No person is waiting on this turn (a Schedule fire, a memory review, an inbox turn, or an
 	// Objective notice), so it may finish quietly: FinishTaskRequest.quiet. A person's message is
 	// always answered.
-	MayStayQuiet  bool `protobuf:"varint,18,opt,name=may_stay_quiet,json=mayStayQuiet,proto3" json:"may_stay_quiet,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	MayStayQuiet bool `protobuf:"varint,18,opt,name=may_stay_quiet,json=mayStayQuiet,proto3" json:"may_stay_quiet,omitempty"`
+	// A Work Session's own Task rereads its own Session's earlier turns with `read_session` and
+	// `read_turn` (AttemptTagSessions), and no other Session. Root turns have
+	// `may_read_tag_sessions` instead.
+	MayReadOwnSession bool `protobuf:"varint,19,opt,name=may_read_own_session,json=mayReadOwnSession,proto3" json:"may_read_own_session,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *AttemptCapabilities) Reset() {
@@ -5098,6 +5103,13 @@ func (x *AttemptCapabilities) GetMayRemember() bool {
 func (x *AttemptCapabilities) GetMayStayQuiet() bool {
 	if x != nil {
 		return x.MayStayQuiet
+	}
+	return false
+}
+
+func (x *AttemptCapabilities) GetMayReadOwnSession() bool {
+	if x != nil {
+		return x.MayReadOwnSession
 	}
 	return false
 }
@@ -25217,7 +25229,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12AskQuestionRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"\xcc\x06\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\xfd\x06\n" +
 	"\x13AttemptCapabilities\x12;\n" +
 	"\x1amay_ask_objective_question\x18\x01 \x01(\bR\x17mayAskObjectiveQuestion\x12,\n" +
 	"\x12may_use_workstream\x18\x02 \x01(\bR\x10mayUseWorkstream\x12(\n" +
@@ -25235,7 +25247,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12open_work_sessions\x18\x0f \x01(\rR\x10openWorkSessions\x12*\n" +
 	"\x11max_work_sessions\x18\x10 \x01(\rR\x0fmaxWorkSessions\x12!\n" +
 	"\fmay_remember\x18\x11 \x01(\bR\vmayRemember\x12$\n" +
-	"\x0emay_stay_quiet\x18\x12 \x01(\bR\fmayStayQuietJ\x04\b\n" +
+	"\x0emay_stay_quiet\x18\x12 \x01(\bR\fmayStayQuiet\x12/\n" +
+	"\x14may_read_own_session\x18\x13 \x01(\bR\x11mayReadOwnSessionJ\x04\b\n" +
 	"\x10\vR\x14may_create_objective\"j\n" +
 	"\x17CloseWorkSessionRequest\x12&\n" +
 	"\x0fwork_session_id\x18\x01 \x01(\tR\rworkSessionId\x12'\n" +

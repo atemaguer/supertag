@@ -165,8 +165,9 @@ from the sender. A grant is exactly that: this recipient accepts messages from t
 ### What a work Session sees
 
 A work Session sees only its own work. It doesn't get the Tag's open Objectives, and it can't
-read the Tag's other Sessions or Objectives. Its own history comes from its native session, so
-the Tag's instruction has to carry everything else it needs. Information passes between work
+read the Tag's other Sessions or Objectives. Its own history comes from its native session, and
+it can reread its own earlier turns with `read_session` and `read_turn`, so the Tag's
+instruction has to carry everything else it needs. Information passes between work
 Sessions only through the conversation.
 
 Nothing a work Session writes is posted while it works; the only thing posted mid-run is

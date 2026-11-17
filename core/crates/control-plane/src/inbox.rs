@@ -140,6 +140,8 @@ impl Store {
             may_continue_work_session,
             may_ask_work_session_question: kind == Some(crate::work_sessions::CHILD),
             may_request_commit_review,
+            may_read_own_session: tag_portfolio.is_none()
+                && kind == Some(crate::work_sessions::CHILD),
             may_read_tag_sessions: tag_portfolio.is_some(),
             tag_portfolio: tag_portfolio.unwrap_or_default(),
             objective_ongoing,

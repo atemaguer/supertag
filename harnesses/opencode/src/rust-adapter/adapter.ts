@@ -436,7 +436,7 @@ export async function runAdapter(
       [bootstrap.token],
       cancellation,
       tagPortfolio(run),
-      run.coordination?.mayReadTagSessions ?? false,
+      (run.coordination?.mayReadTagSessions || run.coordination?.mayReadOwnSession) ?? false,
     );
     secrets.push(...native.secrets);
     const coordination = await startCoordination(bridge, run, {

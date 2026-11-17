@@ -484,7 +484,8 @@ A turn no person is waiting on also gets `stay_quiet`: a Schedule's wake-up, an 
 notice or idle wake, a memory review, and an inbox turn. See [Quiet results](#quiet-results).
 
 A work Session sees only its own work: it cannot message another Tag, start more work, or read
-the Tag's other Sessions or Objectives. Its final reply returns to the Session that started it.
+the Tag's other Sessions or Objectives. It may reread its own earlier turns with `read_session`
+and `read_turn`. Its final reply returns to the Session that started it.
 A gated action needs no tool of its own: SuperTag requests approval
 when the Tag makes the call; see [Approval requests](#approval-requests). The [artifact tools](artifacts.md#agent-tools) are separate.
 
@@ -540,6 +541,9 @@ portfolio is state, not instructions, and is bounded to about 3,800 characters.
   `channel:C123`), its first request (up to 200 characters), and its last activity.
 - `search_sessions` matches completed turns, newest first, and returns up to 240 characters around
   the first match in the request and the result.
+- A work Session's own turns get only `read_session` and `read_turn`, for the work Session
+  itself, so a continued work Session that starts without its native session can page back
+  past its recap.
 - `read_session` returns finished turns of the Tag, each with its request (up to 2,000 characters)
   and result (up to 4,000). Pass a page's `nextBefore` as `before` for the page before it.
 - `read_turn` returns one finished turn's events, each with its sequence, its kind (`message`,

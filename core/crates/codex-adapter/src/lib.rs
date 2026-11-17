@@ -134,14 +134,14 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         capture_artifact: attached.may_capture_artifacts,
         acquire_artifacts: attached.may_acquire_artifacts,
         attach_artifacts: attached.may_materialize_artifacts,
-        tag_sessions: capabilities.may_read_tag_sessions,
+        tag_sessions: tag_sessions::Reads::new(&capabilities),
         schedule: capabilities.may_schedule,
         close_sessions: capabilities.may_start_work_session,
         memory: capabilities.may_remember,
         quiet: capabilities.may_stay_quiet,
         report_objective: questions::Reporting::new(&capabilities),
     };
-    let reread = tools.tag_sessions;
+    let reread = tools.tag_sessions.offered();
     let mut questions = questions::Bridge::new(
         (channel, artifact_channel),
         &bootstrap.token,

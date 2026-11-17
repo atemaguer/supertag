@@ -455,6 +455,55 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
   }
 });
 
+it("lets a Work Session's own Task reread only its own Session", async () => {
+  const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
+  const readSession = vi.spyOn(bridge.tagSessions, "readSession").mockImplementation(async () =>
+    create(ReadTagSessionResponseSchema, {
+      entries: [{ taskId: "earlier", state: 3, request: "Compare", result: "Compared" }],
+    }),
+  );
+  const run = create(HarnessRunSchema, {
+    task: { taskId, tagId, sessionId: "work/compare" },
+    attemptId,
+    coordination: { mayReadOwnSession: true },
+  });
+  expect(tagPortfolio(run)).toBe("");
+  const abort = new AbortController();
+  const service = await startCoordination(bridge, run, {
+    taskId,
+    tagId,
+    attemptId,
+    secrets: [grpcToken],
+    signal: abort.signal,
+    active: () => !abort.signal.aborted,
+  });
+  const client = new Client({ name: "work-reader", version: "1" });
+  try {
+    const tool = service.tools[0];
+    if (!tool) throw new Error("missing own Session tools");
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(tool.url), {
+        requestInit: { headers: tool.headers },
+      }),
+    );
+    const tools = (await client.listTools()).tools;
+    expect(tools.map(({ name }) => name)).toEqual(["read_session", "read_turn"]);
+    expect(tools[0]?.description).toContain("You may read only this Session.");
+    expect(
+      JSON.stringify(
+        await client.callTool({ name: "read_session", arguments: { sessionId: "work/compare" } }),
+      ),
+    ).toContain("Compared");
+    expect(readSession).toHaveBeenCalledWith(
+      { sessionId: "work/compare", limit: 0 },
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
+  } finally {
+    await client.close();
+    await service.close();
+  }
+});
+
 it("schedules a follow-up in the turn's Session, redacts the note, and reports refusals", async () => {
   const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
   const scope = {

@@ -338,6 +338,7 @@ async fn contract(url: &str) {
 
     // Alice's next turn.
     let a2 = say(&store, ALICE, "What did we decide earlier?").await;
+    let a2_session = a2.session_id.clone();
     let a2 = claim(&store, &host, &a2.task_id).await;
     let caps = store.attempt_capabilities(&host, &a2).await.unwrap();
     assert!(caps.may_read_tag_sessions);
@@ -462,8 +463,8 @@ async fn contract(url: &str) {
         Err(StoreError::NotFound(_))
     ));
 
-    // A Work Session sees only its own work; its report turn reads like its conversation, and
-    // the Work Session has its conversation's audience.
+    // A Work Session rereads only its own Session; its report turn reads like its conversation,
+    // and the Work Session has its conversation's audience.
     let work = store
         .start_work_session(
             &host,
@@ -483,6 +484,18 @@ async fn contract(url: &str) {
     let child = claim(&store, &host, &work.latest_task_id).await;
     let caps = store.attempt_capabilities(&host, &child).await.unwrap();
     assert!(!caps.may_read_tag_sessions && caps.tag_portfolio.is_empty());
+    assert!(caps.may_read_own_session);
+    assert!(
+        read(&store, &host, &child, &work.work_session_id, 0, None)
+            .await
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+    assert!(matches!(
+        read(&store, &host, &child, &a2_session, 0, None).await,
+        Err(StoreError::NotFound(_))
+    ));
     assert!(matches!(
         store
             .list_tag_sessions(
@@ -497,8 +510,37 @@ async fn contract(url: &str) {
     ));
     assert!(matches!(
         turn(&store, &host, &child, &s1.task_id, 0, None).await,
-        Err(StoreError::FailedPrecondition(_))
+        Err(StoreError::NotFound(_))
     ));
+    for refused in [
+        store
+            .search_tag_sessions(
+                &host,
+                &SearchTagSessionsRequest {
+                    attempt: Some(child.clone()),
+                    query: "notes".into(),
+                    limit: 0,
+                },
+            )
+            .await
+            .map(|_| ()),
+        store
+            .list_tag_objectives(
+                &host,
+                &ListTagObjectivesRequest {
+                    attempt: Some(child.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map(|_| ()),
+        read_objective(&store, &host, &child, Some("docs"))
+            .await
+            .map(|_| ()),
+    ] {
+        assert!(matches!(refused, Err(StoreError::FailedPrecondition(_))));
+    }
+    let first_child = child.task_id.clone();
     finish(&store, &host, &child, "Notes compared").await;
     let report = store
         .get_work_session(ALICE, &work.work_session_id)
@@ -520,6 +562,63 @@ async fn contract(url: &str) {
             .contains(&work.work_session_id)
     );
     finish(&store, &host, &report, "Reported").await;
+
+    // Continued, the Work Session rereads its earlier turn, and still nothing else.
+    let again = say(&store, ALICE, "Compare them once more").await;
+    let again = claim(&store, &host, &again.task_id).await;
+    let continued = store
+        .continue_work_session(
+            &host,
+            &ContinueWorkSessionRequest {
+                attempt: Some(again.clone()),
+                operation_id: "again".into(),
+                work_session_id: work.work_session_id.clone(),
+                message: "Compare them once more".into(),
+            },
+        )
+        .await
+        .unwrap();
+    finish(&store, &host, &again, "Asked for another comparison").await;
+    let next = claim(&store, &host, &continued.latest_task_id).await;
+    assert!(
+        store
+            .attempt_capabilities(&host, &next)
+            .await
+            .unwrap()
+            .may_read_own_session
+    );
+    let earlier = read(&store, &host, &next, &work.work_session_id, 0, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        earlier
+            .entries
+            .iter()
+            .map(|entry| entry.task_id.as_str())
+            .collect::<Vec<_>>(),
+        [first_child.as_str()]
+    );
+    assert_eq!(earlier.entries[0].result, "Notes compared");
+    assert_eq!(
+        turn(&store, &host, &next, &first_child, 0, None)
+            .await
+            .unwrap()
+            .session_id,
+        work.work_session_id
+    );
+    assert!(matches!(
+        turn(&store, &host, &next, &again.task_id, 0, None).await,
+        Err(StoreError::NotFound(_))
+    ));
+    finish(&store, &host, &next, "Compared again").await;
+    let report = store
+        .get_work_session(ALICE, &work.work_session_id)
+        .await
+        .unwrap()
+        .report_task_id
+        .unwrap();
+    let report = claim(&store, &host, &report).await;
+    finish(&store, &host, &report, "Reported again").await;
 
     // Bob sees the shared Objective, never Alice's Sessions or her Work Session.
     let b2 = say(&store, BOB, "Anything on search?").await;

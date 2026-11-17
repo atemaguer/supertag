@@ -30,6 +30,7 @@ pub(crate) const ARTIFACT_ACQUIRE_SUFFIX: &str = "+artifact-acquire-v1";
 pub(crate) const ARTIFACT_ATTACH_SUFFIX: &str = "+artifact-attach-v1";
 pub(crate) const ARTIFACT_CAPTURE_SUFFIX: &str = "+artifact-capture-v1";
 pub(crate) const TAG_SESSIONS_SUFFIX: &str = "+tag-sessions-v2";
+pub(crate) const OWN_SESSION_SUFFIX: &str = "+own-session-v1";
 pub(crate) const SCHEDULE_SUFFIX: &str = "+schedule-v1";
 pub(crate) const CLOSE_SESSION_SUFFIX: &str = "+close-session-v1";
 pub(crate) const MEMORY_SUFFIX: &str = "+memory-v1";
@@ -47,8 +48,9 @@ pub(crate) struct Tools {
     pub(crate) acquire_artifacts: bool,
     pub(crate) attach_artifacts: bool,
     /// `list_sessions`, `search_sessions`, `read_session`, `read_turn`, `list_objectives`, and
-    /// `read_objective`.
-    pub(crate) tag_sessions: bool,
+    /// `read_objective` for a root turn; `read_session` and `read_turn` of its own Session for a
+    /// Work Session's own Task.
+    pub(crate) tag_sessions: crate::tag_sessions::Reads,
     /// `schedule` and `cancel_schedule`, for a root turn.
     pub(crate) schedule: bool,
     /// `close_session`, with `start_session`.
@@ -109,7 +111,7 @@ impl Tools {
         self.coordination != Inventory::None
             || self.capture_artifact
             || self.acquire_artifacts
-            || self.tag_sessions
+            || self.tag_sessions.offered()
             || self.schedule
             || self.close_sessions
             || self.memory
@@ -142,8 +144,10 @@ impl Tools {
         if self.attach_artifacts {
             manifest.push_str(ARTIFACT_ATTACH_SUFFIX);
         }
-        if self.tag_sessions {
-            manifest.push_str(TAG_SESSIONS_SUFFIX);
+        match self.tag_sessions {
+            crate::tag_sessions::Reads::None => {}
+            crate::tag_sessions::Reads::Own => manifest.push_str(OWN_SESSION_SUFFIX),
+            crate::tag_sessions::Reads::All => manifest.push_str(TAG_SESSIONS_SUFFIX),
         }
         if self.schedule {
             manifest.push_str(SCHEDULE_SUFFIX);
@@ -198,7 +202,7 @@ impl Tools {
         {
             return Ok(Arguments::Memory(call));
         }
-        if self.tag_sessions
+        if self.tag_sessions.offered()
             && params["namespace"] == "supertag"
             && let Some(call) = crate::tag_sessions::arguments(params)?
         {
@@ -274,7 +278,9 @@ impl Bridge {
     }
     /// The Tag portfolio for this turn's context, when this turn reads the Tag's Sessions.
     pub(crate) fn portfolio(&self) -> &str {
-        if self.tools.tag_sessions && self.capabilities.may_read_tag_sessions {
+        if self.tools.tag_sessions == crate::tag_sessions::Reads::All
+            && self.capabilities.may_read_tag_sessions
+        {
             &self.capabilities.tag_portfolio
         } else {
             ""
@@ -324,11 +330,11 @@ impl Bridge {
                     self.tools.attach_artifacts,
                 ));
         }
-        if self.tools.tag_sessions {
+        if self.tools.tag_sessions.offered() {
             specs[0]["tools"]
                 .as_array_mut()
                 .expect("tool specifications")
-                .extend(crate::tag_sessions::tool_specs());
+                .extend(crate::tag_sessions::tool_specs(self.tools.tag_sessions));
         }
         if self.tools.close_sessions {
             specs[0]["tools"]
@@ -550,8 +556,8 @@ impl Bridge {
                     .await?
             }
             Arguments::TagSessions(call)
-                if self.current.tag_sessions
-                    && self.capabilities.may_read_tag_sessions
+                if self.current.tag_sessions.allows(call)
+                    && crate::tag_sessions::Reads::new(&self.capabilities).allows(call)
                     && !self.asked =>
             {
                 self.tag_sessions
@@ -887,7 +893,7 @@ mod tests {
             capture_artifact: false,
             acquire_artifacts: false,
             attach_artifacts: false,
-            tag_sessions: false,
+            tag_sessions: crate::tag_sessions::Reads::None,
             schedule: false,
             close_sessions: false,
             memory: false,
