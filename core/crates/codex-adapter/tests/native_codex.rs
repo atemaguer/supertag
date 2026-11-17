@@ -2114,18 +2114,23 @@ async fn disposable_write_and_commands_select_legacy_loopback_profile_and_protec
     ] {
         assert!(args.iter().any(|value| value == setting));
     }
-    // The worktree's `gitdir:` file and the common directory holding its Git directory.
+    // The worktree's `gitdir:` file and the other entries Codex protects by default, then the
+    // common directory holding the worktree's Git directory.
+    let workspace = fixture.workspace.canonicalize()?;
+    let mut entries = [".git", ".codex", ".agents", ".aws"]
+        .iter()
+        .map(|name| serde_json::to_string(workspace.join(name).to_str().unwrap()))
+        .collect::<serde_json::Result<Vec<_>>>()?;
+    entries.push(serde_json::to_string(
+        common.canonicalize()?.to_str().unwrap(),
+    )?);
     let protected = format!(
-        "permissions.supertag.filesystem={{ {} = \"read\", {} = \"read\" }}",
-        serde_json::to_string(
-            fixture
-                .workspace
-                .canonicalize()?
-                .join(".git")
-                .to_str()
-                .unwrap()
-        )?,
-        serde_json::to_string(common.canonicalize()?.to_str().unwrap())?
+        "permissions.supertag.filesystem={{ {} }}",
+        entries
+            .iter()
+            .map(|path| format!("{path} = \"read\""))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     assert!(
         args.iter().any(|value| value == &protected),

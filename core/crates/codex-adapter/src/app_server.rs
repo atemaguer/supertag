@@ -1373,10 +1373,17 @@ mod tests {
         }
         // A full clone with a read-write Workspace copy, itself a Git checkout.
         policy.writable_roots = vec![copy.clone()];
+        // A managed checkout has the same shape: a real `.git` directory.
+        for root in [&clone, &copy] {
+            for name in [".codex", ".agents", ".aws"] {
+                std::fs::create_dir(root.join(name))?;
+            }
+        }
         let attempts = format!(
             "echo ok > written; echo ok > {copy}/written; echo x > .git/injected; \
-             echo x > .git/hooks/pre-commit; echo '[core] fsmonitor = x' >> .git/config; \
-             echo x > {copy}/.git/injected; mv .git moved; true",
+             printf x > .git/hooks/pre-commit; echo '[core] fsmonitor = x' >> .git/config; \
+             echo x > {copy}/.git/injected; for name in .codex .agents .aws; do \
+             echo x > $name/injected; echo x > {copy}/$name/injected; done; mv .git moved; true",
             copy = copy.display()
         );
         let config = std::fs::read_to_string(clone.join(".git/config"))?;
@@ -1400,6 +1407,12 @@ mod tests {
             clone.join(".git/injected"),
             clone.join(".git/hooks/pre-commit"),
             copy.join(".git/injected"),
+            clone.join(".codex/injected"),
+            clone.join(".agents/injected"),
+            clone.join(".aws/injected"),
+            copy.join(".codex/injected"),
+            copy.join(".agents/injected"),
+            copy.join(".aws/injected"),
             clone.join("moved"),
         ] {
             assert!(!path.exists(), "{}: {result}", path.display());

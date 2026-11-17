@@ -340,12 +340,14 @@ The `supertag` profile grants read-only access to:
 
 - the Workspace's `.git`, whether it is a directory or a linked worktree's `gitdir:` file. When
   there is no `.git`, the grant also stops a command from creating one.
+- the Workspace's `.codex`, `.agents`, and `.aws`, which Codex's built-in profiles also protect.
 - the Git directory a `gitdir:` file names, and a linked worktree's common Git directory.
-- the `.git` of each read-write Volume copy.
+- the same four entries in each read-write Volume copy.
 
-Codex protects `.git` in its built-in profiles. A profile that extends `:workspace` loses that
-protection when the Workspace sits under another writable root, such as `/tmp` or `$TMPDIR`.
-The grants are therefore always explicit. With `web:fetch`, the adapter uses Codex's
+Codex protects these entries in its built-in profiles. A profile that extends `:workspace` loses
+that protection when the Workspace sits under another writable root, such as `/tmp` or
+`$TMPDIR`. The grants are therefore always explicit. Codex's `apply_patch` tool refuses `.git`
+and paths outside the writable roots on its own. With `web:fetch`, the adapter uses Codex's
 workspace-write sandbox, which keeps `.git` read-only itself.
 
 Claude Code's and OpenCode's file tools refuse a write to any `.git` path in the worktree or a

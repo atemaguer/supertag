@@ -219,29 +219,39 @@ pub(crate) fn thread_parameters(
     Ok(params)
 }
 
-/// Filesystem rules of the `supertag` permission profile. Each Git directory SuperTag or the
-/// Worker Host later runs `git` in is read-only: the Workspace's own `.git` (a directory, a
-/// linked worktree's `gitdir:` file, or absent), the common Git directory of a linked worktree,
-/// and the `.git` of each read-write Workspace copy, which is itself writable.
+/// The entries Codex 0.163.0's built-in `:workspace` profile keeps read-only in each writable
+/// root, whether or not they exist (probed with `codex sandbox -P :workspace`).
+const PROTECTED_ENTRIES: [&str; 4] = [".git", ".codex", ".agents", ".aws"];
+
+/// Filesystem rules of the `supertag` permission profile. In the Workspace and each read-write
+/// Workspace copy, every entry Codex protects by default stays read-only: `.git` (a directory, a
+/// linked worktree's `gitdir:` file, or absent), `.codex`, `.agents`, and `.aws`. So do the Git
+/// directories a `gitdir:` file names. SuperTag and the Worker Host later run `git` there outside
+/// the sandbox.
 ///
-/// Codex 0.163.0 protects `.git` for its built-in profiles, but a profile that `extends`
-/// `:workspace` loses that protection when the Workspace lies under another writable root
-/// such as `/tmp` or `$TMPDIR` (openai/codex#52620), so the grants are always explicit. A
-/// grant for an absent `.git` also keeps a sandboxed command from creating one.
+/// Codex 0.163.0 protects these entries for its built-in profiles, but a profile that `extends`
+/// `:workspace` loses that protection when the Workspace lies under another writable root such as
+/// `/tmp` or `$TMPDIR` (openai/codex#52620), so the grants are always explicit. A grant for an
+/// absent entry also keeps a sandboxed command from creating it.
 fn filesystem(workspace: &Path, policy: &Policy) -> Result<Vec<(String, &'static str)>> {
     let utf8 = |path: &Path, what: &str| {
         path.to_str()
             .map(str::to_owned)
             .with_context(|| format!("{what} must be UTF-8"))
     };
-    let mut entries = vec![(utf8(&workspace.join(".git"), "Workspace path")?, "read")];
+    let mut entries = PROTECTED_ENTRIES
+        .iter()
+        .map(|name| Ok((utf8(&workspace.join(name), "Workspace path")?, "read")))
+        .collect::<Result<Vec<_>>>()?;
     for directory in pointed_git_directories(workspace)? {
         entries.push((utf8(&directory, "Git directory path")?, "read"));
     }
     for root in &policy.writable_roots {
         ensure!(root.is_absolute(), "Workspace copy path must be absolute");
         entries.push((utf8(root, "Workspace copy path")?, "write"));
-        entries.push((utf8(&root.join(".git"), "Workspace copy path")?, "read"));
+        for name in PROTECTED_ENTRIES {
+            entries.push((utf8(&root.join(name), "Workspace copy path")?, "read"));
+        }
     }
     Ok(entries)
 }
@@ -302,20 +312,25 @@ mod tests {
         let mut policy = Policy::from_actions(&actions(&["files:read", "files:write"]), true)?;
         policy.writable_roots = vec![PathBuf::from("/mnt/data \"quoted\"")];
         let args = arguments(workspace.path(), None, None, &policy)?;
-        let git = workspace.path().join(".git");
-        let git = git.to_str().unwrap();
+        let copy = "/mnt/data \"quoted\"";
+        let mut expected = protected(workspace.path());
+        expected.push((copy.into(), "write"));
+        expected.extend(protected(Path::new(copy)));
+        let listed = expected
+            .iter()
+            .map(|(path, access)| {
+                format!("{} = \"{access}\"", serde_json::to_string(path).unwrap())
+            })
+            .collect::<Vec<_>>();
         assert!(args.contains(&format!(
-            "permissions.supertag.filesystem={{ \"{git}\" = \"read\", \"/mnt/data \\\"quoted\\\"\" = \"write\", \"/mnt/data \\\"quoted\\\"/.git\" = \"read\" }}"
+            "permissions.supertag.filesystem={{ {} }}",
+            listed.join(", ")
         )));
         assert!(args.contains(&"permissions.supertag.extends=\":workspace\"".into()));
         let params = thread_parameters(workspace.path(), &policy, &args)?;
         assert_eq!(
             params["config"]["permissions.supertag.filesystem"],
-            serde_json::json!({
-                git: "read",
-                "/mnt/data \"quoted\"": "write",
-                "/mnt/data \"quoted\"/.git": "read",
-            })
+            object(expected, &[])
         );
         // A read-only Task cannot be given a writable copy.
         let mut read_only = Policy::from_actions(&actions(&["files:read"]), false)?;
@@ -349,28 +364,48 @@ mod tests {
         assert!(status.success(), "git {args:?}");
     }
 
+    /// The entries Codex protects by default in `root`, in grant order.
+    fn protected(root: &Path) -> Vec<(String, &'static str)> {
+        PROTECTED_ENTRIES
+            .iter()
+            .map(|name| (root.join(name).to_str().unwrap().to_owned(), "read"))
+            .collect()
+    }
+
+    /// `entries` and then each of `extra` read-only, as a JSON object.
+    fn object(mut entries: Vec<(String, &'static str)>, extra: &[&Path]) -> serde_json::Value {
+        entries.extend(
+            extra
+                .iter()
+                .map(|path| (path.to_str().unwrap().to_owned(), "read")),
+        );
+        serde_json::Value::Object(
+            entries
+                .into_iter()
+                .map(|(path, access)| (path, access.into()))
+                .collect(),
+        )
+    }
+
     fn grants(workspace: &Path, policy: &Policy) -> Result<serde_json::Value> {
         let args = arguments(workspace, None, None, policy)?;
         let resumed = thread_parameters(workspace, policy, &args)?;
         Ok(resumed["config"]["permissions.supertag.filesystem"].clone())
     }
 
-    /// Every supertag profile names the Workspace's `.git` read-only, whatever its shape, and a
+    /// Every supertag profile names the Workspace's `.git`, whatever its shape, and the other
+    /// entries Codex protects by default read-only, and a
     /// resumed thread gets the same grants.
     #[test]
     fn every_supertag_profile_keeps_workspace_git_metadata_read_only() -> Result<()> {
         let root = tempfile::tempdir()?;
         let root = root.path().canonicalize()?;
-        let at = |path: &Path| path.to_str().unwrap().to_owned();
         for granted in [&["files:write"][..], &["commands:execute"]] {
             let policy = Policy::from_actions(&actions(granted), true)?;
             // No `.git`: the grant still keeps a command from creating one.
             let plain = root.join("plain");
             std::fs::create_dir_all(&plain)?;
-            assert_eq!(
-                grants(&plain, &policy)?,
-                serde_json::json!({at(&plain.join(".git")): "read"})
-            );
+            assert_eq!(grants(&plain, &policy)?, object(protected(&plain), &[]));
             // A full clone: its `.git` directory.
             let clone = root.join("clone");
             if !clone.exists() {
@@ -392,28 +427,19 @@ mod tests {
                     ],
                 );
             }
-            assert_eq!(
-                grants(&clone, &policy)?,
-                serde_json::json!({at(&clone.join(".git")): "read"})
-            );
+            assert_eq!(grants(&clone, &policy)?, object(protected(&clone), &[]));
             // A linked worktree: the pointer file and the common directory, which holds the
             // worktree's own Git directory.
             let linked = root.join("linked");
             assert_eq!(
                 grants(&linked, &policy)?,
-                serde_json::json!({
-                    at(&linked.join(".git")): "read",
-                    at(&clone.join(".git")): "read",
-                })
+                object(protected(&linked), &[&clone.join(".git")])
             );
             // A separate Git directory outside the Workspace.
             let separated = root.join("separated");
             assert_eq!(
                 grants(&separated, &policy)?,
-                serde_json::json!({
-                    at(&separated.join(".git")): "read",
-                    at(&root.join("separate.git")): "read",
-                })
+                object(protected(&separated), &[&root.join("separate.git")])
             );
         }
         Ok(())
