@@ -2016,9 +2016,18 @@ async fn cursor_remote_lost_allocation_ack_keeps_work_fenced_until_absence_is_co
         );
         ensure!(!error.contains(PROVIDER_KEY) && !error.contains("synthetic-e2b-provider-key"));
     }
+    // The Harness starts while its sandbox is prepared, so the model does not wait for it, but
+    // no tool reached a sandbox whose allocation was never confirmed.
     ensure!(
-        fixture.trace()?.is_empty(),
-        "native execution started without a prepared sandbox"
+        !fixture.trace()?.is_empty(),
+        "native execution waited for the sandbox"
+    );
+    ensure!(
+        !fixture.provider_trace()?.iter().any(|value| matches!(
+            value["type"].as_str(),
+            Some("read" | "write" | "edit" | "command" | "glob" | "grep" | "list")
+        )),
+        "a tool ran in a sandbox whose allocation was never confirmed"
     );
     assert!(matches!(
         runtime.task(&first.task_id).await?.state(),

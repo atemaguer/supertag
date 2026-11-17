@@ -1770,7 +1770,38 @@ async fn run_assignment(
         }
     };
     let mut sandbox_execution_ends = None;
-    let mut provider = if options.remote_provider.is_some() {
+    // A remote sandbox nothing needs before the Harness starts is prepared while it runs, so the
+    // model starts without waiting for it; its first tool waits instead. Workspace copies, Task
+    // artifact inputs and MCP servers need the sandbox first, so then it is prepared before.
+    let defer_sandbox = options.remote_provider.is_some()
+        && options.shared_execution.is_none()
+        && mounted.is_none()
+        && task.input_artifacts.is_empty()
+        && workspace_mcp.is_none()
+        && supertag_protocol::mcp::grants(&task).next().is_none();
+    let mut deferred = None;
+    if defer_sandbox {
+        let prepared = workspace
+            .as_ref()
+            .context("remote Attempt has no prepared Workspace")?;
+        // The base commit's devcontainer subset is still read and refused before launch.
+        let cancel = shutdown.child_token();
+        match workspaces.remote_environment(prepared, &cancel).await {
+            Ok(environment) => {
+                let (pending, ready) = adapter::RemoteWorkspace::pending();
+                sandbox_execution_ends = Some(remote::execution_ends(options));
+                deferred = Some((environment, pending, ready));
+            }
+            Err(error) => {
+                return save_finish(
+                    journal,
+                    attempt,
+                    adapter::failed(&format!("{DEVCONTAINER_REFUSAL}{error:#}")),
+                );
+            }
+        }
+    }
+    let mut provider = if options.remote_provider.is_some() && !defer_sandbox {
         let workspace = workspace
             .as_ref()
             .context("remote Attempt has no prepared Workspace")?;
@@ -1942,12 +1973,21 @@ async fn run_assignment(
         None
     };
     let uses_shared_access = shared_access.is_some();
+    let (sandbox_environment, sandbox_ready) = match deferred {
+        Some((environment, pending, ready)) => (Some((environment, pending)), Some(ready)),
+        None => (None, None),
+    };
+    let (sandbox_environment, pending_workspace) = match sandbox_environment {
+        Some((environment, pending)) => (Some(environment), Some(pending)),
+        None => (None, None),
+    };
     let remote_workspace = provider
         .as_ref()
         .map(|provider| {
             let (channel, token) = provider.workspace_connection();
             adapter::RemoteWorkspace::new(channel, token)
         })
+        .or(pending_workspace)
         .or_else(|| shared_access.map(adapter::RemoteWorkspace::shared));
     let adapter_workspace = workspace
         .as_ref()
@@ -1957,7 +1997,10 @@ async fn run_assignment(
         .as_ref()
         .zip(adapter_workspace)
         .map(|(outputs, checkout)| outputs.absolute(checkout));
-    if let Some(output) = outputs.as_ref().filter(|_| provider.is_some()) {
+    if let Some(output) = outputs
+        .as_ref()
+        .filter(|_| options.remote_provider.is_some())
+    {
         task.instructions.push_str(&format!(
             "\n\nTask output directory: {}\nUse paths relative to the remote Workspace in the admitted file tools. SuperTag preserves selected Task outputs from this Attempt.",
             output.directory,
@@ -1997,30 +2040,86 @@ async fn run_assignment(
     // The delivery check applies the Task's path scope to what it changed.
     let file_scope = supertag_protocol::file_scope::of_task(&task)
         .map(supertag_protocol::file_scope::Rules::from);
+    let sandbox_task = defer_sandbox.then(|| task.clone());
     let assignment = Assignment {
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
         lease_token: attempt.lease_token.clone(),
     };
-    let outcome = adapter::execute(
-        options,
-        assignment,
-        adapter::ExecutionInputs {
-            checkpoint,
-            workspace: adapter_workspace,
-            output_directory: output_directory.as_deref(),
-            resolved_skills,
-            remote_workspace,
-            mcp: mcp.clone(),
-            processes: processes.clone(),
-            sandbox_execution_ends,
-        },
-        (host.clone(), inputs.clone(), coordination.clone()),
-        token,
-        valid_until,
-        shutdown,
-    )
-    .await
+    let sandbox_cancel = shutdown.child_token();
+    let run = async {
+        let outcome = adapter::execute(
+            options,
+            assignment,
+            adapter::ExecutionInputs {
+                checkpoint,
+                workspace: adapter_workspace,
+                output_directory: output_directory.as_deref(),
+                resolved_skills,
+                remote_workspace,
+                mcp: mcp.clone(),
+                processes: processes.clone(),
+                sandbox_execution_ends,
+            },
+            (host.clone(), inputs.clone(), coordination.clone()),
+            token,
+            valid_until,
+            shutdown,
+        )
+        .await;
+        // A sandbox still being prepared when the Harness ends is no longer needed.
+        sandbox_cancel.cancel();
+        outcome
+    };
+    let background_sandbox = async {
+        let (Some(ready), Some(prepared), Some(sandbox_task)) =
+            (sandbox_ready, workspace.as_ref(), sandbox_task.as_ref())
+        else {
+            return None;
+        };
+        let result = remote::prepare(
+            options,
+            journal,
+            workspaces,
+            (&attempt, prepared, sandbox_task),
+            (None, sandbox_environment.flatten(), None),
+            (registration, coordination, token),
+            &sandbox_cancel,
+        )
+        .await;
+        // Whether it failed while the Harness still ran, rather than being stopped after.
+        let while_running = !sandbox_cancel.is_cancelled();
+        let _ = ready.send(Some(match &result {
+            Ok((provider, _, _)) => Ok(provider.workspace_connection()),
+            Err(_) => Err("Remote Workspace could not be prepared".to_owned()),
+        }));
+        Some((result, while_running))
+    };
+    let (outcome, sandbox) = tokio::join!(run, background_sandbox);
+    let outcome = match sandbox {
+        None => outcome,
+        Some((Ok((prepared, _, _)), _)) => {
+            provider = Some(prepared);
+            outcome
+        }
+        Some((Err(_), while_running)) => {
+            with_cleanup_authority(
+                host,
+                &attempt,
+                token,
+                shutdown,
+                remote::ensure_stopped(options, journal, &attempt, registration),
+            )
+            .await?;
+            // A sandbox that failed while the Harness ran fails the turn, as one that failed
+            // before launch did; one stopped because the Harness ended first changes nothing.
+            if while_running {
+                outcome.map(|_| adapter::failed("Remote Workspace could not be prepared"))
+            } else {
+                outcome
+            }
+        }
+    }
     // The adapter run's errors carry its cleanup marker and the Attempt's values to redact.
     .with_context(|| {
         format!(

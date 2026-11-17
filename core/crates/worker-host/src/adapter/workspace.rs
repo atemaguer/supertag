@@ -34,8 +34,16 @@ enum Provider {
         client: HarnessWorkspaceClient<Channel>,
         token: String,
     },
+    /// A sandbox still being prepared while the Harness already runs. A tool waits for it; if
+    /// preparation fails, every tool fails with the reason, and nothing runs on the host.
+    Pending(tokio::sync::watch::Receiver<Option<Result<(Channel, String), String>>>),
     Shared(crate::shared_execution::Access),
 }
+
+/// What a sandbox prepared in the background sends its pending workspace: its connection, or why
+/// it could not be prepared.
+pub(crate) type SandboxReady =
+    tokio::sync::watch::Sender<Option<Result<(Channel, String), String>>>;
 
 impl RemoteWorkspace {
     pub(crate) fn new(channel: Channel, token: String) -> Self {
@@ -50,6 +58,18 @@ impl RemoteWorkspace {
         }
     }
 
+    /// A workspace whose sandbox is prepared in the background; `ready` says when it is.
+    pub(crate) fn pending() -> (Self, SandboxReady) {
+        let (ready, receiver) = tokio::sync::watch::channel(None);
+        (
+            Self {
+                provider: Provider::Pending(receiver),
+                operation: Arc::default(),
+            },
+            ready,
+        )
+    }
+
     pub(crate) fn shared(access: crate::shared_execution::Access) -> Self {
         Self {
             provider: Provider::Shared(access),
@@ -59,7 +79,7 @@ impl RemoteWorkspace {
 
     pub(super) fn shared_summary(&self) -> Option<SharedExecutionAccessSummary> {
         match &self.provider {
-            Provider::Sandbox { .. } => None,
+            Provider::Sandbox { .. } | Provider::Pending(_) => None,
             Provider::Shared(access) => Some(access.summary.clone()),
         }
     }
@@ -82,6 +102,22 @@ impl RemoteWorkspace {
                 input => access.execute(input).await,
             },
             Provider::Sandbox { client, token } => sandbox(client, token, input, deadline).await,
+            Provider::Pending(ready) => {
+                let mut ready = ready.clone();
+                let prepared = time::timeout_at(deadline, ready.wait_for(Option::is_some))
+                    .await
+                    .map_err(|_| {
+                        Status::deadline_exceeded("the remote Workspace is not ready yet")
+                    })?
+                    .map_err(|_| Status::unavailable("Remote Workspace could not be prepared"))?
+                    .clone()
+                    .expect("waited for a value");
+                let (channel, token) = prepared.map_err(Status::unavailable)?;
+                let client = HarnessWorkspaceClient::new(channel)
+                    .max_decoding_message_size(MAX_WORKSPACE_TOOL_OUTPUT_BYTES + 16)
+                    .max_encoding_message_size(MAX_MESSAGE_BYTES);
+                sandbox(&client, &token, input, deadline).await
+            }
         }
     }
 }

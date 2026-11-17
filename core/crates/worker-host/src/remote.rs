@@ -56,6 +56,17 @@ pub(crate) const COPY_CAPTURE_FAILED: &str =
     "Remote Workspace Volume copies could not be captured safely";
 pub(crate) const OUTPUTS_FAILED: &str = "Task output files could not be captured safely";
 
+/// When a Harness that starts before its sandbox must stop: the sandbox's lifetime less its
+/// cleanup margin, counted from now. The sandbox is allocated later, so this is never later than
+/// the deadline `prepare` reports.
+pub(crate) fn execution_ends(options: &HostOptions) -> Instant {
+    let timeout = options
+        .attempt_timeout
+        .saturating_add(SANDBOX_CLEANUP_MARGIN)
+        .min(MAX_SANDBOX_LIFETIME);
+    Instant::now() + timeout.saturating_sub(SANDBOX_CLEANUP_MARGIN)
+}
+
 pub(crate) async fn prepare(
     options: &HostOptions,
     journal: &Journal,
