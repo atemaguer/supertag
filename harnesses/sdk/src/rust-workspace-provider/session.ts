@@ -12,7 +12,12 @@ import {
 } from "./copies.js";
 import { type InputFile, inputManifest, inputRoot } from "./input-files.js";
 import { createWorkspaceOperations, type WorkspaceOperation } from "./operations.js";
-import { createProcessSeal, type PrivilegedRun, type ProcessSeal } from "./process-seal.js";
+import {
+  createProcessSeal,
+  lastLine,
+  type PrivilegedRun,
+  type ProcessSeal,
+} from "./process-seal.js";
 
 export const MAX_TRANSFER = 256 * 1024 * 1024;
 const API_TIMEOUT_MS = 15_000;
@@ -570,11 +575,18 @@ export function createSandboxWorkspaceSession(
           throw new Error("Invalid sandbox identity");
         // Commands and Workspace MCP servers are Task-driven processes that may outlive their
         // call, so every sandbox records its own processes first, before any of them exists.
-        if (sandbox.runPrivileged) {
-          seal = createProcessSeal(sandbox.runPrivileged);
-          await seal.record(signal);
-        }
         commands = request.allowedActions.includes("commands:execute");
+        if (sandbox.runPrivileged) {
+          const recording = createProcessSeal(sandbox.runPrivileged);
+          try {
+            await recording.record(signal);
+            seal = recording;
+          } catch (error) {
+            // Without commands the record matters only if a Workspace MCP server runs; then
+            // Capture refuses. An image the record cannot run in never fails a file-only Task.
+            if (commands) throw error;
+          }
+        }
         // Only a sandbox that can be sealed admits commands.
         if (commands && !seal) throw new Error("Sandbox cannot be sealed");
         root = preparing || fromArtifact ? preparedRoot : `/tmp/supertag-workspace-${randomUUID()}`;
@@ -648,7 +660,7 @@ export function createSandboxWorkspaceSession(
           API_TIMEOUT_MS,
           signal,
         );
-        const physicalRoot = prepared.stdout.trim();
+        const physicalRoot = lastLine(prepared.stdout);
         if (
           prepared.exitCode !== 0 ||
           !posix.isAbsolute(physicalRoot) ||
@@ -683,7 +695,7 @@ export function createSandboxWorkspaceSession(
           ],
           signal,
         );
-        if (result.exitCode !== 0 || result.stdout.trim() !== "staged")
+        if (result.exitCode !== 0 || lastLine(result.stdout) !== "staged")
           throw new Error("Pinned bundle could not be materialized");
         signal.throwIfAborted();
         if (setupCommands.length > 0) {
@@ -859,7 +871,7 @@ export function createSandboxWorkspaceSession(
         } else {
           result = await runTransfer("capture", captureArgs, signal);
         }
-        const receipt = /^([1-9][0-9]{0,8}) ([0-9a-f]{64})$/u.exec(result.stdout.trim());
+        const receipt = /^([1-9][0-9]{0,8}) ([0-9a-f]{64})$/u.exec(lastLine(result.stdout));
         if (result.exitCode !== 0 || !receipt?.[1] || !receipt[2])
           throw workspaceError("capture did not produce a receipt");
         const byteLength = Number(receipt[1]);
@@ -1264,7 +1276,15 @@ def capture(commit, keep_json, *excluded):
                               ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         check(len(manifest) <= MAX_MANIFEST and 13 + len(manifest) + body_length <= MAX_TREE)
         destination = os.path.join(root, "return.tree")
+        # As root after the seal, write only into the private root the provider's own user
+        # created at Stage, and give the tree to that user by descriptor, never by path: the
+        # Task could swap the path for a link between the two.
+        private = os.lstat(root)
+        check(stat.S_ISDIR(private.st_mode) and not stat.S_ISLNK(private.st_mode))
+        check(os.geteuid() != 0 or private.st_mode & 0o777 == 0o700)
         with open(destination, "xb") as tree:
+            if os.geteuid() == 0:
+                os.fchown(tree.fileno(), private.st_uid, private.st_gid)
             tree.write(b"STWTREE1\n" + struct.pack(">I", len(manifest)) + manifest)
             for entry, expected in entries:
                 *parents, name = components(entry["path"])
@@ -1293,10 +1313,6 @@ def capture(commit, keep_json, *excluded):
                     check(fingerprint(os.fstat(directory_fd)) == expected)
     finally:
         os.close(root_fd)
-    if os.geteuid() == 0:
-        # Run as root after the seal; the provider's unprivileged reader fetches it.
-        owner = os.stat(checkout)
-        os.chown(destination, owner.st_uid, owner.st_gid)
     length, digest = file_hash(destination)
     print(length, digest)
 

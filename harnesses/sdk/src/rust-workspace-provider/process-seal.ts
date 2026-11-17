@@ -188,6 +188,17 @@ export interface ProcessSeal {
   }>;
 }
 
+/** The last non-empty line: a program's own output after anything a login profile printed. */
+export function lastLine(stdout: string): string {
+  return (
+    stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .at(-1) ?? ""
+  );
+}
+
 export function createProcessSeal(run: PrivilegedRun): ProcessSeal {
   let recorded: Recorded | undefined;
   return {
@@ -198,7 +209,8 @@ export function createProcessSeal(run: PrivilegedRun): ProcessSeal {
         SEAL_TIMEOUT_MS,
         signal,
       );
-      const value = result.exitCode === 0 ? recordedProcesses(result.stdout.trim()) : undefined;
+      // E2B runs every command through a login shell, whose profile may print first.
+      const value = result.exitCode === 0 ? recordedProcesses(lastLine(result.stdout)) : undefined;
       if (!value) throw new Error("Sandbox processes could not be recorded");
       recorded = value;
     },
@@ -220,9 +232,15 @@ export function createProcessSeal(run: PrivilegedRun): ProcessSeal {
           Math.max(timeoutMs, SEAL_TIMEOUT_MS),
           signal,
         );
-        const [first = "", ...rest] = result.stdout.split("\n");
-        const sealed = /^sealed [0-9]+$/u.test(first) && (then.length > 0 || result.exitCode === 0);
-        return { sealed, exitCode: result.exitCode, stdout: rest.join("\n") };
+        // A login shell's profile may print before the program does: find the marker line.
+        const lines = result.stdout.split("\n");
+        const marker = lines.findIndex((line) => /^sealed [0-9]+$/u.test(line));
+        const sealed = marker >= 0 && (then.length > 0 || result.exitCode === 0);
+        return {
+          sealed,
+          exitCode: result.exitCode,
+          stdout: marker >= 0 ? lines.slice(marker + 1).join("\n") : "",
+        };
       } catch {
         return { sealed: false, exitCode: null, stdout: "" };
       }

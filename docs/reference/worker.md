@@ -163,7 +163,10 @@ needs no `--allow-unsandboxed-commands` (and cannot take it). Each command runs 
 group with its own time limit, enforced inside the sandbox. After a Task ran commands or a
 Workspace MCP server, the provider stops every process in the sandbox except the ones the sandbox
 started with, confirms none is left, and captures the Workspace in the same process; a sandbox it
-cannot confirm fails the Task Attempt. This keeps an honest Task's leftovers (a dev server, a
+cannot confirm fails the Task Attempt. Processes already running when the sandbox was
+allocated, such as a `cron`, `supervisord`, or other daemon the image or a prepared artifact
+starts, count as the sandbox's own: they keep running through Capture, and whatever they write
+to the Workspace is captured like the Task's own work. This keeps an honest Task's leftovers (a dev server, a
 watcher) from changing the Workspace while it is read. It is not a security boundary: on Modal,
 and on E2B through sudo, the Task is root in its sandbox and could defeat it. What protects the
 host is that nothing runs on it: the Worker Host checks the returned files, and stopping the

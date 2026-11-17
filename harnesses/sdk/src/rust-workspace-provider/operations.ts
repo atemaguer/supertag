@@ -101,7 +101,20 @@ limit = int(sys.argv[1])
 deadline = time.monotonic() + int(sys.argv[2]) / 1000
 record = sys.argv[3]
 os.makedirs(os.path.dirname(record), mode=0o700, exist_ok=True)
-# A cancel that arrives before the group exists leaves a stop marker instead.
+# A cancel signals this wrapper, which alone knows its command's group for certain: the group
+# outlives a leader that exited while members still run. A cancel that arrives before the group
+# exists, or between the signal and the spawn, leaves a stop marker this wrapper checks.
+child = None
+stopping = False
+def stop(*_):
+    global stopping
+    stopping = True
+    if child is not None:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except OSError:
+            pass
+signal.signal(signal.SIGUSR1, stop)
 if os.path.exists(record + ".stop"):
     sys.exit(130)
 child = subprocess.Popen(sys.argv[4:], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -109,11 +122,8 @@ child = subprocess.Popen(sys.argv[4:], stdout=subprocess.PIPE, stderr=subprocess
 with open(record + ".tmp", "w") as out:
     out.write(str(child.pid))
 os.rename(record + ".tmp", record)
-if os.path.exists(record + ".stop"):
-    try:
-        os.killpg(child.pid, signal.SIGKILL)
-    except OSError:
-        pass
+if stopping or os.path.exists(record + ".stop"):
+    stop()
 expired = False
 with selectors.DefaultSelector() as streams:
     streams.register(child.stdout, selectors.EVENT_READ, sys.stdout.buffer)
@@ -162,33 +172,27 @@ sys.exit(status if status >= 0 else 128 - status)`;
 // trusted to be a group other than the sandbox's init.
 // It never waits: the marker stops a command that has not recorded its group yet, because the
 // wrapper checks for it right after recording.
-const STOP_COMMAND = `import os, signal, sys
+// Never trusts a group ID from the sandbox: it signals the wrapper running this record's command,
+// which kills the group it started. A wrapper that already exited leaves nothing to stop here;
+// the seal stops whatever its command left behind.
+const STOP_COMMAND = String.raw`import os, signal, sys
 record = sys.argv[1]
 os.makedirs(os.path.dirname(record), mode=0o700, exist_ok=True)
 open(record + ".stop", "a").close()
-try:
-    with open(record) as recorded:
-        group = int(recorded.read(32))
-except (OSError, ValueError):
-    sys.exit(0)
-# The record is in the sandbox, so only a group it can prove is this command's is stopped: the
-# group's leader leads its own session, and its parent is the wrapper started for this record.
-def stat(pid):
-    with open("/proc/%d/stat" % pid, "rb") as handle:
-        raw = handle.read(4096)
-    return raw[raw.rindex(b")") + 2:].split()
-try:
-    leader = stat(group)
-    ppid, pgrp, session = int(leader[1]), int(leader[2]), int(leader[3])
-    with open("/proc/%d/cmdline" % ppid, "rb") as handle:
-        parent = handle.read(1 << 20).split(b"\0")
-except (OSError, ValueError, IndexError):
-    sys.exit(0)
-if group > 1 and pgrp == group and session == group and record.encode() in parent:
+wanted = record.encode()
+for name in os.listdir("/proc") if os.path.isdir("/proc") else []:
+    if not name.isdigit() or int(name) == os.getpid():
+        continue
     try:
-        os.killpg(group, signal.SIGKILL)
+        with open("/proc/%s/cmdline" % name, "rb") as handle:
+            argv = handle.read(1 << 20).split(b"\0")
     except OSError:
-        pass`;
+        continue
+    if wanted in argv and any(b"start_new_session=True" in arg for arg in argv):
+        try:
+            os.kill(int(name), signal.SIGUSR1)
+        except OSError:
+            pass`;
 
 // The shell both checks and enters the physical Workspace before starting the
 // command. An image's login scripts and default environment are not needed.
@@ -506,3 +510,6 @@ export function createWorkspaceOperations(options: WorkspaceOperationsOptions) {
     },
   };
 }
+
+/** The command wrapper and its stopper, for tests that run them in a real Linux sandbox. */
+export const COMMAND_PROGRAMS = { command: COMMAND_PROCESS, stop: STOP_COMMAND } as const;

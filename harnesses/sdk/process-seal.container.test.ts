@@ -1,5 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { PROCESS_SEAL_PROGRAMS } from "@supertag/worker-sdk/internal/rust-workspace-provider";
+import {
+  COMMAND_PROGRAMS,
+  PROCESS_SEAL_PROGRAMS,
+} from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { afterEach, expect, it } from "vitest";
 
 // The record and seal programs, run for real in a throwaway Linux container: they kill every
@@ -132,6 +135,52 @@ it.skipIf(!available)(
     const result = seal(id, recorded);
     expect(result.stdout).toBe("sealed 0\n");
     expect(processes(id).some((line) => line.includes("sleep 900"))).toBe(true);
+  },
+  120_000,
+);
+
+it.skipIf(!available)(
+  "cancels a command's whole group after its leader exited, through the command's own wrapper",
+  async () => {
+    const id = start();
+    // The leader starts two members of its group and exits; they keep the output open.
+    execFileSync(runtime, [
+      "exec",
+      "-d",
+      id,
+      "python3",
+      "-I",
+      "-S",
+      "-c",
+      COMMAND_PROGRAMS.command,
+      "65536",
+      "120000",
+      "/tmp/commands/one",
+      "/bin/sh",
+      "-c",
+      "sleep 900 & sleep 901 & exit 0",
+    ]);
+    const deadline = Date.now() + 20_000;
+    while (!processes(id).some((line) => line.includes("sleep 901"))) {
+      expect(Date.now()).toBeLessThan(deadline);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    // A forged record names another group; the stopper never reads it.
+    exec(id, ["sh", "-c", "echo 1 > /tmp/commands/one"]);
+    const stopped = exec(id, [
+      "python3",
+      "-I",
+      "-S",
+      "-c",
+      COMMAND_PROGRAMS.stop,
+      "/tmp/commands/one",
+    ]);
+    expect(stopped.status, stopped.stderr).toBe(0);
+    while (processes(id).some((line) => /sleep 90[01]|start_new_session/u.test(line))) {
+      expect(Date.now()).toBeLessThan(deadline + 10_000);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    expect(processes(id).some((line) => line.includes("sleep 600"))).toBe(true);
   },
   120_000,
 );

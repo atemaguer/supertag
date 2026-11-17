@@ -207,7 +207,7 @@ it("cancels an active foreground command and fences later calls after disposal",
   await expect(tools.execute({ kind: "command", command: "true" })).rejects.toThrow(/closed/i);
   // The cancel stopped the command's group with a second sandbox process, never the provider.
   expect(specs).toHaveLength(2);
-  expect(specs[1]?.args?.join(" ")).toContain("killpg");
+  expect(specs[1]?.args?.join(" ")).toContain("SIGUSR1");
   // Nothing may stop the stopper through the provider.
   expect(specs[1]?.timeoutMs).toBeUndefined();
 });

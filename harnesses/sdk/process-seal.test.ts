@@ -77,3 +77,18 @@ it("reports a seal that failed, printed something else, or could not run", async
     await expect(seal.sealThen([], 1000, signal)).resolves.toMatchObject({ sealed: false });
   }
 });
+
+it("finds its output after anything a login shell's profile printed", async () => {
+  const profile = "Welcome to the sandbox!\nsealed is a word\n";
+  const seal = createProcessSeal(async (argv) =>
+    argv.some((value) => value.includes("sealed %d"))
+      ? { exitCode: 0, stdout: `${profile}sealed 1\n12 abc\n` }
+      : { exitCode: 0, stdout: `${profile}${recordOutput([[1, "1"]])}` },
+  );
+  await seal.record(signal);
+  await expect(seal.sealThen(["print(1)"], 1000, signal)).resolves.toEqual({
+    sealed: true,
+    exitCode: 0,
+    stdout: "12 abc\n",
+  });
+});

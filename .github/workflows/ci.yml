@@ -112,7 +112,10 @@ jobs:
       - run: pnpm check
       - run: pnpm build
       - run: pnpm --filter supertag-ai typecheck
+      # The runner has Docker, so the real seal programs run in a container and never skip.
       - run: pnpm test
+        env:
+          SUPERTAG_TEST_REQUIRE_CONTAINER: "1"
       # Documentation and script checks under scripts/, which Vitest does not collect.
       - run: node --test scripts/*.test.mjs
 

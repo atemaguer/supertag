@@ -2,11 +2,13 @@ export { type CopySandbox, createWorkspaceCopies } from "./copies.js";
 export { createWorkspaceHandlers } from "./handlers.js";
 export {
   COMMAND_GRACE_MS,
+  COMMAND_PROGRAMS,
   createWorkspaceOperations,
   type WorkspaceOperation,
 } from "./operations.js";
 export {
   createProcessSeal,
+  lastLine,
   PROCESS_SEAL_PROGRAMS,
   type PrivilegedRun,
   type ProcessSeal,
