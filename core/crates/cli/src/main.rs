@@ -1477,6 +1477,13 @@ async fn control_plane(
     if let Some(audit_log) = &options.audit_log {
         plane = plane.with_audit_sink(supertag_control_plane::AuditSink::parse(audit_log)?);
     }
+    // `time-zone` in supertag.yaml reaches the Control Plane as SUPERTAG_TIME_ZONE; refuse a zone
+    // it does not know rather than reading Schedules in UTC.
+    if let Some(zone) = nonempty_env("SUPERTAG_TIME_ZONE") {
+        plane = plane
+            .with_time_zone(&zone)
+            .map_err(|_| anyhow::anyhow!("SUPERTAG_TIME_ZONE {zone:?} is not an IANA time zone"))?;
+    }
     // Tests move the Control Plane's clock forward by the milliseconds this file holds, so a
     // Schedule falls due without waiting.
     #[cfg(feature = "test-fixtures")]

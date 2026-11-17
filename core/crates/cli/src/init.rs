@@ -710,7 +710,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
     if answers.harness == Found::Codex {
         permissions.push(json!({ "target": "runtime", "action": "web:fetch" }));
     }
-    json!({
+    let mut document = json!({
         "version": 1,
         "name": lifecycle::DEFAULT_INSTANCE,
         "services": {
@@ -748,7 +748,12 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
             },
             machine_name(): host,
         },
-    })
+    });
+    // Schedules read times in the machine's zone, which the Control Plane may not see as a service.
+    if let Ok(zone) = iana_time_zone::get_timezone() {
+        document["services"]["control-plane"]["time-zone"] = json!(zone);
+    }
+    document
 }
 
 #[cfg(test)]

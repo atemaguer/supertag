@@ -69,6 +69,10 @@ enum Service {
         /// Service logging; only `audit` is configurable.
         #[serde(default)]
         logging: Option<Logging>,
+        /// The IANA time zone Schedules read times in when they name none, such as
+        /// `Europe/Berlin`; the machine's zone when unset.
+        #[serde(default, rename = "time-zone")]
+        time_zone: Option<String>,
     },
     Host {
         #[serde(default, rename = "control-plane")]
@@ -227,6 +231,8 @@ pub struct Plane {
     /// The Control Plane's `--audit-log`: `stderr` or an absolute file path.
     pub audit_log: Option<String>,
     pub database: Option<Database>,
+    /// The Control Plane's time zone for Schedules, when set.
+    pub time_zone: Option<String>,
 }
 /// The control-plane service's `database`: a PostgreSQL URL without a password, and the
 /// named secret that holds the password.
@@ -431,6 +437,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             notify,
             database,
             logging,
+            time_zone,
         } = service
         {
             ensure!(plane.is_none(), "configure at most one local Control Plane");
@@ -556,6 +563,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                     secrets,
                 },
                 database,
+                time_zone: time_zone.clone(),
             });
             plane_name = Some(name.clone());
         }
@@ -1693,6 +1701,21 @@ secrets:
         ] {
             assert!(validate_endpoint(value).is_err(), "{value}");
         }
+    }
+
+    #[test]
+    fn control_plane_time_zone_is_read() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = parse(
+            b"services: {cp: {type: control-plane, time-zone: Europe/Berlin}}",
+            temp.path(),
+            |_| None,
+        )
+        .unwrap();
+        assert_eq!(
+            config.plane.unwrap().time_zone.as_deref(),
+            Some("Europe/Berlin")
+        );
     }
 
     #[test]

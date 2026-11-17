@@ -145,6 +145,12 @@ impl ControlPlane {
         self
     }
 
+    /// Reads Schedule times that name no zone in `zone`, an IANA name.
+    pub fn with_time_zone(mut self, zone: &str) -> anyhow::Result<Self> {
+        self.store = self.store.with_time_zone(zone)?;
+        Ok(self)
+    }
+
     /// Also writes every committed audit entry to `sink`.
     pub fn with_audit_sink(mut self, sink: crate::AuditSink) -> Self {
         self.store = self.store.with_audit_sink(sink);

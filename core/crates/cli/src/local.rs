@@ -260,6 +260,8 @@ struct Children {
     proxy: Vec<(String, OsString)>,
     /// The Control Plane's `--audit-log`.
     audit_log: Option<String>,
+    /// The Control Plane's time zone for Schedules.
+    time_zone: Option<String>,
 }
 
 /// A PostgreSQL database for the local Control Plane, and the password it connects with.
@@ -321,6 +323,7 @@ impl Children {
             database: None,
             proxy: proxy_environment(&Environment::default()),
             audit_log: None,
+            time_zone: None,
         })
     }
 
@@ -385,6 +388,9 @@ impl Children {
         }
         if let Some(audit_log) = &self.audit_log {
             plane.arg("--audit-log").arg(audit_log);
+        }
+        if let Some(zone) = &self.time_zone {
+            plane.env("SUPERTAG_TIME_ZONE", zone);
         }
         let address = start_child(
             &mut self.control_plane,
@@ -1504,6 +1510,7 @@ pub async fn configured(
             base.database = postgres_database(plane.database.as_ref(), &environment)?;
             base.proxy = proxy_environment(&environment);
             base.audit_log.clone_from(&plane.audit_log);
+            base.time_zone.clone_from(&plane.time_zone);
             let endpoint = base
                 .start_base(
                     &executable,
