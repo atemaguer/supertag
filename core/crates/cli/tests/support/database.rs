@@ -80,14 +80,31 @@ where
 const PREFIX: &str = "supertag_rust_process_";
 
 /// Drops `name` even while a service the body left running holds or reopens connections: new
-/// connections are refused first, then `FORCE` ends the existing ones. A backend that does not
-/// exit within PostgreSQL's five-second grace still fails the drop, so it is retried.
+/// connections are refused first, then its backends are terminated and awaited, then `FORCE`
+/// drops it; a drop that still loses a race is retried.
 pub async fn drop_database(admin: &mut PgConnection, name: &str) -> Result<()> {
+    let _ = admin
+        .execute(format!("ALTER DATABASE {name} ALLOW_CONNECTIONS false").as_str())
+        .await;
+    // FORCE waits only five seconds for terminated backends to exit, which a backend of a
+    // service the body left running can exceed on a loaded machine. Terminate them first and
+    // wait for them to go, without a deadline that short.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(pg_terminate_backend(pid)) FROM pg_stat_activity \
+             WHERE datname = $1 AND pid <> pg_backend_pid()",
+        )
+        .bind(name)
+        .fetch_one(&mut *admin)
+        .await?;
+        if remaining == 0 || std::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     let mut attempt = 0;
     loop {
-        let _ = admin
-            .execute(format!("ALTER DATABASE {name} ALLOW_CONNECTIONS false").as_str())
-            .await;
         match admin
             .execute(format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)").as_str())
             .await
