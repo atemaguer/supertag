@@ -11,6 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Task continuing a Session whose last delivery is on an offline Worker Host says so:
+  `describe task`, `placement explain` and the conversation name the host it waits for
+  (`workspace-holder`) instead of retrying silently.
 - A work Session may run on another harness than its lead: `start_session` takes an optional
   `harness`, and the work Session runs only on a Worker Host bound to the Tag that offers it.
 - Operators see a Tag's network log, the web requests its Task Attempts made through the Worker
