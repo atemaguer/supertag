@@ -14,11 +14,21 @@ keeps its assignments and results across Sessions. Tags work in Teams. Together,
 Tags make up an **autonomous organization**. Teams may pursue different goals and share one
 Control Plane, its rules, and its record of the work.
 
+A Tag is persistent, proactive, and multiplayer:
+
+- **Persistent.** It keeps its goal, responsibilities, and work history while different coding
+  agents and machines do the work.
+- **Proactive.** Give it an enduring responsibility, as an ongoing
+  [Objective](../guides/ongoing-responsibilities.md), and it acts on new reports and alerts without
+  being asked. Related responsibilities belong to the same Tag.
+- **Multiplayer.** Your teammates direct Tags on the same Control Plane, and Tags in a Team
+  message each other and settle details without involving you. See [multiplayer](multiplayer.md).
+
 In security terms, the Tag is a non-human identity in SuperTag's identity and access
 management (IAM) model. Each Task still has its own requester, source, policy, and execution needs.
 
 The Tag's identity anchors security and accountability. Knowledge, authority, and audit history
-attach to the Tag across model sessions and execution processes.
+attach to the Tag across harness sessions and execution processes.
 
 Terms used on this page (see the [glossary](../reference/glossary.md)):
 

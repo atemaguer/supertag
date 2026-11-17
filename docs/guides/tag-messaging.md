@@ -8,7 +8,9 @@ in a turn of its own. A **Team** is a flat list of member Tags. See the
 A message is plain text, addressed to one Tag. A grant says one thing: this recipient accepts
 messages from this sender.
 
-Use a message when one Tag needs another Tag to know or do something. Post to the
+Messages are how teammates' Tags coordinate without involving you: one Tag asks, the other
+answers in its own turn, and people hear about it only when a decision is theirs. Use a message
+when one Tag needs another Tag to know or do something. Post to the
 [Workstream](workstreams.md) when the whole Team may want the information later.
 
 ## How a Mailbox behaves

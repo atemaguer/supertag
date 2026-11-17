@@ -1,8 +1,9 @@
 # How you direct your Tags
 
-With most coding agents, you direct work one task at a time and coordinate the parallel sessions
-yourself. SuperTag changes both. You talk to one Tag, which keeps what it owns across sessions,
-and for bigger work you define the outcome once and the Tag delivers it with its Team.
+With most coding agents, you direct work one task at a time and coordinate the agents running in
+parallel yourself. SuperTag changes both: you define outcomes, not tasks. You talk to one Tag,
+which keeps what it owns from one piece of work to the next, and for bigger work you define the
+outcome once and the Tag delivers it with its Team.
 
 An **Objective** records that outcome and how success will be checked. A **Tag** is a persistent
 AI actor with its own responsibilities and permissions. A **Session** is one Tag's thread of
@@ -89,15 +90,16 @@ SuperTag without assuming that the products use the same contracts.
 | Where does work run? | Tasks run on eligible Worker Hosts bound to their Tags. | Which local or hosted environments execute work, and who configures them. |
 | Who reviews? | The owner reviews submitted results; the outcome can require a separate reviewer or a person's approval. | Who assesses changes and what makes a result final. |
 | What is the goal contract? | An Objective records the outcome, owner, limits, status, and completion assessment across Sessions. | How goals, success criteria, and completion persist between sessions. |
-| Can several people direct work? | Multiplayer lets people continue shared work through configured collaboration tools, under access rules. | How people share direction, results, and access. |
+| Can several people direct work? | Multiplayer lets people continue shared work through configured collaboration tools, under access rules. Teammates' Tags message each other and settle details without involving you. | How people share direction, results, and access. |
 | How is spending controlled? | Objective budgets with a currency cap provider-reported spend; reporting delays can produce overruns. | Which spending limits apply, what they count, and when they stop execution. |
 
-Choose a single session, with or without `/goal`, when you can supervise one bounded change and
-assess the result yourself.
+Choose a single coding-agent chat, with or without `/goal`, when you can supervise one bounded
+change and assess the result yourself.
 Choose a Project when its documented execution, review, sharing, and spending behavior meet your
-needs within the coding product you already use. Choose SuperTag when you want a persistent owner for
-engineering work, with recorded ownership, work, and limits across sessions and execution
-environments.
+needs within the coding product you already use. Choose SuperTag when you want persistent,
+proactive, multiplayer actors for engineering work: Tags that keep the goal between pieces of work,
+act on their responsibilities without being asked, coordinate with your teammates' Tags, and run on
+the coding agents and machines you choose.
 
 For details, see [multiplayer](multiplayer.md),
 [Worker Hosts and harnesses](workers.md), and

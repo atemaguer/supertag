@@ -14,7 +14,7 @@ Objectives, but share one Control Plane (the service that stores and coordinates
 rules, and one record of the work. This page calls it the organization.
 
 A team like that needs actors, responsibilities, goals, work, groups, and ways to
-communicate. SuperTag represents each of these directly and keeps them available across model
+communicate. SuperTag represents each of these directly and keeps them available across harness
 sessions, process restarts, and the machines that execute work.
 
 ```text
