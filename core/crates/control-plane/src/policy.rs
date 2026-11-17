@@ -173,15 +173,20 @@ impl Resource for PermissionSet {
         }
         let mut approvers = BTreeSet::new();
         for value in &self.approvers {
-            let Some((kind, id)) = value.trim().split_once(':') else {
-                return Err(invalid(
-                    "approvers must be operator:<id>, client:<name> or tag:<id>",
-                ));
-            };
-            if !matches!(kind, "operator" | "client" | "tag") {
-                return Err(invalid(
-                    "approvers must be operator:<id>, client:<name> or tag:<id>",
-                ));
+            const FORMAT: &str = "approvers must be operator:<id> or client:<name>";
+            let (kind, id) = value
+                .trim()
+                .split_once(':')
+                .ok_or_else(|| invalid(FORMAT))?;
+            match kind {
+                "operator" | "client" => {}
+                // Approval is a person's check on a Tag's work, so no Tag decides one.
+                "tag" => {
+                    return Err(invalid(&format!(
+                        "approver {value:?} names a Tag, and Tags never decide approval requests; {FORMAT}"
+                    )));
+                }
+                _ => return Err(invalid(FORMAT)),
             }
             let id = bounded(id, "approver identity", 200, false)?;
             name("approver identity", &id)?;
@@ -935,17 +940,6 @@ impl Store {
             input.expected_revision,
         )
         .await?;
-        for tag_id in value
-            .approvers
-            .iter()
-            .filter_map(|value| value.strip_prefix("tag:"))
-        {
-            match crate::tags::require_active(&mut tx, tag_id).await {
-                // Declarations may name an identity before it has been created.
-                Ok(()) | Err(StoreError::NotFound(_)) => {}
-                Err(error) => return Err(error),
-            }
-        }
         save_resource(&mut tx, &value).await?;
         receipt(&mut tx, principal, &input.operation_id, &hash, &value).await?;
         tx.commit().await?;

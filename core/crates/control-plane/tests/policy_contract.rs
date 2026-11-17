@@ -661,7 +661,15 @@ async fn composition(store: &Store) {
     let mut named = permission("named", "workstream:post");
     let set = named.permission_set.as_mut().unwrap();
     set.permissions[0].approval_required = true;
+    // Tags never decide approval requests, so naming one as an approver is refused.
     set.approvers = vec!["operator:bob".into(), "tag:lead".into()];
+    let refused = store.put_permission_set(OP, &named).await;
+    assert!(
+        matches!(&refused, Err(StoreError::InvalidArgument(reason))
+            if reason.contains("Tags never decide approval requests")),
+        "{refused:?}"
+    );
+    named.permission_set.as_mut().unwrap().approvers = vec!["operator:bob".into()];
     store.put_permission_set(OP, &named).await.unwrap();
     store
         .put_permission_set(OP, &permission("ungated", "files:write"))

@@ -106,7 +106,9 @@ The approvers of a request are the union of the approvers of the sets that requi
 | --- | --- |
 | `operator:<operatorId>` | That operator, authenticated to the Control Plane's operator RPCs |
 | `client:<name>` | That client device, enrolled with a client Auth Key. Only for `workstream:post` and `mailbox:send` |
-| `tag:<Tag name or ID>` | Accepted in a Permission Set, but no Tag decides an approval |
+
+A Permission Set that names a Tag (`tag:<id>`) as an approver is refused: approval is a person's
+check on a Tag's work, so no Tag decides one.
 
 Without `approvers`, any authorized operator decides, and no client does. Listing operators
 restricts the decision to them. A gate must name at least one operator: a gated MCP tool call

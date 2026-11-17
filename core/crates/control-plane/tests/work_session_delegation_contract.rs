@@ -204,7 +204,7 @@ async fn assert_delegated_gates(store: &Store, objective: &Objective, host: &Hos
         "owner",
         "owner-gate",
         "files:delegate-write",
-        &["operator:alice", "tag:outsider"],
+        &["operator:alice"],
     )
     .await;
     assign_gate(
@@ -212,7 +212,7 @@ async fn assert_delegated_gates(store: &Store, objective: &Objective, host: &Hos
         "builder",
         "member-gate",
         "files:write",
-        &["operator:bob", "tag:owner"],
+        &["operator:bob"],
     )
     .await;
     let parent = store
@@ -250,15 +250,7 @@ async fn assert_delegated_gates(store: &Store, objective: &Objective, host: &Hos
         .find(|requirement| requirement.action == "files:write")
         .unwrap();
     assert_eq!(write.permission_set_ids, ["member-gate", "owner-gate"]);
-    assert_eq!(
-        write.approvers,
-        [
-            "operator:alice",
-            "operator:bob",
-            "tag:outsider",
-            "tag:owner"
-        ]
-    );
+    assert_eq!(write.approvers, ["operator:alice", "operator:bob"]);
 }
 
 async fn contract(url: &str) {

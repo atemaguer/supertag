@@ -156,7 +156,7 @@ mod tests {
             .unwrap()
             .digest
         );
-        snapshot.permission_sets[0].approvers = vec!["tag:reviewer".into()];
+        snapshot.permission_sets[0].approvers = vec!["client:laptop".into()];
         assert!(
             surface(
                 &snapshot,

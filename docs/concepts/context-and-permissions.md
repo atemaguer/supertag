@@ -150,8 +150,9 @@ the exact rules.
 ### Actions that need a decision
 
 Some granted actions should still wait for a person, such as merging a pull request or running
-commands during a release. Mark those permissions `approvalRequired: true`. List `approvers` to let a
-specific operator or a Tag, such as a release manager Tag, decide instead of any operator.
+commands during a release. Mark those permissions `approvalRequired: true`. List `approvers` to let
+specific operators, such as the release on-call, decide instead of any operator. A Tag never
+decides an approval.
 
 ```yaml
 apiVersion: supertag/v1
@@ -160,7 +161,7 @@ metadata:
   name: release-engineering
 spec:
   approvers:
-    - tag:release-manager
+    - operator:release-oncall
   permissions:
     - target: mcp
       action: "github/merge_pull_request"
