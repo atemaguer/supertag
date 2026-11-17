@@ -307,3 +307,12 @@ it("opens Tags with Ctrl+1…9 and Ctrl+↑/↓, and New Tag with Ctrl+N", () =>
     by: -1,
   });
 });
+
+it("shows a working Tag's row as typing dots, never a line of its activity", () => {
+  render({ summaries: { moss: { working: true, preview: "You: Run the tests" } } });
+  const moss = [...host.querySelectorAll(".tag-row")].find(
+    (row) => row.getAttribute("aria-label") === "moss",
+  ) as HTMLElement;
+  expect(moss.querySelector(".working-dots")).not.toBeNull();
+  expect(moss.textContent).not.toMatch(/Run/);
+});

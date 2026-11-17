@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import type { ControlPlane, Message as TagMessage, TaskEvent } from "../control-plane";
 import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
-import { Shimmer } from "./ai-elements/shimmer";
 import { ExternalLink } from "./external-link";
 import { ResultFiles } from "./result-files";
 import { dividerLabel, RUNNING } from "./transcript";
@@ -129,8 +128,8 @@ export function ConversationEntry({
             />
           ))}
           {typing && (
-            // The dots stand for the running turn, so they open its activity, with what the Tag
-            // is doing now under them.
+            // The dots alone say the Tag is working, as in a messaging app. They open the turn's
+            // activity, and only their label names the current step.
             <div className="typing" role="status">
               <button
                 type="button"
@@ -147,21 +146,11 @@ export function ConversationEntry({
                     <span />
                   </span>
                 </span>
-                {turn.status && (
-                  <span className="typing-caption" aria-hidden>
-                    <Shimmer as="span">{turn.status}</Shimmer>
-                  </span>
-                )}
               </button>
             </div>
           )}
           {!joined && task.artifacts && task.artifacts.length > 0 && (
             <ResultFiles artifacts={task.artifacts} onSave={onSaveArtifact} />
-          )}
-          {!typing && turn.status && (
-            <div className="turn-status" role="status">
-              {turn.status}
-            </div>
           )}
           {report && (
             <div className="turn-meta">

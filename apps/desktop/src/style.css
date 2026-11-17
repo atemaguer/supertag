@@ -941,7 +941,7 @@ button:disabled {
 .user-turn .bubble.tail {
   border-bottom-right-radius: 6px;
 }
-/* The typing bubble: a one-line message bubble of dots, with what the Tag does now under it. */
+/* The typing bubble: a one-line message bubble of dots that opens the turn's activity. */
 .typing {
   max-width: var(--bubble-max);
 }
@@ -976,15 +976,6 @@ button:disabled {
   --dot: 7px;
   --dot-gap: 5px;
   --dot-lift: -3px;
-}
-.typing-caption {
-  max-width: 100%;
-  padding: 0 6px;
-  color: var(--muted);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* Under the operator's last message: Sending…, Sent, Seen, or Not delivered with a retry. */
 .delivery {
@@ -1066,15 +1057,6 @@ button:disabled {
 .bubble-row:hover .bubble-actions,
 .bubble-actions:focus-within {
   opacity: 1;
-}
-.turn-status {
-  max-width: var(--bubble-max);
-  padding: 2px 6px;
-  color: var(--muted);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .turn-meta {
   display: flex;
