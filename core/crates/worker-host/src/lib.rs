@@ -369,7 +369,7 @@ pub async fn run(
                 wait_for_work(&shutdown).await;
                 continue;
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(error.at(options.control_plane.url()).into()),
         };
         let response = WorkerHostClient::new(negotiation::bind(channel.clone(), protocol))
             .max_decoding_message_size(MAX_MESSAGE_BYTES)

@@ -49,12 +49,12 @@ class _OldControlPlane(negotiation_pb2_grpc.ProtocolNegotiationServicer):
     def Negotiate(self, request, context):  # noqa: N802
         self.calls.append(dict(context.invocation_metadata()).get("authorization", ""))
         assert request.role == negotiation_pb2.SERVICE_ROLE_CLIENT
-        assert list(request.protocol_versions) == [2]
+        assert list(request.protocol_versions) == [3]
         context.abort(
             grpc.StatusCode.FAILED_PRECONDITION,
-            "incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol "
-            "versions [1], but the connecting operator client (SuperTag supertag-python) "
-            "offered [2]",
+            "incompatible SuperTag protocol: this Control Plane (SuperTag 0.3.0) speaks protocol "
+            "versions [2], but the connecting operator client (SuperTag supertag-python) "
+            "offered [3]; run the same SuperTag release on both services",
         )
 
 
@@ -84,7 +84,7 @@ def test_sync_client_refuses_a_control_plane_from_another_protocol_epoch():
 async def test_async_client_refuses_a_control_plane_from_another_protocol_epoch():
     with old_control_plane() as (url, handler):
         async with ControlPlaneClient(url, TOKEN) as client:
-            with pytest.raises(ControlPlaneProtocolError, match="offered \\[2\\]"):
+            with pytest.raises(ControlPlaneProtocolError, match="offered \\[3\\]"):
                 await client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
         assert handler.calls == [""]
 
@@ -111,8 +111,8 @@ class _ReplacedControlPlane(
         self.negotiations += 1
         return negotiation_pb2.NegotiateProtocolResponse(
             role=negotiation_pb2.SERVICE_ROLE_CONTROL_PLANE,
-            protocol_version=2,
-            protocol_versions=[2],
+            protocol_version=3,
+            protocol_versions=[3],
             build_version="fixture",
         )
 

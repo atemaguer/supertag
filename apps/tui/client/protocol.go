@@ -21,7 +21,7 @@ import (
 const protocolHeader = "X-Supertag-Protocol"
 
 // protocolVersions are the SuperTag protocol versions this client speaks.
-var protocolVersions = []uint32{2}
+var protocolVersions = []uint32{3}
 
 // negotiationTimeout bounds one negotiation exchange.
 const negotiationTimeout = 5 * time.Second
@@ -29,10 +29,12 @@ const negotiationTimeout = 5 * time.Second
 // protocolSession negotiates once with the Control Plane, before the first call that needs it, and
 // again after the Control Plane refuses the version it holds.
 type protocolSession struct {
-	client  runtimev2connect.ProtocolNegotiationClient
-	build   string
-	mu      sync.Mutex
-	version uint32
+	client runtimev2connect.ProtocolNegotiationClient
+	build  string
+	// endpoint names the Control Plane in a version mismatch.
+	endpoint string
+	mu       sync.Mutex
+	version  uint32
 }
 
 func (p *protocolSession) negotiated(ctx context.Context) (uint32, error) {
@@ -54,6 +56,9 @@ func (p *protocolSession) negotiated(ctx context.Context) (uint32, error) {
 		if !errors.As(err, &connectErr) || retryable(connectErr.Code()) {
 			return 0, apiError(err)
 		}
+		if connectErr.Code() == connect.CodeFailedPrecondition && strings.HasPrefix(connectErr.Message(), "incompatible SuperTag protocol") {
+			return 0, p.mismatch(parseRefusal(connectErr.Message()))
+		}
 		if connectErr.Code() == connect.CodeUnimplemented {
 			return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "incompatible SuperTag protocol: the Control Plane does not offer SuperTag protocol negotiation"}
 		}
@@ -64,11 +69,106 @@ func (p *protocolSession) negotiated(ctx context.Context) (uint32, error) {
 		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "this operator client expected a SuperTag Control Plane but reached another service"}
 	}
 	if !slices.Contains(protocolVersions, selected) || !slices.Contains(res.Msg.GetProtocolVersions(), selected) {
-		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "incompatible SuperTag protocol: the Control Plane selected protocol " +
-			strconv.FormatUint(uint64(selected), 10) + "; run the same SuperTag release on the Control Plane and this client"}
+		versions := res.Msg.GetProtocolVersions()
+		if len(versions) == 0 {
+			versions = []uint32{selected}
+		}
+		return 0, p.mismatch(&peerRelease{build: printable(res.Msg.GetBuildVersion()), versions: versions}, "")
 	}
 	p.version = selected
 	return selected, nil
+}
+
+// peerRelease is what a Control Plane said of its release while negotiating.
+type peerRelease struct {
+	build    string
+	versions []uint32
+}
+
+// parseRefusal reads the Control Plane's release and versions out of its refusal. Every SuperTag
+// release that negotiates refuses with "... (SuperTag BUILD) speaks protocol versions [V, ...] ...".
+func parseRefusal(message string) (*peerRelease, string) {
+	_, rest, ok := strings.Cut(message, "(SuperTag ")
+	if !ok {
+		return nil, message
+	}
+	build, rest, ok := strings.Cut(rest, ") speaks protocol versions [")
+	if !ok {
+		return nil, message
+	}
+	list, _, ok := strings.Cut(rest, "]")
+	if !ok {
+		return nil, message
+	}
+	var versions []uint32
+	for _, item := range strings.Split(list, ",") {
+		version, err := strconv.ParseUint(strings.TrimSpace(item), 10, 32)
+		if err != nil {
+			return nil, message
+		}
+		versions = append(versions, uint32(version))
+	}
+	return &peerRelease{build: printable(build), versions: versions}, ""
+}
+
+// printable keeps up to 64 visible ASCII characters of a peer's release.
+func printable(build string) string {
+	var kept strings.Builder
+	for _, r := range build {
+		if r > ' ' && r < 0x7f && kept.Len() < 64 {
+			kept.WriteRune(r)
+		}
+	}
+	if kept.Len() == 0 {
+		return "unknown"
+	}
+	return kept.String()
+}
+
+// spoken is "protocol 3", or "protocols 2, 3".
+func spoken(versions []uint32) string {
+	items := make([]string, len(versions))
+	for i, version := range versions {
+		items[i] = strconv.FormatUint(uint64(version), 10)
+	}
+	if len(items) == 1 {
+		return "protocol " + items[0]
+	}
+	return "protocols " + strings.Join(items, ", ")
+}
+
+// mismatch reports a Control Plane that speaks no protocol version this client speaks, naming
+// both releases, where the Control Plane runs, and which side to upgrade.
+func (p *protocolSession) mismatch(peer *peerRelease, refusal string) error {
+	at := ""
+	if p.endpoint != "" {
+		at = " at " + p.endpoint
+	}
+	message := "This TUI speaks SuperTag " + spoken(protocolVersions) + ", but the Control Plane" + at
+	switch {
+	case peer == nil:
+		refusal = strings.TrimRight(strings.Map(func(r rune) rune {
+			if r < ' ' || r == 0x7f {
+				return -1
+			}
+			return r
+		}, refusal), ". ")
+		message += " refused it: " + refusal + ". Run the same SuperTag release on both."
+	case slices.Max(peer.versions) < slices.Min(protocolVersions):
+		message += " runs SuperTag " + peer.build + " (" + spoken(peer.versions) + "). Upgrade the Control Plane."
+	case slices.Max(protocolVersions) < slices.Min(peer.versions):
+		message += " runs SuperTag " + peer.build + " (" + spoken(peer.versions) + "). Upgrade this TUI."
+	default:
+		message += " runs SuperTag " + peer.build + " (" + spoken(peer.versions) + "). Run the same SuperTag release on both."
+	}
+	return &APIError{Code: connect.CodeFailedPrecondition, Message: message, Mismatch: true}
+}
+
+// ProtocolMismatch reports whether err is a Control Plane from a release that speaks other
+// protocol versions. Its message names both releases and the fix.
+func ProtocolMismatch(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Mismatch
 }
 
 // forget drops a version the Control Plane refused, so the next call negotiates again.

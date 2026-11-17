@@ -32,6 +32,8 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_PAGES: usize = 100;
 /// The most events one `ListEvents` call returns.
 const EVENT_PAGE: u32 = 32;
+/// The most of a Control Plane's reason for refusing a request the app shows.
+const MAX_REASON_CHARS: usize = 300;
 
 /// The current connection, a lock that orders connection changes, and the local state directory
 /// a local Control Plane is found in, if one could be located.
@@ -91,6 +93,10 @@ impl Session {
                 NegotiationError::Incompatible(_) => {
                     "This Control Plane runs an incompatible SuperTag release. Use the same release for the Control Plane and this app."
                         .to_owned()
+                }
+                // Names both releases, where the Control Plane runs, and which to upgrade.
+                mismatch @ NegotiationError::Mismatch(_) => {
+                    mismatch.at(target.url()).speaking_as("This app").to_string()
                 }
             })?;
         Ok(Self {
@@ -489,13 +495,28 @@ fn bearer(token: &str) -> Result<MetadataValue<Ascii>> {
 
 fn rpc_error(status: Status) -> String {
     // Never surface an arbitrary upstream status message: it can contain request
-    // data, backend details, or credentials echoed by an unexpected server.
+    // data, backend details, or credentials echoed by an unexpected server. The
+    // Control Plane writes its InvalidArgument messages for the person who sent
+    // the request, so that one is shown, bounded and stripped of control characters.
+    if status.code() == Code::InvalidArgument {
+        let reason: String = status
+            .message()
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(MAX_REASON_CHARS)
+            .collect();
+        let reason = reason.trim().trim_end_matches('.');
+        return if reason.is_empty() {
+            "The Control Plane rejected this request. Check its values.".into()
+        } else {
+            format!("The Control Plane rejected this request: {reason}.")
+        };
+    }
     match status.code() {
         Code::Unauthenticated => "The Control Plane rejected the saved credential.",
         Code::PermissionDenied => "This connection cannot access that resource.",
         Code::NotFound => "The requested resource is no longer available.",
         Code::AlreadyExists => "This operation conflicts with an earlier request.",
-        Code::InvalidArgument => "The Control Plane rejected this request. Check its values.",
         Code::FailedPrecondition => "This action is not available in the current state.",
         Code::ResourceExhausted => "The Control Plane limit was reached. Try a smaller request.",
         Code::DeadlineExceeded | Code::Unavailable => {

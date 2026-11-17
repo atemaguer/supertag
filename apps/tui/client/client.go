@@ -32,6 +32,8 @@ type Target struct {
 type APIError struct {
 	Code    connect.Code
 	Message string
+	// Mismatch marks a Control Plane that speaks no protocol version this client speaks.
+	Mismatch bool
 }
 
 func (e *APIError) Error() string { return e.Message }

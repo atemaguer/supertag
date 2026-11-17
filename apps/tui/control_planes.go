@@ -192,6 +192,11 @@ func (a *app) controlPlaneMessage(msg tea.Msg) tea.Cmd {
 		d := a.controlPlaneDialog
 		if enrolled.err != nil {
 			d.busy = false
+			if client.ProtocolMismatch(enrolled.err) {
+				// The mismatch names both releases and which to upgrade.
+				d.note = enrolled.err.Error()
+				return d.inputs[d.field].Focus()
+			}
 			switch connect.CodeOf(enrolled.err) {
 			case connect.CodeUnauthenticated, connect.CodePermissionDenied, connect.CodeFailedPrecondition:
 				d.note = "The Control Plane refused this Auth Key: " + enrolled.err.Error()
@@ -214,8 +219,11 @@ func (a *app) controlPlaneMessage(msg tea.Msg) tea.Cmd {
 	d := a.controlPlaneDialog
 	d.busy = false
 	if checked.err != nil {
-		switch connect.CodeOf(checked.err) {
-		case connect.CodeUnauthenticated, connect.CodePermissionDenied:
+		switch {
+		case client.ProtocolMismatch(checked.err):
+			// The mismatch names both releases and which to upgrade.
+			d.note = checked.err.Error()
+		case connect.CodeOf(checked.err) == connect.CodeUnauthenticated, connect.CodeOf(checked.err) == connect.CodePermissionDenied:
 			d.note = "The Control Plane refused this credential."
 		default:
 			d.note = "Could not connect to the Control Plane. Check its URL, credential and TLS files."

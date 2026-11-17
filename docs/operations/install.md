@@ -109,7 +109,10 @@ service. For a hosted deployment, follow [Upgrade a deployment](control-plane.md
 ## Check the CLI and the local services
 
 Your CLI, the terminal UI, the desktop app, and Worker Hosts negotiate a protocol version with
-the Control Plane on every connection, and refuse a Control Plane that speaks none of theirs.
+the Control Plane on every connection, and refuse a Control Plane that speaks none of theirs. The
+error names both releases and which to upgrade, such as `This CLI speaks SuperTag protocol 3, but
+the Control Plane at http://127.0.0.1:3434 runs SuperTag 0.3.0 (protocol 2). Upgrade the Control
+Plane.`
 Check what is running:
 
 ```sh

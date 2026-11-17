@@ -56,12 +56,58 @@ fn upstream_diagnostics_are_not_exposed() {
     for code in [
         Code::Unauthenticated,
         Code::Unknown,
-        Code::InvalidArgument,
         Code::Internal,
         Code::Unavailable,
     ] {
         assert!(!rpc_error(Status::new(code, secret)).contains(secret));
     }
+}
+
+#[test]
+fn an_invalid_request_shows_the_control_planes_reason() {
+    assert_eq!(
+        rpc_error(Status::invalid_argument(
+            "tag_id must be 1 to 64 lowercase letters, digits, or hyphens.\u{1b}[2J"
+        )),
+        "The Control Plane rejected this request: tag_id must be 1 to 64 lowercase letters, digits, or hyphens.[2J."
+    );
+    assert_eq!(
+        rpc_error(Status::invalid_argument("")),
+        "The Control Plane rejected this request. Check its values."
+    );
+    assert!(rpc_error(Status::invalid_argument("x".repeat(5_000))).len() < 400);
+}
+
+/// A SuperTag 0.3.0 Control Plane speaks only protocol 2. The app refuses it when it connects,
+/// naming both releases, where the Control Plane runs, and which to upgrade.
+#[tokio::test]
+async fn a_control_plane_from_an_older_protocol_is_refused_on_connect_with_the_fix() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(
+        Server::builder()
+            .add_service(
+                supertag_protocol::negotiation::Negotiator::new(
+                    v2::ServiceRole::ControlPlane,
+                    &[v2::ServiceRole::Client],
+                )
+                .with_versions(&[2])
+                .service(),
+            )
+            .serve_with_incoming(TcpListenerStream::new(listener)),
+    );
+    let refused = Session::connect(endpoint(&address).unwrap(), "operator-test-token")
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        refused,
+        format!(
+            "This app speaks SuperTag protocol 3, but the Control Plane at {address} runs SuperTag {} (protocol 2). Upgrade the Control Plane.",
+            supertag_protocol::negotiation::build_version()
+        )
+    );
+    server.abort();
 }
 
 #[test]

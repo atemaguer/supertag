@@ -35,6 +35,10 @@ After terminal UI changes, run `go vet ./...` and `go test ./...` in `apps/tui`.
 changes, run `pnpm --filter @supertag/desktop build` and `cargo clippy` with
 `--manifest-path apps/desktop/src-tauri/Cargo.toml`.
 
+After changes under `proto/`, decide whether the protocol version changes and update
+`proto/protocol.lock` (see "Changing `proto/`" in `AGENTS.md`); `cargo test -p supertag-protocol
+--test protocol_lock` checks it.
+
 After changes under `proto/` or `sdks/`, regenerate and check the bindings and run the round trip:
 
 ```sh

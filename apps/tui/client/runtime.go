@@ -112,7 +112,8 @@ func New(target Target, version string) (*Client, error) {
 	session := &protocolSession{
 		client: runtimev2connect.NewProtocolNegotiationClient(httpClient, origin,
 			connect.WithGRPC(), connect.WithReadMaxBytes(4096), connect.WithSendMaxBytes(4096)),
-		build: version,
+		build:    version,
+		endpoint: target.URL,
 	}
 	options := []connect.ClientOption{
 		connect.WithGRPC(),

@@ -38,8 +38,9 @@ supertag version
 - `no local Control Plane is running from DIR; start one with supertag up, or pass
   --control-plane`: the command looked for local services in `DIR`. Run `supertag up` there, set
   `SUPERTAG_STATE_DIR` to the directory `up` uses, or pass `--control-plane NAME`.
-- A protocol negotiation error: the CLI and the Control Plane share no protocol version. Upgrade
-  them together.
+- `... speaks SuperTag protocol N, but the Control Plane at URL runs SuperTag X (protocol M)`: the
+  client and the Control Plane come from releases with different protocol versions. Upgrade the
+  side the message names; upgrade them together.
 
 ## 2. Is the collaboration surface enrolled and reachable?
 

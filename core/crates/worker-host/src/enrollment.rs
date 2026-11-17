@@ -142,7 +142,8 @@ pub async fn enroll(
         role.service(),
         ServiceRole::ControlPlane,
     )
-    .await?;
+    .await
+    .map_err(|error| error.at(control_plane.url()))?;
     let enrollment = EnrollmentsClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -286,7 +287,8 @@ pub async fn rotate_own_credential(
         role.service(),
         ServiceRole::ControlPlane,
     )
-    .await?;
+    .await
+    .map_err(|error| error.at(control_plane.url()))?;
     let rotate = |bearer: &str| {
         request(
             RotateCredentialRequest {

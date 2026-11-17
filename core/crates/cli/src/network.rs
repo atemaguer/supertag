@@ -47,13 +47,17 @@ fn keepalive(server: Server) -> Server {
 /// version every later call names; the Control Plane refuses calls that skip this.
 pub async fn operator_channel(target: &Target) -> Result<ProtocolChannel> {
     let channel = target.connect().await?;
-    Ok(connect(channel, ServiceRole::Client, ServiceRole::ControlPlane).await?)
+    connect(channel, ServiceRole::Client, ServiceRole::ControlPlane)
+        .await
+        .map_err(|error| error.at(target.url()).speaking_as("This CLI").into())
 }
 
 /// Connects to a Gateway as an operator client, for its test notification.
 pub async fn gateway_operator_channel(target: &Target) -> Result<ProtocolChannel> {
     let channel = target.connect().await?;
-    Ok(connect(channel, ServiceRole::Client, ServiceRole::Gateway).await?)
+    connect(channel, ServiceRole::Client, ServiceRole::Gateway)
+        .await
+        .map_err(|error| error.at(target.url()).speaking_as("This CLI").into())
 }
 
 pub async fn endpoint(uri: String) -> Result<Target> {
