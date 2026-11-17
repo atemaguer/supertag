@@ -12,7 +12,6 @@ class NotificationProvider(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     NOTIFICATION_PROVIDER_UNSPECIFIED: _ClassVar[NotificationProvider]
     NOTIFICATION_PROVIDER_SLACK: _ClassVar[NotificationProvider]
     NOTIFICATION_PROVIDER_WEBHOOK: _ClassVar[NotificationProvider]
-    NOTIFICATION_PROVIDER_DESKTOP: _ClassVar[NotificationProvider]
 
 class OperatorNotificationStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -24,7 +23,6 @@ class OperatorNotificationStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapp
 NOTIFICATION_PROVIDER_UNSPECIFIED: NotificationProvider
 NOTIFICATION_PROVIDER_SLACK: NotificationProvider
 NOTIFICATION_PROVIDER_WEBHOOK: NotificationProvider
-NOTIFICATION_PROVIDER_DESKTOP: NotificationProvider
 OPERATOR_NOTIFICATION_STATUS_UNSPECIFIED: OperatorNotificationStatus
 OPERATOR_NOTIFICATION_STATUS_PENDING: OperatorNotificationStatus
 OPERATOR_NOTIFICATION_STATUS_DELIVERING: OperatorNotificationStatus

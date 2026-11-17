@@ -2,7 +2,8 @@ syntax = "proto3";
 package supertag.runtime.v2;
 
 // Operator notifications: Inbox items told to the operator through the destinations a Gateway
-// is configured with (a Slack channel or direct message, an HTTPS webhook, or the desktop).
+// is configured with: a Slack channel or direct message, or an HTTPS webhook. The desktop app
+// notifies on its own device from Watch and the read marks.
 //
 // The Control Plane owns the durable outbox, one per operator principal. Each claim reads the
 // calling operator's Inbox and records new item occurrences for the claiming Gateway's
@@ -26,7 +27,8 @@ enum NotificationProvider {
   NOTIFICATION_PROVIDER_UNSPECIFIED = 0;
   NOTIFICATION_PROVIDER_SLACK = 1;
   NOTIFICATION_PROVIDER_WEBHOOK = 2;
-  NOTIFICATION_PROVIDER_DESKTOP = 3;
+  reserved 3;
+  reserved "NOTIFICATION_PROVIDER_DESKTOP";
 }
 
 enum OperatorNotificationStatus {

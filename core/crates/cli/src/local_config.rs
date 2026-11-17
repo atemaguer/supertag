@@ -237,7 +237,7 @@ pub fn check_database_url(url: &str) -> Result<()> {
     Ok(())
 }
 /// The Gateway's `--notify` destinations and the named secrets their webhooks send.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Notifications {
     pub destinations: Vec<String>,
     pub secrets: BTreeMap<String, Secret>,
@@ -255,15 +255,6 @@ impl Notifications {
             })
             .collect();
         (self.destinations.clone(), secrets)
-    }
-}
-impl Default for Notifications {
-    /// A local installation tells its operator on the desktop.
-    fn default() -> Self {
-        Self {
-            destinations: vec!["desktop".into()],
-            secrets: BTreeMap::new(),
-        }
     }
 }
 #[derive(Clone)]
@@ -485,7 +476,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 );
             }
             let destinations = match notify {
-                None => vec!["desktop".to_owned()],
+                None => vec![],
                 Some(Notify::One(value)) => vec![value.clone()],
                 Some(Notify::Many(values)) => values.clone(),
             };

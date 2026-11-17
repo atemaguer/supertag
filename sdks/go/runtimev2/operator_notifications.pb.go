@@ -27,7 +27,6 @@ const (
 	NotificationProvider_NOTIFICATION_PROVIDER_UNSPECIFIED NotificationProvider = 0
 	NotificationProvider_NOTIFICATION_PROVIDER_SLACK       NotificationProvider = 1
 	NotificationProvider_NOTIFICATION_PROVIDER_WEBHOOK     NotificationProvider = 2
-	NotificationProvider_NOTIFICATION_PROVIDER_DESKTOP     NotificationProvider = 3
 )
 
 // Enum value maps for NotificationProvider.
@@ -36,13 +35,11 @@ var (
 		0: "NOTIFICATION_PROVIDER_UNSPECIFIED",
 		1: "NOTIFICATION_PROVIDER_SLACK",
 		2: "NOTIFICATION_PROVIDER_WEBHOOK",
-		3: "NOTIFICATION_PROVIDER_DESKTOP",
 	}
 	NotificationProvider_value = map[string]int32{
 		"NOTIFICATION_PROVIDER_UNSPECIFIED": 0,
 		"NOTIFICATION_PROVIDER_SLACK":       1,
 		"NOTIFICATION_PROVIDER_WEBHOOK":     2,
-		"NOTIFICATION_PROVIDER_DESKTOP":     3,
 	}
 )
 
@@ -690,12 +687,11 @@ const file_supertag_runtime_v2_operator_notifications_proto_rawDesc = "" +
 	"\tdelivered\x18\x02 \x01(\bR\tdelivered\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"e\n" +
 	"\x1cSendTestNotificationResponse\x12E\n" +
-	"\aresults\x18\x01 \x03(\v2+.supertag.runtime.v2.TestNotificationResultR\aresults*\xa4\x01\n" +
+	"\aresults\x18\x01 \x03(\v2+.supertag.runtime.v2.TestNotificationResultR\aresults*\xa6\x01\n" +
 	"\x14NotificationProvider\x12%\n" +
 	"!NOTIFICATION_PROVIDER_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bNOTIFICATION_PROVIDER_SLACK\x10\x01\x12!\n" +
-	"\x1dNOTIFICATION_PROVIDER_WEBHOOK\x10\x02\x12!\n" +
-	"\x1dNOTIFICATION_PROVIDER_DESKTOP\x10\x03*\xf6\x01\n" +
+	"\x1dNOTIFICATION_PROVIDER_WEBHOOK\x10\x02\"\x04\b\x03\x10\x03*\x1dNOTIFICATION_PROVIDER_DESKTOP*\xf6\x01\n" +
 	"\x1aOperatorNotificationStatus\x12,\n" +
 	"(OPERATOR_NOTIFICATION_STATUS_UNSPECIFIED\x10\x00\x12(\n" +
 	"$OPERATOR_NOTIFICATION_STATUS_PENDING\x10\x01\x12+\n" +

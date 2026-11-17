@@ -26,12 +26,6 @@ fn slack() -> NotificationDestination {
         provider: NotificationProvider::Slack as i32,
     }
 }
-fn desktop() -> NotificationDestination {
-    NotificationDestination {
-        key: "desktop".into(),
-        provider: NotificationProvider::Desktop as i32,
-    }
-}
 fn webhook() -> NotificationDestination {
     NotificationDestination {
         key: WEBHOOK.into(),
@@ -414,38 +408,17 @@ async fn contract(url: &str) {
     assert_eq!(latest.attempt_count, 2);
     assert!(latest.last_error.is_none());
 
-    // Desktop coalesces Objectives; each destination keeps its own ledger. An item resolved
+    // Each destination keeps its own ledger, one message per Objective. An item resolved
     // before delivery is dropped without sending.
     f.ask("question").await;
-    let (desktop_message, desktop_lease) = f
-        .claim(&[desktop(), webhook()])
-        .await
-        .expect("desktop or webhook message");
-    let desktop_first = desktop_message.destination_key == "desktop";
-    if desktop_first {
-        assert_eq!(desktop_message.objective_id, "*");
-        assert_eq!(
-            desktop_message.text,
-            "SuperTag has 2 new items across 2 Objectives.\n`supertag get inbox-items`"
-        );
-        assert_eq!(desktop_message.max_attempts, 3);
-    }
     let mut webhook_messages = 0;
-    // Drain every message except the leased one.
-    loop {
-        let Some((next, lease)) = f.claim(&[desktop(), webhook()]).await else {
-            break;
-        };
+    while let Some((next, lease)) = f.claim(&[webhook()]).await {
         assert!(!next.text.contains("private.example"));
-        if next.destination_key == WEBHOOK {
-            webhook_messages += 1;
-        }
+        assert_eq!(next.max_attempts, 5);
+        webhook_messages += 1;
         f.settle(&next, &lease, Ok("receipt")).await.unwrap();
     }
-    assert_eq!(webhook_messages + usize::from(!desktop_first), 2);
-    f.settle(&desktop_message, &desktop_lease, Ok("receipt"))
-        .await
-        .unwrap();
+    assert_eq!(webhook_messages, 2);
     f.store
         .cancel_objective(
             OPERATOR,
@@ -546,58 +519,38 @@ async fn contract(url: &str) {
     );
     f.settle(&ended, &lease, Ok("waiting-2")).await.unwrap();
 
-    // An unavailable desktop notifier is tried three times, then the message fails for good.
-    let last = f.objective("desktop-only").await;
-    f.running(&last.starting_task_id).await;
-    f.expire().await;
-    f.advance(WINDOW_MS);
-    for attempt in 1..=3 {
-        let (message, lease) = loop {
-            if let Some(claimed) = f.claim(&[desktop()]).await {
-                break claimed;
-            }
-            f.advance(1_000);
-        };
-        assert_eq!(message.attempt_count, attempt);
-        f.settle(&message, &lease, Err("Desktop notification unavailable"))
-            .await
-            .unwrap();
-    }
-    f.advance(15 * 60_000);
-    assert!(f.claim(&[desktop()]).await.is_none());
-    let failed = f.latest("desktop", "*").await;
-    assert_eq!(failed.status(), OperatorNotificationStatus::Failed);
-    assert_eq!(failed.attempt_count, 3);
-    assert_eq!(
-        failed.last_error.as_deref(),
-        Some("Desktop notification unavailable")
-    );
-    assert_eq!(
-        f.status("desktop-only", InboxItemKind::TaskAttention).await,
-        (InboxNotificationStatus::Unavailable, String::new())
-    );
-
     // A message whose lease lapses on its last attempt fails instead of being sent again.
+    let lapsing = NotificationDestination {
+        key: format!("webhook:{}", "f".repeat(64)),
+        provider: NotificationProvider::Webhook as i32,
+    };
     let abandoned = f.objective("abandoned").await;
     f.running(&abandoned.starting_task_id).await;
     f.expire().await;
     f.advance(WINDOW_MS);
+    // This destination is new, so it first hears about every open item.
     let (lapsed, first_lease) = loop {
-        if let Some(claimed) = f.claim(&[desktop()]).await {
-            break claimed;
+        match f.claim(std::slice::from_ref(&lapsing)).await {
+            Some((other, lease)) if other.objective_id != "abandoned" => {
+                f.settle(&other, &lease, Ok("other")).await.unwrap();
+            }
+            Some(claimed) => break claimed,
+            None => f.advance(1_000),
         }
-        f.advance(1_000);
     };
     assert_eq!(lapsed.attempt_count, 1);
-    for attempt in 2..=3 {
+    for attempt in 2..=5 {
         f.advance(LEASE_MS);
-        let (again, _) = f.claim(&[desktop()]).await.expect("a lapsed lease");
+        let (again, _) = f
+            .claim(std::slice::from_ref(&lapsing))
+            .await
+            .expect("a lapsed lease");
         assert_eq!(again.notification_id, lapsed.notification_id);
         assert_eq!(again.attempt_count, attempt);
     }
     f.advance(LEASE_MS);
     for _ in 0..3 {
-        if let Some((next, _)) = f.claim(&[desktop()]).await {
+        if let Some((next, _)) = f.claim(std::slice::from_ref(&lapsing)).await {
             assert_ne!(next.notification_id, lapsed.notification_id);
         }
         f.advance(LEASE_MS);
@@ -612,7 +565,7 @@ async fn contract(url: &str) {
     .unwrap();
     assert_eq!(
         (status, attempts),
-        (OperatorNotificationStatus::Failed as i64, 3)
+        (OperatorNotificationStatus::Failed as i64, 5)
     );
     assert!(error.contains("lease expired"), "{error}");
     assert!(matches!(

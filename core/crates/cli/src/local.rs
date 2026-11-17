@@ -407,10 +407,7 @@ impl Children {
         }
         gateway.envs(self.notify.1.iter().map(|(name, value)| (name, value)));
         #[cfg(feature = "test-fixtures")]
-        for name in [
-            "SUPERTAG_TEST_DESKTOP_NOTIFIER",
-            "SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP",
-        ] {
+        for name in ["SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP"] {
             if let Some(value) = std::env::var_os(name) {
                 gateway.env(name, value);
             }

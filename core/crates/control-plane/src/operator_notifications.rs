@@ -5,9 +5,9 @@
 //! and `packages/store/src/operator-notification-store.ts`. Each Inbox item occurrence reaches a
 //! destination at most once. Messages per Objective per destination are batched to one per window,
 //! except a pending approval that running work waits on; later items wait for the next window and
-//! are summarized as "more". Desktop messages and items without an Objective are not batched per
-//! Objective. A message whose items were all resolved before delivery is settled unsent. Failed
-//! deliveries are retried with exponential backoff until the message's last attempt.
+//! are summarized as "more". Items without an Objective are batched together. A message whose
+//! items were all resolved before delivery is settled unsent. Failed deliveries are retried with
+//! exponential backoff until the message's last attempt.
 //!
 //! Differences: reconciliation runs inside each Gateway claim instead of a separate Control Plane
 //! loop, because only the Gateway knows its destinations; the Control Plane stores destination
@@ -282,7 +282,6 @@ fn destinations(input: &[NotificationDestination]) -> Result<Vec<(String, Notifi
 
 fn valid_key(key: &str, provider: NotificationProvider) -> bool {
     match provider {
-        NotificationProvider::Desktop => key == "desktop",
         NotificationProvider::Webhook => key.strip_prefix("webhook:").is_some_and(|digest| {
             digest.len() == 64
                 && digest
@@ -414,15 +413,10 @@ pub(crate) async fn item_status_in(
             }
         }
         let error: Option<String> = deliveries[0].try_get("last_error")?;
-        return Ok(match error.as_deref() {
-            Some("Desktop notification unavailable") => {
-                status(InboxNotificationStatus::Unavailable, "")
-            }
-            error => status(
-                InboxNotificationStatus::Failed,
-                error.unwrap_or("delivery failed"),
-            ),
-        });
+        return Ok(status(
+            InboxNotificationStatus::Failed,
+            error.as_deref().unwrap_or("delivery failed"),
+        ));
     }
     let kind = InboxItemKind::try_from(item.kind).unwrap_or(InboxItemKind::Unspecified);
     let prefix = match kind {
@@ -506,10 +500,7 @@ async fn record_in(
             if item.carried && *provider == NotificationProvider::Slack {
                 continue;
             }
-            let objective = match (&item.objective_id, provider) {
-                (Some(objective), p) if *p != NotificationProvider::Desktop => objective.clone(),
-                _ => "*".to_owned(),
-            };
+            let objective = item.objective_id.clone().unwrap_or_else(|| "*".to_owned());
             groups
                 .entry((key.clone(), objective))
                 .or_insert_with(|| (*provider, Vec::new()))
@@ -547,7 +538,7 @@ async fn record_in(
             .bind(i64::from(more))
             .bind(i64::from(immediate))
             .bind(PENDING)
-            .bind(if provider == NotificationProvider::Desktop { 3_i64 } else { 5 })
+            .bind(5_i64)
             .bind(now)
             .bind(order)
             .bind(principal)
@@ -776,7 +767,7 @@ fn format_character(c: char) -> bool {
 
 fn render(objective: &str, items: &[&Item], more: bool) -> String {
     let text = if objective == "*" {
-        desktop_text(items, more)
+        unscoped_text(items, more)
     } else {
         objective_text(objective, items, more)
     };
@@ -818,7 +809,7 @@ fn objective_text(objective: &str, items: &[&Item], more: bool) -> String {
     lines.join("\n")
 }
 
-fn desktop_text(items: &[&Item], more: bool) -> String {
+fn unscoped_text(items: &[&Item], more: bool) -> String {
     let objectives: BTreeSet<Option<&str>> = items
         .iter()
         .map(|item| item.objective_id.as_deref())
@@ -1005,7 +996,6 @@ mod tests {
 
     #[test]
     fn destination_keys_never_carry_webhook_urls() {
-        assert!(valid_key("desktop", NotificationProvider::Desktop));
         assert!(valid_key("slack:C123", NotificationProvider::Slack));
         assert!(valid_key("slack:T1/U123", NotificationProvider::Slack));
         assert!(!valid_key("slack:X123", NotificationProvider::Slack));

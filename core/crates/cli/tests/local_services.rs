@@ -2267,21 +2267,11 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
     let state = temp.path().join("state");
     let file = temp.path().join("supertag.yaml");
     let (url, hooks) = webhook_mock().await?;
-    let desktop = temp.path().join("desktop.log");
-    let notifier = temp.path().join("desktop-notifier");
-    fs::write(
-        &notifier,
-        format!(
-            "#!/bin/sh\nprintf '%s|%s\\n--\\n' \"$1\" \"$2\" >> '{}'\n",
-            desktop.display()
-        ),
-    )?;
-    fs::set_permissions(&notifier, fs::Permissions::from_mode(0o700))?;
     yaml(
         &file,
         &serde_json::json!({"version":1,"services":{
             "control-plane":{"type":"control-plane","ports":["127.0.0.1:0"],
-                "notify":[format!("webhook:{url}#hook-token"),"desktop"]},
+                "notify":[format!("webhook:{url}#hook-token")]},
             "builder":{"type":"host","adapter":ADAPTER,"adapter-args":["--objective-question"],"concurrency":1}
         },"secrets":{"hook-token":{"environment":"FIXTURE_HOOK_SECRET"}}}),
     )?;
@@ -2304,14 +2294,12 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
     ensure!(!output.status.success() && stderr.contains("notify webhook must contain"));
     ensure!(!stderr.contains("private-token"), "{stderr}");
 
-    let notifier_path = notifier.to_str().context("notifier path")?;
     let mut supervisor = Process::spawn(
         &state,
         Some(&file),
         &[
             ("FIXTURE_HOOK_SECRET", "synthetic-hook-secret"),
             ("SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP", "1"),
-            ("SUPERTAG_TEST_DESKTOP_NOTIFIER", notifier_path),
         ]
         .into_iter()
         .chain(database_env(&database))
@@ -2345,10 +2333,7 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(
-        String::from_utf8(output.stdout)?,
-        "webhook: delivered\ndesktop: delivered\n"
-    );
+    assert_eq!(String::from_utf8(output.stdout)?, "webhook: delivered\n");
     cli(&[
         "tag",
         "put",
@@ -2367,8 +2352,7 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
     let message = "Objective release needs you: Objective release waits on your answer\n`supertag describe objective release`";
     timeout(WAIT, async {
         loop {
-            let lines = fs::read_to_string(&desktop).unwrap_or_default();
-            if hooks.lock().await.len() == 2 && lines.matches("\n--\n").count() == 2 {
+            if hooks.lock().await.len() == 2 {
                 break;
             }
             sleep(Duration::from_millis(50)).await;
@@ -2388,23 +2372,14 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
     );
     assert_eq!(hooks[1].1["text"], message);
     assert_eq!(hooks[1].1["kinds"], serde_json::json!(["question"]));
-    assert!(
-        fs::read_to_string(&desktop)?.ends_with(&format!("SuperTag needs you|{message}\n--\n"))
-    );
-    // The Inbox shows that the question reached the operator, and through what. Each
-    // destination's message is settled after its send returns, so a destination this test saw
-    // receive the message may not be recorded yet: wait for both settlements.
+    // The Inbox shows that the question reached the operator, and through what. The message is
+    // settled after its send returns, so this test may see it before it is recorded: wait.
     let mut inbox = Value::Null;
     let settled = timeout(WAIT, async {
         loop {
             inbox = serde_json::from_str(&cli(&["get", "inbox-items", "--objective", "release"])?)?;
             let notification = &inbox["items"][0]["notification"];
-            if notification["status"] == "delivered"
-                && matches!(
-                    notification["reason"].as_str(),
-                    Some("via desktop,webhook" | "via webhook,desktop")
-                )
-            {
+            if notification["status"] == "delivered" && notification["reason"] == "via webhook" {
                 return Ok::<_, anyhow::Error>(());
             }
             sleep(Duration::from_millis(50)).await;
@@ -2413,7 +2388,7 @@ async fn configured_notify_destinations_tell_the_operator_about_a_question(
     .await;
     match settled {
         Ok(result) => result?,
-        Err(_) => anyhow::bail!("both deliveries were not recorded: {inbox}"),
+        Err(_) => anyhow::bail!("the delivery was not recorded: {inbox}"),
     }
     supervisor.stop().await
 }

@@ -27,7 +27,8 @@ if _version_not_supported:
 
 class OperatorNotificationsStub:
     """Operator notifications: Inbox items told to the operator through the destinations a Gateway
-    is configured with (a Slack channel or direct message, an HTTPS webhook, or the desktop).
+    is configured with: a Slack channel or direct message, or an HTTPS webhook. The desktop app
+    notifies on its own device from Watch and the read marks.
 
     The Control Plane owns the durable outbox, one per operator principal. Each claim reads the
     calling operator's Inbox and records new item occurrences for the claiming Gateway's
@@ -57,7 +58,8 @@ class OperatorNotificationsStub:
 
 class OperatorNotificationsServicer:
     """Operator notifications: Inbox items told to the operator through the destinations a Gateway
-    is configured with (a Slack channel or direct message, an HTTPS webhook, or the desktop).
+    is configured with: a Slack channel or direct message, or an HTTPS webhook. The desktop app
+    notifies on its own device from Watch and the read marks.
 
     The Control Plane owns the durable outbox, one per operator principal. Each claim reads the
     calling operator's Inbox and records new item occurrences for the claiming Gateway's
@@ -102,7 +104,8 @@ def add_OperatorNotificationsServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class OperatorNotifications:
     """Operator notifications: Inbox items told to the operator through the destinations a Gateway
-    is configured with (a Slack channel or direct message, an HTTPS webhook, or the desktop).
+    is configured with: a Slack channel or direct message, or an HTTPS webhook. The desktop app
+    notifies on its own device from Watch and the read marks.
 
     The Control Plane owns the durable outbox, one per operator principal. Each claim reads the
     calling operator's Inbox and records new item occurrences for the claiming Gateway's

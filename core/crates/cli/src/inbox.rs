@@ -361,7 +361,6 @@ fn notification_status(status: InboxNotificationStatus) -> &'static str {
         InboxNotificationStatus::Pending => "pending",
         InboxNotificationStatus::Delivered => "delivered",
         InboxNotificationStatus::Failed => "failed",
-        InboxNotificationStatus::Unavailable => "unavailable",
     }
 }
 

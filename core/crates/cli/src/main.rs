@@ -2100,13 +2100,7 @@ fn operator_notifier(
     channel: ProtocolChannel,
     gateway_token: String,
 ) -> Result<supertag_gateway::notifications::OperatorNotifier> {
-    use supertag_gateway::notifications::{Desktop, OperatorNotifier, Senders, parse_destinations};
-    // Test builds never show real desktop notifications.
-    #[cfg(feature = "test-fixtures")]
-    let desktop = std::env::var_os("SUPERTAG_TEST_DESKTOP_NOTIFIER")
-        .map_or(Desktop::Unavailable, |path| Desktop::Command(path.into()));
-    #[cfg(not(feature = "test-fixtures"))]
-    let desktop = Desktop::Native;
+    use supertag_gateway::notifications::{OperatorNotifier, Senders, parse_destinations};
     let destinations = parse_destinations(values, notify_loopback_http())?;
     let mut secrets = std::collections::BTreeMap::new();
     for name in destinations.iter().filter_map(|d| d.secret_name.as_ref()) {
@@ -2121,7 +2115,7 @@ fn operator_notifier(
     }
     OperatorNotifier::new(
         destinations,
-        Senders::new(slack, secrets, desktop)?,
+        Senders::new(slack, secrets)?,
         channel,
         gateway_token,
     )

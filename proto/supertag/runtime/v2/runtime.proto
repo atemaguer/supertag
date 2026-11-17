@@ -321,8 +321,8 @@ enum InboxNotificationStatus {
   INBOX_NOTIFICATION_STATUS_PENDING = 2;
   INBOX_NOTIFICATION_STATUS_DELIVERED = 3;
   INBOX_NOTIFICATION_STATUS_FAILED = 4;
-  // The desktop notifier could not run.
-  INBOX_NOTIFICATION_STATUS_UNAVAILABLE = 5;
+  reserved 5;
+  reserved "INBOX_NOTIFICATION_STATUS_UNAVAILABLE";
 }
 
 message InboxNotification {

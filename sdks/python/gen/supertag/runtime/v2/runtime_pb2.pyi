@@ -52,7 +52,6 @@ class InboxNotificationStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper)
     INBOX_NOTIFICATION_STATUS_PENDING: _ClassVar[InboxNotificationStatus]
     INBOX_NOTIFICATION_STATUS_DELIVERED: _ClassVar[InboxNotificationStatus]
     INBOX_NOTIFICATION_STATUS_FAILED: _ClassVar[InboxNotificationStatus]
-    INBOX_NOTIFICATION_STATUS_UNAVAILABLE: _ClassVar[InboxNotificationStatus]
 
 class ApprovalState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -346,7 +345,6 @@ INBOX_NOTIFICATION_STATUS_NOT_CONFIGURED: InboxNotificationStatus
 INBOX_NOTIFICATION_STATUS_PENDING: InboxNotificationStatus
 INBOX_NOTIFICATION_STATUS_DELIVERED: InboxNotificationStatus
 INBOX_NOTIFICATION_STATUS_FAILED: InboxNotificationStatus
-INBOX_NOTIFICATION_STATUS_UNAVAILABLE: InboxNotificationStatus
 APPROVAL_STATE_UNSPECIFIED: ApprovalState
 APPROVAL_STATE_PENDING: ApprovalState
 APPROVAL_STATE_APPROVED: ApprovalState

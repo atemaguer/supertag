@@ -70,15 +70,10 @@ fn render(response: &SendTestNotificationResponse) -> String {
         let provider = match result.provider() {
             NotificationProvider::Slack => "slack",
             NotificationProvider::Webhook => "webhook",
-            NotificationProvider::Desktop => "desktop",
             NotificationProvider::Unspecified => "unknown",
         };
         let line = if result.delivered {
             format!("{provider}: delivered")
-        } else if result.provider() == NotificationProvider::Desktop
-            && result.error.contains("unavailable")
-        {
-            "desktop: unavailable".into()
         } else {
             let error = if result.error.is_empty() {
                 "delivery failed"
@@ -115,18 +110,13 @@ mod tests {
                 results: vec![
                     result(NotificationProvider::Slack, true, ""),
                     result(
-                        NotificationProvider::Desktop,
-                        false,
-                        "Desktop notification unavailable"
-                    ),
-                    result(
                         NotificationProvider::Webhook,
                         false,
                         "Webhook returned HTTP 500"
                     ),
                 ],
             }),
-            "slack: delivered\ndesktop: unavailable\nwebhook: failed: Webhook returned HTTP 500\n"
+            "slack: delivered\nwebhook: failed: Webhook returned HTTP 500\n"
         );
     }
 }
