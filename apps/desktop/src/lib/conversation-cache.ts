@@ -237,9 +237,12 @@ export function useConversationList(controlPlane: ControlPlane, feed: WatchFeed 
     () => cachedRoster(controlPlane)?.conversations ?? [],
   );
   const [error, setError] = useState("");
+  // The list came from the Control Plane, not only the cache.
+  const [fresh, setFresh] = useState(false);
   const read = useRef(false);
   useEffect(() => {
     read.current = false;
+    setFresh(false);
     if (cachedRoster(controlPlane)) return;
     void storedRoster(controlPlane).then((roster) => {
       if (roster && !read.current) setConversations(roster.conversations);
@@ -252,6 +255,7 @@ export function useConversationList(controlPlane: ControlPlane, feed: WatchFeed 
         if (signal.aborted) return;
         read.current = true;
         setConversations(next);
+        setFresh(true);
         setError("");
         cacheRoster(controlPlane, { conversations: next });
       } catch (error) {
@@ -261,8 +265,9 @@ export function useConversationList(controlPlane: ControlPlane, feed: WatchFeed 
     },
     [controlPlane],
   );
-  useWatchRefresh(refresh, LIST_INTERVAL, feed, conversationChanged);
-  return { conversations, error };
+  // Notifications and the Dock badge follow the list while the window is hidden too.
+  useWatchRefresh(refresh, LIST_INTERVAL, feed, conversationChanged, true);
+  return { conversations, error, fresh };
 }
 
 /**

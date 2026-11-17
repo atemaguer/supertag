@@ -16,6 +16,7 @@ import {
   useConversationList,
   useConversationPrefetch,
 } from "../lib/conversation-cache";
+import { nativeNotifier, silentNotifier, useDesktopNotifications } from "../lib/notifications";
 import { describe } from "../lib/polling";
 import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { harnessLabel, type TagAdmin } from "../tag-admin";
@@ -237,8 +238,24 @@ export function Workspace({
   const watch = useControlPlaneWatch(connectionId);
   // Every conversation's row, from the cached list at once and then the Control Plane, kept
   // current through the watch.
-  const { conversations } = useConversationList(controlPlane, watch);
+  const { conversations, fresh } = useConversationList(controlPlane, watch);
   const tag = tags.find((entry) => entry.tagId === selectedTag) ?? tags[0];
+  const tagName = useCallback(
+    (tagId: string) => {
+      const named = tags.find((entry) => entry.tagId === tagId);
+      return named?.name ?? named?.tagId ?? tagId;
+    },
+    [tags],
+  );
+  // A reply or question in a conversation not in view notifies; clicking it opens the Tag.
+  useDesktopNotifications({
+    conversations,
+    fresh,
+    openTagId: tag?.tagId,
+    name: tagName,
+    onOpen: selectTag,
+    notifier: connectionId ? nativeNotifier : silentNotifier,
+  });
   useConversationPrefetch(
     controlPlane,
     tags.map(({ tagId }) => tagId),

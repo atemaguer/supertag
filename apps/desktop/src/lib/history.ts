@@ -91,11 +91,16 @@ export function tail(history: History): History {
   return { ...history, messages, cursor: oldest ? String(oldest) : undefined };
 }
 
-/** Each Task once, the latest copy winning, ordered by the conversation. */
+/**
+ * Each Task once, the latest copy winning, ordered by the conversation. A turn that finished
+ * quietly leaves: the Control Plane sends it only to a copy that held it running.
+ */
 function ordered(earlier: readonly Message[], later: readonly Message[]): Message[] {
   const byTask = new Map<string, Message>();
   for (const message of [...earlier, ...later]) byTask.set(message.task.taskId, message);
-  return [...byTask.values()].sort((a, b) => a.order - b.order);
+  return [...byTask.values()]
+    .filter((message) => !message.task.quiet)
+    .sort((a, b) => a.order - b.order);
 }
 
 /** The last message that matches. */

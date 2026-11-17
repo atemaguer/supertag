@@ -156,6 +156,38 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
     assert_eq!(json["order"], 9);
     assert_eq!(json["task"]["createdAtMs"], 1_000);
     assert!(json.get("completedAtMs").is_none());
+    assert!(json["task"].get("quiet").is_none());
+}
+
+#[test]
+fn quiet_turns_and_open_questions_reach_the_window() {
+    let message = Message::try_from(v2::ConversationMessage {
+        task: Some(v2::Task {
+            task_id: "check".into(),
+            tag_id: "engineer".into(),
+            state: v2::TaskState::Succeeded as i32,
+            result: Some("CI is green".into()),
+            quiet: true,
+            ..Default::default()
+        }),
+        schedule_id: Some("schedule".into()),
+        order: 12,
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(message).unwrap()["task"]["quiet"],
+        true
+    );
+    let asking = Conversation::from(v2::Conversation {
+        tag_id: "engineer".into(),
+        preview: "Which branch should I release?".into(),
+        preview_from_tag: true,
+        unread_count: 1,
+        asking: true,
+        ..Default::default()
+    });
+    assert_eq!(serde_json::to_value(asking).unwrap()["asking"], true);
 }
 
 #[test]

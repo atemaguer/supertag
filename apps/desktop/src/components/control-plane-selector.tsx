@@ -1,10 +1,11 @@
-import { Check, ChevronRight, Pencil, Plus, Server, Unplug } from "lucide-react";
+import { Bell, Check, ChevronRight, Pencil, Plus, Server, Unplug } from "lucide-react";
 import type { RefObject } from "react";
 import {
   type ControlPlaneProfile,
   LOCAL_CONTROL_PLANE,
   type LocalControlPlane,
 } from "../control-plane";
+import { type NotificationLevel, useNotificationLevel } from "../lib/notifications";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -40,6 +41,13 @@ interface ControlPlaneSelectorProps {
   onOpen(): void;
 }
 
+/** What this device notifies about; the setting is kept on this device only. */
+const NOTIFICATION_CHOICES: readonly [NotificationLevel, string][] = [
+  ["all", "All messages"],
+  ["questions", "Questions only"],
+  ["off", "Off"],
+];
+
 interface Choice extends ControlPlaneProfile {
   /** The address shown under the name. */
   address: string;
@@ -69,6 +77,7 @@ export function ControlPlaneSelector({
     ...profiles.map((profile) => ({ ...profile, address: profile.origin })),
   ];
   const selected = choices.find((choice) => choice.origin === active);
+  const [notifications, setNotifications] = useNotificationLevel();
   const connected = Boolean(selected || preview);
   const client = selected && principal?.startsWith("client:") ? principal : undefined;
   const name = switching
@@ -178,6 +187,36 @@ export function ControlPlaneSelector({
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         )}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="control-plane-action">
+            <Bell size={15} aria-hidden /> Notifications
+            <ChevronRight className="control-plane-edit-arrow" size={14} aria-hidden />
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="control-plane-edit-menu" sideOffset={6}>
+            <DropdownMenuRadioGroup
+              value={notifications}
+              onValueChange={(value) => setNotifications(value as NotificationLevel)}
+            >
+              {NOTIFICATION_CHOICES.map(([level, label]) => (
+                <DropdownMenuRadioItem
+                  className="control-plane-choice"
+                  key={level}
+                  value={level}
+                  textValue={label}
+                >
+                  <span className="control-plane-indicator" aria-hidden>
+                    <DropdownMenuItemIndicator>
+                      <Check size={14} />
+                    </DropdownMenuItemIndicator>
+                  </span>
+                  <span className="control-plane-choice-text">
+                    <span>{label}</span>
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         {connected && (
           <DropdownMenuItem className="control-plane-action" onSelect={onDisconnect}>
             <Unplug size={15} aria-hidden /> Disconnect
