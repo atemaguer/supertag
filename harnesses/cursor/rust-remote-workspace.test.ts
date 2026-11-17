@@ -1,4 +1,7 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import {
   HarnessWorkspaceResultSchema,
   WorkspaceGrepMode,
@@ -73,5 +76,30 @@ describe("Cursor remote workspace tools", () => {
     await expect(workspace.call("command", { command: "pwd" })).rejects.toMatchObject({
       name: "AbortError",
     });
+  });
+
+  it("returns an error when the sandbox is unreachable and never runs the tool locally", async () => {
+    const provider = bridge();
+    const workspace = createRemoteWorkspaceExecutor(
+      ["files:read", "files:write", "commands:execute"],
+      provider,
+    );
+    await expect(workspace.call("read", { file_path: "a" })).resolves.toEqual({
+      text: "result",
+      isError: false,
+    });
+    // The Worker Host's bridge loses the sandbox mid-turn.
+    provider.workspace.execute.mockRejectedValue(
+      new ConnectError("sandbox is unreachable", Code.Unavailable),
+    );
+    const marker = join(process.cwd(), "supertag-fallback-marker");
+    for (const [name, input] of [
+      ["write", { file_path: "supertag-fallback-marker", content: "host" }],
+      ["edit", { file_path: "a", old_string: "x", new_string: "y" }],
+      ["read", { file_path: "a" }],
+      ["command", { command: `touch ${marker}` }],
+    ] as const)
+      await expect(workspace.call(name, input)).rejects.toMatchObject({ code: Code.Unavailable });
+    expect(existsSync(marker)).toBe(false);
   });
 });

@@ -202,3 +202,28 @@ it("cancels an active foreground command and fences later calls after disposal",
   await expect(tools.execute({ kind: "command", command: "true" })).rejects.toThrow(/closed/i);
   expect(specs).toHaveLength(1);
 });
+
+it("fails every tool once the sandbox becomes unreachable and never runs it on the host", async () => {
+  const { environment, operations, workspace } = await fixture();
+  const tools = operations();
+  await expect(
+    tools.execute({ kind: "write", path: "before.txt", content: "ok" }),
+  ).resolves.toEqual(expect.objectContaining({ isError: false }));
+  // The sandbox disappears mid-turn.
+  const unreachable = () => Promise.reject(new Error("sandbox is unreachable"));
+  vi.spyOn(environment, "spawn").mockImplementation(unreachable);
+  vi.spyOn(environment, "read").mockImplementation(unreachable);
+  const marker = join(workspace, "fallback.txt");
+  for (const operation of [
+    { kind: "write", path: "fallback.txt", content: "host" },
+    { kind: "edit", path: "before.txt", oldText: "ok", newText: "host" },
+    { kind: "read", path: "before.txt" },
+    { kind: "command", command: `touch ${marker}` },
+  ] as const)
+    await expect(tools.execute(operation)).rejects.toThrow();
+  await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(readFile(join(process.cwd(), "fallback.txt"), "utf8")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+  expect(await readFile(join(workspace, "before.txt"), "utf8")).toBe("ok");
+});

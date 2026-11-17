@@ -531,3 +531,72 @@ fn convert_receipt(
         text,
     })
 }
+
+#[cfg(test)]
+mod no_host_fallback {
+    use super::*;
+    use supertag_protocol::v2::{WorkspaceCommand, WorkspaceRead, WorkspaceWrite};
+    use tonic::transport::Endpoint;
+
+    /// Shared execution that lost its provider returns errors from its file and command tools,
+    /// and never runs them on the Worker Host instead.
+    #[tokio::test]
+    async fn an_unreachable_provider_fails_every_tool_without_a_host_effect() {
+        let workspace = tempfile::tempdir().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let channel = Endpoint::from_shared(format!("http://{address}"))
+            .unwrap()
+            .connect_timeout(Duration::from_millis(500))
+            .connect_lazy();
+        let access = Access {
+            client: SharedExecutionClient::new(channel),
+            token: "fixture".into(),
+            access_id: "access".into(),
+            commands_blocked: Arc::default(),
+            capability: SharedExecutionCapability {
+                tools: vec![
+                    SharedExecutionTool::Read as i32,
+                    SharedExecutionTool::Write as i32,
+                    SharedExecutionTool::Command as i32,
+                ],
+                ..Default::default()
+            },
+            summary: Default::default(),
+        };
+        let original = std::env::current_dir().unwrap();
+        for operation in [
+            Tool::Write(WorkspaceWrite {
+                path: "fallback".into(),
+                content: "written on the host".into(),
+            }),
+            Tool::Read(WorkspaceRead {
+                path: "fallback".into(),
+                offset: None,
+                limit: None,
+            }),
+        ] {
+            let result = access
+                .execute(HarnessWorkspaceRequest {
+                    operation: Some(operation),
+                })
+                .await;
+            assert!(result.is_err(), "{result:?}");
+        }
+        let command = access
+            .command(
+                WorkspaceCommand {
+                    command: format!("touch {}/fallback", workspace.path().display()),
+                    timeout_ms: Some(1_000),
+                },
+                tokio::time::Instant::now() + Duration::from_secs(5),
+                || async { Ok(5_000) },
+            )
+            .await;
+        assert!(command.is_err(), "{command:?}");
+        for directory in [workspace.path(), original.as_path()] {
+            assert!(!directory.join("fallback").exists());
+        }
+    }
+}

@@ -501,6 +501,10 @@ outside the Workspace.
 
 Unknown runtime actions do not enable anything in the built-in harnesses. A harness must fail closed when it cannot enforce an admitted policy. Permission checks select tools; execution-environment isolation, filesystem mounts, and network policy provide the hard boundary.
 
+When a Task's file and command tools run in a remote sandbox or a shared execution
+environment, a sandbox that cannot be reached or fails makes the tool return an error. The
+Worker Host never runs the operation itself instead.
+
 ### Failed write calls
 
 If execution fails after a write call starts, the Control Plane marks the Task failed and does not

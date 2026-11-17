@@ -81,13 +81,22 @@ impl RemoteWorkspace {
                 }
                 input => access.execute(input).await,
             },
-            Provider::Sandbox { client, token } => {
-                let mut downstream = authenticated_request(input, token, None)?;
-                downstream.set_timeout(deadline.saturating_duration_since(Instant::now()));
-                Ok(client.clone().execute(downstream).await?.into_inner())
-            }
+            Provider::Sandbox { client, token } => sandbox(client, token, input, deadline).await,
         }
     }
+}
+
+/// Run one operation in the sandbox. A provider that cannot be reached, or fails, returns its
+/// error to the harness: nothing runs on the Worker Host instead.
+async fn sandbox(
+    client: &HarnessWorkspaceClient<Channel>,
+    token: &str,
+    input: HarnessWorkspaceRequest,
+    deadline: Instant,
+) -> Result<HarnessWorkspaceResult, Status> {
+    let mut downstream = authenticated_request(input, token, None)?;
+    downstream.set_timeout(deadline.saturating_duration_since(Instant::now()));
+    Ok(client.clone().execute(downstream).await?.into_inner())
 }
 
 impl Bridge {
@@ -194,5 +203,51 @@ impl HarnessWorkspace for Bridge {
                 result = &mut operation => return result,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use supertag_protocol::v2::{WorkspaceCommand, WorkspaceWrite};
+    use tonic::transport::Endpoint;
+
+    /// A remote sandbox that became unreachable fails its file and command tools; the Worker
+    /// Host never runs them itself.
+    #[tokio::test]
+    async fn an_unreachable_sandbox_fails_every_tool_without_a_host_effect() {
+        let workspace = tempfile::tempdir().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let channel = Endpoint::from_shared(format!("http://{address}"))
+            .unwrap()
+            .connect_timeout(Duration::from_millis(500))
+            .connect_lazy();
+        let client = HarnessWorkspaceClient::new(channel);
+        let marker = workspace.path().join("fallback");
+        for operation in [
+            Operation::Write(WorkspaceWrite {
+                path: "fallback".into(),
+                content: "written on the host".into(),
+            }),
+            Operation::Command(WorkspaceCommand {
+                command: format!("touch {}", marker.display()),
+                timeout_ms: Some(1_000),
+            }),
+        ] {
+            let result = sandbox(
+                &client,
+                "fixture",
+                HarnessWorkspaceRequest {
+                    operation: Some(operation),
+                },
+                Instant::now() + Duration::from_secs(5),
+            )
+            .await;
+            assert!(result.is_err(), "{result:?}");
+        }
+        assert!(!marker.exists());
+        assert!(!std::env::current_dir().unwrap().join("fallback").exists());
     }
 }
