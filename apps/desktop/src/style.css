@@ -46,12 +46,15 @@ button:disabled {
   cursor: default;
 }
 button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
 summary:focus-visible,
-[tabindex]:focus-visible {
+[tabindex]:not(input):not(textarea):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
+}
+/* Text fields show focus by their caret and, where bordered, their border; never an offset outline. */
+input:focus,
+textarea:focus {
+  outline: none;
 }
 button:disabled {
   opacity: 0.46;
@@ -1369,6 +1372,10 @@ button.identity-pill[aria-expanded="true"] {
   color: var(--text);
   font-size: 13px;
 }
+.workspace-dialog input:focus,
+.workspace-dialog .field-select:focus {
+  border-color: var(--muted);
+}
 .field-hint {
   color: var(--muted);
   font-size: 12px;
@@ -1472,10 +1479,6 @@ button.identity-pill[aria-expanded="true"] {
   border: 0;
   color: var(--text);
   font-size: 15px;
-}
-/* The palette is the focus; an outline around its field would spill past its rounded edge. */
-.command-palette [data-slot="command-input"]:focus-visible {
-  outline: none;
 }
 .palette-row .avatar {
   width: 30px;
