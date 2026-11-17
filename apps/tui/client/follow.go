@@ -46,8 +46,8 @@ const (
 	EventNotContinued
 	// EventStillWorking says following stopped while work Sessions still run (Text).
 	EventStillWorking
-	// EventJoined says the message was delivered into a turn already running, whose reply
-	// answers it.
+	// EventJoined says the message was delivered into a turn already running, or joined the turn
+	// of Task TaskID when it was claimed; that turn's reply answers it.
 	EventJoined
 	// EventError ends the follow with a failure to follow (Text).
 	EventError
@@ -105,12 +105,13 @@ func (s *Shown) once(key string) bool {
 	return true
 }
 
-func (s *Shown) join() []FollowEvent {
+// join says the message joined the turn of Task source, whose reply answers it.
+func (s *Shown) join(source string) []FollowEvent {
 	if s.joined {
 		return nil
 	}
 	s.joined = true
-	return []FollowEvent{{Kind: EventJoined}}
+	return []FollowEvent{{Kind: EventJoined, TaskID: source}}
 }
 
 func (s *Shown) start() []FollowEvent {
@@ -277,7 +278,7 @@ func History(tag string, page []*views.Message, displayedTaskIDs ...string) []Hi
 		shown := newShown(tag)
 		item := HistoryItem{Message: message, Shown: shown}
 		if joined := message.GetJoinedTaskId(); joined != "" {
-			item.Events = shown.join()
+			item.Events = shown.join(joined)
 			if onPage[joined] && joined != message.GetTaskId() {
 				shown.joinedOnPage = joined
 				// Its follow shows nothing while that turn's does, unless the delivery is withdrawn.

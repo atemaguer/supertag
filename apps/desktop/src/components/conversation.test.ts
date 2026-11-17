@@ -296,3 +296,43 @@ it("shows the Tag's messages and its result as the conversation's follow pushes 
   await flush();
   expect(stop).toHaveBeenCalled();
 });
+
+it("shows a turn's reply after the messages that joined it, in the order they were sent", async () => {
+  const turn = (taskId: string, order: number, prompt: string, extra: Partial<Message> = {}) =>
+    ({
+      order,
+      task: { taskId, tagId: "lead", sessionId: "c1", prompt, state: "succeeded" },
+      ...extra,
+    }) as Message;
+  const first = turn("t1", 1, "Fix the build");
+  first.task.result = "Fixed the build and the tests.";
+  const joined = (taskId: string, order: number, prompt: string) =>
+    turn(taskId, order, prompt, { liveInput: { taskId: "t1", state: "accepted" } });
+  const page = [first, joined("t2", 2, "Also the tests"), joined("t3", 3, "Thanks")];
+  const controlPlane: ControlPlane = {
+    tags: async () => [tag],
+    conversations: async () => [],
+    messages: async () => ({ conversationId: "c1", messages: [...page].reverse() }),
+    send: async () => first,
+    events: async () => [],
+    saveArtifact: async () => false,
+    markRead: async () => {
+      throw new Error("not listed");
+    },
+    scope: "test",
+    readCache: async () => undefined,
+    writeCache: async () => {},
+  };
+  act(() => root.render(createElement(Pane, { controlPlane })));
+  await flush();
+  const shown = [...host.querySelectorAll(".prompt-text, .result-text")].map(
+    (bubble) => bubble.textContent,
+  );
+  expect(shown).toEqual([
+    "Fix the build",
+    "Also the tests",
+    "Thanks",
+    "Fixed the build and the tests.",
+  ]);
+  expect(host.querySelectorAll(".result-text")).toHaveLength(1);
+});

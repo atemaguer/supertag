@@ -163,7 +163,20 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 		}
 	}
 	written := 0
-	render := func(t *transcript, turn *runtimeTurn, id string) {
+	// A turn that later messages joined shows its reply after the last of them, so the
+	// conversation reads in order.
+	answeredBy := map[string]string{}
+	for _, id := range c.runtime.order {
+		if turn := c.runtime.turns[id]; turn != nil && turn.joined && turn.source != "" && turn.source != id &&
+			c.runtime.turns[turn.source] != nil {
+			answeredBy[turn.source] = id
+		}
+	}
+	answers := map[string]string{}
+	for source, last := range answeredBy {
+		answers[last] = source
+	}
+	render := func(t *transcript, turn *runtimeTurn, id string, part turnPart) {
 		if t.cacheWidth != width {
 			t.cache, t.cacheWidth = nil, width
 		}
@@ -175,7 +188,7 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 				}
 				t.cache = append(t.cache, rendered)
 			}
-			if hidden(e.kind) {
+			if hidden(e.kind) || (part == promptOnly && e.kind != entryYou) || (part == replyOnly && e.kind == entryYou) {
 				continue
 			}
 			s := entrySender(e.kind)
@@ -190,6 +203,9 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 					w.write(line + "\n")
 				}
 			}
+		}
+		if part == promptOnly {
+			return
 		}
 		if t.draft != "" {
 			w.from(senderTag)
@@ -208,10 +224,19 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 			continue
 		}
 		w.at(turn.sentAt)
-		render(&turn.transcript, turn, id)
+		if _, later := answeredBy[id]; later {
+			render(&turn.transcript, turn, id, promptOnly)
+			continue
+		}
+		render(&turn.transcript, turn, id, wholeTurn)
+		if source := answers[id]; source != "" {
+			answered := c.runtime.turns[source]
+			render(&answered.transcript, answered, source, replyOnly)
+			w.seen(answered.completedAt)
+		}
 		w.seen(turn.completedAt)
 	}
-	render(&c.transcript, nil, "")
+	render(&c.transcript, nil, "", wholeTurn)
 	for _, entry := range queued {
 		w.at(time.UnixMilli(entry.CreatedAtMs))
 		w.from(senderYou)
@@ -224,6 +249,18 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 	c.written = written
 	return strings.TrimRight(w.out.String(), "\n")
 }
+
+// turnPart is what of a turn the transcript shows where the turn stands.
+type turnPart int
+
+const (
+	wholeTurn turnPart = iota
+	// promptOnly is the person's message alone: its reply shows after a later message that
+	// joined its turn.
+	promptOnly
+	// replyOnly is what the Tag wrote, shown after the last message that joined the turn.
+	replyOnly
+)
 
 // running says the turn shows the typing indicator: a Worker Host took it up, and its result has
 // not arrived.

@@ -28,6 +28,52 @@ export function fromOperator(message: Message): boolean {
   return message.workSessionReportId === undefined && message.scheduleId === undefined;
 }
 
+/**
+ * Where each turn's reply shows when later messages joined it, as a person's quick follow-ups
+ * that one run answers together: after the last of them, so the conversation reads in order.
+ * `answeredBy` maps the last joined message to the turn whose reply it shows; `replyLater` holds
+ * the turns and joined messages that show only their prompt.
+ */
+export function joinedReplies(messages: readonly Message[]): {
+  answeredBy: Map<string, Message>;
+  replyLater: Set<string>;
+} {
+  const byTask = new Map(messages.map((message) => [message.task.taskId, message]));
+  const last = new Map<string, Message>();
+  for (const message of messages) {
+    const source = message.liveInput?.taskId;
+    if (
+      !fromOperator(message) ||
+      message.liveInput?.state !== "accepted" ||
+      !source ||
+      source === message.task.taskId ||
+      !byTask.has(source)
+    )
+      continue;
+    const prior = last.get(source);
+    if (!prior || prior.order < message.order) last.set(source, message);
+  }
+  const answeredBy = new Map<string, Message>();
+  const replyLater = new Set<string>();
+  for (const [source, follower] of last) {
+    const turn = byTask.get(source);
+    if (!turn) continue;
+    answeredBy.set(follower.task.taskId, turn);
+    replyLater.add(source);
+  }
+  for (const message of messages) {
+    const source = message.liveInput?.taskId;
+    if (
+      source &&
+      replyLater.has(source) &&
+      message.liveInput?.state === "accepted" &&
+      !answeredBy.has(message.task.taskId)
+    )
+      replyLater.add(message.task.taskId);
+  }
+  return { answeredBy, replyLater };
+}
+
 /** A gap between two messages longer than this starts a new time divider. */
 const DIVIDER_GAP = 15 * 60_000;
 

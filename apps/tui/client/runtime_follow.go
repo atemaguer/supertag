@@ -201,7 +201,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 	task := message.GetTask()
 	source := state.task
 	if joined := view.GetJoinedTaskId(); joined != "" && joined != state.task {
-		emit(state.shown.join()...)
+		emit(state.shown.join(joined)...)
 		source = joined
 		original, _, err := state.read(ctx, runtime, source)
 		if err != nil {

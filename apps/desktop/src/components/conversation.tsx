@@ -52,6 +52,7 @@ import { TagAvatar } from "./tag-avatar";
 import {
   conversationSummary,
   deliveryStatus,
+  joinedReplies,
   lastOperatorMessage,
   timeDividers,
   workSessionCount,
@@ -281,6 +282,7 @@ export function ConversationPane({
 
   const messages = history.messages;
   const dividers = useMemo(() => timeDividers(messages), [messages]);
+  const joined = useMemo(() => joinedReplies(messages), [messages]);
   const reportSummary = useRef(onSummary);
   reportSummary.current = onSummary;
   useEffect(() => {
@@ -331,22 +333,29 @@ export function ConversationPane({
                     {paging ? "Loading…" : "Load earlier messages"}
                   </Button>
                 )}
-                {messages.map((message) => (
-                  <LiveConversationEntry
-                    key={message.task.taskId}
-                    message={message}
-                    readEvents={controlPlane.events}
-                    wait={follow.waits.get(message.task.taskId)}
-                    writing={follow.texts.get(message.task.taskId)}
-                    activeTask={activeTask}
-                    delivery={
-                      message.task.taskId === lastSent ? deliveryStatus(message) : undefined
-                    }
-                    divider={dividers.get(message.task.taskId)}
-                    onActivity={viewActivity}
-                    onSaveArtifact={controlPlane.saveArtifact}
-                  />
-                ))}
+                {messages.map((message) => {
+                  // A turn that later messages joined shows its reply after the last of them.
+                  const answers = joined.answeredBy.get(message.task.taskId);
+                  const turnId = (answers ?? message).task.taskId;
+                  return (
+                    <LiveConversationEntry
+                      key={message.task.taskId}
+                      message={message}
+                      answers={answers}
+                      replyLater={joined.replyLater.has(message.task.taskId)}
+                      readEvents={controlPlane.events}
+                      wait={follow.waits.get(turnId)}
+                      writing={follow.texts.get(turnId)}
+                      activeTask={activeTask}
+                      delivery={
+                        message.task.taskId === lastSent ? deliveryStatus(message) : undefined
+                      }
+                      divider={dividers.get(message.task.taskId)}
+                      onActivity={viewActivity}
+                      onSaveArtifact={controlPlane.saveArtifact}
+                    />
+                  );
+                })}
                 {outgoing && (
                   <OutgoingMessage
                     outgoing={outgoing}

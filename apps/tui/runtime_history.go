@@ -17,9 +17,12 @@ import (
 // a message without interleaving the first turn's reply with it.
 type runtimeTurn struct {
 	transcript
-	following   bool
-	settled     bool
-	joined      bool
+	following bool
+	settled   bool
+	joined    bool
+	// source is the Task whose turn this message joined; its reply shows after the last message
+	// that joined it.
+	source      string
 	needsFollow bool
 	// started says a Worker Host took the turn up.
 	started bool
@@ -410,6 +413,9 @@ func (m *model) applyRuntimeTurn(history *runtimeHistory, turn *runtimeTurn, eve
 	switch event.Kind {
 	case client.EventJoined:
 		turn.joined = true
+		if event.TaskID != "" {
+			turn.source = event.TaskID
+		}
 	case client.EventHostWait:
 		turn.wait = event.Text
 		return nil
