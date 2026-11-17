@@ -38,6 +38,9 @@ type runtimeTurn struct {
 	sentAt, completedAt time.Time
 	// stop ends the turn's follow.
 	stop context.CancelFunc
+	// hidden is a Schedule's turn that has not finished: no person asked for it and it may stay
+	// quiet, so it shows nothing until it finishes. The history holds it so a read refreshes it.
+	hidden bool
 }
 
 type runtimeHistory struct {
@@ -273,6 +276,20 @@ func (m *model) runtimeItem(tag string, item client.HistoryItem) tea.Cmd {
 		h.turns = make(map[string]*runtimeTurn)
 	}
 	turn := h.turns[id]
+	if item.Message.GetScheduleId() != "" && !finishedMessage(item.Message) {
+		if turn == nil {
+			turn = &runtimeTurn{hidden: true}
+			h.turns[id] = turn
+			h.order = append(h.order, id)
+		}
+		turn.times(item.Message)
+		return nil
+	}
+	if turn != nil && turn.hidden {
+		// It finished: it shows from now on as a turn of its own.
+		h.remove(id)
+		turn = nil
+	}
 	joined := item.Message.GetJoinedTaskId() != ""
 	var cmds []tea.Cmd
 	if turn != nil && (turn.following || !turn.joined || joined) {
@@ -318,6 +335,11 @@ func (m *model) runtimeItem(tag string, item client.HistoryItem) tea.Cmd {
 		cmds = append(cmds, m.followTurn(tag, id, turn, item))
 	}
 	return tea.Batch(cmds...)
+}
+
+// finishedMessage says the message's turn finished: it has a reply or a completion time.
+func finishedMessage(message *views.Message) bool {
+	return message.GetReply() != nil || message.GetCompletedAt() != nil
 }
 
 // times records the message's order and when it was sent and finished.

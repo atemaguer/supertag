@@ -128,9 +128,9 @@ Summarize open work every Monday at 9.
 
 The Tag sets a **Schedule**, a durable wake-up for itself in this conversation, and tells you
 when it will look. When the time comes, its reply appears in the conversation as a normal
-message, marked "Scheduled", with no message from you before it. A recurring check that finds
-nothing new stays quiet: no message, nothing unread, though `supertag describe task` still shows
-the turn ran. A Schedule takes effect only
+message, marked "Scheduled", with no message from you before it. Nothing shows while the Tag
+checks, and a recurring check that finds nothing new stays quiet: no message, nothing unread,
+though `supertag describe task` still shows the turn ran. A Schedule takes effect only
 when the turn that set it succeeds. Recurring ones run at least an hour apart. A Tag schedules only
 when it holds the `schedule:create` runtime action, which `supertag init` and the New Tag forms
 grant.

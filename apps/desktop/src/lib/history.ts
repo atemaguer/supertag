@@ -27,6 +27,15 @@ export function unsettled(message: Message) {
   return !FINISHED.has(message.task.state);
 }
 
+/**
+ * The messages a conversation shows. A turn no person asked for, a Schedule's wake-up, shows
+ * only once it finishes: it may find nothing to say and stay quiet, so it never appears, types,
+ * and vanishes. The history still holds it, so the next read refreshes it.
+ */
+export function shownMessages(messages: readonly Message[]): Message[] {
+  return messages.filter((message) => !(message.scheduleId && unsettled(message)));
+}
+
 /** What to read to bring `history` up to date: only what changed, once it holds a copy. */
 export function refreshRequest(tagId: string, history: History): ReadMessages {
   const latest = lastOf(history.messages, ({ order }) => order > 0);

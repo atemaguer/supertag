@@ -391,3 +391,40 @@ func TestRuntimeHistoryShowsAScheduledTurnWithoutYourMessage(t *testing.T) {
 		t.Fatalf("scheduled turn transcript:\n%s", got)
 	}
 }
+
+// A Schedule's turn shows nothing while it runs, not even the typing indicator: it may stay
+// quiet. The history still asks for it, and it shows once it finishes and posts.
+func TestRuntimeHistoryHidesAScheduledTurnUntilItFinishes(t *testing.T) {
+	m := runtimeModel(t)
+	first := ordered(runtimeHistoryMessage("asked", "Check CI every morning", "I'll check at 9."), 1)
+	running := ordered(&views.Message{TaskId: "woken", Tag: "lead", SessionId: "session",
+		Status: views.ReplyStatus_REPLY_STATUS_WAITING, Started: true, ScheduleId: "sch_1"}, 2)
+	m = update(t, m, runtimePage(0, running, first))
+	h := &m.shown().runtime
+	if turn := h.turns["woken"]; turn == nil || !turn.hidden || turn.following || len(turn.entries) > 0 {
+		t.Fatalf("running scheduled turn = %+v", turn)
+	}
+	if got := h.unsettled(); !slices.Contains(got, "woken") {
+		t.Fatalf("the next read does not refresh the hidden turn: %v", got)
+	}
+	if got := ansi.Strip(m.renderConversation()); strings.Contains(got, "Scheduled") || m.showsTyping() {
+		t.Fatalf("a running scheduled turn showed:\n%s", got)
+	}
+	snapshot := m.conversationSnapshot("lead")
+	if last := snapshot.Turns[len(snapshot.Turns)-1]; !last.Hidden || last.ID != "woken" {
+		t.Fatalf("the cache does not keep it hidden: %+v", last)
+	}
+
+	finished := ordered(runtimeHistoryMessage("woken", "", "CI is red on main."), 2)
+	finished.ScheduleId = "sch_1"
+	m = update(t, m, historyMsg{tag: "lead", items: client.History("lead", []*views.Message{finished}),
+		conversationID: runtimeConversationID, incremental: true, revision: m.shown().runtime.revision})
+	turn := m.shown().runtime.turns["woken"]
+	if turn == nil || turn.hidden || len(turn.entries) == 0 || turn.entries[0].text != "Scheduled" {
+		t.Fatalf("finished scheduled turn = %+v", turn)
+	}
+	got := ansi.Strip(m.renderConversation())
+	if caption, reply := strings.Index(got, "Scheduled"), strings.Index(got, "CI is red"); caption < 0 || reply < caption {
+		t.Fatalf("finished scheduled turn transcript:\n%s", got)
+	}
+}

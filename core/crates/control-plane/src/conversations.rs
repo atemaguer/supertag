@@ -287,7 +287,8 @@ impl Store {
                 });
         }
         // Per conversation: its latest message, its unfinished Tasks, and its finished turns
-        // after the read mark.
+        // after the read mark. A Schedule's turn counts once it finished: it may stay quiet, so
+        // until then it is neither the latest message nor work the conversation shows.
         let rows = sqlx::query(&format!(
             "SELECT c.tag_id,MAX(h.accepted_order) AS latest_order,
                     SUM(CASE WHEN t.state IN ({UNFINISHED}) THEN 1 ELSE 0 END) AS working,
@@ -298,7 +299,10 @@ impl Store {
              JOIN supertag_v2_conversation_history h ON h.session_id=c.session_id
              JOIN supertag_v2_tasks t ON t.task_id=h.task_id AND t.quiet=0
              LEFT JOIN supertag_v2_conversation_reads r ON r.principal=c.principal AND r.tag_id=c.tag_id
-             WHERE c.principal=$1 GROUP BY c.tag_id"
+             WHERE c.principal=$1
+               AND NOT (t.state IN ({UNFINISHED})
+                        AND EXISTS (SELECT 1 FROM supertag_v2_schedule_fires f WHERE f.task_id=t.task_id))
+             GROUP BY c.tag_id"
         ))
         .bind(principal)
         .fetch_all(&mut *tx)

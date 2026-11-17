@@ -6,6 +6,7 @@ import {
   latestHistory,
   receivedMessage,
   refreshRequest,
+  shownMessages,
   TAIL,
   tail,
 } from "./history";
@@ -95,5 +96,21 @@ describe("conversation history", () => {
     expect(kept.messages[0]?.task.taskId).toBe("m6");
     expect(kept.cursor).toBe("6");
     expect(tail(kept)).toBe(kept);
+  });
+});
+
+describe("a Schedule's wake-up", () => {
+  it("shows only once it finishes, while the history still refreshes it", () => {
+    const hello = message("hello", 1);
+    const wake = { ...message("wake", 2, "running"), scheduleId: "schedule" };
+    const history = { messages: [hello, wake], conversationId: "c", loading: false, read: true };
+    expect(ids(shownMessages(history.messages))).toEqual(["hello"]);
+    expect(refreshRequest("lead", history).refreshTaskIds).toEqual(["wake"]);
+    for (const state of ["queued", "claimed", "uncertain"])
+      expect(ids(shownMessages([{ ...wake, task: { ...wake.task, state } }]))).toEqual([]);
+    const posted = { ...wake, task: { ...wake.task, state: "succeeded", result: "CI is red" } };
+    expect(ids(shownMessages([hello, posted]))).toEqual(["hello", "wake"]);
+    // A person's running turn shows at once.
+    expect(ids(shownMessages([message("ask", 3, "running")]))).toEqual(["ask"]);
   });
 });

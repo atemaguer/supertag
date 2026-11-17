@@ -233,12 +233,15 @@ async fn one_off_fires_once_in_the_conversation(
     assert_eq!(shown.prompt, "");
     assert_eq!(Some(&shown.task_id), fired.last_task_id.as_ref());
     assert_eq!(page.messages[1].schedule_id, None);
+    // Until it finishes, the conversation list still shows the previous message, and no work.
     let listed = store
         .list_conversations(ALICE, &ListConversationsRequest {})
         .await
         .unwrap();
-    assert_eq!(listed.conversations[0].preview, "");
-    assert!(listed.conversations[0].preview_from_tag);
+    let before = &listed.conversations[0];
+    assert_eq!(before.preview, "Handled");
+    assert!(!before.working);
+    assert_eq!(before.latest_order, page.messages[1].order);
 
     // The turn runs in the conversation's Session with the wake-up prompt.
     let (task, identity) = next(store, host).await.unwrap();
@@ -260,6 +263,18 @@ async fn one_off_fires_once_in_the_conversation(
         task.prompt
     );
     finish(store, host, &identity, true).await;
+    // Once it finishes and posts, it is the latest message.
+    let listed = store
+        .list_conversations(ALICE, &ListConversationsRequest {})
+        .await
+        .unwrap();
+    let after = &listed.conversations[0];
+    assert_eq!(
+        (after.preview.as_str(), after.preview_from_tag),
+        ("Handled", true)
+    );
+    assert_eq!(after.latest_order, latest.order);
+    assert_eq!((before.unread_count, after.unread_count), (1, 2));
 }
 
 async fn recurrence_catches_up_once_and_coalesces(

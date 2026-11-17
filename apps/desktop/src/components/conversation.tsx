@@ -31,6 +31,7 @@ import {
   latestHistory,
   receivedMessage,
   refreshRequest,
+  shownMessages,
 } from "../lib/history";
 import {
   discard,
@@ -280,7 +281,7 @@ export function ConversationPane({
     );
   const activityShown = activityLive ?? clamp(activityWidth, ACTIVITY_WIDTH.min, activityMax());
 
-  const messages = history.messages;
+  const messages = useMemo(() => shownMessages(history.messages), [history.messages]);
   const dividers = useMemo(() => timeDividers(messages), [messages]);
   const joined = useMemo(() => joinedReplies(messages), [messages]);
   const reportSummary = useRef(onSummary);

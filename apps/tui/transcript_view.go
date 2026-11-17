@@ -220,7 +220,7 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 	}
 	for _, id := range c.runtime.order {
 		turn := c.runtime.turns[id]
-		if turn == nil {
+		if turn == nil || turn.hidden {
 			continue
 		}
 		w.at(turn.sentAt)
