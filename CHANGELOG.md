@@ -11,6 +11,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Microsoft Teams message from a channel connected to a different Tag gets one notice in its
+  thread naming the connected Tag, instead of no answer.
+- Slack and Lark event-ID receipts are deleted after 7 days. Message receipts are kept, so a late
+  redelivery still reaches its original Task.
 - Merging a pull request that a work Session delivered closes that Session (`closed: pull request
   merged`). A pull request closed without merging leaves it open for a revision.
 - A pull request publication queued because its Worker Host was offline retries as soon as that
