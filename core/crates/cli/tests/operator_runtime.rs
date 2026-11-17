@@ -173,7 +173,10 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity(database: Str
     let retired = run(&["tag", "retire", "review-1"]).await?;
     assert!(retired["tag"]["retired_at_ms"].as_i64().is_some());
     assert_eq!(run(&["get", "tags"]).await?["tags"], serde_json::json!([]));
-    assert_eq!(run(&["get", "tag", "review-1"]).await?, retired["tag"]);
+    // Only `get tag` reads how the Tag's messages landed.
+    let mut read = run(&["get", "tag", "review-1"]).await?;
+    read["attention"] = serde_json::Value::Null;
+    assert_eq!(read, retired["tag"]);
     run(&[
         "tag",
         "put",

@@ -1109,8 +1109,9 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint(
     )
     .await?;
     drop(client);
+    // The Control Plane and the Worker Host; without a surface or notify destination, no Gateway.
     let children = direct_children(supervisor.child.id())?;
-    assert_eq!(children.len(), 3);
+    assert_eq!(children.len(), 2);
     let mut cleanup = DescendantCleanup(children);
     assert_eq!(supervisor.crash()?.signal(), Some(libc::SIGKILL));
     cleanup.wait_and_disarm().await?;
@@ -1173,7 +1174,7 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint(
         })?)
         .await?;
     let children = direct_children(restarted.child.id())?;
-    assert_eq!(children.len(), 3);
+    assert_eq!(children.len(), 2);
     restarted.terminate()?;
     restarted.successful_exit().await?;
     for pid in children {
@@ -1260,7 +1261,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
     assert_eq!(next.state(), TaskState::Queued);
 
     let children = direct_children(supervisor.child.id())?;
-    assert_eq!(children.len(), 3);
+    assert_eq!(children.len(), 2);
     let mut adapters = Vec::new();
     for child in &children {
         adapters.extend(descendants(*child)?);
@@ -1427,8 +1428,8 @@ async fn local_up_runs_work_and_reaps_its_services(database: String) -> Result<(
     let children = direct_children(supervisor.child.id())?;
     assert_eq!(
         children.len(),
-        3,
-        "local startup must supervise three separate services"
+        2,
+        "local startup without surfaces must supervise the Control Plane and the Worker Host, and no Gateway"
     );
     supervisor.terminate()?;
     supervisor.successful_exit().await?;
@@ -1450,7 +1451,7 @@ async fn local_up_runs_work_and_reaps_its_services(database: String) -> Result<(
         )
         .await?
         .is_err(),
-        "Gateway still accepts connections after local shutdown"
+        "the Control Plane still accepts connections after local shutdown"
     );
     Ok(())
 }

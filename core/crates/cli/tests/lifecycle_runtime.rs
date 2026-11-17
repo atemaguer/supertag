@@ -207,14 +207,17 @@ fn background_up_runs_until_down_and_reports_through_ps_logs_status_and_version(
     );
     let ps = machine.ps()?;
     assert_eq!(ps["supervisor"]["mode"], "background");
-    for name in ["control-plane", "gateway", "local"] {
+    // Without a surface or notify destination, `up` runs no Gateway.
+    for name in ["control-plane", "local"] {
         assert_eq!(service(&ps, name)?["state"], "running", "{ps}");
     }
+    assert!(service(&ps, "gateway").is_err(), "{ps}");
     let host = service(&ps, "local")?;
     assert_eq!(host["connected"], true, "{ps}");
     assert_eq!(host["draining"], false, "{ps}");
+    // The supervisor, the Control Plane, and the Worker Host.
     let first = pids(&ps);
-    assert_eq!(first.len(), 4);
+    assert_eq!(first.len(), 3);
     assert!(first.iter().all(|pid| alive(*pid)));
     let text = machine.ok(&["ps"])?;
     assert!(
@@ -1299,9 +1302,11 @@ fn down_and_up_replace_services_from_an_older_release() -> Result<()> {
     assert!(!upgraded.contains("left alone"), "{upgraded}");
     let ps = machine.ps()?;
     assert_eq!(ps["supervisor"]["matches_cli"], true, "{ps}");
-    for name in ["control-plane", "gateway", "local"] {
+    // Without a surface or notify destination, `up` runs no Gateway.
+    for name in ["control-plane", "local"] {
         assert_eq!(service(&ps, name)?["state"], "running", "{ps}");
     }
+    assert!(service(&ps, "gateway").is_err(), "{ps}");
     assert_eq!(service(&ps, "local")?["connected"], true, "{ps}");
     let running = pids(&ps);
 

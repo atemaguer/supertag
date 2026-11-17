@@ -1705,7 +1705,7 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
     );
     let output = run(test).await?;
     ensure!(
-        output.status.success() && String::from_utf8_lossy(&output.stdout).starts_with("desktop: "),
+        output.status.success() && String::from_utf8_lossy(&output.stdout).starts_with("webhook: "),
         "test notification through the Gateway tunnel: {}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
