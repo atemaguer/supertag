@@ -49,7 +49,8 @@ async fn bind(mut command: Command) -> Result<(Child, String)> {
     let mut child = command.stdout(Stdio::piped()).spawn()?;
     let mut output = BufReader::new(child.stdout.take().context("missing endpoint")?);
     let mut endpoint = String::new();
-    timeout(Duration::from_secs(10), output.read_line(&mut endpoint)).await??;
+    // A fresh PostgreSQL database runs every migration before the service binds.
+    timeout(Duration::from_secs(30), output.read_line(&mut endpoint)).await??;
     ensure!(endpoint.starts_with("127.0.0.1:"));
     Ok((child, format!("http://{}", endpoint.trim())))
 }
