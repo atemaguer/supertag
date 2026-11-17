@@ -259,3 +259,23 @@ it("says how a turn ended only when it did not simply succeed", () => {
   // A succeeded turn with nothing to show still offers its activity.
   expect(render("succeeded")).toContain("View activity");
 });
+
+it("renders a Schedule's turn as the Tag's reply under a muted caption, with no operator bubble", () => {
+  const html = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: {
+        order: 2,
+        task: { ...task, taskId: "woken", prompt: "", result: "CI is green." },
+        scheduleId: "sch_1",
+      },
+      delivery: "Seen",
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(html).toContain("CI is green.");
+  expect(html).toContain('<span class="report-label">Scheduled</span>');
+  expect(html.indexOf("CI is green.")).toBeLessThan(html.indexOf(">Scheduled<"));
+  expect(html).not.toContain("user-turn");
+  expect(html).not.toContain("Work Session report");
+});

@@ -290,6 +290,10 @@ func (m *model) runtimeItem(tag string, item client.HistoryItem) tea.Cmd {
 	if item.Message.GetText() != "" {
 		turn.add(entryYou, item.Message.GetText())
 	}
+	if item.Message.GetScheduleId() != "" {
+		// The Tag speaks because it asked to be woken, not because you wrote.
+		turn.add(entryDim, "Scheduled")
+	}
 	for _, event := range item.Events {
 		cmds = append(cmds, m.applyRuntimeTurn(h, turn, event))
 	}

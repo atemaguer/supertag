@@ -71,3 +71,18 @@ it("finds the operator's last message and summarises the conversation for the si
   ).toEqual({ preview: "You: Check it", lastActivityMs: 5, working: true });
   expect(conversationSummary([])).toEqual({});
 });
+
+it("treats a Schedule's turn as the Tag's: no delivery, never the operator's last message", () => {
+  const messages = [
+    message("a", { result: "On it" }),
+    message("b", { prompt: "", result: "CI is green." }, { scheduleId: "sch_1" }),
+  ];
+  expect(deliveryStatus(messages[1] as Message)).toBeUndefined();
+  expect(lastOperatorMessage(messages)).toBe("a");
+  expect(conversationSummary(messages)).toEqual({ preview: "CI is green." });
+  expect(
+    conversationSummary([
+      message("c", { state: "queued", prompt: "Hidden" }, { scheduleId: "sch_1" }),
+    ]),
+  ).toEqual({ working: true });
+});

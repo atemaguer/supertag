@@ -10,7 +10,7 @@ export const RUNNING = new Set(["queued", "claimed", "running"]);
  * joined accepted it), and otherwise why it did not arrive.
  */
 export function deliveryStatus(message: Message): string | undefined {
-  if (message.workSessionReportId !== undefined) return undefined;
+  if (!fromOperator(message)) return undefined;
   const input = message.liveInput?.state;
   if (input)
     return {
@@ -21,6 +21,11 @@ export function deliveryStatus(message: Message): string | undefined {
       withdrawn: "Not delivered",
     }[input];
   return message.task.state === "queued" ? "Sent" : "Seen";
+}
+
+/** Whether the operator wrote the message: a report or a Schedule's turn has none from them. */
+export function fromOperator(message: Message): boolean {
+  return message.workSessionReportId === undefined && message.scheduleId === undefined;
 }
 
 /** A gap between two messages longer than this starts a new time divider. */
@@ -61,7 +66,7 @@ export function dividerLabel(at: number, now = Date.now()): string {
 export function lastOperatorMessage(messages: readonly Message[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
-    if (message && message.workSessionReportId === undefined) return message.task.taskId;
+    if (message && fromOperator(message)) return message.task.taskId;
   }
   return undefined;
 }
@@ -74,7 +79,7 @@ export function conversationSummary(messages: readonly Message[]): TagSummary {
   const last = messages.at(-1);
   if (!last) return {};
   const reply = last.task.result?.trim();
-  const prompt = last.workSessionReportId === undefined ? last.task.prompt?.trim() : undefined;
+  const prompt = fromOperator(last) ? last.task.prompt?.trim() : undefined;
   const line = (reply || (prompt ? `You: ${prompt}` : "")).split("\n")[0]?.trim();
   return {
     ...(line ? { preview: line } : {}),

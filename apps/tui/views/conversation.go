@@ -315,6 +315,9 @@ type Message struct {
 	WorkSessions []*WorkSession
 	// The messages the Tag wrote while its turn ran, oldest first, such as its sentence of intent.
 	TagMessages []*TagMessage
+	// The Schedule that queued this turn. Such a turn has no message from you; the Tag speaks
+	// because it asked to be woken.
+	ScheduleId string
 	// What the Tag is doing now, from its latest activity or plan event, while the turn runs.
 	Activity string
 	// The sequence of the turn's latest event the message carried; a follow reads after it.
@@ -428,6 +431,13 @@ func (x *Message) GetReply() *Reply {
 		return x.Reply
 	}
 	return nil
+}
+
+func (x *Message) GetScheduleId() string {
+	if x != nil {
+		return x.ScheduleId
+	}
+	return ""
 }
 
 func (x *Message) GetJoinedTaskId() string {

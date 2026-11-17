@@ -138,6 +138,7 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
         order: 9,
         sent_at_ms: 1_000,
         completed_at_ms: None,
+        schedule_id: None,
     })
     .unwrap();
     let json = serde_json::to_value(message).unwrap();
@@ -183,6 +184,7 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
         order: 10,
         sent_at_ms: 1_000,
         completed_at_ms: Some(2_000),
+        schedule_id: None,
     })
     .unwrap();
     let json = serde_json::to_value(message).unwrap();
@@ -1050,4 +1052,29 @@ async fn a_conversation_follow_pushes_sent_messages_through_the_api_tier() {
     client.stop_follow(&follow).await;
     control_plane_task.abort();
     cp_task.abort();
+}
+
+#[test]
+fn scheduled_turns_name_their_schedule_and_carry_no_operator_message() {
+    let message = Message::try_from(v2::ConversationMessage {
+        task: Some(v2::Task {
+            task_id: "woken".into(),
+            tag_id: "engineer".into(),
+            session_id: "conversation/planning".into(),
+            state: v2::TaskState::Succeeded as i32,
+            prompt: "Scheduled wake-up.".into(),
+            result: Some("CI is green.".into()),
+            ..Default::default()
+        }),
+        live_input: Some(v2::LiveInput::default()),
+        schedule_id: Some("sch_1".into()),
+        order: 11,
+        ..Default::default()
+    })
+    .unwrap();
+    let json = serde_json::to_value(message).unwrap();
+    assert_eq!(json["scheduleId"], "sch_1");
+    assert!(json["task"].get("prompt").is_none());
+    assert!(json.get("liveInput").is_none());
+    assert_eq!(json["task"]["result"], "CI is green.");
 }

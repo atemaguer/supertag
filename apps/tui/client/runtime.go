@@ -317,6 +317,8 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 	if message.CompletedAtMs != nil {
 		out.CompletedAt = timestamppb.New(time.UnixMilli(message.GetCompletedAtMs()))
 	}
+	// A Schedule's turn has no message from you either; the Control Plane leaves out its prompt.
+	out.ScheduleId = message.GetScheduleId()
 	if message.GetWorkSessionReportId() != "" {
 		// The prompt instructs the parent to report on child work. It was not
 		// written by the operator and must never appear as their message. The report shows

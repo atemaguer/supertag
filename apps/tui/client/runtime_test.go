@@ -565,3 +565,14 @@ func TestAReportTurnCarriesNoMessagesOfItsOwn(t *testing.T) {
 		t.Fatalf("report turn = %+v", message)
 	}
 }
+
+// A Schedule's turn has no message from you; it keeps the Tag's messages and names its Schedule.
+func TestAScheduledTurnCarriesItsScheduleAndNoMessageFromYou(t *testing.T) {
+	schedule := "sch_1"
+	message := runtimeMessage(&v2.ConversationMessage{ScheduleId: &schedule,
+		Task:   &v2.Task{TaskId: "woken", TagId: "lead", State: v2.TaskState_TASK_STATE_SUCCEEDED, Result: proto.String("CI is green.")},
+		Events: []*v2.TaskEvent{{Sequence: 1, Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE, Text: "Checking PR 412."}}})
+	if message.GetText() != "" || message.GetScheduleId() != schedule || len(message.GetTagMessages()) != 1 {
+		t.Fatalf("scheduled turn = %+v", message)
+	}
+}

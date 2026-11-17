@@ -705,6 +705,9 @@ pub struct Message {
     pub live_input: Option<LiveInput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub work_session_report_id: Option<String>,
+    /// The Schedule that queued the turn, which has no message from the operator.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule_id: Option<String>,
     /// What the turn shows from its events: each message the Tag wrote and its latest activity
     /// or plan, ending at its latest event.
     pub events: Vec<Event>,
@@ -721,7 +724,7 @@ impl TryFrom<v2::ConversationMessage> for Message {
                 .task
                 .ok_or("The Control Plane returned an incomplete message.")?,
         );
-        let live_input = if value.work_session_report_id.is_some() {
+        let live_input = if value.work_session_report_id.is_some() || value.schedule_id.is_some() {
             task.prompt = None;
             None
         } else {
@@ -734,6 +737,7 @@ impl TryFrom<v2::ConversationMessage> for Message {
             completed_at_ms: value.completed_at_ms,
             live_input,
             work_session_report_id: value.work_session_report_id,
+            schedule_id: value.schedule_id,
             events: value.events.into_iter().map(Event::from).collect(),
             events_truncated: value.events_truncated,
         })

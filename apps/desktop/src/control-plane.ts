@@ -36,6 +36,8 @@ export interface Message {
   completedAtMs?: number;
   liveInput?: { taskId: string; state: string };
   workSessionReportId?: string;
+  /** The Schedule that queued this turn. It has no message from the operator. */
+  scheduleId?: string;
   /**
    * What the turn shows from its events, oldest first: each message the Tag wrote and its latest
    * activity or plan. The last is the turn's latest event.

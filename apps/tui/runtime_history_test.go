@@ -367,3 +367,27 @@ func TestRailShowsEachConversationFromItsSummaryAndShowingAReplyMarksItRead(t *t
 		t.Fatalf("the same reply was marked read again: %v", marks)
 	}
 }
+
+// A turn a Schedule queued shows the Tag's reply under a muted "Scheduled" caption, with no
+// message from you.
+func TestRuntimeHistoryShowsAScheduledTurnWithoutYourMessage(t *testing.T) {
+	m := runtimeModel(t)
+	first := ordered(runtimeHistoryMessage("asked", "Check PR 412 again in two hours", "I'll look again at 16:30."), 1)
+	woken := ordered(runtimeHistoryMessage("woken", "", "CI is green and there are no new comments."), 2)
+	woken.ScheduleId = "sch_1"
+	m = update(t, m, runtimePage(0, woken, first))
+	turn := m.shown().runtime.turns["woken"]
+	if turn == nil || len(turn.entries) == 0 || turn.entries[0].kind != entryDim || turn.entries[0].text != "Scheduled" {
+		t.Fatalf("scheduled turn entries: %+v", turn)
+	}
+	for _, e := range turn.entries {
+		if e.kind == entryYou {
+			t.Fatalf("a scheduled turn showed a message from you: %+v", turn.entries)
+		}
+	}
+	got := ansi.Strip(m.renderConversation())
+	caption, reply := strings.Index(got, "Scheduled"), strings.Index(got, "CI is green")
+	if caption < 0 || reply < caption || strings.Index(got, "I'll look again") > caption {
+		t.Fatalf("scheduled turn transcript:\n%s", got)
+	}
+}

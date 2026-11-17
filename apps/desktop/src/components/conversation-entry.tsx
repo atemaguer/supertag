@@ -5,7 +5,7 @@ import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import { ExternalLink } from "./external-link";
 import { ResultFiles } from "./result-files";
-import { dividerLabel, RUNNING } from "./transcript";
+import { dividerLabel, fromOperator, RUNNING } from "./transcript";
 import { Button } from "./ui/button";
 
 /**
@@ -46,8 +46,8 @@ export function LiveConversationEntry(
   },
 ) {
   const { message, wait, ...entry } = props;
-  const { task, workSessionReportId, liveInput } = message;
-  const joined = workSessionReportId === undefined && liveInput?.state === "accepted";
+  const { task, liveInput } = message;
+  const joined = fromOperator(message) && liveInput?.state === "accepted";
   const events = useTurnEvents(props.readEvents, joined ? {} : { ...message, taskId: task.taskId });
   const waiting = !joined && task.state === "queued" ? wait : undefined;
   return <ConversationEntry {...entry} message={message} events={events} wait={waiting} />;
@@ -79,9 +79,10 @@ export function ConversationEntry({
   onActivity(taskId: string, trigger: HTMLButtonElement): void;
   onSaveArtifact: ControlPlane["saveArtifact"];
 }) {
-  const { task, workSessionReportId } = message;
+  const { task, workSessionReportId, scheduleId } = message;
   const report = workSessionReportId !== undefined;
-  const input = report ? undefined : message.liveInput;
+  const scheduled = scheduleId !== undefined;
+  const input = fromOperator(message) ? message.liveInput : undefined;
   const notice = turnNotice(task.state, input?.state);
   const joined = input?.state === "accepted";
   const activityTask = joined ? input.taskId : task.taskId;
@@ -110,7 +111,7 @@ export function ConversationEntry({
         </div>
       )}
       <article className="exchange">
-        {!report && (
+        {fromOperator(message) && (
           <Message from="user" className="user-turn">
             <span className="visually-hidden">You</span>
             <Bubble text={task.prompt ?? ""} className="prompt-text" tail />
@@ -165,6 +166,12 @@ export function ConversationEntry({
           {report && (
             <div className="turn-meta">
               <span className="report-label">Work Session report</span>
+            </div>
+          )}
+          {scheduled && (
+            // The Tag speaks because it asked to be woken, not because the operator wrote.
+            <div className="turn-meta">
+              <span className="report-label">Scheduled</span>
             </div>
           )}
           {/* A settled turn says something here only when it did not simply succeed, or when it
