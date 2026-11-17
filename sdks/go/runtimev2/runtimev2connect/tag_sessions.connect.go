@@ -44,6 +44,9 @@ const (
 	// AttemptTagSessionsReadSessionProcedure is the fully-qualified name of the AttemptTagSessions's
 	// ReadSession RPC.
 	AttemptTagSessionsReadSessionProcedure = "/supertag.runtime.v2.AttemptTagSessions/ReadSession"
+	// AttemptTagSessionsReadTurnProcedure is the fully-qualified name of the AttemptTagSessions's
+	// ReadTurn RPC.
+	AttemptTagSessionsReadTurnProcedure = "/supertag.runtime.v2.AttemptTagSessions/ReadTurn"
 	// AttemptTagSessionsListObjectivesProcedure is the fully-qualified name of the AttemptTagSessions's
 	// ListObjectives RPC.
 	AttemptTagSessionsListObjectivesProcedure = "/supertag.runtime.v2.AttemptTagSessions/ListObjectives"
@@ -59,6 +62,9 @@ const (
 	// HarnessTagSessionsReadSessionProcedure is the fully-qualified name of the HarnessTagSessions's
 	// ReadSession RPC.
 	HarnessTagSessionsReadSessionProcedure = "/supertag.runtime.v2.HarnessTagSessions/ReadSession"
+	// HarnessTagSessionsReadTurnProcedure is the fully-qualified name of the HarnessTagSessions's
+	// ReadTurn RPC.
+	HarnessTagSessionsReadTurnProcedure = "/supertag.runtime.v2.HarnessTagSessions/ReadTurn"
 	// HarnessTagSessionsListObjectivesProcedure is the fully-qualified name of the HarnessTagSessions's
 	// ListObjectives RPC.
 	HarnessTagSessionsListObjectivesProcedure = "/supertag.runtime.v2.HarnessTagSessions/ListObjectives"
@@ -72,6 +78,7 @@ type AttemptTagSessionsClient interface {
 	ListSessions(context.Context, *connect.Request[runtimev2.ListTagSessionsRequest]) (*connect.Response[runtimev2.ListTagSessionsResponse], error)
 	SearchSessions(context.Context, *connect.Request[runtimev2.SearchTagSessionsRequest]) (*connect.Response[runtimev2.SearchTagSessionsResponse], error)
 	ReadSession(context.Context, *connect.Request[runtimev2.ReadTagSessionRequest]) (*connect.Response[runtimev2.ReadTagSessionResponse], error)
+	ReadTurn(context.Context, *connect.Request[runtimev2.ReadTagTurnRequest]) (*connect.Response[runtimev2.ReadTagTurnResponse], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error)
 	ReadObjective(context.Context, *connect.Request[runtimev2.ReadTagObjectiveRequest]) (*connect.Response[runtimev2.TagObjectiveView], error)
 }
@@ -105,6 +112,12 @@ func NewAttemptTagSessionsClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(attemptTagSessionsMethods.ByName("ReadSession")),
 			connect.WithClientOptions(opts...),
 		),
+		readTurn: connect.NewClient[runtimev2.ReadTagTurnRequest, runtimev2.ReadTagTurnResponse](
+			httpClient,
+			baseURL+AttemptTagSessionsReadTurnProcedure,
+			connect.WithSchema(attemptTagSessionsMethods.ByName("ReadTurn")),
+			connect.WithClientOptions(opts...),
+		),
 		listObjectives: connect.NewClient[runtimev2.ListTagObjectivesRequest, runtimev2.ListTagObjectivesResponse](
 			httpClient,
 			baseURL+AttemptTagSessionsListObjectivesProcedure,
@@ -125,6 +138,7 @@ type attemptTagSessionsClient struct {
 	listSessions   *connect.Client[runtimev2.ListTagSessionsRequest, runtimev2.ListTagSessionsResponse]
 	searchSessions *connect.Client[runtimev2.SearchTagSessionsRequest, runtimev2.SearchTagSessionsResponse]
 	readSession    *connect.Client[runtimev2.ReadTagSessionRequest, runtimev2.ReadTagSessionResponse]
+	readTurn       *connect.Client[runtimev2.ReadTagTurnRequest, runtimev2.ReadTagTurnResponse]
 	listObjectives *connect.Client[runtimev2.ListTagObjectivesRequest, runtimev2.ListTagObjectivesResponse]
 	readObjective  *connect.Client[runtimev2.ReadTagObjectiveRequest, runtimev2.TagObjectiveView]
 }
@@ -144,6 +158,11 @@ func (c *attemptTagSessionsClient) ReadSession(ctx context.Context, req *connect
 	return c.readSession.CallUnary(ctx, req)
 }
 
+// ReadTurn calls supertag.runtime.v2.AttemptTagSessions.ReadTurn.
+func (c *attemptTagSessionsClient) ReadTurn(ctx context.Context, req *connect.Request[runtimev2.ReadTagTurnRequest]) (*connect.Response[runtimev2.ReadTagTurnResponse], error) {
+	return c.readTurn.CallUnary(ctx, req)
+}
+
 // ListObjectives calls supertag.runtime.v2.AttemptTagSessions.ListObjectives.
 func (c *attemptTagSessionsClient) ListObjectives(ctx context.Context, req *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error) {
 	return c.listObjectives.CallUnary(ctx, req)
@@ -160,6 +179,7 @@ type AttemptTagSessionsHandler interface {
 	ListSessions(context.Context, *connect.Request[runtimev2.ListTagSessionsRequest]) (*connect.Response[runtimev2.ListTagSessionsResponse], error)
 	SearchSessions(context.Context, *connect.Request[runtimev2.SearchTagSessionsRequest]) (*connect.Response[runtimev2.SearchTagSessionsResponse], error)
 	ReadSession(context.Context, *connect.Request[runtimev2.ReadTagSessionRequest]) (*connect.Response[runtimev2.ReadTagSessionResponse], error)
+	ReadTurn(context.Context, *connect.Request[runtimev2.ReadTagTurnRequest]) (*connect.Response[runtimev2.ReadTagTurnResponse], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error)
 	ReadObjective(context.Context, *connect.Request[runtimev2.ReadTagObjectiveRequest]) (*connect.Response[runtimev2.TagObjectiveView], error)
 }
@@ -189,6 +209,12 @@ func NewAttemptTagSessionsHandler(svc AttemptTagSessionsHandler, opts ...connect
 		connect.WithSchema(attemptTagSessionsMethods.ByName("ReadSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	attemptTagSessionsReadTurnHandler := connect.NewUnaryHandler(
+		AttemptTagSessionsReadTurnProcedure,
+		svc.ReadTurn,
+		connect.WithSchema(attemptTagSessionsMethods.ByName("ReadTurn")),
+		connect.WithHandlerOptions(opts...),
+	)
 	attemptTagSessionsListObjectivesHandler := connect.NewUnaryHandler(
 		AttemptTagSessionsListObjectivesProcedure,
 		svc.ListObjectives,
@@ -209,6 +235,8 @@ func NewAttemptTagSessionsHandler(svc AttemptTagSessionsHandler, opts ...connect
 			attemptTagSessionsSearchSessionsHandler.ServeHTTP(w, r)
 		case AttemptTagSessionsReadSessionProcedure:
 			attemptTagSessionsReadSessionHandler.ServeHTTP(w, r)
+		case AttemptTagSessionsReadTurnProcedure:
+			attemptTagSessionsReadTurnHandler.ServeHTTP(w, r)
 		case AttemptTagSessionsListObjectivesProcedure:
 			attemptTagSessionsListObjectivesHandler.ServeHTTP(w, r)
 		case AttemptTagSessionsReadObjectiveProcedure:
@@ -234,6 +262,10 @@ func (UnimplementedAttemptTagSessionsHandler) ReadSession(context.Context, *conn
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptTagSessions.ReadSession is not implemented"))
 }
 
+func (UnimplementedAttemptTagSessionsHandler) ReadTurn(context.Context, *connect.Request[runtimev2.ReadTagTurnRequest]) (*connect.Response[runtimev2.ReadTagTurnResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptTagSessions.ReadTurn is not implemented"))
+}
+
 func (UnimplementedAttemptTagSessionsHandler) ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptTagSessions.ListObjectives is not implemented"))
 }
@@ -247,6 +279,7 @@ type HarnessTagSessionsClient interface {
 	ListSessions(context.Context, *connect.Request[runtimev2.ListTagSessionsRequest]) (*connect.Response[runtimev2.ListTagSessionsResponse], error)
 	SearchSessions(context.Context, *connect.Request[runtimev2.SearchTagSessionsRequest]) (*connect.Response[runtimev2.SearchTagSessionsResponse], error)
 	ReadSession(context.Context, *connect.Request[runtimev2.ReadTagSessionRequest]) (*connect.Response[runtimev2.ReadTagSessionResponse], error)
+	ReadTurn(context.Context, *connect.Request[runtimev2.ReadTagTurnRequest]) (*connect.Response[runtimev2.ReadTagTurnResponse], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error)
 	ReadObjective(context.Context, *connect.Request[runtimev2.ReadTagObjectiveRequest]) (*connect.Response[runtimev2.TagObjectiveView], error)
 }
@@ -280,6 +313,12 @@ func NewHarnessTagSessionsClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(harnessTagSessionsMethods.ByName("ReadSession")),
 			connect.WithClientOptions(opts...),
 		),
+		readTurn: connect.NewClient[runtimev2.ReadTagTurnRequest, runtimev2.ReadTagTurnResponse](
+			httpClient,
+			baseURL+HarnessTagSessionsReadTurnProcedure,
+			connect.WithSchema(harnessTagSessionsMethods.ByName("ReadTurn")),
+			connect.WithClientOptions(opts...),
+		),
 		listObjectives: connect.NewClient[runtimev2.ListTagObjectivesRequest, runtimev2.ListTagObjectivesResponse](
 			httpClient,
 			baseURL+HarnessTagSessionsListObjectivesProcedure,
@@ -300,6 +339,7 @@ type harnessTagSessionsClient struct {
 	listSessions   *connect.Client[runtimev2.ListTagSessionsRequest, runtimev2.ListTagSessionsResponse]
 	searchSessions *connect.Client[runtimev2.SearchTagSessionsRequest, runtimev2.SearchTagSessionsResponse]
 	readSession    *connect.Client[runtimev2.ReadTagSessionRequest, runtimev2.ReadTagSessionResponse]
+	readTurn       *connect.Client[runtimev2.ReadTagTurnRequest, runtimev2.ReadTagTurnResponse]
 	listObjectives *connect.Client[runtimev2.ListTagObjectivesRequest, runtimev2.ListTagObjectivesResponse]
 	readObjective  *connect.Client[runtimev2.ReadTagObjectiveRequest, runtimev2.TagObjectiveView]
 }
@@ -319,6 +359,11 @@ func (c *harnessTagSessionsClient) ReadSession(ctx context.Context, req *connect
 	return c.readSession.CallUnary(ctx, req)
 }
 
+// ReadTurn calls supertag.runtime.v2.HarnessTagSessions.ReadTurn.
+func (c *harnessTagSessionsClient) ReadTurn(ctx context.Context, req *connect.Request[runtimev2.ReadTagTurnRequest]) (*connect.Response[runtimev2.ReadTagTurnResponse], error) {
+	return c.readTurn.CallUnary(ctx, req)
+}
+
 // ListObjectives calls supertag.runtime.v2.HarnessTagSessions.ListObjectives.
 func (c *harnessTagSessionsClient) ListObjectives(ctx context.Context, req *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error) {
 	return c.listObjectives.CallUnary(ctx, req)
@@ -335,6 +380,7 @@ type HarnessTagSessionsHandler interface {
 	ListSessions(context.Context, *connect.Request[runtimev2.ListTagSessionsRequest]) (*connect.Response[runtimev2.ListTagSessionsResponse], error)
 	SearchSessions(context.Context, *connect.Request[runtimev2.SearchTagSessionsRequest]) (*connect.Response[runtimev2.SearchTagSessionsResponse], error)
 	ReadSession(context.Context, *connect.Request[runtimev2.ReadTagSessionRequest]) (*connect.Response[runtimev2.ReadTagSessionResponse], error)
+	ReadTurn(context.Context, *connect.Request[runtimev2.ReadTagTurnRequest]) (*connect.Response[runtimev2.ReadTagTurnResponse], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error)
 	ReadObjective(context.Context, *connect.Request[runtimev2.ReadTagObjectiveRequest]) (*connect.Response[runtimev2.TagObjectiveView], error)
 }
@@ -364,6 +410,12 @@ func NewHarnessTagSessionsHandler(svc HarnessTagSessionsHandler, opts ...connect
 		connect.WithSchema(harnessTagSessionsMethods.ByName("ReadSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	harnessTagSessionsReadTurnHandler := connect.NewUnaryHandler(
+		HarnessTagSessionsReadTurnProcedure,
+		svc.ReadTurn,
+		connect.WithSchema(harnessTagSessionsMethods.ByName("ReadTurn")),
+		connect.WithHandlerOptions(opts...),
+	)
 	harnessTagSessionsListObjectivesHandler := connect.NewUnaryHandler(
 		HarnessTagSessionsListObjectivesProcedure,
 		svc.ListObjectives,
@@ -384,6 +436,8 @@ func NewHarnessTagSessionsHandler(svc HarnessTagSessionsHandler, opts ...connect
 			harnessTagSessionsSearchSessionsHandler.ServeHTTP(w, r)
 		case HarnessTagSessionsReadSessionProcedure:
 			harnessTagSessionsReadSessionHandler.ServeHTTP(w, r)
+		case HarnessTagSessionsReadTurnProcedure:
+			harnessTagSessionsReadTurnHandler.ServeHTTP(w, r)
 		case HarnessTagSessionsListObjectivesProcedure:
 			harnessTagSessionsListObjectivesHandler.ServeHTTP(w, r)
 		case HarnessTagSessionsReadObjectiveProcedure:
@@ -407,6 +461,10 @@ func (UnimplementedHarnessTagSessionsHandler) SearchSessions(context.Context, *c
 
 func (UnimplementedHarnessTagSessionsHandler) ReadSession(context.Context, *connect.Request[runtimev2.ReadTagSessionRequest]) (*connect.Response[runtimev2.ReadTagSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessTagSessions.ReadSession is not implemented"))
+}
+
+func (UnimplementedHarnessTagSessionsHandler) ReadTurn(context.Context, *connect.Request[runtimev2.ReadTagTurnRequest]) (*connect.Response[runtimev2.ReadTagTurnResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessTagSessions.ReadTurn is not implemented"))
 }
 
 func (UnimplementedHarnessTagSessionsHandler) ListObjectives(context.Context, *connect.Request[runtimev2.ListTagObjectivesRequest]) (*connect.Response[runtimev2.ListTagObjectivesResponse], error) {

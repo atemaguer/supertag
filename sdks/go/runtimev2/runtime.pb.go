@@ -16826,11 +16826,14 @@ func (x *AdapterBootstrap) GetToken() string {
 	return ""
 }
 
+// One earlier finished turn of the Session: its request, its result, and the messages the Tag
+// wrote during it, each bounded. A turn without a native checkpoint starts from these.
 type AttemptHistoryEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	Prompt        string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
 	Result        *string                `protobuf:"bytes,3,opt,name=result,proto3,oneof" json:"result,omitempty"`
+	Messages      []string               `protobuf:"bytes,4,rep,name=messages,proto3" json:"messages,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -16886,6 +16889,13 @@ func (x *AttemptHistoryEntry) GetResult() string {
 	return ""
 }
 
+func (x *AttemptHistoryEntry) GetMessages() []string {
+	if x != nil {
+		return x.Messages
+	}
+	return nil
+}
+
 type AttemptHistory struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Entries       []*AttemptHistoryEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
@@ -16938,7 +16948,9 @@ type HarnessRun struct {
 	MayAskObjectiveQuestion bool                   `protobuf:"varint,4,opt,name=may_ask_objective_question,json=mayAskObjectiveQuestion,proto3" json:"may_ask_objective_question,omitempty"`
 	Coordination            *AttemptCapabilities   `protobuf:"bytes,5,opt,name=coordination,proto3" json:"coordination,omitempty"`
 	ResolvedSkills          []*ResolvedSkill       `protobuf:"bytes,6,rep,name=resolved_skills,json=resolvedSkills,proto3" json:"resolved_skills,omitempty"`
-	// Prior turns from the same Session, supplied as untrusted evidence to fresh native runs.
+	// The Session's last finished turns, oldest first, as untrusted evidence. An adapter that
+	// does not resume `checkpoint` (none was offered, or the adapter cannot use it) starts its
+	// fresh native session with this recap.
 	History         []*AttemptHistoryEntry `protobuf:"bytes,7,rep,name=history,proto3" json:"history,omitempty"`
 	RemoteWorkspace bool                   `protobuf:"varint,8,opt,name=remote_workspace,json=remoteWorkspace,proto3" json:"remote_workspace,omitempty"`
 	// The supervising Worker Host can capture selected files from this checkout.
@@ -24911,11 +24923,12 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x1eConfirmExecutionLimitsResponse\"D\n" +
 	"\x10AdapterBootstrap\x12\x1a\n" +
 	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05token\"n\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\"\x8a\x01\n" +
 	"\x13AttemptHistoryEntry\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x16\n" +
 	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12\x1b\n" +
-	"\x06result\x18\x03 \x01(\tH\x00R\x06result\x88\x01\x01B\t\n" +
+	"\x06result\x18\x03 \x01(\tH\x00R\x06result\x88\x01\x01\x12\x1a\n" +
+	"\bmessages\x18\x04 \x03(\tR\bmessagesB\t\n" +
 	"\a_result\"T\n" +
 	"\x0eAttemptHistory\x12B\n" +
 	"\aentries\x18\x01 \x03(\v2(.supertag.runtime.v2.AttemptHistoryEntryR\aentries\"\xeb\x05\n" +

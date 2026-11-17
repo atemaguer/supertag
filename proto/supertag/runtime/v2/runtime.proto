@@ -2216,10 +2216,13 @@ message AdapterBootstrap {
   string token = 2;
 }
 
+// One earlier finished turn of the Session: its request, its result, and the messages the Tag
+// wrote during it, each bounded. A turn without a native checkpoint starts from these.
 message AttemptHistoryEntry {
   string task_id = 1;
   string prompt = 2;
   optional string result = 3;
+  repeated string messages = 4;
 }
 
 message AttemptHistory {
@@ -2233,7 +2236,9 @@ message HarnessRun {
   bool may_ask_objective_question = 4;
   AttemptCapabilities coordination = 5;
   repeated ResolvedSkill resolved_skills = 6;
-  // Prior turns from the same Session, supplied as untrusted evidence to fresh native runs.
+  // The Session's last finished turns, oldest first, as untrusted evidence. An adapter that
+  // does not resume `checkpoint` (none was offered, or the adapter cannot use it) starts its
+  // fresh native session with this recap.
   repeated AttemptHistoryEntry history = 7;
   bool remote_workspace = 8;
   // The supervising Worker Host can capture selected files from this checkout.

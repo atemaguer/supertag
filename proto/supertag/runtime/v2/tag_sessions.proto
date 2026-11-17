@@ -18,6 +18,7 @@ service AttemptTagSessions {
   rpc ListSessions(ListTagSessionsRequest) returns (ListTagSessionsResponse);
   rpc SearchSessions(SearchTagSessionsRequest) returns (SearchTagSessionsResponse);
   rpc ReadSession(ReadTagSessionRequest) returns (ReadTagSessionResponse);
+  rpc ReadTurn(ReadTagTurnRequest) returns (ReadTagTurnResponse);
   rpc ListObjectives(ListTagObjectivesRequest) returns (ListTagObjectivesResponse);
   rpc ReadObjective(ReadTagObjectiveRequest) returns (TagObjectiveView);
 }
@@ -28,6 +29,7 @@ service HarnessTagSessions {
   rpc ListSessions(ListTagSessionsRequest) returns (ListTagSessionsResponse);
   rpc SearchSessions(SearchTagSessionsRequest) returns (SearchTagSessionsResponse);
   rpc ReadSession(ReadTagSessionRequest) returns (ReadTagSessionResponse);
+  rpc ReadTurn(ReadTagTurnRequest) returns (ReadTagTurnResponse);
   rpc ListObjectives(ListTagObjectivesRequest) returns (ListTagObjectivesResponse);
   rpc ReadObjective(ReadTagObjectiveRequest) returns (TagObjectiveView);
 }
@@ -110,6 +112,26 @@ message ReadTagSessionResponse {
   TagSessionSummary session = 1;
   repeated TagSessionEntry entries = 2;
   optional uint64 next_before = 3;
+}
+
+// One page of a visible finished turn's kept events: the messages the Tag wrote, its activity
+// lines, and its progress. `after` is a previous page's `next_after`. The caller's own Session's
+// turns are visible too.
+message ReadTagTurnRequest {
+  InspectAttemptRequest attempt = 1;
+  string task_id = 2;
+  optional uint64 after = 3;
+  // At most 100 per page (default 50).
+  uint32 limit = 4;
+}
+
+// Events in order, each at most 4,000 characters, then `[truncated]`; a page stops early at about
+// 512 KiB. `next_after` is set when a later page may exist.
+message ReadTagTurnResponse {
+  string session_id = 1;
+  TaskState state = 2;
+  repeated TaskEvent events = 3;
+  optional uint64 next_after = 4;
 }
 
 message TagObjectiveSummary {

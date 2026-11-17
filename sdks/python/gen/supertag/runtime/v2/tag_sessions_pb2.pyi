@@ -120,6 +120,30 @@ class ReadTagSessionResponse(_message.Message):
     next_before: int
     def __init__(self, session: _Optional[_Union[TagSessionSummary, _Mapping]] = ..., entries: _Optional[_Iterable[_Union[TagSessionEntry, _Mapping]]] = ..., next_before: _Optional[int] = ...) -> None: ...
 
+class ReadTagTurnRequest(_message.Message):
+    __slots__ = ("attempt", "task_id", "after", "limit")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    AFTER_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    attempt: _runtime_pb2.InspectAttemptRequest
+    task_id: str
+    after: int
+    limit: int
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., task_id: _Optional[str] = ..., after: _Optional[int] = ..., limit: _Optional[int] = ...) -> None: ...
+
+class ReadTagTurnResponse(_message.Message):
+    __slots__ = ("session_id", "state", "events", "next_after")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    EVENTS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_AFTER_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    state: _runtime_pb2.TaskState
+    events: _containers.RepeatedCompositeFieldContainer[_runtime_pb2.TaskEvent]
+    next_after: int
+    def __init__(self, session_id: _Optional[str] = ..., state: _Optional[_Union[_runtime_pb2.TaskState, str]] = ..., events: _Optional[_Iterable[_Union[_runtime_pb2.TaskEvent, _Mapping]]] = ..., next_after: _Optional[int] = ...) -> None: ...
+
 class TagObjectiveSummary(_message.Message):
     __slots__ = ("objective_id", "status", "outcome", "deadline_ms", "updated_at_ms", "home_provider", "home_scope")
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]

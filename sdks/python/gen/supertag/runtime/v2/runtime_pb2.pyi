@@ -2944,14 +2944,16 @@ class AdapterBootstrap(_message.Message):
     def __init__(self, endpoint: _Optional[str] = ..., token: _Optional[str] = ...) -> None: ...
 
 class AttemptHistoryEntry(_message.Message):
-    __slots__ = ("task_id", "prompt", "result")
+    __slots__ = ("task_id", "prompt", "result", "messages")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
     RESULT_FIELD_NUMBER: _ClassVar[int]
+    MESSAGES_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     prompt: str
     result: str
-    def __init__(self, task_id: _Optional[str] = ..., prompt: _Optional[str] = ..., result: _Optional[str] = ...) -> None: ...
+    messages: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, task_id: _Optional[str] = ..., prompt: _Optional[str] = ..., result: _Optional[str] = ..., messages: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class AttemptHistory(_message.Message):
     __slots__ = ("entries",)

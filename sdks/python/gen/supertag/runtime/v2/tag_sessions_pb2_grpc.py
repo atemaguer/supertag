@@ -58,6 +58,11 @@ class AttemptTagSessionsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionResponse.FromString,
                 _registered_method=True)
+        self.ReadTurn = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptTagSessions/ReadTurn',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnResponse.FromString,
+                _registered_method=True)
         self.ListObjectives = channel.unary_unary(
                 '/supertag.runtime.v2.AttemptTagSessions/ListObjectives',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ListTagObjectivesRequest.SerializeToString,
@@ -100,6 +105,12 @@ class AttemptTagSessionsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReadTurn(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListObjectives(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -129,6 +140,11 @@ def add_AttemptTagSessionsServicer_to_server(servicer, server):
                     servicer.ReadSession,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionResponse.SerializeToString,
+            ),
+            'ReadTurn': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReadTurn,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnResponse.SerializeToString,
             ),
             'ListObjectives': grpc.unary_unary_rpc_method_handler(
                     servicer.ListObjectives,
@@ -242,6 +258,33 @@ class AttemptTagSessions:
             _registered_method=True)
 
     @staticmethod
+    def ReadTurn(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptTagSessions/ReadTurn',
+            supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def ListObjectives(request,
             target,
             options=(),
@@ -322,6 +365,11 @@ class HarnessTagSessionsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionResponse.FromString,
                 _registered_method=True)
+        self.ReadTurn = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessTagSessions/ReadTurn',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnResponse.FromString,
+                _registered_method=True)
         self.ListObjectives = channel.unary_unary(
                 '/supertag.runtime.v2.HarnessTagSessions/ListObjectives',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ListTagObjectivesRequest.SerializeToString,
@@ -357,6 +405,12 @@ class HarnessTagSessionsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReadTurn(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListObjectives(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -386,6 +440,11 @@ def add_HarnessTagSessionsServicer_to_server(servicer, server):
                     servicer.ReadSession,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionResponse.SerializeToString,
+            ),
+            'ReadTurn': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReadTurn,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnResponse.SerializeToString,
             ),
             'ListObjectives': grpc.unary_unary_rpc_method_handler(
                     servicer.ListObjectives,
@@ -481,6 +540,33 @@ class HarnessTagSessions:
             '/supertag.runtime.v2.HarnessTagSessions/ReadSession',
             supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagSessionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReadTurn(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessTagSessions/ReadTurn',
+            supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_tag__sessions__pb2.ReadTagTurnResponse.FromString,
             options,
             channel_credentials,
             insecure,

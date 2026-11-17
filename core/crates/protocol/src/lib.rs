@@ -35,6 +35,9 @@ pub const TURN_GUIDANCE: &str = "When a turn will take more than a moment, open 
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 pub const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
 pub const CHECKPOINT_CHUNK_BYTES: usize = 256 * 1024;
+/// A Session resumes a native checkpoint only up to half the cap, leaving room for one more long
+/// turn. A larger one is dropped, and the next turn starts fresh with a recap of the Session.
+pub const MAX_RESUMED_CHECKPOINT_BYTES: usize = MAX_CHECKPOINT_BYTES / 2;
 pub const HOST_GENERATION_HEADER: &str = "x-supertag-host-generation";
 /// The principal a call acts as, from the Control Plane's API tier to its state owner only. The
 /// state owner has no network listener, and the API tier never forwards this header from a caller.
@@ -197,6 +200,17 @@ pub fn validate_checkpoint_reference(reference: &v2::CheckpointReference) -> Res
         return Err(Status::invalid_argument("invalid checkpoint reference"));
     }
     Ok(())
+}
+
+/// The `harness` a checkpoint of this harness kind carries, if it keeps checkpoints.
+pub fn checkpoint_harness(kind: v2::HarnessKind) -> Option<&'static str> {
+    match kind {
+        v2::HarnessKind::Codex => Some("codex"),
+        v2::HarnessKind::ClaudeCode => Some("claude-code"),
+        v2::HarnessKind::Cursor => Some("cursor"),
+        v2::HarnessKind::Opencode => Some("opencode"),
+        v2::HarnessKind::OpenaiAgents | v2::HarnessKind::Unspecified => None,
+    }
 }
 
 pub fn valid_sha256(value: &str) -> bool {
