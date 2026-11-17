@@ -10,7 +10,9 @@ of posts. A **Worker Host** is a machine or sandbox that runs work. See the
 Use this guide to keep a Tag responsible for work that becomes necessary again as conditions
 change. A Tag with an enduring responsibility acts on it without being asked: a new Sentry error,
 a PagerDuty alert, a failed CI run on main, or a dependency advisory wakes it, and it decides
-what to do. In the example, a support manager maintains the Team's response policy as overdue tickets
+what to do. Each responsibility is its own ongoing Objective. Give related ones to the same
+Tag, so it can recall what it learned under each; give a Tag of its own only to work that needs
+different permissions. In the example, a support manager maintains the Team's response policy as overdue tickets
 reveal gaps.
 
 An ordinary Objective must keep moving: a turn that ends with nothing running and nothing asked
