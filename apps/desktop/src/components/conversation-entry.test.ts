@@ -183,33 +183,44 @@ it("gives only the last bubble of each group a tail, and shows the operator's de
   expect(html).toMatch(/class="time-divider"[^>]*>Today /);
 });
 
-it("shows the Tag typing until it writes, then its activity line instead", () => {
+it("shows the Tag typing for the whole running turn, last, with its activity as a caption", () => {
   const running = { ...task, state: "running", result: undefined };
-  const typing = renderToStaticMarkup(
-    createElement(ConversationEntry, {
-      message: { order: 1, task: running },
-      onActivity: () => {},
-      onSaveArtifact: async () => false,
-    }),
+  const render = (props: Partial<Parameters<typeof ConversationEntry>[0]>) =>
+    renderToStaticMarkup(
+      createElement(ConversationEntry, {
+        message: { order: 1, task: running },
+        onActivity: () => {},
+        onSaveArtifact: async () => false,
+        ...props,
+      }),
+    );
+  // Before the first line: the dots alone, and no "Working" status.
+  const waiting = render({});
+  expect(waiting).toContain("typing-bubble");
+  expect(waiting).toContain('aria-label="engineer is working · View Task activity"');
+  expect(waiting).not.toContain("task-status");
+  expect(waiting).not.toContain("typing-caption");
+
+  // After an intermediate message: the message, then the dots last with the activity under them.
+  const working = render({
+    events: [
+      { sequence: 1, kind: "message", text: "I'll check the lockfile first." },
+      { sequence: 2, kind: "activity", text: "Running pnpm test" },
+    ],
+  });
+  expect(working.indexOf("tag-message")).toBeLessThan(working.indexOf("typing-bubble"));
+  expect(working).toMatch(/class="[^"]*\bbubble tag-message"/);
+  expect(working).toContain("typing-bubble tail");
+  expect(working).toMatch(/class="typing-caption"[^>]*>.*Running pnpm test/);
+  expect(working).toContain(
+    'aria-label="engineer is working: Running pnpm test · View Task activity"',
   );
-  expect(typing).toContain("typing-bubble");
-  expect(typing).toContain('aria-label="engineer is working"');
-  const active = renderToStaticMarkup(
-    createElement(ConversationEntry, {
-      message: { order: 1, task: running },
-      events: [{ sequence: 1, kind: "activity", text: "Running pnpm test" }],
-      onActivity: () => {},
-      onSaveArtifact: async () => false,
-    }),
-  );
-  expect(active).not.toContain("typing-bubble");
-  expect(active).toContain("Running pnpm test");
-  const done = renderToStaticMarkup(
-    createElement(ConversationEntry, {
-      message: { order: 1, task },
-      onActivity: () => {},
-      onSaveArtifact: async () => false,
-    }),
-  );
+  // The caption replaces the separate activity line and the status line.
+  expect(working).not.toContain('class="turn-status"');
+  expect(working).not.toContain("task-status");
+
+  // Finished: no dots, and the status returns as the way into the activity.
+  const done = render({ message: { order: 1, task } });
   expect(done).not.toContain("typing-bubble");
+  expect(done).toContain("Completed · View Task activity");
 });

@@ -460,26 +460,30 @@ button:disabled {
 .tag-row[data-status="working"] .tag-row-badge {
   background: #efd4a0;
 }
-/* Three dots that rise in turn, as a messaging app shows someone typing. */
+/* Three dots that rise in turn, as a messaging app shows someone typing: small in a sidebar row,
+   large in the transcript's typing bubble. */
 .working-dots {
+  --dot: 5px;
+  --dot-gap: 3px;
+  --dot-lift: -2px;
   display: inline-flex;
-  gap: 3px;
+  gap: var(--dot-gap);
   align-items: center;
-  height: 16px;
+  height: calc(var(--dot) * 2);
 }
 .working-dots > span {
-  width: 5px;
-  height: 5px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   background: currentColor;
   opacity: 0.4;
-  animation: working-dot 1.2s infinite ease-in-out;
+  animation: working-dot 1.3s infinite ease-in-out;
 }
 .working-dots > span:nth-child(2) {
-  animation-delay: 0.15s;
+  animation-delay: 0.16s;
 }
 .working-dots > span:nth-child(3) {
-  animation-delay: 0.3s;
+  animation-delay: 0.32s;
 }
 @keyframes working-dot {
   0%,
@@ -490,12 +494,23 @@ button:disabled {
   }
   30% {
     opacity: 1;
-    transform: translateY(-2px);
+    transform: translateY(var(--dot-lift));
+  }
+}
+/* Without motion the dots pulse softly in place. */
+@keyframes working-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.85;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .working-dots > span {
-    animation: none;
+    animation: working-dot-pulse 2.4s infinite ease-in-out;
+    animation-delay: 0s;
   }
 }
 .sidebar-bottom {
@@ -922,16 +937,50 @@ button:disabled {
 .user-turn .bubble.tail {
   border-bottom-right-radius: 6px;
 }
+/* The typing bubble: a message bubble with large dots, with what the Tag does now under it. */
+.typing {
+  max-width: 65%;
+}
+.typing-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
 .typing-bubble {
   display: flex;
   align-items: center;
-  height: 40px;
-  padding: 0 16px;
-  color: var(--muted);
+  justify-content: center;
+  min-width: 116px;
+  min-height: 76px;
+  padding: 24px;
+  color: #a39ea6;
 }
-.typing-bubble .working-dots > span {
-  width: 7px;
-  height: 7px;
+.typing-button:hover .typing-bubble {
+  background: var(--hover);
+}
+.typing-button[aria-expanded="true"] .typing-bubble {
+  box-shadow: 0 0 0 1px #776358;
+}
+.typing-bubble .working-dots {
+  --dot: 14px;
+  --dot-gap: 9px;
+  --dot-lift: -5px;
+}
+.typing-caption {
+  max-width: 100%;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Under the operator's last message: Sending…, Sent, Seen, or Not delivered with a retry. */
 .delivery {

@@ -51,6 +51,10 @@ until you come back, even after a restart, and a message not yet accepted is sen
 time you open the app. When you scroll up, the terminal UI counts the Tag's new messages in its
 title, and End jumps to them.
 
+In the desktop app, the `···` stays at the end of the Tag's reply for as long as it works, after
+its first sentence and any later messages, with its current step under it; select it to see the
+Task's activity. Once the answer arrives, the reply shows its status instead.
+
 In the desktop app, drag the sidebar's edge to resize it, or past its narrowest to fold it into a
 rail of avatars; ⌘B does the same. The Task activity pane resizes from its edge too. ⌘1 to ⌘9 open
 the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘F searches them by name; use Ctrl in

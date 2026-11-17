@@ -80,8 +80,9 @@ export function ConversationEntry({
     ...turn.messages.map((text) => ({ text, className: "tag-message" })),
     ...(task.result && !joined ? [{ text: task.result, className: "result-text" }] : []),
   ];
-  // Before the Tag writes anything, it is typing; once it has, the activity line shows instead.
-  const typing = working && !joined && bubbles.length === 0 && !turn.status;
+  // While the turn runs the Tag is typing, after whatever it has written so far, until its result.
+  const typing = working && !joined && !task.result;
+  const openActivity = (trigger: HTMLButtonElement) => onActivity(activityTask, trigger);
   return (
     <>
       {divider !== undefined && (
@@ -111,45 +112,64 @@ export function ConversationEntry({
               text={bubble.text}
               markdown
               className={bubble.className}
-              tail={index === bubbles.length - 1}
+              tail={!typing && index === bubbles.length - 1}
             />
           ))}
           {typing && (
-            <div
-              className="bubble typing-bubble tail"
-              role="status"
-              aria-label={`${task.tagId} is working`}
-            >
-              <span className="working-dots" aria-hidden>
-                <span />
-                <span />
-                <span />
-              </span>
+            // The dots stand for the running turn, so they open its activity, with what the Tag
+            // is doing now under them.
+            <div className="typing" role="status">
+              <button
+                type="button"
+                className="typing-button"
+                aria-label={`${task.tagId} is working${turn.status ? `: ${turn.status}` : ""} · View Task activity`}
+                aria-expanded={activeTask === activityTask}
+                aria-controls={activeTask ? "activity" : undefined}
+                onClick={(event) => openActivity(event.currentTarget)}
+              >
+                <span className="bubble typing-bubble tail" aria-hidden>
+                  <span className="working-dots">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                </span>
+                {turn.status && (
+                  <span className="typing-caption" aria-hidden>
+                    <Shimmer as="span">{turn.status}</Shimmer>
+                  </span>
+                )}
+              </button>
             </div>
           )}
           {!joined && task.artifacts && task.artifacts.length > 0 && (
             <ResultFiles artifacts={task.artifacts} onSave={onSaveArtifact} />
           )}
-          {turn.status && (
+          {!typing && turn.status && (
             <div className="turn-status" role="status">
-              {working ? <Shimmer as="span">{turn.status}</Shimmer> : turn.status}
+              {turn.status}
             </div>
           )}
-          <div className="turn-meta">
-            {report && <span className="report-label">Work Session report</span>}
-            <Button
-              variant="ghost"
-              className="task-status"
-              data-state={task.state}
-              aria-label={`${status} · View Task activity`}
-              aria-expanded={activeTask === activityTask}
-              aria-controls={activeTask ? "activity" : undefined}
-              onClick={(event) => onActivity(activityTask, event.currentTarget)}
-            >
-              <span className="status-dot" aria-hidden />
-              {status}
-            </Button>
-          </div>
+          {/* The dots say a running turn is working; a settled one shows its status here. */}
+          {(report || !typing) && (
+            <div className="turn-meta">
+              {report && <span className="report-label">Work Session report</span>}
+              {!typing && (
+                <Button
+                  variant="ghost"
+                  className="task-status"
+                  data-state={task.state}
+                  aria-label={`${status} · View Task activity`}
+                  aria-expanded={activeTask === activityTask}
+                  aria-controls={activeTask ? "activity" : undefined}
+                  onClick={(event) => openActivity(event.currentTarget)}
+                >
+                  <span className="status-dot" aria-hidden />
+                  {status}
+                </Button>
+              )}
+            </div>
+          )}
         </Message>
       </article>
     </>
