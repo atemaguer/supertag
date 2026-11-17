@@ -46,7 +46,12 @@ const ENDING_SIGNALS: [i32; 3] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP];
 /// `exit_if_interrupted` then ends the command; the signal at any other time ends the command at
 /// once, with the status the signal's default action would report to a shell. Never used by the
 /// supervisor, which handles its own signals.
-pub async fn interactive_deadline(timeout: Duration) {
+///
+/// The handlers are installed when this is called, not when the returned future is first
+/// polled: callers create the deadline before starting the probe it bounds, so a signal that
+/// arrives as soon as the probe runs is already handled. Installed lazily, a signal in that
+/// window took its default action and left the probe and its home behind.
+pub fn interactive_deadline(timeout: Duration) -> impl Future<Output = ()> {
     struct Active;
     impl Drop for Active {
         fn drop(&mut self) {
@@ -54,7 +59,7 @@ pub async fn interactive_deadline(timeout: Duration) {
         }
     }
     ACTIVE.fetch_add(1, Ordering::SeqCst);
-    let _active = Active;
+    let active = Active;
     let mut interrupted = INTERRUPTED
         .get_or_init(|| {
             let (sender, _) = watch::channel(None);
@@ -77,9 +82,12 @@ pub async fn interactive_deadline(timeout: Duration) {
             sender
         })
         .subscribe();
-    tokio::select! {
-        () = tokio::time::sleep(timeout) => {}
-        _ = interrupted.wait_for(Option::is_some) => {}
+    async move {
+        let _active = active;
+        tokio::select! {
+            () = tokio::time::sleep(timeout) => {}
+            _ = interrupted.wait_for(Option::is_some) => {}
+        }
     }
 }
 
