@@ -11,6 +11,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A work Session may run on another harness than its lead: `start_session` takes an optional
+  `harness`, and the work Session runs only on a Worker Host bound to the Tag that offers it.
 - Operators see a Tag's network log, the web requests its Task Attempts made through the Worker
   Host's egress proxy, allowed or refused, in the desktop app's Tag details under **Network** and
   under **Network** in the terminal UI's command palette.
@@ -133,6 +135,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A Tag keeps one harness: changing an existing Tag's harness is refused (create a new Tag
+  instead), and a Session's saved state is no longer dropped for a harness change.
 - Each turn's Workspace delivery bundle carries only what the turn added on top of its start
   commit (about 500 bytes instead of the whole history, 44 MB on this repository). A reader
   without the start commit, such as `supertag fetch` into another clone or a new host, gets a
