@@ -893,7 +893,7 @@ impl Workspace {
         copy.flush()?;
         let repository = self.repository(cancel).await?;
         repository
-            .import_bundle(copy.path(), expected_head, cancel)
+            .import_bundle(copy.path(), expected_head, None, cancel)
             .await?;
         repository.sync()?;
         Ok(())

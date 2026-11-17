@@ -369,6 +369,8 @@ async fn incremental_delivery_bundles_build_on_a_start_commit_the_host_holds() {
                         session_id: session.into(),
                         expected_head: expected,
                         setup: None,
+                        merge_commit: None,
+                        author: None,
                     },
                     &CancellationToken::new(),
                 )
