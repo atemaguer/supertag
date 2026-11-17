@@ -1,34 +1,39 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, ListTree } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ControlPlane, Message as TagMessage, TaskEvent } from "../control-plane";
 import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
-import { Shimmer } from "./ai-elements/shimmer";
 import { ExternalLink } from "./external-link";
 import { ResultFiles } from "./result-files";
 import { dividerLabel, RUNNING } from "./transcript";
 import { Button } from "./ui/button";
 
-function statusText(taskState: string, inputState?: string) {
+/**
+ * What a settled turn says under its reply, only when there is something to say: a turn that
+ * succeeded says nothing. The tone colours it: muted, a warning, or an error.
+ */
+export function turnNotice(
+  taskState: string,
+  inputState?: string,
+): { text: string; tone: "muted" | "warning" | "error" } | undefined {
+  const input = {
+    pending: { text: "Waiting to join the running Task", tone: "muted" },
+    dispatching: { text: "Joining the running Task", tone: "muted" },
+    accepted: { text: "Joined the running Task", tone: "muted" },
+    unknown: { text: "Delivery uncertain", tone: "warning" },
+    withdrawn: { text: "Not delivered to the running Task", tone: "error" },
+  }[inputState ?? ""] as { text: string; tone: "muted" | "warning" | "error" } | undefined;
+  if (input) return input;
   return (
     {
-      pending: "Waiting to join Task",
-      dispatching: "Joining Task",
-      accepted: "Joined active Task",
-      unknown: "Delivery uncertain",
-      withdrawn: "Withdrawn",
-    }[inputState ?? ""] ??
-    {
-      queued: "Queued",
-      claimed: "Starting",
-      running: "Working",
-      succeeded: "Completed",
-      failed: "Failed",
-      cancelled: "Cancelled",
-      uncertain: "Needs attention",
-    }[taskState] ??
-    "Pending"
-  );
+      queued: { text: "Queued", tone: "muted" },
+      claimed: { text: "Starting", tone: "muted" },
+      running: { text: "Working", tone: "muted" },
+      failed: { text: "Failed", tone: "error" },
+      cancelled: { text: "Cancelled", tone: "warning" },
+      uncertain: { text: "Interrupted: needs attention", tone: "warning" },
+    } as Record<string, { text: string; tone: "muted" | "warning" | "error" }>
+  )[taskState];
 }
 
 /** A conversation entry that shows its turn's messages and activity, and reads newer ones while it runs. */
@@ -71,7 +76,7 @@ export function ConversationEntry({
   const { task, workSessionReportId } = message;
   const report = workSessionReportId !== undefined;
   const input = report ? undefined : message.liveInput;
-  const status = statusText(task.state, input?.state);
+  const notice = turnNotice(task.state, input?.state);
   const joined = input?.state === "accepted";
   const activityTask = joined ? input.taskId : task.taskId;
   const turn = turnView(joined ? [] : events, task.result);
@@ -83,6 +88,11 @@ export function ConversationEntry({
   // While the turn runs the Tag is typing, after whatever it has written so far, until its result.
   const typing = working && !joined && !task.result;
   const openActivity = (trigger: HTMLButtonElement) => onActivity(activityTask, trigger);
+  const activity = {
+    expanded: activeTask === activityTask,
+    controls: activeTask ? "activity" : undefined,
+    open: openActivity,
+  };
   return (
     <>
       {divider !== undefined && (
@@ -113,11 +123,13 @@ export function ConversationEntry({
               markdown
               className={bubble.className}
               tail={!typing && index === bubbles.length - 1}
+              // A settled reply opens its activity from its last bubble's actions.
+              activity={!typing && index === bubbles.length - 1 ? activity : undefined}
             />
           ))}
           {typing && (
-            // The dots stand for the running turn, so they open its activity, with what the Tag
-            // is doing now under them.
+            // The dots alone say the Tag is working, as in a messaging app. They open the turn's
+            // activity, and only their label names the current step.
             <div className="typing" role="status">
               <button
                 type="button"
@@ -134,40 +146,34 @@ export function ConversationEntry({
                     <span />
                   </span>
                 </span>
-                {turn.status && (
-                  <span className="typing-caption" aria-hidden>
-                    <Shimmer as="span">{turn.status}</Shimmer>
-                  </span>
-                )}
               </button>
             </div>
           )}
           {!joined && task.artifacts && task.artifacts.length > 0 && (
             <ResultFiles artifacts={task.artifacts} onSave={onSaveArtifact} />
           )}
-          {!typing && turn.status && (
-            <div className="turn-status" role="status">
-              {turn.status}
+          {report && (
+            <div className="turn-meta">
+              <span className="report-label">Work Session report</span>
             </div>
           )}
-          {/* The dots say a running turn is working; a settled one shows its status here. */}
-          {(report || !typing) && (
+          {/* A settled turn says something here only when it did not simply succeed, or when it
+              has no bubble whose actions open its activity. */}
+          {!typing && (notice || bubbles.length === 0) && (
             <div className="turn-meta">
-              {report && <span className="report-label">Work Session report</span>}
-              {!typing && (
-                <Button
-                  variant="ghost"
-                  className="task-status"
-                  data-state={task.state}
-                  aria-label={`${status} · View Task activity`}
-                  aria-expanded={activeTask === activityTask}
-                  aria-controls={activeTask ? "activity" : undefined}
-                  onClick={(event) => openActivity(event.currentTarget)}
-                >
-                  <span className="status-dot" aria-hidden />
-                  {status}
-                </Button>
-              )}
+              <Button
+                variant="ghost"
+                className="task-status"
+                data-state={task.state}
+                data-tone={notice?.tone ?? "muted"}
+                aria-label={`${notice?.text ?? "Completed"} · View Task activity`}
+                aria-expanded={activity.expanded}
+                aria-controls={activity.controls}
+                onClick={(event) => openActivity(event.currentTarget)}
+              >
+                <span className="status-dot" aria-hidden />
+                {notice?.text ?? "View activity"}
+              </Button>
             </div>
           )}
         </Message>
@@ -182,6 +188,7 @@ export function Bubble({
   markdown,
   className,
   tail,
+  activity,
 }: {
   text: string;
   /** The Tag writes markdown; the operator's text shows as typed. */
@@ -189,6 +196,8 @@ export function Bubble({
   className: string;
   /** The last bubble of a group, which gets the tail corner. */
   tail?: boolean;
+  /** Opens the turn's Task activity from the bubble's actions. */
+  activity?: { expanded: boolean; controls?: string; open(trigger: HTMLButtonElement): void };
 }) {
   return (
     <div className="bubble-row">
@@ -201,7 +210,23 @@ export function Bubble({
           text
         )}
       </MessageContent>
-      <CopyText text={text} />
+      <div className="bubble-actions">
+        <CopyText text={text} />
+        {activity && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="icon-button"
+            aria-label="View Task activity"
+            title="View Task activity"
+            aria-expanded={activity.expanded}
+            aria-controls={activity.controls}
+            onClick={(event) => activity.open(event.currentTarget)}
+          >
+            <ListTree size={14} aria-hidden />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -214,22 +239,20 @@ function CopyText({ text }: { text: string }) {
     return () => window.clearTimeout(timer);
   }, [copied]);
   return (
-    <div className="bubble-actions">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="icon-button"
-        aria-label={copied ? "Copied" : "Copy message"}
-        title={copied ? "Copied" : "Copy message"}
-        onClick={() =>
-          navigator.clipboard.writeText(text).then(
-            () => setCopied(true),
-            () => {},
-          )
-        }
-      >
-        {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-      </Button>
-    </div>
+    <Button
+      variant="ghost"
+      size="icon"
+      className="icon-button"
+      aria-label={copied ? "Copied" : "Copy message"}
+      title={copied ? "Copied" : "Copy message"}
+      onClick={() =>
+        navigator.clipboard.writeText(text).then(
+          () => setCopied(true),
+          () => {},
+        )
+      }
+    >
+      {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+    </Button>
   );
 }

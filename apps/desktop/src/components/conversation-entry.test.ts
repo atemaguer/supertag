@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import type { Message } from "../control-plane";
-import { ConversationEntry } from "./conversation-entry";
+import { ConversationEntry, turnNotice } from "./conversation-entry";
 
 const task: Message["task"] = {
   taskId: "report-task",
@@ -33,7 +33,7 @@ it("renders a Work Session report as Tag output with activity and no operator bu
   expect(html).toContain('aria-expanded="true"');
   expect(html).not.toContain("user-turn");
   expect(html).not.toContain(task.prompt);
-  expect(html).not.toContain("Joined active Task");
+  expect(html).not.toContain("Joined the running Task");
 });
 
 it("keeps the operator prompt and joined Task activity on ordinary messages", () => {
@@ -51,7 +51,7 @@ it("keeps the operator prompt and joined Task activity on ordinary messages", ()
   );
   expect(html).toContain("user-turn");
   expect(html).toContain("Check the update.");
-  expect(html).toContain("Joined active Task");
+  expect(html).toContain("Joined the running Task");
   expect(html).toContain('aria-expanded="true"');
   expect(html).not.toContain("Work Session report");
   expect(html).not.toContain(task.result);
@@ -72,7 +72,10 @@ it("offers the selected Task result files in the Tag reply", () => {
   expect(html).toContain('aria-label="Save outputs/report.md"');
 });
 
-it("shows each message the Tag wrote, its current activity, and then its reply once", () => {
+/** What a reader sees: the text, without markup or attributes such as accessible labels. */
+const visible = (html: string) => html.replace(/<[^>]*>/g, "");
+
+it("shows each message the Tag wrote, and then its reply once, but never its activity", () => {
   const running = renderToStaticMarkup(
     createElement(ConversationEntry, {
       message: { order: 1, task: { ...task, state: "running", result: undefined } },
@@ -85,7 +88,7 @@ it("shows each message the Tag wrote, its current activity, and then its reply o
     }),
   );
   expect(running).toContain("I&#x27;ll check the lockfile first.");
-  expect(running).toContain("Running pnpm install");
+  expect(visible(running)).not.toContain("Running pnpm install");
   const done = renderToStaticMarkup(
     createElement(ConversationEntry, {
       message: { order: 1, task },
@@ -127,22 +130,30 @@ it("renders the operator's prompt as written and the Tag's messages and result a
   expect(html).toMatch(/data-streamdown="list-item">tests pass</);
 });
 
-it("animates the activity line only while the Task runs", () => {
+it("keeps activity and progress out of the transcript, running or ended without a result", () => {
   const render = (state: string) =>
     renderToStaticMarkup(
       createElement(ConversationEntry, {
         message: { order: 1, task: { ...task, state, result: undefined } },
-        events: [{ sequence: 1, kind: "activity", text: "Running pnpm test" }],
+        events: [
+          { sequence: 1, kind: "activity", text: "Running pnpm test" },
+          {
+            sequence: 2,
+            kind: "progress",
+            text: JSON.stringify({ progress: { summary: "Fix the race" } }),
+          },
+        ],
         onActivity: () => {},
         onSaveArtifact: async () => false,
       }),
     );
   const running = render("running");
-  expect(running).toContain("Running pnpm test");
-  expect(running).toContain("bg-clip-text");
+  expect(visible(running)).not.toMatch(/Running pnpm test|Fix the race/);
+  // Only the dots' accessible label names the current step.
+  expect(running).toContain('aria-label="engineer is working: Fix the race · View Task activity"');
   const failed = render("failed");
-  expect(failed).toContain("Running pnpm test");
-  expect(failed).not.toContain("bg-clip-text");
+  expect(visible(failed)).not.toMatch(/Running pnpm test|Fix the race/);
+  expect(visible(failed)).toContain("Failed");
 });
 
 it("gives each message its own bubble with a copy action, and no avatar or name header", () => {
@@ -162,7 +173,10 @@ it("gives each message its own bubble with a copy action, and no avatar or name 
   expect(html.match(/class="[^"]*\bbubble prompt-text\b/g)).toHaveLength(1);
   expect(html.match(/aria-label="Copy message"/g)).toHaveLength(4);
   expect(html).not.toContain('class="avatar');
-  expect(html).toContain("Completed · View Task activity");
+  // A turn that succeeded says nothing under its reply; its last bubble's actions open the activity.
+  expect(html).not.toContain("task-status");
+  expect(html).not.toContain("Completed");
+  expect(html.match(/aria-label="View Task activity"/g)).toHaveLength(1);
 });
 
 it("gives only the last bubble of each group a tail, and shows the operator's delivery", () => {
@@ -183,7 +197,7 @@ it("gives only the last bubble of each group a tail, and shows the operator's de
   expect(html).toMatch(/class="time-divider"[^>]*>Today /);
 });
 
-it("shows the Tag typing for the whole running turn, last, with its activity as a caption", () => {
+it("shows the Tag typing for the whole running turn, last, as dots alone", () => {
   const running = { ...task, state: "running", result: undefined };
   const render = (props: Partial<Parameters<typeof ConversationEntry>[0]>) =>
     renderToStaticMarkup(
@@ -199,9 +213,8 @@ it("shows the Tag typing for the whole running turn, last, with its activity as 
   expect(waiting).toContain("typing-bubble");
   expect(waiting).toContain('aria-label="engineer is working · View Task activity"');
   expect(waiting).not.toContain("task-status");
-  expect(waiting).not.toContain("typing-caption");
 
-  // After an intermediate message: the message, then the dots last with the activity under them.
+  // After an intermediate message: the message, then the dots alone, last.
   const working = render({
     events: [
       { sequence: 1, kind: "message", text: "I'll check the lockfile first." },
@@ -211,16 +224,38 @@ it("shows the Tag typing for the whole running turn, last, with its activity as 
   expect(working.indexOf("tag-message")).toBeLessThan(working.indexOf("typing-bubble"));
   expect(working).toMatch(/class="[^"]*\bbubble tag-message"/);
   expect(working).toContain("typing-bubble tail");
-  expect(working).toMatch(/class="typing-caption"[^>]*>.*Running pnpm test/);
+  expect(visible(working)).not.toContain("Running pnpm test");
   expect(working).toContain(
     'aria-label="engineer is working: Running pnpm test · View Task activity"',
   );
-  // The caption replaces the separate activity line and the status line.
-  expect(working).not.toContain('class="turn-status"');
   expect(working).not.toContain("task-status");
 
   // Finished: no dots, and the status returns as the way into the activity.
   const done = render({ message: { order: 1, task } });
   expect(done).not.toContain("typing-bubble");
-  expect(done).toContain("Completed · View Task activity");
+  expect(done).not.toContain("task-status");
+  expect(done).toContain('aria-label="View Task activity"');
+});
+
+it("says how a turn ended only when it did not simply succeed", () => {
+  const render = (state: string, liveInput?: { taskId: string; state: string }) =>
+    renderToStaticMarkup(
+      createElement(ConversationEntry, {
+        message: { order: 1, task: { ...task, state, result: undefined }, liveInput },
+        onActivity: () => {},
+        onSaveArtifact: async () => false,
+      }),
+    );
+  expect(render("failed")).toMatch(/data-tone="error"[^>]*>.*Failed/);
+  expect(render("cancelled")).toMatch(/data-tone="warning"[^>]*>.*Cancelled/);
+  expect(render("uncertain")).toContain("Interrupted: needs attention");
+  expect(render("cancelled", { taskId: "x", state: "withdrawn" })).toContain(
+    "Not delivered to the running Task",
+  );
+  expect(render("succeeded", { taskId: "x", state: "unknown" })).toMatch(
+    /data-tone="warning"[^>]*>.*Delivery uncertain/,
+  );
+  expect(turnNotice("succeeded")).toBeUndefined();
+  // A succeeded turn with nothing to show still offers its activity.
+  expect(render("succeeded")).toContain("View activity");
 });

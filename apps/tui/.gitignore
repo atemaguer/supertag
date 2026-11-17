@@ -1,1 +1,4 @@
 dist/
+# `go build` and `go test -c` in this directory.
+/tui
+/tui.test

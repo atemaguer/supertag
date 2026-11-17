@@ -59,7 +59,7 @@ function controlPlaneOrigin(value: string): URL {
 /** Names, on every call, the protocol version this client negotiated with the Control Plane. */
 const PROTOCOL_HEADER = "x-supertag-protocol";
 /** The SuperTag protocol versions this client speaks. */
-const PROTOCOL_VERSIONS = [2];
+const PROTOCOL_VERSIONS = [3];
 
 function refusedByControlPlane(error: unknown): ConnectError {
   const status = ConnectError.from(error);

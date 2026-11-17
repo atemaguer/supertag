@@ -39,7 +39,7 @@ func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 // secure, and returns the target that trusts it, without a URL.
 func testControlPlane(t *testing.T, handler http.Handler, secure bool) (*httptest.Server, Target) {
 	t.Helper()
-	negotiation := testNegotiation(t, []uint32{2})
+	negotiation := testNegotiation(t, []uint32{3})
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor != 2 || r.Header.Get("Content-Type") != "application/grpc" {
 			t.Errorf("expected binary gRPC/HTTP2, got %s %s", r.Proto, r.Header.Get("Content-Type"))
@@ -54,7 +54,7 @@ func testControlPlane(t *testing.T, handler http.Handler, secure bool) (*httptes
 		if r.Header.Get("Authorization") != "Bearer test-operator" || r.Header.Get(clientVersionHeader) != "test-version" {
 			t.Error("missing expected authentication or version header")
 		}
-		if r.Header.Get(protocolHeader) != "2" {
+		if r.Header.Get(protocolHeader) != "3" {
 			t.Errorf("call %s did not name the negotiated protocol version", r.URL.Path)
 		}
 		handler.ServeHTTP(w, r)
@@ -89,7 +89,8 @@ func testNegotiation(t *testing.T, versions []uint32) http.Handler {
 				return &v2.NegotiateProtocolResponse{Role: v2.ServiceRole_SERVICE_ROLE_CONTROL_PLANE, ProtocolVersion: version, ProtocolVersions: versions, BuildVersion: "0.1.0"}, nil
 			}
 		}
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag test-version) offered [2]"))
+		// The refusal a SuperTag 0.3.0 Control Plane sends, word for word.
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("incompatible SuperTag protocol: this Control Plane (SuperTag 0.3.0) speaks protocol versions [2], but the connecting operator client (SuperTag test-version) offered [3]; run the same SuperTag release on both services"))
 	})
 	return mux
 }
@@ -98,7 +99,7 @@ func TestRuntimeV2RefusesAControlPlaneFromAnotherProtocolEpoch(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == rpc.ProtocolNegotiationNegotiateProcedure {
-			testNegotiation(t, []uint32{1}).ServeHTTP(w, r)
+			testNegotiation(t, []uint32{2}).ServeHTTP(w, r)
 			return
 		}
 		calls.Add(1)
@@ -115,8 +116,8 @@ func TestRuntimeV2RefusesAControlPlaneFromAnotherProtocolEpoch(t *testing.T) {
 	t.Cleanup(c.Close)
 	_, err = c.ListTags(t.Context())
 	var refused *APIError
-	if !errors.As(err, &refused) || refused.Code != connect.CodeFailedPrecondition ||
-		refused.Message != "the SuperTag Control Plane refused this operator client: incompatible SuperTag protocol: this Control Plane (SuperTag 0.1.0) speaks protocol versions [1], but the connecting operator client (SuperTag test-version) offered [2]" {
+	if !errors.As(err, &refused) || refused.Code != connect.CodeFailedPrecondition || !ProtocolMismatch(err) ||
+		refused.Message != "This TUI speaks SuperTag protocol 3, but the Control Plane at "+server.URL+" runs SuperTag 0.3.0 (protocol 2). Upgrade the Control Plane." {
 		t.Fatalf("ListTags against an old Control Plane = %v", err)
 	}
 	if calls.Load() != 0 {

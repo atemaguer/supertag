@@ -44,6 +44,16 @@ users to depend on them. The `supertag` PyPI package is the Python SDK in `sdks/
 `core/crates/control-plane/migrations/sqlite` and `core/crates/control-plane/migrations/postgresql`,
 and its tests run on both databases (`::sqlite` and `::postgres` cases).
 
+**Changing `proto/` means deciding the protocol version.** `proto/protocol.lock` pairs the
+protocol version with a digest of `proto/`, and `cargo test -p supertag-protocol --test
+protocol_lock` fails until you update it. If a peer from the last release would misread or refuse
+the change (a removed, renamed or renumbered field, method or message; a changed type; a new
+meaning for an old value), bump `PROTOCOL_VERSIONS` in `core/crates/protocol/src/negotiation.rs`
+and its copies in `sdks/typescript/src/control-plane-client.ts`,
+`sdks/python/src/supertag/control_plane_client.py`, and `apps/tui/client/protocol.go`, and write the
+new version to the lock. Before a stable release a build speaks only the current version; peers
+from earlier releases are refused at connect with an error naming both releases.
+
 **`docs/` is for users and integrators.** Explain how to use SuperTag and how it works.
 Put contributor workflows, repository layout, testing, and simulation instructions in
 `CONTRIBUTING.md`; do not add internal progress or validation reports to public docs. The

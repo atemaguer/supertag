@@ -941,7 +941,7 @@ button:disabled {
 .user-turn .bubble.tail {
   border-bottom-right-radius: 6px;
 }
-/* The typing bubble: a message bubble with large dots, with what the Tag does now under it. */
+/* The typing bubble: a one-line message bubble of dots that opens the turn's activity. */
 .typing {
   max-width: var(--bubble-max);
 }
@@ -961,9 +961,9 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 116px;
-  min-height: 76px;
-  padding: 24px;
+  /* As tall as a one-line message bubble, so it lines up with a short reply. */
+  min-height: calc(14px * 1.55 + 20px);
+  padding: 0 16px;
   color: #a39ea6;
 }
 .typing-button:hover .typing-bubble {
@@ -973,18 +973,9 @@ button:disabled {
   box-shadow: 0 0 0 1px #776358;
 }
 .typing-bubble .working-dots {
-  --dot: 14px;
-  --dot-gap: 9px;
-  --dot-lift: -5px;
-}
-.typing-caption {
-  max-width: 100%;
-  padding: 0 6px;
-  color: var(--muted);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  --dot: 7px;
+  --dot-gap: 5px;
+  --dot-lift: -3px;
 }
 /* Under the operator's last message: Sending…, Sent, Seen, or Not delivered with a retry. */
 .delivery {
@@ -1057,6 +1048,8 @@ button:disabled {
   background: rgb(0 0 0 / 24%);
 }
 .bubble-actions {
+  display: flex;
+  gap: 2px;
   flex-shrink: 0;
   opacity: 0;
   transition: opacity 120ms;
@@ -1064,15 +1057,6 @@ button:disabled {
 .bubble-row:hover .bubble-actions,
 .bubble-actions:focus-within {
   opacity: 1;
-}
-.turn-status {
-  max-width: var(--bubble-max);
-  padding: 2px 6px;
-  color: var(--muted);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .turn-meta {
   display: flex;
@@ -1115,6 +1099,19 @@ button:disabled {
 }
 .task-status[data-state="failed"] .status-dot,
 .task-status[data-state="uncertain"] .status-dot {
+  background: #ffb7a9;
+}
+/* A settled turn's notice: a warning or an error stands out from the muted text. */
+.task-status[data-tone="warning"] {
+  color: #efd4a0;
+}
+.task-status[data-tone="warning"] .status-dot {
+  background: #efd4a0;
+}
+.task-status[data-tone="error"] {
+  color: #ffb7a9;
+}
+.task-status[data-tone="error"] .status-dot {
   background: #ffb7a9;
 }
 .result-files {

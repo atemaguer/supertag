@@ -33,6 +33,15 @@ within the pre-1.0 compatibility policy described in
 
 - The README's multiplayer diagram shows personal and shared Tags coordinating work across local
   machines, teammates' machines, and VMs.
+- The SuperTag protocol version is now 3, because conversations changed on the wire since 0.3.0.
+  A CLI, terminal UI, desktop app, or Worker Host from this release refuses a 0.3.0 Control Plane
+  (protocol 2) when it connects, and the error names both releases and which to upgrade, for
+  example: "This app speaks SuperTag protocol 3, but the Control Plane at http://127.0.0.1:3434
+  runs SuperTag 0.3.0 (protocol 2). Upgrade the Control Plane." Before, a newer desktop app
+  connected and then failed every conversation request.
+- The desktop app shows the Control Plane's reason when it rejects a request as invalid, instead
+  of "Check its values".
+
 - `/goal <outcome>` is the one command that creates an Objective, in every conversation: the
   terminal UI, the desktop app, the conversations API, and Slack and Microsoft Teams channels,
   where it follows the app's mention (`@SuperTag /goal <outcome>`). The Control Plane creates the

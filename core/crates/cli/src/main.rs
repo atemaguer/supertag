@@ -1787,7 +1787,9 @@ async fn gateway(
     let channel = control_plane_target.connect().await?;
     // Refuse an incompatible Control Plane before accepting any public traffic,
     // and name the selected version on every call to it.
-    let channel = connect(channel, ServiceRole::Gateway, ServiceRole::ControlPlane).await?;
+    let channel = connect(channel, ServiceRole::Gateway, ServiceRole::ControlPlane)
+        .await
+        .map_err(|error| error.at(control_plane_target.url()))?;
     let gateway_token = gateway_credential(&control_plane_target, credential_directory)?;
     let slack = match connectors.slack {
         Some((ingress, state_directory)) => {

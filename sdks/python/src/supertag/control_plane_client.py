@@ -95,7 +95,7 @@ def _connection(url: str, token: str, *, ca: bytes | None, identity: tuple[bytes
 # Every call names the protocol version this client negotiated with the Control Plane, which
 # refuses a call without it.
 _PROTOCOL_HEADER = "x-supertag-protocol"
-_PROTOCOL_VERSIONS = (2,)
+_PROTOCOL_VERSIONS = (3,)
 _NEGOTIATION_TIMEOUT = 5.0
 
 

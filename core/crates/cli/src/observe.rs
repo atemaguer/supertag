@@ -793,7 +793,10 @@ pub async fn watch(connection: Connection, args: WatchArgs) -> Result<()> {
                 // Errors a retry cannot fix end the command at once.
                 if matches!(
                     error.downcast_ref::<supertag_protocol::negotiation::NegotiationError>(),
-                    Some(supertag_protocol::negotiation::NegotiationError::Incompatible(_))
+                    Some(
+                        supertag_protocol::negotiation::NegotiationError::Incompatible(_)
+                            | supertag_protocol::negotiation::NegotiationError::Mismatch(_)
+                    )
                 ) {
                     return Err(error);
                 }
