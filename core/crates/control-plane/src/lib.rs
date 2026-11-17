@@ -11,6 +11,7 @@ mod audit_sink;
 mod budget_pool;
 mod changed_paths;
 mod checkpoints;
+mod claims;
 mod commit_reviews;
 mod connector_leases;
 mod context;
@@ -565,17 +566,12 @@ impl worker_host_server::WorkerHost for ControlPlane {
     ) -> Result<Response<ClaimTaskResponse>, Status> {
         let principal = self.host_authority(&request)?;
         let input = request.into_inner();
-        let harness = HarnessKind::try_from(input.harness_kind)
-            .map_err(|_| Status::invalid_argument("unknown harness kind"))?;
         let assignment = self
             .store
-            .claim_task_with_sources(
+            .claim_task_waiting(
                 &principal,
-                &input.operation_id,
-                (&input.workspace_ids, &input.gateway_workspace_ids),
-                harness,
-                &input.context_contracts,
-                input.execution_profile.as_ref(),
+                &input,
+                std::time::Duration::from_millis(input.wait_ms.into()),
             )
             .await?;
         if assignment.is_some() {
@@ -1043,6 +1039,7 @@ mod tests {
             context_contracts: vec![],
             execution_profile: None,
             gateway_workspace_ids: vec![],
+            wait_ms: 0,
         };
         assert_eq!(
             cp.claim_task(

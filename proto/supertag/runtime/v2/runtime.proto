@@ -2041,6 +2041,10 @@ message ClaimTaskRequest {
   repeated ContextContract context_contracts = 4;
   HarnessExecutionProfile execution_profile = 5;
   repeated string gateway_workspace_ids = 6;
+  // How long the Control Plane may hold a claim that finds no Task, waiting for one; it answers
+  // as soon as one can be claimed. Zero answers at once. The Control Plane holds a claim for at
+  // most 8 seconds, and a host's claims beyond a few at once are answered at once.
+  uint32 wait_ms = 7;
 }
 
 message ClaimTaskResponse {

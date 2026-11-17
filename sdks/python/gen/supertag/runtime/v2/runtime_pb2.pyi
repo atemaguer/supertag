@@ -2680,20 +2680,22 @@ class CancelTaskRequest(_message.Message):
     def __init__(self, task_id: _Optional[str] = ...) -> None: ...
 
 class ClaimTaskRequest(_message.Message):
-    __slots__ = ("operation_id", "workspace_ids", "harness_kind", "context_contracts", "execution_profile", "gateway_workspace_ids")
+    __slots__ = ("operation_id", "workspace_ids", "harness_kind", "context_contracts", "execution_profile", "gateway_workspace_ids", "wait_ms")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_CONTRACTS_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_PROFILE_FIELD_NUMBER: _ClassVar[int]
     GATEWAY_WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
+    WAIT_MS_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     workspace_ids: _containers.RepeatedScalarFieldContainer[str]
     harness_kind: HarnessKind
     context_contracts: _containers.RepeatedCompositeFieldContainer[ContextContract]
     execution_profile: HarnessExecutionProfile
     gateway_workspace_ids: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, operation_id: _Optional[str] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., context_contracts: _Optional[_Iterable[_Union[ContextContract, _Mapping]]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., gateway_workspace_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+    wait_ms: int
+    def __init__(self, operation_id: _Optional[str] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., context_contracts: _Optional[_Iterable[_Union[ContextContract, _Mapping]]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., gateway_workspace_ids: _Optional[_Iterable[str]] = ..., wait_ms: _Optional[int] = ...) -> None: ...
 
 class ClaimTaskResponse(_message.Message):
     __slots__ = ("assignment",)

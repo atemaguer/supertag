@@ -247,8 +247,18 @@ fn claim_request(
             &options.execution_profile,
             &options.mcp_catalog.lapsed_logins(),
         )),
+        // `--once` answers whether there is work now; otherwise the Control Plane holds an empty
+        // claim until a Task can be claimed.
+        wait_ms: if options.once {
+            0
+        } else {
+            CLAIM_WAIT.as_millis() as u32
+        },
     }
 }
+
+/// How long the Control Plane may hold an empty claim. Inside the API tier's call budget.
+const CLAIM_WAIT: Duration = Duration::from_secs(6);
 
 pub async fn run(
     mut options: HostOptions,
@@ -559,9 +569,22 @@ pub async fn run(
                 }
                 supertag_protocol::crash_point("worker-host.claim", "journaled");
                 presence.first_report(Duration::from_secs(5)).await;
-                let response = host
-                    .claim_task(request(claim, &token)?)
-                    .await;
+                let mut claim = claim;
+                if ready.is_some() {
+                    // The host says it is ready after its first claim answers, so that one
+                    // is not held.
+                    claim.wait_ms = 0;
+                }
+                let mut claim_request = request(claim, &token)?;
+                claim_request.set_timeout(CLAIM_WAIT + Duration::from_secs(3));
+                let sent = Instant::now();
+                // Shutdown ends a held claim; the journaled Claim replays with the same operation
+                // on the next start, so an assignment made meanwhile is not lost. A retiring lane
+                // lets its claim answer, at most a few seconds later.
+                let response = tokio::select! {
+                    response = host.claim_task(claim_request) => response,
+                    _ = shutdown.cancelled() => continue,
+                };
                 let assignment = match response {
                     Ok(response) => response.into_inner().assignment,
                     Err(error) if retryable(&error) => {
@@ -583,6 +606,10 @@ pub async fn run(
                     journal.clear()?;
                     if options.once {
                         return Ok(());
+                    }
+                    // A claim the Control Plane held already waited; claim again at once.
+                    if sent.elapsed() >= Duration::from_secs(1) {
+                        continue;
                     }
                     match &retire {
                         Some(retire) => tokio::select! {

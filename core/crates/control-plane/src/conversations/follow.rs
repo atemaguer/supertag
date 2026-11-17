@@ -34,10 +34,12 @@ const TRACKED: usize = 128;
 
 /// In-process signals for open follows, and the text of the messages running turns write.
 pub(crate) struct Live {
-    changes: tokio::sync::watch::Sender<u64>,
+    pub(crate) changes: tokio::sync::watch::Sender<u64>,
     text_changes: tokio::sync::watch::Sender<u64>,
     pub(crate) texts: super::texts::Texts,
-    closing: CancellationToken,
+    /// Worker Host claims held while they wait for a Task.
+    pub(crate) claims: crate::claims::HeldClaims,
+    pub(crate) closing: CancellationToken,
 }
 
 impl Default for Live {
@@ -46,6 +48,7 @@ impl Default for Live {
             changes: tokio::sync::watch::Sender::new(0),
             text_changes: tokio::sync::watch::Sender::new(0),
             texts: Default::default(),
+            claims: Default::default(),
             closing: CancellationToken::new(),
         }
     }

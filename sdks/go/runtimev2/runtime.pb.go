@@ -15275,8 +15275,12 @@ type ClaimTaskRequest struct {
 	ContextContracts    []*ContextContract       `protobuf:"bytes,4,rep,name=context_contracts,json=contextContracts,proto3" json:"context_contracts,omitempty"`
 	ExecutionProfile    *HarnessExecutionProfile `protobuf:"bytes,5,opt,name=execution_profile,json=executionProfile,proto3" json:"execution_profile,omitempty"`
 	GatewayWorkspaceIds []string                 `protobuf:"bytes,6,rep,name=gateway_workspace_ids,json=gatewayWorkspaceIds,proto3" json:"gateway_workspace_ids,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// How long the Control Plane may hold a claim that finds no Task, waiting for one; it answers
+	// as soon as one can be claimed. Zero answers at once. The Control Plane holds a claim for at
+	// most 8 seconds, and a host's claims beyond a few at once are answered at once.
+	WaitMs        uint32 `protobuf:"varint,7,opt,name=wait_ms,json=waitMs,proto3" json:"wait_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ClaimTaskRequest) Reset() {
@@ -15349,6 +15353,13 @@ func (x *ClaimTaskRequest) GetGatewayWorkspaceIds() []string {
 		return x.GatewayWorkspaceIds
 	}
 	return nil
+}
+
+func (x *ClaimTaskRequest) GetWaitMs() uint32 {
+	if x != nil {
+		return x.WaitMs
+	}
+	return 0
 }
 
 type ClaimTaskResponse struct {
@@ -24788,14 +24799,15 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12ListEventsResponse\x126\n" +
 	"\x06events\x18\x01 \x03(\v2\x1e.supertag.runtime.v2.TaskEventR\x06events\",\n" +
 	"\x11CancelTaskRequest\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\tR\x06taskId\"\x81\x03\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\"\x9a\x03\n" +
 	"\x10ClaimTaskRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12#\n" +
 	"\rworkspace_ids\x18\x02 \x03(\tR\fworkspaceIds\x12C\n" +
 	"\fharness_kind\x18\x03 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\x12Q\n" +
 	"\x11context_contracts\x18\x04 \x03(\v2$.supertag.runtime.v2.ContextContractR\x10contextContracts\x12Y\n" +
 	"\x11execution_profile\x18\x05 \x01(\v2,.supertag.runtime.v2.HarnessExecutionProfileR\x10executionProfile\x122\n" +
-	"\x15gateway_workspace_ids\x18\x06 \x03(\tR\x13gatewayWorkspaceIds\"T\n" +
+	"\x15gateway_workspace_ids\x18\x06 \x03(\tR\x13gatewayWorkspaceIds\x12\x17\n" +
+	"\await_ms\x18\a \x01(\rR\x06waitMs\"T\n" +
 	"\x11ClaimTaskResponse\x12?\n" +
 	"\n" +
 	"assignment\x18\x01 \x01(\v2\x1f.supertag.runtime.v2.AssignmentR\n" +
