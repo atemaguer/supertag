@@ -2469,7 +2469,7 @@ class Task(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., quiet: _Optional[bool] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ..., execution_report: _Optional[_Union[TaskExecutionReport, _Mapping]] = ..., network_logs: _Optional[_Iterable[_Union[AttemptNetworkLog, _Mapping]]] = ...) -> None: ...
 
 class TaskExecutionReport(_message.Message):
-    __slots__ = ("limit_outcome", "max_reported_tokens", "max_reported_cost", "max_native_agents", "limits_applied", "usage_complete", "complete", "cleanup", "cleanup_failure")
+    __slots__ = ("limit_outcome", "max_reported_tokens", "max_reported_cost", "max_native_agents", "limits_applied", "usage_complete", "complete", "cleanup", "cleanup_failure", "failure_detail")
     LIMIT_OUTCOME_FIELD_NUMBER: _ClassVar[int]
     MAX_REPORTED_TOKENS_FIELD_NUMBER: _ClassVar[int]
     MAX_REPORTED_COST_FIELD_NUMBER: _ClassVar[int]
@@ -2479,6 +2479,7 @@ class TaskExecutionReport(_message.Message):
     COMPLETE_FIELD_NUMBER: _ClassVar[int]
     CLEANUP_FIELD_NUMBER: _ClassVar[int]
     CLEANUP_FAILURE_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_DETAIL_FIELD_NUMBER: _ClassVar[int]
     limit_outcome: ExecutionLimitOutcome
     max_reported_tokens: ExecutionThreshold
     max_reported_cost: ExecutionThreshold
@@ -2488,7 +2489,8 @@ class TaskExecutionReport(_message.Message):
     complete: bool
     cleanup: AttemptCleanup
     cleanup_failure: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, limit_outcome: _Optional[_Union[ExecutionLimitOutcome, str]] = ..., max_reported_tokens: _Optional[_Union[ExecutionThreshold, str]] = ..., max_reported_cost: _Optional[_Union[ExecutionThreshold, str]] = ..., max_native_agents: _Optional[_Union[ExecutionThreshold, str]] = ..., limits_applied: _Optional[bool] = ..., usage_complete: _Optional[bool] = ..., complete: _Optional[bool] = ..., cleanup: _Optional[_Union[AttemptCleanup, str]] = ..., cleanup_failure: _Optional[_Iterable[str]] = ...) -> None: ...
+    failure_detail: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, limit_outcome: _Optional[_Union[ExecutionLimitOutcome, str]] = ..., max_reported_tokens: _Optional[_Union[ExecutionThreshold, str]] = ..., max_reported_cost: _Optional[_Union[ExecutionThreshold, str]] = ..., max_native_agents: _Optional[_Union[ExecutionThreshold, str]] = ..., limits_applied: _Optional[bool] = ..., usage_complete: _Optional[bool] = ..., complete: _Optional[bool] = ..., cleanup: _Optional[_Union[AttemptCleanup, str]] = ..., cleanup_failure: _Optional[_Iterable[str]] = ..., failure_detail: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ReportCleanupFailureRequest(_message.Message):
     __slots__ = ("attempt", "reasons")
@@ -3053,7 +3055,7 @@ class TaskEvent(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ..., kind: _Optional[_Union[TaskEventKind, str]] = ...) -> None: ...
 
 class FinishTaskRequest(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256", "workspace_delivery", "waiting_approval_ids", "artifacts", "quiet")
+    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256", "workspace_delivery", "waiting_approval_ids", "artifacts", "quiet", "failure_detail")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
@@ -3065,6 +3067,7 @@ class FinishTaskRequest(_message.Message):
     WAITING_APPROVAL_IDS_FIELD_NUMBER: _ClassVar[int]
     ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     QUIET_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_DETAIL_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     attempt_id: str
     lease_token: str
@@ -3076,7 +3079,8 @@ class FinishTaskRequest(_message.Message):
     waiting_approval_ids: _containers.RepeatedScalarFieldContainer[str]
     artifacts: _containers.RepeatedCompositeFieldContainer[ArtifactSelection]
     quiet: bool
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., waiting_approval_ids: _Optional[_Iterable[str]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., quiet: _Optional[bool] = ...) -> None: ...
+    failure_detail: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., waiting_approval_ids: _Optional[_Iterable[str]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., quiet: _Optional[bool] = ..., failure_detail: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class HarnessAttachRequest(_message.Message):
     __slots__ = ()

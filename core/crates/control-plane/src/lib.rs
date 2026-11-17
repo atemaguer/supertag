@@ -428,7 +428,7 @@ impl operator_server::Operator for ControlPlane {
         let task_id = request.into_inner().task_id;
         self.store.ensure_task_access(&principal, &task_id).await?;
         let mut task = self.store.get_task(&task_id).await?;
-        task.execution_report = Some(self.store.task_execution_report(&task).await?);
+        task.execution_report = Some(self.store.task_execution_report(&task, &principal).await?);
         Ok(Response::new(task))
     }
 

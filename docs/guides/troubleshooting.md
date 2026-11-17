@@ -116,7 +116,10 @@ supertag get reply
 the Tag wrote, `activity` for what it did, or `progress` for its plan. `get reply` shows whether
 the Gateway delivered the reply. When a Task failed, `supertag logs HOST_NAME` shows why: the
 Worker Host logs the failure with the last lines its harness adapter wrote to standard error,
-secrets hidden. A reply whose delivery is uncertain waits for
+secrets hidden. When the Worker Host itself failed the Task, for example because it could not
+capture the output, the result is a fixed message and `supertag describe task TASK_ID` shows the
+reason under the execution report's `failure_detail`: at most eight lines, secrets hidden, shown
+to operators only and never in a reply, conversation, or client's view of the Task. A reply whose delivery is uncertain waits for
 `supertag reply resolve REPLY_ID --decision ... --evidence ...` after you check the thread.
 
 ## A Task Attempt is uncertain

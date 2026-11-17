@@ -77,6 +77,7 @@ async fn claim_start(
 
 fn finish(identity: &InspectAttemptRequest, signal: ObjectiveSignal) -> FinishTaskRequest {
     FinishTaskRequest {
+        failure_detail: vec![],
         waiting_approval_ids: vec![],
         artifacts: vec![],
         workspace_delivery: None,

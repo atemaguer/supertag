@@ -297,6 +297,7 @@ pub(crate) async fn capture(
                     {
                         REQUIRED_OUTPUT_MISSING
                     } else {
+                        crate::failures::note(OUTPUTS_FAILED, &error);
                         OUTPUTS_FAILED
                     };
                     Status::failed_precondition(message)

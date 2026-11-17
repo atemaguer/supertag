@@ -156,6 +156,9 @@ pub(crate) enum Entry {
         prepared: Option<Box<PreparedWorkspace>>,
         #[serde(default)]
         outputs: Option<Box<crate::task_outputs::PendingOutputs>>,
+        /// Why the host failed the Attempt, for operators: see `failures::take_detail`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        failure_detail: Vec<String>,
     },
     Terminal {
         #[serde(flatten)]

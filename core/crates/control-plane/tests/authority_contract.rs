@@ -135,6 +135,7 @@ fn event(identity: &InspectAttemptRequest, text: &str) -> AppendEventRequest {
 
 fn finish(identity: &InspectAttemptRequest) -> FinishTaskRequest {
     FinishTaskRequest {
+        failure_detail: vec![],
         waiting_approval_ids: vec![],
         artifacts: vec![],
         workspace_delivery: None,

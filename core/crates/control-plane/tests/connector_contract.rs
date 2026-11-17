@@ -43,6 +43,7 @@ async fn finish(store: &Store, task_id: &str, succeeded: bool) -> FinishTaskRequ
         .await
         .unwrap();
     let finish = FinishTaskRequest {
+        failure_detail: vec![],
         waiting_approval_ids: vec![],
         artifacts: vec![],
         workspace_delivery: None,

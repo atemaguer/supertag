@@ -20,6 +20,8 @@ use supertag_protocol::v2::{
 };
 use uuid::Uuid;
 
+const OPERATOR: &str = "operator:alice";
+const CLIENT: &str = "client:mallory";
 const BASE: i64 = 1_790_000_000_000;
 const LEASE: i64 = 30_000;
 
@@ -136,7 +138,7 @@ fn failure(attempt: &InspectAttemptRequest, reasons: &[&str]) -> ReportCleanupFa
 
 async fn report(store: &Store, task_id: &str) -> (Task, TaskExecutionReport) {
     let task = store.get_task(task_id).await.unwrap();
-    let report = store.task_execution_report(&task).await.unwrap();
+    let report = store.task_execution_report(&task, OPERATOR).await.unwrap();
     (task, report)
 }
 
@@ -339,6 +341,89 @@ async fn execution_report_contract(url: &str) {
     store.close().await;
 }
 
+fn failed(attempt: &InspectAttemptRequest, detail: &[&str]) -> FinishTaskRequest {
+    FinishTaskRequest {
+        task_id: attempt.task_id.clone(),
+        attempt_id: attempt.attempt_id.clone(),
+        lease_token: attempt.lease_token.clone(),
+        result: "Remote Workspace output could not be captured safely".into(),
+        succeeded: false,
+        failure_detail: detail.iter().map(|line| (*line).to_owned()).collect(),
+        ..Default::default()
+    }
+}
+
+/// A failed Attempt's failure detail: bounded, redacted, and read by operators only. Clients get the Task's fixed result, as surface replies and conversations do.
+async fn failure_detail_contract(url: &str) {
+    let store = Store::open(url).await.unwrap();
+    let host = support::register_host(&store, "laptop").await;
+    store.put_tag("worker", "Edit files", vec![]).await.unwrap();
+    let task = submit(&store, "detail", None).await;
+    let attempt = start(&store, &host, "detail").await;
+
+    // Only a failed Attempt carries detail, of at most eight one-line reasons of 160 characters.
+    let mut succeeded = failed(&attempt, &["provider: sandbox refused the capture"]);
+    succeeded.succeeded = true;
+    succeeded.result = "Done".into();
+    for refused in [
+        succeeded,
+        failed(&attempt, &["one"; 9]),
+        failed(&attempt, &[&"x".repeat(161)]),
+        failed(&attempt, &["two\nlines"]),
+        failed(&attempt, &[" "]),
+    ] {
+        assert!(matches!(
+            store.finish_task(&host, &refused).await,
+            Err(StoreError::InvalidArgument(_))
+        ));
+    }
+    let finished = store
+        .finish_task(
+            &host,
+            &failed(
+                &attempt,
+                &[
+                    "Remote Workspace output could not be captured safely: capture: provider exited 1",
+                    "fetch https://bot:hunter2-secret@example.test/archive failed",
+                ],
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(finished.state(), TaskState::Failed);
+    let task_row = store.get_task(&task).await.unwrap();
+    // The Task, which surfaces and conversations read, carries the fixed result alone.
+    assert_eq!(
+        task_row.result.as_deref(),
+        Some("Remote Workspace output could not be captured safely")
+    );
+    assert!(task_row.execution_report.is_none());
+    let operator = store
+        .task_execution_report(&task_row, OPERATOR)
+        .await
+        .unwrap();
+    assert_eq!(operator.failure_detail.len(), 2);
+    assert_eq!(
+        operator.failure_detail[0],
+        "Remote Workspace output could not be captured safely: capture: provider exited 1"
+    );
+    assert!(!operator.failure_detail[1].contains("hunter2-secret"));
+    let client = store
+        .task_execution_report(&task_row, CLIENT)
+        .await
+        .unwrap();
+    assert!(client.failure_detail.is_empty(), "{client:?}");
+    assert_eq!(
+        client,
+        TaskExecutionReport {
+            failure_detail: vec![],
+            ..operator.clone()
+        }
+    );
+
+    store.close().await;
+}
+
 #[tokio::test]
 async fn sqlite_execution_report_contract() {
     let directory = tempfile::tempdir().unwrap();
@@ -376,4 +461,43 @@ async fn postgres_execution_report_contract() {
         .unwrap();
     admin.close().await.unwrap();
     outcome.expect("PostgreSQL execution report contract failed");
+}
+
+#[tokio::test]
+async fn sqlite_failure_detail_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("detail.db").display()
+    );
+    failure_detail_contract(&url).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_failure_detail_contract() {
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .expect("PostgreSQL test URL file required");
+    let admin_url = std::fs::read_to_string(path).unwrap();
+    let name = format!("supertag_rust_report_{}", Uuid::new_v4().simple());
+    let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
+    admin
+        .execute(format!("CREATE DATABASE {name}").as_str())
+        .await
+        .unwrap();
+    let mut url = url::Url::parse(admin_url.trim()).unwrap();
+    url.set_path(&name);
+    let local = tokio::task::LocalSet::new();
+    let outcome = local
+        .run_until(async move {
+            tokio::task::spawn_local(async move { failure_detail_contract(url.as_str()).await })
+                .await
+        })
+        .await;
+    admin
+        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+        .await
+        .unwrap();
+    admin.close().await.unwrap();
+    outcome.expect("PostgreSQL failure detail contract failed");
 }

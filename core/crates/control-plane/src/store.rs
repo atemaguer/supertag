@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 91;
+        const SCHEMA_VERSION: i64 = 92;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -290,6 +290,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0089_quiet_results.sql"),
                 include_str!("../migrations/sqlite/0090_attempt_network_logs.sql"),
                 include_str!("../migrations/sqlite/0091_event_receipt_expiry.sql"),
+                include_str!("../migrations/sqlite/0092_failure_detail.sql"),
             ]
         } else {
             [
@@ -386,6 +387,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0089_quiet_results.sql"),
                 include_str!("../migrations/postgresql/0090_attempt_network_logs.sql"),
                 include_str!("../migrations/postgresql/0091_event_receipt_expiry.sql"),
+                include_str!("../migrations/postgresql/0092_failure_detail.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1064,7 +1066,7 @@ impl Store {
         let attempt = Uuid::new_v4().to_string();
         let lease = Uuid::new_v4().to_string();
         let attempt_execution = attempt_execution.encode_to_vec();
-        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL WHERE task_id = $8")
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL, failure_detail = NULL WHERE task_id = $8")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
         // Later messages from the person join this run, so one reply answers them all.
@@ -1273,6 +1275,17 @@ impl Store {
     ) -> Result<Task> {
         let _wake = self.wake_follows();
         text("result", &input.result, 262_144)?;
+        if input.succeeded && !input.failure_detail.is_empty() {
+            return Err(invalid("only a failed Attempt has failure detail"));
+        }
+        if input.failure_detail.len() > crate::execution_report::MAX_REASONS {
+            return Err(invalid("at most eight failure detail reasons are allowed"));
+        }
+        let failure_detail =
+            crate::execution_report::checked_reasons(&input.failure_detail, "failure detail")?;
+        let failure_detail = (!failure_detail.is_empty())
+            .then(|| serde_json::to_string(&failure_detail))
+            .transpose()?;
         if !input.succeeded && input.checkpoint_sha256.is_some() {
             return Err(invalid(
                 "only a successful Attempt can advance a checkpoint",
@@ -1354,8 +1367,8 @@ impl Store {
             let quiet =
                 crate::attention::quiet_finish_in(&mut transaction, &task_row(&row)?, input)
                     .await?;
-            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL, finish_objective_signal = $3, finish_checkpoint_sha256 = $4, quiet = $5 WHERE task_id = $6")
-                .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.checkpoint_sha256).bind(i64::from(quiet)).bind(&input.task_id)
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL, finish_objective_signal = $3, finish_checkpoint_sha256 = $4, quiet = $5, failure_detail = $6 WHERE task_id = $7")
+                .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.checkpoint_sha256).bind(i64::from(quiet)).bind(&failure_detail).bind(&input.task_id)
                 .execute(&mut *transaction).await?;
         }
         let task = task_in(&mut transaction, &input.task_id).await?;

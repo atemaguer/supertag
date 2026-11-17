@@ -1,4 +1,5 @@
-//! The Task execution report's classifications, and the host's cleanup failure reasons.
+//! The Task execution report's classifications, the host's cleanup failure reasons, and its
+//! operator-only failure detail.
 //!
 //! TypeScript parity: `taskExecutionLimitReport` and the `cleanup` and `cleanupFailure` fields of
 //! `taskExecutionPlacementReport` (`packages/control-plane/src/task-execution-report.ts`), computed
@@ -30,15 +31,26 @@ pub(crate) const MAX_REASONS: usize = 8;
 pub(crate) const MAX_REASON_CHARS: usize = 160;
 
 impl Store {
-    /// The Task execution report of a Task's current Attempt, which `GetTask` adds to the Task.
-    pub async fn task_execution_report(&self, task: &Task) -> Result<TaskExecutionReport> {
+    /// The Task execution report of a Task's current Attempt, which `GetTask` adds to the Task,
+    /// as `principal` may read it. The host's failure detail can name paths and native output,
+    /// so only an operator reads it; a client, like a surface reply or a conversation, gets the
+    /// Task's fixed result alone.
+    pub async fn task_execution_report(
+        &self,
+        task: &Task,
+        principal: &str,
+    ) -> Result<TaskExecutionReport> {
         name("Task ID", &task.task_id)?;
         let row = sqlx::query("SELECT * FROM supertag_v2_tasks WHERE task_id = $1")
             .bind(&task.task_id)
             .fetch_optional(&self.pool)
             .await?
             .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?;
-        report_for(&self.pool, &row, task, self.execution_now_ms()).await
+        let mut report = report_for(&self.pool, &row, task, self.execution_now_ms()).await?;
+        if !principal.starts_with("operator:") {
+            report.failure_detail.clear();
+        }
+        Ok(report)
     }
 
     /// Records why the host could not confirm the current Attempt's cleanup. The host redacts
@@ -56,18 +68,7 @@ impl Store {
         if input.reasons.is_empty() || input.reasons.len() > MAX_REASONS {
             return Err(invalid("one to eight cleanup failure reasons are required"));
         }
-        let mut reasons = Vec::with_capacity(input.reasons.len());
-        for reason in &input.reasons {
-            if reason.trim().is_empty()
-                || reason.chars().count() > MAX_REASON_CHARS
-                || reason.chars().any(char::is_control)
-            {
-                return Err(invalid(
-                    "a cleanup failure reason must be one line of at most 160 characters",
-                ));
-            }
-            reasons.push(bounded(&redact_text(reason, &[], true)));
-        }
+        let reasons = checked_reasons(&input.reasons, "a cleanup failure reason")?;
         name("Task ID", &attempt.task_id)?;
         name("Task Attempt ID", &attempt.attempt_id)?;
         name("lease token", &attempt.lease_token)?;
@@ -119,6 +120,24 @@ fn bounded(text: &str) -> String {
     text.chars().take(MAX_REASON_CHARS).collect()
 }
 
+/// A host's reasons, each one line of at most 160 characters; the Control Plane also hides
+/// explicit credentials, such as URL userinfo, that the host's own redaction did not know.
+pub(crate) fn checked_reasons(reasons: &[String], what: &str) -> Result<Vec<String>> {
+    let mut checked = Vec::with_capacity(reasons.len());
+    for reason in reasons {
+        if reason.trim().is_empty()
+            || reason.chars().count() > MAX_REASON_CHARS
+            || reason.chars().any(char::is_control)
+        {
+            return Err(invalid(&format!(
+                "{what} must be one line of at most 160 characters"
+            )));
+        }
+        checked.push(bounded(&redact_text(reason, &[], true)));
+    }
+    Ok(checked)
+}
+
 /// What an Attempt's durable records show; read once per report.
 struct Observed {
     tokens: Option<u64>,
@@ -139,6 +158,11 @@ async fn report_for(
     let observed_cleanup = row.try_get::<i64, _>("cleanup_observed")? == 1;
     let failure: Vec<String> = row
         .try_get::<Option<String>, _>("cleanup_failure")?
+        .map(|value| serde_json::from_str(&value))
+        .transpose()?
+        .unwrap_or_default();
+    let detail: Vec<String> = row
+        .try_get::<Option<String>, _>("failure_detail")?
         .map(|value| serde_json::from_str(&value))
         .transpose()?
         .unwrap_or_default();
@@ -208,6 +232,7 @@ async fn report_for(
     let mut report = classify(task, &observed, terminal);
     report.cleanup = cleanup as i32;
     report.cleanup_failure = failure;
+    report.failure_detail = detail;
     Ok(report)
 }
 
@@ -320,6 +345,7 @@ fn classify(task: &Task, observed: &Observed, terminal: bool) -> TaskExecutionRe
         complete,
         cleanup: AttemptCleanup::Unspecified as i32,
         cleanup_failure: vec![],
+        failure_detail: vec![],
     }
 }
 

@@ -1931,6 +1931,10 @@ message TaskExecutionReport {
   // The host's redacted reasons when it could not confirm cleanup: at most 8, each at most 160
   // characters. Cleared when the host later confirms cleanup.
   repeated string cleanup_failure = 9;
+  // Why the Worker Host failed the Attempt, behind the Task's fixed result: the host's redacted
+  // reasons, at most 8, each at most 160 characters. Shown to operators only; empty for every
+  // other caller and when the host gave none.
+  repeated string failure_detail = 10;
 }
 
 message ReportCleanupFailureRequest {
@@ -2352,6 +2356,9 @@ message FinishTaskRequest {
   // The turn found nothing that needs attention (`stay_quiet`): it posts nothing to its surface or
   // conversation. Honored only for a successful progress turn that `may_stay_quiet`.
   bool quiet = 11;
+  // For a failed Attempt, why the host failed it behind `result`: at most 8 redacted reasons,
+  // each one line of at most 160 characters. Stored for operators only.
+  repeated string failure_detail = 12;
 }
 
 message HarnessAttachRequest {}

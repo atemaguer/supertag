@@ -13952,8 +13952,12 @@ type TaskExecutionReport struct {
 	// The host's redacted reasons when it could not confirm cleanup: at most 8, each at most 160
 	// characters. Cleared when the host later confirms cleanup.
 	CleanupFailure []string `protobuf:"bytes,9,rep,name=cleanup_failure,json=cleanupFailure,proto3" json:"cleanup_failure,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Why the Worker Host failed the Attempt, behind the Task's fixed result: the host's redacted
+	// reasons, at most 8, each at most 160 characters. Shown to operators only; empty for every
+	// other caller and when the host gave none.
+	FailureDetail []string `protobuf:"bytes,10,rep,name=failure_detail,json=failureDetail,proto3" json:"failure_detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskExecutionReport) Reset() {
@@ -14045,6 +14049,13 @@ func (x *TaskExecutionReport) GetCleanup() AttemptCleanup {
 func (x *TaskExecutionReport) GetCleanupFailure() []string {
 	if x != nil {
 		return x.CleanupFailure
+	}
+	return nil
+}
+
+func (x *TaskExecutionReport) GetFailureDetail() []string {
+	if x != nil {
+		return x.FailureDetail
 	}
 	return nil
 }
@@ -17424,7 +17435,10 @@ type FinishTaskRequest struct {
 	Artifacts          []*ArtifactSelection        `protobuf:"bytes,10,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
 	// The turn found nothing that needs attention (`stay_quiet`): it posts nothing to its surface or
 	// conversation. Honored only for a successful progress turn that `may_stay_quiet`.
-	Quiet         bool `protobuf:"varint,11,opt,name=quiet,proto3" json:"quiet,omitempty"`
+	Quiet bool `protobuf:"varint,11,opt,name=quiet,proto3" json:"quiet,omitempty"`
+	// For a failed Attempt, why the host failed it behind `result`: at most 8 redacted reasons,
+	// each one line of at most 160 characters. Stored for operators only.
+	FailureDetail []string `protobuf:"bytes,12,rep,name=failure_detail,json=failureDetail,proto3" json:"failure_detail,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -17534,6 +17548,13 @@ func (x *FinishTaskRequest) GetQuiet() bool {
 		return x.Quiet
 	}
 	return false
+}
+
+func (x *FinishTaskRequest) GetFailureDetail() []string {
+	if x != nil {
+		return x.FailureDetail
+	}
+	return nil
 }
 
 type HarnessAttachRequest struct {
@@ -25588,7 +25609,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\fnetwork_logs\x18\xb4) \x03(\v2&.supertag.runtime.v2.AttemptNetworkLogR\vnetworkLogsB\t\n" +
 	"\a_resultB\r\n" +
 	"\v_attempt_idB\x16\n" +
-	"\x14_workspace_selection\"\xd3\x04\n" +
+	"\x14_workspace_selection\"\xfa\x04\n" +
 	"\x13TaskExecutionReport\x12O\n" +
 	"\rlimit_outcome\x18\x01 \x01(\x0e2*.supertag.runtime.v2.ExecutionLimitOutcomeR\flimitOutcome\x12W\n" +
 	"\x13max_reported_tokens\x18\x02 \x01(\x0e2'.supertag.runtime.v2.ExecutionThresholdR\x11maxReportedTokens\x12S\n" +
@@ -25598,7 +25619,9 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x0eusage_complete\x18\x06 \x01(\bH\x00R\rusageComplete\x88\x01\x01\x12\x1a\n" +
 	"\bcomplete\x18\a \x01(\bR\bcomplete\x12=\n" +
 	"\acleanup\x18\b \x01(\x0e2#.supertag.runtime.v2.AttemptCleanupR\acleanup\x12'\n" +
-	"\x0fcleanup_failure\x18\t \x03(\tR\x0ecleanupFailureB\x11\n" +
+	"\x0fcleanup_failure\x18\t \x03(\tR\x0ecleanupFailure\x12%\n" +
+	"\x0efailure_detail\x18\n" +
+	" \x03(\tR\rfailureDetailB\x11\n" +
 	"\x0f_usage_complete\"}\n" +
 	"\x1bReportCleanupFailureRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x18\n" +
@@ -25884,7 +25907,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\tTaskEvent\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x126\n" +
-	"\x04kind\x18\x03 \x01(\x0e2\".supertag.runtime.v2.TaskEventKindR\x04kind\"\xa9\x04\n" +
+	"\x04kind\x18\x03 \x01(\x0e2\".supertag.runtime.v2.TaskEventKindR\x04kind\"\xd0\x04\n" +
 	"\x11FinishTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
 	"\n" +
@@ -25899,7 +25922,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x14waiting_approval_ids\x18\t \x03(\tR\x12waitingApprovalIds\x12D\n" +
 	"\tartifacts\x18\n" +
 	" \x03(\v2&.supertag.runtime.v2.ArtifactSelectionR\tartifacts\x12\x14\n" +
-	"\x05quiet\x18\v \x01(\bR\x05quietB\x14\n" +
+	"\x05quiet\x18\v \x01(\bR\x05quiet\x12%\n" +
+	"\x0efailure_detail\x18\f \x03(\tR\rfailureDetailB\x14\n" +
 	"\x12_checkpoint_sha256\"\x16\n" +
 	"\x14HarnessAttachRequest\"\xd9\x02\n" +
 	"\x16AppliedExecutionLimits\x12<\n" +

@@ -143,6 +143,7 @@ async fn contract(store: &Store) {
     );
 
     let finish = FinishTaskRequest {
+        failure_detail: vec![],
         waiting_approval_ids: vec![],
         artifacts: vec![],
         workspace_delivery: None,
@@ -223,6 +224,7 @@ async fn contract(store: &Store) {
             .is_none()
     );
     let finish = FinishTaskRequest {
+        failure_detail: vec![],
         waiting_approval_ids: vec![],
         artifacts: vec![],
         workspace_delivery: None,
@@ -269,6 +271,7 @@ async fn contract(store: &Store) {
         };
         store.start_task(&racer_host, &start).await.unwrap();
         let finish = FinishTaskRequest {
+            failure_detail: vec![],
             waiting_approval_ids: vec![],
             artifacts: vec![],
             workspace_delivery: None,

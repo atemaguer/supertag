@@ -254,6 +254,21 @@ async fn policies(
             assert_eq!(result.state(), TaskState::Failed);
             assert_eq!(result.result.as_deref(), Some(message));
             assert!(result.workspace_delivery.is_none());
+            // The operator's execution report says why behind the fixed result.
+            if mode == "remote-output-cap" {
+                let detail = &result
+                    .execution_report
+                    .as_ref()
+                    .context("execution report")?
+                    .failure_detail;
+                assert!(
+                    detail
+                        .iter()
+                        .any(|line| line
+                            .starts_with("Task output files could not be captured safely: ")),
+                    "{detail:?}"
+                );
+            }
         } else {
             assert_eq!(result.state(), TaskState::Succeeded);
         }

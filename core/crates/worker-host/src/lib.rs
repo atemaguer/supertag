@@ -630,6 +630,7 @@ pub async fn run(
                 }
                 if let Some(assignment) = assignment {
                     supertag_protocol::crash_point("worker-host.claim", "assigned");
+                    failures::begin_attempt();
                     journal.save(&Entry::Starting {
                         attempt: Attempt::from_assignment(assignment)?,
                     })?;
@@ -884,6 +885,7 @@ pub async fn run(
                         workspace: Some(Box::new(pending)),
                         prepared: Some(workspace),
                         outputs,
+                        failure_detail: if succeeded { vec![] } else { failures::take_detail() },
                     })?,
                     Err(_) if shutdown.is_cancelled() => return Ok(()),
                     Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
@@ -911,6 +913,7 @@ pub async fn run(
                 workspace,
                 prepared,
                 outputs,
+                failure_detail,
             } => {
                 with_cleanup_authority(
                     &mut host, &attempt, &token, &shutdown,
@@ -965,6 +968,7 @@ pub async fn run(
                                 workspace: Some(pending),
                                 prepared,
                                 outputs,
+                                failure_detail: failure_detail.clone(),
                             })?;
                         }
                         Err(error)
@@ -1014,6 +1018,7 @@ pub async fn run(
                                 workspace,
                                 prepared,
                                 outputs,
+                                failure_detail: failure_detail.clone(),
                             })?;
                         }
                         Err(error)
@@ -1064,6 +1069,7 @@ pub async fn run(
                             workspace,
                             prepared,
                             outputs: Some(pending),
+                            failure_detail: failure_detail.clone(),
                         })?,
                         Err(error) if retryable(&error) || error.code() == Code::ResourceExhausted => wait_for_work(&shutdown).await,
                         Err(_) if shutdown.is_cancelled() => return Ok(()),
@@ -1098,6 +1104,7 @@ pub async fn run(
                                 .filter(|_| succeeded)
                                 .map(|pending| workspaces.verify(pending))
                                 .transpose()?,
+                            failure_detail: if succeeded { vec![] } else { failure_detail.clone() },
                         },
                         &token,
                     )?)
@@ -1158,6 +1165,7 @@ pub async fn run(
                             workspace,
                             prepared,
                             outputs: None,
+                            failure_detail: vec![],
                         })?;
                         continue;
                     }
@@ -2532,6 +2540,11 @@ fn record_finish(
         workspace: None,
         prepared,
         outputs: None,
+        failure_detail: if outcome.succeeded {
+            vec![]
+        } else {
+            failures::take_detail()
+        },
     })
 }
 

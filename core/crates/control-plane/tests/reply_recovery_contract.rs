@@ -63,6 +63,7 @@ async fn reply_with_result(store: &Store, id: &str, result: &str) -> String {
         .finish_task(
             &host,
             &FinishTaskRequest {
+                failure_detail: vec![],
                 task_id: task.task_id.clone(),
                 attempt_id: assignment.attempt_id,
                 lease_token: assignment.lease_token,

@@ -598,7 +598,7 @@ impl SourceServer {
             .authorize_artifact_transfer(request)
             .await
             .map_err(|error| {
-                crate::failures::noted(
+                crate::failures::noted_unrecorded(
                     Status::permission_denied("direct artifact read is not authorized"),
                     &error,
                 )
@@ -656,10 +656,13 @@ impl WorkerArtifactTransfers for SourceServer {
         .await
         .map_err(|_| Status::deadline_exceeded("direct artifact grant expired"))?
         .map_err(|error| {
-            crate::failures::noted(Status::internal("direct artifact read failed"), &error)
+            crate::failures::noted_unrecorded(
+                Status::internal("direct artifact read failed"),
+                &error,
+            )
         })?
         .map_err(|error| {
-            crate::failures::noted(
+            crate::failures::noted_unrecorded(
                 Status::data_loss("producer has no exact verified artifact bytes"),
                 &error,
             )

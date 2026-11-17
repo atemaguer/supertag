@@ -993,6 +993,7 @@ mod tests {
             workspace: Some(Box::new(first)),
             prepared: Some(workspace),
             outputs: None,
+            failure_detail: vec![],
         })?;
         drop(journal);
         let journal = Journal::open(&state)?;

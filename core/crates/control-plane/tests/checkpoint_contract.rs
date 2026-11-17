@@ -97,6 +97,7 @@ fn finish(
     checkpoint: Option<&CheckpointReference>,
 ) -> FinishTaskRequest {
     FinishTaskRequest {
+        failure_detail: vec![],
         waiting_approval_ids: vec![],
         artifacts: vec![],
         workspace_delivery: None,

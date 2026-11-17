@@ -3000,6 +3000,8 @@ fn execution_report_json(report: &supertag_protocol::v2::TaskExecutionReport) ->
         "complete": report.complete,
         "cleanup": word(report.cleanup().as_str_name(), "ATTEMPT_CLEANUP_"),
         "cleanup_failure": report.cleanup_failure,
+        // Operator-only: the Control Plane sends it to operators alone.
+        "failure_detail": report.failure_detail,
     })
 }
 
