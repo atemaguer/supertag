@@ -25,33 +25,33 @@ _sym_db = _symbol_database.Default()
 from . import runtime_pb2 as supertag_dot_runtime_dot_v2_dot_runtime__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"supertag/runtime/v2/memories.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"\x80\x02\n\x06Memory\x12\x11\n\tmemory_id\x18\x01 \x01(\t\x12\x0e\n\x06tag_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x15\n\x08\x61udience\x18\x04 \x01(\tH\x00\x88\x01\x01\x12/\n\x05state\x18\x05 \x01(\x0e\x32 .supertag.runtime.v2.MemoryState\x12\x12\n\ncreated_by\x18\x06 \x01(\t\x12\x1b\n\x0esource_task_id\x18\x07 \x01(\tH\x01\x88\x01\x01\x12\x15\n\rcreated_at_ms\x18\x08 \x01(\x03\x12\x15\n\rupdated_at_ms\x18\t \x01(\x03\x42\x0b\n\t_audienceB\x11\n\x0f_source_task_id\"5\n\x13ListMemoriesRequest\x12\x13\n\x06tag_id\x18\x01 \x01(\tH\x00\x88\x01\x01\x42\t\n\x07_tag_id\"E\n\x14ListMemoriesResponse\x12-\n\x08memories\x18\x01 \x03(\x0b\x32\x1b.supertag.runtime.v2.Memory\"%\n\x10GetMemoryRequest\x12\x11\n\tmemory_id\x18\x01 \x01(\t\"\x9d\x01\n\x16\x41ttemptRememberRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x15\n\x08replaces\x18\x04 \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_replaces\"|\n\x14\x41ttemptForgetRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x11\n\tmemory_id\x18\x03 \x01(\t\"p\n\x15\x41ttemptMemoryResponse\x12+\n\x06memory\x18\x01 \x01(\x0b\x32\x1b.supertag.runtime.v2.Memory\x12*\n\x05notes\x18\x02 \x03(\x0b\x32\x1b.supertag.runtime.v2.Memory*z\n\x0bMemoryState\x12\x1c\n\x18MEMORY_STATE_UNSPECIFIED\x10\x00\x12\x17\n\x13MEMORY_STATE_STAGED\x10\x01\x12\x17\n\x13MEMORY_STATE_ACTIVE\x10\x02\x12\x1b\n\x17MEMORY_STATE_FORGETTING\x10\x03\x32\x80\x02\n\x08Memories\x12[\n\x04List\x12(.supertag.runtime.v2.ListMemoriesRequest\x1a).supertag.runtime.v2.ListMemoriesResponse\x12I\n\x03Get\x12%.supertag.runtime.v2.GetMemoryRequest\x1a\x1b.supertag.runtime.v2.Memory\x12L\n\x06\x44\x65lete\x12%.supertag.runtime.v2.GetMemoryRequest\x1a\x1b.supertag.runtime.v2.Memory2\xd5\x01\n\rAttemptMemory\x12\x63\n\x08Remember\x12+.supertag.runtime.v2.AttemptRememberRequest\x1a*.supertag.runtime.v2.AttemptMemoryResponse\x12_\n\x06\x46orget\x12).supertag.runtime.v2.AttemptForgetRequest\x1a*.supertag.runtime.v2.AttemptMemoryResponse2\xd5\x01\n\rHarnessMemory\x12\x63\n\x08Remember\x12+.supertag.runtime.v2.AttemptRememberRequest\x1a*.supertag.runtime.v2.AttemptMemoryResponse\x12_\n\x06\x46orget\x12).supertag.runtime.v2.AttemptForgetRequest\x1a*.supertag.runtime.v2.AttemptMemoryResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"supertag/runtime/v2/memories.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"\xb2\x02\n\x06Memory\x12\x11\n\tmemory_id\x18\x01 \x01(\t\x12\x0e\n\x06tag_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x15\n\x08\x61udience\x18\x04 \x01(\tH\x00\x88\x01\x01\x12/\n\x05state\x18\x05 \x01(\x0e\x32 .supertag.runtime.v2.MemoryState\x12\x12\n\ncreated_by\x18\x06 \x01(\t\x12\x1b\n\x0esource_task_id\x18\x07 \x01(\tH\x01\x88\x01\x01\x12\x15\n\rcreated_at_ms\x18\x08 \x01(\x03\x12\x15\n\rupdated_at_ms\x18\t \x01(\x03\x12\x1c\n\x0flast_seen_at_ms\x18\n \x01(\x03H\x02\x88\x01\x01\x42\x0b\n\t_audienceB\x11\n\x0f_source_task_idB\x12\n\x10_last_seen_at_ms\"5\n\x13ListMemoriesRequest\x12\x13\n\x06tag_id\x18\x01 \x01(\tH\x00\x88\x01\x01\x42\t\n\x07_tag_id\"E\n\x14ListMemoriesResponse\x12-\n\x08memories\x18\x01 \x03(\x0b\x32\x1b.supertag.runtime.v2.Memory\"%\n\x10GetMemoryRequest\x12\x11\n\tmemory_id\x18\x01 \x01(\t\"\x9d\x01\n\x16\x41ttemptRememberRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x15\n\x08replaces\x18\x04 \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_replaces\"|\n\x14\x41ttemptForgetRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x11\n\tmemory_id\x18\x03 \x01(\t\"p\n\x15\x41ttemptMemoryResponse\x12+\n\x06memory\x18\x01 \x01(\x0b\x32\x1b.supertag.runtime.v2.Memory\x12*\n\x05notes\x18\x02 \x03(\x0b\x32\x1b.supertag.runtime.v2.Memory*z\n\x0bMemoryState\x12\x1c\n\x18MEMORY_STATE_UNSPECIFIED\x10\x00\x12\x17\n\x13MEMORY_STATE_STAGED\x10\x01\x12\x17\n\x13MEMORY_STATE_ACTIVE\x10\x02\x12\x1b\n\x17MEMORY_STATE_FORGETTING\x10\x03\x32\x80\x02\n\x08Memories\x12[\n\x04List\x12(.supertag.runtime.v2.ListMemoriesRequest\x1a).supertag.runtime.v2.ListMemoriesResponse\x12I\n\x03Get\x12%.supertag.runtime.v2.GetMemoryRequest\x1a\x1b.supertag.runtime.v2.Memory\x12L\n\x06\x44\x65lete\x12%.supertag.runtime.v2.GetMemoryRequest\x1a\x1b.supertag.runtime.v2.Memory2\xd5\x01\n\rAttemptMemory\x12\x63\n\x08Remember\x12+.supertag.runtime.v2.AttemptRememberRequest\x1a*.supertag.runtime.v2.AttemptMemoryResponse\x12_\n\x06\x46orget\x12).supertag.runtime.v2.AttemptForgetRequest\x1a*.supertag.runtime.v2.AttemptMemoryResponse2\xd5\x01\n\rHarnessMemory\x12\x63\n\x08Remember\x12+.supertag.runtime.v2.AttemptRememberRequest\x1a*.supertag.runtime.v2.AttemptMemoryResponse\x12_\n\x06\x46orget\x12).supertag.runtime.v2.AttemptForgetRequest\x1a*.supertag.runtime.v2.AttemptMemoryResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'supertag._runtime_v2.memories_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_MEMORYSTATE']._serialized_start=918
-  _globals['_MEMORYSTATE']._serialized_end=1040
+  _globals['_MEMORYSTATE']._serialized_start=968
+  _globals['_MEMORYSTATE']._serialized_end=1090
   _globals['_MEMORY']._serialized_start=95
-  _globals['_MEMORY']._serialized_end=351
-  _globals['_LISTMEMORIESREQUEST']._serialized_start=353
-  _globals['_LISTMEMORIESREQUEST']._serialized_end=406
-  _globals['_LISTMEMORIESRESPONSE']._serialized_start=408
-  _globals['_LISTMEMORIESRESPONSE']._serialized_end=477
-  _globals['_GETMEMORYREQUEST']._serialized_start=479
-  _globals['_GETMEMORYREQUEST']._serialized_end=516
-  _globals['_ATTEMPTREMEMBERREQUEST']._serialized_start=519
-  _globals['_ATTEMPTREMEMBERREQUEST']._serialized_end=676
-  _globals['_ATTEMPTFORGETREQUEST']._serialized_start=678
-  _globals['_ATTEMPTFORGETREQUEST']._serialized_end=802
-  _globals['_ATTEMPTMEMORYRESPONSE']._serialized_start=804
-  _globals['_ATTEMPTMEMORYRESPONSE']._serialized_end=916
-  _globals['_MEMORIES']._serialized_start=1043
-  _globals['_MEMORIES']._serialized_end=1299
-  _globals['_ATTEMPTMEMORY']._serialized_start=1302
-  _globals['_ATTEMPTMEMORY']._serialized_end=1515
-  _globals['_HARNESSMEMORY']._serialized_start=1518
-  _globals['_HARNESSMEMORY']._serialized_end=1731
+  _globals['_MEMORY']._serialized_end=401
+  _globals['_LISTMEMORIESREQUEST']._serialized_start=403
+  _globals['_LISTMEMORIESREQUEST']._serialized_end=456
+  _globals['_LISTMEMORIESRESPONSE']._serialized_start=458
+  _globals['_LISTMEMORIESRESPONSE']._serialized_end=527
+  _globals['_GETMEMORYREQUEST']._serialized_start=529
+  _globals['_GETMEMORYREQUEST']._serialized_end=566
+  _globals['_ATTEMPTREMEMBERREQUEST']._serialized_start=569
+  _globals['_ATTEMPTREMEMBERREQUEST']._serialized_end=726
+  _globals['_ATTEMPTFORGETREQUEST']._serialized_start=728
+  _globals['_ATTEMPTFORGETREQUEST']._serialized_end=852
+  _globals['_ATTEMPTMEMORYRESPONSE']._serialized_start=854
+  _globals['_ATTEMPTMEMORYRESPONSE']._serialized_end=966
+  _globals['_MEMORIES']._serialized_start=1093
+  _globals['_MEMORIES']._serialized_end=1349
+  _globals['_ATTEMPTMEMORY']._serialized_start=1352
+  _globals['_ATTEMPTMEMORY']._serialized_end=1565
+  _globals['_HARNESSMEMORY']._serialized_start=1568
+  _globals['_HARNESSMEMORY']._serialized_end=1781
 # @@protoc_insertion_point(module_scope)

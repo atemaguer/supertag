@@ -92,5 +92,7 @@ fn memory_json(memory: &Memory) -> Value {
         "source_task_id": memory.source_task_id,
         "created_at": at(memory.created_at_ms),
         "updated_at": at(memory.updated_at_ms),
+        // When a turn last had it in its context; null until one has.
+        "last_seen_at": memory.last_seen_at_ms.map_or(Value::Null, at),
     })
 }

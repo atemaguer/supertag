@@ -294,7 +294,13 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "Schedule",
         LIST_DELETE,
     ),
-    kind(Kind::Memory, "memory", "memories", "Memory", LIST_DELETE),
+    kind(
+        Kind::Memory,
+        "memory",
+        "memories",
+        "Memory",
+        [true, true, true, true],
+    ),
 ];
 
 pub(crate) fn spec(kind: Kind) -> &'static KindSpec {

@@ -87,9 +87,11 @@ type Memory struct {
 	// `tag:ID` for the Tag that wrote it.
 	CreatedBy string `protobuf:"bytes,6,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
 	// The turn that wrote it.
-	SourceTaskId  *string `protobuf:"bytes,7,opt,name=source_task_id,json=sourceTaskId,proto3,oneof" json:"source_task_id,omitempty"`
-	CreatedAtMs   int64   `protobuf:"varint,8,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
-	UpdatedAtMs   int64   `protobuf:"varint,9,opt,name=updated_at_ms,json=updatedAtMs,proto3" json:"updated_at_ms,omitempty"`
+	SourceTaskId *string `protobuf:"bytes,7,opt,name=source_task_id,json=sourceTaskId,proto3,oneof" json:"source_task_id,omitempty"`
+	CreatedAtMs  int64   `protobuf:"varint,8,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	UpdatedAtMs  int64   `protobuf:"varint,9,opt,name=updated_at_ms,json=updatedAtMs,proto3" json:"updated_at_ms,omitempty"`
+	// When a turn last had the note in its context; unset until one has.
+	LastSeenAtMs  *int64 `protobuf:"varint,10,opt,name=last_seen_at_ms,json=lastSeenAtMs,proto3,oneof" json:"last_seen_at_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -183,6 +185,13 @@ func (x *Memory) GetCreatedAtMs() int64 {
 func (x *Memory) GetUpdatedAtMs() int64 {
 	if x != nil {
 		return x.UpdatedAtMs
+	}
+	return 0
+}
+
+func (x *Memory) GetLastSeenAtMs() int64 {
+	if x != nil && x.LastSeenAtMs != nil {
+		return *x.LastSeenAtMs
 	}
 	return 0
 }
@@ -509,7 +518,7 @@ var File_supertag_runtime_v2_memories_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_memories_proto_rawDesc = "" +
 	"\n" +
-	"\"supertag/runtime/v2/memories.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"\xdb\x02\n" +
+	"\"supertag/runtime/v2/memories.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"\x9b\x03\n" +
 	"\x06Memory\x12\x1b\n" +
 	"\tmemory_id\x18\x01 \x01(\tR\bmemoryId\x12\x15\n" +
 	"\x06tag_id\x18\x02 \x01(\tR\x05tagId\x12\x12\n" +
@@ -520,9 +529,12 @@ const file_supertag_runtime_v2_memories_proto_rawDesc = "" +
 	"created_by\x18\x06 \x01(\tR\tcreatedBy\x12)\n" +
 	"\x0esource_task_id\x18\a \x01(\tH\x01R\fsourceTaskId\x88\x01\x01\x12\"\n" +
 	"\rcreated_at_ms\x18\b \x01(\x03R\vcreatedAtMs\x12\"\n" +
-	"\rupdated_at_ms\x18\t \x01(\x03R\vupdatedAtMsB\v\n" +
+	"\rupdated_at_ms\x18\t \x01(\x03R\vupdatedAtMs\x12*\n" +
+	"\x0flast_seen_at_ms\x18\n" +
+	" \x01(\x03H\x02R\flastSeenAtMs\x88\x01\x01B\v\n" +
 	"\t_audienceB\x11\n" +
-	"\x0f_source_task_id\"<\n" +
+	"\x0f_source_task_idB\x12\n" +
+	"\x10_last_seen_at_ms\"<\n" +
 	"\x13ListMemoriesRequest\x12\x1a\n" +
 	"\x06tag_id\x18\x01 \x01(\tH\x00R\x05tagId\x88\x01\x01B\t\n" +
 	"\a_tag_id\"O\n" +

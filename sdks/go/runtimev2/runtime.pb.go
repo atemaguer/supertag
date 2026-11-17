@@ -94,6 +94,9 @@ const (
 	WatchKind_WATCH_KIND_OBJECTIVE            WatchKind = 4
 	WatchKind_WATCH_KIND_TEAM                 WatchKind = 5
 	WatchKind_WATCH_KIND_WORKSTREAM_POST      WatchKind = 6
+	// A Tag's note was kept, rewritten, or deleted (Memories). The change's id names the note and
+	// its tag_id the Tag; a private note reaches only its person.
+	WatchKind_WATCH_KIND_MEMORY WatchKind = 8
 )
 
 // Enum value maps for WatchKind.
@@ -106,6 +109,7 @@ var (
 		4: "WATCH_KIND_OBJECTIVE",
 		5: "WATCH_KIND_TEAM",
 		6: "WATCH_KIND_WORKSTREAM_POST",
+		8: "WATCH_KIND_MEMORY",
 	}
 	WatchKind_value = map[string]int32{
 		"WATCH_KIND_UNSPECIFIED":          0,
@@ -115,6 +119,7 @@ var (
 		"WATCH_KIND_OBJECTIVE":            4,
 		"WATCH_KIND_TEAM":                 5,
 		"WATCH_KIND_WORKSTREAM_POST":      6,
+		"WATCH_KIND_MEMORY":               8,
 	}
 )
 
@@ -26561,7 +26566,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x1dAPPLY_SET_PRUNE_ACTION_DELETE\x10\x01\x12\x1f\n" +
 	"\x1bAPPLY_SET_PRUNE_ACTION_KEEP\x10\x02\x12\"\n" +
 	"\x1eAPPLY_SET_PRUNE_ACTION_RELEASE\x10\x03\x12!\n" +
-	"\x1dAPPLY_SET_PRUNE_ACTION_FORGET\x10\x04*\xc4\x01\n" +
+	"\x1dAPPLY_SET_PRUNE_ACTION_FORGET\x10\x04*\xdb\x01\n" +
 	"\tWatchKind\x12\x1a\n" +
 	"\x16WATCH_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eWATCH_KIND_TAG\x10\x01\x12\x13\n" +
@@ -26569,7 +26574,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x1fWATCH_KIND_CONVERSATION_MESSAGE\x10\x03\x12\x18\n" +
 	"\x14WATCH_KIND_OBJECTIVE\x10\x04\x12\x13\n" +
 	"\x0fWATCH_KIND_TEAM\x10\x05\x12\x1e\n" +
-	"\x1aWATCH_KIND_WORKSTREAM_POST\x10\x06*y\n" +
+	"\x1aWATCH_KIND_WORKSTREAM_POST\x10\x06\x12\x15\n" +
+	"\x11WATCH_KIND_MEMORY\x10\b*y\n" +
 	"\vWatchReason\x12\x1c\n" +
 	"\x18WATCH_REASON_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14WATCH_REASON_CREATED\x10\x01\x12\x18\n" +

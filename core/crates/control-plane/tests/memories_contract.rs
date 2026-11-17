@@ -213,9 +213,23 @@ async fn contract(url: &str) {
     ));
     finish(&store, &host, &a1, true).await;
     assert_eq!(texts(&store, ALICE).await, ["Alice prefers squash merges."]);
+    let kept = store
+        .get_memory(ALICE, &alice_note.memory_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        kept.last_seen_at_ms, None,
+        "no turn has had it in its context yet"
+    );
 
     // A failed turn's notes never apply.
     let a2 = say(&store, &host, ALICE, "Note this, then fail").await;
+    // Her next turn started with the note in its context.
+    let seen = store
+        .get_memory(ALICE, &alice_note.memory_id)
+        .await
+        .unwrap();
+    assert!(seen.last_seen_at_ms.is_some());
     remember(&store, &host, &a2, "op-1", "Never kept", None)
         .await
         .unwrap();
@@ -491,6 +505,15 @@ async fn review_contract(url: &str) {
         )
         .await
         .unwrap();
+    // The review runs read-only: of the Tag's actions it keeps only reading files.
+    assert_eq!(
+        store
+            .get_task(&review.task_id)
+            .await
+            .unwrap()
+            .allowed_actions,
+        ["files:read"]
+    );
     let caps = store.attempt_capabilities(&host, &review).await.unwrap();
     assert!(caps.may_remember && caps.may_read_tag_sessions);
     // The review reaches no one: it finishes quietly.

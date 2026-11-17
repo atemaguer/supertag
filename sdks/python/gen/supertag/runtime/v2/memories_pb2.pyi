@@ -20,7 +20,7 @@ MEMORY_STATE_ACTIVE: MemoryState
 MEMORY_STATE_FORGETTING: MemoryState
 
 class Memory(_message.Message):
-    __slots__ = ("memory_id", "tag_id", "text", "audience", "state", "created_by", "source_task_id", "created_at_ms", "updated_at_ms")
+    __slots__ = ("memory_id", "tag_id", "text", "audience", "state", "created_by", "source_task_id", "created_at_ms", "updated_at_ms", "last_seen_at_ms")
     MEMORY_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
@@ -30,6 +30,7 @@ class Memory(_message.Message):
     SOURCE_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    LAST_SEEN_AT_MS_FIELD_NUMBER: _ClassVar[int]
     memory_id: str
     tag_id: str
     text: str
@@ -39,7 +40,8 @@ class Memory(_message.Message):
     source_task_id: str
     created_at_ms: int
     updated_at_ms: int
-    def __init__(self, memory_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., text: _Optional[str] = ..., audience: _Optional[str] = ..., state: _Optional[_Union[MemoryState, str]] = ..., created_by: _Optional[str] = ..., source_task_id: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., updated_at_ms: _Optional[int] = ...) -> None: ...
+    last_seen_at_ms: int
+    def __init__(self, memory_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., text: _Optional[str] = ..., audience: _Optional[str] = ..., state: _Optional[_Union[MemoryState, str]] = ..., created_by: _Optional[str] = ..., source_task_id: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., updated_at_ms: _Optional[int] = ..., last_seen_at_ms: _Optional[int] = ...) -> None: ...
 
 class ListMemoriesRequest(_message.Message):
     __slots__ = ("tag_id",)

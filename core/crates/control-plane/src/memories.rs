@@ -11,7 +11,7 @@
 //! The maintenance sweep queues a review turn in the Tag's reserved `memory:` Session once a day
 //! after enough work. The review reads the Tag's shared Sessions and rewrites its shared notes;
 //! it has no tool that reaches anyone, and it ends with `stay_quiet` (attention.rs), so it posts
-//! nothing.
+//! nothing. It runs read-only: of the Tag's actions it keeps only reading files.
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -156,6 +156,29 @@ pub(crate) async fn turn_memory_in(
     Ok((writes, section))
 }
 
+/// Called when a turn starts: the notes its context lists were seen now. Only a root turn of a
+/// Tag that keeps memory lists notes, those of its audience.
+pub(crate) async fn started_in(tx: &mut Transaction<'_, Any>, task: &Task, now: i64) -> Result<()> {
+    let kind = crate::work_sessions::task_scope_in(tx, &task.task_id)
+        .await?
+        .map(|scope| scope.kind);
+    if crate::tag_sessions::viewer_in(tx, task.clone(), kind)
+        .await?
+        .is_none()
+        || !tag_keeps_memory_in(tx, &task.tag_id).await?
+    {
+        return Ok(());
+    }
+    let Some(audience) = turn_audience_in(tx, task).await? else {
+        return Ok(());
+    };
+    sqlx::query("UPDATE supertag_v2_tag_memories SET last_seen_at_ms=$1 WHERE tag_id=$2 AND (audience_principal IS NULL OR audience_principal=$3) AND state IN ($4,$5)")
+        .bind(now).bind(&task.tag_id).bind(audience.as_deref().unwrap_or(""))
+        .bind(ACTIVE).bind(FORGETTING)
+        .execute(&mut **tx).await?;
+    Ok(())
+}
+
 fn memory_row(row: &AnyRow) -> Result<Memory> {
     Ok(Memory {
         memory_id: row.try_get("memory_id")?,
@@ -167,6 +190,7 @@ fn memory_row(row: &AnyRow) -> Result<Memory> {
         source_task_id: row.try_get("source_task_id")?,
         created_at_ms: row.try_get("created_at_ms")?,
         updated_at_ms: row.try_get("updated_at_ms")?,
+        last_seen_at_ms: row.try_get("last_seen_at_ms")?,
     })
 }
 
@@ -668,6 +692,20 @@ async fn queue_review_in(tx: &mut Transaction<'_, Any>, tag: &str, now: i64) -> 
     let prompt = review_prompt(since, &sessions);
     let order = next_order(tx).await?;
     let task = Box::pin(insert_task(tx, order, tag, &session, &prompt)).await?;
+    // The review reads the Tag's work and keeps notes; it changes nothing else. It runs read-only
+    // in the Tag's Workspace, whatever else the Tag may do. Writing or running a command implies
+    // reading, as harnesses read the Workspace in every mode.
+    let reads = task.allowed_actions.iter().any(|action| {
+        matches!(
+            action.as_str(),
+            "files:read" | "files:write" | "commands:execute"
+        )
+    });
+    sqlx::query("UPDATE supertag_v2_tasks SET allowed_actions=$1 WHERE task_id=$2")
+        .bind(if reads { r#"["files:read"]"# } else { "[]" })
+        .bind(&task.task_id)
+        .execute(&mut **tx)
+        .await?;
     sqlx::query("UPDATE supertag_v2_tags SET memory_reviewed_at_ms=$1,memory_review_task_id=$2 WHERE tag_id=$3")
         .bind(now)
         .bind(&task.task_id)

@@ -628,6 +628,8 @@ pub enum WatchKindArg {
     WorkstreamPost,
     #[value(alias = "inbox-items")]
     InboxItem,
+    #[value(alias = "memories")]
+    Memory,
 }
 
 /// Change streams `watch` follows that are not resources `get` reads: messages in a Session's
@@ -647,6 +649,7 @@ impl WatchKindArg {
             WatchKindArg::Objective => WatchKind::Objective,
             WatchKindArg::Team => WatchKind::Team,
             WatchKindArg::WorkstreamPost => WatchKind::WorkstreamPost,
+            WatchKindArg::Memory => WatchKind::Memory,
             WatchKindArg::InboxItem => return None,
         })
     }
@@ -875,6 +878,7 @@ fn kind_name(kind: WatchKind) -> &'static str {
         WatchKind::Objective => "objective",
         WatchKind::Team => "team",
         WatchKind::WorkstreamPost => "workstream-post",
+        WatchKind::Memory => "memory",
         WatchKind::Unspecified => "unknown",
     }
 }
