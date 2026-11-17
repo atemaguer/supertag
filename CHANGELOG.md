@@ -12,6 +12,19 @@ within the pre-1.0 compatibility policy described in
 ### Added
 
 - `supertag placement explain` names each Worker Host's own reason a Task can't run there: `harness`, `file-scope` or `unsandboxed-commands`.
+- A Tag speaks when it has something to say. A turn no person is waiting on (a Schedule's
+  wake-up, an Objective's notice, a memory review, or an inbox turn) may end with a new
+  `stay_quiet` tool on Claude Code, Codex, Cursor, and OpenCode: nothing is posted to its
+  conversation or thread and nothing counts as unread, while `supertag describe task` still shows
+  it ran (`quiet: true`). A person's message is always answered. `supertag describe tag` shows
+  how the Tag's unprompted messages of the last 30 days landed (posted, read, answered, quiet),
+  and a Schedule's wake-up prompt says how its last fires did.
+- The desktop app notifies you when a Tag replies or asks a question in a conversation you are
+  not looking at, and clicking a notification opens that Tag. The Dock badge shows your unread
+  replies. Choose all messages, questions only, or off under Notifications in the Control Plane
+  menu. The terminal UI sends a terminal notification (OSC 9) the same way, set with
+  `SUPERTAG_TUI_NOTIFY` (`questions`, `bell`, or `off`), and counts unread replies in its status
+  line.
 - A Tag has at most 8 work Sessions open at once, across all its conversations and Objectives;
   set `maxWorkSessions` (1 to 64) with `supertag tag put --max-work-sessions`, a Tag manifest,
   or the New Tag form. A work Session stays open after it reports, for `continue_session`, until
@@ -135,6 +148,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Removed
 
+- The Gateway's `desktop` notification destination, which notified the Gateway's own machine.
+  `notify: desktop` is now refused; the desktop app and terminal UI notify on their device, and
+  `webhook:` and `slack:` reach people away from them. A local `supertag up` configures no
+  destination by default.
 - The Python SDK's `supertag.worker` module and `examples/custom-worker`. SDKs provide harness
   adapters, not Worker runtimes; the composition interfaces the OpenAI Agents adapter uses stay in
   the `supertag` package.

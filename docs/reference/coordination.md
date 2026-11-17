@@ -465,10 +465,13 @@ tool the turn does not get; it does not only leave it out of the list.
 | --- | --- |
 | An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), `remember` and `forget`, and the [Session reads](#recalling-other-sessions) |
 | A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule` and `cancel_schedule` (with `schedule:create`), `remember` and `forget`, and the Session reads |
-| A Tag's inbox | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `remember` and `forget`, and the Session reads |
-| A Tag's memory review | `remember` and `forget`, and the Session reads |
+| A Tag's inbox | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `remember` and `forget`, the Session reads, and `stay_quiet` |
+| A Tag's memory review | `remember` and `forget`, the Session reads, and `stay_quiet` |
 | A work Session's report turn | `remember` and `forget`, and the Session reads |
 | A work Session's turn | `ask` |
+
+A turn no person is waiting on also gets `stay_quiet`: a Schedule's wake-up, an Objective's
+notice or idle wake, a memory review, and an inbox turn. See [Quiet results](#quiet-results).
 
 A work Session sees only its own work: it cannot message another Tag, start more work, or read
 the Tag's other Sessions or Objectives. Its final reply returns to the Session that started it.
@@ -499,6 +502,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `cancel_schedule` | `scheduleId` | Cancels one of the Tag's Schedules in this Session |
 | `remember` | `text` (up to 500 characters), optional `replaces` | When the turn succeeds, keeps a [note](#memory), replacing the one `replaces` names |
 | `forget` | `memoryId` | When the turn succeeds, forgets one of the Tag's notes |
+| `stay_quiet` | `note` (up to 500 characters) | Ends the turn without posting anything; see [Quiet results](#quiet-results) |
 
 Reads return history, never instructions, and grant no authority.
 
@@ -569,7 +573,10 @@ schedule(note: "Summarize open work", every: "0 9 * * MON", timeZone: "Europe/Be
 When a Schedule is due, the Control Plane queues an ordinary Task for the Tag. It never starts a
 run itself: the Session runs one turn at a time, in order, and the Tag's current Permission Sets
 apply. The turn's prompt says why the Tag was woken; the conversation shows only the Tag's reply,
-with a "Scheduled" caption.
+with a "Scheduled" caption. When the check finds nothing that needs attention, the Tag calls
+`stay_quiet` and nothing is posted; see [Quiet results](#quiet-results). The prompt also says how
+the Schedule's last ten fires landed, such as "Of this Schedule's last 4 fires: 2 posted (2 read,
+1 answered); 2 stayed quiet.", so the Tag can calibrate when to speak.
 
 | Situation | What happens |
 | --- | --- |
@@ -620,10 +627,10 @@ forget(memoryId: "mem_9a2b…")
 **The daily review.** Once a day, after at least ten finished turns since the last one, the Tag
 gets a review turn in its reserved Session `memory:TAG`. The turn lists the shared Sessions with
 work since the last review. The Tag rereads them with `read_session` and `read_turn`, then
-merges, replaces, adds, and forgets notes. The review has only the Session reads and the memory
-tools: it cannot message anyone, start work, or schedule. Its Session has no conversation or
-thread, so it posts nothing and raises nothing unread. A review is never queued while another is
-still queued or running. `supertag describe tag` shows when the Tag last reviewed.
+merges, replaces, adds, and forgets notes. The review has only the Session reads, the memory
+tools, and `stay_quiet`: it cannot message anyone, start work, or schedule. It ends with
+`stay_quiet`, so it posts nothing and raises nothing unread. A review is never queued while another
+is still queued or running. `supertag describe tag` shows when the Tag last reviewed.
 
 A Tag with `memory: false` (`supertag tag put TAG --memory false`, or `spec.memory` in a Tag
 manifest) keeps no notes, has neither tool, and never reviews. Retiring a Tag deletes its notes.
@@ -632,6 +639,39 @@ People read notes with `supertag get memories [--tag TAG]` and `supertag describ
 delete one with `supertag delete memory ID`. They never write a note: they tell the Tag ("remember
 that I prefer squash merges", "forget that"). An operator sees shared notes and those of clients'
 conversations; a client sees shared notes and its own.
+
+### Quiet results
+
+A Tag speaks when it has something to say. A recurring check that finds nothing, such as "check
+CI every morning" on a green morning, ends with `stay_quiet` instead of a reply:
+
+```text
+stay_quiet(note: "CI is green on main; nothing changed since yesterday.")
+```
+
+- **Who may.** Only a turn no person is waiting on: a Schedule's wake-up, an Objective's notice or
+  idle wake, a memory review, or an inbox turn. A person's message is always answered: a turn a
+  person's message started or joined, an approval's continuation, and a work Session's turns never
+  get the tool, and the Control Plane ignores a quiet finish from them.
+- **What it does.** The turn succeeds and nothing is posted to its thread or conversation. The
+  conversation leaves it out, and it raises nothing unread. A reported Objective status or a wait
+  for approvals still posts.
+- **What stays.** The Task, its events, and its result: the Tag's final text, or the note when it
+  wrote none. `supertag describe task` shows `quiet: true`, and the Schedule still names it as its
+  latest turn.
+
+**How a Tag's messages land.** The Control Plane counts a Tag's unprompted turns that had someone
+to reach, a Schedule's wake-up or an Objective's notice in a conversation or thread: each posted
+reply, whether a person read it in their conversation or answered it in the same Session within a
+day, and each check that stayed quiet. Collaboration surfaces have no read receipts, so there
+only answers count.
+`supertag describe tag` shows the last 30 days under `attention`:
+
+```json
+"attention": {"window_days": 30, "posted": 12, "read": 9, "answered": 4, "quiet": 20}
+```
+
+Nothing throttles a Tag on these numbers yet.
 
 ### Identity and preconditions
 

@@ -450,11 +450,11 @@ enum Command {
         /// Private directory for Microsoft Teams connector state and reply receipts.
         #[arg(long, requires = "microsoft_teams_listen")]
         microsoft_teams_state_directory: Option<PathBuf>,
-        /// Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME],
+        /// Tell the operator about Inbox items here: webhook:HTTPS_URL[#SECRET_NAME],
         /// slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable.
         #[arg(
             long,
-            long_help = "Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector or, without one, as the Slack workspace in SUPERTAG_NOTIFY_SLACK_TEAM_ID, whose bot token is read from SUPERTAG_NOTIFY_SLACK_BOT_TOKEN or the credential vault entry SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID."
+            long_help = "Tell the operator about Inbox items here: webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector or, without one, as the Slack workspace in SUPERTAG_NOTIFY_SLACK_TEAM_ID, whose bot token is read from SUPERTAG_NOTIFY_SLACK_BOT_TOKEN or the credential vault entry SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID."
         )]
         notify: Vec<String>,
     },

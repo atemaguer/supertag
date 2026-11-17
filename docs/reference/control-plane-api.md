@@ -129,9 +129,15 @@ response then sets `incremental` and holds the newer messages and those turns. W
 conversation was replaced, or more than a page arrived since, the response is the newest page
 instead, which replaces the copy.
 
+A conversation leaves out turns that finished quietly ([quiet results](coordination.md#quiet-results)).
+A refreshed turn that ended that way comes back with `Task.quiet` set, so a client that held it
+running drops it.
+
 `Conversations.ListConversations` lists your conversations, one per Tag, the latest active first.
 Each has a preview of its latest message, when it was active, how many finished replies you have
-not read, and whether one of its Tasks is queued or running. `MarkConversationRead` records the
+not read, whether one of its Tasks is queued or running, and `asking` when its latest message is
+the Tag's question still waiting for an answer. Quiet turns count in none of these. Clients use
+the list for notifications and badges. `MarkConversationRead` records the
 latest finished turn you have read.
 
 ## Follow a conversation

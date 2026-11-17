@@ -73,7 +73,9 @@ The run's capabilities say which of these the Task may use. When the Task reads 
 Sessions, its capabilities also carry `tag_portfolio`, the Tag's open Objectives, which an adapter
 adds to the turn's context. With `may_start_work_session`, `open_work_sessions` and `max_work_sessions` say how many work
 Sessions the Tag has open of its limit; show them in the `start_session` description. When it may schedule, `may_schedule` is set and `time_zone` names the
-zone a time without an offset is read in. The messages are defined in
+zone a time without an offset is read in. When no person waits on the turn, `may_stay_quiet` is
+set: offer a `stay_quiet` tool, and when the agent calls it, `Complete` with `quiet` set so nothing
+is posted ([quiet results](../reference/coordination.md#quiet-results)). The messages are defined in
 [`runtime.proto`](../../proto/supertag/runtime/v2/runtime.proto) and its siblings.
 
 ## Write one in Python
