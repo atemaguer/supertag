@@ -24,6 +24,13 @@ within the pre-1.0 compatibility policy described in
   `spec.startRate` in a Tag manifest. A Task over the rate stays queued until the window has room,
   and says when it can start; a person's message always starts. `describe tag` shows the rate and
   the starts in the current window, and `placement explain` reports `start-rate`.
+- Cursor Tasks with an E2B or Modal Workspace can run commands (`commands:execute`), in the Task's
+  sandbox, without `allow-unsandboxed-commands`. The sandbox has no network access. Each command
+  stops at its time limit inside the sandbox, and every process the Task left running is stopped
+  before the Workspace returns. Files your ignore rules match (such as `node_modules/`) and any
+  `.git` directory a command creates stay in the sandbox; the Task output directory always
+  returns. A Task whose Permission Sets hide paths does not run commands in a remote sandbox.
+
 - See and delete what a Tag remembers: the desktop app lists a Tag's notes in its details panel,
   opened from the Tag's name, and the terminal UI under Notes in the command palette. Each note
   records when a turn last had it in its context (`last_seen_at` in `supertag describe memory`),

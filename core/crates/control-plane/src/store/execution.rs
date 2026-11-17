@@ -201,8 +201,10 @@ pub(crate) fn lane_requirement(
         HarnessKind::Cursor => "cursor",
         _ => return None,
     };
+    // Shared execution and remote Workspace sandboxes run commands away from the Worker Host.
     (!profile.allow_unsandboxed_commands
         && profile.shared_execution.is_none()
+        && !profile.remote_file_workspace
         && task
             .allowed_actions
             .iter()
@@ -246,7 +248,7 @@ mod tests {
     use supertag_protocol::v2::WorkspaceSpec;
 
     #[test]
-    fn remote_file_host_only_reserves_cursor_repository_work_without_commands() {
+    fn remote_file_host_reserves_cursor_repository_work_with_sandboxed_commands() {
         let profile = HarnessExecutionProfile {
             remote_file_workspace: true,
             ..Default::default()
@@ -263,8 +265,21 @@ mod tests {
                 .unwrap()
                 .remote_file_workspace
         );
+        // Commands run in the sandbox, so they need no allow-unsandboxed-commands opt-in.
         task.allowed_actions.push("commands:execute".into());
-        assert!(resolve_attempt(&task, HarnessKind::Cursor, &profile).is_none());
+        assert!(lane_requirement(&task, HarnessKind::Cursor, &profile).is_none());
+        assert!(
+            resolve_attempt(&task, HarnessKind::Cursor, &profile)
+                .unwrap()
+                .remote_file_workspace
+        );
+        // A local lane still needs the opt-in.
+        assert_eq!(
+            lane_requirement(&task, HarnessKind::Cursor, &Default::default())
+                .unwrap()
+                .0,
+            "unsandboxed-commands"
+        );
         let invalid = HarnessExecutionProfile {
             allow_unsandboxed_commands: true,
             ..profile

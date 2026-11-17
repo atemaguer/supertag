@@ -150,11 +150,12 @@ dependencies in the sandbox image. It needs `python3` and POSIX shell tools, wit
 executable.
 
 In this split mode, Cursor has no built-in tools. SDK custom tools provide read, write, edit,
-glob, grep, and ls in the sandbox, plus the Task's allowed external tools. Web search, subagents,
-and commands are unavailable. A **Permission Set** selects
-allowed actions: write and edit require `files:write`. Such a host cannot take
-`--allow-unsandboxed-commands`, so the Control Plane does not place a Task with
-`commands:execute` on it; run those Tasks in a shared execution environment.
+glob, grep, ls, and commands in the sandbox, plus the Task's allowed external tools. Web search
+and subagents are unavailable. A **Permission Set** selects allowed actions: write and edit
+require `files:write`, and the command tool requires `files:write` and `commands:execute`.
+Commands run in the sandbox without network access, so install your project's dependencies in
+the sandbox image or its devcontainer setup. Such a host cannot take
+`--allow-unsandboxed-commands`, and doesn't need it.
 
 `local.cwd` is an empty host directory. Repository rules do not load automatically, so supply
 needed instructions as Task context. Cursor's own sandbox provides no useful workspace

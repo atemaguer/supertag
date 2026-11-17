@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import type { ExecutionEnvironment, ProcessSpec } from "@supertag/worker-sdk";
 import { spawnOwnedProcess } from "@supertag/worker-sdk/internal/rust-harness";
-import { createWorkspaceOperations } from "@supertag/worker-sdk/internal/rust-workspace-provider";
+import {
+  COMMAND_GRACE_MS,
+  createWorkspaceOperations,
+} from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { afterEach, expect, it, vi } from "vitest";
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -144,7 +147,9 @@ it("runs bounded foreground commands with a clean non-login environment and a ve
   ).resolves.toEqual({ text: "unset/unset", isError: false });
   expect(await readFile(join(workspace, "result.txt"), "utf8")).toBe("x");
   const command = specs.at(-1);
-  expect(command?.timeoutMs).toBe(4_000);
+  // The wrapper enforces the 4 s deadline in the sandbox; the provider's stop waits longer.
+  expect(command?.timeoutMs).toBe(4_000 + COMMAND_GRACE_MS);
+  expect(command?.args).toContain("4000");
   expect(command?.replaceEnvironment).toBe(true);
   expect(command?.args).not.toContain("-lc");
   const bounded = await tools.execute({
@@ -200,7 +205,26 @@ it("cancels an active foreground command and fences later calls after disposal",
   await cancelled;
   await tools.dispose();
   await expect(tools.execute({ kind: "command", command: "true" })).rejects.toThrow(/closed/i);
-  expect(specs).toHaveLength(1);
+  // The cancel stopped the command's group with a second sandbox process, never the provider.
+  expect(specs).toHaveLength(2);
+  expect(specs[1]?.args?.join(" ")).toContain("killpg");
+});
+
+it("stops a command at its deadline inside the sandbox, with its process group", async () => {
+  const { workspace, operations } = await fixture();
+  const tools = operations(allActions, { commandTimeoutMs: 1_500 });
+  const started = Date.now();
+  const result = await tools.execute({
+    kind: "command",
+    command: "(sleep 30; echo late > late.txt) & echo started; sleep 30",
+  });
+  expect(result.isError).toBe(true);
+  expect(result.text).toContain("deadline");
+  expect(Date.now() - started).toBeLessThan(10_000);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await expect(readFile(join(workspace, "late.txt"), "utf8")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
 });
 
 it("fails every tool once the sandbox becomes unreachable and never runs it on the host", async () => {

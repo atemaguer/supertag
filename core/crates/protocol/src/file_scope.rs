@@ -656,6 +656,14 @@ pub fn reason(
         return Some(reason);
     }
     let scope = of_task(task)?;
+    // A remote sandbox holds the whole checkout, hidden paths included, and its commands can
+    // read any of it.
+    if profile.remote_file_workspace && has(task, "commands:execute") && !scope.hidden.is_empty() {
+        return Some(format!(
+            "commands in a remote Workspace sandbox can read hidden paths ({}); remove commands:execute or the hidden paths from the Tag's Permission Sets, or run the Tag on Codex",
+            listed(&scope.hidden)
+        ));
+    }
     if harness != HarnessKind::Cursor {
         return None;
     }
@@ -1138,6 +1146,16 @@ mod tests {
         ));
         assert!(!supports(
             &task(&tools, outside.clone(), true),
+            HarnessKind::Cursor,
+            &remote
+        ));
+        // Remote commands run in a sandbox holding the whole checkout: hidden paths are refused,
+        // and a write restriction is checked at delivery.
+        let remote_hidden = reason(&task(&commands, hidden.clone(), true), HarnessKind::Cursor, &remote)
+            .unwrap();
+        assert!(remote_hidden.contains("remote Workspace sandbox"), "{remote_hidden}");
+        assert!(supports(
+            &task(&commands, writes.clone(), true),
             HarnessKind::Cursor,
             &remote
         ));

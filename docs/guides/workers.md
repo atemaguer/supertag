@@ -205,10 +205,14 @@ on the host:
 | `--modal-workspace-provider` | A Modal sandbox per Task Attempt, with `SUPERTAG_MODAL_WORKSPACE_APP` and optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` |
 | `--shared-execution-endpoint` | A long-lived shared execution environment, served by `supertag-shared-execution`, that several Cursor Sessions share |
 
-A Task that may run commands (`commands:execute`) runs only in a shared execution environment:
-a host with an E2B or Modal Workspace provider holds files only and cannot take
-`allow-unsandboxed-commands`. A remote sandbox caps a Task Attempt at 3600 seconds, the longest
-those providers grant. A Tag
+A Task that may run commands (`commands:execute`) runs them in its sandbox, so such a host needs
+no `allow-unsandboxed-commands` (and cannot take it). The sandbox has no network access. Each
+command stops at its own time limit inside the sandbox. Before the Workspace returns, SuperTag
+stops every process the Task left running there. Files your ignore rules match, such as
+`node_modules/`, and any `.git` directory a command creates stay in the sandbox and are not
+returned; the Task output directory is always returned. A Task whose Permission Sets hide paths
+can't run commands there, because the sandbox holds the whole checkout. A remote sandbox caps a
+Task Attempt at 3600 seconds, the longest those providers grant. A Tag
 requires a shared environment with `tag put --shared-execution-environment ID`. A repository's
 `.devcontainer` settings choose the sandbox's image, user, and setup commands; see
 [Devcontainer settings](../reference/devcontainer-subset.md).

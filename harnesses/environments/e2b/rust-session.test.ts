@@ -64,7 +64,20 @@ function wait(child: ChildProcess) {
   });
 }
 
-async function fixture(preparedRoot?: string) {
+/**
+ * A fake privileged run. It never executes anything: the seal program kills every process it
+ * did not record, so it must never run on the machine running the tests.
+ */
+function fakePrivileged(sealExit = 0) {
+  return vi.fn(async (argv: string[]) => {
+    const sealing = argv.length > 5;
+    return sealing
+      ? { exitCode: sealExit, stdout: sealExit === 0 ? "sealed 2\n" : "" }
+      : { exitCode: 0, stdout: '[[1,"7"],[2,"9"]]\n' };
+  });
+}
+
+async function fixture(preparedRoot?: string, privileged?: ReturnType<typeof fakePrivileged>) {
   const builds: E2BWorkspaceTemplateBuild[] = [];
   const templates = {
     build: vi.fn(async (spec: E2BWorkspaceTemplateBuild) => {
@@ -167,7 +180,13 @@ async function fixture(preparedRoot?: string) {
     create: vi.fn(async (options: SandboxOpts) => {
       alive = true;
       metadata = options.metadata ?? {};
-      return { client, writeTransfer, readTransfer, snapshot };
+      return {
+        client,
+        writeTransfer,
+        readTransfer,
+        snapshot,
+        ...(privileged ? { runPrivileged: privileged } : {}),
+      };
     }),
     deleteSnapshot: vi.fn(async (_snapshotId: string) => {}),
   };
@@ -375,16 +394,88 @@ it("allocates once with exact ownership, bounded lifetime, and no network or env
   });
 });
 
-it("rejects command authority before a sandbox is allocated", async () => {
-  const { session, factory } = await fixture();
+it("admits commands only in a sandbox it can seal", async () => {
+  const { session } = await fixture();
   await expect(
     session.allocate({
       owner,
       timeoutMs: 60_000,
       allowedActions: ["files:write", "commands:execute"],
     }),
-  ).rejects.toThrow(/commands/i);
-  expect(factory.create).not.toHaveBeenCalled();
+  ).rejects.toThrow(/allocation/i);
+  expect(session.admitsCommands()).toBe(false);
+});
+
+it("records the sandbox's processes, seals it before capture, and returns no ignored output or Git metadata", async () => {
+  const privileged = fakePrivileged();
+  const { session } = await fixture(undefined, privileged);
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write", "commands:execute"],
+  });
+  expect(session.admitsCommands()).toBe(true);
+  expect(privileged).toHaveBeenCalledTimes(1);
+  expect(privileged.mock.calls[0]?.[0].slice(0, 4)).toEqual(["python3", "-I", "-S", "-c"]);
+  await session.stage(header, bytes);
+  await expect(
+    session.execute({
+      kind: "command",
+      command: [
+        "printf 'node_modules/\\nout/\\na.txt\\n' > .gitignore",
+        "mkdir -p node_modules/pkg sub/.git out",
+        "echo dep > node_modules/pkg/index.js",
+        "echo nested > sub/.git/HEAD",
+        "echo kept > sub/file",
+        "echo report > out/report.txt",
+        "echo dropped > out/scratch.txt",
+        "echo changed > a.txt",
+        "git init -q . 2>/dev/null; echo done",
+      ].join(" && "),
+    }),
+  ).resolves.toEqual({ text: "done\n", isError: false });
+  const captured = await session.capture(undefined, ["out/report.txt"]);
+  // Sealing ran with the recorded processes, after the command and before the tree was read.
+  expect(privileged).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(privileged.mock.calls[1]?.[0].at(-1) ?? "")).toEqual([
+    [1, "7"],
+    [2, "9"],
+  ]);
+  const paths = unpack(captured.bytes).map((entry) => entry.path);
+  // A tracked file stays even when the ignore rules match it; a named path stays too.
+  expect(paths).toEqual(
+    expect.arrayContaining([".gitignore", "a.txt", "out/report.txt", "sub/file"]),
+  );
+  expect(paths.some((path) => path.startsWith("node_modules"))).toBe(false);
+  expect(paths.some((path) => path.split("/").includes(".git"))).toBe(false);
+  expect(paths).not.toContain("out/scratch.txt");
+  await session.stop({ owner });
+});
+
+it("refuses to capture a sandbox it cannot seal", async () => {
+  const { session } = await fixture(undefined, fakePrivileged(4));
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write", "commands:execute"],
+  });
+  await session.stage(header, bytes);
+  await expect(session.capture()).rejects.toThrow(/captured/i);
+  await expect(session.capture()).rejects.toThrow();
+  await session.stop({ owner });
+});
+
+it("never seals a sandbox whose Task cannot run commands", async () => {
+  const privileged = fakePrivileged();
+  const { session } = await fixture(undefined, privileged);
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:write"] });
+  await session.stage(header, bytes);
+  await session.capture();
+  expect(privileged).not.toHaveBeenCalled();
+  await session.stop({ owner });
 });
 
 it("stages a pinned bundle, accepts file tools, seals them, and returns exact sorted bytes and modes", async () => {
@@ -1366,8 +1457,8 @@ it("prepares the trusted commit once, snapshots it, and starts Task sandboxes fr
   await expect(task.session.snapshot()).rejects.toThrow(/preparation sandbox/u);
   const captured = await task.session.capture();
   expect(unpack(captured.bytes)).toEqual([
+    // Setup output the checkout ignores stays in the sandbox.
     { path: ".gitignore", mode: "100644", body: ".setup-*\n" },
-    { path: ".setup-log", mode: "100644", body: "built\n" },
     { path: "a.txt", mode: "100644", body: "two\n" },
   ]);
   await task.session.stop({ owner });

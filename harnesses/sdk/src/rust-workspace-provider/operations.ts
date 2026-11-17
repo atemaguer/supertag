@@ -1,5 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { posix } from "node:path";
-import type { ExecutionEnvironment, ProcessSpec, SplitExecutionToolResult } from "../index.js";
+import type {
+  ExecutionEnvironment,
+  ProcessHandle,
+  ProcessSpec,
+  SplitExecutionToolResult,
+} from "../index.js";
 import { createWorkspaceToolBridge } from "../split-execution-bridge.js";
 
 export type WorkspaceOperation =
@@ -78,6 +84,102 @@ with subprocess.Popen(sys.argv[2:], stdout=subprocess.PIPE, stderr=subprocess.PI
                     remaining[output] -= len(prefix)
     status = child.wait()
 sys.exit(status if status >= 0 else 128 - status)`;
+
+/**
+ * How much longer than a command's own deadline the host waits before stopping its process
+ * through the provider. On Modal that stop ends the whole sandbox, so the command's wrapper
+ * enforces the deadline inside the sandbox first.
+ */
+export const COMMAND_GRACE_MS = 15_000;
+
+// A Workspace command keeps its own lifecycle in the sandbox: it runs in a new session, whose
+// group ID is recorded in the private root so a cancel can stop it with a fresh process, and at
+// its deadline the group is killed and the wrapper exits 124. Processes that leave the group
+// (setsid, nohup into another session) end when the session seals the sandbox before capture.
+const COMMAND_PROCESS = String.raw`import os, selectors, signal, subprocess, sys, time
+limit = int(sys.argv[1])
+deadline = time.monotonic() + int(sys.argv[2]) / 1000
+record = sys.argv[3]
+os.makedirs(os.path.dirname(record), mode=0o700, exist_ok=True)
+# A cancel that arrives before the group exists leaves a stop marker instead.
+if os.path.exists(record + ".stop"):
+    sys.exit(130)
+child = subprocess.Popen(sys.argv[4:], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+with open(record + ".tmp", "w") as out:
+    out.write(str(child.pid))
+os.rename(record + ".tmp", record)
+if os.path.exists(record + ".stop"):
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except OSError:
+        pass
+expired = False
+with selectors.DefaultSelector() as streams:
+    streams.register(child.stdout, selectors.EVENT_READ, sys.stdout.buffer)
+    streams.register(child.stderr, selectors.EVENT_READ, sys.stderr.buffer)
+    remaining = {sys.stdout.buffer: limit, sys.stderr.buffer: limit}
+    while streams.get_map():
+        left = deadline - time.monotonic()
+        if left <= 0:
+            expired = True
+            break
+        for key, _ in streams.select(min(left, 1.0)):
+            data = os.read(key.fd, 8192)
+            if not data:
+                streams.unregister(key.fileobj)
+                continue
+            output = key.data
+            prefix = data[:remaining[output]]
+            if prefix:
+                output.write(prefix)
+                output.flush()
+                remaining[output] -= len(prefix)
+while not expired:
+    try:
+        status = child.wait(timeout=max(0.01, deadline - time.monotonic()))
+        break
+    except subprocess.TimeoutExpired:
+        if time.monotonic() >= deadline:
+            expired = True
+if expired:
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    child.wait()
+    sys.stderr.write("\nCommand stopped at its %d ms deadline\n" % int(sys.argv[2]))
+    sys.stderr.flush()
+    status = 124
+for leftover in (record, record + ".stop"):
+    try:
+        os.unlink(leftover)
+    except OSError:
+        pass
+sys.exit(status if status >= 0 else 128 - status)`;
+
+// Stops a recorded command's process group. The record is in the sandbox, so its value is only
+// trusted to be a group other than the sandbox's init.
+const STOP_COMMAND = `import os, signal, sys, time
+record = sys.argv[1]
+os.makedirs(os.path.dirname(record), mode=0o700, exist_ok=True)
+open(record + ".stop", "a").close()
+deadline = time.monotonic() + 5
+while True:
+    try:
+        with open(record) as recorded:
+            group = int(recorded.read(32))
+        break
+    except (OSError, ValueError):
+        # Not started yet (the marker stops it), or already finished.
+        if time.monotonic() > deadline:
+            sys.exit(0)
+        time.sleep(0.05)
+if group > 1:
+    try:
+        os.killpg(group, signal.SIGKILL)
+    except OSError:
+        pass`;
 
 // The shell both checks and enters the physical Workspace before starting the
 // command. An image's login scripts and default environment are not needed.
@@ -202,10 +304,12 @@ function cleanProcess(
   workspaceRoot: string,
   operation: WorkspaceOperation,
   outputBytes: number,
+  command?: { readonly deadlineMs: number; readonly record: string },
 ): ProcessSpec {
   if (spec.stdin !== undefined && Buffer.byteLength(spec.stdin) > MAX_EDIT_BYTES)
     throw new Error("Workspace input exceeds its byte limit");
-  const command = operation.kind === "command";
+  if ((operation.kind === "command") !== (command !== undefined))
+    throw new Error("Workspace command lifecycle is missing");
   return {
     ...spec,
     command: "/usr/bin/env",
@@ -218,11 +322,13 @@ function cleanProcess(
       "-I",
       "-S",
       "-c",
-      BOUNDED_PROCESS,
+      command ? COMMAND_PROCESS : BOUNDED_PROCESS,
       // Room for path resolution and for the SDK bridge to detect truncation.
       String(Math.max(16 * 1024, outputBytes + 1)),
-      ...(command
+      ...(command && operation.kind === "command"
         ? [
+            String(command.deadlineMs),
+            command.record,
             "/bin/sh",
             "-c",
             WORKSPACE_COMMAND,
@@ -232,7 +338,7 @@ function cleanProcess(
           ]
         : [spec.command, ...(spec.args ?? [])]),
     ],
-    ...(command ? { cwd: sandboxRoot } : {}),
+    ...(command ? { cwd: sandboxRoot, timeoutMs: command.deadlineMs + COMMAND_GRACE_MS } : {}),
     environment: {},
     replaceEnvironment: true,
   };
@@ -279,11 +385,64 @@ export function createWorkspaceOperations(options: WorkspaceOperationsOptions) {
         throw new Error("Workspace reads require files:read");
       }
       const args = bridgeArguments(operation);
+      const command = operation.kind === "command";
       const signal = AbortSignal.any([
         lifetime.signal,
-        AbortSignal.timeout(limits.commandTimeoutMs),
+        // A command enforces its own deadline in the sandbox; the host waits a little longer.
+        AbortSignal.timeout(limits.commandTimeoutMs + (command ? COMMAND_GRACE_MS : 0)),
         ...(caller ? [caller] : []),
       ]);
+      /**
+       * Starts a command without the caller's signal: cancelling through the provider would stop
+       * the process, and on Modal the whole sandbox. A cancel instead stops the command's group
+       * with a fresh process in the sandbox, and the wrapper's deadline stops it otherwise.
+       */
+      async function spawnCommand(spec: ProcessSpec, signal?: AbortSignal): Promise<ProcessHandle> {
+        signal?.throwIfAborted();
+        const deadlineMs = Math.min(
+          spec.timeoutMs ?? limits.commandTimeoutMs,
+          limits.commandTimeoutMs,
+        );
+        const record = posix.join(sandboxRoot, "commands", randomUUID());
+        const process = await environment.spawn(
+          cleanProcess(spec, sandboxRoot, workspaceRoot, operation, limits.maxOutputBytes, {
+            deadlineMs,
+            record,
+          }),
+          lifetime.signal,
+        );
+        let stopping: Promise<void> | undefined;
+        const stop = () =>
+          (stopping ??= (async () => {
+            const killer = await environment.spawn(
+              {
+                command: "/usr/bin/env",
+                args: [
+                  "-i",
+                  "PATH=/usr/local/bin:/usr/bin:/bin",
+                  "python3",
+                  "-I",
+                  "-S",
+                  "-c",
+                  STOP_COMMAND,
+                  record,
+                ],
+                cwd: sandboxRoot,
+                environment: {},
+                replaceEnvironment: true,
+                timeoutMs: 10_000,
+              },
+              lifetime.signal,
+            );
+            await killer.wait();
+          })().catch(() => undefined));
+        signal?.addEventListener("abort", () => void stop(), { once: true });
+        return {
+          ...(process.pid === undefined ? {} : { pid: process.pid }),
+          wait: () => process.wait(),
+          kill: () => void stop(),
+        };
+      }
       const bridge = createWorkspaceToolBridge({
         environment: {
           rootDirectory: sandboxRoot,
@@ -296,10 +455,12 @@ export function createWorkspaceOperations(options: WorkspaceOperationsOptions) {
             return text;
           },
           spawn: (spec, signal) =>
-            environment.spawn(
-              cleanProcess(spec, sandboxRoot, workspaceRoot, operation, limits.maxOutputBytes),
-              signal,
-            ),
+            command
+              ? spawnCommand(spec, signal)
+              : environment.spawn(
+                  cleanProcess(spec, sandboxRoot, workspaceRoot, operation, limits.maxOutputBytes),
+                  signal,
+                ),
         },
         workspaceRoot,
         ...(options.readOnlyRoots ? { readOnlyRoots: options.readOnlyRoots } : {}),

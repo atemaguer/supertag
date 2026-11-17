@@ -12,6 +12,7 @@ import {
 } from "./copies.js";
 import { type InputFile, inputManifest, inputRoot } from "./input-files.js";
 import { createWorkspaceOperations, type WorkspaceOperation } from "./operations.js";
+import { createProcessSeal, type PrivilegedRun, type ProcessSeal } from "./process-seal.js";
 
 export const MAX_TRANSFER = 256 * 1024 * 1024;
 const API_TIMEOUT_MS = 15_000;
@@ -71,6 +72,11 @@ export interface SandboxWorkspace {
   readTransfer(path: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array>>;
   /** Records this preparation sandbox's filesystem as a prepared artifact and returns its ID. */
   snapshot(signal: AbortSignal): Promise<string>;
+  /**
+   * Runs trusted provider code as the sandbox's privileged user, for sealing (see
+   * process-seal.ts). Workspace commands are admitted only in a sandbox that provides it.
+   */
+  runPrivileged?: PrivilegedRun;
 }
 
 /**
@@ -359,6 +365,10 @@ export function createSandboxWorkspaceSession(
   let tools: ReturnType<typeof createWorkspaceOperations> | undefined;
   let captured: CapturedTree | undefined;
   let mcpStaged = false;
+  /** The commit Stage materialized; Capture indexes it to tell ignored files from tracked ones. */
+  let stagedCommit = "";
+  /** Present when the Task may run commands: the sandbox is sealed before Capture. */
+  let seal: ProcessSeal | undefined;
   /** This Attempt's Workspace copies, once the first is staged. */
   let copies: WorkspaceCopies | undefined;
   const mcpServers = new Set<ProcessHandle>();
@@ -516,8 +526,6 @@ export function createSandboxWorkspaceSession(
       provider.validateOwner(request.owner);
       if (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1)
         throw workspaceError("sandbox lifetime is invalid");
-      if (request.allowedActions.includes("commands:execute"))
-        throw workspaceError("does not support commands:execute");
       const { environment, preparedArtifact } = request;
       if (environment !== undefined && !validSandboxEnvironment(environment))
         throw workspaceError("devcontainer environment is invalid");
@@ -557,6 +565,12 @@ export function createSandboxWorkspaceSession(
         sandboxId = sandbox.sandboxId;
         if (!sandboxId || sandboxId.length > 256 || /\p{Cc}/u.test(sandboxId))
           throw new Error("Invalid sandbox identity");
+        if (request.allowedActions.includes("commands:execute")) {
+          // Commands may leave processes behind; only a sandbox that can be sealed admits them.
+          if (!sandbox.runPrivileged) throw new Error("Sandbox cannot be sealed");
+          seal = createProcessSeal(sandbox.runPrivileged);
+          await seal.record(signal);
+        }
         root = preparing || fromArtifact ? preparedRoot : `/tmp/supertag-workspace-${randomUUID()}`;
         phase = "allocated";
         return { sandboxId };
@@ -685,6 +699,7 @@ export function createSandboxWorkspaceSession(
           signal.throwIfAborted();
         }
         stagedInputRoot = expectedRoot;
+        stagedCommit = header.startCommit;
         mcpStaged = header.mcpCommit !== undefined;
         if (preparing) {
           phase = "staged";
@@ -695,6 +710,10 @@ export function createSandboxWorkspaceSession(
       } catch {
         throw workspaceError("bundle could not be staged");
       }
+    },
+    /** Whether this allocation admitted commands (its Task allows them and it can be sealed). */
+    admitsCommands(): boolean {
+      return seal !== undefined;
     },
     async execute(operation: WorkspaceOperation, caller?: AbortSignal) {
       if (phase !== "staged" || !tools) throw workspaceError("tools are not staged or were sealed");
@@ -772,7 +791,12 @@ export function createSandboxWorkspaceSession(
       if (caller?.aborted) void stopMcpServer(server);
       return server;
     },
-    async capture(caller?: AbortSignal): Promise<CapturedTree> {
+    /**
+     * `keep` names checkout paths returned even when ignored, such as the Task output directory.
+     * Every other untracked path the checkout's ignore rules match stays in the sandbox, and so
+     * does every `.git` entry.
+     */
+    async capture(caller?: AbortSignal, keep: readonly string[] = []): Promise<CapturedTree> {
       caller?.throwIfAborted();
       if (phase === "captured" && captured) return captured;
       if (phase !== "staged" || !sandbox || !root || !tools)
@@ -787,10 +811,33 @@ export function createSandboxWorkspaceSession(
         await tools.dispose();
         if (uncertain) throw workspaceError("was modified by an unsettled operation");
         signal.throwIfAborted();
+        if (
+          keep.length > 64 ||
+          keep.some(
+            (path) =>
+              !path ||
+              Buffer.byteLength(path) > 1024 ||
+              /\p{Cc}/u.test(path) ||
+              posix.isAbsolute(path) ||
+              posix.normalize(path) !== path ||
+              path.split("/").includes(".."),
+          )
+        )
+          throw workspaceError("capture keep list is invalid");
+        // Nothing a command left running may change the tree while it is read.
+        if (seal && !(await seal.seal(signal))) {
+          uncertain = true;
+          throw workspaceError("could not be sealed");
+        }
         // Staged inputs and Workspace copies never return in the tree.
         const result = await runTransfer(
           "capture",
-          [stagedInputRoot, ...(copies?.root() ? [copies.root() as string] : [])],
+          [
+            stagedCommit,
+            JSON.stringify(keep),
+            stagedInputRoot,
+            ...(copies?.root() ? [copies.root() as string] : []),
+          ],
           signal,
         );
         const receipt = /^([1-9][0-9]{0,8}) ([0-9a-f]{64})$/u.exec(result.stdout.trim());
@@ -1093,8 +1140,49 @@ def stage_inputs(input_root):
     os.unlink(manifest_path)
     os.unlink(body_path)
 
-def capture(*excluded):
+def ignored_paths(commit):
+    # Untracked paths the checkout's ignore rules match, against an index of the staged commit,
+    # so a tracked file is never left out. Directories end with "/".
+    index = os.path.join(root, "capture.index")
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(index)
+    os.environ["GIT_INDEX_FILE"] = index
+    try:
+        git_command(["read-tree", commit])
+        raw = git_command(["--work-tree=" + checkout, "-c", "core.untrackedCache=false",
+                           "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
+                           "--directory", "--no-empty-directory"], MAX_MANIFEST)
+    finally:
+        del os.environ["GIT_INDEX_FILE"]
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(index)
+    files, directories = set(), set()
+    for item in raw.split(b"\0"):
+        if item:
+            path = item.decode("utf-8")
+            if path.endswith("/"):
+                directories.add(path.rstrip("/"))
+            else:
+                files.add(path)
+    return files, directories
+
+def capture(commit, keep_json, *excluded):
     excluded = {root for root in excluded if root}
+    keep = json.loads(keep_json)
+    check(isinstance(keep, list) and all(isinstance(path, str) and path for path in keep))
+    check(len(commit) in (40, 64) and all(c in "0123456789abcdef" for c in commit))
+    ignored_files, ignored_directories = ignored_paths(commit)
+
+    def kept(path):
+        return any(path == item or path.startswith(item + "/") or item.startswith(path + "/")
+                   for item in keep)
+
+    def ignored(path):
+        if path in ignored_files:
+            return True
+        parts = path.split("/")
+        return any("/".join(parts[:end]) in ignored_directories for end in range(1, len(parts) + 1))
+
     entries = []
     directories = []
     body_length = 0
@@ -1108,7 +1196,11 @@ def capture(*excluded):
         with os.scandir(directory_fd) as children:
             for child in children:
                 path = "/".join((*prefix, child.name))
-                if path in excluded:
+                # Git metadata a command created, and ignored output such as dependencies,
+                # stay in the sandbox.
+                if path in excluded or child.name.lower() == ".git":
+                    continue
+                if ignored(path) and not kept(path):
                     continue
                 parts = components(path)
                 info = child.stat(follow_symlinks=False)

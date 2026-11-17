@@ -46,7 +46,34 @@ function collected(child: ChildProcess) {
   });
 }
 
-async function fixture() {
+/**
+ * A fake privileged exec. It never executes anything: the seal program kills every process it
+ * did not record, so it must never run on the machine running the tests.
+ */
+function fakePrivileged(sealExit = 0) {
+  const stream = (text: string) =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (text) controller.enqueue(new TextEncoder().encode(text));
+        controller.close();
+      },
+    });
+  return vi.fn<ModalSandboxClient["exec"]>(async (command) => {
+    const sealing = command.length > 5;
+    const exitCode = sealing ? sealExit : 0;
+    const stdout = sealing ? (sealExit === 0 ? "sealed 1\n" : "") : '[[1,"3"],[2,"4"]]\n';
+    return {
+      stdin: { async writeBytes() {}, async close() {} },
+      stdout: stream(stdout),
+      stderr: stream(""),
+      async wait() {
+        return exitCode;
+      },
+    };
+  });
+}
+
+async function fixture(privileged?: ReturnType<typeof fakePrivileged>) {
   const roots = new Set<string>();
   const children: { child: ChildProcess; done: Promise<number>; running: boolean }[] = [];
   let allocated = false;
@@ -139,7 +166,13 @@ async function fixture() {
     return 137;
   });
   const snapshotFilesystem = vi.fn(async () => "im-prepared0000000000000000");
-  const sandbox = { sandboxId, exec, terminate, snapshotFilesystem };
+  const sandbox = {
+    sandboxId,
+    exec,
+    terminate,
+    snapshotFilesystem,
+    ...(privileged ? { execPrivileged: privileged } : {}),
+  };
   const create = vi.fn<ModalWorkspaceScope["create"]>(async (params) => {
     allocated = true;
     tags = { ...params.tags };
@@ -385,14 +418,48 @@ it("allocates once with create-time ownership and a bounded whole-second lifetim
   expect(f.terminate).toHaveBeenCalledExactlyOnceWith({ wait: true });
 });
 
-it("refuses command authority before opening a provider client", async () => {
+it("admits commands only in a sandbox it can seal", async () => {
   const f = await fixture();
   await expect(
-    f.session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["commands:execute"] }),
-  ).rejects.toThrow(/commands/i);
-  expect(f.open).not.toHaveBeenCalled();
-  expect(f.create).not.toHaveBeenCalled();
+    f.session.allocate({
+      owner,
+      timeoutMs: 60_000,
+      allowedActions: ["files:write", "commands:execute"],
+    }),
+  ).rejects.toThrow(/allocation/i);
+  expect(f.session.admitsCommands()).toBe(false);
 });
+
+it("stops a timed-out command inside the sandbox without ending it, then seals before capture", async () => {
+  const privileged = fakePrivileged();
+  const f = await fixture(privileged);
+  const { header, bytes } = await bundle();
+  await f.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write", "commands:execute"],
+  });
+  await f.session.stage(header, bytes);
+  const started = Date.now();
+  const late = await f.session.execute({
+    kind: "command",
+    command: "echo started; sleep 30; echo late > late.txt",
+    timeoutMs: 1_000,
+  });
+  expect(late).toMatchObject({ isError: true, text: expect.stringContaining("deadline") });
+  expect(Date.now() - started).toBeLessThan(10_000);
+  // On Modal a process's terminate is the sandbox's: the deadline must never reach it.
+  expect(f.terminate).not.toHaveBeenCalled();
+  await expect(
+    f.session.execute({ kind: "command", command: "echo next > next.txt; echo ok" }),
+  ).resolves.toEqual({ text: "ok\n", isError: false });
+  const captured = await f.session.capture();
+  expect(privileged).toHaveBeenCalledTimes(2);
+  const paths = unpack(captured.bytes).map((entry) => entry.path);
+  expect(paths).toContain("next.txt");
+  expect(paths).not.toContain("late.txt");
+  expect(f.terminate).not.toHaveBeenCalled();
+}, 30_000);
 
 it("rounds a fractional-second lifetime for the pinned Modal create contract", async () => {
   const f = await fixture();

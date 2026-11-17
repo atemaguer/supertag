@@ -92,7 +92,7 @@ turns. Reported tokens are not a billing cap. See [Budgets and allocation](coord
 | --- | --- | --- | --- |
 | `codex` | Built into `supertag`; drives Codex's app-server | `CODEX_API_KEY`, `OPENAI_API_KEY`, and a copy of a file-backed sign-in | In Codex's sandbox, writable only in the checkout and read-write Workspace Volume copies. A code-mode-only model, such as gpt-6-sol, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) |
 | `claude-code` | Node bridge on the Claude Agent SDK | `ANTHROPIC_API_KEY` or the host user's sign-in | Without a sandbox, only with `--allow-unsandboxed-commands`; a permission hook keeps file tools in the Task's roots |
-| `cursor` | Node bridge on the Cursor SDK | `CURSOR_API_KEY` | Without a sandbox, only with `--allow-unsandboxed-commands`; or in a shared execution environment. A host with an E2B or Modal Workspace runs no commands |
+| `cursor` | Node bridge on the Cursor SDK | `CURSOR_API_KEY` | Without a sandbox, only with `--allow-unsandboxed-commands`; in the Task's sandbox on a host with an E2B or Modal Workspace; or in a shared execution environment |
 | `opencode` | Node bridge | The selected provider's API key, or `--opencode-auth-file` | Without a sandbox, only with `--allow-unsandboxed-commands` |
 | `openai-agents` | The `supertag` Python package | `OPENAI_API_KEY` | The tools the Task's permissions allow |
 
@@ -157,9 +157,14 @@ the only form: read-only provider-native Modal Volume mounts are on the backlog.
 
 A Cursor Task can keep its Workspace in an E2B or Modal sandbox
 (`--e2b-workspace-provider`, `--modal-workspace-provider`) while the harness and its credentials
-stay on the host. Only the checkout moves into the sandbox; keys never do. Such a host holds files
-only: it cannot take `--allow-unsandboxed-commands`, so a Task with `commands:execute` does not
-run on it. A repository's
+stay on the host. Only the checkout moves into the sandbox; keys never do. A Task with
+`commands:execute` runs its commands in the sandbox, which has no network access, so the host
+needs no `--allow-unsandboxed-commands` (and cannot take it). Each command runs in its own process
+group with its own time limit, enforced inside the sandbox. Before Capture, the provider stops every
+process in the sandbox except the ones the sandbox started with, and confirms none is left; a
+sandbox it cannot confirm fails the Task Attempt. Capture leaves out every `.git` entry and every
+untracked path the checkout's ignore rules match, except the Task output directory. A Task whose
+Permission Sets hide paths does not run commands on such a host. A repository's
 `.devcontainer` settings choose the sandbox image, user, and setup; see
 [Devcontainer settings](devcontainer-subset.md).
 

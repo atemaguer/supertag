@@ -9930,7 +9930,11 @@ func (x *RemoteWorkspaceStageResponse) GetInputFiles() []*ArtifactInputFile {
 }
 
 type RemoteWorkspaceCaptureRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Checkout paths returned even when the checkout's ignore rules match them, such as the Task
+	// output directory. Every other ignored untracked path, and every `.git` entry, stays in the
+	// sandbox. Workspace-relative, at most 64.
+	Keep          []string `protobuf:"bytes,1,rep,name=keep,proto3" json:"keep,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9963,6 +9967,13 @@ func (x *RemoteWorkspaceCaptureRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RemoteWorkspaceCaptureRequest.ProtoReflect.Descriptor instead.
 func (*RemoteWorkspaceCaptureRequest) Descriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{109}
+}
+
+func (x *RemoteWorkspaceCaptureRequest) GetKeep() []string {
+	if x != nil {
+		return x.Keep
+	}
+	return nil
 }
 
 type RemoteWorkspaceCaptureChunk struct {
@@ -25623,8 +25634,9 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x04part\"g\n" +
 	"\x1cRemoteWorkspaceStageResponse\x12G\n" +
 	"\vinput_files\x18\x01 \x03(\v2&.supertag.runtime.v2.ArtifactInputFileR\n" +
-	"inputFiles\"\x1f\n" +
-	"\x1dRemoteWorkspaceCaptureRequest\"{\n" +
+	"inputFiles\"3\n" +
+	"\x1dRemoteWorkspaceCaptureRequest\x12\x12\n" +
+	"\x04keep\x18\x01 \x03(\tR\x04keep\"{\n" +
 	"\x1bRemoteWorkspaceCaptureChunk\x128\n" +
 	"\x04tree\x18\x01 \x01(\v2\".supertag.runtime.v2.BlobReferenceH\x00R\x04tree\x12\x1a\n" +
 	"\apayload\x18\x02 \x01(\fH\x00R\apayloadB\x06\n" +

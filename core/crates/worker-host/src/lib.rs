@@ -190,6 +190,7 @@ impl Attempt {
                     attempt.harness_kind(),
                     HarnessKind::ClaudeCode | HarnessKind::Opencode | HarnessKind::Cursor
                 ) && attempt.shared_execution.is_none()
+                    && !attempt.remote_file_workspace
                     && task
                         .allowed_actions
                         .iter()

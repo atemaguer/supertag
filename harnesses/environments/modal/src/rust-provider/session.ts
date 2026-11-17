@@ -53,6 +53,12 @@ export interface ModalWorkspaceScope {
 /** A Modal sandbox that can snapshot its filesystem into a prepared image. */
 export interface ModalWorkspaceSandbox extends ModalSandboxClient {
   snapshotFilesystem(): Promise<string>;
+  /**
+   * Runs trusted provider code as the sandbox's privileged user, for sealing before Capture.
+   * Modal runs every process as root, so the native one is `exec`. Never point it at a Worker
+   * Host process: the seal program kills every process it did not record.
+   */
+  execPrivileged?: ModalSandboxClient["exec"];
 }
 
 function required(name: string): string {
@@ -89,6 +95,8 @@ async function openNativeScope(): Promise<ModalWorkspaceScope> {
         return Object.assign(sandbox, {
           snapshotFilesystem: async () =>
             (await sandbox.snapshotFilesystem({ timeoutMs: 300_000 })).imageId,
+          execPrivileged: (command: string[], options: Parameters<ModalSandboxClient["exec"]>[1]) =>
+            sandbox.exec(command, options),
         });
       },
       async deleteImage(imageId) {
@@ -189,6 +197,26 @@ async function readTransfer(
   });
 }
 
+async function runIn(
+  exec: ModalSandboxClient["exec"],
+  argv: string[],
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  return withSignal(async () => {
+    const process = await exec(argv, { mode: "binary", workdir: "/tmp", timeoutMs });
+    const result = Promise.all([
+      collect(process.stdout, 8192),
+      collect(process.stderr, 8192),
+      process.wait(),
+    ]);
+    void result.catch(() => undefined);
+    await process.stdin.close();
+    const [stdout, , exitCode] = await result;
+    return { stdout: new TextDecoder().decode(stdout), exitCode };
+  }, signal);
+}
+
 export function createModalWorkspaceSession(
   options: {
     readonly open?: () => Promise<ModalWorkspaceScope>;
@@ -236,24 +264,19 @@ export function createModalWorkspaceSession(
           sandboxId,
           environment: (root) =>
             sandboxExecutionEnvironment(adaptModal(sandbox), root, environmentOptions),
-          async run(argv, timeoutMs, signal) {
-            return withSignal(async () => {
-              const process = await sandbox.exec(argv, {
-                mode: "binary",
-                workdir: "/tmp",
-                timeoutMs,
-              });
-              const result = Promise.all([
-                collect(process.stdout, 8192),
-                collect(process.stderr, 8192),
-                process.wait(),
-              ]);
-              void result.catch(() => undefined);
-              await process.stdin.close();
-              const [stdout, , exitCode] = await result;
-              return { stdout: new TextDecoder().decode(stdout), exitCode };
-            }, signal);
-          },
+          run: (argv, timeoutMs, signal) =>
+            runIn(sandbox.exec.bind(sandbox), argv, timeoutMs, signal),
+          ...(sandbox.execPrivileged
+            ? {
+                runPrivileged: (argv: string[], timeoutMs: number, signal: AbortSignal) =>
+                  runIn(
+                    (sandbox.execPrivileged as ModalSandboxClient["exec"]).bind(sandbox),
+                    argv,
+                    timeoutMs,
+                    signal,
+                  ),
+              }
+            : {}),
           writeTransfer: (path, bytes, signal) => writeTransfer(sandbox, path, bytes, signal),
           readTransfer: (path, signal) => readTransfer(sandbox, path, signal),
           snapshot: (signal) => withSignal(() => sandbox.snapshotFilesystem(), signal),

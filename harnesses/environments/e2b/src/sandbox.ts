@@ -30,6 +30,8 @@ interface E2BCommandOptionsLike {
   readonly stdin?: boolean;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  /** The Linux user; the provider's privileged runs pass `root`. */
+  readonly user?: string;
 }
 
 /** Minimal E2B surface used by the provider and replaceable by tests. */

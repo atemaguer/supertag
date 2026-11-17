@@ -1789,8 +1789,10 @@ class RemoteWorkspaceStageResponse(_message.Message):
     def __init__(self, input_files: _Optional[_Iterable[_Union[ArtifactInputFile, _Mapping]]] = ...) -> None: ...
 
 class RemoteWorkspaceCaptureRequest(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    __slots__ = ("keep",)
+    KEEP_FIELD_NUMBER: _ClassVar[int]
+    keep: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, keep: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class RemoteWorkspaceCaptureChunk(_message.Message):
     __slots__ = ("tree", "payload")

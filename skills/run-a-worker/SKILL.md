@@ -40,7 +40,8 @@ a path or `{ path, delivery: branch|patch, setup: COMMAND }`; `concurrency` 1 to
 `attempt-timeout-seconds`; `skills`; `labels`; `allow-unsandboxed-commands` for `claude-code`,
 `cursor`, or `opencode`; `restart: unless-stopped`. Claude Code, Cursor, and OpenCode run commands
 without a sandbox, so their Tasks that may run commands (`commands:execute`) run only on a host
-that lists the harness in `allow-unsandboxed-commands`.
+that lists the harness in `allow-unsandboxed-commands`. Cursor on a host with an E2B or Modal
+Workspace provider runs commands in the Task's sandbox instead and needs no opt-in.
 
 ## Join a shared Control Plane
 

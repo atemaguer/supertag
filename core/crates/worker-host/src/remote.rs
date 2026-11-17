@@ -84,17 +84,16 @@ pub(crate) async fn prepare(
         .remote_provider
         .as_ref()
         .context("remote Workspace provider is unavailable")?;
-    ensure!(
-        !task
-            .allowed_actions
-            .iter()
-            .any(|action| action == "commands:execute"),
-        "remote file Workspace cannot run commands"
-    );
+    // Commands run in the sandbox; the provider seals it before Capture.
     let allowed_actions = task
         .allowed_actions
         .iter()
-        .filter(|action| matches!(action.as_str(), "files:read" | "files:write"))
+        .filter(|action| {
+            matches!(
+                action.as_str(),
+                "files:read" | "files:write" | "commands:execute"
+            )
+        })
         .cloned()
         .collect::<Vec<_>>();
     let export = workspaces.export_remote(workspace, cancel).await?;
@@ -223,8 +222,13 @@ pub(crate) async fn capture(
     let directory = journal
         .remote_scratch()
         .map_err(|error| crate::failures::noted(Status::internal(CAPTURE_FAILED), &error))?;
+    // The Task output directory returns even when the checkout's ignore rules match it.
+    let keep = outputs
+        .as_ref()
+        .map(|outputs| vec![outputs.directory.clone()])
+        .unwrap_or_default();
     let tree = provider
-        .capture(&directory, cancel)
+        .capture(&directory, &keep, cancel)
         .await
         .map_err(|error| {
             crate::failures::noted(Status::failed_precondition(CAPTURE_FAILED), &error)

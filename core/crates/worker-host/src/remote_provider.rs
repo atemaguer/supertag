@@ -460,16 +460,22 @@ impl RemoteProvider {
         .await
     }
 
+    /// `keep` names checkout paths the provider returns even when ignored; every other ignored
+    /// untracked path and every `.git` entry stays in the sandbox.
     pub async fn capture(
         &self,
         directory: &Path,
+        keep: &[String],
         cancel: &CancellationToken,
     ) -> Result<TransferArtifact> {
         private_directory(directory)?;
         bounded(TRANSFER_TIMEOUT, cancel, async {
+            let request = RemoteWorkspaceCaptureRequest {
+                keep: keep.to_vec(),
+            };
             let mut stream = self
                 .client()
-                .capture(self.request(RemoteWorkspaceCaptureRequest {}, TRANSFER_TIMEOUT)?)
+                .capture(self.request(request, TRANSFER_TIMEOUT)?)
                 .await?
                 .into_inner();
             let reference = match stream.message().await?.and_then(|message| message.part) {
@@ -1556,7 +1562,7 @@ mod tests {
         assert_eq!(started[0].0.args, ["mcp-server.js"]);
         assert!(started[0].1, "closing the session ends the server's input");
         let captured = provider
-            .capture(&directory, &CancellationToken::new())
+            .capture(&directory, &[], &CancellationToken::new())
             .await
             .unwrap();
         assert_eq!(
@@ -1624,7 +1630,7 @@ mod tests {
             mock.mode.store(mode, Ordering::SeqCst);
             assert!(
                 provider
-                    .capture(&directory, &CancellationToken::new())
+                    .capture(&directory, &[], &CancellationToken::new())
                     .await
                     .is_err(),
                 "mode {mode}"
@@ -1650,7 +1656,7 @@ mod tests {
         }
         let cancel = CancellationToken::new();
         cancel.cancel();
-        assert!(provider.capture(&directory, &cancel).await.is_err());
+        assert!(provider.capture(&directory, &[], &cancel).await.is_err());
         assert!(
             provider
                 .allocate(

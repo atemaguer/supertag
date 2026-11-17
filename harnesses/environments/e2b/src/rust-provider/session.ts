@@ -8,7 +8,7 @@ import {
   type SandboxEnvironment,
   type SandboxWorkspaceSession,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
-import { Sandbox, type SandboxOpts, Template } from "e2b";
+import { CommandExitError, Sandbox, type SandboxOpts, Template } from "e2b";
 import { E2BExecutionEnvironmentProvider } from "../index.js";
 import { adaptE2B, type E2BSandboxClient, shellQuote } from "../sandbox.js";
 import {
@@ -28,6 +28,16 @@ export interface E2BWorkspaceSandbox {
   readTransfer(path: string, signal: AbortSignal): Promise<ReadableStream<Uint8Array>>;
   /** Snapshots this sandbox; later sandboxes are created from the snapshot ID. */
   snapshot(signal: AbortSignal): Promise<string>;
+  /**
+   * Runs trusted provider code as root, for sealing before Capture: E2B's default `user` has
+   * sudo, so a Task process can outrank it. Never point it at a Worker Host process: the seal
+   * program kills every process it did not record.
+   */
+  runPrivileged?(
+    argv: string[],
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<{ readonly exitCode: number | null; readonly stdout: string }>;
 }
 
 /**
@@ -132,6 +142,20 @@ const nativeFactory = {
         signal.throwIfAborted();
         return (await client.createSnapshot({ requestTimeoutMs: TRANSFER_TIMEOUT_MS })).snapshotId;
       },
+      async runPrivileged(argv, timeoutMs, signal) {
+        try {
+          return await client.commands.run(argv.map(shellQuote).join(" "), {
+            cwd: "/tmp",
+            user: "root",
+            timeoutMs,
+            signal,
+          });
+        } catch (error) {
+          // A non-zero exit is a result here, as it is for the session's other runs.
+          if (error instanceof CommandExitError) return error;
+          throw error;
+        }
+      },
     };
   },
   async deleteSnapshot(snapshotId: string) {
@@ -199,6 +223,17 @@ export function createE2BWorkspaceSession(
           writeTransfer: (path, bytes, signal) => sandbox.writeTransfer(path, bytes, signal),
           readTransfer: (path, signal) => sandbox.readTransfer(path, signal),
           snapshot: (signal) => sandbox.snapshot(signal),
+          ...(sandbox.runPrivileged
+            ? {
+                runPrivileged: (argv: string[], timeoutMs: number, signal: AbortSignal) =>
+                  (sandbox.runPrivileged as NonNullable<E2BWorkspaceSandbox["runPrivileged"]>).call(
+                    sandbox,
+                    argv,
+                    timeoutMs,
+                    signal,
+                  ),
+              }
+            : {}),
         };
       },
       stop: (owner, sandboxId) => stopOwnedSandbox(inventory, owner, sandboxId),

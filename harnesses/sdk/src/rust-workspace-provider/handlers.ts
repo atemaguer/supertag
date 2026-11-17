@@ -54,11 +54,11 @@ function workspaceOperation(input: HarnessWorkspaceRequest): WorkspaceOperation 
           throw new ConnectError("Invalid Workspace grep mode", Code.InvalidArgument);
       }
     }
-    case "command":
-      throw new ConnectError(
-        "Remote Workspace command execution is unavailable",
-        Code.PermissionDenied,
-      );
+    case "command": {
+      // The session admits commands only when the Task allows them and its sandbox can be sealed.
+      const { command, timeoutMs } = operation.value;
+      return { kind: "command", command, ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+    }
     default:
       throw new ConnectError("Workspace operation is required", Code.InvalidArgument);
   }
@@ -190,8 +190,8 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
       async *captureCopy(request, context) {
         for await (const part of session.captureCopy(request, context.signal)) yield { part };
       },
-      async *capture(_request, context) {
-        const { tree, bytes } = await session.capture(context.signal);
+      async *capture(request, context) {
+        const { tree, bytes } = await session.capture(context.signal, request.keep);
         yield { part: { case: "tree", value: tree } };
         for (let offset = 0; offset < bytes.byteLength; offset += CHUNK_SIZE) {
           context.signal.throwIfAborted();
@@ -252,7 +252,13 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
     },
     workspace: {
       async execute(request, context) {
-        return session.execute(workspaceOperation(request), context.signal);
+        const operation = workspaceOperation(request);
+        if (operation.kind === "command" && !session.admitsCommands())
+          throw new ConnectError(
+            "Remote Workspace commands are not admitted for this Task",
+            Code.PermissionDenied,
+          );
+        return session.execute(operation, context.signal);
       },
     },
   };

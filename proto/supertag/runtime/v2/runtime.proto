@@ -1305,7 +1305,12 @@ message RemoteWorkspaceStageResponse {
   repeated ArtifactInputFile input_files = 1;
 }
 
-message RemoteWorkspaceCaptureRequest {}
+message RemoteWorkspaceCaptureRequest {
+  // Checkout paths returned even when the checkout's ignore rules match them, such as the Task
+  // output directory. Every other ignored untracked path, and every `.git` entry, stays in the
+  // sandbox. Workspace-relative, at most 64.
+  repeated string keep = 1;
+}
 
 message RemoteWorkspaceCaptureChunk {
   oneof part {
