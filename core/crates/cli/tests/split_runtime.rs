@@ -1801,11 +1801,13 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         signed_slack_event(&http, prompt).await?,
         reqwest::StatusCode::OK
     );
-    // A conflict proves the HTTP acknowledgement followed durable admission. This
-    // must succeed before an exact private replay is used to obtain the Task ID.
+    // A redelivery with different content can never succeed, so the Gateway acknowledges it
+    // (and logs it) rather than letting Slack retry. That it is told apart from the first
+    // event proves the first acknowledgement followed durable admission; the exact private
+    // replay below still returns the original Task.
     assert_eq!(
         signed_slack_event(&http, "different intent").await?,
-        reqwest::StatusCode::CONFLICT
+        reqwest::StatusCode::OK
     );
     let mut connector = ConnectorClient::new(protocol::dial(private_endpoint.clone()).await?);
     let accepted_input = AcceptSlackEventRequest {
