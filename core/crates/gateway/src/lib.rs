@@ -28,10 +28,17 @@ pub(crate) fn settled_without_admission(surface: &str, error: &tonic::Status) ->
         tonic::Code::AlreadyExists | tonic::Code::InvalidArgument
     );
     if settled {
-        eprintln!(
-            "{surface} event acknowledged without admission: {}",
-            error.message()
-        );
+        // The reason can echo provider input, so control characters are dropped before it
+        // reaches the log.
+        let reason: String = error
+            .message()
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(300)
+            .collect();
+        // Standard error reaches only the Gateway log.
+        // terminal-safe: control characters are removed above.
+        eprintln!("{surface} event acknowledged without admission: {reason}");
     }
     settled
 }
