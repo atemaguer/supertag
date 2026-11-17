@@ -31,6 +31,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- The README's multiplayer diagram shows personal and shared Tags coordinating work across local
+  machines, teammates' machines, and VMs.
 - `/goal <outcome>` is the one command that creates an Objective, in every conversation: the
   terminal UI, the desktop app, the conversations API, and Slack and Microsoft Teams channels,
   where it follows the app's mention (`@SuperTag /goal <outcome>`). The Control Plane creates the
