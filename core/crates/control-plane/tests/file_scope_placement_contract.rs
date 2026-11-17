@@ -168,6 +168,14 @@ async fn contract(url: &str) {
         "{}",
         waiting.summary
     );
+    // Each bound host reports what keeps its own lanes from the Task.
+    let [host] = &waiting.hosts[..] else {
+        panic!("{:?}", waiting.hosts)
+    };
+    assert_eq!(
+        (host.requirement.as_str(), host.reason.as_str()),
+        (waiting.requirement.as_str(), waiting.summary.as_str())
+    );
     // Without commands the hook enforces the scope, so the same host claims the Task.
     let tools = scoped_task(
         &store,
@@ -242,6 +250,23 @@ async fn contract(url: &str) {
         waiting.summary.contains("local tools"),
         "{}",
         waiting.summary
+    );
+    let per_host: Vec<(&str, &str)> = waiting
+        .hosts
+        .iter()
+        .map(|host| (host.host_id.as_str(), host.requirement.as_str()))
+        .collect();
+    assert_eq!(
+        per_host,
+        [
+            ("claude", "harness"),
+            ("codex", "harness"),
+            ("cursor", "file-scope")
+        ]
+    );
+    assert_eq!(
+        waiting.hosts[1].reason,
+        "Worker Host codex does not run Cursor"
     );
 
     // explain also names a harness's unsandboxed commands when no bound host allows them.

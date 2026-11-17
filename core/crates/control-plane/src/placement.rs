@@ -571,14 +571,28 @@ impl Store {
                 profiles.push((status.harness_kind(), status.execution_profile.as_ref()));
             }
             let default = HarnessExecutionProfile::default();
-            lanes.extend(
-                profiles
-                    .into_iter()
-                    .filter(|(harness, _)| *harness == task.harness_kind())
-                    .map(|(harness, profile)| {
-                        crate::store::lane_requirement(&task, harness, profile.unwrap_or(&default))
-                    }),
-            );
+            let host_lanes: Vec<Option<(String, String)>> = profiles
+                .into_iter()
+                .filter(|(harness, _)| *harness == task.harness_kind())
+                .map(|(harness, profile)| {
+                    crate::store::lane_requirement(&task, harness, profile.unwrap_or(&default))
+                })
+                .collect();
+            // A host whose every lane for the harness is blocked reports the first reason.
+            let (requirement, reason) = if host_lanes.is_empty() {
+                (
+                    "harness".to_owned(),
+                    format!(
+                        "Worker Host {id} does not run {}",
+                        harness_name(task.harness_kind())
+                    ),
+                )
+            } else if host_lanes.iter().all(Option::is_some) {
+                host_lanes[0].clone().unwrap_or_default()
+            } else {
+                Default::default()
+            };
+            lanes.extend(host_lanes);
             let labels: BTreeSet<String> = status.labels.iter().cloned().collect();
             let missing: Vec<String> = required
                 .iter()
@@ -594,6 +608,8 @@ impl Store {
                 labels: status.labels,
                 eligible: missing.is_empty(),
                 missing_labels: missing,
+                requirement,
+                reason,
             });
             carried.push(labels);
         }

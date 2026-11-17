@@ -181,6 +181,11 @@ message HostPlacement {
   repeated string missing_labels = 4;
   // Carries every required label. Readiness, capacity and harness still apply.
   bool eligible = 5;
+  // What keeps this host's lanes for the Task's harness from running it, such as file-scope or
+  // unsandboxed-commands, or harness when it runs no such lane. Empty when a lane can.
+  string requirement = 6;
+  // A readable explanation, or empty when requirement is empty.
+  string reason = 7;
 }
 
 message TaskPlacementDiagnosis {

@@ -66,6 +66,8 @@ pub async fn run(connection: Connection, command: PlacementCommand) -> Result<()
                         "labels": host.labels,
                         "missing_labels": host.missing_labels,
                         "eligible": host.eligible,
+                        "requirement": host.requirement,
+                        "reason": host.reason,
                     })
                 }).collect::<Vec<_>>(),
             })

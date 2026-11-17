@@ -83,6 +83,10 @@ and serves its harness and model. `placement explain` names which is missing:
 | `unsandboxed-commands`: no host lets the harness run commands | Add the harness to a host's `allow-unsandboxed-commands`, or remove `commands:execute` |
 | `file-scope`: the harness cannot enforce the Task's path scope | Run the Tag on a harness that can, or change the scope; see [Path scopes](../reference/iam.md#path-scopes) |
 
+Each entry under `hosts` also gives that Worker Host's own `requirement` and `reason` when none
+of its lanes for the Task's harness can run the Task: `harness` when it runs no such lane, or
+`unsandboxed-commands` or `file-scope` as above. Use them to find the host to change.
+
 ## 6. Check the harness
 
 A host that cannot sign in to its harness stops with the reason in its log. Check it the way the

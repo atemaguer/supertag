@@ -172,18 +172,22 @@ class DiagnoseTaskPlacementRequest(_message.Message):
     def __init__(self, task_id: _Optional[str] = ...) -> None: ...
 
 class HostPlacement(_message.Message):
-    __slots__ = ("host_id", "phase", "labels", "missing_labels", "eligible")
+    __slots__ = ("host_id", "phase", "labels", "missing_labels", "eligible", "requirement", "reason")
     HOST_ID_FIELD_NUMBER: _ClassVar[int]
     PHASE_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
     MISSING_LABELS_FIELD_NUMBER: _ClassVar[int]
     ELIGIBLE_FIELD_NUMBER: _ClassVar[int]
+    REQUIREMENT_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
     host_id: str
     phase: _runtime_pb2.HostPhase
     labels: _containers.RepeatedScalarFieldContainer[str]
     missing_labels: _containers.RepeatedScalarFieldContainer[str]
     eligible: bool
-    def __init__(self, host_id: _Optional[str] = ..., phase: _Optional[_Union[_runtime_pb2.HostPhase, str]] = ..., labels: _Optional[_Iterable[str]] = ..., missing_labels: _Optional[_Iterable[str]] = ..., eligible: _Optional[bool] = ...) -> None: ...
+    requirement: str
+    reason: str
+    def __init__(self, host_id: _Optional[str] = ..., phase: _Optional[_Union[_runtime_pb2.HostPhase, str]] = ..., labels: _Optional[_Iterable[str]] = ..., missing_labels: _Optional[_Iterable[str]] = ..., eligible: _Optional[bool] = ..., requirement: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
 
 class TaskPlacementDiagnosis(_message.Message):
     __slots__ = ("task_id", "tag_id", "state", "required_labels", "missing_labels", "requirement", "summary", "hosts")

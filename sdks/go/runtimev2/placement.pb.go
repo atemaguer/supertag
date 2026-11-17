@@ -1072,7 +1072,12 @@ type HostPlacement struct {
 	// Required labels this host does not carry.
 	MissingLabels []string `protobuf:"bytes,4,rep,name=missing_labels,json=missingLabels,proto3" json:"missing_labels,omitempty"`
 	// Carries every required label. Readiness, capacity and harness still apply.
-	Eligible      bool `protobuf:"varint,5,opt,name=eligible,proto3" json:"eligible,omitempty"`
+	Eligible bool `protobuf:"varint,5,opt,name=eligible,proto3" json:"eligible,omitempty"`
+	// What keeps this host's lanes for the Task's harness from running it, such as file-scope or
+	// unsandboxed-commands, or harness when it runs no such lane. Empty when a lane can.
+	Requirement string `protobuf:"bytes,6,opt,name=requirement,proto3" json:"requirement,omitempty"`
+	// A readable explanation, or empty when requirement is empty.
+	Reason        string `protobuf:"bytes,7,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1140,6 +1145,20 @@ func (x *HostPlacement) GetEligible() bool {
 		return x.Eligible
 	}
 	return false
+}
+
+func (x *HostPlacement) GetRequirement() string {
+	if x != nil {
+		return x.Requirement
+	}
+	return ""
+}
+
+func (x *HostPlacement) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
 }
 
 type TaskPlacementDiagnosis struct {
@@ -1327,13 +1346,15 @@ const file_supertag_runtime_v2_placement_proto_rawDesc = "" +
 	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\x17\n" +
 	"\aruns_on\x18\x02 \x03(\tR\x06runsOn\"7\n" +
 	"\x1cDiagnoseTaskPlacementRequest\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\tR\x06taskId\"\xb9\x01\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\"\xf3\x01\n" +
 	"\rHostPlacement\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x124\n" +
 	"\x05phase\x18\x02 \x01(\x0e2\x1e.supertag.runtime.v2.HostPhaseR\x05phase\x12\x16\n" +
 	"\x06labels\x18\x03 \x03(\tR\x06labels\x12%\n" +
 	"\x0emissing_labels\x18\x04 \x03(\tR\rmissingLabels\x12\x1a\n" +
-	"\beligible\x18\x05 \x01(\bR\beligible\"\xc4\x02\n" +
+	"\beligible\x18\x05 \x01(\bR\beligible\x12 \n" +
+	"\vrequirement\x18\x06 \x01(\tR\vrequirement\x12\x16\n" +
+	"\x06reason\x18\a \x01(\tR\x06reason\"\xc4\x02\n" +
 	"\x16TaskPlacementDiagnosis\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x15\n" +
 	"\x06tag_id\x18\x02 \x01(\tR\x05tagId\x124\n" +
