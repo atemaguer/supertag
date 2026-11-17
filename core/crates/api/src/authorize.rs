@@ -21,6 +21,10 @@ use std::{
 
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+pub use supertag_protocol::authorization::allowed_roles;
+use supertag_protocol::authorization::{
+    ADMIN, CLIENT, ENROLL, GATEWAY, HEALTH_PATH, HOST, NEGOTIATION_PATH, OPERATOR, path_access,
+};
 use supertag_protocol::{
     AUTH_KEY_SECRET_PREFIX, CREDENTIAL_SECRET_PREFIX, INTERNAL_PRINCIPAL_HEADER, MAX_MESSAGE_BYTES,
     is_operator_token_secret, is_secret,
@@ -38,9 +42,6 @@ use tower_service::Service;
 
 use crate::{AUTHORIZATION, Api};
 
-const NEGOTIATION_PATH: &str = "/supertag.runtime.v2.ProtocolNegotiation/";
-const HEALTH_PATH: &str = "/grpc.health.v1.Health/";
-const PACKAGE: &str = "/supertag.runtime.v2.";
 /// How long resolving a presented credential may take.
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -104,209 +105,6 @@ impl Caller {
 /// The SHA-256 of the Auth Key presented to `Enrollments.Enroll`, in the request's extensions.
 #[derive(Clone, Debug)]
 pub(crate) struct AuthKeyDigest(pub(crate) Vec<u8>);
-
-const ADMIN: u16 = 1;
-const OPERATOR: u16 = 1 << 1;
-const GATEWAY: u16 = 1 << 2;
-const HOST: u16 = 1 << 3;
-const CLIENT: u16 = 1 << 4;
-/// No credential: protocol negotiation.
-const OPEN: u16 = 1 << 5;
-/// An Auth Key as the bearer: enrollment only.
-const ENROLL: u16 = 1 << 6;
-/// Served by the state owner to the API tier only; never on the public listener.
-const INTERNAL: u16 = 1 << 7;
-/// Served by a Worker Host or Gateway on its own listener; never by the Control Plane.
-const PEER_LOCAL: u16 = 1 << 8;
-
-const O: u16 = OPERATOR;
-const OC: u16 = OPERATOR | CLIENT;
-const ANY: u16 = OPERATOR | GATEWAY | HOST | CLIENT;
-
-/// Every RPC of the runtime protocol and who may call it on the Control Plane's public listener.
-/// `*` covers every method of a service that has no exact entry. A `*` entry never admits a
-/// client: each method a client may call is listed by name. See
-/// contributing/auth-key-roles-design.md, section 4.
-const TABLE: &[(&str, &str, u16)] = &[
-    ("ProtocolNegotiation", "*", OPEN),
-    // Operator Tokens and audit.
-    ("OperatorAccess", "*", ADMIN),
-    ("OperatorAccess", "ListAuditEntries", O),
-    // Enrollment.
-    ("Enrollments", "Enroll", ENROLL),
-    ("Enrollments", "WhoAmI", ANY),
-    ("Enrollments", "RotateCredential", ANY),
-    ("Enrollments", "*", O),
-    ("AuthKeys", "*", O),
-    ("CredentialDirectory", "*", INTERNAL),
-    // Fleet, configuration, recovery.
-    ("Operator", "*", O),
-    ("Operator", "GetTag", OC),
-    ("Operator", "ListTags", OC),
-    ("Operator", "GetTask", OC),
-    ("Operator", "GetSessionDelivery", OC),
-    ("Operator", "ListNativeUsage", OC),
-    ("Operator", "ListEvents", OC),
-    ("Operator", "CancelTask", OC),
-    ("Placement", "*", O),
-    ("PolicyCatalog", "*", O),
-    ("SurfacePolicyCatalog", "*", O),
-    ("ManifestRelationships", "*", O),
-    // Manifest field ownership and `--force-conflicts`: an operator's apply, never a client's.
-    ("ManifestRelationships", "ReconcileManifestFields", O),
-    ("Teams", "*", O),
-    ("Teams", "GetTeam", OC),
-    ("Teams", "ListTeams", OC),
-    ("Mailbox", "*", O),
-    ("GithubWorkspaces", "*", O),
-    ("GithubPublications", "*", O),
-    ("WorkspaceVolumes", "*", O),
-    ("ArtifactVolumes", "*", O),
-    ("ArtifactPublications", "*", O),
-    ("Spend", "*", O),
-    ("Metrics", "*", O),
-    // Conversations and own work. Every client method is listed by name, so a new method on
-    // these services is operator-only until it is classified.
-    ("Conversations", "*", O),
-    ("Conversations", "ListConversations", OC),
-    ("Conversations", "ListMessages", OC),
-    ("Conversations", "SendMessage", OC),
-    ("Conversations", "GetMessage", OC),
-    ("Conversations", "MarkConversationRead", OC),
-    ("Conversations", "FollowConversation", OC),
-    ("Objectives", "*", O),
-    ("Objectives", "CreateObjective", OC),
-    ("Objectives", "GetObjective", OC),
-    ("Objectives", "ListObjectives", OC),
-    ("Objectives", "ListCommitReviews", OC),
-    ("Objectives", "PauseObjective", OC),
-    ("Objectives", "ResumeObjective", OC),
-    ("Objectives", "CancelObjective", OC),
-    ("Objectives", "ReviewObjective", OC),
-    ("Objectives", "CompleteObjective", OC),
-    // A client sees and changes the Schedules of its own conversations.
-    ("Schedules", "*", O),
-    ("Schedules", "Create", OC),
-    ("Schedules", "Get", OC),
-    ("Schedules", "List", OC),
-    ("Schedules", "Pause", OC),
-    ("Schedules", "Resume", OC),
-    ("Schedules", "Delete", OC),
-    // A client lists and deletes the shared notes and its own conversations' notes.
-    ("Memories", "*", O),
-    ("Memories", "List", OC),
-    ("Memories", "Get", OC),
-    ("Memories", "Delete", OC),
-    ("ObjectiveOverviews", "*", O),
-    ("ObjectiveOverviews", "GetObjectiveOverview", OC),
-    ("OperatorEvents", "*", O),
-    ("OperatorEvents", "Watch", OC),
-    ("LiveInputs", "*", O),
-    ("LiveInputs", "QueueInput", OC),
-    ("LiveInputs", "GetInput", OC),
-    ("LiveInputs", "ResolveInput", OC),
-    ("WorkSessions", "*", O),
-    ("WorkSessions", "Get", OC),
-    ("WorkSessions", "List", OC),
-    ("WorkSessions", "Close", OC),
-    ("ArtifactCatalog", "*", O),
-    ("ArtifactCatalog", "Get", OC),
-    ("ArtifactCatalog", "List", OC),
-    ("ArtifactTransfers", "DownloadFile", OC),
-    ("Inbox", "*", O),
-    ("Inbox", "ListItems", OC),
-    ("Inbox", "GetQuestion", OC),
-    ("Inbox", "AnswerQuestion", OC),
-    ("Inbox", "GetApproval", OC),
-    ("Inbox", "ListApprovals", OC),
-    ("Inbox", "DecideApproval", OC),
-    // Execution.
-    ("WorkerHost", "*", HOST),
-    // A restarted host reclaiming an Attempt it proved stopped, and the limits its adapter
-    // confirmed: only the Worker Host that holds the Attempt.
-    ("WorkerHost", "ReclaimAttempt", HOST),
-    ("WorkerHost", "ReportAppliedLimits", HOST),
-    ("WorkerHost", "ReportCleanupFailure", HOST),
-    ("WorkerHost", "ReportNetworkLog", HOST),
-    ("AttemptInputs", "*", HOST),
-    ("AttemptWorkstreams", "*", HOST),
-    ("AttemptMailbox", "*", HOST),
-    // A root turn reads its own Tag's Sessions and Objectives through its Worker Host.
-    ("AttemptTagSessions", "*", HOST),
-    ("AttemptSchedules", "*", HOST),
-    ("AttemptMemory", "*", HOST),
-    ("AttemptWorkSessions", "*", HOST),
-    ("AttemptMcpEffects", "*", HOST),
-    ("AttemptChangedPaths", "*", HOST),
-    ("AttemptEffects", "*", HOST),
-    ("AttemptWorkspaceMounts", "*", HOST),
-    // A read-write Workspace copy's write-back summary, from the Attempt's own Worker Host.
-    ("AttemptWorkspaceMounts", "RecordWrites", HOST),
-    ("AttemptArtifacts", "*", HOST),
-    ("ArtifactTransfers", "*", HOST),
-    ("Transfers", "*", HOST),
-    ("Transfers", "DownloadWorkspaceArtifact", OC),
-    // A Worker Host serving the artifact and Workspace bytes it holds to the Control Plane's
-    // relay: only the host the relay asked.
-    ("HostRelay", "Await", HOST),
-    ("HostRelay", "Deliver", HOST),
-    // Surfaces.
-    ("Connector", "*", GATEWAY),
-    ("ReplyProgress", "*", GATEWAY),
-    ("OperatorNotifications", "*", GATEWAY),
-    // The state owner's directories, behind the API tier.
-    ("CheckpointDirectory", "*", INTERNAL),
-    ("WorkspaceDirectory", "*", INTERNAL),
-    ("ArtifactDirectory", "*", INTERNAL),
-    ("ArtifactVolumeDirectory", "*", INTERNAL),
-    ("GithubPublisher", "*", INTERNAL),
-    ("GithubSourceResolver", "*", INTERNAL),
-    // Served by a Worker Host to its harness adapters, or by a Gateway to operators.
-    ("Harness", "*", PEER_LOCAL),
-    ("HarnessArtifacts", "*", PEER_LOCAL),
-    ("HarnessEffects", "*", PEER_LOCAL),
-    ("HarnessMailbox", "*", PEER_LOCAL),
-    ("HarnessMcp", "*", PEER_LOCAL),
-    ("HarnessQuestions", "*", PEER_LOCAL),
-    ("HarnessSchedules", "*", PEER_LOCAL),
-    ("HarnessMemory", "*", PEER_LOCAL),
-    ("HarnessTagSessions", "*", PEER_LOCAL),
-    ("HarnessWorkSessions", "*", PEER_LOCAL),
-    ("HarnessWorkspace", "*", PEER_LOCAL),
-    ("HarnessWorkstreams", "*", PEER_LOCAL),
-    ("RemoteWorkspaceProvider", "*", PEER_LOCAL),
-    ("WorkerArtifactTransfers", "*", PEER_LOCAL),
-    ("OperatorNotificationTest", "*", PEER_LOCAL),
-];
-
-/// Who may call `service`/`method`; `None` when the table has no entry.
-fn access(service: &str, method: &str) -> Option<u16> {
-    let exact = TABLE.iter().find(|(s, m, _)| *s == service && *m == method);
-    exact
-        .or_else(|| TABLE.iter().find(|(s, m, _)| *s == service && *m == "*"))
-        .map(|(_, _, access)| *access)
-}
-
-/// The roles allowed to call a gRPC path, by name, for diagnostics and documentation.
-pub fn allowed_roles(path: &str) -> Vec<&'static str> {
-    let Some((service, method)) = path.strip_prefix(PACKAGE).and_then(|p| p.split_once('/')) else {
-        return vec![];
-    };
-    let access = access(service, method).unwrap_or(0);
-    [
-        (ADMIN, "admin"),
-        (OPERATOR, "operator"),
-        (GATEWAY, "gateway"),
-        (HOST, "host"),
-        (CLIENT, "client"),
-        (OPEN, "unauthenticated"),
-        (ENROLL, "auth-key"),
-    ]
-    .into_iter()
-    .filter(|(bit, _)| access & bit != 0)
-    .map(|(_, name)| name)
-    .collect()
-}
 
 fn unauthenticated() -> Status {
     Status::unauthenticated("valid bearer credential required")
@@ -449,11 +247,7 @@ async fn admit(api: &Api, path: &str, metadata: &MetadataMap) -> Result<Admissio
     if path.starts_with(NEGOTIATION_PATH) || path.starts_with(HEALTH_PATH) {
         return Ok(Admission::Open);
     }
-    let access = path
-        .strip_prefix(PACKAGE)
-        .and_then(|path| path.split_once('/'))
-        .and_then(|(service, method)| access(service, method))
-        .unwrap_or(0);
+    let access = path_access(path).unwrap_or(0);
     if access & ENROLL != 0 {
         let (_, secret) = bearer(metadata)?;
         if !is_secret(AUTH_KEY_SECRET_PREFIX, secret) {
@@ -566,106 +360,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use prost::Message as _;
-
-    /// Every RPC in the compiled protocol descriptors has an entry, so no RPC ships unclassified.
-    #[test]
-    fn every_rpc_in_the_protocol_is_classified() {
-        let set = prost_types::FileDescriptorSet::decode(supertag_protocol::FILE_DESCRIPTOR_SET)
-            .expect("compiled descriptors");
-        let mut missing = vec![];
-        let mut methods = 0;
-        for file in &set.file {
-            for service in &file.service {
-                let name = service.name();
-                let explicit = TABLE.iter().any(|(s, _, _)| *s == name);
-                for method in &service.method {
-                    methods += 1;
-                    if !explicit || access(name, method.name()).is_none() {
-                        missing.push(format!("{name}/{}", method.name()));
-                    }
-                }
-            }
-        }
-        assert!(methods > 250, "descriptors list too few methods: {methods}");
-        assert!(missing.is_empty(), "unclassified RPCs: {missing:?}");
-        // No entry names a service the protocol no longer has.
-        for (service, method, _) in TABLE {
-            let found = set
-                .file
-                .iter()
-                .flat_map(|file| &file.service)
-                .find(|s| s.name() == *service);
-            let found = found.unwrap_or_else(|| panic!("stale table entry {service}"));
-            assert!(
-                *method == "*" || found.method.iter().any(|m| m.name() == *method),
-                "stale table entry {service}/{method}"
-            );
-        }
-    }
-
-    #[test]
-    fn no_service_wide_entry_admits_a_client() {
-        for (service, method, access) in TABLE {
-            assert!(
-                *method != "*" || access & CLIENT == 0,
-                "{service}/* admits a client; list each client method by name"
-            );
-        }
-    }
-
-    #[test]
-    fn the_table_matches_the_approved_role_matrix() {
-        let roles = |path: &str| allowed_roles(&format!("{PACKAGE}{path}"));
-        assert_eq!(roles("OperatorAccess/CreateOperatorToken"), ["admin"]);
-        assert_eq!(roles("OperatorAccess/ListAuditEntries"), ["operator"]);
-        assert_eq!(roles("Operator/PutTag"), ["operator"]);
-        assert_eq!(roles("Operator/SubmitTask"), ["operator"]);
-        assert_eq!(roles("Operator/ListHosts"), ["operator"]);
-        assert_eq!(roles("Operator/GetTag"), ["operator", "client"]);
-        assert_eq!(roles("Conversations/SendMessage"), ["operator", "client"]);
-        assert_eq!(roles("Objectives/CreateObjective"), ["operator", "client"]);
-        assert_eq!(roles("Objectives/SetLimits"), ["operator"]);
-        assert_eq!(roles("Inbox/DecideApproval"), ["operator", "client"]);
-        assert_eq!(roles("WorkerHost/ClaimTask"), ["host"]);
-        assert_eq!(roles("WorkerHost/ReclaimAttempt"), ["host"]);
-        assert_eq!(roles("WorkerHost/ReportAppliedLimits"), ["host"]);
-        assert_eq!(roles("WorkerHost/ReportCleanupFailure"), ["host"]);
-        assert_eq!(roles("WorkerHost/ReportNetworkLog"), ["host"]);
-        assert_eq!(roles("AttemptWorkspaceMounts/RecordWrites"), ["host"]);
-        assert_eq!(roles("WorkspaceVolumes/Put"), ["operator"]);
-        assert_eq!(
-            roles("ManifestRelationships/ReconcileManifestFields"),
-            ["operator"]
-        );
-        assert_eq!(roles("Transfers/UploadCheckpoint"), ["host"]);
-        assert_eq!(
-            roles("Transfers/DownloadWorkspaceArtifact"),
-            ["operator", "client"]
-        );
-        assert_eq!(roles("HostRelay/Await"), ["host"]);
-        assert_eq!(roles("HostRelay/Deliver"), ["host"]);
-        assert_eq!(roles("AttemptArtifacts/CommitCapture"), ["host"]);
-        assert_eq!(roles("Transfers/CommitWorkspace"), ["host"]);
-        assert_eq!(roles("Connector/AcceptEvent"), ["gateway"]);
-        assert_eq!(roles("OperatorNotifications/Claim"), ["gateway"]);
-        assert_eq!(roles("Enrollments/Enroll"), ["auth-key"]);
-        assert_eq!(
-            roles("Enrollments/RotateCredential"),
-            ["operator", "gateway", "host", "client"]
-        );
-        assert_eq!(roles("Enrollments/RevokeEnrollment"), ["operator"]);
-        assert_eq!(roles("ProtocolNegotiation/Negotiate"), ["unauthenticated"]);
-        for internal in [
-            "CredentialDirectory/Resolve",
-            "CheckpointDirectory/GetCheckpoint",
-            "GithubPublisher/Claim",
-            "Harness/Attach",
-            "NoSuchService/Call",
-        ] {
-            assert!(roles(internal).is_empty(), "{internal}");
-        }
-    }
 
     #[test]
     fn a_single_bearer_is_required() {

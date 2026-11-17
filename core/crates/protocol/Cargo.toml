@@ -28,6 +28,9 @@ unicode-normalization = "0.1"
 url = "2"
 uuid.workspace = true
 
+[dev-dependencies]
+prost-types = "0.14"
+
 [build-dependencies]
 protoc-bin-vendored.workspace = true
 tonic-prost-build.workspace = true
