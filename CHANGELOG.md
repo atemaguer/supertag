@@ -153,6 +153,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- `stay_quiet` tells a Tag to stay quiet only when nothing changed since its last report: a small
+  change or a resolved problem is still reported, and a known problem someone is handling is not.
 - A turn that stays quiet records its `stay_quiet` note as its result in every harness, rather
   than whatever text it wrote first, so `describe task` says why it posted nothing.
 - Clients connect to the Gateway, which forwards their calls to the Control Plane and authorizes
