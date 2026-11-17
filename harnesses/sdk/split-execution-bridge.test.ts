@@ -71,4 +71,5 @@ it("never writes Git metadata in the workspace or a read-write copy, in any case
   expect(await exists(join(copy, ".git/config"))).toBe(false);
   // Reading Git metadata stays allowed.
   expect((await bridge.call("ls", { path: ".git" })).isError).toBe(false);
-});
+  // About a dozen bridge calls in sequence; loaded CI runners take over five seconds.
+}, 30_000);
