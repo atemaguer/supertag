@@ -1,6 +1,7 @@
 //! GitHub delivery through real split processes against a loopback GitHub API and Git server:
 //! a Work Session's delivery opens a pull request, and the Gateway's signed `pull_request`
-//! webhook reporting that pull request merged closes the Work Session.
+//! webhook reporting that pull request merged closes the Work Session; and a publication whose
+//! holding Worker Host was offline is published as soon as that host is back.
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
@@ -31,7 +32,10 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tokio::{
@@ -53,6 +57,8 @@ const SIGNING: &str = "synthetic-github-webhook-secret";
 struct Fixture {
     root: PathBuf,
     pulls: Arc<Mutex<BTreeMap<String, Value>>>,
+    /// Holds the publisher's pull request lookup until the test opens it.
+    discovery: Arc<AtomicBool>,
 }
 
 struct Server(tokio::task::JoinHandle<()>);
@@ -158,6 +164,9 @@ async fn api(State(fixture): State<Fixture>, request: Request<Body>) -> Response
             .unwrap();
     }
     if path == "/repos/acme/project/pulls" {
+        while !fixture.discovery.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
         let head = query
             .split('&')
             .find_map(|pair| pair.strip_prefix("head=acme%3A"))
@@ -355,11 +364,23 @@ async fn webhook(endpoint: &str, delivery: &str, event: &str, payload: &Value) -
 database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     a_merged_pull_request_closes_the_work_session_that_opened_it;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    a_publication_waiting_for_its_holder_is_published_when_the_holder_returns;
 }
 
 async fn a_merged_pull_request_closes_the_work_session_that_opened_it(
     database: String,
 ) -> Result<()> {
+    scenario(database, true).await
+}
+
+async fn a_publication_waiting_for_its_holder_is_published_when_the_holder_returns(
+    database: String,
+) -> Result<()> {
+    scenario(database, false).await
+}
+
+async fn scenario(database: String, merge: bool) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let repository = root.join("input");
@@ -386,6 +407,7 @@ async fn a_merged_pull_request_closes_the_work_session_that_opened_it(
     let fixture = Fixture {
         root: exported,
         pulls: Arc::default(),
+        discovery: Arc::new(AtomicBool::new(merge)),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let github = format!("http://{}/", listener.local_addr()?);
@@ -536,6 +558,76 @@ async fn a_merged_pull_request_closes_the_work_session_that_opened_it(
             ]);
         host
     };
+    let publication = |task: String| {
+        let cli = &cli;
+        async move {
+            let page = json(cli(&["get", "github-publications", "--task-id", &task])).await?;
+            let job = page["publications"][0].clone();
+            ensure!(
+                job["state"] != "GITHUB_PUBLICATION_STATE_HELD"
+                    && job["state"] != "GITHUB_PUBLICATION_STATE_CANCELLED",
+                "publication stopped: {job}"
+            );
+            Ok::<_, anyhow::Error>(job)
+        }
+    };
+    if !merge {
+        // The Task's host exits as soon as it finishes. The publisher's lookup waits until then,
+        // so it finds no host holding the bundle and puts the publication back for the Queued
+        // retry of a minute.
+        let task = json(cli(&[
+            "task",
+            "submit",
+            "--tag",
+            "builder",
+            "--session",
+            "feature",
+            "first",
+        ]))
+        .await?;
+        let task = task["task_id"].as_str().context("task ID")?.to_owned();
+        let output = timeout(
+            WAIT,
+            host("host-once", &["--workspace-fixture"], true).output(),
+        )
+        .await??;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fixture.discovery.store(true, Ordering::SeqCst);
+        let queued = eventually("queued publication", || {
+            let job = publication(task.clone());
+            async move {
+                let job = job.await?;
+                Ok((job["state"] == "GITHUB_PUBLICATION_STATE_QUEUED"
+                    && job["reason"]
+                        .as_str()
+                        .is_some_and(|reason| reason.contains("not connected")))
+                .then_some(job))
+            }
+        })
+        .await?;
+        // The holder coming back retries it at once, well before the minute is up.
+        let returned = std::time::Instant::now();
+        let _holding =
+            holding_host::serve(host("host-returned", &["--workspace-fixture"], false)).await?;
+        let published = eventually("publication after the holder returned", || {
+            let job = publication(task.clone());
+            async move {
+                let job = job.await?;
+                Ok((job["state"] == "GITHUB_PUBLICATION_STATE_PUBLISHED").then_some(job))
+            }
+        })
+        .await?;
+        ensure!(
+            returned.elapsed() < Duration::from_secs(40),
+            "published {:?} after the holder returned: {queued} then {published}",
+            returned.elapsed()
+        );
+        return Ok(());
+    }
     json(cli(&[
         "task",
         "submit",
@@ -576,16 +668,9 @@ async fn a_merged_pull_request_closes_the_work_session_that_opened_it(
     let _holding =
         holding_host::serve(host("host-holding", &["--workspace-fixture"], false)).await?;
     let published = eventually("publication", || {
-        let child = child.clone();
-        let cli = &cli;
+        let job = publication(child.clone());
         async move {
-            let page = json(cli(&["get", "github-publications", "--task-id", &child])).await?;
-            let job = page["publications"][0].clone();
-            ensure!(
-                job["state"] != "GITHUB_PUBLICATION_STATE_HELD"
-                    && job["state"] != "GITHUB_PUBLICATION_STATE_CANCELLED",
-                "publication stopped: {job}"
-            );
+            let job = job.await?;
             Ok((job["state"] == "GITHUB_PUBLICATION_STATE_PUBLISHED").then_some(job))
         }
     })

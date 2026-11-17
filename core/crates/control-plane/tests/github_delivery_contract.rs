@@ -1,12 +1,21 @@
+//! GitHub delivery follow-ups.
+//!
 //! A merged pull request closes the Work Session whose GitHub delivery opened it: the connector
 //! reports the merge, the Control Plane finds the open Work Session that delivered to that pull
 //! request, and closes it as `merged`. Another pull request, a replay, or a Work Session that
 //! delivered nowhere changes nothing.
+//!
+//! A publication put back because its holding Worker Host was not connected retries as soon as
+//! that host reports Ready, instead of waiting out the Queued retry.
 
 mod support;
 
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, Executor};
+use std::sync::{
+    Arc,
+    atomic::{AtomicI64, Ordering},
+};
 use supertag_control_plane::{HostAuthority, Store};
 use supertag_protocol::v2::*;
 use uuid::Uuid;
@@ -393,8 +402,8 @@ async fn reason(store: &Store, work: &WorkSession) -> (bool, WorkSessionCloseRea
     (current.closed_at_ms.is_some(), current.close_reason())
 }
 
-async fn contract(url: &str) {
-    let store = Store::open(url).await.unwrap();
+async fn merge_contract(url: String) {
+    let store = Store::open(&url).await.unwrap();
     setup(&store).await;
     let host = support::register_host(&store, "builder-host").await;
     let first = work_session(&store, &host, "first", &"2".repeat(40)).await;
@@ -476,33 +485,177 @@ async fn contract(url: &str) {
     store.close().await;
 }
 
-#[tokio::test]
-async fn sqlite_github_merge_contract() {
-    let dir = tempfile::tempdir().unwrap();
-    contract(&format!(
-        "sqlite://{}?mode=rwc",
-        dir.path().join("merge.db").display()
-    ))
-    .await;
+async fn report(store: &Store, host: &HostAuthority, sequence: u64, ready: bool) {
+    store
+        .report_host(
+            host,
+            &ReportHostRequest {
+                sequence,
+                capacity: 4,
+                available_slots: if ready { 4 } else { 0 },
+                readiness: if ready {
+                    HostReadiness::Ready
+                } else {
+                    HostReadiness::Pending
+                } as i32,
+                reason: if ready {
+                    HostReadinessReason::Unspecified
+                } else {
+                    HostReadinessReason::Starting
+                } as i32,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
 }
 
-#[tokio::test]
-#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
-async fn postgres_github_merge_contract() {
+/// Claims the next due publication and records it Queued with `reason`, as the publisher does.
+async fn requeue(store: &Store, reason: &str) -> String {
+    let claim = store
+        .claim_github_publication(
+            PUBLISHER,
+            &ClaimGithubPublicationRequest {
+                operation_id: Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let job = claim.publication.clone().unwrap();
+    let lease = GithubPublicationLease {
+        publication_id: job.publication_id.clone(),
+        lease_token: claim.lease_token.clone(),
+    };
+    let planned = store
+        .plan_github_publication(
+            PUBLISHER,
+            &PlanGithubPublicationRequest {
+                lease: Some(lease.clone()),
+                operation_id: Uuid::new_v4().to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .record_github_publication_effect(
+            PUBLISHER,
+            &RecordGithubPublicationEffectRequest {
+                lease: Some(lease),
+                operation_id: Uuid::new_v4().to_string(),
+                phase: planned.phase,
+                state: GithubPublicationState::Queued as i32,
+                reason: reason.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    job.publication_id
+}
+
+/// The publication the publisher would claim now, if any; the claim is released at once.
+async fn due(store: &Store) -> Option<String> {
+    let claim = store
+        .claim_github_publication(
+            PUBLISHER,
+            &ClaimGithubPublicationRequest {
+                operation_id: Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let job = claim.publication?;
+    store
+        .record_github_publication_effect(
+            PUBLISHER,
+            &RecordGithubPublicationEffectRequest {
+                lease: Some(GithubPublicationLease {
+                    publication_id: job.publication_id.clone(),
+                    lease_token: claim.lease_token,
+                }),
+                operation_id: Uuid::new_v4().to_string(),
+                phase: job.phase,
+                state: GithubPublicationState::Queued as i32,
+                reason: supertag_protocol::GITHUB_PUBLICATION_HOLDER_OFFLINE.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    Some(job.publication_id)
+}
+
+async fn wake_contract(url: String) {
+    let clock = Arc::new(AtomicI64::new(1_000_000));
+    let timer = clock.clone();
+    let store = Store::open(&url)
+        .await
+        .unwrap()
+        .with_execution_clock(move || timer.load(Ordering::SeqCst));
+    setup(&store).await;
+    let holder = support::register_host(&store, "holder").await;
+    let other = support::register_host(&store, "other").await;
+    for (session, head) in [("offline", "2"), ("discovery", "3")] {
+        let task = store
+            .submit_task(
+                OP,
+                &SubmitTaskRequest {
+                    tag_id: "engineer".into(),
+                    session_id: session.into(),
+                    operation_id: session.into(),
+                    prompt: "Change the code".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let attempt = run(&store, &holder, &task.task_id).await;
+        finish(&store, &holder, attempt, &head.repeat(40)).await;
+    }
+    // One publication finds its holding host offline; the other finds GitHub unavailable.
+    let offline = requeue(&store, supertag_protocol::GITHUB_PUBLICATION_HOLDER_OFFLINE).await;
+    let discovery = requeue(
+        &store,
+        "GitHub discovery is unavailable; no provider write was dispatched",
+    )
+    .await;
+    assert_eq!(due(&store).await, None);
+    // A Ready report moments after the publication was queued does not retry it yet.
+    report(&store, &holder, 1, true).await;
+    assert_eq!(due(&store).await, None);
+    clock.fetch_add(15_000, Ordering::SeqCst);
+    // Neither another host's Ready report nor the holder's Pending one retries it.
+    report(&store, &other, 1, true).await;
+    report(&store, &holder, 2, false).await;
+    assert_eq!(due(&store).await, None);
+    // The holder reporting Ready again retries only the publication that waited for it.
+    report(&store, &holder, 3, true).await;
+    assert_eq!(due(&store).await.as_ref(), Some(&offline));
+    assert_eq!(due(&store).await, None);
+    // The other waits out its retry.
+    clock.fetch_add(50_000, Ordering::SeqCst);
+    assert_eq!(due(&store).await.as_ref(), Some(&discovery));
+    store.close().await;
+}
+
+async fn on_postgres(
+    name: &str,
+    contract: fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>,
+) {
     let file = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE").expect("URL file");
     let admin_url = std::fs::read_to_string(file).unwrap();
     let mut url = url::Url::parse(admin_url.trim()).unwrap();
-    let database = format!("supertag_merge_{}", Uuid::new_v4().simple());
+    let database = format!("supertag_{name}_{}", Uuid::new_v4().simple());
     let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
     admin
         .execute(format!("CREATE DATABASE {database}").as_str())
         .await
         .unwrap();
     url.set_path(&database);
+    let url = url.to_string();
     let result = tokio::task::LocalSet::new()
-        .run_until(async move {
-            tokio::task::spawn_local(async move { contract(url.as_str()).await }).await
-        })
+        .run_until(async move { tokio::task::spawn_local(contract(url)).await })
         .await;
     admin
         .execute(format!("DROP DATABASE {database} WITH (FORCE)").as_str())
@@ -510,4 +663,35 @@ async fn postgres_github_merge_contract() {
         .unwrap();
     admin.close().await.unwrap();
     result.unwrap();
+}
+
+fn sqlite_url(dir: &tempfile::TempDir) -> String {
+    format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("delivery.db").display()
+    )
+}
+
+#[tokio::test]
+async fn sqlite_github_merge_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    merge_contract(sqlite_url(&dir)).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_github_merge_contract() {
+    on_postgres("merge", |url| Box::pin(merge_contract(url))).await;
+}
+
+#[tokio::test]
+async fn sqlite_queued_publication_wakes_when_its_holder_reports_ready() {
+    let dir = tempfile::tempdir().unwrap();
+    wake_contract(sqlite_url(&dir)).await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_queued_publication_wakes_when_its_holder_reports_ready() {
+    on_postgres("wake", |url| Box::pin(wake_contract(url))).await;
 }

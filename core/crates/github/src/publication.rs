@@ -323,7 +323,7 @@ impl GithubPublisher {
                     GithubPublicationState::Queued,
                     None,
                     None,
-                    "the Worker Host holding the Workspace bundle is not connected; no provider write was dispatched",
+                    supertag_protocol::GITHUB_PUBLICATION_HOLDER_OFFLINE,
                 )
                 .await?;
                 return Ok(());

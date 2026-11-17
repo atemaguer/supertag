@@ -153,6 +153,12 @@ once per Session; `--commit` pins one commit for every Session. Worker Hosts ser
 draft pull request into that branch. `supertag get github-publication` lists publications, and
 `supertag github-publication cancel ID --reason TEXT` stops further writes.
 
+The Control Plane keeps no copy of a result, so publishing reads it from the Worker Host that ran
+the Task. When that host is not connected, the publication goes back to Queued with the reason
+`the Worker Host holding the Workspace bundle is not connected`. It retries a minute later, or
+sooner once that host reports Ready again. Merging the pull request closes the
+[work Session](../reference/coordination.md#open-work-sessions) that opened it.
+
 ## Start from Slack or GitHub
 
 A message from a collaboration surface can select a GitHub Workspace that the Tag's Permission

@@ -33,6 +33,9 @@ pub const FILE_DESCRIPTOR_SET: &[u8] =
 /// it asks for reaches the person at once as its own message, before the work that follows.
 pub const TURN_GUIDANCE: &str = "When a turn will take more than a moment, open it with one short sentence saying what you are about to do, as its own message, then do it. Answer a quick question directly.";
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
+/// Why a GitHub publication went back to Queued: the Worker Host holding its Workspace bundle was
+/// not connected. The Control Plane retries such a publication as soon as that host reports Ready.
+pub const GITHUB_PUBLICATION_HOLDER_OFFLINE: &str = "the Worker Host holding the Workspace bundle is not connected; no provider write was dispatched";
 pub const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
 pub const CHECKPOINT_CHUNK_BYTES: usize = 256 * 1024;
 /// A Session resumes a native checkpoint only up to half the cap, leaving room for one more long

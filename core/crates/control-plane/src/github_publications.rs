@@ -183,6 +183,50 @@ pub(crate) async fn finish_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Res
     Ok(())
 }
 
+/// How long a Queued publication waits before its next retry.
+const QUEUED_RETRY_MS: i64 = 60_000;
+/// The shortest wait between retries that a holding host's Ready reports bring forward, so a host
+/// that reports Ready while its relay stays down does not make every report a GitHub request.
+const HOLDER_WAKE_MS: i64 = 10_000;
+
+/// Publications put back because their holding Worker Host was not connected retry now that
+/// `host_id` reports Ready, instead of waiting out the Queued retry. Each was queued at least
+/// HOLDER_WAKE_MS ago.
+pub(crate) async fn wake_held_by_in(
+    tx: &mut Transaction<'_, Any>,
+    host_id: &str,
+    now: i64,
+) -> Result<()> {
+    let rows = sqlx::query(
+        "SELECT p.* FROM supertag_v2_github_publications p WHERE p.state=$1 AND p.retry_after_ms>$2
+         AND p.retry_after_ms<=$3 AND EXISTS (SELECT 1 FROM supertag_v2_workspace_deliveries d
+         WHERE d.task_id=p.task_id AND d.holder_host_id=$4 AND d.committed_at_ms IS NOT NULL)",
+    )
+    .bind(GithubPublicationState::Queued as i64)
+    .bind(now)
+    .bind(now.saturating_add(QUEUED_RETRY_MS - HOLDER_WAKE_MS))
+    .bind(host_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for row in rows {
+        let value = decode(&row)?;
+        if value.reason != supertag_protocol::GITHUB_PUBLICATION_HOLDER_OFFLINE {
+            continue;
+        }
+        let Some(delivery) = &value.delivery else {
+            continue;
+        };
+        if crate::workspaces::delivery_holder_in(tx, delivery)
+            .await
+            .is_ok_and(|holder| holder.host_id == host_id)
+        {
+            sqlx::query("UPDATE supertag_v2_github_publications SET retry_after_ms=$1 WHERE publication_id=$2")
+                .bind(now).bind(&value.publication_id).execute(&mut **tx).await?;
+        }
+    }
+    Ok(())
+}
+
 async fn sweep_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<()> {
     let after: i64 = sqlx::query_scalar(
         "SELECT last_order FROM supertag_v2_github_publication_sweep WHERE singleton=1",
@@ -596,7 +640,7 @@ impl Store {
             desired,
             GithubPublicationState::Uncertain | GithubPublicationState::Queued
         ) {
-            sqlx::query("UPDATE supertag_v2_github_publications SET retry_after_ms=$1 WHERE publication_id=$2").bind(now.saturating_add(60_000)).bind(&value.publication_id).execute(&mut *tx).await?;
+            sqlx::query("UPDATE supertag_v2_github_publications SET retry_after_ms=$1 WHERE publication_id=$2").bind(now.saturating_add(QUEUED_RETRY_MS)).bind(&value.publication_id).execute(&mut *tx).await?;
         }
 
         if desired != GithubPublicationState::Claimed {
