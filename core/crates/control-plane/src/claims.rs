@@ -10,29 +10,56 @@ use std::{collections::HashMap, sync::Mutex, time::Duration};
 use supertag_protocol::v2::*;
 use tokio::time::Instant;
 
-use crate::{HostAuthority, Store, store::Result};
+use crate::{
+    HostAuthority, Store,
+    store::{ClaimScope, Result, Sticky},
+};
 
 /// The longest a claim is held, inside the API tier's 10-second call budget.
 const MAX_HOLD: Duration = Duration::from_secs(8);
-/// How many claims of one host may be held at once; more are answered at once.
-const MAX_HELD_PER_HOST: usize = 4;
+/// How many claims of one host, across its lanes, may be held at once; more are answered at once.
+const MAX_HELD_PER_HOST: usize = 16;
 /// How often a held claim checks the watch feed without a signal.
 const CHECK: Duration = Duration::from_millis(250);
 /// The longest a held claim goes without claiming again, for the sweeps a claim runs.
 const RECLAIM: Duration = Duration::from_secs(1);
 
-/// The claims held now, by host principal.
+/// How long a Session stays warm on the host its last Task finished on.
+const WARM_MS: i64 = 5 * 60 * 1000;
+
+/// The claims held now: how many per host principal, and what each can run.
 #[derive(Default)]
-pub(crate) struct HeldClaims(Mutex<HashMap<String, usize>>);
+pub(crate) struct HeldClaims {
+    held: Mutex<HashMap<String, usize>>,
+    scopes: Mutex<HashMap<u64, (String, ClaimScope)>>,
+    next: Mutex<u64>,
+    /// Each warm Session's host and until when, by Tag and Session.
+    warm: Mutex<HashMap<(String, String), (String, i64)>>,
+}
 
 struct Held<'a> {
     claims: &'a HeldClaims,
     principal: String,
+    id: u64,
+}
+
+impl Held<'_> {
+    /// Records what this held claim can run, so other hosts leave its warm Sessions to it.
+    fn can_run(&self, scope: Option<ClaimScope>) {
+        if let Some(scope) = scope {
+            self.claims
+                .scopes
+                .lock()
+                .unwrap()
+                .insert(self.id, (self.principal.clone(), scope));
+        }
+    }
 }
 
 impl Drop for Held<'_> {
     fn drop(&mut self) {
-        let mut held = self.claims.0.lock().unwrap();
+        self.claims.scopes.lock().unwrap().remove(&self.id);
+        let mut held = self.claims.held.lock().unwrap();
         if let Some(count) = held.get_mut(&self.principal) {
             *count -= 1;
             if *count == 0 {
@@ -43,16 +70,53 @@ impl Drop for Held<'_> {
 }
 
 impl HeldClaims {
+    /// The Session's last Task finished on this host: its next Task is offered here first.
+    pub(crate) fn warm(&self, tag_id: &str, session_id: &str, principal: &str, now: i64) {
+        let mut warm = self.warm.lock().unwrap();
+        warm.retain(|_, (_, until)| *until > now);
+        warm.insert(
+            (tag_id.to_owned(), session_id.to_owned()),
+            (principal.to_owned(), now + WARM_MS),
+        );
+    }
+
+    /// The warm Sessions of other hosts that wait to claim now, with what their waiting claims
+    /// can run.
+    pub(crate) fn sticky(&self, principal: &str, now: i64) -> Vec<Sticky> {
+        let scopes = self.scopes.lock().unwrap();
+        self.warm
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, (host, until))| host != principal && *until > now)
+            .filter_map(|((tag_id, session_id), (host, _))| {
+                let waiting: Vec<ClaimScope> = scopes
+                    .values()
+                    .filter(|(held_by, _)| held_by == host)
+                    .map(|(_, scope)| scope.clone())
+                    .collect();
+                (!waiting.is_empty()).then(|| Sticky {
+                    tag_id: tag_id.clone(),
+                    session_id: session_id.clone(),
+                    scopes: waiting,
+                })
+            })
+            .collect()
+    }
+
     fn hold(&self, principal: &str) -> Option<Held<'_>> {
-        let mut held = self.0.lock().unwrap();
+        let mut held = self.held.lock().unwrap();
         let count = held.entry(principal.to_owned()).or_default();
         if *count >= MAX_HELD_PER_HOST {
             return None;
         }
         *count += 1;
+        let mut next = self.next.lock().unwrap();
+        *next += 1;
         Some(Held {
             claims: self,
             principal: principal.to_owned(),
+            id: *next,
         })
     }
 }
@@ -77,27 +141,36 @@ impl Store {
     ) -> Result<Option<Assignment>> {
         let harness = HarnessKind::try_from(input.harness_kind)
             .map_err(|_| crate::store::invalid("unknown harness kind"))?;
-        let claim = async || {
-            self.claim_task_with_sources(
+        let claim = async |scope: &mut Option<ClaimScope>| {
+            self.claim_scoped(
                 host,
                 &input.operation_id,
                 (&input.workspace_ids, &input.gateway_workspace_ids),
-                harness,
-                &input.context_contracts,
-                input.execution_profile.as_ref(),
+                (
+                    harness,
+                    &input.context_contracts,
+                    input.execution_profile.as_ref(),
+                ),
+                scope,
             )
             .await
         };
         let mut changes = self.live.changes.subscribe();
         let mut head = self.feed_head().await?;
-        let assignment = claim().await?;
+        let assignment = claim(&mut None).await?;
         let wait = wait.min(MAX_HOLD);
         if assignment.is_some() || wait.is_zero() {
             return Ok(assignment);
         }
-        let Some(_held) = self.live.claims.hold(&host.principal) else {
+        let Some(held) = self.live.claims.hold(&host.principal) else {
             return Ok(None);
         };
+        // Claimed again now that it is held, so what it can run is recorded.
+        let mut scope = None;
+        if let Some(assignment) = claim(&mut scope).await? {
+            return Ok(Some(assignment));
+        }
+        held.can_run(scope);
         let until = Instant::now() + wait;
         let mut claimed_at = Instant::now();
         loop {
@@ -117,9 +190,11 @@ impl Store {
             }
             head = current;
             claimed_at = Instant::now();
-            if let Some(assignment) = claim().await? {
+            let mut scope = None;
+            if let Some(assignment) = claim(&mut scope).await? {
                 return Ok(Some(assignment));
             }
+            held.can_run(scope);
         }
     }
 }

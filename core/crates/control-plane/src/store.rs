@@ -23,6 +23,7 @@ mod replica_tests;
 mod slack_threads;
 mod sqlite_files;
 pub(crate) use authority::lease_is_live;
+pub(crate) use authority::{ClaimScope, Sticky};
 pub use enrollments::Role;
 pub(crate) use enrollments::{client_tags_in, enrollee_name};
 pub(crate) use execution::lane_requirement;
@@ -826,10 +827,33 @@ impl Store {
         &self,
         host: &HostAuthority,
         operation_id: &str,
-        (workspace_ids, gateway_workspace_ids): (&[String], &[String]),
+        sources: (&[String], &[String]),
         harness: HarnessKind,
         context_contracts: &[ContextContract],
         execution_profile: Option<&HarnessExecutionProfile>,
+    ) -> Result<Option<Assignment>> {
+        self.claim_scoped(
+            host,
+            operation_id,
+            sources,
+            (harness, context_contracts, execution_profile),
+            &mut None,
+        )
+        .await
+    }
+
+    /// Claims as `claim_task_with_sources` does, and says what the claim can run.
+    pub(crate) async fn claim_scoped(
+        &self,
+        host: &HostAuthority,
+        operation_id: &str,
+        (workspace_ids, gateway_workspace_ids): (&[String], &[String]),
+        (harness, context_contracts, execution_profile): (
+            HarnessKind,
+            &[ContextContract],
+            Option<&HarnessExecutionProfile>,
+        ),
+        claimed_scope: &mut Option<ClaimScope>,
     ) -> Result<Option<Assignment>> {
         let _wake = self.wake_follows();
         name("operation ID", operation_id)?;
@@ -931,16 +955,20 @@ impl Store {
             transaction.commit().await?;
             return Ok(None);
         }
-        let Some((id, attempt_execution)) = authority::claim_candidate(
-            &mut transaction,
-            now,
-            (host.id(), host.generation),
+        let scope = ClaimScope {
+            host_id: host.id().to_owned(),
+            generation: host.generation,
             all_tags,
-            (&workspace_ids, &gateway_workspace_ids),
-            (harness, &profile),
-            &contracts,
-        )
-        .await?
+            workspace_ids,
+            gateway_workspace_ids,
+            harness,
+            profile,
+            contracts,
+        };
+        *claimed_scope = Some(scope.clone());
+        let sticky = self.live.claims.sticky(&host.principal, now);
+        let Some((id, attempt_execution)) =
+            authority::claim_candidate(&mut transaction, now, &scope, &sticky).await?
         else {
             // Commit maintenance transitions. An empty poll retains no claim receipt.
             transaction.commit().await?;
@@ -1274,6 +1302,13 @@ impl Store {
         }
         transaction.commit().await?;
         self.text_finished(&input.task_id);
+        // The Session's next Task is offered to this host first for a while.
+        self.live.claims.warm(
+            &task.tag_id,
+            &task.session_id,
+            &host.principal,
+            self.execution_now_ms(),
+        );
         Ok(task)
     }
 

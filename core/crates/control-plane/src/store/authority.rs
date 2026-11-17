@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -430,82 +431,199 @@ fn supports_runtime_actions(harness: HarnessKind, task: &Task) -> bool {
     crate::placement::unsupported_runtime_actions(harness, &task.allowed_actions).is_none()
 }
 
+/// What a Worker Host's claim can run: its identity and Tag scope, and the capabilities its claim
+/// declared, normalized.
+#[derive(Clone)]
+pub(crate) struct ClaimScope {
+    pub(crate) host_id: String,
+    pub(crate) generation: i64,
+    pub(crate) all_tags: i64,
+    pub(crate) workspace_ids: Vec<String>,
+    pub(crate) gateway_workspace_ids: Vec<String>,
+    pub(crate) harness: HarnessKind,
+    pub(crate) profile: HarnessExecutionProfile,
+    pub(crate) contracts: Vec<supertag_protocol::v2::ContextContract>,
+}
+
+/// A Session whose last Task finished on another host that is waiting to claim now: a new Task
+/// of it is left for that host for a moment, when that host can run it.
+pub(crate) struct Sticky {
+    pub(crate) tag_id: String,
+    pub(crate) session_id: String,
+    /// What each of that host's waiting claims can run.
+    pub(crate) scopes: Vec<ClaimScope>,
+}
+
+/// How long a new Task of a warm Session is left for its warm host.
+const STICKY_MS: i64 = 2_000;
+
+/// A host's labels and its Tags' required labels, read once per claim.
+struct Placement {
+    labels: BTreeSet<String>,
+    runs_on: crate::placement::RunsOnCache,
+}
+
+impl ClaimScope {
+    fn contracts(&self) -> &[supertag_protocol::v2::ContextContract] {
+        if matches!(
+            self.harness,
+            HarnessKind::Opencode | HarnessKind::OpenaiAgents | HarnessKind::Cursor
+        ) {
+            &[]
+        } else {
+            &self.contracts
+        }
+    }
+
+    async fn placement(&self, transaction: &mut Transaction<'_, Any>) -> Result<Placement> {
+        // Labels narrow the bound hosts; they never add a Tag to this host's scope.
+        let labels = crate::placement::claim_labels_in(
+            transaction,
+            (&self.host_id, self.generation),
+            self.harness,
+            &[self.workspace_ids.as_slice(), &self.gateway_workspace_ids].concat(),
+            &self.profile,
+        )
+        .await?;
+        Ok(Placement {
+            labels,
+            runs_on: crate::placement::RunsOnCache::default(),
+        })
+    }
+
+    async fn serves(&self, transaction: &mut Transaction<'_, Any>, tag_id: &str) -> Result<bool> {
+        if self.all_tags == 1 {
+            return Ok(true);
+        }
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT CAST(1 AS BIGINT) FROM supertag_v2_host_tags WHERE host_id=$1 AND tag_id=$2",
+        )
+        .bind(&self.host_id)
+        .bind(tag_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .is_some())
+    }
+
+    /// How this host would run `task`, if it may: placement, path scope, Workspace, harness,
+    /// limits, context and the Task's own admission rules.
+    async fn admits(
+        &self,
+        transaction: &mut Transaction<'_, Any>,
+        placement: &mut Placement,
+        now: i64,
+        task: &Task,
+        accepted_order: i64,
+    ) -> Result<Option<AttemptExecutionSelection>> {
+        let has_workspace = task.workspace.as_ref().is_none_or(|spec| {
+            let sources = if spec.github_source.is_some() {
+                &self.gateway_workspace_ids
+            } else {
+                &self.workspace_ids
+            };
+            sources.binary_search(&spec.workspace_id).is_ok()
+        });
+        let Some(attempt_execution) = execution::resolve_attempt(task, self.harness, &self.profile)
+        else {
+            return Ok(None);
+        };
+        let admitted = has_workspace
+            && placement
+                .runs_on
+                .admits(transaction, &task.tag_id, &placement.labels)
+                .await?
+            && crate::workspace_mounts::current_in(transaction, task).await?
+            && task.workspace.as_ref().is_none_or(|spec| {
+                supertag_protocol::valid_git_commit(&spec.base_commit)
+                        // A followed branch is resolved by the host that runs the Attempt.
+                        || (spec.base_commit.is_empty()
+                            && !spec.base_ref.is_empty()
+                            && spec.github_source.is_none())
+            })
+            && supports_execution_limits(self.harness, task)
+            && supports_runtime_actions(self.harness, task)
+            && crate::context::task_supported(task, self.contracts())
+            && crate::work_sessions::can_claim_in(transaction, task).await?
+            && crate::inputs::can_claim_in(transaction, task, accepted_order).await?
+            && crate::objectives::objective_task_can_start_in(transaction, task, now).await?;
+        Ok(admitted.then_some(attempt_execution))
+    }
+}
+
 pub(super) async fn claim_candidate(
     transaction: &mut Transaction<'_, Any>,
     now: i64,
-    (host_id, generation): (&str, i64),
-    all_tags: i64,
-    (workspace_ids, gateway_workspace_ids): (&[String], &[String]),
-    (harness, profile): (HarnessKind, &HarnessExecutionProfile),
-    context_contracts: &[supertag_protocol::v2::ContextContract],
+    scope: &ClaimScope,
+    sticky: &[Sticky],
 ) -> Result<Option<(String, AttemptExecutionSelection)>> {
-    let context_contracts = if matches!(
-        harness,
-        HarnessKind::Opencode | HarnessKind::OpenaiAgents | HarnessKind::Cursor
-    ) {
-        &[]
-    } else {
-        context_contracts
-    };
-    // Labels narrow the bound hosts; they never add a Tag to this host's scope.
-    let labels = crate::placement::claim_labels_in(
-        transaction,
-        (host_id, generation),
-        harness,
-        &[workspace_ids, gateway_workspace_ids].concat(),
-        profile,
-    )
-    .await?;
-    let mut runs_on = crate::placement::RunsOnCache::default();
+    let mut placement = scope.placement(transaction).await?;
     let mut after = 0_i64;
     loop {
         let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND pending.harness_kind IN (0,$8) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1)) AND ($6 = 1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")
             .bind(TaskState::Queued as i64).bind(after).bind(TaskState::Claimed as i64)
-            .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).bind(all_tags).bind(host_id).bind(harness as i64)
+            .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).bind(scope.all_tags).bind(&scope.host_id).bind(scope.harness as i64)
             .fetch_all(&mut **transaction).await?;
         let last_page = candidates.len() < 32;
         for candidate in candidates {
             let id: String = candidate.try_get("task_id")?;
+            let accepted_order: i64 = candidate.try_get("accepted_order")?;
+            after = accepted_order;
             let task = task_in(transaction, &id).await?;
-            let has_workspace = task.workspace.as_ref().is_none_or(|spec| {
-                let sources = if spec.github_source.is_some() {
-                    gateway_workspace_ids
-                } else {
-                    workspace_ids
-                };
-                sources.binary_search(&spec.workspace_id).is_ok()
-            });
-            if let Some(attempt_execution) = execution::resolve_attempt(&task, harness, profile)
-                && has_workspace
-                && runs_on.admits(transaction, &task.tag_id, &labels).await?
-                && crate::workspace_mounts::current_in(transaction, &task).await?
-                && task.workspace.as_ref().is_none_or(|spec| {
-                    supertag_protocol::valid_git_commit(&spec.base_commit)
-                            // A followed branch is resolved by the host that runs the Attempt.
-                            || (spec.base_commit.is_empty()
-                                && !spec.base_ref.is_empty()
-                                && spec.github_source.is_none())
-                })
-                && supports_execution_limits(harness, &task)
-                && supports_runtime_actions(harness, &task)
-                && crate::context::task_supported(&task, context_contracts)
-                && crate::work_sessions::can_claim_in(transaction, &task).await?
-                && crate::inputs::can_claim_in(
-                    transaction,
-                    &task,
-                    candidate.try_get("accepted_order")?,
-                )
+            let Some(attempt_execution) = scope
+                .admits(transaction, &mut placement, now, &task, accepted_order)
                 .await?
-                && crate::objectives::objective_task_can_start_in(transaction, &task, now).await?
-            {
-                return Ok(Some((id, attempt_execution)));
+            else {
+                continue;
+            };
+            if left_for_warm_host(transaction, now, &task, accepted_order, sticky).await? {
+                continue;
             }
-            after = candidate.try_get("accepted_order")?;
+            return Ok(Some((id, attempt_execution)));
         }
         if last_page {
             return Ok(None);
         }
     }
+}
+
+/// Whether a new Task of a warm Session is left, for a moment, to the host it last ran on. That
+/// host is waiting to claim, so it takes the Task at once, and only if it may run it.
+async fn left_for_warm_host(
+    transaction: &mut Transaction<'_, Any>,
+    now: i64,
+    task: &Task,
+    accepted_order: i64,
+    sticky: &[Sticky],
+) -> Result<bool> {
+    let Some(warm) = sticky
+        .iter()
+        .find(|warm| warm.tag_id == task.tag_id && warm.session_id == task.session_id)
+    else {
+        return Ok(false);
+    };
+    let accepted_at: Option<i64> =
+        sqlx::query_scalar("SELECT accepted_at_ms FROM supertag_v2_tasks WHERE task_id=$1")
+            .bind(&task.task_id)
+            .fetch_one(&mut **transaction)
+            .await?;
+    if accepted_at.is_none_or(|at| at + STICKY_MS <= now) {
+        return Ok(false);
+    }
+    for scope in &warm.scopes {
+        if (task.harness_kind == 0 || task.harness_kind == scope.harness as i32)
+            && scope.serves(transaction, &task.tag_id).await?
+        {
+            let mut placement = scope.placement(transaction).await?;
+            if scope
+                .admits(transaction, &mut placement, now, task, accepted_order)
+                .await?
+                .is_some()
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 pub(super) async fn expire_due_attempts(
