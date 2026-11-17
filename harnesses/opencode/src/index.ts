@@ -61,34 +61,48 @@ export interface OpenCodeScope {
   readonly outputDirectory?: string | undefined;
 }
 
-/** Every case spelling of one segment, when there are at most 64; otherwise three common ones. */
-function segmentSpellings(value: string): string[] {
-  const letters = [...value].filter((character) => /[a-z]/iu.test(character)).length;
-  if (letters > 6) return [...new Set([value, value.toLowerCase(), value.toUpperCase()])];
-  let variants = [""];
-  for (const character of value) {
-    const options = /[a-z]/iu.test(character)
-      ? [character.toLowerCase(), character.toUpperCase()]
-      : [character];
-    variants = variants.flatMap((prefix) => options.map((option) => `${prefix}${option}`));
-  }
-  return [...new Set(variants)];
-}
+const LETTER = /[a-z]/iu;
+
+/** At most 2^8 = 256 spellings per path. */
+const SPELLED_LETTERS = 8;
 
 /**
- * Case spellings of a path, segment by segment, for a case-insensitive filesystem: at most 256
- * per path, beyond which only the written, lower-case, and upper-case spellings remain.
+ * Case spellings of a path for a case-insensitive filesystem. OpenCode 1.15.12 matches patterns
+ * case-sensitively and has no character classes, so each letter is spelled out in both cases, up
+ * to 8 letters per path. They are shared out one at a time across the segments, starting with
+ * the last, so every segment keeps its leading letters. Each further letter becomes `?`, which
+ * matches any one character: the patterns can only match more names, all of the same length,
+ * which widens a denial and never lets a spelling of the entry through.
  */
 function caseVariants(value: string): string[] {
+  const segments = value.split("/");
+  const letters = segments.map((segment) => [...segment].filter((c) => LETTER.test(c)).length);
+  const spelled = segments.map(() => 0);
+  let budget = SPELLED_LETTERS;
+  while (budget > 0 && spelled.some((count, index) => count < (letters[index] ?? 0))) {
+    for (let index = segments.length - 1; index >= 0 && budget > 0; index--) {
+      if ((spelled[index] ?? 0) < (letters[index] ?? 0)) {
+        spelled[index] = (spelled[index] ?? 0) + 1;
+        budget--;
+      }
+    }
+  }
   let variants = [""];
-  for (const [index, segment] of value.split("/").entries()) {
-    const options = segmentSpellings(segment);
-    if (variants.length * options.length > 256)
-      return [...new Set([value, value.toLowerCase(), value.toUpperCase()])];
+  segments.forEach((segment, index) => {
+    let seen = 0;
+    let options = [""];
+    for (const character of segment) {
+      const choices = !LETTER.test(character)
+        ? [character]
+        : seen++ < (spelled[index] ?? 0)
+          ? [character.toLowerCase(), character.toUpperCase()]
+          : ["?"];
+      options = options.flatMap((prefix) => choices.map((choice) => `${prefix}${choice}`));
+    }
     variants = variants.flatMap((prefix) =>
       options.map((option) => (index ? `${prefix}/${option}` : option)),
     );
-  }
+  });
   return [...new Set(variants)];
 }
 

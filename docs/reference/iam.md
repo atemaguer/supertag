@@ -503,8 +503,10 @@ outside the Workspace.
 - Claude Code applies its deny rules to `Grep` and `Glob` results. OpenCode does not, so a
   scope with hidden entries turns off OpenCode's `grep` tool. Both list the names of hidden
   files, as an operating-system sandbox does; neither reads them.
-- OpenCode matches its rules in exact letter case. SuperTag adds case spellings of short names,
-  but on macOS a mixed-case spelling of a long hidden name can pass OpenCode's own rules.
+- OpenCode matches its rules in exact letter case, so SuperTag denies every case spelling of a
+  read-only or hidden entry. Past the eighth letter of an entry, a denial covers any character in
+  that position: a hidden `secrets.production` also hides other names of that length that
+  share its first eight letters, such as `secrets.playground`.
 - An Objective's runtime actions narrow which actions its Tasks get, not their paths.
 
 ### Fail-closed behavior

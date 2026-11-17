@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import * as rustHarness from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it, vi } from "vitest";
-import { openCodePermissions, runOpenCode } from "./src/index.js";
+import { openCodePatterns, openCodePermissions, runOpenCode } from "./src/index.js";
 import { nativeRequest, taskModel } from "./src/rust-adapter/adapter.js";
 import { verifiedCompletionParts } from "./src/rust-adapter/completion.js";
 import { verifyWorkspaceLinks } from "./src/rust-adapter/workspace.js";
@@ -208,9 +208,11 @@ it("translates a path scope into OpenCode's ordered permission patterns", () => 
     ["package.json", "allow"],
     ["README.md", "deny"],
     ["src/generated/x.ts", "deny"],
-    // OpenCode matches case-sensitively. Names of up to six letters get every spelling; longer
-    // ones get the written, lower-case, and upper-case spellings, and delivery checks the rest.
+    // OpenCode matches case-sensitively, and a macOS filesystem does not, so every spelling of
+    // a read-only or hidden entry is denied, however long its name.
     ["src/GENERATED/x.ts", "deny"],
+    ["src/GeNeRaTeD/x.ts", "deny"],
+    ["SRC/generateD/x.ts", "deny"],
     ["src/.Env", "deny"],
     ["src/.env", "deny"],
     ["src/.git/config", "deny"],
@@ -229,6 +231,10 @@ it("translates a path scope into OpenCode's ordered permission patterns", () => 
     ["config.env", "allow"],
     ["secrets/key", "deny"],
     ["SECRETS/key", "deny"],
+    ["SeCrEtS/key", "deny"],
+    ["secretS/deep/key", "deny"],
+    ["secrets2/key", "allow"],
+    ["public/key", "allow"],
   ] as const)
     expect(decide(permissions["read"], path), `read ${path}`).toBe(decision);
   // The explicit allow follows OpenCode's built-in `*.env` ask rule, so it no longer asks.
@@ -249,6 +255,26 @@ it("translates a path scope into OpenCode's ordered permission patterns", () => 
   });
   expect(writes["grep"]).toBe("allow");
   expect(writes["read"]).toBe("allow");
+});
+
+it("denies every case spelling of a long hidden name with at most 256 patterns per form", () => {
+  const entry = "config/Production.Secrets.json";
+  const patterns = openCodePatterns(entry, true);
+  // Two forms (the path and its subtree), at most 256 spellings each.
+  expect(patterns.length).toBeLessThanOrEqual(512);
+  const permissions = openCodePermissions(["files:read"], [], "/work", {
+    ...noScope,
+    hidden: [entry],
+  });
+  for (const [path, decision] of [
+    ["config/production.secrets.json", "deny"],
+    ["CONFIG/PRODUCTION.SECRETS.JSON", "deny"],
+    ["Config/pRoDuCtIoN.sEcReTs.JsOn", "deny"],
+    ["config/production.secrets.json/inner", "deny"],
+    ["config/production.json", "allow"],
+    ["config/staging.secrets.json", "allow"],
+  ] as const)
+    expect(decide(permissions["read"], path), path).toBe(decision);
 });
 
 it("keeps the Task output directory editable under narrowed write paths", () => {
