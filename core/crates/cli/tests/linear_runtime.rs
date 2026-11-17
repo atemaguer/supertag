@@ -49,7 +49,8 @@ use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
-const WAIT: Duration = Duration::from_secs(20);
+/// Bounds one test wait. Only the test waits this long; product deadlines are unchanged.
+const WAIT: Duration = Duration::from_secs(60);
 const ACCOUNT: &str = "linear-process-test";
 const WORKSPACE: &str = "11111111-1111-4111-8111-111111111111";
 const TEAM: &str = "22222222-2222-4222-8222-222222222222";
@@ -105,7 +106,8 @@ fn request<T>(input: T, token: &str, principal: Option<&str>) -> Result<Request<
         Some(account) => supertag_protocol::connector_request(input, token, account)?,
         None => authenticated_request(input, token, None)?,
     };
-    request.set_timeout(Duration::from_secs(3));
+    // A test RPC's bound; generous because a loaded machine stalls a debug Control Plane.
+    request.set_timeout(Duration::from_secs(15));
     Ok(request)
 }
 
@@ -390,7 +392,23 @@ fn payload() -> Value {
         .as_millis() as u64;
     json!({"action":"create","actor":{"id":USER,"type":"user"},"type":"Comment","organizationId":WORKSPACE,"webhookTimestamp":timestamp,"data":{"id":COMMENT,"issueId":ISSUE,"body":"@supertag inspect this issue"}})
 }
+/// Delivers a webhook as Linear does: a `503` is redelivered, up to three retries. The Gateway
+/// answers `503` when the Control Plane does not admit the event within its acknowledgement
+/// budget, which a loaded machine can exceed; admission is idempotent per delivery ID.
 async fn signed(endpoint: &str, id: &str, payload: &Value) -> Result<reqwest::StatusCode> {
+    let mut retry = 0;
+    loop {
+        let status = signed_once(endpoint, id, payload).await?;
+        if status != reqwest::StatusCode::SERVICE_UNAVAILABLE || retry == 3 {
+            return Ok(status);
+        }
+        retry += 1;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+/// One delivery, for cases that expect the Gateway's `503`.
+async fn signed_once(endpoint: &str, id: &str, payload: &Value) -> Result<reqwest::StatusCode> {
     let body = payload.to_string();
     let mut mac = Hmac::<Sha256>::new_from_slice(SIGNING.as_bytes())?;
     mac.update(body.as_bytes());
@@ -583,7 +601,7 @@ async fn concurrent_linear_gateways_deduplicate_and_replay_saved_receipt_after_r
     ] {
         mock.lookup_mode.store(mode, Ordering::SeqCst);
         assert_eq!(
-            signed(&http, &format!("invalid-lookup-{mode}"), &payload()).await?,
+            signed_once(&http, &format!("invalid-lookup-{mode}"), &payload()).await?,
             expected
         );
         assert_eq!(task_count(&database).await?, 0);

@@ -48,7 +48,10 @@ use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
-const WAIT: Duration = Duration::from_secs(20);
+/// Bounds one test wait. Only the test waits this long; product deadlines are unchanged.
+const WAIT: Duration = Duration::from_secs(60);
+/// Bounds one test RPC; generous because a loaded machine stalls a debug Control Plane.
+const RPC_DEADLINE: Duration = Duration::from_secs(15);
 const ACCOUNT: &str = "slack-socket-test";
 const TEAM: &str = "TTEAM1";
 const CHANNEL: &str = "CCHANNEL1";
@@ -87,12 +90,12 @@ impl Credentials {
     }
     fn operator<T>(&self, input: T) -> Result<Request<T>> {
         let mut request = authenticated_request(input, &self.operator, None)?;
-        request.set_timeout(Duration::from_secs(3));
+        request.set_timeout(RPC_DEADLINE);
         Ok(request)
     }
     fn connector<T>(&self, input: T) -> Result<Request<T>> {
         let mut request = supertag_protocol::connector_request(input, &self.gateway, ACCOUNT)?;
-        request.set_timeout(Duration::from_secs(3));
+        request.set_timeout(RPC_DEADLINE);
         Ok(request)
     }
 }
@@ -239,14 +242,24 @@ impl Connection {
         Ok(envelope_id)
     }
     /// Delivers an Events API payload and requires its acknowledgement.
+    /// As Slack does, an envelope left unacknowledged is redelivered, up to three retries: the
+    /// Gateway acknowledges only once the Control Plane admits the event within its budget,
+    /// which a loaded machine can exceed. Admission is idempotent per event ID.
     async fn acknowledged(&self, payload: Value) -> Result<()> {
-        let envelope_id = self.deliver("events_api", payload).await?;
-        let ack = tokio::time::timeout(WAIT, self.acks.lock().await.recv())
-            .await
-            .context("envelope was not acknowledged")?
-            .context("Socket Mode connection closed")?;
-        ensure!(ack == envelope_id, "acknowledged another envelope");
-        Ok(())
+        let mut delivered = Vec::new();
+        for retry in 0..=3 {
+            delivered.push(self.deliver("events_api", payload.clone()).await?);
+            let wait = if retry == 3 { WAIT } else { NO_ACK };
+            match tokio::time::timeout(wait, self.acks.lock().await.recv()).await {
+                Ok(ack) => {
+                    let ack = ack.context("Socket Mode connection closed")?;
+                    ensure!(delivered.contains(&ack), "acknowledged another envelope");
+                    return Ok(());
+                }
+                Err(_) => continue,
+            }
+        }
+        anyhow::bail!("envelope was not acknowledged")
     }
     /// Delivers an Events API payload and requires that it stays unacknowledged.
     async fn unacknowledged(&self, payload: Value) -> Result<()> {

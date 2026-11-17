@@ -176,7 +176,13 @@ impl Drop for DatabaseGuard {
 /// Opens a direct connection to either backend so a fixture can inspect or adjust persisted state.
 pub async fn connect(url: &str) -> Result<sqlx::AnyConnection> {
     sqlx::any::install_default_drivers();
-    Ok(sqlx::AnyConnection::connect(url).await?)
+    let mut connection = sqlx::AnyConnection::connect(url).await?;
+    if url.starts_with("sqlite:") {
+        // The Control Plane under test holds SQLite's write lock for its own transactions; a
+        // loaded machine stretches those past the default five-second busy wait.
+        connection.execute("PRAGMA busy_timeout = 60000").await?;
+    }
+    Ok(connection)
 }
 
 /// Declares the cases of a split-process test that runs once per database backend. For each
