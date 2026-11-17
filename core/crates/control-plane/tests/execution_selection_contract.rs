@@ -15,6 +15,7 @@ async fn open(url: &str) -> Store {
 fn profile(models: &[&str], default: Option<&str>, commands: bool) -> HarnessExecutionProfile {
     HarnessExecutionProfile {
         mcp_login_servers: vec![],
+        network_credentials: vec![],
         workspace_mounts: vec![],
         declared_task_outputs: false,
         model_ids: models.iter().map(|model| (*model).into()).collect(),

@@ -489,7 +489,11 @@ mod tests {
             "gh": {"provider": "github", "account": "acme"},
         }));
         assert_eq!(
-            notify_slack_account(&one, &notify(&["desktop", "slack:C0ALERTS"])).unwrap(),
+            notify_slack_account(
+                &one,
+                &notify(&["webhook:https://hooks.example/x", "slack:C0ALERTS"])
+            )
+            .unwrap(),
             Some(vec![
                 ("SUPERTAG_NOTIFY_SLACK_TEAM_ID".into(), "T0OPS".into()),
                 (
@@ -500,7 +504,7 @@ mod tests {
         );
         // No Slack destination, or a workspace no account serves: nothing to name.
         assert_eq!(
-            notify_slack_account(&one, &notify(&["desktop"])).unwrap(),
+            notify_slack_account(&one, &notify(&["webhook:https://hooks.example/x"])).unwrap(),
             None
         );
         assert_eq!(

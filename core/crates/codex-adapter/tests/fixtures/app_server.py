@@ -80,6 +80,9 @@ if root.joinpath("memory-mode").exists():
         ("forget", {"memoryId": "mem_stale"}),
     ])
 
+if root.joinpath("quiet-mode").exists():
+    coordination_tools.append(("stay_quiet", {"note": "CI is green synthetic-codex-provider-secret"}))
+
 if root.joinpath("report-mode").exists():
     coordination_tools.extend(("report_objective", report) for report in json.loads(root.joinpath("report-mode").read_text()))
 

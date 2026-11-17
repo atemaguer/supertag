@@ -290,6 +290,7 @@ func (c *runtimeClient) listConversations(ctx context.Context) ([]*views.Convers
 			UnreadCount: int32(min(conv.GetUnreadCount(), math.MaxInt32)), ReadOrder: conv.GetReadOrder(),
 			Working: conv.GetWorking(), LatestWorkSessionReportId: conv.GetLatestWorkSessionReportId(),
 			LastActivityAtMs: conv.GetLastActivityAtMs(), LatestOrder: conv.GetLatestOrder(),
+			Asking: conv.GetAsking(),
 		})
 	}
 	return conversations, nil
@@ -320,6 +321,7 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 	}
 	// A Schedule's turn has no message from you either; the Control Plane leaves out its prompt.
 	out.ScheduleId = message.GetScheduleId()
+	out.Quiet = task.GetQuiet()
 	if message.GetWorkSessionReportId() != "" {
 		// The prompt instructs the parent to report on child work. It was not
 		// written by the operator and must never appear as their message. The report shows
@@ -329,6 +331,11 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 		turnEvents(out, message.GetEvents())
 	}
 	if input := message.GetLiveInput(); input != nil {
+		switch input.GetState() {
+		case v2.LiveInputState_LIVE_INPUT_STATE_PENDING, v2.LiveInputState_LIVE_INPUT_STATE_DISPATCHING,
+			v2.LiveInputState_LIVE_INPUT_STATE_ACCEPTED, v2.LiveInputState_LIVE_INPUT_STATE_UNKNOWN:
+			out.Answering = input.GetTaskId()
+		}
 		switch input.GetState() {
 		case v2.LiveInputState_LIVE_INPUT_STATE_PENDING:
 			out.WaitingReason = "Waiting to deliver your message to the running Task."

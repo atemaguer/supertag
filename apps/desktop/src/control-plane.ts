@@ -29,6 +29,8 @@ export interface Task {
   artifacts?: ResultArtifact[];
   /** When the operator sent it, in milliseconds since the epoch, once the Control Plane says. */
   createdAtMs?: number;
+  /** The turn finished quietly: no person was waiting and it found nothing to say. */
+  quiet?: boolean;
 }
 
 export interface Message {
@@ -67,6 +69,8 @@ export interface Conversation {
   unreadCount: number;
   /** A Task of the conversation is queued or running. */
   working: boolean;
+  /** The latest message is the Tag's question, still unanswered. */
+  asking?: boolean;
 }
 
 export interface MessagePage {

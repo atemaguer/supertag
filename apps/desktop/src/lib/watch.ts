@@ -126,15 +126,26 @@ export function watchReader(
   };
 }
 
+/**
+ * Keeps `read` current through the watch. A view reads only while the window shows; with
+ * `background`, it reads while hidden too, as notifications need.
+ */
 export function useWatchRefresh(
   read: Read,
   interval: number,
   feed: WatchFeed | undefined,
   affected: (update: WatchUpdate) => boolean,
+  background = false,
 ) {
   const active = useRef<ReturnType<typeof watchReader> | undefined>(undefined);
   useEffect(() => {
-    const reader = watchReader(read, interval, feed, affected, () => !document.hidden);
+    const reader = watchReader(
+      read,
+      interval,
+      feed,
+      affected,
+      () => background || !document.hidden,
+    );
     active.current = reader;
     const visible = () => {
       if (!document.hidden) reader.request();
@@ -145,6 +156,6 @@ export function useWatchRefresh(
       document.removeEventListener("visibilitychange", visible);
       reader.close();
     };
-  }, [read, interval, feed, affected]);
+  }, [read, interval, feed, affected, background]);
   return useCallback(() => active.current?.request(), []);
 }

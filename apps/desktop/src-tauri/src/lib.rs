@@ -281,6 +281,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(ControlPlaneState::new(local_state_directory()))
         .plugin(tauri_plugin_dialog::init())
+        // A Tag's reply or question while its conversation is not in view; see notifications.ts.
+        .plugin(tauri_plugin_notification::init())
         // Links in messages open in the system browser; the capability allows only http and https.
         .plugin(tauri_plugin_opener::init())
         .on_page_load(|webview, payload| {
@@ -351,8 +353,8 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
 
-    /// The window may open only web links, in the system browser, and may otherwise only drag
-    /// and zoom itself.
+    /// The window may open only web links, in the system browser, show notifications and its
+    /// Dock badge, and may otherwise only drag and zoom itself.
     #[test]
     fn the_main_window_opens_only_web_links() {
         let capability: Value =
@@ -363,6 +365,13 @@ mod tests {
                 "control-plane-client",
                 "core:window:allow-start-dragging",
                 "core:window:allow-internal-toggle-maximize",
+                "core:window:allow-set-badge-count",
+                "core:window:allow-set-focus",
+                "notification:allow-is-permission-granted",
+                "notification:allow-request-permission",
+                "notification:allow-notify",
+                "notification:allow-register-listener",
+                "notification:allow-remove-listener",
                 {
                     "identifier": "opener:allow-open-url",
                     "allow": [{ "url": "https://*" }, { "url": "http://*" }]

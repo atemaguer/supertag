@@ -3475,6 +3475,46 @@ async fn native_tag_session_tools_read_and_carry_the_portfolio() -> Result<()> {
 }
 
 #[tokio::test]
+async fn native_stay_quiet_finishes_quietly_only_with_the_capability() -> Result<()> {
+    for may_stay_quiet in [true, false] {
+        let native = NativeFixture::new(&successful("Nothing changed"), "exit 0")?;
+        if may_stay_quiet {
+            std::fs::write(native.directory.path().join("quiet-mode"), "")?;
+        }
+        let server = HarnessProcess::configured_tools(
+            &["files:read"],
+            None,
+            "Scheduled wake-up. Check CI.",
+            false,
+            Some(AttemptCapabilities {
+                may_stay_quiet,
+                ..Default::default()
+            }),
+        )
+        .await?;
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        // The final text stays the result; the turn is quiet only when it may be.
+        assert_eq!(outcome.result, "Nothing changed");
+        assert_eq!(outcome.quiet, may_stay_quiet);
+        let manifest =
+            String::from_utf8_lossy(&outcome.checkpoint.as_ref().context("checkpoint")?.payload)
+                .contains("+quiet-v1");
+        assert_eq!(manifest, may_stay_quiet);
+        let logs = native.read("requests.jsonl")?;
+        if may_stay_quiet {
+            assert!(logs.contains("nothing from this turn is posted"), "{logs}");
+            assert!(!logs.contains(KEY));
+        } else {
+            assert!(!logs.contains("\"stay_quiet\""));
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn native_memory_tools_keep_notes_only_with_the_capability() -> Result<()> {
     for may_remember in [true, false] {
         let native = NativeFixture::new(&successful("Noted"), "exit 0")?;

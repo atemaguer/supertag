@@ -166,6 +166,14 @@ message PolicyPermission {
   // Directories outside the Workspace, absolute or starting with `~/`: writable on
   // files:write, readable on files:read.
   repeated string additional_directories = 11;
+  // Network scopes, on runtime web:fetch only. `https://NAME[:PORT]` origins the Task may reach;
+  // empty means any origin.
+  repeated string hosts = 12;
+  // HTTP methods allowed on `hosts`, uppercase; empty means any method.
+  repeated string methods = 13;
+  // A credential name the Worker Host injects into requests this permission allows. The sandbox
+  // sees only a placeholder. Requires `hosts`.
+  string credential = 14;
 }
 message PermissionSet {
   string set_id = 1;
@@ -258,6 +266,9 @@ message TaskRuntimeAuthority {
   // The path scope composed from the accepted Permission Sets. Absent: no restriction beyond
   // the accepted actions.
   FileScope files = 6;
+  // The network scope composed from the accepted Permission Sets' web:fetch grants. Absent: no
+  // restriction beyond the accepted actions.
+  NetworkScope network = 7;
 }
 
 // A Task's file scope, composed when it is accepted. Workspace entries are relative to the
@@ -274,6 +285,24 @@ message FileScope {
   repeated string outside_write = 4;
   // Directories outside the Workspace that are readable.
   repeated string outside_read = 5;
+}
+
+// A Task's network scope, composed when it is accepted. A request is allowed when `any_origin` is
+// set or a rule matches its origin and method. A credential is injected only where a rule naming
+// it matches.
+message NetworkScope {
+  // An admitted web:fetch grant names no hosts and no methods: every origin and method.
+  bool any_origin = 1;
+  repeated NetworkRule rules = 2;
+}
+
+message NetworkRule {
+  // Canonical `https://name` or `https://name:port` origins. Empty: any origin.
+  repeated string origins = 1;
+  // Uppercase HTTP methods. Empty: any method.
+  repeated string methods = 2;
+  // A credential name the Worker Host injects into matching requests, or empty.
+  string credential = 3;
 }
 
 message PutPermissionSetRequest {

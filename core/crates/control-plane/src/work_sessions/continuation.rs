@@ -49,7 +49,9 @@ fn same_permissions(left: &Task, right: &Task) -> bool {
     left.tag_id == right.tag_id && authority(left) == authority(right)
 }
 
-fn runtime_grants(task: &Task) -> (Vec<String>, Vec<Vec<u8>>, Option<Vec<u8>>) {
+type RuntimeGrants = (Vec<String>, Vec<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>);
+
+fn runtime_grants(task: &Task) -> RuntimeGrants {
     let mut runtime = crate::policy::runtime_authority(task);
     fn normalize(values: &mut Vec<String>) {
         values.sort();
@@ -60,13 +62,22 @@ fn runtime_grants(task: &Task) -> (Vec<String>, Vec<Vec<u8>>, Option<Vec<u8>>) {
         normalize(&mut approval.permission_set_ids);
         normalize(&mut approval.approvers);
     }
-    // Objective revisions and the initiating Task identify provenance, not grants. A path
-    // scope is a grant.
+    // Objective revisions and the initiating Task identify provenance, not grants. Path and
+    // network scopes are grants.
     let files = runtime
         .files
         .filter(|scope| !supertag_protocol::file_scope::is_empty(scope))
         .map(|scope| scope.encode_to_vec());
-    (runtime.actions, encoded_set(&runtime.approvals), files)
+    let network = runtime
+        .network
+        .filter(|scope| !scope.rules.is_empty())
+        .map(|scope| scope.encode_to_vec());
+    (
+        runtime.actions,
+        encoded_set(&runtime.approvals),
+        files,
+        network,
+    )
 }
 
 fn has_typed_runtime(task: &Task) -> bool {
@@ -405,6 +416,7 @@ mod tests {
                     objective_revision: Some(1),
                     delegating_task_id: Some("first-owner-task".into()),
                     files: None,
+                    network: None,
                 }),
                 ..Default::default()
             }),

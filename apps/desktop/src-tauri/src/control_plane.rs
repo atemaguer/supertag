@@ -593,6 +593,9 @@ pub struct Task {
     /// When the Control Plane accepted the message, for a conversation's Task.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<i64>,
+    /// The turn finished quietly: its conversation does not show it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub quiet: bool,
 }
 
 #[derive(Serialize, Debug)]
@@ -632,6 +635,7 @@ impl From<v2::Task> for Task {
                 .map(ResultArtifact::from)
                 .collect(),
             created_at_ms: None,
+            quiet: task.quiet,
         }
     }
 }
@@ -649,6 +653,8 @@ pub struct Conversation {
     pub read_order: u64,
     pub unread_count: u32,
     pub working: bool,
+    /// The latest message is the Tag's question, still unanswered.
+    pub asking: bool,
 }
 
 impl From<v2::Conversation> for Conversation {
@@ -663,6 +669,7 @@ impl From<v2::Conversation> for Conversation {
             read_order: value.read_order,
             unread_count: value.unread_count,
             working: value.working,
+            asking: value.asking,
         }
     }
 }

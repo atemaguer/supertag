@@ -33,10 +33,12 @@ pub(crate) const TAG_SESSIONS_SUFFIX: &str = "+tag-sessions-v2";
 pub(crate) const SCHEDULE_SUFFIX: &str = "+schedule-v1";
 pub(crate) const CLOSE_SESSION_SUFFIX: &str = "+close-session-v1";
 pub(crate) const MEMORY_SUFFIX: &str = "+memory-v1";
+pub(crate) const QUIET_SUFFIX: &str = "+quiet-v1";
 pub(crate) const OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-v1";
 pub(crate) const ONGOING_OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-ongoing-v1";
 const ONGOING_COMPLETION_REFUSED: &str = "This Objective is ongoing, so it never completes; only an operator ends it. Report ready_for_review or blocked instead, or finish the turn without a report.";
 const REPORT_SUMMARY_MAX: usize = 16_000;
+const QUIET_NOTE_MAX: usize = 500;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Tools {
@@ -53,6 +55,8 @@ pub(crate) struct Tools {
     pub(crate) close_sessions: bool,
     /// `remember` and `forget`, for a root turn of a Tag that keeps memory.
     pub(crate) memory: bool,
+    /// `stay_quiet`, for a turn no person is waiting on.
+    pub(crate) quiet: bool,
     /// `report_objective`, for the owner Session of an open Objective.
     pub(crate) report_objective: Reporting,
 }
@@ -109,6 +113,7 @@ impl Tools {
             || self.schedule
             || self.close_sessions
             || self.memory
+            || self.quiet
             || self.report_objective.offered()
     }
 
@@ -149,6 +154,9 @@ impl Tools {
         if self.memory {
             manifest.push_str(MEMORY_SUFFIX);
         }
+        if self.quiet {
+            manifest.push_str(QUIET_SUFFIX);
+        }
         manifest.push_str(self.report_objective.suffix());
         manifest
     }
@@ -169,6 +177,9 @@ impl Tools {
         }
         if params["tool"] == "report_objective" && self.report_objective.offered() {
             return Ok(Arguments::Report(validate_report(params)?));
+        }
+        if params["tool"] == "stay_quiet" && self.quiet {
+            return Ok(Arguments::Quiet(validate_quiet(params)?));
         }
         if self.close_sessions
             && let Some(id) = coordination::close_arguments(params)?
@@ -216,6 +227,7 @@ pub(crate) struct Bridge {
     secrets: Vec<String>,
     asked: bool,
     report: Option<ObjectiveReport>,
+    quiet: Option<String>,
 }
 impl Bridge {
     pub(crate) fn new(
@@ -250,6 +262,7 @@ impl Bridge {
             secrets: vec![],
             asked: false,
             report: None,
+            quiet: None,
         }
     }
     pub(crate) fn enabled(&self) -> bool {
@@ -283,6 +296,14 @@ impl Bridge {
             return None;
         }
         self.report.clone()
+    }
+    /// Why this turn stays quiet, if it called `stay_quiet` and reported nothing, asked
+    /// nothing, and left no approvals pending.
+    pub(crate) fn quiet_note(&self) -> Option<String> {
+        if self.asked || self.report.is_some() || !self.coordination.pending.is_empty() {
+            return None;
+        }
+        self.quiet.clone()
     }
     pub(crate) fn manifest(&self) -> String {
         self.tools.manifest()
@@ -352,6 +373,12 @@ impl Bridge {
                 .as_array_mut()
                 .expect("tool specifications")
                 .push(report_spec(self.tools.report_objective));
+        }
+        if self.tools.quiet {
+            specs[0]["tools"]
+                .as_array_mut()
+                .expect("tool specifications")
+                .push(quiet_spec());
         }
         specs
     }
@@ -572,6 +599,16 @@ impl Bridge {
                     true,
                 )
             }
+            Arguments::Quiet(note)
+                if self.current.quiet
+                    && self.capabilities.may_stay_quiet
+                    && !self.asked
+                    && self.report.is_none()
+                    && self.coordination.pending.is_empty() =>
+            {
+                self.quiet = Some(crate::auth::redact(note.clone(), &self.secrets));
+                coordination::response(QUIET_RECORDED, true)
+            }
             _ => coordination::refused(),
         };
         self.calls
@@ -716,6 +753,47 @@ fn report_spec(reporting: Reporting) -> Value {
     })
 }
 
+/// What `stay_quiet` tells the model; the harness adapters say the same.
+pub(crate) const QUIET_DESCRIPTION: &str = "Finish this turn without posting anything, when it found nothing that needs a person's attention: no reply is posted to the thread or conversation and nothing counts as unread. The note says why in one line; it is kept in the Tag's history, never posted. Use it only when nothing changed or nothing needs anyone; when something does, write the reply instead. Call this last, then finish the turn.";
+const QUIET_RECORDED: &str =
+    "Recorded: nothing from this turn is posted. Finish the turn now without further tool calls.";
+
+fn quiet_spec() -> Value {
+    json!({
+        "type":"function", "name":"stay_quiet",
+        "description":QUIET_DESCRIPTION,
+        "inputSchema":{
+            "type":"object",
+            "properties":{"note":{"type":"string","minLength":1,"maxLength":QUIET_NOTE_MAX}},
+            "required":["note"], "additionalProperties":false
+        }
+    })
+}
+
+pub(crate) fn validate_quiet(params: &Value) -> Result<String> {
+    ensure!(
+        params["namespace"] == "supertag" && params["tool"] == "stay_quiet",
+        "Codex requested an unregistered coordination tool"
+    );
+    let args = params["arguments"]
+        .as_object()
+        .context("Codex stay_quiet arguments must be an object")?;
+    ensure!(
+        args.len() == 1,
+        "Codex stay_quiet arguments do not match the admitted schema"
+    );
+    let note = args
+        .get("note")
+        .and_then(Value::as_str)
+        .context("Codex stay_quiet note is missing")?
+        .trim();
+    ensure!(
+        !note.is_empty() && note.chars().count() <= QUIET_NOTE_MAX && !note.contains('\0'),
+        "Codex stay_quiet note is invalid"
+    );
+    Ok(note.into())
+}
+
 pub(crate) fn validate_report(params: &Value) -> Result<ObjectiveReport> {
     ensure!(
         params["namespace"] == "supertag" && params["tool"] == "report_objective",
@@ -807,6 +885,7 @@ mod tests {
             schedule: false,
             close_sessions: false,
             memory: false,
+            quiet: false,
             report_objective,
         };
         let params = call(json!({"status":"completed","summary":"Done"}));

@@ -600,7 +600,7 @@ impl<'a> Runtime<'a> {
 
     async fn checkpoint(&self) -> Result<(String, String, String, String, i64)> {
         sqlx::any::install_default_drivers();
-        let mut db = sqlx::AnyConnection::connect(&self.database).await?;
+        let mut db = database::connect(&self.database).await?;
         Ok(sqlx::query_as("SELECT c.task_id,c.harness,c.format,c.sha256,c.byte_length FROM supertag_v2_session_checkpoints s JOIN supertag_v2_checkpoints c ON s.attempt_id=c.attempt_id WHERE s.tag_id=$1 AND s.session_id=$2 AND c.committed=1")
             .bind(TAG).bind(SESSION).fetch_one(&mut db).await?)
     }
@@ -1034,7 +1034,7 @@ async fn sandbox_mcp(provider: RemoteWorkspace, database: &str) -> Result<()> {
     // The Attempt finished; the write_note call waits for its decision, never having run.
     assert_eq!(task.state(), TaskState::Succeeded, "{task:?}");
     sqlx::any::install_default_drivers();
-    let mut connection = sqlx::AnyConnection::connect(&runtime.database).await?;
+    let mut connection = database::connect(&runtime.database).await?;
     let pending: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM supertag_v2_approvals WHERE attempt_id=$1 AND state=1 AND action LIKE 'mcp:%'",
     )
@@ -1613,7 +1613,7 @@ async fn remote_workspace_round_trip(provider: RemoteWorkspace, database: &str) 
         sleep(Duration::from_millis(20)).await;
     }
     sqlx::any::install_default_drivers();
-    let mut connection = sqlx::AnyConnection::connect(&runtime.database).await?;
+    let mut connection = database::connect(&runtime.database).await?;
     let before: i64 =
         sqlx::query_scalar("SELECT lease_expires_at_ms FROM supertag_v2_tasks WHERE task_id=$1")
             .bind(&first.task_id)

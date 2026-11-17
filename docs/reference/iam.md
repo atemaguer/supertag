@@ -293,7 +293,7 @@ Runtime actions are captured separately from collaboration surface resources in 
 | no write permission | removes `Write` and `Edit` | read-only sandbox | no edit tool |
 | `files:write` | enables `Write` and `Edit` | Workspace writes in the `supertag` permission profile | adds edit |
 | `commands:execute` | enables `Bash` only with `allow-unsandboxed-commands: [claude-code]`; otherwise a Claude Code host does not run the Task | enables shell and unified execution features, and lets commands use loopback sockets. A code-mode-only model, which is every current Codex model, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) | adds shell only with `files:write` and `allow-unsandboxed-commands: [cursor]`; otherwise the Task waits |
-| `web:fetch` | enables `WebFetch` | requires `files:write`; enables outbound network in the `supertag` permission profile, for commands too | not supported: the Task waits |
+| `web:fetch` | enables `WebFetch` | requires `files:write`; enables outbound network in the `supertag` permission profile, for commands too, limited to the Task's [network scope](#network-scopes) | not supported: the Task waits |
 | `web:search` | enables `WebSearch` | enables live web search | adds `webSearch` |
 | `browser:use` | not supported | not supported | not supported: the Task waits |
 
@@ -335,7 +335,9 @@ With the proxy on, Codex sets `HTTP_PROXY`, `HTTPS_PROXY`, and related variables
 Its `NO_PROXY` value keeps loopback addresses direct.
 
 With `web:fetch`, the profile's network section turns network access on in `full` mode and the
-managed proxy off, so commands connect to external hosts directly, as well as on loopback.
+managed proxy off, so commands connect to external hosts directly, as well as on loopback. A
+[network scope](#network-scopes) that limits hosts or methods changes this; see
+[Network scope enforcement](#network-scope-enforcement).
 
 The profile also grants write access to the Task Attempt's output directory, so a Task with
 `files:write` can still write its deliverables there.
@@ -508,6 +510,122 @@ outside the Workspace.
   that position: a hidden `secrets.production` also hides other names of that length that
   share its first eight letters, such as `secrets.playground`.
 - An Objective's runtime actions narrow which actions its Tasks get, not their paths.
+
+### Network scopes
+
+A network scope narrows a Permission Set's `web:fetch` grant to named origins and HTTP methods.
+It can also name a credential that the Worker Host adds to those requests. The Task's commands
+never see the secret, only a placeholder. Network scopes live only in Permission Sets. A Tag's
+own `allowedActions` `web:fetch` reaches every origin.
+
+A runtime `web:fetch` permission takes three optional fields:
+
+| Field | Meaning |
+| --- | --- |
+| `hosts` | Origins the Task may reach, `https://NAME` or `https://NAME:PORT`. Omitted: any origin |
+| `methods` | HTTP methods allowed on those origins: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`. Omitted: any method |
+| `credential` | A credential configured on the Worker Host, added to requests this permission allows. Needs `hosts` |
+
+```yaml
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: python-and-github }
+spec:
+  permissions:
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://pypi.org", "https://files.pythonhosted.org"]
+      methods: [GET, HEAD]
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://api.github.com"]
+      methods: [GET]
+      credential: github
+    - { target: runtime, action: commands:execute }
+    - { target: runtime, action: files:write }
+```
+
+Read as one statement: *the Task may read packages from PyPI, and read the GitHub API with the
+host's GitHub token, and nothing else on the network.*
+
+Entries follow these rules:
+
+- An origin matches its exact host name, in any letter case, and its exact port. The default port
+  443 is dropped, so `https://pypi.org:443` is `https://pypi.org`. `https://pypi.org` does not
+  cover `https://www.pypi.org`.
+- Only `https://` origins are allowed, so a credential never travels in clear text. An origin
+  has no path, query, user name, or wildcard, and is not an IP address or `localhost`.
+- `GET` does not imply `HEAD`; list both.
+- A permission lists at most 64 hosts.
+
+`supertag apply` and `supertag diff` refuse an invalid entry and say why.
+
+Every Permission Set a Task receives applies, and their grants combine. A request is allowed when
+any grant allows its origin and method. A `web:fetch` grant with neither `hosts` nor `methods`,
+including a Tag's own `web:fetch`, allows every request; then only the credential bindings still
+matter. A credential is added only to a request that a grant naming it allows. A request that
+carries a credential's placeholder anywhere else is refused.
+
+A Task keeps the scope recorded when SuperTag accepted it. `supertag describe task` shows it
+under `network_scope`, for example
+`Reaches https://api.github.com (GET; credential github) · https://pypi.org (GET, HEAD)`.
+
+### Network credentials
+
+A network credential is a secret on the Worker Host, such as a GitHub token, that a Permission
+Set names. Configure it on a host service in `supertag.yaml`; see
+[Network credentials](supertag-yaml.md#network-credentials). The Control Plane learns only its
+name.
+
+For each Task Attempt, the host makes a placeholder such as
+`supertag-credential-github-4f2c0d1e9b8a7c6d5e4f3a2b`. The Task's commands see it in the
+variable the host names, such as `GITHUB_TOKEN`. When a command sends a request that a grant
+naming the credential allows, the Worker Host's egress proxy replaces the placeholder with the
+secret. It replaces it in any header, including inside `Authorization: Basic`, so `git` over
+HTTPS works with `x-access-token:$GITHUB_TOKEN`. It never replaces it in a URL or a body.
+
+An allowed origin can still echo a secret back, for example in an error message or a created
+resource. Keep `methods` and origins as narrow as the work needs.
+
+### Network scope enforcement
+
+The Worker Host runs an egress proxy for each Task Attempt whose Task has a network scope. The
+proxy listens on loopback and accepts only that Task Attempt's harness. It refuses an origin
+outside the scope before any TLS. For an allowed origin, it ends TLS with a certificate from a
+certificate authority made for that Task Attempt. It then checks each request's method and
+`Host`, adds credentials, and forwards the request over a verified TLS connection. The
+authority's key never leaves the Worker Host's memory. The proxy also refuses an origin whose
+address is loopback, private, link-local, or otherwise not public, such as a cloud metadata
+service.
+
+Commands get the authority's certificate in `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
+`CURL_CA_BUNDLE`, `PIP_CERT`, and `GIT_SSL_CAINFO`, as a bundle with the host's own roots, and in
+`NODE_EXTRA_CA_CERTS`.
+
+| Harness | Scope with `hosts` or `methods` | Scope that only names credentials |
+| --- | --- | --- |
+| Codex, local Worker Host | operating system: the sandbox allows only loopback, Codex's managed network proxy allows only the scope's hosts, and it forwards every connection through the egress proxy | commands reach the network directly, and the proxy variables point at the egress proxy |
+| Claude Code, OpenCode, Cursor, custom harnesses | not supported: the Task waits | not supported: the Task waits |
+| Remote Workspaces and shared execution | not supported: the Task waits | not supported: the Task waits |
+
+A Task waits too when no Worker Host offers a credential its scope names.
+`supertag placement explain TASK` names the `network-scope` requirement and why, for example:
+
+```text
+this Worker Host offers no network credential github; configure it under network-credentials on
+a host that runs the Tag
+```
+
+Codex code-mode commands run under the same profile, so they reach the network only through
+the managed proxy and the egress proxy as well.
+
+### Network log
+
+The egress proxy records every request it decides: the time, the method, the origin, the path
+without its query, whether it was allowed, the reason for a refusal, the origin's status code, and
+the credential it added. It never records headers or bodies, and it removes secrets and
+placeholders from paths. It keeps the first 500 requests of a Task Attempt and counts the rest.
+`supertag describe task` shows each Task Attempt's log under `network_log`.
 
 ### Fail-closed behavior
 

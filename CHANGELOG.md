@@ -12,6 +12,21 @@ within the pre-1.0 compatibility policy described in
 ### Added
 
 - `supertag placement explain` names each Worker Host's own reason a Task can't run there: `harness`, `file-scope` or `unsandboxed-commands`.
+- A Tag speaks when it has something to say. A turn no person is waiting on (a Schedule's
+  wake-up, an Objective's notice, a memory review, or an inbox turn) may end with a new
+  `stay_quiet` tool on Claude Code, Codex, Cursor, and OpenCode: nothing is posted to its
+  conversation or thread and nothing counts as unread, while `supertag describe task` still shows
+  it ran (`quiet: true`). A person's message is always answered. `supertag describe tag` shows
+  how the Tag's unprompted messages of the last 30 days landed (posted, read, answered, quiet),
+  and a Schedule's wake-up prompt says how its last fires did. A Schedule's turn shows in the
+  desktop app and the terminal UI only once it finishes, with no typing indicator while it
+  runs, unless a message you send joins it.
+- The desktop app notifies you when a Tag replies or asks a question in a conversation you are
+  not looking at, and clicking a notification opens that Tag. The Dock badge shows your unread
+  replies. Choose all messages, questions only, or off under Notifications in the Control Plane
+  menu. The terminal UI sends a terminal notification (OSC 9) the same way, set with
+  `SUPERTAG_TUI_NOTIFY` (`questions`, `bell`, or `off`), and counts unread replies in its status
+  line.
 - A Tag has at most 8 work Sessions open at once, across all its conversations and Objectives;
   set `maxWorkSessions` (1 to 64) with `supertag tag put --max-work-sessions`, a Tag manifest,
   or the New Tag form. A work Session stays open after it reports, for `continue_session`, until
@@ -22,6 +37,17 @@ within the pre-1.0 compatibility policy described in
   Sessions so the Tag can continue or close one; the turn goes on. The tool description, `supertag get session`, `supertag get tag`, the desktop app
   and the terminal UI show how many are open. On upgrade, finished work Sessions close
   except each Tag's four newest, which can still be continued.
+- Permission Sets can scope web access. A `web:fetch` grant takes `hosts` (`https://` origins),
+  `methods`, and a `credential`, the name of a secret configured on the Worker Host with
+  `network-credentials` in supertag.yaml or `supertag worker-host --network-credential`. Each
+  Task Attempt with a network scope runs an egress proxy on its Worker Host. The proxy allows
+  only the scope's origins and methods, refuses non-public addresses, and swaps a credential's
+  placeholder for the secret only in requests a grant naming it allows, so the secret never
+  enters the sandbox. Codex enforces scopes in its sandbox through its managed network proxy;
+  other harnesses and remote Workspaces wait with requirement `network-scope`, and so does a
+  Task whose credential no host offers. Codex code-mode commands run under the same limits.
+  `supertag describe task` shows the scope and each Task Attempt's network
+  log of allowed and refused requests.
 - Permission Sets can scope file access to paths. A `files:write` grant takes `paths` it may
   write and `exclude` entries that stay read-only; a `files:read` grant takes `exclude` entries
   that are hidden, with `*`, `**`, and `?` globs; both take `additionalDirectories` outside the
@@ -135,6 +161,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Removed
 
+- The Gateway's `desktop` notification destination, which notified the Gateway's own machine.
+  `notify: desktop` is now refused; the desktop app and terminal UI notify on their device, and
+  `webhook:` and `slack:` reach people away from them. A local `supertag up` configures no
+  destination by default.
 - The Python SDK's `supertag.worker` module and `examples/custom-worker`. SDKs provide harness
   adapters, not Worker runtimes; the composition interfaces the OpenAI Agents adapter uses stay in
   the `supertag` package.
@@ -150,6 +180,9 @@ within the pre-1.0 compatibility policy described in
 ### Fixed
 
 - OpenCode path scopes deny every letter-case spelling of hidden and read-only paths, so `SeCrEtS/key` no longer gets past a hidden `secrets/` on case-insensitive file systems.
+- On Linux, a Worker Host no longer leaves the processes it stops for a harness as zombies. Its
+  guardian kills descendants that left the adapter's process group and now reaps the last ones
+  before exiting; in a container whose PID 1 does not reap, they stayed zombies.
 - Codex installed with `npm install -g @openai/codex` no longer fails with "Codex version probe
   timed out". SuperTag runs the native Codex binary behind the npm launcher instead of starting
   Node for every Codex process, and gives the version probe the 30-second startup bound.

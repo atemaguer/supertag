@@ -38,6 +38,11 @@ type runtimeTurn struct {
 	sentAt, completedAt time.Time
 	// stop ends the turn's follow.
 	stop context.CancelFunc
+	// hidden is a Schedule's turn that has not finished: no person asked for it and it may stay
+	// quiet, so it shows nothing until it finishes or a person's message joins it. The history
+	// holds it so a read refreshes it; held is what was last read of it.
+	hidden bool
+	held   *client.HistoryItem
 }
 
 type runtimeHistory struct {
@@ -51,6 +56,8 @@ type runtimeHistory struct {
 	workShown      map[string]bool
 	// markedRead is the order up to which the conversation was last marked read.
 	markedRead uint64
+	// answering are the running turns a person's message joined: they show at once.
+	answering map[string]bool
 }
 
 // latestOrder is the order of the latest message held, zero when none is known.
@@ -80,7 +87,16 @@ func (h *runtimeHistory) reset() {
 			turn.stop()
 		}
 	}
-	h.order, h.turns, h.workShown, h.markedRead = nil, nil, nil, 0
+	h.order, h.turns, h.workShown, h.markedRead, h.answering = nil, nil, nil, 0, nil
+}
+
+// remove forgets one turn, and ends its follow.
+func (h *runtimeHistory) remove(id string) {
+	if turn := h.turns[id]; turn != nil && turn.stop != nil {
+		turn.stop()
+	}
+	delete(h.turns, id)
+	h.order = slices.DeleteFunc(h.order, func(held string) bool { return held == id })
 }
 
 // sortOrder puts the turns in the conversation's order; one whose order is not known yet stays
@@ -171,7 +187,13 @@ func (m *model) showRuntimeHistory(msg historyMsg) tea.Cmd {
 		}
 		h.read = true
 		h.conversationID = msg.conversationID
+		cmds = append(cmds, m.answer(msg.tag, msg.items))
 		for _, item := range msg.items {
+			if item.Message.Quiet {
+				// A turn that finished quietly leaves the conversation.
+				h.remove(item.Message.GetTaskId())
+				continue
+			}
 			cmds = append(cmds, m.runtimeItem(msg.tag, item))
 		}
 		h.sortOrder()
@@ -233,7 +255,9 @@ func (m *model) runtimeSent(msg sentMsg) tea.Cmd {
 		if joined := msg.message.GetJoinedTaskId(); c.runtime.turns[joined] != nil {
 			source = append(source, joined)
 		}
-		for _, item := range client.History(msg.tag, []*views.Message{msg.message}, source...) {
+		items := client.History(msg.tag, []*views.Message{msg.message}, source...)
+		cmds = append(cmds, m.answer(msg.tag, items))
+		for _, item := range items {
 			cmds = append(cmds, m.runtimeItem(msg.tag, item))
 		}
 		c.runtime.sortOrder()
@@ -259,6 +283,21 @@ func (m *model) runtimeItem(tag string, item client.HistoryItem) tea.Cmd {
 		h.turns = make(map[string]*runtimeTurn)
 	}
 	turn := h.turns[id]
+	if item.Message.GetScheduleId() != "" && !finishedMessage(item.Message) && !h.answering[id] {
+		if turn == nil {
+			turn = &runtimeTurn{hidden: true}
+			h.turns[id] = turn
+			h.order = append(h.order, id)
+		}
+		turn.times(item.Message)
+		turn.held = &item
+		return nil
+	}
+	if turn != nil && turn.hidden {
+		// It finished: it shows from now on as a turn of its own.
+		h.remove(id)
+		turn = nil
+	}
 	joined := item.Message.GetJoinedTaskId() != ""
 	var cmds []tea.Cmd
 	if turn != nil && (turn.following || !turn.joined || joined) {
@@ -304,6 +343,35 @@ func (m *model) runtimeItem(tag string, item client.HistoryItem) tea.Cmd {
 		cmds = append(cmds, m.followTurn(tag, id, turn, item))
 	}
 	return tea.Batch(cmds...)
+}
+
+// answer records the running turns these messages joined, and shows any of them held hidden: a
+// Schedule's turn that a person's message joined answers that person, typing included.
+func (m *model) answer(tag string, items []client.HistoryItem) tea.Cmd {
+	h := &m.conversation(tag).runtime
+	var cmds []tea.Cmd
+	for _, item := range items {
+		id := item.Message.Answering
+		if id == "" {
+			continue
+		}
+		if h.answering == nil {
+			h.answering = map[string]bool{}
+		}
+		h.answering[id] = true
+		if turn := h.turns[id]; turn != nil && turn.hidden && turn.held != nil {
+			held := *turn.held
+			h.remove(id)
+			cmds = append(cmds, m.runtimeItem(tag, held))
+		}
+	}
+	h.sortOrder()
+	return tea.Batch(cmds...)
+}
+
+// finishedMessage says the message's turn finished: it has a reply or a completion time.
+func finishedMessage(message *views.Message) bool {
+	return message.GetReply() != nil || message.GetCompletedAt() != nil
 }
 
 // times records the message's order and when it was sent and finished.

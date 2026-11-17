@@ -66,7 +66,8 @@ A Codex Task with `commands:execute` but without `web:fetch` on such a model fai
 starts, naming the model. To let it run commands, do one of these:
 
 - grant the Tag `web:fetch` as well, which also opens the network to its commands; Codex allows
-  `web:fetch` only with `files:write`; or
+  `web:fetch` only with `files:write`. To limit that network, give the `web:fetch` grant a
+  [network scope](../reference/iam.md#network-scopes); or
 - select a Codex model that is not code-mode-only in the Tag's or Role's `execution.models`.
 
 SuperTag cannot tell a model's mode before the Task Attempt starts: Codex does not report it, so

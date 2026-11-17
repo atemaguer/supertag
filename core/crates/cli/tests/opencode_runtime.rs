@@ -837,6 +837,7 @@ async fn opencode_claims_and_runs_the_accepted_role_model(database: String) -> R
         harness_kind: HarnessKind::Opencode as i32,
         execution_profile: Some(HarnessExecutionProfile {
             mcp_login_servers: vec![],
+            network_credentials: vec![],
             workspace_mounts: vec![],
             declared_task_outputs: false,
             model_ids: vec![FIXTURE_MODEL.into()],

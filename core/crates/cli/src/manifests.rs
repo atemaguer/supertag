@@ -639,4 +639,22 @@ mod tests {
             .is_err()
         );
     }
+
+    #[test]
+    fn permission_sets_carry_network_scopes() {
+        let manifest = parse(
+            "PermissionSet",
+            json!({"permissions": [
+                {"target": "runtime", "action": "web:fetch", "hosts": ["https://api.github.com"],
+                 "methods": ["GET"], "credential": "github"},
+            ]}),
+        )
+        .unwrap();
+        let Resource::PermissionSet(set) = manifest.resource else {
+            panic!("not a Permission Set");
+        };
+        assert_eq!(set.permissions[0].hosts, ["https://api.github.com"]);
+        assert_eq!(set.permissions[0].methods, ["GET"]);
+        assert_eq!(set.permissions[0].credential, "github");
+    }
 }

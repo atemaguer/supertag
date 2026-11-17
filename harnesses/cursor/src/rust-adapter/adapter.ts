@@ -371,7 +371,10 @@ export async function runAdapter(
         await settled();
         active = false;
         cancellation.throwIfAborted();
-        if (!agentId || !result?.trim()) throw new Error("Cursor omitted a successful result");
+        // A quiet turn may end without final text; its note becomes the result.
+        const quiet = await coordination.quietNote();
+        if (!agentId || (!result?.trim() && quiet === undefined))
+          throw new Error("Cursor omitted a successful result");
 
         // The legacy runner has closed the SDK and confirmed descendants before capture.
         phase = "checkpoint capture";
@@ -393,7 +396,7 @@ export async function runAdapter(
         outcome = withObjectiveReport(
           {
             succeeded: true,
-            result,
+            result: result ?? "",
             ...(checkpoint ? { checkpoint } : {}),
             waitingApprovalIds: [
               ...(await coordination.waitingApprovalIds()),
@@ -401,6 +404,7 @@ export async function runAdapter(
             ].sort(),
           },
           await coordination.objectiveReport(),
+          quiet,
         );
       } finally {
         active = false;

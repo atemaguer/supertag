@@ -129,10 +129,10 @@ supertag watch inbox-item --control-plane team
 `watch inbox-item` prints every item already waiting, then each new item once as it appears,
 until you stop it. It takes `--objective ID`, `--kind KIND`, `--limit N`, and `--output json`.
 
-The Gateway tells you when the inbox gains an item. Local `supertag up` uses desktop
-notifications. Choose destinations with the `control-plane` service's `notify` in
-`supertag.yaml`, or the Gateway's `--notify` flag: `desktop`, `webhook:HTTPS_URL#SECRET_NAME`, or
-`slack:CHANNEL_OR_USER_ID`. Send a sample with `supertag test notification`. See
+The Gateway tells you when the inbox gains an item. Choose destinations with the
+`control-plane` service's `notify` in `supertag.yaml`, or the Gateway's `--notify` flag:
+`webhook:HTTPS_URL#SECRET_NAME` or `slack:CHANNEL_OR_USER_ID`. The desktop app and the terminal
+UI notify on their own device without one. Send a sample with `supertag test notification`. See
 [Set up operator notifications](../guides/notifications.md).
 
 ## Health and readiness

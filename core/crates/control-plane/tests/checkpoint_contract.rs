@@ -107,6 +107,7 @@ fn finish(
         succeeded: true,
         objective_signal: ObjectiveSignal::Progress.into(),
         checkpoint_sha256: checkpoint.map(|value| value.sha256.clone()),
+        quiet: false,
     }
 }
 

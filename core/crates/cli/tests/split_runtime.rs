@@ -637,7 +637,7 @@ database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     slack_reply_streams_progress_and_never_repeats_an_uncertain_acknowledgement;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    operator_notifications_reach_slack_webhook_and_desktop_once;
+    operator_notifications_reach_slack_and_webhook_once;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     native_codex_plan_replaces_the_slack_acknowledgement_in_place;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2916,10 +2916,7 @@ async fn control_plane_partition_expires_execution_and_requires_audited_retry_be
 
 /// TypeScript parity: `tests/operator-channel-runtime.test.ts`,
 /// `tests/operator-notification-delivery.test.ts`, and `apps/cli/notification-command.test.ts`.
-async fn operator_notifications_reach_slack_webhook_and_desktop_once(
-    database: String,
-) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+async fn operator_notifications_reach_slack_and_webhook_once(database: String) -> Result<()> {
     let directory = TempDir::new()?;
     let directory = directory.path();
     let credentials = Credentials::new();
@@ -2928,16 +2925,6 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     let hook = MockSlackApi::start().await?;
     hook.responses.add_permits(1_000);
     let hook_url = hook.endpoint.replace("/chat.postMessage", "/hook");
-    let desktop = directory.join("desktop.log");
-    let notifier = directory.join("desktop-notifier");
-    std::fs::write(
-        &notifier,
-        format!(
-            "#!/bin/sh\nprintf '%s|%s\\n--\\n' \"$1\" \"$2\" >> '{}'\n",
-            desktop.display()
-        ),
-    )?;
-    std::fs::set_permissions(&notifier, std::fs::Permissions::from_mode(0o700))?;
     let mut command = credentials.command();
     command
         .arg("control-plane")
@@ -2960,7 +2947,6 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
             .args(["--notify", "slack:TOTHER/U0OPERATOR"])
             .arg("--notify")
             .arg(format!("webhook:{hook_url}#hook-token"))
-            .args(["--notify", "desktop"])
             .env("SUPERTAG_SLACK_ACCOUNT_ID", SLACK_ACCOUNT)
             .env("SUPERTAG_SLACK_TEAM_ID", SLACK_TEAM)
             .env("SUPERTAG_SLACK_CHANNEL_ID", SLACK_CHANNEL)
@@ -2970,8 +2956,7 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
             .env("SUPERTAG_SLACK_BOT_TOKEN", SLACK_BOT_TOKEN)
             .env("SUPERTAG_TEST_SLACK_API_URL", &slack.endpoint)
             .env("SUPERTAG_TEST_NOTIFY_LOOPBACK_HTTP", "1")
-            .env("SUPERTAG_NOTIFY_SECRET_HOOK_TOKEN", "synthetic-hook-secret")
-            .env("SUPERTAG_TEST_DESKTOP_NOTIFIER", &notifier);
+            .env("SUPERTAG_NOTIFY_SECRET_HOOK_TOKEN", "synthetic-hook-secret");
         Process::spawn(command, directory, "notify-gateway", true)
     };
     let mut gateway = start_gateway()?;
@@ -2996,7 +2981,7 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     process.successful_exit().await?;
     assert_eq!(
         std::fs::read_to_string(process.log.with_extension("stdout"))?,
-        "slack: delivered\nslack: failed: No Slack Surface Account is enrolled for TOTHER\nwebhook: delivered\ndesktop: delivered\n"
+        "slack: delivered\nslack: failed: No Slack Surface Account is enrolled for TOTHER\nwebhook: delivered\n"
     );
     // Samples are throttled per Gateway.
     let mut again = credentials.command();
@@ -3041,10 +3026,6 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
             })
         );
     }
-    assert_eq!(
-        std::fs::read_to_string(&desktop)?,
-        format!("SuperTag needs you|{sample}\n--\n")
-    );
 
     // A question the Objective owner asks reaches each destination once.
     // The connection flags follow the command's first word.
@@ -3099,9 +3080,8 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     let message = "Objective release needs you: Objective release waits on your answer\n`supertag describe objective release`";
     let deadline = Instant::now() + WAIT;
     loop {
-        let delivered = slack.requests.lock().await.len() == 2
-            && hook.requests.lock().await.len() == 2
-            && std::fs::read_to_string(&desktop)?.matches("\n--\n").count() == 2;
+        let delivered =
+            slack.requests.lock().await.len() == 2 && hook.requests.lock().await.len() == 2;
         if delivered {
             break;
         }
@@ -3117,10 +3097,6 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     assert_eq!(webhook["kinds"], serde_json::json!(["question"]));
     assert_eq!(webhook["command"], "supertag describe objective release");
     assert_eq!(webhook["objectiveId"], "release");
-    assert!(
-        std::fs::read_to_string(&desktop)?
-            .ends_with(&format!("SuperTag needs you|{message}\n--\n"))
-    );
 
     // A restarted Gateway resumes from the durable outbox and never repeats a message.
     services.gateway()?.crash()?;
@@ -3130,10 +3106,6 @@ async fn operator_notifications_reach_slack_webhook_and_desktop_once(
     sleep(Duration::from_millis(4_500)).await;
     assert_eq!(slack.requests.lock().await.len(), 2);
     assert_eq!(hook.requests.lock().await.len(), 2);
-    assert_eq!(
-        std::fs::read_to_string(&desktop)?.matches("\n--\n").count(),
-        2
-    );
 
     // Text an agent or operator wrote is rendered for Slack, never posted as live mentions.
     let mut test = credentials.command();

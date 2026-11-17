@@ -747,3 +747,81 @@ it("keeps notes with remember and forget only with the capability, redacted", as
     await service.close();
   }
 });
+
+it("offers stay_quiet only to a turn no person waits on, and finishes it quietly", async () => {
+  const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
+  const scope = {
+    taskId,
+    tagId,
+    attemptId,
+    secrets: [grpcToken],
+    signal: new AbortController().signal,
+    active: () => true,
+  };
+  const plain = await startCoordination(
+    bridge,
+    create(HarnessRunSchema, { task: { taskId, tagId, sessionId: "ops" }, attemptId }),
+    scope,
+  );
+  expect(plain.tools).toEqual([]);
+  expect(await plain.quietNote()).toBeUndefined();
+  await plain.close();
+
+  const service = await startCoordination(
+    bridge,
+    create(HarnessRunSchema, {
+      task: { taskId, tagId, sessionId: "ops" },
+      attemptId,
+      coordination: { mayStayQuiet: true },
+    }),
+    scope,
+  );
+  const client = new Client({ name: "opencode-fixture", version: "1" });
+  try {
+    const [tool] = service.tools;
+    if (!tool) throw new Error("expected private MCP binding");
+    expect(tool.operations).toEqual(["stay_quiet"]);
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(tool.url), {
+        requestInit: { headers: tool.headers },
+      }),
+    );
+    for (const args of [{ note: " " }, { note: "x".repeat(501) }, { note: "x", post: true }])
+      expect(await client.callTool({ name: "stay_quiet", arguments: args })).toMatchObject({
+        isError: true,
+      });
+    expect(await service.quietNote()).toBeUndefined();
+    const quiet = await client.callTool({
+      name: "stay_quiet",
+      arguments: { note: ` CI is green ${grpcToken} ` },
+    });
+    expect(quiet.isError).toBeFalsy();
+    expect((quiet.content as { text: string }[])[0]?.text).toContain(
+      "nothing from this turn is posted",
+    );
+    const note = await service.quietNote();
+    expect(note).toBe("CI is green [REDACTED]");
+
+    // The final text stays the result; with none, the note is. A report or a failure posts.
+    const succeeded = { succeeded: true, result: "No change", waitingApprovalIds: [] };
+    expect(withObjectiveReport(succeeded, undefined, note)).toEqual({ ...succeeded, quiet: true });
+    expect(withObjectiveReport({ ...succeeded, result: " " }, undefined, note)).toEqual({
+      ...succeeded,
+      result: "CI is green [REDACTED]",
+      quiet: true,
+    });
+    const report = { signal: ObjectiveSignal.BLOCKED, summary: "Blocked on staging" };
+    expect(withObjectiveReport(succeeded, report, note)).toEqual({
+      ...succeeded,
+      result: "Blocked on staging",
+      objectiveSignal: ObjectiveSignal.BLOCKED,
+    });
+    expect(withObjectiveReport({ succeeded: false, result: "Failed" }, undefined, note)).toEqual({
+      succeeded: false,
+      result: "Failed",
+    });
+  } finally {
+    await client.close();
+    await service.close();
+  }
+});

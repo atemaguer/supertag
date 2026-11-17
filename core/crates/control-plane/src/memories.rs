@@ -10,7 +10,7 @@
 //!
 //! The maintenance sweep queues a review turn in the Tag's reserved `memory:` Session once a day
 //! after enough work. The review reads the Tag's shared Sessions and rewrites its shared notes;
-//! it has no tool that reaches anyone, and its Session has no reply destination, so it posts
+//! it has no tool that reaches anyone, and it ends with `stay_quiet` (attention.rs), so it posts
 //! nothing.
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
@@ -119,15 +119,41 @@ pub(crate) async fn may_remember_in(
     task: &Task,
     kind: Option<i64>,
 ) -> Result<bool> {
-    if matches!(kind, Some(kind) if kind != crate::work_sessions::REPORT)
-        || crate::work_sessions::reserved_session(&task.session_id)
-        || task.session_id.starts_with("surface-status:")
-        || external_origin(task)
-        || !tag_keeps_memory_in(tx, &task.tag_id).await?
-    {
+    if !tag_keeps_memory_in(tx, &task.tag_id).await? {
         return Ok(false);
     }
-    Ok(turn_audience_in(tx, task).await?.is_some())
+    Ok(may_write(task, kind) && turn_audience_in(tx, task).await?.is_some())
+}
+
+/// The turn-shape half of [`may_remember_in`], which reads nothing.
+fn may_write(task: &Task, kind: Option<i64>) -> bool {
+    !(matches!(kind, Some(kind) if kind != crate::work_sessions::REPORT)
+        || crate::work_sessions::reserved_session(&task.session_id)
+        || task.session_id.starts_with("surface-status:")
+        || external_origin(task))
+}
+
+/// What a turn starts with: whether it may write notes, and its portfolio's notes section when
+/// `root` (it has a portfolio). Reads the Tag's memory flag and the turn's audience once.
+pub(crate) async fn turn_memory_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    kind: Option<i64>,
+    root: bool,
+) -> Result<(bool, Option<String>)> {
+    let writes = may_write(task, kind);
+    if !(writes || root) || !tag_keeps_memory_in(tx, &task.tag_id).await? {
+        return Ok((false, None));
+    }
+    let Some(audience) = turn_audience_in(tx, task).await? else {
+        return Ok((false, None));
+    };
+    let section = if root {
+        Some(notes_section(tx, task, audience.as_deref(), writes).await?)
+    } else {
+        None
+    };
+    Ok((writes, section))
 }
 
 fn memory_row(row: &AnyRow) -> Result<Memory> {
@@ -170,20 +196,14 @@ async fn notes_in(
     rows.iter().map(memory_row).collect()
 }
 
-/// The notes section of a root turn's portfolio: state, not instructions. `None` when the Tag
-/// keeps no memory or the turn has no audience.
-pub(crate) async fn portfolio_in(
+/// The notes section of a root turn's portfolio: state, not instructions.
+async fn notes_section(
     tx: &mut Transaction<'_, Any>,
     task: &Task,
+    audience: Option<&str>,
     may_remember: bool,
-) -> Result<Option<String>> {
-    if !tag_keeps_memory_in(tx, &task.tag_id).await? {
-        return Ok(None);
-    }
-    let Some(audience) = turn_audience_in(tx, task).await? else {
-        return Ok(None);
-    };
-    let notes = notes_in(tx, &task.tag_id, audience.as_deref(), None).await?;
+) -> Result<String> {
+    let notes = notes_in(tx, &task.tag_id, audience, None).await?;
     let mut lines = vec![if notes.is_empty() {
         "Notes: this Tag keeps none yet.".to_owned()
     } else {
@@ -200,7 +220,7 @@ pub(crate) async fn portfolio_in(
     if may_remember {
         lines.push("Keep notes with remember and forget: only what you can't look up again, such as preferences, corrections, decisions and their reasons, and pointers to where things live.".to_owned());
     }
-    Ok(Some(lines.join("\n")))
+    Ok(lines.join("\n"))
 }
 
 fn note_text(value: &str) -> Result<String> {
@@ -666,7 +686,7 @@ fn review_prompt(since: Option<i64>, sessions: &[String]) -> String {
         None => "so far".to_owned(),
     };
     let mut text = format!(
-        "Memory review. Review your work {since}. Read the Sessions below with read_session, and read_turn for detail; you may see only shared Sessions. Then update your notes: merge duplicates, replace what is stale, add only lasting lessons and pointers, and forget what no longer matters. Don't contact anyone. Finish with one line saying what you changed."
+        "Memory review. Review your work {since}. Read the Sessions below with read_session, and read_turn for detail; you may see only shared Sessions. Then update your notes: merge duplicates, replace what is stale, add only lasting lessons and pointers, and forget what no longer matters. Don't contact anyone. Finish by calling stay_quiet with one line saying what you changed."
     );
     if sessions.is_empty() {
         text.push_str("\nSessions: none listed; use list_sessions.");

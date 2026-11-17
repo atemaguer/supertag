@@ -16,7 +16,7 @@ This page uses these SuperTag terms, each defined in the glossary: [Tag](glossar
 SuperTag keeps each credential with the component that uses it, so a Gateway's collaboration
 surface secrets, an operator's token, and a Worker Host's keys never share a store.
 
-## Four logical boundaries
+## Five logical boundaries
 
 | Boundary | Owner | Examples | Default implementation |
 | --- | --- | --- | --- |
@@ -24,6 +24,7 @@ surface secrets, an operator's token, and a Worker Host's keys never share a sto
 | Operator credentials | Operator's CLI, terminal UI, and desktop app | The admin token, an [Operator Token](resource-model.md#operator-tokens), or a client device credential | The saved Control Plane stores of the terminal UI and desktop app, or `SUPERTAG_OPERATOR_TOKEN` |
 | Worker Host enrollment credential | One Worker Host | Its connection to the Control Plane | The host's own state directory, on that host |
 | MCP and git credentials | One Worker Host | MCP server and git credentials | The host's environment, owner-only files, or `~/.supertag/.env`; see [MCP and git credentials](#mcp-and-git-credentials) |
+| Network credentials | One Worker Host | Secrets the egress proxy adds to a Task's web requests, such as a GitHub token | A `secrets` entry in `supertag.yaml`; see [Network credentials](supertag-yaml.md#network-credentials) |
 
 The Control Plane stores only SHA-256 digests of the credentials it issues: Auth Keys, enrolled
 host, Gateway, and client credentials, and Operator Tokens. It never resolves a collaboration

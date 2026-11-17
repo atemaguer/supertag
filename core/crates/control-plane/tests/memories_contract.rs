@@ -167,6 +167,8 @@ async fn contract(url: &str) {
     let a1 = say(&store, &host, ALICE, "I prefer squash merges").await;
     let caps = store.attempt_capabilities(&host, &a1).await.unwrap();
     assert!(caps.may_remember);
+    // A person waits on her message: it is always answered.
+    assert!(!caps.may_stay_quiet);
     assert!(
         caps.tag_portfolio
             .contains("Notes: this Tag keeps none yet.")
@@ -491,6 +493,8 @@ async fn review_contract(url: &str) {
         .unwrap();
     let caps = store.attempt_capabilities(&host, &review).await.unwrap();
     assert!(caps.may_remember && caps.may_read_tag_sessions);
+    // The review reaches no one: it finishes quietly.
+    assert!(caps.may_stay_quiet);
     assert!(
         !caps.may_send_tag_message
             && !caps.may_read_mailbox

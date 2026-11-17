@@ -498,7 +498,7 @@ impl Deployment {
             "--websocket-listen",
             "127.0.0.1:0",
             "--notify",
-            "desktop",
+            "webhook:https://notify.invalid/hook",
         ]);
         command
             .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)

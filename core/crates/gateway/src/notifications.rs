@@ -1,5 +1,4 @@
-//! Operator notification delivery: the destinations in `notify`, the Slack, webhook, and desktop
-//! senders, the outbox loop that claims messages from the Control Plane, and the operator
+//! Operator notification delivery: the destinations in `notify`, the Slack and webhook senders, the outbox loop that claims messages from the Control Plane, and the operator
 //! `SendTestNotification` call behind `supertag test notification`.
 //!
 //! TypeScript parity: `apps/cli/src/operator-notification-delivery.ts`,
@@ -19,7 +18,6 @@
 //! one sample per Gateway every few seconds.
 use std::{
     collections::BTreeMap,
-    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -42,7 +40,7 @@ use supertag_protocol::{
         operator_notifications_client::OperatorNotificationsClient,
     },
 };
-use tokio::{process::Command, time};
+use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
@@ -71,7 +69,7 @@ pub struct Destination {
     pub secret_name: Option<String>,
 }
 
-/// Parses one `notify` value without echoing a webhook URL in errors: `desktop`,
+/// Parses one `notify` value without echoing a webhook URL in errors:
 /// `webhook:HTTPS_URL[#SECRET_NAME]`, `slack:TARGET`, or `slack:WORKSPACE_ID/TARGET`.
 pub fn parse_destination(value: &str) -> Result<Destination> {
     parse(value, false)
@@ -79,15 +77,11 @@ pub fn parse_destination(value: &str) -> Result<Destination> {
 
 fn parse(value: &str, loopback_http: bool) -> Result<Destination> {
     let trimmed = value.trim();
-    if trimmed == "desktop" {
-        return Ok(Destination {
-            key: "desktop".into(),
-            provider: NotificationProvider::Desktop,
-            target: "desktop".into(),
-            workspace_id: None,
-            secret_name: None,
-        });
-    }
+    // The desktop app notifies on its own device; a Gateway is usually a server.
+    ensure!(
+        trimmed != "desktop",
+        "desktop is not a notify destination: the SuperTag desktop app shows notifications on its own device. Use webhook: or slack: to reach people away from the app"
+    );
     if let Some(raw) = trimmed.strip_prefix("webhook:") {
         let (url, secret) = match raw.rsplit_once('#') {
             Some((url, secret)) => (url, Some(secret)),
@@ -128,7 +122,7 @@ fn parse(value: &str, loopback_http: bool) -> Result<Destination> {
     }
     let invalid = || {
         anyhow::anyhow!(
-            "notify must be desktop, webhook:HTTPS_URL[#SECRET], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID, using a Slack ID beginning with C, G, D, U, or W"
+            "notify must be webhook:HTTPS_URL[#SECRET], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID, using a Slack ID beginning with C, G, D, U, or W"
         )
     };
     let rest = trimmed.strip_prefix("slack:").ok_or_else(invalid)?;
@@ -232,35 +226,19 @@ impl SlackSender {
     }
 }
 
-/// How desktop notifications are shown.
-#[derive(Clone)]
-pub enum Desktop {
-    /// `osascript` on macOS, `notify-send` on Linux.
-    Native,
-    /// A test notifier run with the title and text as its two arguments.
-    Command(PathBuf),
-    Unavailable,
-}
-
 /// Local senders for each destination kind, holding webhook secrets by name.
 #[derive(Clone)]
 pub struct Senders {
     slack: Option<SlackSender>,
     secrets: BTreeMap<String, String>,
-    desktop: Desktop,
     http: reqwest::Client,
 }
 
 impl Senders {
-    pub fn new(
-        slack: Option<SlackSender>,
-        secrets: BTreeMap<String, String>,
-        desktop: Desktop,
-    ) -> Result<Self> {
+    pub fn new(slack: Option<SlackSender>, secrets: BTreeMap<String, String>) -> Result<Self> {
         Ok(Self {
             slack,
             secrets,
-            desktop,
             http: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(3))
                 .timeout(SEND_TIMEOUT)
@@ -305,10 +283,6 @@ impl Senders {
         let text = self.redact(text);
         match destination.provider {
             NotificationProvider::Slack => self.slack(destination, &text).await.map(Some),
-            NotificationProvider::Desktop => {
-                self.desktop(&text).await?;
-                Ok(None)
-            }
             NotificationProvider::Webhook => {
                 self.webhook(destination, &text, notification).await?;
                 Ok(None)
@@ -370,46 +344,6 @@ impl Senders {
                     .filter(|e| e.len() <= 64 && e.bytes().all(|b| b.is_ascii_graphic()))
                     .unwrap_or_else(|| "unknown_error".into())
             ),
-        }
-    }
-
-    async fn desktop(&self, text: &str) -> Result<()> {
-        let mut command = match &self.desktop {
-            Desktop::Unavailable => bail!("Desktop notification unavailable"),
-            Desktop::Command(path) => {
-                let mut command = Command::new(path);
-                command.args([TITLE, text]);
-                command
-            }
-            Desktop::Native if cfg!(target_os = "macos") => {
-                let mut command = Command::new("osascript");
-                command.args([
-                    "-e",
-                    "on run argv",
-                    "-e",
-                    "display notification (item 2 of argv) with title (item 1 of argv)",
-                    "-e",
-                    "end run",
-                    TITLE,
-                    text,
-                ]);
-                command
-            }
-            Desktop::Native if cfg!(target_os = "linux") => {
-                let mut command = Command::new("notify-send");
-                command.args([TITLE, text]);
-                command
-            }
-            Desktop::Native => bail!("Desktop notification unavailable"),
-        };
-        command
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true);
-        match time::timeout(SEND_TIMEOUT, async { command.status().await }).await {
-            Ok(Ok(status)) if status.success() => Ok(()),
-            _ => bail!("Desktop notification unavailable"),
         }
     }
 
@@ -734,7 +668,8 @@ mod tests {
         );
         assert!(parse_destination("slack:X0CHANNEL").is_err());
         assert!(parse_destination("slack:c0channel").is_err());
-        assert_eq!(parse_destination("desktop").unwrap().key, "desktop");
+        let desktop = parse_destination("desktop").unwrap_err().to_string();
+        assert!(desktop.contains("desktop app"), "{desktop}");
         let secret_url = "webhook:https://hooks.example/x?token=private#hook-token";
         let webhook = parse_destination(secret_url).unwrap();
         assert!(webhook.key.starts_with("webhook:") && !webhook.key.contains("hooks.example"));
@@ -752,18 +687,18 @@ mod tests {
         assert!(parse_destination("webhook:http://127.0.0.1:9/x").is_err());
         assert!(parse("webhook:http://127.0.0.1:9/x", true).is_ok());
         assert!(parse("webhook:http://hooks.example/x", true).is_err());
-        let both = parse_destinations(&["desktop".into(), " desktop".into()], false).unwrap();
+        let both = parse_destinations(
+            &["slack:C0CHANNEL".into(), " slack:C0CHANNEL".into()],
+            false,
+        )
+        .unwrap();
         assert_eq!(both.len(), 1);
     }
 
     #[test]
     fn secrets_and_urls_are_redacted() {
-        let senders = Senders::new(
-            None,
-            BTreeMap::from([("hook".into(), "s3cr3t".into())]),
-            Desktop::Unavailable,
-        )
-        .unwrap();
+        let senders =
+            Senders::new(None, BTreeMap::from([("hook".into(), "s3cr3t".into())])).unwrap();
         assert_eq!(
             senders.redact("token s3cr3t at https://hooks.example/x?token=s3cr3t"),
             "token <redacted> at <redacted URL>"

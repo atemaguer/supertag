@@ -22,5 +22,6 @@ tokio-util.workspace = true
 tonic.workspace = true
 
 [dev-dependencies]
+supertag-worker-host = { workspace = true, features = ["test-fixtures"] }
 tokio-stream.workspace = true
 uuid.workspace = true

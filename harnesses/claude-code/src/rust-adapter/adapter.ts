@@ -860,11 +860,14 @@ export async function runAdapter(
     await store.flush();
     if (mirrorFailed)
       throw new SafeAdapterFailure("Claude session mirroring failed. No checkpoint was accepted.");
-    if (!finalSeen || !result)
+    // A quiet turn may end without final text; its note becomes the result.
+    const quiet = await coordination.quietNote();
+    if (!finalSeen || (!result && quiet === undefined))
       throw new SafeAdapterFailure("Claude ended without a successful final response.");
     if (!nativeSessionId)
       throw new SafeAdapterFailure("Claude ended without a native Session identity.");
-    if (Buffer.byteLength(result) > 262144) throw new Error("Claude result exceeds its limit");
+    const final = result ?? "";
+    if (Buffer.byteLength(final) > 262144) throw new Error("Claude result exceeds its limit");
     phase = "checkpoint capture";
     const checkpoint = captureCheckpoint(
       task,
@@ -875,7 +878,7 @@ export async function runAdapter(
     );
     const outcome = withObjectiveReport(
       {
-        result,
+        result: final,
         succeeded: true,
         ...(checkpoint ? { checkpoint } : {}),
         waitingApprovalIds: [
@@ -886,6 +889,7 @@ export async function runAdapter(
         ].sort(),
       },
       await coordination.objectiveReport(),
+      quiet,
     );
     completionProposed = true;
     await receipt(() => client.complete(outcome, options()));

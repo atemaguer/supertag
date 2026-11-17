@@ -31,6 +31,13 @@ it reopens from what it holds after a drop. While it is down, or for an Objectiv
 follow reads the turn each second instead. A history page reads its messages' work Sessions
 concurrently, and each conversation stays in memory, so returning to it shows it at once.
 
+When a Tag replies or asks a question in a conversation that is not in front, or while the
+terminal is in the background (the TUI asks the terminal to report focus), the TUI sends an OSC 9
+desktop notification through the terminal. `SUPERTAG_TUI_NOTIFY` sets it: `all` (the default),
+`questions`, `bell` for the terminal bell instead, or `off`. The status line counts unread replies
+outside the conversation in front. Turns that finished quietly (`Task.quiet`) leave the
+conversation.
+
 The TUI also keeps a cache on disk, so `supertag` shows the last Tag's conversation before any
 call to the Control Plane: the Tag list with each conversation's row, the selected Tag, the latest
 50 messages of each conversation shown, with their rendering at the terminal's width, messages not

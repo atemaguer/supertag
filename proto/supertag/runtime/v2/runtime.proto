@@ -321,8 +321,8 @@ enum InboxNotificationStatus {
   INBOX_NOTIFICATION_STATUS_PENDING = 2;
   INBOX_NOTIFICATION_STATUS_DELIVERED = 3;
   INBOX_NOTIFICATION_STATUS_FAILED = 4;
-  // The desktop notifier could not run.
-  INBOX_NOTIFICATION_STATUS_UNAVAILABLE = 5;
+  reserved 5;
+  reserved "INBOX_NOTIFICATION_STATUS_UNAVAILABLE";
 }
 
 message InboxNotification {
@@ -490,6 +490,10 @@ message AttemptCapabilities {
   // A root turn of a Tag with memory may write and forget the Tag's notes (AttemptMemory),
   // unless an outside event, such as a GitHub or Linear webhook, started it.
   bool may_remember = 17;
+  // No person is waiting on this turn (a Schedule fire, a memory review, an inbox turn, or an
+  // Objective notice), so it may finish quietly: FinishTaskRequest.quiet. A person's message is
+  // always answered.
+  bool may_stay_quiet = 18;
 }
 
 // Operators see the work started in Sessions they can access.
@@ -796,6 +800,8 @@ service WorkerHost {
   // Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
   // execution report. The Attempt stays uncertain until the host or an operator resolves it.
   rpc ReportCleanupFailure(ReportCleanupFailureRequest) returns (ReportCleanupFailureResponse);
+  // The Attempt's egress proxy log, for the Task's network log. Each report replaces the last.
+  rpc ReportNetworkLog(ReportNetworkLogRequest) returns (ReportNetworkLogResponse);
   // The commit the running Attempt's host resolved for its Task's Workspace `base_ref`. The first
   // resolution in a Session wins and is recorded on every unresolved Task of the Session; the
   // returned Task carries the recorded commit.
@@ -1622,6 +1628,20 @@ message Tag {
   bool memory = 6800;
   // When the Tag last reviewed its work and tidied its notes.
   optional int64 memory_reviewed_at_ms = 6801;
+  // How the Tag's unprompted messages were received over the last `window_days`; read with GetTag.
+  AttentionSummary attention = 6900;
+}
+
+// A Tag's unprompted messages: the replies of turns no person asked for (Schedule fires and
+// Objective notices) that reached a person, and the checks that found nothing and stayed quiet.
+message AttentionSummary {
+  uint32 posted = 1;
+  // Posted messages a person read in their conversation; surfaces have no read receipts.
+  uint32 read = 2;
+  // Posted messages a person answered in the same Session within a day.
+  uint32 answered = 3;
+  uint32 quiet = 4;
+  uint32 window_days = 5;
 }
 
 message ListTagsRequest {
@@ -1672,12 +1692,15 @@ message Conversation {
   uint64 latest_order = 7;
   // How far the caller has read, as a message order; zero when it never has.
   uint64 read_order = 8;
-  // Finished replies after `read_order`.
+  // Finished replies after `read_order`, without quiet turns.
   uint32 unread_count = 9;
   // A Task of this conversation is queued or running.
   bool working = 10;
   // Set when the latest message is a Work Session's report turn, which has no caller message.
   optional string latest_work_session_report_id = 11;
+  // The latest message is the Tag's question, still unanswered: its turn asked an Objective
+  // question that waits for an answer.
+  bool asking = 12;
 }
 
 message ConversationMessage {
@@ -1839,6 +1862,9 @@ message Task {
   // Optional output requirements frozen when the Task is accepted.
   TaskOutputPolicy output_policy = 20;
   repeated AcceptedTaskArtifactInput input_artifacts = 21;
+  // The turn succeeded quietly: it found nothing that needs attention, so nothing was posted and
+  // its conversation does not show it. Its result says why.
+  bool quiet = 22;
   // How a surface message selected this Task's GitHub Workspace: request, origin or default.
   // Absent when the Tag's configured Workspace (or none) was used.
   optional string workspace_selection = 3500;
@@ -1850,6 +1876,9 @@ message Task {
   // What the current Attempt's durable records show about its limits and its cleanup. Set only
   // by GetTask.
   TaskExecutionReport execution_report = 5200;
+  // Each Attempt's network log from its Worker Host's egress proxy, for a Task with a network
+  // scope. Set only by GetTask.
+  repeated AttemptNetworkLog network_logs = 5300;
 }
 
 // How the current Attempt ended against its execution limits.
@@ -1910,6 +1939,45 @@ message ReportCleanupFailureRequest {
 }
 
 message ReportCleanupFailureResponse {}
+
+// One request the Attempt's egress proxy decided. Never headers or bodies; the path has no query
+// and is redacted by the host.
+message NetworkRequestRecord {
+  int64 at_ms = 1;
+  string method = 2;
+  // `https://name[:port]`.
+  string origin = 3;
+  string path = 4;
+  bool allowed = 5;
+  // Why a request was denied; empty when allowed.
+  string reason = 6;
+  // The upstream's HTTP status; 0 when the request never reached it.
+  uint32 status = 7;
+  // The credential name injected into the request, or empty.
+  string credential = 8;
+}
+
+// The first requests an Attempt's egress proxy decided, with totals.
+message NetworkLog {
+  repeated NetworkRequestRecord requests = 1;
+  uint64 allowed = 2;
+  uint64 denied = 3;
+  // Requests counted but not kept, beyond the host's limit.
+  uint64 unrecorded = 4;
+}
+
+message AttemptNetworkLog {
+  string attempt_id = 1;
+  NetworkLog log = 2;
+}
+
+// The Attempt's network log so far. Each report replaces the previous one.
+message ReportNetworkLogRequest {
+  InspectAttemptRequest attempt = 1;
+  NetworkLog log = 2;
+}
+
+message ReportNetworkLogResponse {}
 
 message ResolveWorkspaceRefRequest {
   InspectAttemptRequest attempt = 1;
@@ -1989,6 +2057,9 @@ message HarnessExecutionProfile {
   // OAuth MCP servers whose login lapsed on this host. They are advertised here instead of in
   // `mcp_servers`, so Tasks that need them wait for `supertag mcp login NAME`.
   repeated string mcp_login_servers = 1800;
+  // Names of the network credentials this host injects through its egress proxy. Only names;
+  // the values never leave the host.
+  repeated string network_credentials = 1900;
 }
 
 enum SharedExecutionTool {
@@ -2278,6 +2349,9 @@ message FinishTaskRequest {
   WorkspaceDeliveryReference workspace_delivery = 8;
   repeated string waiting_approval_ids = 9;
   repeated ArtifactSelection artifacts = 10;
+  // The turn found nothing that needs attention (`stay_quiet`): it posts nothing to its surface or
+  // conversation. Honored only for a successful progress turn that `may_stay_quiet`.
+  bool quiet = 11;
 }
 
 message HarnessAttachRequest {}
@@ -2601,6 +2675,8 @@ message HarnessCompleteRequest {
   ObjectiveSignal objective_signal = 3;
   SessionCheckpoint checkpoint = 4;
   repeated string waiting_approval_ids = 5;
+  // The turn called `stay_quiet`; see FinishTaskRequest.quiet.
+  bool quiet = 6;
 }
 
 message HarnessCompleteResponse {}

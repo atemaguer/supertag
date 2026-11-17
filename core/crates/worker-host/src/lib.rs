@@ -7,6 +7,7 @@ mod checkpoints;
 mod cleanup_failure;
 pub mod context;
 mod credentials;
+pub mod egress;
 mod enrollment;
 pub mod environment;
 mod failures;
@@ -113,6 +114,8 @@ pub struct HostOptions {
     pub labels: Vec<String>,
     /// Set when a supervisor runs this process as one execution lane of a shared Host.
     pub lane: Option<Lane>,
+    /// Credentials the egress proxy injects for Tasks whose network scope names them.
+    pub network_credentials: Vec<egress::HostCredential>,
 }
 
 /// One supervised execution lane. Every lane of a Host registers the Host's single
@@ -586,8 +589,7 @@ pub async fn run(
                     continue;
                 }
                 supertag_protocol::crash_point("worker-host.claim", "journaled");
-                // A claim made before the host's first presence report finds no work; the
-                // report then wakes the claims the Control Plane holds, so none waits for it.
+                presence.first_report(Duration::from_secs(5)).await;
                 let mut claim = claim;
                 if ready.is_some() {
                     // The host says it is ready after its first claim answers, so that one
@@ -709,6 +711,7 @@ pub async fn run(
                 succeeded,
                 objective_signal,
                 waiting_approval_ids,
+                quiet,
                 checkpoint,
                 workspace,
                 remote_tree,
@@ -746,6 +749,7 @@ pub async fn run(
                             succeeded,
                             objective_signal,
                             waiting_approval_ids,
+                            quiet,
                             checkpoint,
                             workspace,
                             remote_tree,
@@ -875,6 +879,7 @@ pub async fn run(
                         succeeded,
                         objective_signal,
                         waiting_approval_ids,
+                        quiet,
                         checkpoint,
                         workspace: Some(Box::new(pending)),
                         prepared: Some(workspace),
@@ -901,6 +906,7 @@ pub async fn run(
                 succeeded,
                 objective_signal,
                 waiting_approval_ids,
+                quiet,
                 checkpoint,
                 workspace,
                 prepared,
@@ -954,6 +960,7 @@ pub async fn run(
                                 succeeded,
                                 objective_signal,
                                 waiting_approval_ids,
+                                quiet,
                                 checkpoint,
                                 workspace: Some(pending),
                                 prepared,
@@ -1002,6 +1009,7 @@ pub async fn run(
                                 succeeded,
                                 objective_signal,
                                 waiting_approval_ids,
+                                quiet,
                                 checkpoint: Some(pending),
                                 workspace,
                                 prepared,
@@ -1051,6 +1059,7 @@ pub async fn run(
                             succeeded,
                             objective_signal,
                             waiting_approval_ids,
+                            quiet,
                             checkpoint,
                             workspace,
                             prepared,
@@ -1080,6 +1089,7 @@ pub async fn run(
                             succeeded,
                             objective_signal,
                             waiting_approval_ids: waiting_approval_ids.clone(),
+                            quiet,
                             artifacts: outputs.as_ref().filter(|_| succeeded)
                                 .and_then(|outputs| outputs.selection()).into_iter().collect(),
                             checkpoint_sha256: checkpoint.map(|pending| pending.sha256),
@@ -1143,6 +1153,7 @@ pub async fn run(
                             succeeded: false,
                             objective_signal: 0,
                             waiting_approval_ids: vec![],
+                            quiet: false,
                             checkpoint: None,
                             workspace,
                             prepared,
@@ -1489,6 +1500,17 @@ async fn run_assignment(
             journal,
             attempt,
             adapter::failed("Worker Host cannot enforce accepted shared execution placement"),
+        );
+    }
+    if !supertag_protocol::network_scope::supports(
+        &task,
+        options.harness,
+        &options.execution_profile,
+    ) {
+        return save_finish(
+            journal,
+            attempt,
+            adapter::failed("Worker Host cannot enforce the Task's network scope"),
         );
     }
     if !supertag_protocol::output_policy::supports(
@@ -2133,6 +2155,20 @@ async fn run_assignment(
     // The delivery check applies the Task's path scope to what it changed.
     let file_scope = supertag_protocol::file_scope::of_task(&task)
         .map(supertag_protocol::file_scope::Rules::from);
+    // A network scope runs this Attempt's egress proxy for as long as its harness runs.
+    let egress = match supertag_protocol::network_scope::of_task(&task) {
+        Some(scope) => Some(
+            egress::start_for_attempt(
+                scope,
+                &options.network_credentials,
+                &options.state_directory,
+                &attempt.attempt_id,
+            )
+            .await
+            .context("start the Attempt's egress proxy")?,
+        ),
+        None => None,
+    };
     let sandbox_task = defer_sandbox.then(|| task.clone());
     // The harness answers the joined messages in the same turn. The Task's stored prompt keeps
     // only the person's own text.
@@ -2165,6 +2201,10 @@ async fn run_assignment(
                 mcp: mcp.clone(),
                 processes: processes.clone(),
                 sandbox_execution_ends,
+                egress_environment: egress
+                    .as_ref()
+                    .map(|egress| egress.environment.clone())
+                    .unwrap_or_default(),
             },
             (host.clone(), inputs.clone(), coordination.clone()),
             token,
@@ -2237,6 +2277,9 @@ async fn run_assignment(
     if let Some(reports) = reports {
         let _ = reports.await;
     }
+    if let Some(egress) = egress {
+        egress.finish(host, &attempt, token).await;
+    }
     if let Some(mcp) = mcp {
         mcp.close().await;
     }
@@ -2302,6 +2345,7 @@ async fn run_assignment(
                 succeeded: outcome.succeeded,
                 objective_signal: outcome.objective_signal,
                 waiting_approval_ids: outcome.waiting_approval_ids,
+                quiet: outcome.quiet,
                 checkpoint,
                 workspace: Box::new(workspace),
                 remote_tree,
@@ -2483,6 +2527,7 @@ fn record_finish(
         succeeded: outcome.succeeded,
         objective_signal: outcome.objective_signal,
         waiting_approval_ids: outcome.waiting_approval_ids,
+        quiet: outcome.quiet,
         checkpoint,
         workspace: None,
         prepared,

@@ -101,6 +101,22 @@ one to see its commands, tool calls, and result.
 You can leave the terminal UI while work runs. The report appears in the conversation when you
 return.
 
+## Notifications in the apps
+
+The desktop app tells you when a Tag replies or asks you a question while you are not looking at
+that conversation: the window is in the background, or another Tag's conversation is open. Several
+replies from one Tag make one notification, such as "lead: 3 new messages", and a question gets
+its own. Clicking a notification opens that Tag. The Dock badge shows how many replies you have
+not read. Choose **All messages**, **Questions only**, or **Off** under **Notifications** in the
+Control Plane menu; the choice is kept on this device. Your own messages, the Tag's activity, and
+checks that stayed quiet never notify.
+
+The terminal UI does the same through the terminal: a reply or question in a conversation that is
+not in front, or while the terminal is in the background, sends a desktop notification with the
+OSC 9 escape, which iTerm2, WezTerm, Ghostty, kitty, and other terminals show. The status line
+counts unread replies. Set `SUPERTAG_TUI_NOTIFY` to `questions` for questions only, `bell` to ring
+the terminal bell instead, or `off`.
+
 ## Ask a Tag to follow up
 
 Ask the Tag to come back to something later, once or on a schedule:
@@ -112,7 +128,9 @@ Summarize open work every Monday at 9.
 
 The Tag sets a **Schedule**, a durable wake-up for itself in this conversation, and tells you
 when it will look. When the time comes, its reply appears in the conversation as a normal
-message, marked "Scheduled", with no message from you before it. A Schedule takes effect only
+message, marked "Scheduled", with no message from you before it. Nothing shows while the Tag
+checks unless you write to it meanwhile, and a recurring check that finds nothing new stays quiet: no message, nothing unread,
+though `supertag describe task` still shows the turn ran. A Schedule takes effect only
 when the turn that set it succeeds. Recurring ones run at least an hour apart. A Tag schedules only
 when it holds the `schedule:create` runtime action, which `supertag init` and the New Tag forms
 grant.
@@ -177,7 +195,8 @@ For a coding agent that operates SuperTag from a separate conversation, see
 ## Check that it worked
 
 Your conversation shows under its Tag with its latest message, and the terminal UI and the
-desktop app mark replies you have not read. An Objective's conversation is titled by the Objective. A work Session the Tag started appears
+desktop app mark replies you have not read. The desktop app's Dock badge and the terminal UI's
+status line count them; see [Notifications in the apps](#notifications-in-the-apps). An Objective's conversation is titled by the Objective. A work Session the Tag started appears
 beneath the conversation that started it; `supertag get session --parent-session SESSION_ID`
 lists them, and `supertag describe session ID` shows one with its latest Task and report.
 

@@ -121,6 +121,9 @@ package and unprivileged user namespaces, with `SUPERTAG_TEST_CODEX_BINARY` set 
 Codex), and `linux-root`. The `linux-root` shared execution cases need root in a disposable Linux VM or
 container, util-linux `setsid`, and `SUPERTAG_RUST_TEST_SHARED_EXECUTION_BINARY` set to a built
 `supertag-shared-execution`. The `linux-root` job in `.github/workflows/core.yml` runs them.
+When you run tests in a container, start it with an init (`docker run --init`): processes a
+test leaves behind are reparented to PID 1, and a PID 1 such as `sleep infinity` never reaps
+them.
 
 For a live read-only smoke test, use the built-in Codex adapter with an installed Codex CLI
 version 0.163.0 or newer. Start the services with a separate development state directory.
@@ -163,6 +166,23 @@ separately from log tails; a child may not print anything before a short deadlin
 
 Add or update tests for changed behavior. If a required check cannot run in
 your environment, say so in the pull request and describe what you verified.
+
+### Attention eval
+
+When you change what makes a Tag speak or stay quiet, such as the Schedule wake-up prompt or the
+`stay_quiet` tool's description, run the attention eval before and after the change. It gives
+each of 20 scheduled checks, half of them finding a change, its own throwaway Tag, and scores how
+often a Tag posted when something changed (recall) and stayed quiet when nothing did
+(precision):
+
+```sh
+uv run --python 3.13 --script tests/evals/attention/run.py --harness codex --harness claude-code \
+  --output attention.json
+```
+
+It needs a running Control Plane with a Worker Host for each harness, spends one turn per check
+and harness, and retires its Tags afterwards (`--keep` keeps them). `--plan` prints the notes it
+would schedule without running anything; `scenarios.json` holds the checks.
 
 ## Submit a pull request
 

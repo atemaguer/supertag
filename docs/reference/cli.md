@@ -1739,6 +1739,9 @@ Options:
       --allow-unsandboxed-commands
           Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
 
+      --network-credential <NAME=VARIABLE>
+          NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials
+
       --claude-path <CLAUDE_PATH>
           Claude executable used by the Agent SDK
 
@@ -1990,7 +1993,7 @@ Options:
           Private directory for Microsoft Teams connector state and reply receipts
 
       --notify <NOTIFY>
-          Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector or, without one, as the Slack workspace in SUPERTAG_NOTIFY_SLACK_TEAM_ID, whose bot token is read from SUPERTAG_NOTIFY_SLACK_BOT_TOKEN or the credential vault entry SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID.
+          Tell the operator about Inbox items here: webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector or, without one, as the Slack workspace in SUPERTAG_NOTIFY_SLACK_TEAM_ID, whose bot token is read from SUPERTAG_NOTIFY_SLACK_BOT_TOKEN or the credential vault entry SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID.
 
   -h, --help
           Print help (see a summary with '-h')
@@ -2179,6 +2182,9 @@ Options:
 
       --allow-unsandboxed-commands
           Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
+
+      --network-credential <NAME=VARIABLE>
+          NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials
 
       --claude-path <CLAUDE_PATH>
           Claude executable used by the Agent SDK

@@ -287,7 +287,9 @@ impl Store {
                 });
         }
         // Per conversation: its latest message, its unfinished Tasks, and its finished turns
-        // after the read mark.
+        // after the read mark. A Schedule's turn counts once it finished, or once a person's
+        // message joined it: it may stay quiet, so until then it is neither the latest message
+        // nor work the conversation shows.
         let rows = sqlx::query(&format!(
             "SELECT c.tag_id,MAX(h.accepted_order) AS latest_order,
                     SUM(CASE WHEN t.state IN ({UNFINISHED}) THEN 1 ELSE 0 END) AS working,
@@ -296,9 +298,14 @@ impl Store {
                     COALESCE(MAX(r.read_order),0) AS read_order
              FROM supertag_v2_conversations c
              JOIN supertag_v2_conversation_history h ON h.session_id=c.session_id
-             JOIN supertag_v2_tasks t ON t.task_id=h.task_id
+             JOIN supertag_v2_tasks t ON t.task_id=h.task_id AND t.quiet=0
              LEFT JOIN supertag_v2_conversation_reads r ON r.principal=c.principal AND r.tag_id=c.tag_id
-             WHERE c.principal=$1 GROUP BY c.tag_id"
+             WHERE c.principal=$1
+               AND NOT (t.state IN ({UNFINISHED})
+                        AND EXISTS (SELECT 1 FROM supertag_v2_schedule_fires f WHERE f.task_id=t.task_id)
+                        AND NOT EXISTS (SELECT 1 FROM supertag_v2_live_inputs i
+                                        WHERE i.task_id=t.task_id AND i.state IN ({JOINING})))
+             GROUP BY c.tag_id"
         ))
         .bind(principal)
         .fetch_all(&mut *tx)
@@ -320,6 +327,7 @@ impl Store {
         let ids: Vec<&str> = latest.iter().map(|entry| entry.task_id.as_str()).collect();
         let tasks = tasks_in(&mut tx, &ids).await?;
         let fired = crate::schedules::fired_by_in(&mut tx, &ids).await?;
+        let asking = open_questions_in(&mut tx, &ids).await?;
         for entry in &latest {
             let Some(row) = tasks.get(&entry.task_id) else {
                 continue;
@@ -343,6 +351,7 @@ impl Store {
             conversation.preview = preview.chars().take(PREVIEW_CHARS).collect();
             conversation.preview_from_tag = from_tag;
             conversation.latest_work_session_report_id = entry.report_id.clone();
+            conversation.asking = asking.contains(&entry.task_id);
             conversation.last_activity_at_ms = row
                 .completed_at_ms
                 .or(row.accepted_at_ms)
@@ -427,7 +436,7 @@ impl Store {
         name("Tag ID", tag_id)?;
         name("Task ID", task_id)?;
         let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(&format!("{HISTORY} AND h.task_id=$3"))
+        let row = sqlx::query(&format!("{HISTORY_WITH_QUIET} AND h.task_id=$3"))
             .bind(principal)
             .bind(tag_id)
             .bind(task_id)
@@ -478,6 +487,7 @@ impl Store {
             }
             Some(_) => {}
         }
+        crate::attention::read_in(&mut tx, principal, &input.tag_id, order, now).await?;
         tx.commit().await?;
         self.list_conversations(principal, &ListConversationsRequest {})
             .await?
@@ -541,13 +551,22 @@ pub(crate) async fn task_access_in(
 }
 
 /// The conversation's history: the messages of every Session of `principal`'s conversation with
-/// the Tag in `$2`. Callers add conditions from `$3`.
+/// the Tag in `$2`, without quiet turns. Callers add conditions from `$3`.
 const HISTORY: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_id
+     FROM supertag_v2_conversation_history h
+     WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversations c
+                            WHERE c.principal=$1 AND c.tag_id=$2)
+       AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks q WHERE q.task_id=h.task_id AND q.quiet=1)";
+/// [`HISTORY`] with its quiet turns, for a client that holds one as unfinished or asks for it: it
+/// learns the turn ended quietly (`Task.quiet`) and drops it.
+const HISTORY_WITH_QUIET: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_id
      FROM supertag_v2_conversation_history h
      WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversations c
                             WHERE c.principal=$1 AND c.tag_id=$2)";
 const UNFINISHED: &str = "1,2,6";
 const FINISHED: &str = "3,4,5";
+/// Live input states of a person's message on its way into, or taken in by, a running turn.
+const JOINING: &str = "1,2,3,5";
 /// How much of the latest message a conversation list shows.
 const PREVIEW_CHARS: usize = 200;
 
@@ -621,7 +640,7 @@ async fn changes_in(
     let mut entries = rows.iter().map(history_entry).collect::<Result<Vec<_>>>()?;
     if !input.refresh_task_ids.is_empty() {
         let sql = format!(
-            "{HISTORY} AND h.accepted_order<=$3 AND h.task_id IN ({})",
+            "{HISTORY_WITH_QUIET} AND h.accepted_order<=$3 AND h.task_id IN ({})",
             placeholders(4, input.refresh_task_ids.len())
         );
         let mut query = sqlx::query(&sql).bind(principal).bind(tag_id).bind(after);
@@ -639,6 +658,30 @@ async fn changes_in(
         .map(|message| message.encoded_len() + 8)
         .sum();
     Ok((bytes <= PAGE_BYTES).then_some(messages))
+}
+
+/// Which of these Tasks asked an Objective question that waits for an answer.
+async fn open_questions_in(
+    tx: &mut Transaction<'_, Any>,
+    task_ids: &[&str],
+) -> Result<std::collections::HashSet<String>> {
+    let mut open = std::collections::HashSet::new();
+    for chunk in task_ids.chunks(ID_BATCH) {
+        let sql = format!(
+            "SELECT q.task_id FROM supertag_v2_objective_questions q
+             JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id
+             JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id
+             WHERE q.task_id IN ({}) AND q.published_at_ms IS NOT NULL AND q.answer_task_id IS NULL
+               AND o.status NOT IN (5,6)",
+            placeholders(1, chunk.len())
+        );
+        let mut query = sqlx::query_scalar::<_, String>(&sql);
+        for id in chunk {
+            query = query.bind(*id);
+        }
+        open.extend(query.fetch_all(&mut **tx).await?);
+    }
+    Ok(open)
 }
 
 /// A new conversation Session's ID.

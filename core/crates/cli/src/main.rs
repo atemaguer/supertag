@@ -450,11 +450,11 @@ enum Command {
         /// Private directory for Microsoft Teams connector state and reply receipts.
         #[arg(long, requires = "microsoft_teams_listen")]
         microsoft_teams_state_directory: Option<PathBuf>,
-        /// Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME],
+        /// Tell the operator about Inbox items here: webhook:HTTPS_URL[#SECRET_NAME],
         /// slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable.
         #[arg(
             long,
-            long_help = "Tell the operator about Inbox items here: desktop, webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector or, without one, as the Slack workspace in SUPERTAG_NOTIFY_SLACK_TEAM_ID, whose bot token is read from SUPERTAG_NOTIFY_SLACK_BOT_TOKEN or the credential vault entry SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID."
+            long_help = "Tell the operator about Inbox items here: webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector or, without one, as the Slack workspace in SUPERTAG_NOTIFY_SLACK_TEAM_ID, whose bot token is read from SUPERTAG_NOTIFY_SLACK_BOT_TOKEN or the credential vault entry SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID."
         )]
         notify: Vec<String>,
     },
@@ -1158,6 +1158,21 @@ async fn run(command: Command) -> Result<()> {
             );
             let provider_model = adapter.provider_model();
             let mut execution_profile = adapter.execution_profile()?;
+            let network_credentials = adapter
+                .network_credentials()?
+                .into_iter()
+                .map(|(name, variable)| {
+                    let source = supertag_worker_host::egress::credential_source_variable(&name);
+                    let value = std::env::var(&source).with_context(|| {
+                        format!("set {source} to the value of network credential {name}")
+                    })?;
+                    supertag_worker_host::egress::HostCredential::new(&name, &variable, value)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            ensure!(
+                network_credentials.is_empty() || harness == HarnessKind::Codex,
+                "network credentials are injected only for Codex in this release"
+            );
             let workspaces = adapter.workspace_mappings()?;
             use supertag_worker_host::{ProviderAuthority, ProviderConfig};
             let remote_provider = if let Some(executable) = e2b_workspace_provider {
@@ -1318,6 +1333,7 @@ async fn run(command: Command) -> Result<()> {
                 disk_space,
                 keep_awake,
                 labels,
+                network_credentials,
                 lane: supervised_lane.map(|incarnation_id| supertag_worker_host::Lane {
                     incarnation_id,
                     observer: std::sync::Arc::new(|state: supertag_worker_host::LaneState| {
@@ -2100,13 +2116,7 @@ fn operator_notifier(
     channel: ProtocolChannel,
     gateway_token: String,
 ) -> Result<supertag_gateway::notifications::OperatorNotifier> {
-    use supertag_gateway::notifications::{Desktop, OperatorNotifier, Senders, parse_destinations};
-    // Test builds never show real desktop notifications.
-    #[cfg(feature = "test-fixtures")]
-    let desktop = std::env::var_os("SUPERTAG_TEST_DESKTOP_NOTIFIER")
-        .map_or(Desktop::Unavailable, |path| Desktop::Command(path.into()));
-    #[cfg(not(feature = "test-fixtures"))]
-    let desktop = Desktop::Native;
+    use supertag_gateway::notifications::{OperatorNotifier, Senders, parse_destinations};
     let destinations = parse_destinations(values, notify_loopback_http())?;
     let mut secrets = std::collections::BTreeMap::new();
     for name in destinations.iter().filter_map(|d| d.secret_name.as_ref()) {
@@ -2121,7 +2131,7 @@ fn operator_notifier(
     }
     OperatorNotifier::new(
         destinations,
-        Senders::new(slack, secrets, desktop)?,
+        Senders::new(slack, secrets)?,
         channel,
         gateway_token,
     )
@@ -2844,6 +2854,14 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "open_work_sessions": tag.open_work_sessions,
         "memory": tag.memory,
         "memory_reviewed_at_ms": tag.memory_reviewed_at_ms,
+        // How the Tag's unprompted messages were received; only `describe tag` reads it.
+        "attention": tag.attention.as_ref().map(|attention| json!({
+            "window_days": attention.window_days,
+            "posted": attention.posted,
+            "read": attention.read,
+            "answered": attention.answered,
+            "quiet": attention.quiet,
+        })),
         "revision": tag.revision,
         "instructions": tag.instructions,
         "allowed_actions": tag.allowed_actions,
@@ -2868,7 +2886,7 @@ fn print_task(task: &Task) -> Result<()> {
 fn task_json(task: &Task) -> serde_json::Value {
     json!({
         "task_id": task.task_id, "tag_id": task.tag_id, "session_id": task.session_id,
-        "state": task.state().as_str_name(), "result": task.result, "attempt_id": task.attempt_id,
+        "state": task.state().as_str_name(), "result": task.result, "quiet": task.quiet, "attempt_id": task.attempt_id,
         "harness": task.harness_kind().as_str_name(),
         "shared_execution_environment_id": supertag_protocol::shared_execution::environment(task.policy_snapshot.as_ref()),
         "file_scope": supertag_protocol::file_scope::of_task(task).map(|scope| json!({
@@ -2879,6 +2897,34 @@ fn task_json(task: &Task) -> serde_json::Value {
             "outside_write": scope.outside_write,
             "outside_read": scope.outside_read,
         })),
+        "network_scope": supertag_protocol::network_scope::of_task(task).map(|scope| json!({
+            "summary": supertag_protocol::network_scope::summary(scope),
+            "any_origin": scope.any_origin,
+            "rules": scope.rules.iter().map(|rule| json!({
+                "origins": rule.origins,
+                "methods": rule.methods,
+                "credential": (!rule.credential.is_empty()).then_some(&rule.credential),
+            })).collect::<Vec<_>>(),
+        })),
+        "network_log": task.network_logs.iter().map(|attempt| {
+            let log = attempt.log.clone().unwrap_or_default();
+            json!({
+                "attempt_id": attempt.attempt_id,
+                "allowed": log.allowed,
+                "denied": log.denied,
+                "unrecorded": log.unrecorded,
+                "requests": log.requests.iter().map(|record| json!({
+                    "at_ms": record.at_ms,
+                    "method": record.method,
+                    "origin": record.origin,
+                    "path": record.path,
+                    "allowed": record.allowed,
+                    "reason": (!record.reason.is_empty()).then_some(&record.reason),
+                    "status": (record.status != 0).then_some(record.status),
+                    "credential": (!record.credential.is_empty()).then_some(&record.credential),
+                })).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
         "workspace": task.workspace.as_ref().map(|spec| json!({
             "workspace_id": spec.workspace_id,
             // The commit the Task starts from: pinned by its Tag, or resolved from `ref` when the

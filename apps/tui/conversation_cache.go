@@ -70,6 +70,7 @@ type cachedTurn struct {
 	SentAtMs      int64         `json:"sentAtMs,omitempty"`
 	CompletedAtMs int64         `json:"completedAtMs,omitempty"`
 	Status        string        `json:"status,omitempty"`
+	Hidden        bool          `json:"hidden,omitempty"`
 	Entries       []cachedEntry `json:"entries"`
 }
 
@@ -218,7 +219,7 @@ func (m *model) conversationSnapshot(tag string) cachedConversation {
 		}
 		cached := cachedTurn{ID: id, Order: turn.order, Settled: turn.settled && !turn.needsFollow, Joined: turn.joined,
 			Started: turn.started, After: turn.after, Status: turn.status,
-			SentAtMs: unixMilli(turn.sentAt), CompletedAtMs: unixMilli(turn.completedAt)}
+			SentAtMs: unixMilli(turn.sentAt), CompletedAtMs: unixMilli(turn.completedAt), Hidden: turn.hidden}
 		for _, entry := range turn.entries {
 			cached.Entries = append(cached.Entries, cachedEntry{Kind: entry.kind, Text: entry.text, Session: entry.session})
 		}
@@ -345,7 +346,7 @@ func (m *model) cachedConversation(tag string) {
 		}
 		restored := &runtimeTurn{settled: turn.Settled, needsFollow: !turn.Settled, joined: turn.Joined, started: turn.Started,
 			after: turn.After, order: turn.Order, sentAt: fromMilli(turn.SentAtMs), completedAt: fromMilli(turn.CompletedAtMs)}
-		restored.status = turn.Status
+		restored.status, restored.hidden = turn.Status, turn.Hidden
 		rendered := cached.Width > 0
 		for _, held := range turn.Entries {
 			restored.entries = append(restored.entries, entry{kind: held.Kind, text: held.Text, session: held.Session})

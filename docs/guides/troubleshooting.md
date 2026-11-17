@@ -82,6 +82,7 @@ and serves its harness and model. `placement explain` names which is missing:
 | An uncertain Task Attempt keeps a host's slot | Confirm it stopped, then run the `supertag task resolve-attempt` command it names |
 | `unsandboxed-commands`: no host lets the harness run commands | Add the harness to a host's `allow-unsandboxed-commands`, or remove `commands:execute` |
 | `file-scope`: the harness cannot enforce the Task's path scope | Run the Tag on a harness that can, or change the scope; see [Path scopes](../reference/iam.md#path-scopes) |
+| `network-scope`: the harness or host cannot enforce the Task's network scope, or no host offers its credential | Run the Tag on Codex, add the credential to a host's `network-credentials`, or change the scope; see [Network scopes](../reference/iam.md#network-scopes) |
 
 Each entry under `hosts` also gives that Worker Host's own `requirement` and `reason` when none
 of its lanes for the Task's harness can run the Task: `harness` when it runs no such lane, or

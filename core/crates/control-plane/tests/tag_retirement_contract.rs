@@ -137,7 +137,16 @@ async fn exercise(url: &str) {
     assert_eq!(retired.role_assignments, 1);
     let retired = retired.tag.unwrap();
     assert!(retired.retired_at_ms.is_some());
-    assert_eq!(store.get_tag("first").await.unwrap(), retired);
+    // Only GetTag reads how the Tag's messages landed.
+    let read = store.get_tag("first").await.unwrap();
+    assert!(read.attention.is_some());
+    assert_eq!(
+        Tag {
+            attention: None,
+            ..read
+        },
+        retired
+    );
     assert_eq!(
         store.retire_tag("first", false).await.unwrap().tag.unwrap(),
         retired

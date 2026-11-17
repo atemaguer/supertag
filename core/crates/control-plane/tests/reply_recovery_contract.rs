@@ -73,6 +73,7 @@ async fn reply_with_result(store: &Store, id: &str, result: &str) -> String {
                 workspace_delivery: None,
                 waiting_approval_ids: vec![],
                 artifacts: vec![],
+                quiet: false,
             },
         )
         .await

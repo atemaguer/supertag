@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 88;
+        const SCHEMA_VERSION: i64 = 90;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -287,6 +287,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0086_work_session_limit.sql"),
                 include_str!("../migrations/sqlite/0087_surface_delivery.sql"),
                 include_str!("../migrations/sqlite/0088_tag_memories.sql"),
+                include_str!("../migrations/sqlite/0089_quiet_results.sql"),
+                include_str!("../migrations/sqlite/0090_attempt_network_logs.sql"),
             ]
         } else {
             [
@@ -380,6 +382,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0086_work_session_limit.sql"),
                 include_str!("../migrations/postgresql/0087_surface_delivery.sql"),
                 include_str!("../migrations/postgresql/0088_tag_memories.sql"),
+                include_str!("../migrations/postgresql/0089_quiet_results.sql"),
+                include_str!("../migrations/postgresql/0090_attempt_network_logs.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -641,6 +645,7 @@ impl Store {
                 .0,
             memory,
             memory_reviewed_at_ms: row.try_get("memory_reviewed_at_ms")?,
+            attention: None,
         })
     }
 
@@ -739,6 +744,7 @@ impl Store {
         let mut task = task_row(&row)?;
         task.workspace_mount_writes =
             crate::workspace_mounts::writes_for(&self.pool, task_id).await?;
+        task.network_logs = crate::network_logs::logs_for(&self.pool, task_id).await?;
         Ok(task)
     }
 
@@ -1343,8 +1349,11 @@ impl Store {
             } else if !input.artifacts.is_empty() {
                 return Err(invalid("only a successful Task can submit artifacts"));
             }
-            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL, finish_objective_signal = $3, finish_checkpoint_sha256 = $4 WHERE task_id = $5")
-                .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.checkpoint_sha256).bind(&input.task_id)
+            let quiet =
+                crate::attention::quiet_finish_in(&mut transaction, &task_row(&row)?, input)
+                    .await?;
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, cleanup_failure = NULL, finish_objective_signal = $3, finish_checkpoint_sha256 = $4, quiet = $5 WHERE task_id = $6")
+                .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.checkpoint_sha256).bind(i64::from(quiet)).bind(&input.task_id)
                 .execute(&mut *transaction).await?;
         }
         let task = task_in(&mut transaction, &input.task_id).await?;
@@ -1356,6 +1365,7 @@ impl Store {
             crate::work_sessions::questions::finish_in(&mut transaction, &task, input, now).await?;
             crate::schedules::finish_in(&mut transaction, &task, now).await?;
             crate::memories::finish_in(&mut transaction, &task, now).await?;
+            crate::attention::finish_in(&mut transaction, &task, now).await?;
         }
         if state == TaskState::Running && task.state() == TaskState::Succeeded {
             sqlx::query("UPDATE supertag_v2_tasks SET completed_at_ms=$1 WHERE task_id=$2")
@@ -2260,19 +2270,30 @@ async fn bounded_task_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Re
     Ok(task)
 }
 
+/// The surface thread a Task's reply goes to, if any.
+pub(crate) async fn reply_route_in(
+    transaction: &mut Transaction<'_, Any>,
+    task: &Task,
+) -> Result<Option<AnyRow>> {
+    let route = sqlx::query("SELECT account_id, conversation_id, thread_id FROM supertag_v2_inbound_events WHERE task_id = $1")
+        .bind(&task.task_id).fetch_optional(&mut **transaction).await?;
+    if route.is_some() {
+        return Ok(route);
+    }
+    // An Objective started from a surface thread answers there from its own Session.
+    Ok(sqlx::query("SELECT home.account_id, home.conversation_id, home.thread_id FROM supertag_v2_surface_objectives home JOIN supertag_v2_objectives o ON o.objective_id=home.objective_id WHERE o.owner_tag_id=$1 AND o.session_id=$2")
+        .bind(&task.tag_id).bind(&task.session_id).fetch_optional(&mut **transaction).await?)
+}
+
 pub(crate) async fn enqueue_reply(
     transaction: &mut Transaction<'_, Any>,
     task: &Task,
     order: i64,
 ) -> Result<()> {
-    let mut route = sqlx::query("SELECT account_id, conversation_id, thread_id FROM supertag_v2_inbound_events WHERE task_id = $1")
-        .bind(&task.task_id).fetch_optional(&mut **transaction).await?;
-    if route.is_none() {
-        // An Objective started from a surface thread answers there from its own Session.
-        route = sqlx::query("SELECT home.account_id, home.conversation_id, home.thread_id FROM supertag_v2_surface_objectives home JOIN supertag_v2_objectives o ON o.objective_id=home.objective_id WHERE o.owner_tag_id=$1 AND o.session_id=$2")
-            .bind(&task.tag_id).bind(&task.session_id).fetch_optional(&mut **transaction).await?;
+    if crate::attention::attention(task) == crate::attention::Attention::Quiet {
+        return Ok(());
     }
-    let Some(route) = route else {
+    let Some(route) = reply_route_in(transaction, task).await? else {
         return Ok(());
     };
     let result = task
@@ -2465,6 +2486,8 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
             .transpose()?,
         workspace_mount_writes: vec![],
         execution_report: None,
+        quiet: row.try_get::<i64, _>("quiet")? != 0,
+        network_logs: vec![],
     })
 }
 

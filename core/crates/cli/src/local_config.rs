@@ -100,7 +100,18 @@ enum Service {
         /// Placement labels a Tag's `runsOn` can select, such as `gpu`.
         #[serde(default)]
         labels: Vec<String>,
+        /// Credentials the Codex egress proxy injects for Tasks whose network scope names them.
+        #[serde(default, rename = "network-credentials")]
+        network_credentials: BTreeMap<String, NetworkCredential>,
     },
+}
+/// `network-credentials.NAME`: the named secret holding the value, and the variable the sandbox
+/// sees holding a placeholder.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NetworkCredential {
+    secret: String,
+    environment: String,
 }
 /// `logging.audit`: where audit entries also go, besides the database: `stderr` or a JSON-lines
 /// file.
@@ -237,7 +248,7 @@ pub fn check_database_url(url: &str) -> Result<()> {
     Ok(())
 }
 /// The Gateway's `--notify` destinations and the named secrets their webhooks send.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Notifications {
     pub destinations: Vec<String>,
     pub secrets: BTreeMap<String, Secret>,
@@ -257,15 +268,6 @@ impl Notifications {
         (self.destinations.clone(), secrets)
     }
 }
-impl Default for Notifications {
-    /// A local installation tells its operator on the desktop.
-    fn default() -> Self {
-        Self {
-            destinations: vec!["desktop".into()],
-            secrets: BTreeMap::new(),
-        }
-    }
-}
 #[derive(Clone)]
 pub struct Host {
     pub name: String,
@@ -281,6 +283,8 @@ pub struct Host {
     pub labels: Vec<String>,
     pub skills: Option<PathBuf>,
     pub restart: Restart,
+    /// Network credentials by name, with the secret holding each value. Only Codex lanes get them.
+    pub network_credentials: Vec<(String, Secret)>,
     /// Repositories, by Workspace ID, that receive each delivered Task as its Session branch.
     /// Only a Host of this file's own Control Plane has them; the supervisor imports with the
     /// local operator credential.
@@ -485,7 +489,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 );
             }
             let destinations = match notify {
-                None => vec!["desktop".to_owned()],
+                None => vec![],
                 Some(Notify::One(value)) => vec![value.clone()],
                 Some(Notify::Many(values)) => values.clone(),
             };
@@ -602,6 +606,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             concurrency,
             attempt_timeout_seconds,
             labels,
+            network_credentials,
         } = service
         else {
             continue;
@@ -760,6 +765,32 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
                 selections.push(args);
             }
         }
+        ensure!(
+            network_credentials.is_empty() || harnesses.iter().any(|h| h == "codex"),
+            "network-credentials are injected only for the codex harness"
+        );
+        let mut credential_secrets = Vec::new();
+        let mut credential_args = Vec::new();
+        for (credential, entry) in &network_credentials {
+            let secret = secrets.get(&entry.secret).cloned().with_context(|| {
+                format!(
+                    "network credential {credential} names no secret {}",
+                    entry.secret
+                )
+            })?;
+            credential_args.extend([
+                OsString::from("--network-credential"),
+                format!("{credential}={}", entry.environment).into(),
+            ]);
+            credential_secrets.push((credential.clone(), secret));
+        }
+        for args in &mut selections {
+            if args.get(1).is_some_and(|flag| flag == "--harness")
+                && args.get(2).is_some_and(|harness| harness == "codex")
+            {
+                args.extend(credential_args.iter().cloned());
+            }
+        }
         let mut selected = Vec::new();
         for mut args in selections {
             args.extend(mapping.iter().cloned());
@@ -781,6 +812,7 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
             labels,
             skills,
             restart,
+            network_credentials: credential_secrets,
             session_branches,
         });
     }
@@ -1225,6 +1257,68 @@ secrets:
         .unwrap();
         assert!(c.plane.is_none());
         assert!(c.hosts[0].key.is_some());
+    }
+    #[test]
+    fn network_credentials_reach_only_codex_lanes_by_name() {
+        let c = parse(
+            br#"services:
+  control-plane: {type: control-plane}
+  laptop:
+    type: host
+    harnesses: [codex, claude-code]
+    allow-unsandboxed-commands: [claude-code]
+    network-credentials:
+      github: {secret: github-token, environment: GITHUB_TOKEN}
+secrets:
+  github-token: {environment: GITHUB_PAT}
+"#,
+            Path::new("/trusted"),
+            |_| None,
+        )
+        .unwrap();
+        let host = &c.hosts[0];
+        assert_eq!(host.network_credentials.len(), 1);
+        assert_eq!(host.network_credentials[0].0, "github");
+        let codex = &host.harnesses[0];
+        assert_eq!(
+            codex.network_credentials().unwrap(),
+            [("github".to_owned(), "GITHUB_TOKEN".to_owned())]
+        );
+        assert_eq!(
+            codex.execution_profile().unwrap().network_credentials,
+            ["github"]
+        );
+        assert!(host.harnesses[1].network_credentials().unwrap().is_empty());
+        for (yaml, needle) in [
+            (
+                "harnesses: [claude-code]\n    network-credentials: {github: {secret: t, environment: GITHUB_TOKEN}}",
+                "only for the codex harness",
+            ),
+            (
+                "harnesses: [codex]\n    network-credentials: {github: {secret: missing, environment: GITHUB_TOKEN}}",
+                "names no secret",
+            ),
+            (
+                "harnesses: [codex]\n    network-credentials: {github: {secret: t, environment: HTTPS_PROXY}}",
+                "",
+            ),
+            (
+                "harnesses: [codex]\n    network-credentials: {GitHub: {secret: t, environment: GITHUB_TOKEN}}",
+                "",
+            ),
+        ] {
+            let error = parse(
+                format!(
+                    "services:\n  control-plane: {{type: control-plane}}\n  laptop:\n    type: host\n    {yaml}\nsecrets:\n  t: {{environment: T}}\n"
+                )
+                .as_bytes(),
+                Path::new("/trusted"),
+                |_| None,
+            )
+            .err()
+            .unwrap_or_else(|| panic!("accepted {yaml}"));
+            assert!(format!("{error:#}").contains(needle), "{error:#}");
+        }
     }
     #[test]
     fn audit_log_is_stderr_or_a_path_resolved_from_the_file() {

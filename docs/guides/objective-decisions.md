@@ -38,8 +38,9 @@ approval approval:5c1e9a40-2b7d-4f0e-9a51-3d6c8e2f1b07 objective=usage-dashboard
 ```
 
 Add `--output json` for one JSON object per line. To be told without keeping a terminal open,
-[set up operator notifications](notifications.md): a desktop notification, a webhook, or a Slack
-message to a channel or to you.
+use the desktop app, which notifies you of a Tag's question, or
+[set up operator notifications](notifications.md): a webhook, or a Slack message to a channel or
+to you.
 
 ## 1. Answer a question
 

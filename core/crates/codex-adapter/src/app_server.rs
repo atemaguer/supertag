@@ -1342,6 +1342,255 @@ mod tests {
         result
     }
 
+    /// Run `script` as [`sandboxed`] does, with `environment` added to the Codex process.
+    async fn sandboxed_with(
+        executable: &std::ffi::OsStr,
+        root: &std::path::Path,
+        workspace: &std::path::Path,
+        policy: &Policy,
+        environment: &[(String, String)],
+        script: &str,
+    ) -> Result<Value> {
+        let home = root.join("native-home");
+        std::fs::create_dir_all(&home)?;
+        let mut child = Command::new(executable)
+            .args(crate::config::arguments(workspace, None, None, policy)?)
+            .current_dir(workspace)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").context("probe PATH")?)
+            .env("HOME", &home)
+            .env("CODEX_HOME", &home)
+            .env("TMPDIR", root)
+            .envs(environment.iter().map(|(name, value)| (name, value)))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()?;
+        let mut transport =
+            Transport::new(child.stdin.take().unwrap(), child.stdout.take().unwrap());
+        let mut buffered = Vec::new();
+        transport
+            .call(
+                "initialize",
+                json!({"clientInfo":{"name":"supertag-sandbox-probe","version":"1"},"capabilities":{"experimentalApi":true}}),
+                &mut buffered,
+            )
+            .await?;
+        transport
+            .write(json!({"method":"initialized","params":{}}))
+            .await?;
+        let result = transport
+            .call(
+                "command/exec",
+                json!({"command":["/bin/sh","-c",script],"cwd":workspace,"timeoutMs":60_000}),
+                &mut buffered,
+            )
+            .await;
+        drop(transport);
+        child.kill().await?;
+        child.wait().await?;
+        result
+    }
+
+    /// One live model turn (operator-approved): a code-mode command under a narrowed network
+    /// scope's profile. On 2026-11-17 with gpt-6-sol, the allowed origin passed through the egress
+    /// proxy, another got 403 from the managed proxy, a direct connection could not resolve, and
+    /// code-mode JavaScript had no fetch. Prints what happened; a person judges.
+    /// Needs SUPERTAG_TEST_CODEX_BINARY, SUPERTAG_LIVE_CODE_MODE_HOME (a private CODEX_HOME
+    /// holding a copied auth.json), and SUPERTAG_LIVE_CODE_MODE_MODEL.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "spends one live Codex turn; run only with operator approval"]
+    async fn live_code_mode_under_a_narrowed_network_scope() -> Result<()> {
+        use supertag_protocol::v2::{NetworkRule, NetworkScope};
+        use supertag_worker_host::egress;
+        let executable = std::env::var_os("SUPERTAG_TEST_CODEX_BINARY")
+            .context("set SUPERTAG_TEST_CODEX_BINARY")?;
+        let home = std::env::var_os("SUPERTAG_LIVE_CODE_MODE_HOME")
+            .context("set SUPERTAG_LIVE_CODE_MODE_HOME")?;
+        let model = std::env::var("SUPERTAG_LIVE_CODE_MODE_MODEL")
+            .context("set SUPERTAG_LIVE_CODE_MODE_MODEL")?;
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().canonicalize()?;
+        let workspace = root.join("workspace");
+        std::fs::create_dir(&workspace)?;
+        let proxy = egress::EgressProxy::start(egress::Config::new(
+            NetworkScope {
+                any_origin: false,
+                rules: vec![NetworkRule {
+                    origins: vec!["https://example.com".into()],
+                    methods: vec!["GET".into()],
+                    credential: String::new(),
+                }],
+            },
+            vec![],
+        ))
+        .await?;
+        let files = egress::write_sandbox_files(&proxy, &root.join("egress"))?;
+        let mut policy = Policy::from_actions(
+            &[
+                "files:write".into(),
+                "commands:execute".into(),
+                "web:fetch".into(),
+            ],
+            true,
+        )?;
+        policy.egress = Some(crate::config::Egress {
+            proxy: proxy.url(),
+            ca_certificate: files.ca_certificate.clone(),
+            ca_bundle: files.ca_bundle.clone(),
+            placeholders: Default::default(),
+            hosts: ["example.com".to_owned()].into(),
+            narrowed: true,
+        });
+        let args = crate::config::arguments(&workspace, Some(&model), Some("low"), &policy)?;
+        assert!(args.contains(&"features.code_mode_host=true".to_owned()));
+        let configuration: Vec<String> = args[3..].to_vec();
+        let prompt = "Run exactly these three shell commands, one after the other, then try one \
+            JavaScript fetch, and reply with only the four results, one per line, nothing else:\n\
+            curl -sS -m 15 -o /dev/null -w 'allowed=%{http_code}' https://example.com/ || echo allowed-failed=$?\n\
+            curl -sS -m 15 -o /dev/null -w 'denied=%{http_code}' https://example.org/ || echo denied-failed=$?\n\
+            curl -sS -m 15 --noproxy '*' -o /dev/null -w 'direct=%{http_code}' https://example.org/ || echo direct-failed=$?\n\
+            In the same code-mode script, if a global fetch exists, call \
+            fetch('https://example.org/') and report fetch=STATUS, or fetch-error=MESSAGE, or \
+            fetch=unavailable.";
+        let output = Command::new(&executable)
+            .arg("exec")
+            .args(["--skip-git-repo-check", "--json"])
+            .args(configuration)
+            .arg(prompt)
+            .current_dir(&workspace)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").context("probe PATH")?)
+            .env("HOME", &home)
+            .env("CODEX_HOME", &home)
+            .env("TMPDIR", &root)
+            .envs(policy.egress.as_ref().unwrap().process_environment())
+            .stdin(Stdio::null())
+            .output()
+            .await?;
+        // terminal-safe: probe output for the operator.
+        println!("status: {}", output.status);
+        println!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+        println!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+        println!("egress log: {:#?}", proxy.stop().await);
+        Ok(())
+    }
+
+    /// A narrowed network scope, through the real sandbox, Codex's managed proxy, and the Worker
+    /// Host's egress proxy: the allowed origin and method pass with the credential injected,
+    /// everything else is refused, and the command never holds the secret.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native sandbox probe"]
+    async fn installed_sandbox_reaches_only_the_network_scope_through_the_egress_proxy()
+    -> Result<()> {
+        use supertag_protocol::v2::{NetworkRule, NetworkScope};
+        use supertag_worker_host::egress;
+        const HOST: &str = "api.example.test";
+        const SECRET: &str = "ghp_probe_secret_value";
+        let executable = std::env::var_os("SUPERTAG_TEST_CODEX_BINARY")
+            .context("set SUPERTAG_TEST_CODEX_BINARY")?;
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().canonicalize()?;
+        let workspace = root.join("workspace");
+        std::fs::create_dir(&workspace)?;
+        let (origin, certificate) = egress::fixture::origin_server(HOST).await;
+        let base = format!("https://{HOST}:{}", origin.port());
+        let mut config = egress::Config::new(
+            NetworkScope {
+                any_origin: false,
+                rules: vec![NetworkRule {
+                    origins: vec![base.clone()],
+                    methods: vec!["GET".into()],
+                    credential: "github".into(),
+                }],
+            },
+            vec![egress::Credential::new(
+                "github",
+                "GITHUB_TOKEN",
+                SECRET.into(),
+            )],
+        );
+        // The fixture origin is on loopback; production refuses that.
+        config.resolve.insert(HOST.into(), origin);
+        config.allow_private = true;
+        config.extra_roots.push(certificate);
+        let proxy = egress::EgressProxy::start(config).await?;
+        let files = egress::write_sandbox_files(&proxy, &root.join("egress"))?;
+        let placeholder = proxy.credentials()[0].placeholder.clone();
+        let mut policy = Policy::from_actions(
+            &[
+                "files:write".into(),
+                "commands:execute".into(),
+                "web:fetch".into(),
+            ],
+            true,
+        )?;
+        policy.egress = Some(crate::config::Egress {
+            proxy: proxy.url(),
+            ca_certificate: files.ca_certificate.clone(),
+            ca_bundle: files.ca_bundle.clone(),
+            placeholders: [("GITHUB_TOKEN".to_owned(), placeholder.clone())].into(),
+            hosts: [HOST.to_owned()].into(),
+            narrowed: true,
+        });
+        let environment = policy.egress.as_ref().unwrap().process_environment();
+        let script = format!(
+            "echo token=$GITHUB_TOKEN; \
+             echo allowed=$(curl -sS -m 20 -H \"Authorization: Bearer $GITHUB_TOKEN\" {base}/ok); \
+             echo post=$(curl -sS -m 20 -o /dev/null -w '%{{http_code}}' -X POST {base}/x); \
+             curl -sS -m 10 -o /dev/null https://github.com/ 2>/dev/null; echo other=$?; \
+             curl -sS -m 10 -o /dev/null --noproxy '*' https://example.com/ 2>/dev/null; echo direct=$?"
+        );
+        let result = sandboxed_with(
+            &executable,
+            &root,
+            &workspace,
+            &policy,
+            &environment,
+            &script,
+        )
+        .await?;
+        let output = result["stdout"].as_str().unwrap_or_default().to_owned();
+        let line = |name: &str| {
+            output
+                .lines()
+                .find_map(|line| line.strip_prefix(&format!("{name}=")))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        assert_eq!(line("token"), placeholder, "{result}");
+        assert_eq!(
+            line("allowed"),
+            format!("GET /ok Bearer {SECRET}"),
+            "{result}"
+        );
+        assert_eq!(line("post"), "403", "{result}");
+        assert_ne!(line("other"), "0", "{result}");
+        assert_ne!(line("direct"), "0", "{result}");
+        assert!(!output.contains(&format!("token={SECRET}")), "{result}");
+        let log = proxy.stop().await;
+        let decided: Vec<(&str, bool, &str)> = log
+            .requests
+            .iter()
+            .map(|record| {
+                (
+                    record.method.as_str(),
+                    record.allowed,
+                    record.credential.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            decided,
+            [("GET", true, "github"), ("POST", false, "")],
+            "{log:?}"
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native sandbox probe"]
     async fn installed_sandbox_keeps_every_workspace_git_directory_read_only() -> Result<()> {

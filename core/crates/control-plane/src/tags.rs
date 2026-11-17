@@ -91,6 +91,7 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
             .map_or(0, |open| open as u32),
         memory: row.try_get::<i64, _>("memory")? != 0,
         memory_reviewed_at_ms: row.try_get("memory_reviewed_at_ms")?,
+        attention: None,
     })
 }
 
@@ -138,12 +139,17 @@ pub(crate) const READ: &str = "t.*, (SELECT COUNT(*) FROM supertag_v2_work_sessi
 impl Store {
     pub async fn get_tag(&self, tag_id: &str) -> Result<Tag> {
         name("Tag ID", tag_id)?;
+        let mut tx = self.pool.begin().await?;
         let row = sqlx::query(&format!("SELECT {READ} WHERE t.tag_id=$1"))
             .bind(tag_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| missing(tag_id))?;
-        tag_from_row(&row)
+        let mut tag = tag_from_row(&row)?;
+        tag.attention =
+            Some(crate::attention::summary_in(&mut tx, tag_id, self.execution_now_ms()).await?);
+        tx.commit().await?;
+        Ok(tag)
     }
 
     pub async fn retire_tag(&self, tag_id: &str, dry_run: bool) -> Result<RetireTagResponse> {

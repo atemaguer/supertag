@@ -227,6 +227,7 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("WorkerHost", "ReclaimAttempt", HOST),
     ("WorkerHost", "ReportAppliedLimits", HOST),
     ("WorkerHost", "ReportCleanupFailure", HOST),
+    ("WorkerHost", "ReportNetworkLog", HOST),
     ("AttemptInputs", "*", HOST),
     ("AttemptWorkstreams", "*", HOST),
     ("AttemptMailbox", "*", HOST),
@@ -630,6 +631,7 @@ mod tests {
         assert_eq!(roles("WorkerHost/ReclaimAttempt"), ["host"]);
         assert_eq!(roles("WorkerHost/ReportAppliedLimits"), ["host"]);
         assert_eq!(roles("WorkerHost/ReportCleanupFailure"), ["host"]);
+        assert_eq!(roles("WorkerHost/ReportNetworkLog"), ["host"]);
         assert_eq!(roles("AttemptWorkspaceMounts/RecordWrites"), ["host"]);
         assert_eq!(roles("WorkspaceVolumes/Put"), ["operator"]);
         assert_eq!(

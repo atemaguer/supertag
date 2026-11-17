@@ -87,6 +87,7 @@ fn finish(identity: &InspectAttemptRequest, signal: ObjectiveSignal) -> FinishTa
         succeeded: true,
         objective_signal: signal as i32,
         checkpoint_sha256: None,
+        quiet: false,
     }
 }
 

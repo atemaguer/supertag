@@ -3356,6 +3356,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureResponse.FromString,
                 _registered_method=True)
+        self.ReportNetworkLog = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ReportNetworkLog',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportNetworkLogRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportNetworkLogResponse.FromString,
+                _registered_method=True)
         self.ResolveWorkspaceRef = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/ResolveWorkspaceRef',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveWorkspaceRefRequest.SerializeToString,
@@ -3488,6 +3493,13 @@ class WorkerHostServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReportNetworkLog(self, request, context):
+        """The Attempt's egress proxy log, for the Task's network log. Each report replaces the last.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ResolveWorkspaceRef(self, request, context):
         """The commit the running Attempt's host resolved for its Task's Workspace `base_ref`. The first
         resolution in a Session wins and is recorded on every unresolved Task of the Session; the
@@ -3594,6 +3606,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.ReportCleanupFailure,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureResponse.SerializeToString,
+            ),
+            'ReportNetworkLog': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportNetworkLog,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportNetworkLogRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportNetworkLogResponse.SerializeToString,
             ),
             'ResolveWorkspaceRef': grpc.unary_unary_rpc_method_handler(
                     servicer.ResolveWorkspaceRef,
@@ -4114,6 +4131,33 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/ReportCleanupFailure',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportCleanupFailureResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportNetworkLog(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ReportNetworkLog',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportNetworkLogRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportNetworkLogResponse.FromString,
             options,
             channel_credentials,
             insecure,
