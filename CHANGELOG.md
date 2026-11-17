@@ -135,6 +135,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Clients connect to the Gateway, which forwards their calls to the Control Plane and authorizes
+  each as the caller's own credential. `supertag up` always starts a Gateway. The CLI takes
+  `--gateway` and `SUPERTAG_GATEWAY_URL` (Worker Hosts keep `--control-plane`); the desktop app
+  and terminal UI add and switch Gateways; the SDK clients are `supertag-ai/gateway-client`
+  (`createGatewayClient`) and Python `supertag.gateway_client` (`GatewayClient`). Saved Control
+  Plane profiles are not carried over: add your Gateway again.
 - A Tag keeps one harness: changing an existing Tag's harness is refused (create a new Tag
   instead), and a Session's saved state is no longer dropped for a harness change.
 - Each turn's Workspace delivery bundle carries only what the turn added on top of its start
