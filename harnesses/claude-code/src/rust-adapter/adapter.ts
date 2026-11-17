@@ -269,7 +269,8 @@ async function scopeDenial(
 /**
  * Native Claude Code deny rules for the scope, as defense in depth beside the hook. Claude Code
  * 2.1.280 turns `Read()` denies into ripgrep exclusions for Grep and Glob, so a search over a
- * directory holding a hidden file leaves that file out.
+ * directory holding a hidden file leaves that file out (native-deny-search.test.ts runs the
+ * bundled binary to check this).
  */
 export function nativeDenyRules(cwd: string, scope: FileScopeLike | undefined): string[] {
   if (!scope) return [];
