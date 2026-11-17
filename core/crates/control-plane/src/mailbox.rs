@@ -149,8 +149,8 @@ async fn outgoing_hops_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Resul
 /// Keep a single waiting turn per recipient. A running turn keeps its immutable
 /// bound batch; later mail gets a successor in the same serialized Session.
 pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>) -> Result<()> {
-    // An unspecified direct Tag harness can inherit a Role default. Only
-    // prefilter explicit mismatches; insert_task checks the full accepted policy.
+    // Only prefilter Workspace changes; insert_task checks the full accepted policy, including
+    // the inbox Session's one harness.
     let recipients: Vec<String> = sqlx::query_scalar(
         "SELECT m.recipient_tag_id FROM supertag_v2_mailbox_messages m
          JOIN supertag_v2_tags tag ON tag.tag_id=m.recipient_tag_id
@@ -164,8 +164,7 @@ pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>) -> Result<()> {
              AND (COALESCE(previous.workspace_id,'')<>COALESCE(tag.workspace_id,'')
                OR COALESCE(previous.workspace_base_ref,'')<>COALESCE(tag.workspace_base_ref,'')
                OR (tag.workspace_base_ref IS NULL
-                 AND COALESCE(previous.workspace_base_commit,'')<>COALESCE(tag.workspace_base_commit,''))
-               OR (tag.harness_kind<>0 AND previous.harness_kind<>tag.harness_kind)))
+                 AND COALESCE(previous.workspace_base_commit,'')<>COALESCE(tag.workspace_base_commit,''))))
          GROUP BY m.recipient_tag_id ORDER BY MIN(m.delivery_order) LIMIT 128",
     )
         .bind(TaskState::Queued as i64).bind(TaskState::Claimed as i64).fetch_all(&mut **tx).await?;
@@ -181,8 +180,8 @@ pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>) -> Result<()> {
         .await
         {
             Ok(task) => task,
-            // The Tag may now require a different workspace/harness. Keep its
-            // mail pending without blocking unrelated delivery or claim polls.
+            // The Tag may now require a different Workspace, or a Role another harness. Keep
+            // its mail pending without blocking unrelated delivery or claim polls.
             Err(StoreError::FailedPrecondition(_)) => continue,
             Err(error) => return Err(error),
         };

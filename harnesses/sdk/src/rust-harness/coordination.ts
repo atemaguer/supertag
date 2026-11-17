@@ -110,6 +110,7 @@ const schemas = {
     instruction: nonblankText(8000),
     workspace: tagId.optional(),
     tag: tagId.optional(),
+    harness: z.enum(["codex", "claude-code", "openai-agents", "opencode", "cursor"]).optional(),
   }),
   close_session: z.strictObject({ sessionId: z.string().regex(workSessionId) }),
   continue_session: z.strictObject({
@@ -769,11 +770,11 @@ export function registerCoordinationTools(
     server.registerTool(
       "start_session",
       {
-        description: `Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction. You may specify the accepted Workspace ID. When this Task owns an Objective, you can delegate to an eligible Tag on its Team.${capacity}`,
+        description: `Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction. You may specify the accepted Workspace ID. When this Task owns an Objective, you can delegate to an eligible Tag on its Team. You may name another harness for the Work Session; it keeps that harness, and you talk to it only through its report and continue_session.${capacity}`,
         inputSchema: schemas.start_session,
         _meta: meta,
       },
-      ({ title, instruction, workspace, tag }, tool) =>
+      ({ title, instruction, workspace, tag, harness }, tool) =>
         write(async () => {
           if (asked || pending.size || scope.hasPendingExternalApprovals?.())
             return response(
@@ -788,6 +789,7 @@ export function registerCoordinationTools(
               instruction: safeInstruction,
               workspace,
               tag,
+              harness,
             }).success ||
             (workspace !== undefined && safeText(workspace) !== workspace) ||
             (tag !== undefined && safeText(tag) !== tag)
@@ -803,6 +805,7 @@ export function registerCoordinationTools(
                   instruction: safeInstruction,
                   workspaceId: workspace,
                   targetTagId: tag,
+                  harness,
                 },
                 config,
               ),

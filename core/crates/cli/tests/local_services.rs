@@ -1202,7 +1202,8 @@ impl SharedHost {
                 "#!/bin/sh\ntest -z \"${{CODEX_API_KEY:-}}${{ANTHROPIC_API_KEY:-}}${{SUPERTAG_HOST_TOKEN:-}}\" || exit 3\n\
                  test \"${{OPENAI_API_KEY:-}}\" = fixture-openai || exit 4\n\
                  echo $$ > \"{gate_text}/started/agents-$$\"\n\
-                 while [ ! -e \"{gate_text}/release\" ]; do sleep 0.05; done\nexec \"{ADAPTER}\"\n"
+                 while [ ! -e \"{gate_text}/release\" ]; do sleep 0.05; done\n\
+                 exec \"{ADAPTER}\" $(cat \"{gate_text}/adapter-args\" 2>/dev/null)\n"
             ),
         )?;
         // Answer the version probe without starting Python, which is slow on a loaded machine.
@@ -1707,6 +1708,64 @@ async fn shared_host_runs_harnesses_concurrently(database: String) -> Result<()>
     Ok(())
 }
 
+/// A lead on OpenAI Agents starts a Work Session that names Codex: the Work Session runs on the
+/// shared host's Codex lane, and its report returns to the lead's Session on OpenAI Agents.
+async fn shared_host_runs_a_work_session_on_another_harness(database: String) -> Result<()> {
+    let central = Central::start(&database)?;
+    let token = central.operator.clone();
+    let mut operator = client(&central.public).await?;
+    let mut shared = SharedHost::start(&central, 1).await?;
+    host_until(&mut operator, &token, |status| {
+        status.phase() == HostPhase::Ready && status.available_slots == 2
+    })
+    .await?;
+    fs::write(
+        shared.gate.join("adapter-args"),
+        "--work-session-harness=codex",
+    )?;
+    fs::write(shared.gate.join("release"), "")?;
+    tag(&mut operator, &token, "lead", HarnessKind::OpenaiAgents).await?;
+    let parent = submit(&mut operator, &token, "lead", "Task-a1").await?;
+    let log = |shared: &SharedHost| fs::read_to_string(&shared.supervisor.log).unwrap_or_default();
+    let done = settled(&mut operator, &token, &parent, TaskState::Succeeded)
+        .await
+        .with_context(|| format!("lead turn: {}", log(&shared)))?;
+    assert_eq!(done.harness_kind(), HarnessKind::OpenaiAgents);
+    let mut work = work_sessions_client::WorkSessionsClient::new(
+        protocol::dial(central.public.clone()).await?,
+    );
+    let listed = work
+        .list(authenticated_request(
+            ListWorkSessionsRequest {
+                parent_tag_id: "lead".into(),
+                parent_session_id: "task-a1".into(),
+                ..Default::default()
+            },
+            &token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(listed.work_sessions.len() == 1, "{listed:?}");
+    let child = &listed.work_sessions[0].latest_task_id;
+    let finished = settled(&mut operator, &token, child, TaskState::Succeeded)
+        .await
+        .with_context(|| format!("Work Session turn: {}", log(&shared)))?;
+    assert_eq!(finished.harness_kind(), HarnessKind::Codex);
+    assert_eq!(finished.tag_id, "lead");
+    assert_eq!(
+        finished.result.as_deref(),
+        Some("codex finished Task-child")
+    );
+    let started = shared.started()?;
+    ensure!(
+        started.iter().any(|(harness, _)| harness == "codex"),
+        "the Work Session did not run on the Codex lane: {started:?}"
+    );
+    shared.supervisor.stop().await?;
+    Ok(())
+}
+
 async fn replaced_shared_host_fences_every_lane(database: String) -> Result<()> {
     let central = Central::start(&database)?;
     let token = central.operator.clone();
@@ -2182,6 +2241,17 @@ async fn sqlite_shared_host_runs_two_harnesses_concurrently_within_capacity() ->
 #[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
 async fn postgres_shared_host_runs_two_harnesses_concurrently_within_capacity() -> Result<()> {
     with_database(true, shared_host_runs_harnesses_concurrently).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_shared_host_runs_a_work_session_on_another_harness() -> Result<()> {
+    with_database(false, shared_host_runs_a_work_session_on_another_harness).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires an isolated PostgreSQL server via SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"]
+async fn postgres_shared_host_runs_a_work_session_on_another_harness() -> Result<()> {
+    with_database(true, shared_host_runs_a_work_session_on_another_harness).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

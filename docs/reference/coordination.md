@@ -199,7 +199,7 @@ thread becomes the conversation's next turn. The same tool in a work Session ask
 
 ### Work and delegation
 
-An Objective's turn starts work with `start_session {title, instruction, tag?, workspace?}`:
+An Objective's turn starts work with `start_session {title, instruction, tag?, workspace?, harness?}`:
 
 - The instruction must be self-contained. A work Session sees only its own work, never the
   Objective's conversation or the Tag's other Sessions.
@@ -213,6 +213,13 @@ An Objective's turn starts work with `start_session {title, instruction, tag?, w
 - `workspace` may name the Workspace the starting Task accepted; otherwise the work Session uses
   its Tag's Workspace binding. Edits go to that Session's one branch, and each later Task of the
   Session commits on top of them.
+- `harness` names a built-in harness for the work Session: `codex`, `claude-code`,
+  `openai-agents`, `opencode`, or `cursor`. Without it, the work Session runs its Tag's harness.
+  The work Session keeps that harness for its whole life, including when it is continued, and
+  talks to the Session that started it only through messages. The start is refused when the name
+  is unknown, when `tag` names another Tag whose harness differs, when no Worker Host bound to the
+  Tag runs that harness, or when that harness can't enforce the work Session's permissions or
+  limits. A work Session on another harness uses that host's default model.
 - At most four work Sessions run at once per Session; later ones wait.
 
 A work Session's result returns to the Objective's conversation as a turn. The owner reads it,
@@ -485,7 +492,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 
 | Tool | Input | Effect |
 | --- | --- | --- |
-| `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `tag`, `workspace` | Starts a work Session; see [Work and delegation](#work-and-delegation) |
+| `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `tag`, `workspace`, `harness` | Starts a work Session; see [Work and delegation](#work-and-delegation) |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts that work Session's next Task |
 | `close_session` | `sessionId` | Closes one of the Tag's work Sessions, so it stops counting toward the [limit](#open-work-sessions) |
 | `ask` | `text` (up to 16,000 characters; 2,000 in a work Session) | Ends the Task waiting on a person's answer |

@@ -860,6 +860,15 @@ impl<'a> Catalog<'a> {
             value.harness_kind = kind.into();
             value.execution = execution;
         }
+        if let Some(reason) = prior.as_ref().and_then(|prior| {
+            supertag_protocol::harness_change_refusal(
+                name,
+                prior.harness_kind(),
+                value.harness_kind(),
+            )
+        }) {
+            bail!("{reason}");
+        }
         ensure!(
             value.workspace.is_none()
                 || value

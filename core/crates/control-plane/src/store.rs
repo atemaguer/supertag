@@ -602,6 +602,20 @@ impl Store {
                 return Err(StoreError::Conflict("Tag revision changed".into()));
             }
         }
+        let prior_harness: Option<i64> =
+            sqlx::query_scalar("SELECT harness_kind FROM supertag_v2_tags WHERE tag_id=$1")
+                .bind(tag_id)
+                .fetch_optional(&mut **transaction)
+                .await?;
+        if let Some(reason) = prior_harness.and_then(|prior| {
+            supertag_protocol::harness_change_refusal(
+                tag_id,
+                HarnessKind::try_from(prior as i32).unwrap_or_default(),
+                harness,
+            )
+        }) {
+            return Err(StoreError::FailedPrecondition(reason));
+        }
         crate::github_workspaces::validate_tag_in(transaction, workspace.as_ref()).await?;
         crate::workspace_mounts::configure_in(transaction, &mut workspace).await?;
         if let Some(spec) = workspace.as_mut()
@@ -1748,8 +1762,16 @@ async fn insert_task_options(
             .map(crate::policy::decode::<supertag_protocol::v2::TaskPolicySnapshot>).transpose()?;
         let prior_shared = supertag_protocol::shared_execution::environment(prior_policy.as_ref());
         let next_shared = supertag_protocol::shared_execution::environment(Some(&accepted.policy.snapshot));
-        // A Session may change harness: a checkpoint of another harness is dropped, and the
-        // next turn starts from the Session's recap.
+        // A Session keeps one harness. A Tag keeps its harness, so only a Role naming the
+        // harness of a Tag that names none can change it.
+        let prior_harness = HarnessKind::try_from(previous.try_get::<i64, _>("harness_kind")? as i32)
+            .unwrap_or_default();
+        if prior_harness as i32 != accepted.policy.harness_kind {
+            return Err(StoreError::FailedPrecondition(format!(
+                "this Session runs on {}, and a Session keeps its harness; restore the Tag's Role or start another Session",
+                supertag_protocol::harness_name(prior_harness).unwrap_or("no named harness")
+            )));
+        }
         if !crate::workspaces::same_session_workspace(
             crate::workspaces::workspace_from_row(&previous)?.as_ref(),
             accepted.workspace.as_ref(),
@@ -2139,7 +2161,7 @@ pub(crate) async fn current_work_policy_in(
     result.instructions = accepted.policy.instructions;
     result.allowed_actions = accepted.policy.allowed_actions;
     result.approval_rules = accepted.policy.approval_rules;
-    result.harness_kind = accepted.policy.harness_kind;
+    // A Work Session keeps the harness it started on, which may differ from its Tag's.
     result.policy_snapshot = Some(accepted.policy.snapshot);
     result.workspace = accepted.workspace;
     result.tag_revision = accepted.revision as u64;
@@ -2244,6 +2266,41 @@ pub(crate) async fn insert_task_from_snapshot(
     .bind(&source.task_id).bind(authority::system_now_ms()).execute(&mut **transaction).await?;
     sqlx::query("INSERT INTO supertag_v2_artifact_context_grants(task_id,artifact_id) SELECT $1,artifact_id FROM supertag_v2_artifact_context_grants WHERE task_id=$2").bind(&id).bind(&source.task_id).execute(&mut **transaction).await?;
     bounded_task_in(transaction, &id).await
+}
+
+/// Runs a just-accepted Work Session Task on another harness. The Tag's model range was chosen
+/// for its own harness, so the Task keeps its effort but no model: the host's default runs.
+pub(crate) async fn retarget_harness_in(
+    transaction: &mut Transaction<'_, Any>,
+    task: &mut Task,
+    harness: HarnessKind,
+) -> Result<()> {
+    if task.harness_kind() == harness {
+        return Ok(());
+    }
+    let mut snapshot = task.policy_snapshot.clone().unwrap_or_default();
+    if let Some(execution) = snapshot.execution.as_mut() {
+        execution.harness = supertag_protocol::harness_name(harness).map(str::to_owned);
+        execution.models.clear();
+    }
+    let digest = crate::policy::effective_digest(&snapshot)?;
+    let selection = ExecutionSelection {
+        model: None,
+        effort: task
+            .execution_selection
+            .as_ref()
+            .and_then(|selection| selection.effort.clone()),
+    };
+    sqlx::query("UPDATE supertag_v2_tasks SET harness_kind=$1,policy_snapshot=$2,policy_effective_digest=$3,execution_selection=$4 WHERE task_id=$5")
+        .bind(harness as i64)
+        .bind(snapshot.encode_to_vec())
+        .bind(digest)
+        .bind(selection.encode_to_vec())
+        .bind(&task.task_id)
+        .execute(&mut **transaction)
+        .await?;
+    *task = bounded_task_in(transaction, &task.task_id).await?;
+    Ok(())
 }
 
 pub(crate) async fn preserve_execution_in(

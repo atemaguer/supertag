@@ -10,9 +10,10 @@ use tonic::{Status, transport::Channel};
 
 use crate::{HostHeaders, journal::Attempt, request};
 
-/// Whether this host's harness resumes the checkpoint. One it cannot (another harness's, or one
-/// too big to grow) is left out, and the adapter starts fresh from the Session's recap. A custom
-/// adapter's host names no harness, so only its adapter can tell.
+/// Whether this host's harness resumes the checkpoint. One it cannot (one too big to grow, or
+/// another harness's, which only a Tag that names no harness can leave, since any lane claims its
+/// Tasks) is left out, and the adapter starts fresh from the Session's recap. A custom adapter's
+/// host names no harness, so only its adapter can tell.
 pub(crate) fn resumable(harness: HarnessKind, checkpoint: &SessionCheckpoint) -> bool {
     supertag_protocol::checkpoint_harness(harness).is_none_or(|name| name == checkpoint.harness)
         && checkpoint.payload.len() <= MAX_RESUMED_CHECKPOINT_BYTES

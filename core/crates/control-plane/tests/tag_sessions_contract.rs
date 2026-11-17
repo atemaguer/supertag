@@ -474,6 +474,7 @@ async fn contract(url: &str) {
                 instruction: "Compare the release notes".into(),
                 workspace_id: None,
                 target_tag_id: None,
+                harness: None,
             },
         )
         .await

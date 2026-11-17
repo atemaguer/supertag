@@ -29,6 +29,7 @@ pub async fn start_parallel(bootstrap: &AdapterBootstrap, task: &Task) -> Result
                 instruction: format!("Change the release notes ({index})"),
                 workspace_id: None,
                 target_tag_id: None,
+                harness: None,
             },
             &bootstrap.token,
             None,

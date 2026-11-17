@@ -26,7 +26,7 @@ const BUILTIN_HARNESSES: [(HarnessKind, &str); 5] = [
     (HarnessKind::Cursor, "cursor"),
 ];
 
-fn harness_for_name(name: &str) -> Option<HarnessKind> {
+pub(crate) fn harness_for_name(name: &str) -> Option<HarnessKind> {
     BUILTIN_HARNESSES
         .iter()
         .find(|(_, candidate)| *candidate == name)

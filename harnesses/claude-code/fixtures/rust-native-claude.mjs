@@ -528,12 +528,14 @@ async function workSessionTools() {
     instruction: ` Inspect the pinned checkout ${process.env.ANTHROPIC_API_KEY} `,
     workspace: "release",
     tag: "actor",
+    harness: "claude-code",
   };
   const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
   for (const [arguments_, origin] of [
     [{ ...input, attemptId: "forged" }, metadata],
     [{ ...input, title: " " }, metadata],
     [{ ...input, instruction: "x".repeat(8001) }, metadata],
+    [{ ...input, harness: "unknown-harness" }, metadata],
     [input, { ...metadata, agent_id: "untrusted-child" }],
     [input, { mcp_server: { name: "supertag", source: "external" } }],
   ]) {

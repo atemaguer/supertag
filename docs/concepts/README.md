@@ -34,7 +34,8 @@ Mailbox: a Tag's inbox for messages from other Tags
 
 You assign work to a [Tag](tags.md) by name. It can carry on conversations in several tools and
 start separate work Sessions. The same Tag keeps its configuration, open assignments, and results
-across those Sessions and when the model or harness changes.
+across those Sessions and when the model changes. A Tag keeps one harness; its work Sessions may
+run another.
 
 A [Role](roles.md) describes an enduring responsibility such as release management or security
 review. Assign a Role to a Tag when the same responsibility should guide that actor across many

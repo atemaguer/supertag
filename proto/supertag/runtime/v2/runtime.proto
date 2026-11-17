@@ -586,6 +586,9 @@ message StartWorkSessionRequest {
   string instruction = 4;
   optional string workspace_id = 5;
   optional string target_tag_id = 6;
+  // A built-in harness for the Work Session, such as `claude-code`: by default, the target Tag's.
+  // The Work Session keeps it for its whole life.
+  optional string harness = 7;
 }
 
 message GetWorkSessionRequest {
@@ -1399,6 +1402,7 @@ message HarnessStartWorkSessionRequest {
   string instruction = 3;
   optional string workspace_id = 4;
   optional string target_tag_id = 5;
+  optional string harness = 6;
 }
 
 message HarnessSendTagMessageRequest {

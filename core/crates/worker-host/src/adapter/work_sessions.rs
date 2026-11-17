@@ -97,6 +97,7 @@ impl HarnessWorkSessions for Bridge {
             instruction: self.redact(&input.instruction),
             workspace_id: input.workspace_id,
             target_tag_id: input.target_tag_id,
+            harness: input.harness,
         };
         let response = self
             .retry(upstream, |request| {

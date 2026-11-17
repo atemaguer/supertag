@@ -97,7 +97,7 @@ pub(crate) fn harness_label(harness: HarnessKind) -> Option<&'static str> {
     }
 }
 
-fn harness_name(harness: HarnessKind) -> &'static str {
+pub(crate) fn harness_name(harness: HarnessKind) -> &'static str {
     match harness {
         HarnessKind::Unspecified => "A custom harness",
         HarnessKind::Codex => "Codex",
@@ -344,7 +344,7 @@ fn waiting_for_capacity(
     ))
 }
 
-fn unsupported_by_harness(task: &Task) -> Option<(String, String)> {
+pub(crate) fn unsupported_by_harness(task: &Task) -> Option<(String, String)> {
     let harness = task.harness_kind();
     if let Some(reason) = task
         .execution_limits
@@ -511,6 +511,34 @@ fn summary(missing: &[String]) -> String {
         ));
     }
     parts.join(". ")
+}
+
+/// Whether a Worker Host bound to the Tag has reported a lane for `harness`, whatever its state
+/// now. A Work Session that names a harness no bound host runs would never be claimed.
+pub(crate) async fn bound_host_runs_in(
+    transaction: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    harness: HarnessKind,
+    now: i64,
+) -> Result<bool> {
+    let ids: Vec<String> = sqlx::query_scalar(
+        "SELECT host_id FROM supertag_v2_hosts h WHERE revoked_at_ms IS NULL AND (all_tags=1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$1)) ORDER BY host_id",
+    )
+    .bind(tag_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    for id in ids {
+        let status = crate::store::host_status_in(transaction, &id, now).await?;
+        if status
+            .harnesses
+            .iter()
+            .any(|lane| lane.harness_kind() == harness)
+            || (status.harnesses.is_empty() && status.harness_kind() == harness)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 impl Store {

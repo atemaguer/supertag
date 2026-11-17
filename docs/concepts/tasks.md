@@ -87,12 +87,12 @@ from the recap:
 
 - the Session has been idle for 14 days;
 - the native state is larger than 8 MiB, or the harness could not keep it at all;
-- the Tag now runs on another harness;
 - the Session's Objective ended 3 days ago;
 - on Codex, the Tag's tools changed, so the fresh session registers today's tools.
 
-So a conversation never grows too large to continue, and a Tag can change harness or model
-without losing it. A fresh native session loses the earlier tool output and the harness's own
+So a conversation never grows too large to continue, and a Tag can change model without losing
+it. A Session keeps one harness for its whole life, because a Tag keeps the harness it was
+created with. A fresh native session loses the earlier tool output and the harness's own
 reasoning; the recap and `read_turn` recover what matters.
 
 ### Memory
@@ -123,9 +123,18 @@ later ones wait. One Task starts or continues at most four, or its `maxNativeAge
 when lower, and in a conversation they [share its budget](#how-work-sessions-share-a-budget). A
 Session holds at most eight unfinished work Sessions.
 
+A work Session runs the Tag's harness unless `start_session` names another, such as
+`claude-code` for a Tag that runs on Codex. It keeps that harness for its whole life, and it and
+the Session that started it exchange only messages: the instruction, its report, its questions,
+and `continue_session`. SuperTag runs it only on a Worker Host bound to the Tag that runs that
+harness, and checks its permissions against what that harness can enforce, as for any Task: a
+harness no bound host runs, or one that can't enforce the work Session's permissions, refuses the
+start. The work Session uses the host's default model for that harness, because the Tag's models
+are for its own harness.
+
 An Objective's turn can also give `start_session` a Tag: that starts a work Session of another
 member of the Objective's Team, with the Objective's conversation as its parent. The target Tag
-must be active and bound to a Worker Host.
+must be active and bound to a Worker Host. A delegated work Session runs the target Tag's harness.
 
 When a work Session's Task completes, fails, or is cancelled, the Session that started it gets one
 report turn: a new Task that resumes that Session's native session. It carries
@@ -319,8 +328,9 @@ refused when it is submitted. See
 
 The Control Plane records the selected harness and model on the Task before execution. Recovery
 keeps that selection. A Session's native state can be resumed by any Worker Host that serves the
-harness that produced it. When the Tag moves to another harness, its Sessions continue there from
-their recaps.
+harness that produced it. A Tag keeps the harness it was created with: `supertag tag put` and
+`supertag apply` refuse to change it, so to move work to another harness, create a new Tag. A
+[work Session](#other-sessions) may still run another harness than the Tag that started it.
 
 ### Cancelling a Task
 

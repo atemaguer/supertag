@@ -449,56 +449,6 @@ async fn durable_delivery(url: &str) {
             .iter()
             .any(|m| page.messages.iter().any(|p| p.message_id == m.message_id))
     );
-    // Changing an inbox's pinned harness retains the pending message without
-    // preventing another recipient from receiving its independent delivery.
-    store
-        .put_tag_configured(
-            "recipient",
-            "Changed harness",
-            vec![],
-            None,
-            HarnessKind::ClaudeCode,
-        )
-        .await
-        .unwrap();
-    post(
-        &store,
-        &sender,
-        &source,
-        "incompatible-inbox",
-        "Pending until compatible",
-        &["recipient", "quiet"],
-    )
-    .await;
-    let quiet = claim(&store, &other).await;
-    assert_eq!(start(&store, &other, &quiet).await.tag_id, "quiet");
-    finish(&store, &other, &quiet, true).await;
-    assert!(
-        store
-            .claim_task(&other, "incompatible-waits")
-            .await
-            .unwrap()
-            .is_none()
-    );
-    let pending = history(&store, "recipient")
-        .await
-        .into_iter()
-        .find(|m| m.text == "Pending until compatible")
-        .unwrap();
-    assert_eq!(pending.task_id, None);
-    store
-        .put_tag("recipient", "Compatible again", vec![])
-        .await
-        .unwrap();
-    store.sweep_mailbox().await.unwrap();
-    let restored = claim(&store, &recipient).await;
-    assert!(
-        start(&store, &recipient, &restored)
-            .await
-            .prompt
-            .contains("Pending until compatible")
-    );
-    finish(&store, &recipient, &restored, true).await;
     finish(&store, &sender, &source, true).await;
     assert!(
         store

@@ -363,7 +363,10 @@ default. Effort is different: when neither the Tag nor its Roles set `efforts`, 
 default. Starting low keeps routine work cheap; the actors raise effort when work needs it. A Role sets
 the default and allowed range for its Tags. A Tag's own `spec.execution` overrides its Roles' field
 by field, so the Tag wins. When several Roles set a field, the first Role by name wins. A Role's
-models apply only to its own harness: a Tag that switches to another harness does not inherit them.
+models apply only to its own harness: a Tag on another harness does not inherit them.
+A Tag keeps the harness it was created with; changing `harness` on an existing Tag is refused, so
+create a new Tag for another harness. A work Session may name another harness with
+`start_session`; see [work Sessions](../concepts/tasks.md#other-sessions).
 `supertag describe tag` prints the resulting range.
 
 Each harness maps effort to its own option. Codex receives it as `model_reasoning_effort`, and

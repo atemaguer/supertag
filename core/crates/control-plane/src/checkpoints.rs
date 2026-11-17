@@ -10,9 +10,9 @@ use crate::{
 };
 
 impl Store {
-    /// The Session's checkpoint for this Attempt to resume, unless it is dropped: too big, older
-    /// than [`IDLE_MS`], or for another harness. A dropped checkpoint loses its rows here, and
-    /// the turn starts fresh with a recap of the Session.
+    /// The Session's checkpoint for this Attempt to resume, unless it is dropped: too big or older
+    /// than [`IDLE_MS`]. A dropped checkpoint loses its rows here, and the turn starts fresh with
+    /// a recap of the Session. A Session keeps one harness, so its checkpoint is its harness's.
     pub async fn get_checkpoint(
         &self,
         host: &HostAuthority,
@@ -28,12 +28,8 @@ impl Store {
         };
         let reference = reference_row(&row)?;
         let completed: Option<i64> = row.try_get("checkpoint_completed_at_ms")?;
-        let harness = HarnessKind::try_from(task.try_get::<i64, _>("harness_kind")? as i32)
-            .ok()
-            .and_then(supertag_protocol::checkpoint_harness);
         let dropped = reference.byte_length > MAX_RESUMED_CHECKPOINT_BYTES as u64
-            || completed.is_none_or(|completed| completed < now - IDLE_MS)
-            || harness.is_some_and(|harness| harness != reference.harness);
+            || completed.is_none_or(|completed| completed < now - IDLE_MS);
         if !dropped {
             return Ok(Some(reference));
         }

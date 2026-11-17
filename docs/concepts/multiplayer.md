@@ -63,8 +63,8 @@ thread, and Bob follows up in the same thread an hour later. Bob's Task continue
 conversation, even if an operator changed the Tag's permissions in between. Bob's Task runs under
 the new permissions; the transcript keeps what the thread already saw.
 
-When no usable native state exists, such as on the first turn, after a switch to another harness,
-or after a failed turn, the new Task receives bounded history entries derived from earlier
+When no usable native state exists, such as on the first turn, after 14 idle days, or after a
+failed turn, the new Task receives bounded history entries derived from earlier
 completed Tasks in that Session instead. Stored Task results remain the source for that replay. See
 [Session](tasks.md#session).
 

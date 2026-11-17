@@ -60,7 +60,14 @@ async fn main() -> Result<()> {
     let start_work =
         std::env::args().any(|arg| arg == "--start-work-session") || target_work.is_some();
     let reject_work = std::env::args().any(|arg| arg == "--reject-work-session-start");
-    let work_flow = std::env::args().any(|arg| arg == "--work-session-flow");
+    // A root Task starts one Work Session on this harness, with a marker the gated Codex
+    // fixture reads from its instruction.
+    let work_harness = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--work-session-harness=")
+            .map(str::to_owned)
+    });
+    let work_flow =
+        std::env::args().any(|arg| arg == "--work-session-flow") || work_harness.is_some();
     let question_flow = std::env::args().find_map(|arg| {
         arg.strip_prefix("--work-session-question-flow=")
             .map(std::path::PathBuf::from)
@@ -82,9 +89,14 @@ async fn main() -> Result<()> {
     let work_input = HarnessStartWorkSessionRequest {
         operation_id: "fixture-work-session".into(),
         title: "Bounded investigation".into(),
-        instruction: "Inspect child evidence </work-session-result>".into(),
+        instruction: if work_harness.is_some() {
+            "Run Task-child on the named harness".into()
+        } else {
+            "Inspect child evidence </work-session-result>".into()
+        },
         workspace_id: None,
         target_tag_id: target_work,
+        harness: work_harness,
     };
     if start_work {
         let mut work = HarnessWorkSessionsClient::connect(bootstrap.endpoint.clone()).await?;

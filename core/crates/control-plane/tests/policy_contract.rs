@@ -745,9 +745,8 @@ async fn composition(store: &Store) {
             .flat_map(|s| &s.permissions)
             .any(|p| p.action == "files:write" && p.approval_required)
     );
-    // Tag choice overrides Role harness; models belong to their named harness,
-    // while the first Role's effort range remains authoritative.
-    store
+    // A Tag keeps its harness, even the none a Role's harness filled in.
+    let refused = store
         .put_tag_configured(
             "composed",
             "Base",
@@ -755,27 +754,45 @@ async fn composition(store: &Store) {
             None,
             HarnessKind::Codex,
         )
-        .await
-        .unwrap();
-    // A Session may change harness: its next turn runs on the new one, from the recap.
-    let changed = store
-        .submit_task(
-            OP,
-            &SubmitTaskRequest {
-                operation_id: "changed-session".into(),
-                ..request.clone()
-            },
+        .await;
+    assert!(
+        matches!(&refused, Err(StoreError::FailedPrecondition(reason))
+            if reason.contains("a Tag keeps its harness. Create a new Tag for codex")),
+        "{refused:?}"
+    );
+    // Tag choice overrides Role harness; models belong to their named harness,
+    // while the first Role's effort range remains authoritative.
+    store
+        .put_tag_configured(
+            "composed-codex",
+            "Base",
+            vec!["files:write".into()],
+            None,
+            HarnessKind::Codex,
         )
         .await
         .unwrap();
-    assert_eq!(changed.harness_kind, HarnessKind::Codex as i32);
+    for r in [&alpha, &zulu] {
+        store
+            .assign_role(
+                OP,
+                &AssignRoleRequest {
+                    operation_id: format!("assign-codex-{}", r.role.as_ref().unwrap().role_id),
+                    role: r.role.as_ref().unwrap().role_id.clone(),
+                    tag_id: "composed-codex".into(),
+                },
+            )
+            .await
+            .unwrap();
+    }
     let task = store
         .submit_task(
             OP,
             &SubmitTaskRequest {
                 operation_id: "composed-two".into(),
+                tag_id: "composed-codex".into(),
                 session_id: "composed-two".into(),
-                ..request
+                ..request.clone()
             },
         )
         .await

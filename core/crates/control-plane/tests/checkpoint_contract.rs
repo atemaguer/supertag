@@ -360,8 +360,8 @@ async fn promoted(
     attempt
 }
 
-/// A Session keeps only its newest checkpoint, and drops it when it is too big, idle, for
-/// another harness, or its Objective ended long ago. Files go only when no row names them.
+/// A Session keeps only its newest checkpoint, and drops it when it is too big, idle, or its
+/// Objective ended long ago. Files go only when no row names them.
 async fn hygiene_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(BASE));
     let source = clock.clone();
@@ -440,74 +440,19 @@ async fn hygiene_contract(url: &str) {
         .await
         .unwrap();
 
-    // A checkpoint of another harness is not offered to this Tag's harness.
-    promoted(&store, &host, "switched", &reference("codex transcript")).await;
-    store
-        .put_tag_configured(
-            "owner",
-            "Inspect carefully",
-            vec!["files:read".into()],
-            None,
-            HarnessKind::ClaudeCode,
-        )
-        .await
-        .unwrap();
-    let task = store
-        .submit_task(
-            OPERATOR,
-            &SubmitTaskRequest {
-                tag_id: "owner".into(),
-                session_id: "switched".into(),
-                operation_id: Uuid::new_v4().to_string(),
-                prompt: "Continue on Claude Code".into(),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    let claimed = store
-        .claim_task_for_host(
-            &host,
-            &Uuid::new_v4().to_string(),
-            &[],
-            HarnessKind::ClaudeCode,
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(claimed.task.as_ref().unwrap().task_id, task.task_id);
-    let switched = InspectAttemptRequest {
-        task_id: task.task_id.clone(),
-        attempt_id: claimed.attempt_id,
-        lease_token: claimed.lease_token,
-    };
-    store
-        .start_task(
-            &host,
-            &StartTaskRequest {
-                task_id: switched.task_id.clone(),
-                attempt_id: switched.attempt_id.clone(),
-                lease_token: switched.lease_token.clone(),
-            },
-        )
-        .await
-        .unwrap();
-    assert!(
+    // A Tag keeps its harness, so a Session's checkpoint is always its own harness's.
+    assert!(matches!(
         store
-            .get_checkpoint(&host, &switched)
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert_eq!(count(url, &rows("switched")).await, 0);
-    store
-        .finish_task(&host, &finish(&switched, None))
-        .await
-        .unwrap();
-    store
-        .put_tag("owner", "Inspect carefully", vec!["files:read".into()])
-        .await
-        .unwrap();
+            .put_tag_configured(
+                "owner",
+                "Inspect carefully",
+                vec!["files:read".into()],
+                None,
+                HarnessKind::ClaudeCode,
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(reason)) if reason.contains("keeps its harness")
+    ));
 
     // An idle Session's checkpoint is not offered after 14 days, and the sweep drops it.
     let idle = reference("idle transcript");

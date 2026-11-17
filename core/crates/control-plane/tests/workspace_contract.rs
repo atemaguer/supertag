@@ -294,64 +294,19 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
 
-    store
-        .put_tag_configured(
-            "engineer",
-            "Select the accepted harness",
-            vec![],
-            None,
-            HarnessKind::ClaudeCode,
-        )
-        .await
-        .unwrap();
-    let selected = submit(&store, "selected-harness").await.unwrap();
-    assert_eq!(selected.harness_kind(), HarnessKind::ClaudeCode);
-    store
-        .put_tag_configured(
-            "engineer",
-            "Select the next harness",
-            vec![],
-            None,
-            HarnessKind::OpenaiAgents,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        store
-            .get_task(&selected.task_id)
-            .await
-            .unwrap()
-            .harness_kind(),
-        HarnessKind::ClaudeCode
-    );
-    let next_harness = submit(&store, "new-harness").await.unwrap();
-    assert_eq!(next_harness.harness_kind(), HarnessKind::OpenaiAgents);
-    let python = store
-        .claim_task_for_host(&owner, "python-capability", &[], HarnessKind::OpenaiAgents)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(python.task.unwrap().task_id, next_harness.task_id);
+    // A Tag keeps its harness: its Sessions never move to another one.
     assert!(matches!(
         store
-            .claim_task_for_host(&owner, "python-capability", &[], HarnessKind::ClaudeCode)
+            .put_tag_configured(
+                "engineer",
+                "Select another harness",
+                vec![],
+                None,
+                HarnessKind::ClaudeCode,
+            )
             .await,
-        Err(StoreError::Conflict(_))
+        Err(StoreError::FailedPrecondition(reason)) if reason.contains("keeps its harness")
     ));
-    let claude = store
-        .claim_task_for_host(&other, "claude-capability", &[], HarnessKind::ClaudeCode)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(claude.task.unwrap().task_id, selected.task_id);
-    // The Session's next turn runs on the new harness, from the recap.
-    assert_eq!(
-        submit(&store, "selected-harness")
-            .await
-            .unwrap()
-            .harness_kind(),
-        HarnessKind::OpenaiAgents
-    );
 
     store.put_tag("engineer", "Updated", vec![]).await.unwrap();
     assert!(matches!(

@@ -168,6 +168,46 @@ async fn insert_child_in(
     .await
 }
 
+/// The harness a new Work Session names, when it differs from the parent Task's: `None` runs
+/// the target Tag's own. Work delegated to another Tag runs that Tag's harness.
+async fn work_session_harness_in(
+    tx: &mut Transaction<'_, Any>,
+    parent: &Task,
+    target: &str,
+    requested: Option<&str>,
+) -> Result<Option<HarnessKind>> {
+    let Some(requested) = requested else {
+        return Ok(None);
+    };
+    let harness = crate::policy::harness_for_name(requested).ok_or_else(|| {
+        invalid("unknown Work Session harness: use codex, claude-code, openai-agents, opencode, or cursor")
+    })?;
+    if target != parent.tag_id {
+        let own: Option<i64> =
+            sqlx::query_scalar("SELECT harness_kind FROM supertag_v2_tags WHERE tag_id=$1")
+                .bind(target)
+                .fetch_optional(&mut **tx)
+                .await?;
+        if own.is_some_and(|own| own != harness as i64) {
+            return Err(StoreError::FailedPrecondition(format!(
+                "work delegated to Tag {target} runs that Tag's harness; start it without a harness"
+            )));
+        }
+        return Ok(None);
+    }
+    if harness == parent.harness_kind() {
+        return Ok(None);
+    }
+    if supertag_protocol::shared_execution::environment(parent.policy_snapshot.as_ref()).is_some()
+        && harness != HarnessKind::Cursor
+    {
+        return Err(StoreError::FailedPrecondition(
+            "this Tag's shared execution environment runs only Cursor; start the Work Session without a harness".into(),
+        ));
+    }
+    Ok(Some(harness))
+}
+
 /// Direct owner Objective reports may start follow-up work. An approval
 /// continuation remains scoped to its original report and cannot gain this right.
 pub(crate) async fn may_start_in(tx: &mut Transaction<'_, Any>, parent: &Task) -> Result<bool> {
@@ -507,6 +547,8 @@ impl Store {
         }
         let target = input.target_tag_id.as_deref().unwrap_or(&parent.tag_id);
         name("target Tag ID", target)?;
+        let harness =
+            work_session_harness_in(&mut tx, &parent, target, input.harness.as_deref()).await?;
         let workspace = parent
             .workspace
             .as_ref()
@@ -526,7 +568,8 @@ impl Store {
                 &title,
                 instruction,
                 workspace,
-                target
+                target,
+                &input.harness
             ))?)
         );
         let prior = sqlx::query("SELECT child_task_id,request_digest FROM supertag_v2_work_session_starts WHERE starter_task_id=$1 AND operation_id=$2")
@@ -564,6 +607,15 @@ impl Store {
         if open >= max {
             return Err(limit_refusal_in(&mut tx, &parent, open, max).await?);
         }
+        if let Some(harness) = harness
+            && !crate::placement::bound_host_runs_in(&mut tx, &parent.tag_id, harness, now).await?
+        {
+            return Err(StoreError::FailedPrecondition(format!(
+                "no Worker Host bound to Tag {} runs {}; start the Work Session without a harness or on one a bound Worker Host runs",
+                parent.tag_id,
+                crate::placement::harness_name(harness)
+            )));
+        }
         let id = format!("{SESSION_PREFIX}{}", Uuid::new_v4());
         let prompt = format!(
             "Complete the following Work Session assignment. Return the result for the parent Session. If you need an answer to proceed, call ask with a text argument containing one question, then end this turn.\n\n{}",
@@ -579,6 +631,9 @@ impl Store {
             &prompt,
         )
         .await?;
+        if let Some(harness) = harness {
+            crate::store::retarget_harness_in(&mut tx, &mut child, harness).await?;
+        }
         let allocation = crate::budget_pool::child_in(
             &mut tx,
             &parent,
@@ -587,6 +642,15 @@ impl Store {
         )
         .await?;
         crate::budget_pool::set_in(&mut tx, &mut child, allocation).await?;
+        // Its permissions are checked against the harness's capabilities as for any Task; a
+        // Work Session that names a harness is refused now instead of waiting forever.
+        if harness.is_some()
+            && let Some((_, reason)) = crate::placement::unsupported_by_harness(&child)
+        {
+            return Err(StoreError::FailedPrecondition(format!(
+                "{reason}. Start the Work Session without a harness, or on one that can run its accepted permissions"
+            )));
+        }
         sqlx::query("INSERT INTO supertag_v2_work_sessions (work_session_id,title,parent_tag_id,parent_session_id,starter_task_id,tag_id,latest_task_id,objective_id,created_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)")
             .bind(&id).bind(&title).bind(&parent.tag_id).bind(&parent.session_id)
             .bind(&parent.task_id).bind(&child.tag_id).bind(&child.task_id).bind(&objective_id)

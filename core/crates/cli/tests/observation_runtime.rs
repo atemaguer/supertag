@@ -1015,6 +1015,7 @@ async fn exercise(database_url: &str) -> Result<()> {
             instruction: "Read the docs and report.".into(),
             workspace_id: None,
             target_tag_id: None,
+            harness: None,
         },
         &host_token,
         host.generation,

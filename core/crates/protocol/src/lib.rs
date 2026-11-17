@@ -207,6 +207,41 @@ pub fn validate_checkpoint_reference(reference: &v2::CheckpointReference) -> Res
     Ok(())
 }
 
+/// A built-in harness's name, as `--harness` and `start_session` spell it; `None` for none.
+pub fn harness_name(kind: v2::HarnessKind) -> Option<&'static str> {
+    match kind {
+        v2::HarnessKind::Codex => Some("codex"),
+        v2::HarnessKind::ClaudeCode => Some("claude-code"),
+        v2::HarnessKind::OpenaiAgents => Some("openai-agents"),
+        v2::HarnessKind::Opencode => Some("opencode"),
+        v2::HarnessKind::Cursor => Some("cursor"),
+        v2::HarnessKind::Unspecified => None,
+    }
+}
+
+/// Why a Tag cannot move from harness `from` to `to`, or `None` when they are the same. A Tag
+/// keeps the harness it was created with.
+pub fn harness_change_refusal(
+    tag_id: &str,
+    from: v2::HarnessKind,
+    to: v2::HarnessKind,
+) -> Option<String> {
+    if from == to {
+        return None;
+    }
+    let from = harness_name(from).map_or_else(
+        || "names no harness".to_owned(),
+        |name| format!("runs on {name}"),
+    );
+    let to = harness_name(to).map_or_else(
+        || "with no harness".to_owned(),
+        |name| format!("for {name}"),
+    );
+    Some(format!(
+        "Tag {tag_id} {from}, and a Tag keeps its harness. Create a new Tag {to}"
+    ))
+}
+
 /// The `harness` a checkpoint of this harness kind carries, if it keeps checkpoints.
 pub fn checkpoint_harness(kind: v2::HarnessKind) -> Option<&'static str> {
     match kind {

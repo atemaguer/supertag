@@ -1258,6 +1258,7 @@ it("starts a Work Session through the real Claude SDK with a scoped replay recei
     instruction: "Inspect the pinned checkout [REDACTED]",
     workspaceId: "release",
     targetTagId: "actor",
+    harness: "claude-code",
   });
   expect(retry).toEqual(first);
   expect(second?.operationId).not.toBe(first?.operationId);

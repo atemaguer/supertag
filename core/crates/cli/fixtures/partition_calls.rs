@@ -190,6 +190,7 @@ pub async fn exercise(
                 instruction: "Started through a partition".into(),
                 workspace_id: None,
                 target_tag_id: Some(peer.into()),
+                harness: None,
             },
             token,
             None,
