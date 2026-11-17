@@ -1,4 +1,4 @@
-import { Plus, Search, Star, X } from "lucide-react";
+import { Plus, Search, Star } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import type { Tag } from "../control-plane";
@@ -67,17 +67,20 @@ function commandKey(
   return mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
-/** What a Tag shortcut does: open the nth Tag, the previous or next one, New Tag, or search. */
+/**
+ * What a Tag shortcut does: open the nth Tag, the previous or next one, New Tag, or the command
+ * palette.
+ */
 export type TagShortcut =
   | { kind: "nth"; index: number }
   | { kind: "step"; by: 1 | -1 }
   | { kind: "new" }
-  | { kind: "search" };
+  | { kind: "palette" };
 
 /**
  * The messaging-app shortcuts: ⌘1…⌘9 open the nth Tag (the lead is ⌘1), ⌘↑ and ⌘↓ the previous and
- * next, ⌘N New Tag, and ⌘F search; Ctrl in place of ⌘ outside macOS. ⌘↑ and ⌘↓ move the cursor in
- * a field with text, so they are left to it there.
+ * next, ⌘N New Tag, and ⌘K the command palette; Ctrl in place of ⌘ outside macOS. ⌘↑ and ⌘↓ move
+ * the cursor in a field with text, so they are left to it there.
  */
 export function tagShortcut(
   event: Pick<
@@ -94,7 +97,7 @@ export function tagShortcut(
     return { kind: "step", by: event.key === "ArrowUp" ? -1 : 1 };
   }
   if (event.key.toLowerCase() === "n") return { kind: "new" };
-  if (event.key.toLowerCase() === "f") return { kind: "search" };
+  if (event.key.toLowerCase() === "k") return { kind: "palette" };
   return undefined;
 }
 
@@ -140,6 +143,7 @@ export function Sidebar({
   onSelectTag,
   onNewTag,
   newTagRefusal,
+  onSearch,
 }: {
   mode: SidebarMode;
   tags: Tag[];
@@ -150,21 +154,20 @@ export function Sidebar({
   onSelectTag?(tagId: string): void;
   onNewTag?(): void;
   newTagRefusal?: string;
+  /** Opens the command palette, or closes it when it is open. */
+  onSearch?(): void;
 }) {
-  const [search, setSearch] = useState<string>();
-  const searchField = useRef<HTMLInputElement>(null);
   const expanded = mode === "expanded";
   const { lead, others } = orderTags(tags, summaries);
-  const query = search?.trim().toLowerCase();
   const ordered = [...(lead ? [lead] : []), ...others];
-  const shortcuts = useRef({ ordered, tag, onSelectTag, onNewTag });
-  shortcuts.current = { ordered, tag, onSelectTag, onNewTag };
+  const shortcuts = useRef({ ordered, tag, onSelectTag, onNewTag, onSearch });
+  shortcuts.current = { ordered, tag, onSelectTag, onNewTag, onSearch };
   useEffect(() => {
     const mac = onMac();
     function onKey(event: KeyboardEvent) {
       const shortcut = tagShortcut(event, mac);
       if (!shortcut) return;
-      const { ordered, tag, onSelectTag, onNewTag } = shortcuts.current;
+      const { ordered, tag, onSelectTag, onNewTag, onSearch } = shortcuts.current;
       if (shortcut.kind === "nth") {
         const target = ordered[shortcut.index];
         if (!target) return;
@@ -178,25 +181,14 @@ export function Sidebar({
         if (!onNewTag) return;
         onNewTag();
       } else {
-        if (sidebarMode() === "rail") setSidebarMode("expanded");
-        setSearch((current) => current ?? "");
-        searchField.current?.focus();
+        if (!onSearch) return;
+        onSearch();
       }
       event.preventDefault();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const shown =
-    expanded && query
-      ? others.filter((entry) => `${tagName(entry)} ${entry.tagId}`.toLowerCase().includes(query))
-      : others;
-  useEffect(() => {
-    if (search !== undefined) searchField.current?.focus();
-  }, [search]);
-  useEffect(() => {
-    if (!expanded) setSearch(undefined);
-  }, [expanded]);
 
   const newTag = (onNewTag || newTagRefusal) && (
     <Button
@@ -211,24 +203,25 @@ export function Sidebar({
       <Plus size={17} aria-hidden />
     </Button>
   );
+  const search = onSearch && (
+    <Button
+      variant="ghost"
+      className="sidebar-button"
+      aria-label="Search"
+      aria-keyshortcuts={onMac() ? "Meta+K" : "Control+K"}
+      title="Search Tags, conversations, settings"
+      onClick={onSearch}
+    >
+      <Search size={16} aria-hidden />
+    </Button>
+  );
 
   return (
     <nav id="sidebar" className="sidebar" data-mode={mode} aria-label="Tags">
       <div className="sidebar-top" data-tauri-drag-region>
         {expanded && (
           <div className="sidebar-top-actions">
-            {tags.length > 1 && (
-              <Button
-                variant="ghost"
-                className="sidebar-button"
-                aria-label="Search Tags"
-                title="Search Tags"
-                aria-pressed={search !== undefined}
-                onClick={() => setSearch(search === undefined ? "" : undefined)}
-              >
-                <Search size={16} aria-hidden />
-              </Button>
-            )}
+            {search}
             {newTag}
           </div>
         )}
@@ -256,38 +249,13 @@ export function Sidebar({
         )}
       </div>
       <div className="sidebar-divider" aria-hidden />
-      {search !== undefined && (
-        <div className="sidebar-search">
-          <Search size={14} aria-hidden />
-          <input
-            ref={searchField}
-            type="text"
-            aria-label="Search Tags"
-            placeholder="Search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setSearch(undefined);
-            }}
-          />
-          <Button
-            variant="ghost"
-            className="icon-button"
-            aria-label="Close search"
-            onClick={() => setSearch(undefined)}
-          >
-            <X size={14} aria-hidden />
-          </Button>
-        </div>
-      )}
       <div className="sidebar-tags">
         {tags.length === 0 && (
           <p className="visually-hidden">
             {connected ? "No Tags available" : "Connect to see your Tags"}
           </p>
         )}
-        {query && shown.length === 0 && <p className="sidebar-empty">No matching Tags</p>}
-        {shown.map((entry) => (
+        {others.map((entry) => (
           <TagRow
             key={entry.tagId}
             tag={entry}
@@ -299,6 +267,7 @@ export function Sidebar({
         ))}
       </div>
       <div className="sidebar-bottom">
+        {!expanded && search}
         {!expanded && newTag}
         {selector}
       </div>

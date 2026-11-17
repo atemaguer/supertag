@@ -1,15 +1,18 @@
+import { Keyboard, Plus } from "lucide-react";
 import {
   type CSSProperties,
   type MouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
 import type { ControlPlane, Conversation, Tag, WatchUpdate } from "../control-plane";
 import {
+  cachedMessageTexts,
   cachedRoster,
   cacheRoster,
   storedRoster,
@@ -20,9 +23,16 @@ import { nativeNotifier, silentNotifier, useDesktopNotifications } from "../lib/
 import { describe } from "../lib/polling";
 import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { harnessLabel, type TagAdmin } from "../tag-admin";
+import {
+  CommandPalette,
+  commandKeyLabel,
+  KeyboardShortcutsDialog,
+  type PaletteAction,
+} from "./command-palette";
 import { ConversationPane, type Draft } from "./conversation";
 import { NewTagDialog } from "./new-tag";
 import {
+  orderTags,
   Sidebar,
   type SidebarMode,
   type TagSummary,
@@ -50,8 +60,15 @@ interface ShellProps {
   onNewTag?(): void;
   /** Why this connection cannot create Tags. */
   newTagRefusal?: string;
+  /** The Control Plane and connection settings the command palette offers. */
+  actions?: readonly PaletteAction[];
+  /** The text of each cached message of a Tag's conversation, newest first, for search. */
+  messageTexts?(tagId: string): readonly string[];
   children?: ReactNode;
 }
+
+const noSummaries: Record<string, TagSummary> = {};
+const noActions: readonly PaletteAction[] = [];
 
 /**
  * The window: the sidebar of Tags on the left, expanded or as a rail, and the conversation with
@@ -69,11 +86,46 @@ export function WorkspaceShell({
   onSelectTag,
   onNewTag,
   newTagRefusal,
+  actions = noActions,
+  messageTexts,
   children,
 }: ShellProps) {
   useSidebarShortcut();
   const { mode, width, resizing, separator } = useSidebarWidth();
   const provider = tag && harnessLabel(tag.harnessKind);
+  const [searching, setSearching] = useState(false);
+  const [listingShortcuts, setListingShortcuts] = useState(false);
+  const shownSummaries = summaries ?? noSummaries;
+  const { lead, others } = orderTags(tags, shownSummaries);
+  const ordered = [...(lead ? [lead] : []), ...others];
+  const paletteActions = useMemo<PaletteAction[]>(
+    () => [
+      ...(onNewTag || newTagRefusal
+        ? [
+            {
+              id: "new-tag",
+              label: "New Tag",
+              caption: newTagRefusal ?? "a name, a harness and a Workspace",
+              icon: <Plus aria-hidden />,
+              shortcut: commandKeyLabel("N"),
+              keywords: "create",
+              disabled: !onNewTag,
+              run: () => onNewTag?.(),
+            },
+          ]
+        : []),
+      {
+        id: "keyboard-shortcuts",
+        label: "Keyboard shortcuts",
+        caption: "every key the app answers to",
+        icon: <Keyboard aria-hidden />,
+        keywords: "keys help",
+        run: () => setListingShortcuts(true),
+      },
+      ...actions,
+    ],
+    [onNewTag, newTagRefusal, actions],
+  );
   return (
     <div
       className="shell"
@@ -91,6 +143,7 @@ export function WorkspaceShell({
         onSelectTag={onSelectTag}
         onNewTag={onNewTag}
         newTagRefusal={newTagRefusal}
+        onSearch={() => setSearching((open) => !open)}
       />
       {separator}
       <main className="main" aria-label="Conversation" aria-busy={switching}>
@@ -112,6 +165,16 @@ export function WorkspaceShell({
           {children}
         </div>
       </main>
+      <CommandPalette
+        open={searching}
+        onOpenChange={setSearching}
+        tags={ordered}
+        summaries={shownSummaries}
+        actions={paletteActions}
+        messageTexts={messageTexts}
+        onSelectTag={onSelectTag}
+      />
+      <KeyboardShortcutsDialog open={listingShortcuts} onOpenChange={setListingShortcuts} />
     </div>
   );
 }
@@ -189,6 +252,8 @@ interface WorkspaceProps {
   tagAdmin?: TagAdmin;
   /** Why this connection cannot create Tags. */
   newTagRefusal?: string;
+  /** The Control Plane and connection settings the command palette offers. */
+  actions?: readonly PaletteAction[];
   switching: boolean;
   connectionError: string;
   onWriteChange(delta: 1 | -1): void;
@@ -202,6 +267,7 @@ export function Workspace({
   draftScope,
   tagAdmin,
   newTagRefusal,
+  actions,
   switching,
   connectionError,
   onWriteChange,
@@ -279,6 +345,11 @@ export function Workspace({
     [controlPlane],
   );
   useWatchRefresh(refreshTags, rosterInterval, watch, rosterChanged);
+  // Search reads the conversations the app keeps cached, without asking the Control Plane.
+  const messageTexts = useCallback(
+    (tagId: string) => cachedMessageTexts(controlPlane, tagId),
+    [controlPlane],
+  );
 
   const shell = {
     tags,
@@ -299,6 +370,8 @@ export function Workspace({
     ),
     onNewTag: tagAdmin ? () => setCreatingTag(true) : undefined,
     newTagRefusal,
+    actions,
+    messageTexts,
     error: connectionError || error,
   };
   const workspace = tag ? (

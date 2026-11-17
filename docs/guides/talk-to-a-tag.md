@@ -61,14 +61,21 @@ turn failed, was cancelled, or needs attention.
 
 In the desktop app, drag the sidebar's edge to resize it, or past its narrowest to fold it into a
 rail of avatars; ⌘B does the same. The Task activity pane resizes from its edge too. ⌘1 to ⌘9 open
-the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘F searches them by name; use Ctrl in
-place of ⌘ outside macOS.
+the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘N creates a Tag; use Ctrl in place of
+⌘ outside macOS.
+
+To find a Tag, a message, or a setting, press ⌘K or the search button beside **+** at the top of
+the sidebar. The search lists your **Tags**, each with its latest message, and **Actions**: New
+Tag, Keyboard shortcuts, and the Control Plane settings, such as switching or adding a Control
+Plane and what this device notifies about. Typing filters both lists and also finds Tags by the
+text of messages the app keeps on this device. The arrow keys move the selection, Enter opens
+it, ⌘1 to ⌘9 open a Tag directly, and Esc closes the search.
 
 In the terminal UI:
 
 | Key | Action |
 | --- | --- |
-| Ctrl-K | Open the command palette. |
+| Ctrl-K | Search Tags, their latest messages, and actions such as New Tag and Keyboard shortcuts. |
 | Ctrl-P | Switch Control Planes. **Local** is the one `supertag up` runs on this machine. |
 | Alt-1 to Alt-9 | Open the Tags in rail order. |
 | Alt-↑ and Alt-↓ | Open the previous and next Tag. |

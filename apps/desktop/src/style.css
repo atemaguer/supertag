@@ -350,32 +350,6 @@ button:disabled {
   margin-bottom: 10px;
   background: var(--line);
 }
-.sidebar-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 12px 8px;
-  padding: 0 4px 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--muted);
-}
-.sidebar-search input {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-}
-.sidebar-empty {
-  margin: 6px 14px;
-  color: var(--muted);
-  font-size: 12px;
-}
 .sidebar-tags {
   flex: 1 1 auto;
   min-height: 0;
@@ -1416,4 +1390,87 @@ button:disabled {
   .composer-footer {
     display: none;
   }
+}
+/* The command palette: one search field over the Tags, their conversations, and the actions. */
+.command-palette {
+  /* Centered for a full list; its top stays put while a search shortens the list. */
+  top: max(60px, calc(50% - 240px));
+  width: min(620px, calc(100vw - 40px));
+  max-width: none;
+  translate: 0 0;
+  transform: translateX(-50%);
+  border: 1px solid #514a51;
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 18px 90px #0008;
+}
+.command-palette [data-slot="command"] {
+  background: transparent;
+}
+.command-palette [data-slot="command-input-wrapper"] {
+  border-color: var(--line);
+}
+.command-palette [data-slot="command-input"] {
+  border: 0;
+  color: var(--text);
+  font-size: 15px;
+}
+.palette-row .avatar {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+}
+.palette-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--hover);
+}
+.palette-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.palette-label,
+.palette-caption {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-label {
+  font-weight: 550;
+}
+.palette-caption {
+  color: var(--muted);
+  font-size: 12px;
+}
+.shortcut-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+}
+.shortcut-row dd {
+  margin: 0;
+}
+.shortcut-row kbd {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
 }

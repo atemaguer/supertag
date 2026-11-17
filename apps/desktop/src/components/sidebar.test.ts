@@ -232,17 +232,17 @@ it("shows a row's preview, time, unread, and working state when it has them", ()
   expect(moss?.getAttribute("aria-description")).toBe("Working");
 });
 
-it("searches the expanded list by name", () => {
-  render();
-  act(() => (host.querySelector('[aria-label="Search Tags"]') as HTMLButtonElement).click());
-  const input = host.querySelector(".sidebar-search input") as HTMLInputElement;
-  act(() => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "mo");
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  expect(rows()).toEqual(["moss"]);
-  act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-  expect(host.querySelector(".sidebar-search")).toBeNull();
+it("has no search field of its own: the search button beside New Tag opens the palette", () => {
+  render({ onNewTag: vi.fn() });
+  expect(host.querySelector(".sidebar input")).toBeNull();
+  const actions = [...host.querySelectorAll(".sidebar-top-actions button")].map((button) =>
+    button.getAttribute("aria-label"),
+  );
+  expect(actions).toEqual(["Search", "New Tag"]);
+  act(() => (host.querySelector('.sidebar [aria-label="Search"]') as HTMLButtonElement).click());
+  expect(document.querySelector('[role="dialog"] input')?.getAttribute("placeholder")).toBe(
+    "Search Tags, conversations, settings…",
+  );
   expect(rows()).toEqual(["finch", "moss"]);
 });
 
@@ -285,7 +285,9 @@ it("opens Tags with Ctrl+1…9 and Ctrl+↑/↓, and New Tag with Ctrl+N", () =>
   press("n");
   expect(onNewTag).toHaveBeenCalledOnce();
   press("f");
-  expect(document.activeElement).toBe(host.querySelector(".sidebar-search input"));
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  press("k");
+  expect(document.activeElement).toBe(document.querySelector('[role="dialog"] input'));
 
   const key = (init: Partial<KeyboardEvent>) => ({
     key: "1",

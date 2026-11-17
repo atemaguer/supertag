@@ -76,6 +76,24 @@ export function cachedHistory(controlPlane: ControlPlane, tagId: string): Histor
   return entry && { ...entry, loading: false };
 }
 
+/**
+ * The text of each message of the Tag's conversation held in memory, newest first: the Tag's
+ * replies and what it wrote on the way, and the caller's messages.
+ */
+export function cachedMessageTexts(controlPlane: ControlPlane, tagId: string): string[] {
+  const history = memory.get(key(controlPlane, tagId));
+  if (!history) return [];
+  const texts: string[] = [];
+  for (const message of [...history.messages].reverse()) {
+    const { prompt, result } = message.task;
+    if (result) texts.push(result);
+    for (const event of [...(message.events ?? [])].reverse())
+      if (event.kind === "message" && event.text && event.text !== result) texts.push(event.text);
+    if (prompt) texts.push(prompt);
+  }
+  return texts;
+}
+
 /** The Tag's conversation as the disk holds it, if it holds a valid copy. */
 export async function storedHistory(
   controlPlane: ControlPlane,

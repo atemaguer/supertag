@@ -6,6 +6,7 @@ import {
   type LocalControlPlane,
 } from "../control-plane";
 import { type NotificationLevel, useNotificationLevel } from "../lib/notifications";
+import type { PaletteAction } from "./command-palette";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -53,6 +54,110 @@ interface Choice extends ControlPlaneProfile {
   address: string;
 }
 
+/** The Control Planes to choose from: Local first while it runs, then each saved one. */
+function controlPlaneChoices(
+  active: string | undefined,
+  profiles: ControlPlaneProfile[],
+  local: LocalControlPlane | undefined,
+) {
+  const localChoice: Choice | undefined =
+    active === LOCAL_CONTROL_PLANE || local?.origin
+      ? { name: "Local", origin: LOCAL_CONTROL_PLANE, address: local?.origin ?? "This machine" }
+      : undefined;
+  const choices: Choice[] = [
+    ...(localChoice ? [localChoice] : []),
+    ...profiles.map((profile) => ({ ...profile, address: profile.origin })),
+  ];
+  return { localChoice, choices };
+}
+
+/**
+ * What the Control Plane menu offers, as command palette actions: switching to another Control
+ * Plane, adding or editing one, what this device notifies about, and disconnecting.
+ */
+export function controlPlaneActions({
+  active,
+  profiles,
+  local,
+  preview,
+  busy,
+  switching,
+  notifications,
+  onSelect,
+  onEdit,
+  onDisconnect,
+  onNotifications,
+}: Pick<
+  ControlPlaneSelectorProps,
+  | "active"
+  | "profiles"
+  | "local"
+  | "preview"
+  | "busy"
+  | "switching"
+  | "onSelect"
+  | "onEdit"
+  | "onDisconnect"
+> & {
+  notifications: NotificationLevel;
+  onNotifications(level: NotificationLevel): void;
+}): PaletteAction[] {
+  const { choices } = controlPlaneChoices(active, profiles, local);
+  const selected = choices.find((choice) => choice.origin === active);
+  const disabled = busy || switching;
+  return [
+    ...choices
+      .filter((choice) => choice.origin !== active)
+      .map((choice) => ({
+        id: `control-plane:${choice.origin}`,
+        label: `Switch to ${choice.name}`,
+        caption: choice.address,
+        icon: <Server aria-hidden />,
+        keywords: "control plane connect",
+        disabled,
+        run: () => onSelect(choice.origin),
+      })),
+    {
+      id: "add-control-plane",
+      label: "Add Control Plane",
+      caption: "an address and a token",
+      icon: <Plus aria-hidden />,
+      keywords: "connect",
+      disabled,
+      run: () => onEdit(),
+    },
+    ...profiles.map((profile) => ({
+      id: `edit-control-plane:${profile.origin}`,
+      label: `Edit Control Plane · ${profile.name}`,
+      caption: profile.origin,
+      icon: <Pencil aria-hidden />,
+      disabled,
+      run: () => onEdit(profile),
+    })),
+    ...NOTIFICATION_CHOICES.map(([level, label]) => ({
+      id: `notifications:${level}`,
+      label: `Notifications · ${label}`,
+      caption: level === notifications ? "on this device now" : "on this device",
+      icon: level === notifications ? <Check aria-hidden /> : <Bell aria-hidden />,
+      keywords: "notify alerts",
+      run: () => onNotifications(level),
+    })),
+    ...(selected || preview
+      ? [
+          {
+            id: "disconnect",
+            label: "Disconnect",
+            caption: selected?.name ?? "Preview workspace",
+            icon: <Unplug aria-hidden />,
+            keywords: "control plane",
+            disabled,
+            run: onDisconnect,
+          },
+        ]
+      : []),
+  ];
+}
+
 export function ControlPlaneSelector({
   active,
   principal,
@@ -68,14 +173,7 @@ export function ControlPlaneSelector({
   onDisconnect,
   onOpen,
 }: ControlPlaneSelectorProps) {
-  const localChoice: Choice | undefined =
-    active === LOCAL_CONTROL_PLANE || local?.origin
-      ? { name: "Local", origin: LOCAL_CONTROL_PLANE, address: local?.origin ?? "This machine" }
-      : undefined;
-  const choices: Choice[] = [
-    ...(localChoice ? [localChoice] : []),
-    ...profiles.map((profile) => ({ ...profile, address: profile.origin })),
-  ];
+  const { localChoice, choices } = controlPlaneChoices(active, profiles, local);
   const selected = choices.find((choice) => choice.origin === active);
   const [notifications, setNotifications] = useNotificationLevel();
   const connected = Boolean(selected || preview);

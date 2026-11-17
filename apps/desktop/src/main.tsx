@@ -2,7 +2,7 @@ import "@fontsource-variable/geist";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConnectionDialog } from "./components/connection";
-import { ControlPlaneSelector } from "./components/control-plane-selector";
+import { ControlPlaneSelector, controlPlaneActions } from "./components/control-plane-selector";
 import type { SidebarMode } from "./components/sidebar";
 import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
 import {
@@ -16,6 +16,7 @@ import {
   nativeControlPlane,
   type Tag,
 } from "./control-plane";
+import { useNotificationLevel } from "./lib/notifications";
 import { describe } from "./lib/polling";
 import { type TagAdmin, tagAdminRefusal, tagAdminSession } from "./tag-admin";
 import "./shadcn.css";
@@ -43,6 +44,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const pendingWrites = useRef(0);
   const trigger = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
+  const [notifications, setNotifications] = useNotificationLevel();
 
   const activate = useCallback(
     ({ controlPlanes, origin, connectionId, tags, principal }: ControlPlaneActivation) => {
@@ -130,29 +132,39 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     });
   }
 
+  const menu = {
+    active: connection?.origin,
+    profiles: controlPlanes.profiles,
+    local: controlPlanes.local,
+    preview: connection?.preview,
+    busy: writing,
+    switching,
+    onSelect: (origin: string) => {
+      if (origin === connection?.origin) return;
+      void change(async () =>
+        activate(
+          await (origin === LOCAL_CONTROL_PLANE
+            ? nativeControlPlane.connectLocal()
+            : nativeControlPlane.select(origin)),
+        ),
+      );
+    },
+    onEdit: (profile?: ControlPlaneProfile) => open(profile),
+    onDisconnect: () => void clear(),
+  };
+  // The command palette offers what the Control Plane menu does.
+  const actions = controlPlaneActions({
+    ...menu,
+    notifications,
+    onNotifications: setNotifications,
+  });
+
   const selector = (mode: SidebarMode) => (
     <ControlPlaneSelector
+      {...menu}
       wide={mode === "expanded"}
-      active={connection?.origin}
       principal={connection?.principal}
-      profiles={controlPlanes.profiles}
-      local={controlPlanes.local}
-      preview={connection?.preview}
-      busy={writing}
-      switching={switching}
       trigger={trigger}
-      onSelect={(origin) => {
-        if (origin === connection?.origin) return;
-        void change(async () =>
-          activate(
-            await (origin === LOCAL_CONTROL_PLANE
-              ? nativeControlPlane.connectLocal()
-              : nativeControlPlane.select(origin)),
-          ),
-        );
-      }}
-      onEdit={open}
-      onDisconnect={() => void clear()}
       onOpen={() => {
         if (pendingSwitch.current || connection?.preview) return;
         // A local Control Plane started or stopped since the list was read shows as it is now.
@@ -173,6 +185,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           draftScope={connection.origin ?? "preview"}
           tagAdmin={connection.tagAdmin}
           newTagRefusal={tagAdminRefusal(connection.principal)}
+          actions={actions}
           switching={switching}
           connectionError={editor ? "" : error}
           onWriteChange={updateWrites}
@@ -182,6 +195,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           tags={[]}
           connected={false}
           selector={selector}
+          actions={actions}
           switching={switching}
           error={editor ? "" : error}
         >

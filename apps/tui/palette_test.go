@@ -10,6 +10,7 @@ import (
 
 	"github.com/atemaguer/supertag/apps/tui/client"
 	"github.com/atemaguer/supertag/apps/tui/views"
+	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
 )
 
 var ctrlK = tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}
@@ -85,7 +86,7 @@ func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
 	a := testApp(t, &fakeControlPlane{tags: tags("lead")}, nil)
 	pressApp(t, a, ctrlK)
 	s := appScreen(a)
-	for _, want := range []string{"Commands", "/goal · Create Objective        owned by lead", "Open inbox", "0 waiting", "enter runs"} {
+	for _, want := range []string{"Search Tags, conversations, settings…", "Tags", "lead", "alt+1", "Actions", "New Tag", "ctrl+n", "Keyboard shortcuts", "every key the app answers to", "/goal · Create Objective", "owned by lead", "Open inbox", "0 waiting", "enter opens"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the palette lacks %q:\n%s", want, s)
 		}
@@ -93,7 +94,7 @@ func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
 	if !strings.Contains(s, "Control Planes · add or switch") {
 		t.Errorf("one Control Plane must still offer adding another:\n%s", s)
 	}
-	if strings.Contains(s, "conversation") {
+	if strings.Contains(s, "New conversation") || strings.Contains(s, "Switch conversation") {
 		t.Errorf("a Tag has one conversation, so the palette offers none to start or switch to:\n%s", s)
 	}
 	pressApp(t, a, key(tea.KeyEscape))
@@ -103,8 +104,76 @@ func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
 
 	empty := testApp(t, &fakeControlPlane{}, nil)
 	pressApp(t, empty, ctrlK)
-	if s := appScreen(empty); strings.Contains(s, "Create Objective") || !strings.Contains(s, "Open inbox") {
-		t.Fatalf("without Tags only the inbox applies:\n%s", s)
+	if s := appScreen(empty); strings.Contains(s, "Create Objective") || len(empty.matchingTags()) > 0 || !strings.Contains(s, "Open inbox") {
+		t.Fatalf("without Tags neither a Tag nor /goal is offered:\n%s", s)
+	}
+}
+
+func TestThePaletteSearchesTagsByNameAndPreviewAndOpensThem(t *testing.T) {
+	fake := &fakeControlPlane{tags: tags("lead", "alpha", "beta")}
+	fake.conversations = func() []*v2.Conversation {
+		now := time.Now().UnixMilli()
+		return []*v2.Conversation{
+			{TagId: "alpha", Preview: "The lockfile is current.", PreviewFromTag: true, LastActivityAtMs: now},
+			{TagId: "beta", Preview: "Run the tests", LastActivityAtMs: now - 60_000},
+		}
+	}
+	a := testApp(t, fake, nil)
+	runApp(t, a, a.scope(a.inner.reloadConversations()))
+	order := make([]string, 0, len(a.inner.tags))
+	for _, tag := range a.inner.tags {
+		order = append(order, tagName(tag))
+	}
+	pressApp(t, a, ctrlK)
+	s := appScreen(a)
+	for _, want := range []string{"The lockfile is current.", "you: Run the tests", "alt+1", "alt+3"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the Tags section lacks %q:\n%s", want, s)
+		}
+	}
+
+	// A word of the latest message finds the Tag; the actions it does not match are gone.
+	typeApp(t, a, "lockfile")
+	s = appScreen(a)
+	if !strings.Contains(s, "alpha") || strings.Contains(s, "beta") || strings.Contains(s, "Actions") {
+		t.Fatalf("searching a preview must keep only its Tag:\n%s", s)
+	}
+	pressApp(t, a, key(tea.KeyEnter))
+	if a.palette != nil || a.inner.selectedTag() != "alpha" {
+		t.Fatalf("enter must open the Tag: palette=%v selected=%q", a.palette != nil, a.inner.selectedTag())
+	}
+
+	// Searching by name, and the arrow keys move from the Tags into the actions.
+	pressApp(t, a, ctrlK)
+	typeApp(t, a, "beta")
+	if got := a.matching(); len(got) != 1 || got[0].title != "beta" {
+		t.Fatalf("searching a name must keep only its Tag: %+v", got)
+	}
+	pressApp(t, a, key(tea.KeyEscape), ctrlK, key(tea.KeyDown))
+	if a.palette.filter.Value() != "" || a.palette.cursor != 1 {
+		t.Fatalf("the palette must open empty with the cursor moving: %q at %d", a.palette.filter.Value(), a.palette.cursor)
+	}
+
+	// alt+N opens the nth Tag from the palette, in rail order.
+	pressApp(t, a, tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt})
+	if a.palette != nil || tagName(a.inner.tags[a.inner.selected]) != order[2] {
+		t.Fatalf("alt+3 must open %q: palette=%v selected=%q", order[2], a.palette != nil, a.inner.selectedTag())
+	}
+
+	// Keyboard shortcuts shows in place of the palette; esc goes back to it.
+	pressApp(t, a, ctrlK)
+	typeApp(t, a, "keyboard")
+	pressApp(t, a, key(tea.KeyEnter))
+	if s := appScreen(a); !strings.Contains(s, "Keyboard shortcuts") || !strings.Contains(s, "Switch Control Planes") {
+		t.Fatalf("the keyboard shortcuts must show:\n%s", s)
+	}
+	pressApp(t, a, key(tea.KeyEscape))
+	if a.palette == nil || a.palette.shortcuts || a.palette.filter.Value() != "keyboard" {
+		t.Fatal("esc must go back to the palette")
+	}
+	pressApp(t, a, key(tea.KeyEscape))
+	if a.palette != nil {
+		t.Fatal("esc must close the palette")
 	}
 }
 
@@ -128,7 +197,7 @@ func TestSlashOpensThePaletteOnlyWhereItIsNotTyped(t *testing.T) {
 		t.Fatalf("the filter must keep only matching commands:\n%s", s)
 	}
 	typeApp(t, a, "zz")
-	if !strings.Contains(appScreen(a), "No command matches.") {
+	if !strings.Contains(appScreen(a), "No results") {
 		t.Fatalf("screen:\n%s", appScreen(a))
 	}
 	pressApp(t, a, key(tea.KeyEnter), ctrlK)

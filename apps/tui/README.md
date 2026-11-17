@@ -180,26 +180,33 @@ operator token, or a client Auth Key (`stak_…`) from an operator. An Auth Key 
 conversations and Objectives within the Tags its key allows, and no Worker Host status. Switching ends every stream and call
 to the Control Plane you leave and reads everything anew from the next; unsent input stays behind.
 
-Ctrl-K, or `/` on an empty input line or where the pane has none, opens the command palette.
+Ctrl-K, or `/` on an empty input line or where the pane has none, opens the command palette, the
+same search as the desktop app's: its field reads "Search Tags, conversations, settings…". The
+**Tags** section lists each Tag in rail order with its latest message and, for the first nine, the
+Alt-1 to Alt-9 key that opens it; the **Actions** section lists the commands below. Typing filters
+both: a Tag matches by its name, its ID, or its latest message, and a command by its name or
+caption. Up and down move through both sections, enter opens the Tag or runs the command, Alt-1 to
+Alt-9 open a Tag at once, and Esc or Ctrl-K closes the palette.
+
 From a Tag's conversation, type `/goal <outcome>` and press enter. It goes to the conversation
 like any other message, and the Control Plane creates an Objective that the Tag owns, answers with
 its ID, and starts the owner's first turn. Type `/goal` on its own to open the form instead.
 The Objective works in the Workspace configured on its owner Tag.
 
-Type to filter the palette commands, move with up and down, and press enter to run one. Esc goes
-back.
+The palette's actions:
 
+- **New Tag** opens the form to create a Tag, as Ctrl-N does.
+- **Keyboard shortcuts** lists every key the terminal UI answers to; Esc goes back to the palette.
+- **Control Planes · add or switch** opens the Ctrl-P list.
 - **`/goal` · Create Objective** opens a form for an Objective owned by the selected Tag: its outcome, the
   Team its owner may hand work to (empty, it works alone), and a budget such as `300 USD` or
   `$12.50` (empty, no budget). Up and down move between the fields; enter moves to the next and,
   on the budget, creates the Objective, which starts at once. The pane then says whether its
   owner took its first turn, with any warnings, and enter shows the Objective. When it could not
   start, such as for an owner without a connected Worker Host, `r` starts it once that is fixed.
-- **Control Planes · add or switch** opens the Ctrl-P list.
 - **Task files** lists the files a completed Task captured, by Task ID, and saves the chosen one
   to a destination you type.
 - **Open inbox** shows the first item waiting on you, with the rail on it.
-- **New Tag** opens the form to create a Tag, as Ctrl-N does.
 
 Tab moves between the rail and the main pane; up and down (or `k` and `j`) move through the rail,
 and enter opens the row. Esc quits when there is nothing to go back from, and Ctrl-C quits.

@@ -336,7 +336,7 @@ func (m model) renderStatus() string {
 	if unread := unreadTotal(m.summaries, shown); unread > 0 {
 		left += fmt.Sprintf("%d unread  ", unread)
 	}
-	left += "ctrl+k commands  "
+	left += "ctrl+k search  "
 	if m.switchable {
 		left += "ctrl+p Control Planes  "
 	}
