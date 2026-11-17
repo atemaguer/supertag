@@ -1,6 +1,14 @@
 import { Lock, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Gateway, NetworkLog, NetworkRequest, Note, Tag, WatchUpdate } from "../gateway";
+import type {
+  Gateway,
+  NetworkLog,
+  NetworkRequest,
+  Note,
+  Tag,
+  TagActivity,
+  WatchUpdate,
+} from "../gateway";
 import { describe } from "../lib/polling";
 import { useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { ScheduleList } from "./schedules";
@@ -56,6 +64,7 @@ export function TagDetails({
           <X size={16} aria-hidden />
         </Button>
       </div>
+      <ActivitySection gateway={gateway} watch={watch} tag={tag} />
       <NotesSection gateway={gateway} watch={watch} tag={tag} />
       <ScheduleList gateway={gateway} watch={watch} tagId={tag.tagId} />
       <NetworkSection gateway={gateway} watch={watch} tag={tag} />
@@ -274,6 +283,103 @@ export function NetworkSection({
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+/** How often the activity is read again while the watch is down. */
+const ACTIVITY_INTERVAL = 60_000;
+
+/** A period in words: `hour`, `2 hours`, `day`, `30 minutes`. */
+export function periodWords(ms: number): string {
+  const units: [number, string][] = [
+    [24 * 60 * 60 * 1000, "day"],
+    [60 * 60 * 1000, "hour"],
+    [60 * 1000, "minute"],
+  ];
+  for (const [size, unit] of units) {
+    if (ms >= size && ms % size === 0) {
+      const count = ms / size;
+      return count === 1 ? unit : `${count} ${unit}s`;
+    }
+  }
+  return `${Math.round(ms / 1000)} seconds`;
+}
+
+/** The unprompted messages in one line: `6 posted · 4 read · 2 answered · 19 stayed quiet`. */
+export function attentionLine(activity: TagActivity): string {
+  return [
+    `${activity.posted} posted`,
+    `${activity.read} read`,
+    `${activity.answered} answered`,
+    `${activity.quiet} stayed quiet`,
+  ].join(" · ");
+}
+
+/** The start rate in one line: `At most 10 per hour · 3 started in the last hour`. */
+export function startRateLine(rate: NonNullable<TagActivity["startRate"]>): string {
+  const period = periodWords(rate.perMs);
+  return `At most ${rate.starts} per ${period} · ${rate.inWindow} started in the last ${period}`;
+}
+
+/**
+ * How the Tag's messages that no person asked for landed lately, and how often its work may
+ * start: what `supertag describe tag` shows under attention and start rate.
+ */
+export function ActivitySection({
+  gateway,
+  watch,
+  tag,
+}: {
+  gateway: Gateway;
+  watch?: WatchFeed;
+  tag: Tag;
+}) {
+  const [activity, setActivity] = useState<TagActivity>();
+  const [error, setError] = useState("");
+  const tagId = tag.tagId;
+  const read = useCallback(
+    async (signal: AbortSignal) => {
+      if (!gateway.tagActivity) return;
+      try {
+        const next = await gateway.tagActivity(tagId);
+        if (signal.aborted) return;
+        setActivity(next);
+        setError("");
+      } catch (error) {
+        if (!signal.aborted) setError(describe(error));
+        return false;
+      }
+    },
+    [gateway, tagId],
+  );
+  // A conversation change is the sign that one of the Tag's turns ended.
+  const affected = useCallback(
+    (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
+    [tagId],
+  );
+  useWatchRefresh(read, ACTIVITY_INTERVAL, watch, affected);
+  if (!gateway.tagActivity) return null;
+  const name = tag.name ?? tag.tagId;
+  const days = activity?.windowDays || 30;
+  const sent = activity && (activity.posted || activity.quiet);
+  return (
+    <section className="details-section" aria-labelledby="tag-details-activity">
+      <h3 id="tag-details-activity">Activity</h3>
+      {error || !activity ? (
+        <p className="activity-status" role="status">
+          {error || "Loading activity…"}
+        </p>
+      ) : (
+        <dl className="tag-activity">
+          <dt>Unprompted, last {days} days</dt>
+          <dd title="Schedule wake-ups and Objective notices. Read counts only conversations; other surfaces have no read receipts.">
+            {sent ? attentionLine(activity) : `${name} sent nothing unprompted.`}
+          </dd>
+          <dt>Start rate</dt>
+          <dd>{activity.startRate ? startRateLine(activity.startRate) : "None"}</dd>
+        </dl>
+      )}
     </section>
   );
 }

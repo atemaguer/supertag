@@ -2,9 +2,17 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Gateway, NetworkLog, Note, Tag } from "../gateway";
+import type { Gateway, NetworkLog, Note, Tag, TagActivity } from "../gateway";
 import { watchFeed } from "../lib/watch";
-import { networkRequestLine, networkTotals, noteCaption, TagDetails } from "./tag-details";
+import {
+  attentionLine,
+  networkRequestLine,
+  networkTotals,
+  noteCaption,
+  periodWords,
+  startRateLine,
+  TagDetails,
+} from "./tag-details";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -174,4 +182,44 @@ it("tells a person who is not an operator that only operators see the network lo
   act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
   await settle();
   expect(host.textContent).toContain("Only operators can see the network log.");
+});
+
+it("words a period, the unprompted messages, and a start rate", () => {
+  expect(periodWords(60 * 60 * 1000)).toBe("hour");
+  expect(periodWords(2 * 60 * 60 * 1000)).toBe("2 hours");
+  expect(periodWords(24 * 60 * 60 * 1000)).toBe("day");
+  expect(periodWords(30 * 60 * 1000)).toBe("30 minutes");
+  expect(attentionLine({ windowDays: 30, posted: 6, read: 4, answered: 2, quiet: 19 })).toBe(
+    "6 posted · 4 read · 2 answered · 19 stayed quiet",
+  );
+  expect(startRateLine({ starts: 10, perMs: 60 * 60 * 1000, inWindow: 3 })).toBe(
+    "At most 10 per hour · 3 started in the last hour",
+  );
+});
+
+it("shows the Tag's activity first and rereads it when one of its turns ends", async () => {
+  let activity: TagActivity = { windowDays: 30, posted: 0, read: 0, answered: 0, quiet: 0 };
+  const tagActivity = vi.fn(async () => activity);
+  const feed = watchFeed();
+  const gateway = { notes: async () => [], tagActivity } as unknown as Gateway;
+  act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose() {} })));
+  await settle();
+  const section = host.querySelector('[aria-labelledby="tag-details-activity"]');
+  expect(host.querySelector(".details-section")).toBe(section);
+  expect(section?.textContent).toContain("Lead sent nothing unprompted.");
+  expect(section?.textContent).toContain("Start rate");
+  expect(section?.textContent).toContain("None");
+  activity = {
+    windowDays: 30,
+    posted: 6,
+    read: 4,
+    answered: 2,
+    quiet: 19,
+    startRate: { starts: 10, perMs: 60 * 60 * 1000, inWindow: 3 },
+  };
+  act(() => feed.publish({ kind: "conversation", tagId: "lead" }));
+  await settle();
+  expect(tagActivity).toHaveBeenCalledTimes(2);
+  expect(section?.textContent).toContain("6 posted · 4 read · 2 answered · 19 stayed quiet");
+  expect(section?.textContent).toContain("At most 10 per hour · 3 started in the last hour");
 });

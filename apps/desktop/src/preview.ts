@@ -103,6 +103,18 @@ let notes: Note[] = [
 ];
 
 export const previewGateway: Gateway = {
+  async tagActivity(tagId) {
+    return tagId === "finch"
+      ? {
+          windowDays: 30,
+          posted: 6,
+          read: 4,
+          answered: 2,
+          quiet: 19,
+          startRate: { starts: 10, perMs: 60 * 60 * 1000, inWindow: 3 },
+        }
+      : { windowDays: 30, posted: 0, read: 0, answered: 0, quiet: 0 };
+  },
   async notes(tagId) {
     return notes.filter((note) => note.tagId === tagId);
   },

@@ -17,6 +17,7 @@ use tonic::{
     transport::{ClientTlsConfig, Endpoint},
 };
 
+pub mod activity;
 mod artifacts;
 pub mod cache;
 mod follow;

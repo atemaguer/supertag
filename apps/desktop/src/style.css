@@ -1324,6 +1324,18 @@ button.identity-pill[aria-expanded="true"] {
   font-size: 12px;
   line-height: 1.5;
 }
+.tag-activity {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tag-activity dt {
+  color: var(--muted);
+}
+.tag-activity dd {
+  margin: 0 0 6px;
+  font-variant-numeric: tabular-nums;
+}
 .notes {
   margin: 0;
   padding: 0;

@@ -29,6 +29,7 @@ const (
 	commandOpenInbox
 	commandNotes
 	commandNetwork
+	commandActivity
 	commandSchedules
 )
 
@@ -112,6 +113,7 @@ func (a *app) commands() []paletteCommand {
 
 	if tag := terminalText(a.inner.selectedTag()); tag != "" {
 		out = append(out, paletteCommand{id: commandCreateObjective, title: "/goal · Create Objective", about: "owned by " + tag})
+		out = append(out, paletteCommand{id: commandActivity, title: "Activity", about: "how " + tag + "'s unprompted messages landed · start rate"})
 		out = append(out, paletteCommand{id: commandNotes, title: "Notes", about: "what " + tag + " remembers · delete a note"})
 		out = append(out, paletteCommand{id: commandNetwork, title: "Network", about: "web requests " + tag + "'s Tasks made, allowed or refused"})
 		out = append(out, paletteCommand{id: commandSchedules, title: "Schedules", about: "when " + tag + " wakes up · pause, resume or delete"})
@@ -258,6 +260,8 @@ func (a *app) run(c paletteCommand) tea.Cmd {
 		return a.openNotes()
 	case commandNetwork:
 		return a.openNetwork()
+	case commandActivity:
+		return a.openActivity()
 	case commandSchedules:
 		return a.openSchedules()
 	case commandOpenInbox:

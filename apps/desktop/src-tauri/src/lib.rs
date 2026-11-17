@@ -127,6 +127,15 @@ async fn list_notes(
 }
 
 #[tauri::command]
+async fn tag_activity(
+    state: State<'_, GatewayState>,
+    connection_id: String,
+    tag_id: String,
+) -> Result<gateway::activity::TagActivity, String> {
+    state.tag_activity(&connection_id, tag_id).await
+}
+
+#[tauri::command]
 async fn list_network_logs(
     state: State<'_, GatewayState>,
     connection_id: String,
@@ -367,6 +376,7 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             list_notes,
             delete_note,
             list_network_logs,
+            tag_activity,
             list_schedules,
             change_schedule,
             list_tag_options,

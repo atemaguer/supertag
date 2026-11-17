@@ -133,6 +133,14 @@ forget it. In the terminal UI, open the command palette with Ctrl-K and choose *
 press `x` to delete the selected note. The conversation itself shows only messages. To add or change a note, tell the Tag. See
 [Memory](../reference/coordination.md#memory).
 
+## See how a Tag's messages land
+
+A Tag's details in the desktop app open with **Activity**: over the last 30 days, how many of the
+messages it sent without being asked (Schedule wake-ups and Objective notices) were posted, read,
+and answered, and how many checks stayed quiet, and its start rate, if it has one. In the terminal
+UI, choose **Activity** in the command palette. See
+[Quiet results](../reference/coordination.md#quiet-results).
+
 ## See what a Tag fetched
 
 When a Tag's Permission Sets limit `web:fetch` to named hosts, each Task Attempt's web requests go

@@ -703,6 +703,9 @@ only answers count.
 "attention": {"window_days": 30, "posted": 12, "read": 9, "answered": 4, "quiet": 20}
 ```
 
+The desktop app shows the same counts under **Activity** in the Tag's details, and the terminal
+UI under **Activity** in its command palette.
+
 Nothing throttles a Tag on these numbers yet.
 
 ### Identity and preconditions

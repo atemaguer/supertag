@@ -129,6 +129,8 @@ export interface Gateway {
   notes?(tagId: string): Promise<Note[]>;
   /** Deletes a note at once; the Tag no longer sees it from its next turn. */
   deleteNote?(memoryId: string): Promise<Note>;
+  /** How the Tag's unprompted messages landed lately, and its start rate. */
+  tagActivity?(tagId: string): Promise<TagActivity>;
   /** The Tag's newest Task Attempts with a network log, newest first. Operators only. */
   networkLogs?(tagId: string): Promise<NetworkLog[]>;
   /** The Tag's Schedules the caller can see. */
@@ -211,6 +213,22 @@ export interface NetworkRequest {
   status?: number;
   /** The Worker Host credential the proxy added. */
   credential?: string;
+}
+
+/**
+ * How a Tag's unprompted messages (Schedule fires, Objective notices) landed over the last
+ * `windowDays`, and its start rate when it has one. `describe tag` shows the same.
+ */
+export interface TagActivity {
+  windowDays: number;
+  posted: number;
+  /** Read in a person's conversation; surfaces have no read receipts. */
+  read: number;
+  /** Answered in the same Session within a day. */
+  answered: number;
+  /** Checks that found nothing and posted nothing. */
+  quiet: number;
+  startRate?: { starts: number; perMs: number; inWindow: number };
 }
 
 /** A Task Attempt's network log: its first requests and how many it allowed and refused. */
@@ -305,6 +323,7 @@ export function gatewaySession(connectionId: string, scope: string): Gateway {
     notes: (tagId) => invoke("list_notes", { connectionId, tagId }),
     deleteNote: (memoryId) => invoke("delete_note", { connectionId, memoryId }),
     networkLogs: (tagId) => invoke("list_network_logs", { connectionId, tagId }),
+    tagActivity: (tagId) => invoke("tag_activity", { connectionId, tagId }),
     schedules: (tagId) => invoke("list_schedules", { connectionId, tagId }),
     changeSchedule: (scheduleId, action) =>
       invoke("change_schedule", { connectionId, scheduleId, action }),

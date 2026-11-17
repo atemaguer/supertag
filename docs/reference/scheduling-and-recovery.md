@@ -70,7 +70,7 @@ A waiting turn says so wherever a waiting turn's reason shows, such as "Tag lead
 Attempts in the last 1h, its start rate; the next can start at 2026-11-17 10:42 UTC".
 `supertag placement explain TASK` reports the requirement `start-rate`, and
 `supertag describe tag` shows `start_rate` with how many Task Attempts started in the current
-window. A Tag manifest sets it with `spec.startRate`. A new Tag has no start rate.
+window, as do the desktop app's Tag details and the terminal UI under **Activity**. A Tag manifest sets it with `spec.startRate`. A new Tag has no start rate.
 
 ### Objective turns
 

@@ -11,6 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- The desktop app's Tag details open with **Activity**, and the terminal UI's command palette has
+  **Activity**: how the Tag's unprompted messages landed over 30 days (posted, read, answered,
+  stayed quiet) and its start rate with the starts in the current window.
 - A Task continuing a Session whose last delivery is on an offline Worker Host says so:
   `describe task`, `placement explain` and the conversation name the host it waits for
   (`workspace-holder`) instead of retrying silently.

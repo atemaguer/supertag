@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
+
 	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
 	rpc "github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
@@ -79,6 +81,8 @@ type fakeGateway struct {
 	// networkLogs answers NetworkLogs.List for every Tag; networkRefusal refuses it instead.
 	networkLogs    []*v2.TaskNetworkLog
 	networkRefusal bool
+	// tagActivity answers GetTag's attention and start rate, for every Tag.
+	tagActivity *v2.Tag
 }
 
 // fakeNetworkLogs serves the fake's network logs.
@@ -256,6 +260,17 @@ func (f *fakeGateway) PutTag(_ context.Context, req *connect.Request[v2.PutTagRe
 		return nil, f.putTagErr
 	}
 	return connect.NewResponse(&v2.Tag{TagId: req.Msg.GetTagId(), Name: req.Msg.GetName(), HarnessKind: req.Msg.GetHarnessKind(), Revision: 1}), nil
+}
+
+func (f *fakeGateway) GetTag(_ context.Context, req *connect.Request[v2.GetTagRequest]) (*connect.Response[v2.Tag], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	tag := &v2.Tag{Attention: &v2.AttentionSummary{WindowDays: 30}}
+	if f.tagActivity != nil {
+		tag = proto.Clone(f.tagActivity).(*v2.Tag)
+	}
+	tag.TagId = req.Msg.GetTagId()
+	return connect.NewResponse(tag), nil
 }
 
 func (f *fakeGateway) reads() int {
