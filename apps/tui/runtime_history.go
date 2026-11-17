@@ -260,12 +260,12 @@ func (m *model) runtimeItem(tag string, item client.HistoryItem) tea.Cmd {
 		turn.times(item.Message)
 		turn.needsFollow = item.Follow
 		// A snapshot adds what the turn showed since it was last read: its start, the messages
-		// the Tag wrote, what it does now, its final reply and its work, without repeating any
-		// that its follow already showed.
+		// the Tag wrote, what it does now and its final reply, without repeating any that its
+		// follow already showed. A turn's follow alone shows its work Sessions while it runs.
 		for _, event := range item.Events {
 			switch {
-			case runtimeFinal(event), client.WorkEventKey(event) != "",
-				event.Kind == client.EventStarted, event.Kind == client.EventMessage, event.Kind == client.EventStatus:
+			case runtimeFinal(event), event.Kind == client.EventStarted, event.Kind == client.EventMessage,
+				event.Kind == client.EventStatus, client.WorkEventKey(event) != "" && !turn.following:
 				cmds = append(cmds, m.applyRuntimeTurn(h, turn, event))
 			}
 		}

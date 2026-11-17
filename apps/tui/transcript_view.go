@@ -244,9 +244,9 @@ func typingShown(turn *runtimeTurn, fromTag bool) bool {
 }
 
 // deliveryLine says how far the operator's last message got: Sent once the Control Plane
-// accepted it, Seen once a Worker Host took its turn up.
+// accepted it, Seen once a Worker Host took its turn up or a running turn took it in.
 func (m model) deliveryLine(turn *runtimeTurn) string {
-	if turn != nil && (turn.started || turn.settled) {
+	if turn != nil && (turn.started || turn.settled || turn.joined) {
 		return faint.Render("Seen")
 	}
 	return faint.Render("Sent")

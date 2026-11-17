@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -77,7 +78,13 @@ type cachedConversation struct {
 	Turns          []cachedTurn `json:"turns"`
 	// Width is the width the entries were rendered at.
 	Width int `json:"width,omitempty"`
+	// WorkShown are the work Session lines the turns already show, so a later read of a turn
+	// does not show them again.
+	WorkShown []string `json:"workShown,omitempty"`
 }
+
+// maxWorkShown bounds the work Session lines a conversation's entry remembers.
+const maxWorkShown = 2048
 
 type cachedTag struct {
 	ID      string `json:"id"`
@@ -213,6 +220,11 @@ func (m *model) conversationSnapshot(tag string) cachedConversation {
 		snapshot.Turns = append(snapshot.Turns, cached)
 		turns = append(turns, turn)
 	}
+	for key := range h.workShown {
+		snapshot.WorkShown = append(snapshot.WorkShown, key)
+	}
+	slices.Sort(snapshot.WorkShown)
+	snapshot.WorkShown = snapshot.WorkShown[:min(len(snapshot.WorkShown), maxWorkShown)]
 	budget := renderedBudget
 	for i := len(turns) - 1; i >= 0 && budget > 0; i-- {
 		turn := turns[i]
@@ -340,6 +352,10 @@ func (m *model) cachedConversation(tag string) {
 		h.order = append(h.order, turn.ID)
 	}
 	h.sortOrder()
+	h.workShown = map[string]bool{}
+	for _, key := range cached.WorkShown {
+		h.workShown[key] = true
+	}
 	h.conversationID, h.read = cached.ConversationID, true
 	conv.loaded = true
 }

@@ -315,11 +315,13 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 	if message.CompletedAtMs != nil {
 		out.CompletedAt = timestamppb.New(time.UnixMilli(message.GetCompletedAtMs()))
 	}
-	turnEvents(out, message.GetEvents())
 	if message.GetWorkSessionReportId() != "" {
 		// The prompt instructs the parent to report on child work. It was not
-		// written by the operator and must never appear as their message.
+		// written by the operator and must never appear as their message. The report shows
+		// through its Work Session, not as messages of this turn.
 		out.Text = ""
+	} else {
+		turnEvents(out, message.GetEvents())
 	}
 	if input := message.GetLiveInput(); input != nil {
 		switch input.GetState() {

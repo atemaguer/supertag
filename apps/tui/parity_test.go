@@ -472,3 +472,30 @@ func TestOnlyOperatorsOpenNewTag(t *testing.T) {
 		t.Fatalf("a client opened New Tag: %v %q", m.pane, m.notice.text)
 	}
 }
+
+func TestACachedConversationDoesNotRepeatItsWorkSessionLines(t *testing.T) {
+	privateCache(t)
+	message := ordered(runtimeHistoryMessage("root", "Investigate", "Started."), 1)
+	message.WorkSessions = []*views.WorkSession{workSession("work/1", "Bounded investigation", "child-1", "Region verified.")}
+	page := func(m model) model {
+		items := client.History("lead", []*views.Message{message})
+		items[0].Follow = false
+		return update(t, m, historyMsg{tag: "lead", items: items, conversationID: runtimeConversationID, incremental: true})
+	}
+	first := runtimeModel(t)
+	first.cache = newModelCache(openCache("http://127.0.0.1:1"), "test")
+	first.cache.principal, first.cache.confirmed = "operator:local", true
+	first = update(t, first, historyMsg{tag: "lead", conversationID: runtimeConversationID})
+	first = page(first)
+	first.cacheChanged(conversationKey("lead"))
+	first.flush(true)
+
+	next := runtimeModel(t)
+	next.cache = newModelCache(openCache("http://127.0.0.1:1"), "test")
+	next.cache.principal = "operator:local"
+	next.cachedConversation("lead")
+	next = page(next)
+	if got := ansi.Strip(next.renderConversation()); strings.Count(got, "working: Bounded investigation") != 1 || strings.Count(got, "Region verified.") != 1 {
+		t.Fatalf("a reread of a cached turn repeated its work Session:\n%s", got)
+	}
+}

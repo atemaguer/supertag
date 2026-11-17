@@ -41,6 +41,9 @@ type fakeControlPlane struct {
 	putTagErr error
 	// hostStatus answers ListHosts with runtime host statuses, before hostList.
 	hostStatus []*v2.WorkerHostStatus
+	// message answers GetMessage, and events ListEvents; nil refuses them.
+	message func(tag, task string) *v2.ConversationMessage
+	events  func(task string, after uint64) []*v2.TaskEvent
 
 	token string
 	// tags answers ListTags; an error refuses it.
@@ -133,6 +136,20 @@ func (f *fakeControlPlane) SendMessage(_ context.Context, req *connect.Request[v
 		return nil, err
 	}
 	return connect.NewResponse(message), nil
+}
+
+func (f *fakeControlPlane) GetMessage(_ context.Context, req *connect.Request[v2.GetMessageRequest]) (*connect.Response[v2.ConversationMessage], error) {
+	if f.message == nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no message %s", req.Msg.GetTaskId()))
+	}
+	return connect.NewResponse(f.message(req.Msg.GetTagId(), req.Msg.GetTaskId())), nil
+}
+
+func (f *fakeControlPlane) ListEvents(_ context.Context, req *connect.Request[v2.ListEventsRequest]) (*connect.Response[v2.ListEventsResponse], error) {
+	if f.events == nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no Task %s", req.Msg.GetTaskId()))
+	}
+	return connect.NewResponse(&v2.ListEventsResponse{Events: f.events(req.Msg.GetTaskId(), req.Msg.GetAfterSequence())}), nil
 }
 
 func (f *fakeControlPlane) sent() []*v2.SendMessageRequest {

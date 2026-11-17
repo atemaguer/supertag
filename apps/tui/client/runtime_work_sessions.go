@@ -163,7 +163,7 @@ func (c *runtimeClient) projectWork(ctx context.Context, work *v2.WorkSession, r
 
 func (c *runtimeClient) projectMessage(ctx context.Context, message *v2.ConversationMessage) (*views.Message, error) {
 	out := runtimeMessage(message)
-	if message.GetEventsTruncated() {
+	if message.GetEventsTruncated() && message.GetWorkSessionReportId() == "" {
 		// The message left out the turn's earliest messages; read them all once.
 		events, err := c.allEvents(ctx, message.GetTask().GetTaskId())
 		if err != nil {

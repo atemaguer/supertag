@@ -552,3 +552,15 @@ func TestRuntimeEventsShowAsMessagesOrOneStatusLine(t *testing.T) {
 		}
 	}
 }
+
+// A report turn shows its report through its Work Session; the messages of the parent's report
+// turn are not messages of the conversation.
+func TestAReportTurnCarriesNoMessagesOfItsOwn(t *testing.T) {
+	report := "work/1"
+	message := runtimeMessage(&v2.ConversationMessage{WorkSessionReportId: &report,
+		Task:   &v2.Task{TaskId: "report", TagId: "lead", Prompt: "Report on work/1", State: v2.TaskState_TASK_STATE_SUCCEEDED, Result: proto.String("Done")},
+		Events: []*v2.TaskEvent{{Sequence: 1, Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE, Text: "Reporting."}}})
+	if message.GetText() != "" || len(message.GetTagMessages()) != 0 || message.GetActivity() != "" {
+		t.Fatalf("report turn = %+v", message)
+	}
+}
