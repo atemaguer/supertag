@@ -7,7 +7,7 @@
 
 **Persistent, proactive, multiplayer AI actors for engineering work.**
 
-**Define outcomes, not tasks.** Give a Tag — a persistent AI actor with its own identity, responsibilities, and work history — an engineering outcome or an enduring responsibility. It carries the work across sessions, acts on its responsibilities without being asked, and works alongside your teammates and their Tags, on Claude Code, Codex, Cursor, or OpenCode and on machines you choose.
+**Define outcomes, not tasks.** Give a Tag — a persistent AI actor with its own identity, responsibilities, permissions, and work history — an engineering outcome or an enduring responsibility. It carries the work across sessions, acts on its responsibilities without being asked, and works alongside your teammates and their Tags, on Claude Code, Codex, Cursor, or OpenCode and on machines you choose.
 
 [Define outcomes](#define-outcomes-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [Run your first Tag](#run-your-first-tag) · [Documentation](docs/README.md)
 
