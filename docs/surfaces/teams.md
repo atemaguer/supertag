@@ -82,6 +82,10 @@ the Tag, before the Gateway replies.
 - A message the thread's Objective refuses, for example because it is paused, gets one short
   answer in the thread that says why. A redelivered activity gets no second answer. A redelivered
   activity with different content is acknowledged and never admitted.
+- A Teams account answers for one Tag, the one its first admitted message reached. When the
+  Gateway later sends that channel's messages for another Tag, each gets one answer in its thread
+  naming the Tag the channel is connected to, and starts no Task. Messages from another app,
+  tenant, or channel are refused without an answer.
 
 ## If something goes wrong
 

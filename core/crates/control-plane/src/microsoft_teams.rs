@@ -76,14 +76,37 @@ impl Store {
                 ("tenant_id", &input.tenant_id),
                 ("team_id", &input.team_id),
                 ("channel_id", &input.channel_id),
-                ("tag_id", &input.tag_id),
             ] {
                 if route.try_get::<String, _>(column)? != *expected {
                     return Err(StoreError::Conflict(
-                        "Microsoft Teams account is bound to another app, tenant, channel, or Tag"
+                        "Microsoft Teams account is bound to another app, tenant, or channel"
                             .into(),
                     ));
                 }
+            }
+            // The same channel now routed to another Tag: say so in the thread, once, instead of
+            // dropping the message. The bound route still names this channel, so the notice
+            // reaches the person who wrote.
+            let bound: String = route.try_get("tag_id")?;
+            if bound != input.tag_id {
+                let text = format!(
+                    "SuperTag did not pass this message on: this Microsoft Teams channel is \
+                     connected to the Tag {bound}, not {}. Ask an operator to update the \
+                     Microsoft Teams connection.",
+                    input.tag_id
+                );
+                sqlx::query("INSERT INTO supertag_v2_microsoft_teams_activities (account_id,conversation_id,activity_id,root_activity_id,service_url,request_digest,refusal) VALUES ($1,$2,$3,$4,$5,$6,$7)").bind(account).bind(&input.conversation_id).bind(&input.activity_id).bind(&input.root_activity_id).bind(&input.service_url).bind(&digest).bind(&text).execute(&mut *tx).await?;
+                crate::surface_policy::refusal_notice_in(
+                    &mut tx,
+                    account,
+                    &input.conversation_id,
+                    Some(&input.root_activity_id),
+                    &format!("teams:{}:{}", input.conversation_id, input.activity_id),
+                    &text,
+                )
+                .await?;
+                tx.commit().await?;
+                return Ok(AcceptMicrosoftTeamsActivityResponse { task: None });
             }
         }
         let session = format!(
@@ -414,6 +437,43 @@ mod tests {
             .task
             .unwrap();
         assert_ne!(distinct.task_id, original.task_id);
+        // The channel now routed to another Tag: no Task, one notice in the thread, even when
+        // Teams redelivers the activity.
+        let mut moved = event("1741000000003");
+        moved.tag_id = "other".into();
+        for _ in 0..2 {
+            assert_eq!(
+                left.accept_microsoft_teams_activity(PRINCIPAL, &moved)
+                    .await
+                    .unwrap()
+                    .task,
+                None
+            );
+        }
+        let notices: Vec<(String, Option<String>)> = sqlx::query_as(
+            "SELECT text,thread_id FROM supertag_v2_replies WHERE notice_key LIKE 'refusal:teams/shared:%' AND task_id IS NULL",
+        )
+        .fetch_all(&left.pool)
+        .await
+        .unwrap();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert!(
+            notices[0]
+                .0
+                .contains("connected to the Tag builder, not other")
+        );
+        assert_eq!(
+            notices[0].1.as_deref(),
+            Some(moved.root_activity_id.as_str())
+        );
+        // Another app, tenant, or channel is still refused outright.
+        let mut foreign = event("1741000000004");
+        foreign.channel_id = "19:elsewhere@thread.tacv2".into();
+        assert!(matches!(
+            left.accept_microsoft_teams_activity(PRINCIPAL, &foreign)
+                .await,
+            Err(StoreError::Conflict(_))
+        ));
         assert!(matches!(
             left.accept_microsoft_teams_activity("connector:shared", &input)
                 .await,
