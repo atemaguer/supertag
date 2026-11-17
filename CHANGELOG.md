@@ -119,10 +119,9 @@ within the pre-1.0 compatibility policy described in
   schedule`. A Tag schedules only when it holds the new `schedule:create` runtime action:
   `supertag init` and the desktop and terminal UI New Tag forms grant it, and operators add it
   to a Permission Set to let an existing Tag schedule.
-- The desktop app lists a Tag's Schedules in a new Tag details panel, opened from the Tag's
-  name, and the terminal UI in a Schedules dialog; both show the next time, and pause, resume,
-  or delete them; the lists follow a new `WATCH_KIND_SCHEDULE` Watch kind. Operators
-  declare recurring Schedules in `kind: Schedule` manifests, which `apply --set --prune` manages
+- The desktop app lists a Tag's Schedules in the Tag details panel, beside its notes, and the
+  terminal UI in a Schedules dialog; both show the next time, and pause, resume, or delete them;
+  the lists follow a new `WATCH_KIND_SCHEDULE` Watch kind. Operators declare recurring Schedules in `kind: Schedule` manifests, which `apply --set --prune` manages
   like other resources, and replay missed occurrences with `supertag schedule backfill ID --from
   TIME`. `supertag init` writes the machine's time zone as the Control Plane's `time-zone` in
   `supertag.yaml`.

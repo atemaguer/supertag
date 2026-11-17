@@ -173,9 +173,9 @@ supertag delete schedule SCHEDULE_ID
 shows the next time, the missed occurrences, and the latest turn it queued. See
 [Schedules](../reference/coordination.md#schedules) for the rules.
 
-In the desktop app, select the Tag's name at the top of the conversation to open its details,
-which list its Schedules. In the terminal UI, the **Schedules** palette command lists them. Both show each one's next time and let you pause,
-resume, or delete it.
+The Tag's details in the desktop app, opened from its name above the conversation, list its
+Schedules after its notes; in the terminal UI, choose **Schedules** in the command palette. Both
+show each one's next time and let you pause, resume, or delete it.
 
 When SuperTag was down through several occurrences of a recurring Schedule, it fires once and
 counts the rest as missed. To run the missed ones after all:
