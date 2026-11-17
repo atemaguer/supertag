@@ -61,6 +61,7 @@ Commands:
   workspace-volume      Register a Volume whose files Tasks receive as Workspace copies
   artifact              Download files captured by a Task
   fetch                 Import a Task's or Session's delivered commits as its Session branch in a repository
+  session               Close a Work Session so it no longer counts toward its Tag's limit
   schedule              Wake a Tag later in your conversation with it, or pause and resume a Schedule
   input                 Resolve a message whose delivery to a running Task is uncertain
   test                  Check operator settings by sending a sample
@@ -2527,6 +2528,8 @@ Options:
           Require this fixed execution environment for new Cursor Sessions
       --lead [<LEAD>]
           Make this the Control Plane's lead Tag, or with false, stop it being the lead. Omit to keep it as it is. At most one Tag is the lead [possible values: true, false]
+      --max-work-sessions <MAX_WORK_SESSIONS>
+          How many Work Sessions the Tag may have open at once, across all its conversations, from 1 to 64. Omit to keep it as it is; a new Tag gets 8
   -h, --help
           Print help
 ```
@@ -3165,6 +3168,45 @@ Options:
           The Tag whose Session to import, when more than one Tag has a Session with this ID
       --repository <REPOSITORY>
           The Git repository that receives the Session branch [default: .]
+  -h, --help
+          Print help
+```
+
+## `supertag session`
+
+```text
+Close a Work Session so it no longer counts toward its Tag's limit
+
+Usage: supertag session [OPTIONS] <COMMAND>
+
+Commands:
+  close  Close a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed Work Session cannot be continued
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag session close`
+
+```text
+Close a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed Work Session cannot be continued
+
+Usage: supertag session close [OPTIONS] <WORK_SESSION_ID>
+
+Arguments:
+  <WORK_SESSION_ID>  Work Session ID
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
           Print help
 ```

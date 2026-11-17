@@ -146,6 +146,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | `spec.workspace` | `id`, `baseCommit` or `ref`, `mcp` | The Workspace the Tag's Tasks work in, the commit new Sessions start from or the local branch whose current commit they start from, and the `.mcp.json` servers they may use. See [Workspaces](#workspaces). |
 | `spec.acceptsMessagesFrom` | Tag name | Mailbox grants where this Tag is the recipient |
 | `spec.lead` | `true` or `false` | Whether this is the Control Plane's **lead Tag**. Omitted keeps the current value. |
+| `spec.maxWorkSessions` | 1 to 64 | How many work Sessions the Tag may have open at once, 8 by default. Omitted keeps the current value. See [Open work Sessions](coordination.md#open-work-sessions). |
 
 Where a Tag answers is a separate `SurfaceLocation` resource, a Tag **location**. It names the
 Tag, a channel, repository, chat, or team of a Surface Account, and the Permission Sets and Context Sets

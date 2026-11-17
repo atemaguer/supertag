@@ -42,6 +42,10 @@ makes a Tag the lead; the Control Plane refuses a second lead and names the curr
 it first with `--lead false`. `tag put` without `--lead` keeps the Tag's current value. An
 operator can also create a Tag from the desktop app's New Tag dialog.
 
+A Tag may have 8 [work Sessions](../../docs/reference/coordination.md#open-work-sessions) open at
+once by default. Raise or lower it, from 1 to 64, with `tag put TAG --max-work-sessions N` or a
+manifest's `spec.maxWorkSessions`.
+
 ## Grant authority and knowledge
 
 Permission Sets and Context Sets are **shared** resources. Declare them in manifests, then

@@ -11,6 +11,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- A Tag has at most 8 work Sessions open at once, across all its conversations and Objectives;
+  set `maxWorkSessions` (1 to 64) with `supertag tag put --max-work-sessions`, a Tag manifest,
+  or the New Tag form. A work Session stays open after it reports, for `continue_session`, until
+  the Tag closes it with a new `close_session` tool, an operator runs `supertag session close`,
+  `supertag fetch` pulls its delivery, or its Objective closes. At the limit, `start_session`
+  starts nothing and returns the open work Sessions so the Tag can continue or close one; the
+  turn goes on. The tool description, `supertag get session`, `supertag get tag`, the desktop app
+  and the terminal UI show how many are open. Work Sessions that had finished close when the
+  Control Plane upgrades.
 - Permission Sets can scope file access to paths. A `files:write` grant takes `paths` it may
   write and `exclude` entries that stay read-only; a `files:read` grant takes `exclude` entries
   that are hidden, with `*`, `**`, and `?` globs; both take `additionalDirectories` outside the

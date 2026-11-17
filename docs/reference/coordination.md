@@ -220,6 +220,31 @@ then either accepts it in its reply or sends fixes with `continue_session {sessi
 `continue_session` across Tags is checked against a fresh authorization, not the authorization
 captured when the Session started.
 
+### Open work Sessions
+
+A Tag may have at most `maxWorkSessions` work Sessions **open** at once, 8 by default. The count
+covers every work Session the Tag started, across all its conversations and Objectives. A work
+Session stays open after it reports, so the Tag can send fixes with `continue_session`. It closes
+when:
+
+- the Tag calls `close_session` because the work is done or no longer needed;
+- an operator runs `supertag session close ID`;
+- its delivery is pulled with `supertag fetch`;
+- its Objective completes or is cancelled.
+
+A closed work Session cannot be continued. Closing it leaves a turn it already queued.
+
+At the limit, `start_session` starts nothing and the turn goes on. The tool returns an error
+that lists the open work Sessions, each with its ID, title, and state, and asks the Tag to
+continue one or close one. A work Session in a conversation the turn may not see is listed without
+its title. The `start_session` description says how many are open, such as "3 of 8", and so do
+`supertag get session`, `supertag get tag`, the desktop app's conversation, and the terminal UI's
+work Sessions pane.
+
+Set the limit, from 1 to 64, with `supertag tag put TAG --max-work-sessions N`, the
+`maxWorkSessions` field of a Tag manifest, or the New Tag form of the desktop app or the terminal
+UI.
+
 ### The idle rule
 
 An Objective's turn should end with work running, a question asked, or the Objective finished.
@@ -449,6 +474,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | --- | --- | --- |
 | `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `tag`, `workspace` | Starts a work Session; see [Work and delegation](#work-and-delegation) |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts that work Session's next Task |
+| `close_session` | `sessionId` | Closes one of the Tag's work Sessions, so it stops counting toward the [limit](#open-work-sessions) |
 | `ask` | `text` (up to 16,000 characters; 2,000 in a work Session) | Ends the Task waiting on a person's answer |
 | `report_objective` | `status` (`ready_for_review`, `completed`, or `blocked`; not `completed` for an ongoing Objective), `summary` (up to 16,000 characters) | When the turn ends, sets the Objective's status; the summary becomes the turn's result |
 | `send_message` | `to`, `text` (up to 8,000 characters), optional commit review | Delivers a message to another Tag's Mailbox |

@@ -73,7 +73,7 @@ name in `supertag audit`.
 | `Objectives` | Create an Objective, read and list them, change limits, pause, resume, cancel, review, and complete |
 | `ObjectiveOverviews` | The readable progress overview that `describe objective` prints |
 | `Inbox` | Inbox items, questions and their answers, and approval decisions |
-| `WorkSessions` | Work Sessions started from a parent Session |
+| `WorkSessions` | Work Sessions started from a parent Session, how many their Tag has open, and closing one |
 | `Schedules` | [Schedules](coordination.md#schedules) that wake a Tag in your conversation: create, read, list, pause, resume, and delete |
 | `Teams` | Teams and their Workstream posts |
 | `Mailbox` | Messages between Tags and Mailbox grants |
