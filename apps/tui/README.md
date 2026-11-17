@@ -35,8 +35,9 @@ yet sent, and unsent drafts. It lives in `supertag/tui/` in the user cache direc
 owner-only directory per Control Plane and principal and an owner-only file per entry, each
 written in one step as `{"schemaVersion": 1, "value": ...}`; an entry in another schema is
 discarded. The principal is the one `Enrollments.WhoAmI` named the last time this credential
-connected, found by a one-way digest of the credential, and is confirmed again before anything is
-written. The cache never holds a credential. Forgetting a saved Control Plane deletes its cache.
+connected, found by a one-way digest of the credential, so a message sent while the Control Plane
+is unreachable is still kept. Each launch asks again: nothing is written before a principal is
+known, and when the Control Plane names another one, what the cache showed is dropped. The cache never holds a credential. Forgetting a saved Control Plane deletes its cache.
 `docs/reference/credential-storage.md` describes it beside the desktop app's.
 
 Ctrl-P opens **Control Planes**, including when only one connection exists. Press `a` to add a

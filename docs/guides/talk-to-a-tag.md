@@ -30,6 +30,34 @@ with `supertag init`. For a shared Control Plane, ask its operator to set up a T
 also create one with Ctrl-N in the terminal UI, or with **+** in the desktop app's sidebar, or ⌘N:
 give it a name, from which its permanent ID is derived, a harness, and optionally a Workspace.
 
+To give `lead` an **Objective**, an outcome it owns, type `/goal` followed by the outcome and how
+to verify it, and press Enter. The message goes to the conversation like any other, and the Control
+Plane creates the Objective, answers with its ID, and starts its first turn. Select it in the rail
+to open its progress view. Enter `/goal` on its own to choose a Team or budget before starting.
+`/goal` works the same way in the desktop app, where selecting a Tag opens your conversation with
+it. A currency budget requires a
+[harness](../concepts/workers.md) that can enforce a reported cost limit.
+
+## Read the conversation and move around
+
+The terminal UI and the desktop app read like a messaging app. The lead Tag sits at the top of
+the rail with a star, and the other Tags follow by their latest activity. Your messages and the
+Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.
+Under your last message they show **Sent** once the Control Plane has it and **Seen** once a
+Worker Host has taken it up, and until the Tag writes its first line, an animated `···` shows
+that it is working. A message that is not delivered stays in the conversation with
+**Retry**, which sends it at most once, and **Edit**. What you have not sent stays with each Tag
+until you come back, even after a restart, and a message not yet accepted is sent again the next
+time you open the app. When you scroll up, the terminal UI counts the Tag's new messages in its
+title, and End jumps to them.
+
+In the desktop app, drag the sidebar's edge to resize it, or past its narrowest to fold it into a
+rail of avatars; ⌘B does the same. The Task activity pane resizes from its edge too. ⌘1 to ⌘9 open
+the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘F searches them by name; use Ctrl in
+place of ⌘ outside macOS.
+
+In the terminal UI:
+
 | Key | Action |
 | --- | --- |
 | Ctrl-K | Open the command palette. |
@@ -46,29 +74,6 @@ give it a name, from which its permanent ID is derived, a harness, and optionall
 
 On macOS, Alt keys need your terminal to send Option as Meta (Esc+), as iTerm2, Ghostty and
 Terminal can be set to.
-
-To give `lead` an **Objective**, an outcome it owns, type `/goal` followed by the outcome and how
-to verify it, and press Enter. The message goes to the conversation like any other, and the Control
-Plane creates the Objective, answers with its ID, and starts its first turn. Select it in the rail
-to open its progress view. Enter `/goal` on its own to choose a Team or budget before starting.
-`/goal` works the same way in the desktop app, where selecting a Tag opens your conversation with
-it. A currency budget requires a
-[harness](../concepts/workers.md) that can enforce a reported cost limit.
-
-The terminal UI and the desktop app read like a messaging app. The lead Tag sits at the top of
-the rail with a star, and the other Tags follow by their latest activity. Your messages and the
-Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.
-Under your last message they show **Sent** once the Control Plane has it and **Seen** once a
-Worker Host has taken it up, and until the Tag writes its first line, an animated `···` shows
-that it is working. A message that is not delivered stays in the conversation with
-**Retry**, which sends it at most once, and **Edit**. What you have not sent stays with each Tag
-until you come back, even after a restart, and a message not yet accepted is sent again the next
-time you open the app. When you scroll up, the terminal UI counts the Tag's new messages in its
-title, and End jumps to them. Drag the sidebar's edge to resize it, or past its
-narrowest to fold it into a rail of avatars; ⌘B does the same. The Task activity pane resizes from
-its edge too. ⌘1 to
-⌘9 open the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘F searches them by name; use
-Ctrl in place of ⌘ outside macOS.
 
 ## Continue a conversation
 

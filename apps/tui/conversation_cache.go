@@ -34,6 +34,7 @@ type modelCache struct {
 	// principal is whom the credential acts as: remembered from an earlier launch, then confirmed
 	// with the Control Plane. Nothing is written until it is known.
 	principal string
+	// confirmed says the principal is known, from the Control Plane or an earlier launch.
 	confirmed bool
 	// dirty are the entries changed since they were last written; flushing says a write waits.
 	dirty    map[string]bool
@@ -102,7 +103,11 @@ type cachedRoster struct {
 func newModelCache(disk *localCache, token string) *modelCache {
 	cache := &modelCache{disk: disk, token: token, dirty: map[string]bool{}}
 	if disk != nil {
+		// A principal the Control Plane named for this credential before is trusted until it
+		// says otherwise, so what changes while it cannot be reached, such as a message waiting
+		// in the outbox, is kept.
 		cache.principal = disk.principal(token)
+		cache.confirmed = cache.principal != ""
 	}
 	return cache
 }
@@ -316,6 +321,8 @@ func (m *model) hydrate() {
 		m.input.SetValue(m.drafts["conversation:"+tag])
 	}
 	m.placeCursor()
+	// The conversation takes keys at once; Init starts the cursor's blink.
+	m.syncInput()
 }
 
 // cachedConversation shows the cached copy of the conversation with tag when nothing of it is

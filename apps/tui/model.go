@@ -420,6 +420,9 @@ func (m model) Init() tea.Cmd {
 		// The cache showed the conversation; bring it up to date at once.
 		cmds = append(cmds, m.reloadHistory(tag))
 	}
+	if m.input.Focused() {
+		cmds = append(cmds, textinput.Blink)
+	}
 	if m.watcher != nil {
 		cmds = append(cmds, waitForWatch(m.watcher.Run(m.ctx)))
 	}

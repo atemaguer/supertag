@@ -499,3 +499,20 @@ func TestACachedConversationDoesNotRepeatItsWorkSessionLines(t *testing.T) {
 		t.Fatalf("a reread of a cached turn repeated its work Session:\n%s", got)
 	}
 }
+
+func TestALaunchFromTheCacheTakesKeysAtOnce(t *testing.T) {
+	privateCache(t)
+	fake, url := firstPaintPlane(t, 0)
+	_ = fake
+	launchUntil(t, url, true)
+	a, err := newApp(t.Context(), dial("test"), []client.Target{{URL: url, Token: "secret"}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.stop()
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	a.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	if a.inner.input.Value() != "h" {
+		t.Fatalf("the input took %q", a.inner.input.Value())
+	}
+}
