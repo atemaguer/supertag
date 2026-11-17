@@ -294,10 +294,13 @@ impl RemoteProvider {
         ensure!(timeout_ms > 0, "sandbox lifetime must be positive");
         ensure!(
             allowed_actions.len() <= 64
-                && allowed_actions
-                    .iter()
-                    .all(|action| matches!(action.as_str(), "files:read" | "files:write")),
-            "remote provider supports only file actions"
+                && allowed_actions.iter().all(|action| {
+                    matches!(
+                        action.as_str(),
+                        "files:read" | "files:write" | "commands:execute"
+                    )
+                }),
+            "remote provider supports only file and command actions"
         );
         let (prepared_artifact, prepare) = match start {
             Start::Fresh => (None, false),

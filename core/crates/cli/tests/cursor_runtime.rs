@@ -681,6 +681,80 @@ database_tests! {
     cursor_remote_cleanup_failure_reaches_the_task_report_redacted;
     #[tokio::test]
     cursor_remote_workspace_reuses_and_warms_prepared_artifacts;
+    #[tokio::test]
+    cursor_remote_workspace_runs_commands_in_the_sandbox_without_the_unsandboxed_opt_in;
+}
+
+/// A Cursor Task with `commands:execute` on an E2B host: the host never takes
+/// `--allow-unsandboxed-commands`, the provider receives the action, the command tool runs in the
+/// sandbox and its write is delivered.
+async fn cursor_remote_workspace_runs_commands_in_the_sandbox_without_the_unsandboxed_opt_in(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    std::fs::write(fixture.root.join("provider-kind"), "e2b")?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write", "commands:execute"],
+        )
+        .await?;
+    let task = runtime.submit(TAG, "remote-command").await?;
+    worker_finished(
+        runtime.worker_with_remote(
+            &fixture,
+            "remote-command",
+            false,
+            Some(RemoteWorkspace::E2b),
+        )?,
+        &fixture,
+    )
+    .await?;
+    let task = match runtime.assert_success(&task.task_id, "remote-command").await {
+        Ok(task) => task,
+        Err(error) => anyhow::bail!(
+            "{error:#}; fixture: {:?}; provider: {:?}",
+            fixture.trace()?,
+            fixture.provider_trace()?
+        ),
+    };
+    let delivery = task
+        .workspace_delivery
+        .as_ref()
+        .context("remote command delivery missing")?;
+    ensure!(delivery.committed && delivery.changed_files == 1);
+    let trace = fixture.provider_trace()?;
+    assert_eq!(
+        trace
+            .iter()
+            .filter(|value| value["type"] == "command")
+            .count(),
+        2,
+        "{trace:?}"
+    );
+    let request = trace
+        .iter()
+        .find(|value| value["type"] == "capture-request")
+        .context("provider never captured")?;
+    assert_eq!(
+        request["actions"],
+        json!(["commands:execute", "files:read", "files:write"])
+    );
+    let capture = trace
+        .iter()
+        .find(|value| value["type"] == "capture")
+        .context("provider capture trace missing")?;
+    assert_eq!(capture["content"], "command-content\n");
+    assert_eq!(
+        std::fs::read_to_string(fixture.source.join("workspace.txt"))?,
+        "initial-content\n"
+    );
+    Ok(())
 }
 
 async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(

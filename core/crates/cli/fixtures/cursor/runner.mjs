@@ -99,6 +99,7 @@ async function runFixture() {
         "resume",
         "remote-first",
         "remote-resume",
+        "remote-command",
         "remote-output-auto",
         "remote-output-declared",
         "remote-output-empty",
@@ -137,6 +138,7 @@ async function runFixture() {
     const writes = mode === "first" || mode === "remote-first" || mode === "shared-first";
     const remoteInputs = mode.startsWith("remote-input-");
     const remoteMcp = mode === "remote-mcp";
+    const remoteCommand = mode === "remote-command";
     const copies = mode === "copy" || mode === "remote-copy";
     const writable =
       writes ||
@@ -144,6 +146,7 @@ async function runFixture() {
       shared ||
       remoteInputs ||
       remoteMcp ||
+      remoteCommand ||
       (output && mode !== "remote-output-readonly");
     const resumes = mode === "resume" || mode === "remote-resume" || mode === "shared-resume";
     assert.deepEqual(request.tools, ["mcp"]);
@@ -154,7 +157,8 @@ async function runFixture() {
     assert.ok(toolNames.includes("read"));
     assert.equal(toolNames.includes("write"), writable);
     assert.equal(toolNames.includes("edit"), writable && !shared);
-    assert.equal(toolNames.includes("command"), mode === "first" || sharedCommand);
+    const commands = mode === "first" || sharedCommand || remoteCommand;
+    assert.equal(toolNames.includes("command"), commands);
     if (shared)
       assert.deepEqual(
         toolNames.sort(),
@@ -220,8 +224,8 @@ async function runFixture() {
         'test -z "$CURSOR_API_KEY$OPENAI_API_KEY$SUPERTAG_HOST_TOKEN$SUPERTAG_OPERATOR_TOKEN$SUPERTAG_EXECUTION_ADMIN_TOKEN" && printf cursor-command-safe' +
         (sharedCommand ? " && sleep 6" : ""),
     });
-    assert.equal(command.isError, !(mode === "first" || sharedCommand));
-    if (mode === "first" || sharedCommand) assert.ok(command.text.includes("cursor-command-safe"));
+    assert.equal(command.isError, !commands);
+    if (commands) assert.ok(command.text.includes("cursor-command-safe"));
     if (sharedCommand) {
       const blocked = await call("command", {
         command: "/usr/bin/setsid /bin/sh -c 'echo $$ > lease.pid; exec /bin/sleep 60' & wait",
@@ -375,6 +379,12 @@ async function runFixture() {
       } else if (mode === "remote-output-cap") {
         await writeOutput(`${directory}/oversized.txt`, "larger than accepted budget\n");
       }
+    } else if (remoteCommand) {
+      // The command writes the Workspace in the sandbox; the Worker Host delivers it.
+      const written = await call("command", {
+        command: "printf 'command-content\\n' > workspace.txt && printf wrote",
+      });
+      assert.deepEqual([written.isError, written.text], [false, "wrote"]);
     } else {
       const write = await call("write", {
         file_path: "workspace.txt",

@@ -161,7 +161,11 @@ const implementation = {
       assert.equal(allocation, undefined);
       assert.ok(owner && owner.hostGeneration > 0n && timeoutMs > 0);
       assert.match(owner.allocationId, /^[\w-]+$/u);
-      assert.ok(allowedActions.every((action) => ["files:read", "files:write"].includes(action)));
+      assert.ok(
+        allowedActions.every((action) =>
+          ["files:read", "files:write", "commands:execute"].includes(action),
+        ),
+      );
       directory = join(root, "remote-allocations", owner.allocationId);
       await mkdir(directory, { recursive: true, mode: 0o700 });
       allocation = {
@@ -317,8 +321,9 @@ const implementation = {
       await trace({ type: "remove-artifact", artifact });
       return {};
     },
-    async *capture() {
+    async *capture(request) {
       assert.ok(staged && !allocation.stopped);
+      await trace({ type: "capture-request", keep: request.keep, actions });
       await stopMcpServers();
       const checkout = join(directory, "checkout");
       if (
@@ -507,6 +512,25 @@ const implementation = {
   workspace: {
     async execute({ operation }) {
       assert.ok(staged && !allocation.stopped);
+      if (operation.case === "command") {
+        // The sandbox runs the command in the checkout with no Worker Host variable.
+        if (!actions.includes("commands:execute") || !actions.includes("files:write"))
+          return { text: "Fixture command denied", isError: true };
+        const result = await new Promise((resolve) => {
+          execFile(
+            "/bin/sh",
+            ["-c", operation.value.command],
+            {
+              cwd: join(directory, "checkout"),
+              env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
+              timeout: operation.value.timeoutMs ?? 60_000,
+            },
+            (error, stdout, stderr) => resolve({ error, text: `${stdout}${stderr}` }),
+          );
+        });
+        await trace({ type: "command", allocationId: allocation.owner.allocationId });
+        return { text: result.text, isError: Boolean(result.error) };
+      }
       const requested = operation.value?.path ?? "";
       // Like the provider's file tools, a read-only copy may only be read.
       const copy = [...copies].find(([path]) => requested.startsWith(`${path}/`));
