@@ -292,7 +292,7 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "schedule",
         "schedules",
         "Schedule",
-        LIST_DELETE,
+        [true, true, true, true],
     ),
     kind(
         Kind::Memory,

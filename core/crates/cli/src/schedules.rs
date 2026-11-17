@@ -8,8 +8,8 @@ use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        CreateScheduleRequest, GetScheduleRequest, ListSchedulesRequest, Schedule,
-        schedules_client::SchedulesClient,
+        BackfillScheduleRequest, CreateScheduleRequest, GetScheduleRequest, ListSchedulesRequest,
+        Schedule, schedules_client::SchedulesClient,
     },
 };
 use uuid::Uuid;
@@ -52,6 +52,36 @@ pub enum ScheduleCommand {
         /// Schedule ID.
         schedule_id: String,
     },
+    /// Replay a recurring Schedule's occurrences that queued no turn, such as those missed while
+    /// SuperTag was down, one turn each, at most 24.
+    Backfill {
+        /// Schedule ID.
+        schedule_id: String,
+        /// The earliest occurrence to replay: an RFC 3339 time such as 2026-11-10T09:00:00Z, or a
+        /// duration ago such as 3d or 12h.
+        #[arg(long)]
+        from: String,
+    },
+}
+
+/// `--from`: an RFC 3339 time, or a duration ago (`90m`, `12h`, `3d`, `1w`).
+fn from_ms(value: &str, now_ms: i64) -> Result<i64> {
+    let value = value.trim();
+    if let Ok(time) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Ok(time.timestamp_millis());
+    }
+    let (count, unit) = value.split_at(value.len().saturating_sub(1));
+    let unit_ms = match unit {
+        "m" => 60_000,
+        "h" => 3_600_000,
+        "d" => 86_400_000,
+        "w" => 7 * 86_400_000,
+        _ => anyhow::bail!("--from takes an RFC 3339 time or a duration ago, such as 3d"),
+    };
+    let count: i64 = count.parse().map_err(|_| {
+        anyhow::anyhow!("--from takes an RFC 3339 time or a duration ago, such as 3d")
+    })?;
+    Ok(now_ms - count * unit_ms)
 }
 
 /// Options for `supertag get schedules`.
@@ -112,6 +142,29 @@ pub async fn run(connection: Connection, command: ScheduleCommand) -> Result<()>
             .resume(request(GetScheduleRequest { schedule_id }, &token)?)
             .await?
             .into_inner(),
+        ScheduleCommand::Backfill { schedule_id, from } => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_millis() as i64);
+            let replayed = client
+                .backfill(request(
+                    BackfillScheduleRequest {
+                        schedule_id,
+                        from_ms: from_ms(&from, now)?,
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            let mut value = replayed
+                .schedule
+                .as_ref()
+                .map_or_else(|| json!({}), schedule_json);
+            value["backfilled_task_ids"] = json!(replayed.task_ids);
+            value["skipped"] = json!(replayed.skipped);
+            crate::terminal::print_json(&value)?;
+            return Ok(());
+        }
     };
     crate::terminal::print_json(&schedule_json(&schedule))?;
     Ok(())
@@ -192,4 +245,27 @@ fn schedule_json(schedule: &Schedule) -> Value {
         "last_task_id": schedule.last_task_id,
         "last_fired_at": at(schedule.last_fired_at_ms),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_reads_a_time_or_a_duration_ago() {
+        assert_eq!(
+            from_ms("2026-11-10T09:00:00Z", 0).unwrap(),
+            1_794_301_200_000
+        );
+        assert_eq!(
+            from_ms("3d", 1_000_000_000).unwrap(),
+            1_000_000_000 - 3 * 86_400_000
+        );
+        assert_eq!(
+            from_ms("90m", 10_000_000).unwrap(),
+            10_000_000 - 90 * 60_000
+        );
+        assert!(from_ms("next week", 0).is_err());
+        assert!(from_ms("3y", 0).is_err());
+    }
 }
