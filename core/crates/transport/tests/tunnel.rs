@@ -493,7 +493,7 @@ async fn exercise(
 
     // Server streaming.
     let mut capture = client
-        .capture(RemoteWorkspaceCaptureRequest {})
+        .capture(RemoteWorkspaceCaptureRequest::default())
         .await?
         .into_inner();
     let mut received = Vec::new();
