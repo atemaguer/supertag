@@ -562,16 +562,15 @@ impl Store {
                 "Workspace differs from the accepted parent Task".into(),
             ));
         }
-        let digest = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(&(
-                &title,
-                instruction,
-                workspace,
-                target,
-                &input.harness
-            ))?)
-        );
+        // A start that names no harness keeps the digest it had before starts could name one, so a
+        // retry of an operation recorded then still matches.
+        let content = match &input.harness {
+            None => serde_json::to_vec(&(&title, instruction, workspace, target))?,
+            Some(harness) => {
+                serde_json::to_vec(&(&title, instruction, workspace, target, harness))?
+            }
+        };
+        let digest = format!("{:x}", Sha256::digest(content));
         let prior = sqlx::query("SELECT child_task_id,request_digest FROM supertag_v2_work_session_starts WHERE starter_task_id=$1 AND operation_id=$2")
             .bind(&parent.task_id).bind(&input.operation_id).fetch_optional(&mut *tx).await?;
         if let Some(prior) = prior {

@@ -177,6 +177,17 @@ async fn contract(url: String) {
         .await
         .unwrap();
     assert_eq!(retried.work_session_id, started.work_session_id);
+    // The harness is part of the start: the same operation without it, or with another, conflicts.
+    for harness in [None, Some("cursor")] {
+        let changed = StartWorkSessionRequest {
+            harness: harness.map(Into::into),
+            ..start(&lead, "claude", "claude-code")
+        };
+        assert!(matches!(
+            store.start_work_session(&codex, &changed).await,
+            Err(StoreError::Conflict(_))
+        ));
+    }
     let placement = store
         .diagnose_task_placement(&started.latest_task_id)
         .await
