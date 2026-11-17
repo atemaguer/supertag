@@ -101,7 +101,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 84;
+        const SCHEMA_VERSION: i64 = 85;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -282,6 +282,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0082_lead_tag.sql"),
                 include_str!("../migrations/sqlite/0083_one_conversation_per_tag.sql"),
                 include_str!("../migrations/sqlite/0084_schedules.sql"),
+                include_str!("../migrations/sqlite/0085_checkpoint_garbage.sql"),
             ]
         } else {
             [
@@ -371,6 +372,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0082_lead_tag.sql"),
                 include_str!("../migrations/postgresql/0083_one_conversation_per_tag.sql"),
                 include_str!("../migrations/postgresql/0084_schedules.sql"),
+                include_str!("../migrations/postgresql/0085_checkpoint_garbage.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1237,7 +1239,7 @@ impl Store {
                 .bind(&task.task_id)
                 .execute(&mut *transaction)
                 .await?;
-            crate::checkpoints::finish_in(&mut transaction, &task, input).await?;
+            crate::checkpoints::finish_in(&mut transaction, &task, input, now).await?;
             crate::inbox::finish_in(&mut transaction, &task, input.objective_signal, now).await?;
         }
         crate::work_sessions::reports::settle_in(&mut transaction, &task, now).await?;
@@ -1558,7 +1560,6 @@ async fn insert_task_options(
         &mut accepted.workspace,
     )
     .await?;
-    let harness = i64::from(accepted.policy.harness_kind);
     if options.output_policy.is_some()
         && (accepted.workspace.is_none()
             || !accepted
@@ -1586,13 +1587,15 @@ async fn insert_task_options(
             .map(crate::policy::decode::<supertag_protocol::v2::TaskPolicySnapshot>).transpose()?;
         let prior_shared = supertag_protocol::shared_execution::environment(prior_policy.as_ref());
         let next_shared = supertag_protocol::shared_execution::environment(Some(&accepted.policy.snapshot));
+        // A Session may change harness: a checkpoint of another harness is dropped, and the
+        // next turn starts from the Session's recap.
         if !crate::workspaces::same_session_workspace(
             crate::workspaces::workspace_from_row(&previous)?.as_ref(),
             accepted.workspace.as_ref(),
         )
-            || previous.try_get::<i64,_>("harness_kind")? != harness || prior_shared != next_shared
+            || prior_shared != next_shared
         {
-            return Err(StoreError::FailedPrecondition("workspace or harness changed; start a new Session".into()));
+            return Err(StoreError::FailedPrecondition("workspace changed; start a new Session".into()));
         }
     }
     // A requested limit the Tag's harness cannot enforce would leave the Task queued forever.

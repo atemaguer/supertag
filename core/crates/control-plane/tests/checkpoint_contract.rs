@@ -327,6 +327,255 @@ async fn checkpoint_contract(url: &str) {
     store.close().await;
 }
 
+const DAY: i64 = 24 * 60 * 60 * 1000;
+
+async fn count(url: &str, sql: &str) -> i64 {
+    use sqlx::Row;
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    let value: i64 = sqlx::query(sql)
+        .fetch_one(&mut connection)
+        .await
+        .unwrap()
+        .try_get(0)
+        .unwrap();
+    connection.close().await.unwrap();
+    value
+}
+
+/// One promoted turn of `session`, with `reference` as its checkpoint, and its Attempt.
+async fn promoted(
+    store: &Store,
+    host: &HostAuthority,
+    session: &str,
+    reference: &CheckpointReference,
+) -> InspectAttemptRequest {
+    let attempt = turn(store, host, "owner", session).await;
+    stage(store, host, &attempt, reference).await;
+    store
+        .finish_task(host, &finish(&attempt, Some(reference)))
+        .await
+        .unwrap();
+    attempt
+}
+
+/// A Session keeps only its newest checkpoint, and drops it when it is too big, idle, for
+/// another harness, or its Objective ended long ago. Files go only when no row names them.
+async fn hygiene_contract(url: &str) {
+    let clock = Arc::new(AtomicI64::new(BASE));
+    let source = clock.clone();
+    let store = Store::open(url)
+        .await
+        .unwrap()
+        .with_execution_clock(move || source.load(Ordering::SeqCst));
+    let host = support::register_host(&store, "hygiene-owner").await;
+    store
+        .put_tag("owner", "Inspect carefully", vec!["files:read".into()])
+        .await
+        .unwrap();
+    let rows = |session: &str| {
+        format!(
+            "SELECT COUNT(*) FROM supertag_v2_checkpoints c JOIN supertag_v2_tasks t ON t.task_id=c.task_id WHERE t.session_id='{session}'"
+        )
+    };
+
+    // Promoting a checkpoint deletes the Session's older rows and queues their files.
+    let old = reference("first transcript");
+    let new = reference("second transcript, longer");
+    promoted(&store, &host, "one", &old).await;
+    promoted(&store, &host, "one", &new).await;
+    assert_eq!(count(url, &rows("one")).await, 1);
+    assert_eq!(
+        store.take_checkpoint_garbage(10).await.unwrap(),
+        [old.sha256.as_str()]
+    );
+    store
+        .forget_checkpoint_garbage(std::slice::from_ref(&old.sha256))
+        .await
+        .unwrap();
+    assert!(store.take_checkpoint_garbage(10).await.unwrap().is_empty());
+
+    // A file two Sessions share stays while either names it.
+    let shared = reference("identical transcript bytes");
+    promoted(&store, &host, "left", &shared).await;
+    promoted(&store, &host, "right", &shared).await;
+    promoted(&store, &host, "left", &reference("left moves on")).await;
+    assert!(
+        store.take_checkpoint_garbage(10).await.unwrap().is_empty(),
+        "the right Session still names the shared file"
+    );
+
+    // A running Attempt's reservation survives the sweep; a failed Attempt's commit does not.
+    let running = turn(&store, &host, "owner", "running").await;
+    let staged = reference("running transcript");
+    stage(&store, &host, &running, &staged).await;
+    let failed = turn(&store, &host, "owner", "failed").await;
+    let abandoned = reference("failed transcript");
+    stage(&store, &host, &failed, &abandoned).await;
+    let mut failure = finish(&failed, None);
+    failure.succeeded = false;
+    store.finish_task(&host, &failure).await.unwrap();
+    store.sweep_checkpoints().await.unwrap();
+    assert_eq!(count(url, &rows("failed")).await, 0);
+    assert_eq!(
+        store.take_checkpoint_garbage(10).await.unwrap(),
+        [abandoned.sha256.as_str()]
+    );
+    store
+        .finish_task(&host, &finish(&running, Some(&staged)))
+        .await
+        .unwrap();
+    assert_eq!(count(url, &rows("running")).await, 1);
+
+    // A checkpoint over half the cap is not offered: the next turn starts fresh.
+    let mut big = reference("big transcript");
+    big.byte_length = supertag_protocol::MAX_RESUMED_CHECKPOINT_BYTES as u64 + 1;
+    promoted(&store, &host, "big", &big).await;
+    let next = turn(&store, &host, "owner", "big").await;
+    assert!(store.get_checkpoint(&host, &next).await.unwrap().is_none());
+    assert_eq!(count(url, &rows("big")).await, 0);
+    store
+        .finish_task(&host, &finish(&next, None))
+        .await
+        .unwrap();
+
+    // A checkpoint of another harness is not offered to this Tag's harness.
+    promoted(&store, &host, "switched", &reference("codex transcript")).await;
+    store
+        .put_tag_configured(
+            "owner",
+            "Inspect carefully",
+            vec!["files:read".into()],
+            None,
+            HarnessKind::ClaudeCode,
+        )
+        .await
+        .unwrap();
+    let task = store
+        .submit_task(
+            OPERATOR,
+            &SubmitTaskRequest {
+                tag_id: "owner".into(),
+                session_id: "switched".into(),
+                operation_id: Uuid::new_v4().to_string(),
+                prompt: "Continue on Claude Code".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let claimed = store
+        .claim_task_for_host(
+            &host,
+            &Uuid::new_v4().to_string(),
+            &[],
+            HarnessKind::ClaudeCode,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claimed.task.as_ref().unwrap().task_id, task.task_id);
+    let switched = InspectAttemptRequest {
+        task_id: task.task_id.clone(),
+        attempt_id: claimed.attempt_id,
+        lease_token: claimed.lease_token,
+    };
+    store
+        .start_task(
+            &host,
+            &StartTaskRequest {
+                task_id: switched.task_id.clone(),
+                attempt_id: switched.attempt_id.clone(),
+                lease_token: switched.lease_token.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        store
+            .get_checkpoint(&host, &switched)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(count(url, &rows("switched")).await, 0);
+    store
+        .finish_task(&host, &finish(&switched, None))
+        .await
+        .unwrap();
+    store
+        .put_tag("owner", "Inspect carefully", vec!["files:read".into()])
+        .await
+        .unwrap();
+
+    // An idle Session's checkpoint is not offered after 14 days, and the sweep drops it.
+    let idle = reference("idle transcript");
+    promoted(&store, &host, "idle", &idle).await;
+    let swept = reference("swept transcript");
+    promoted(&store, &host, "swept", &swept).await;
+    let resumed = turn(&store, &host, "owner", "idle").await;
+    assert_eq!(
+        store.get_checkpoint(&host, &resumed).await.unwrap(),
+        Some(idle.clone()),
+        "a fresh checkpoint resumes"
+    );
+    store.cancel_task(&resumed.task_id).await.unwrap();
+    store
+        .finish_task(&host, &finish(&resumed, None))
+        .await
+        .unwrap();
+    clock.store(BASE + 15 * DAY, Ordering::SeqCst);
+    let late = turn(&store, &host, "owner", "idle").await;
+    assert!(store.get_checkpoint(&host, &late).await.unwrap().is_none());
+    store
+        .finish_task(&host, &finish(&late, None))
+        .await
+        .unwrap();
+    store.sweep_checkpoints().await.unwrap();
+    assert_eq!(count(url, &rows("swept")).await, 0);
+    let garbage = store.take_checkpoint_garbage(100).await.unwrap();
+    assert!(garbage.contains(&idle.sha256) && garbage.contains(&swept.sha256));
+
+    // An Objective's Sessions lose their checkpoints 14 days after it ends.
+    let objective = store
+        .create_objective(
+            OPERATOR,
+            &CreateObjectiveRequest {
+                objective_id: "ended".into(),
+                operation_id: "ended-create".into(),
+                owner_tag_id: "owner".into(),
+                outcome: "Finish and let go of the transcript".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let attempt = claim(&store, &host, &objective.starting_task_id).await;
+    let ended = reference("objective transcript");
+    stage(&store, &host, &attempt, &ended).await;
+    let mut completion = finish(&attempt, Some(&ended));
+    completion.objective_signal = ObjectiveSignal::Completed.into();
+    store.finish_task(&host, &completion).await.unwrap();
+    store.sweep_checkpoints().await.unwrap();
+    assert!(
+        !store
+            .take_checkpoint_garbage(100)
+            .await
+            .unwrap()
+            .contains(&ended.sha256),
+        "a just-ended Objective keeps its checkpoint"
+    );
+    clock.store(BASE + 30 * DAY, Ordering::SeqCst);
+    store.sweep_checkpoints().await.unwrap();
+    assert!(
+        store
+            .take_checkpoint_garbage(100)
+            .await
+            .unwrap()
+            .contains(&ended.sha256)
+    );
+    store.close().await;
+}
+
 fn native(attempt: &InspectAttemptRequest, sequence: u64, input: u64) -> ReportAttemptUsageRequest {
     ReportAttemptUsageRequest {
         attempt: Some(attempt.clone()),
@@ -501,8 +750,35 @@ async fn sqlite_checkpoint_and_native_usage_contract() {
 }
 
 #[tokio::test]
+async fn sqlite_checkpoint_hygiene_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("hygiene.db").display()
+    );
+    hygiene_contract(&url).await;
+}
+
+#[tokio::test]
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
-async fn postgres_checkpoint_and_native_usage_contract() {
+async fn postgres_checkpoint_hygiene_contract() {
+    postgres(hygiene_contract_boxed).await;
+}
+
+fn hygiene_contract_boxed(url: String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>> {
+    Box::pin(async move { hygiene_contract(&url).await })
+}
+
+fn checkpoint_contract_boxed(
+    url: String,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>> {
+    Box::pin(async move { checkpoint_contract(&url).await })
+}
+
+/// Runs `contract` against a fresh database on the dedicated PostgreSQL test server.
+async fn postgres(
+    contract: fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>,
+) {
     let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
         .expect("PostgreSQL test URL file required");
     let admin_url = std::fs::read_to_string(path).unwrap();
@@ -517,10 +793,7 @@ async fn postgres_checkpoint_and_native_usage_contract() {
     let local = tokio::task::LocalSet::new();
     let outcome = local
         .run_until(async move {
-            tokio::task::spawn_local(async move {
-                checkpoint_contract(url.as_str()).await;
-            })
-            .await
+            tokio::task::spawn_local(async move { contract(url.to_string()).await }).await
         })
         .await;
     admin
@@ -529,4 +802,10 @@ async fn postgres_checkpoint_and_native_usage_contract() {
         .unwrap();
     admin.close().await.unwrap();
     outcome.expect("PostgreSQL checkpoint contract failed");
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_checkpoint_and_native_usage_contract() {
+    postgres(checkpoint_contract_boxed).await;
 }

@@ -2,13 +2,28 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
-    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES,
+    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES, MAX_RESUMED_CHECKPOINT_BYTES,
     v2::{checkpoint_download, checkpoint_upload, transfers_client::TransfersClient, *},
     validate_checkpoint_reference,
 };
 use tonic::{Status, transport::Channel};
 
 use crate::{HostHeaders, journal::Attempt, request};
+
+/// Whether this host's harness resumes the checkpoint. One it cannot (another harness's, or one
+/// too big to grow) is left out, and the adapter starts fresh from the Session's recap. A custom
+/// adapter's host names no harness, so only its adapter can tell.
+pub(crate) fn resumable(harness: HarnessKind, checkpoint: &SessionCheckpoint) -> bool {
+    supertag_protocol::checkpoint_harness(harness).is_none_or(|name| name == checkpoint.harness)
+        && checkpoint.payload.len() <= MAX_RESUMED_CHECKPOINT_BYTES
+}
+
+/// The checkpoint a finished turn keeps. One too big to grow would be dropped before the next
+/// turn resumed it, so it is never kept: the turn still succeeds, and the next one starts from
+/// the recap.
+pub(crate) fn kept(checkpoint: Option<SessionCheckpoint>) -> Option<SessionCheckpoint> {
+    checkpoint.filter(|checkpoint| checkpoint.payload.len() <= MAX_RESUMED_CHECKPOINT_BYTES)
+}
 
 #[derive(Clone)]
 pub(crate) struct Transfers {
@@ -124,5 +139,50 @@ impl Transfers {
             sha256: reference.sha256,
             payload,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn checkpoint(harness: &str, bytes: usize) -> SessionCheckpoint {
+        SessionCheckpoint {
+            harness: harness.into(),
+            format: "fixture-v1".into(),
+            sha256: "0".repeat(64),
+            payload: vec![b' '; bytes],
+        }
+    }
+
+    #[test]
+    fn a_host_resumes_only_its_own_harness_checkpoints_that_can_still_grow() {
+        let limit = MAX_RESUMED_CHECKPOINT_BYTES;
+        assert!(resumable(HarnessKind::Codex, &checkpoint("codex", limit)));
+        assert!(!resumable(
+            HarnessKind::Codex,
+            &checkpoint("codex", limit + 1)
+        ));
+        assert!(!resumable(
+            HarnessKind::ClaudeCode,
+            &checkpoint("codex", 10)
+        ));
+        assert!(resumable(
+            HarnessKind::ClaudeCode,
+            &checkpoint("claude-code", 10)
+        ));
+        // A custom adapter's host names no harness; its adapter decides.
+        assert!(resumable(
+            HarnessKind::Unspecified,
+            &checkpoint("fixture", 10)
+        ));
+    }
+
+    #[test]
+    fn a_turn_keeps_no_checkpoint_too_big_to_resume() {
+        let limit = MAX_RESUMED_CHECKPOINT_BYTES;
+        assert!(kept(Some(checkpoint("codex", limit))).is_some());
+        assert!(kept(Some(checkpoint("codex", limit + 1))).is_none());
+        assert!(kept(None).is_none());
     }
 }

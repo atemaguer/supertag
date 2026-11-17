@@ -193,15 +193,14 @@ impl Harness for Bridge {
                 host.get_attempt_capabilities(request).await
             })
             .await?;
-        let history = if matches!(self.harness, HarnessKind::Opencode | HarnessKind::Cursor) {
-            self.retry_upstream(self.attempt(), |mut host, request| async move {
+        // Every harness gets the recap: an adapter that cannot resume its checkpoint, or has
+        // none, starts a fresh native session from it.
+        let history = self
+            .retry_upstream(self.attempt(), |mut host, request| async move {
                 host.get_attempt_history(request).await
             })
             .await?
-            .entries
-        } else {
-            vec![]
-        };
+            .entries;
         self.attached.store(true, Ordering::Release);
         Ok(Response::new(HarnessRun {
             task: self.assignment.task.clone(),
@@ -398,6 +397,7 @@ impl Harness for Bridge {
         }
         let mut outcome = request.into_inner();
         outcome.result = self.redact_within(&outcome.result, MAX_RESULT_BYTES);
+        outcome.checkpoint = crate::checkpoints::kept(outcome.checkpoint.take());
         if outcome.result.len() > MAX_RESULT_BYTES
             || outcome.result.contains('\0')
             || ObjectiveSignal::try_from(outcome.objective_signal).is_err()

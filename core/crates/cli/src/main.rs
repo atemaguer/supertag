@@ -1543,13 +1543,23 @@ async fn control_plane(
     outln!("{}", listener.local_addr()?);
     let tunnel = bind_websocket(websocket).await?;
     let maintenance = plane.clone();
+    let checkpoint_files = transfers.clone();
     let sweep = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let garbage = CheckpointGarbage(maintenance.clone());
+        let mut tick = 0u64;
         loop {
             interval.tick().await;
             if let Err(error) = maintenance.maintain(Duration::from_secs(1)).await {
                 errln!("Control Plane maintenance failed: {error}");
+            }
+            // Dropped checkpoints' files go once a minute, after the sweep dropped their rows.
+            tick += 1;
+            if tick.is_multiple_of(60)
+                && let Err(error) = checkpoint_files.collect_checkpoint_garbage(&garbage).await
+            {
+                errln!("Control Plane checkpoint cleanup failed: {error}");
             }
         }
     });
@@ -1629,6 +1639,20 @@ async fn control_plane(
     sweep.abort();
     let _ = sweep.await;
     result
+}
+
+/// The state owner's queue of dropped checkpoint files, for the API tier that stores them.
+struct CheckpointGarbage(ControlPlane);
+
+#[tonic::async_trait]
+impl supertag_api::transfers::CheckpointGarbage for CheckpointGarbage {
+    async fn take(&self, limit: u32) -> Result<Vec<String>> {
+        Ok(self.0.take_checkpoint_garbage(limit).await?)
+    }
+
+    async fn forget(&self, digests: &[String]) -> Result<()> {
+        Ok(self.0.forget_checkpoint_garbage(digests).await?)
+    }
 }
 
 /// GitHub Workspace sources, read with this Control Plane's GitHub account, for transfers.

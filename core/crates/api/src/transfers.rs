@@ -71,6 +71,16 @@ pub struct FetchedSource {
     pub keep: Box<dyn std::any::Any + Send + Sync>,
 }
 
+/// The Control Plane's queue of checkpoint files no checkpoint row names any more. The process
+/// that runs this tier supplies it from the state owner.
+#[tonic::async_trait]
+pub trait CheckpointGarbage: Send + Sync + 'static {
+    /// Up to `limit` digests whose files may be deleted.
+    async fn take(&self, limit: u32) -> Result<Vec<String>>;
+    /// Forgets digests whose files are gone.
+    async fn forget(&self, digests: &[String]) -> Result<()>;
+}
+
 /// Serves the Control Plane's byte transfers. It stores Session checkpoints in an optional private
 /// directory and nothing else: artifact and Workspace delivery bytes stay on the Worker Host that
 /// produced them (or a Volume), and reach readers through [`RelayHub`] without being written here.
@@ -82,6 +92,9 @@ pub struct ApiTransfers {
     github_sources: Option<Arc<dyn WorkspaceSources>>,
     volumes: volumes::ArtifactVolumeMappings,
     relay: Arc<RelayHub>,
+    /// Uploads hold it shared and garbage collection exclusively, so a file is never deleted
+    /// while an upload of the same digest is between its reservation and its commit.
+    checkpoint_files: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl ApiTransfers {
@@ -107,7 +120,37 @@ impl ApiTransfers {
             github_sources: None,
             volumes: volumes::ArtifactVolumeMappings::default(),
             relay: Arc::default(),
+            checkpoint_files: Arc::default(),
         })
+    }
+
+    /// Deletes the files of checkpoints no row names any more, and returns how many. A missing
+    /// file counts as deleted.
+    pub async fn collect_checkpoint_garbage(
+        &self,
+        garbage: &dyn CheckpointGarbage,
+    ) -> Result<usize> {
+        let Some(directory) = &self.checkpoints else {
+            return Ok(0);
+        };
+        let _exclusive = self.checkpoint_files.write().await;
+        let digests = garbage.take(256).await?;
+        let mut deleted = Vec::with_capacity(digests.len());
+        for digest in digests {
+            if !supertag_protocol::valid_sha256(&digest) {
+                continue;
+            }
+            match tokio::fs::remove_file(directory.join(&digest)).await {
+                Ok(()) => deleted.push(digest),
+                Err(error) if error.kind() == ErrorKind::NotFound => deleted.push(digest),
+                Err(error) => return Err(error).context("delete a dropped checkpoint file"),
+            }
+        }
+        if !deleted.is_empty() {
+            sync_directory(directory).await?;
+            garbage.forget(&deleted).await?;
+        }
+        Ok(deleted.len())
     }
 
     /// Ends every Worker Host relay stream once `shutdown` is cancelled.
@@ -198,6 +241,7 @@ impl ApiTransfers {
         request: Request<Streaming<CheckpointUpload>>,
     ) -> Result<Response<CheckpointReference>, Status> {
         let directory = self.checkpoint_directory()?;
+        let _shared = self.checkpoint_files.read().await;
         let (metadata, _, mut stream) = request.into_parts();
         let begin = match stream.message().await?.and_then(|message| message.part) {
             Some(checkpoint_upload::Part::Begin(begin)) => begin,

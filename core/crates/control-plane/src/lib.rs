@@ -171,6 +171,17 @@ impl ControlPlane {
         Ok(true)
     }
 
+    /// Up to `limit` digests of checkpoint files no checkpoint row names, for the API tier that
+    /// stores the files to delete.
+    pub async fn take_checkpoint_garbage(&self, limit: u32) -> anyhow::Result<Vec<String>> {
+        Ok(self.store.take_checkpoint_garbage(limit).await?)
+    }
+
+    /// Forgets checkpoint digests whose files the API tier deleted.
+    pub async fn forget_checkpoint_garbage(&self, digests: &[String]) -> anyhow::Result<()> {
+        Ok(self.store.forget_checkpoint_garbage(digests).await?)
+    }
+
     pub async fn sweep(&self) -> anyhow::Result<()> {
         self.store.sweep_objectives().await?;
         self.store.sweep_expired_attempts().await?;
@@ -184,6 +195,7 @@ impl ControlPlane {
         self.store.sweep_github_publications().await?;
         self.store.sweep_ephemeral_hosts().await?;
         self.store.sweep_schedules().await?;
+        self.store.sweep_checkpoints().await?;
         self.store.prune_watch().await?;
         Ok(())
     }

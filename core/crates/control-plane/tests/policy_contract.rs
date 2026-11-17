@@ -757,18 +757,18 @@ async fn composition(store: &Store) {
         )
         .await
         .unwrap();
-    assert!(matches!(
-        store
-            .submit_task(
-                OP,
-                &SubmitTaskRequest {
-                    operation_id: "changed-session".into(),
-                    ..request.clone()
-                }
-            )
-            .await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
+    // A Session may change harness: its next turn runs on the new one, from the recap.
+    let changed = store
+        .submit_task(
+            OP,
+            &SubmitTaskRequest {
+                operation_id: "changed-session".into(),
+                ..request.clone()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(changed.harness_kind, HarnessKind::Codex as i32);
     let task = store
         .submit_task(
             OP,

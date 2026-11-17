@@ -328,3 +328,47 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
     assert_eq!(failure.code(), Code::DataLoss);
     Ok(())
 }
+
+/// The state owner's garbage queue, recording what the API tier forgot.
+struct Garbage {
+    digests: Vec<String>,
+    forgotten: std::sync::Mutex<Vec<String>>,
+}
+
+#[tonic::async_trait]
+impl CheckpointGarbage for Garbage {
+    async fn take(&self, _limit: u32) -> anyhow::Result<Vec<String>> {
+        Ok(self.digests.clone())
+    }
+
+    async fn forget(&self, digests: &[String]) -> anyhow::Result<()> {
+        self.forgotten.lock().unwrap().extend_from_slice(digests);
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn dropped_checkpoint_files_are_deleted_and_forgotten() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let checkpoints = directory.path().join("checkpoints");
+    let channel = Endpoint::from_static("http://127.0.0.1:9").connect_lazy();
+    let api = Api::new(
+        supertag_protocol::negotiation::bind_current(channel),
+        "private-token".into(),
+        "operator-token".into(),
+        "operator:alice".into(),
+    )?;
+    let transfers = ApiTransfers::new(api, Some(checkpoints.clone()))?;
+    let (dropped, missing, kept) = ("a".repeat(64), "b".repeat(64), "c".repeat(64));
+    std::fs::write(checkpoints.join(&dropped), b"old transcript")?;
+    std::fs::write(checkpoints.join(&kept), b"current transcript")?;
+    let garbage = Garbage {
+        digests: vec![dropped.clone(), missing.clone(), "../escape".into()],
+        forgotten: Default::default(),
+    };
+    assert_eq!(transfers.collect_checkpoint_garbage(&garbage).await?, 2);
+    assert!(!checkpoints.join(&dropped).exists());
+    assert!(checkpoints.join(&kept).exists(), "only queued digests go");
+    assert_eq!(*garbage.forgotten.lock().unwrap(), [dropped, missing]);
+    Ok(())
+}

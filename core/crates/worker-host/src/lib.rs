@@ -1490,7 +1490,9 @@ async fn run_assignment(
     }
     let checkpoint = match time::timeout_at(valid_until, transfers.download(&attempt, token)).await
     {
-        Ok(Ok(checkpoint)) => checkpoint,
+        Ok(Ok(checkpoint)) => {
+            checkpoint.filter(|checkpoint| checkpoints::resumable(options.harness, checkpoint))
+        }
         Ok(Err(error)) if retryable(&error) || error.code() == Code::ResourceExhausted => {
             wait_for_work(shutdown).await;
             return Ok(());

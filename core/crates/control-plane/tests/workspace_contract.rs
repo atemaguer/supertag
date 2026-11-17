@@ -324,10 +324,6 @@ async fn exercise(url: &str) {
             .harness_kind(),
         HarnessKind::ClaudeCode
     );
-    assert!(matches!(
-        submit(&store, "selected-harness").await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
     let next_harness = submit(&store, "new-harness").await.unwrap();
     assert_eq!(next_harness.harness_kind(), HarnessKind::OpenaiAgents);
     let python = store
@@ -348,6 +344,14 @@ async fn exercise(url: &str) {
         .unwrap()
         .unwrap();
     assert_eq!(claude.task.unwrap().task_id, selected.task_id);
+    // The Session's next turn runs on the new harness, from the recap.
+    assert_eq!(
+        submit(&store, "selected-harness")
+            .await
+            .unwrap()
+            .harness_kind(),
+        HarnessKind::OpenaiAgents
+    );
 
     store.put_tag("engineer", "Updated", vec![]).await.unwrap();
     assert!(matches!(
