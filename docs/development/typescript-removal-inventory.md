@@ -96,7 +96,7 @@ sits beside the ledger in this directory.
 | `scripts/stage-cli-release.sh` | Remove | Staged the npm `supertag-ai` CLI release |
 | `install.sh`, `scripts/verify-public-installer.sh`, `scripts/notarize-macos-binaries.sh` (was `notarize-release-tui.sh`) | Keep, rewritten | The native release channel: `install.sh` installs a GitHub Release's native archive; the verifier runs it; notarization signs the native macOS binaries |
 | `examples/organizations/` | Keep | Manifests only |
-| `examples/custom-worker/*.py` | Keep | `sdks/python/tests/test_custom_worker_example.py` runs `verify.py` in process |
+| `examples/custom-worker/*.py` | Removed | SDKs provide harness adapters, not Worker runtimes; removed with `supertag.worker` on 2026-11-16 |
 | `examples/custom-worker/*.mjs`, `package.json` | Remove | Used `supertag-ai` |
 | `examples/ongoing-support/`, `examples/shared-organization/`, `examples/objective-walkthrough/` | Remove | Drove the TypeScript services through `supertag-ai`, JavaScript Workers, and WebSocket Worklets |
 

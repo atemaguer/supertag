@@ -79,6 +79,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Removed
 
+- The Python SDK's `supertag.worker` module and `examples/custom-worker`. SDKs provide harness
+  adapters, not Worker runtimes; the composition interfaces the OpenAI Agents adapter uses stay in
+  the `supertag` package.
 - `@SuperTag objective <outcome>`; use `@SuperTag /goal <outcome>`.
 - The `create_objective` tool, the `AttemptTagSessions.CreateObjective` and
   `HarnessTagSessions.CreateObjective` RPCs, and `AttemptCapabilities.may_create_objective`. No

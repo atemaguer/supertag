@@ -44,5 +44,6 @@ def test_public_execution_layers_separate_worklets_from_worker_hosts() -> None:
     assert all(not hasattr(supertag, name) for name in removed_names)
     assert find_spec("supertag.codex_worklet") is None
     assert find_spec("supertag.transport") is None
+    assert find_spec("supertag.worker") is None
     assert find_spec("supertag.durable") is None
     assert find_spec("supertag.operator") is None
