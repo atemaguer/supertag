@@ -208,6 +208,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- Text fields in the desktop app no longer draw a thick offset focus outline; keyboard focus on
+  buttons and links is one subtle ring.
+- A Watch naming a kind the Control Plane doesn't know follows the kinds it does know instead of
+  failing, and the notes kind no longer overflows the kind mask in debug builds.
 - A Claude Code or OpenCode Task that fails because a call to its Worker Host failed names that
   call's status in its result, as Cursor Tasks already do, such as `Claude checkpoint validation
   failed: Worker Host call failed: [permission_denied] … Native execution did not start.`, rather
