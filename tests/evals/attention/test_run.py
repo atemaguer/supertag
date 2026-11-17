@@ -10,8 +10,8 @@ import run  # noqa: E402
 class AttentionEvalTest(unittest.TestCase):
     def test_scenarios_are_balanced_and_notes_carry_both_states(self):
         scenarios = run.load(run.HERE / "scenarios.json")
-        self.assertEqual(len(scenarios), 20)
-        self.assertEqual(sum(s.changed for s in scenarios), 10)
+        self.assertEqual(len(scenarios), 30)
+        self.assertEqual(sum(s.changed for s in scenarios), 14)
         note = scenarios[0].note()
         self.assertIn(scenarios[0].previous, note)
         self.assertIn(scenarios[0].current, note)

@@ -138,5 +138,75 @@
     "previous": "Job queue: 12 waiting, oldest 40 s.",
     "current": "Job queue: 2,340 waiting, oldest 47 minutes; no worker has claimed a job since 08:12.",
     "changed": true
+  },
+  {
+    "id": "pr-one-question",
+    "check": "Look at PR 412 and tell me about new review comments.",
+    "previous": "PR 412 has two approvals and no open review comments.",
+    "current": "PR 412 still has two approvals. sam left one comment an hour ago: \"Does the new flag default to off?\" No one has replied.",
+    "changed": true
+  },
+  {
+    "id": "deploy-new-error",
+    "check": "Check production after the deploy and tell me if anything looks wrong.",
+    "previous": "Production runs release 0.3.0 with a 0.02% error rate.",
+    "current": "Production runs release 0.3.0 with a 0.02% error rate. A new error appeared for the first time: 3 PaymentGatewayTimeout errors in the last hour, all from the EU region.",
+    "changed": true
+  },
+  {
+    "id": "advisory-low",
+    "check": "Check our dependencies for security advisories.",
+    "previous": "No open security advisories for our dependencies.",
+    "current": "One new low-severity advisory: GHSA-3m9p-8w2c-q4vh in serde_yaml 0.9, where a crafted file can use extra memory. We use serde_yaml only to read our own config files.",
+    "changed": true
+  },
+  {
+    "id": "ci-recovered",
+    "check": "Check CI on main and tell me if anything is failing.",
+    "previous": "CI on main is red: test_checkout_totals fails with AssertionError: expected 1299, got 1300.",
+    "current": "CI on main is green: 412 tests passed. test_checkout_totals passes again since #1880 merged.",
+    "changed": true
+  },
+  {
+    "id": "disk-backup-blip",
+    "check": "Check the build host's disk and warn me before it fills up.",
+    "previous": "The build host disk is 41% used.",
+    "current": "The build host disk is 41% used. It reached 88% at 03:05 during the nightly backup and was back to 41% by 03:20, as it is every night.",
+    "changed": false
+  },
+  {
+    "id": "flaky-runner-blip",
+    "check": "Tell me if the flaky test test_upload_retries gets worse.",
+    "previous": "test_upload_retries failed 2 of 50 runs this week.",
+    "current": "test_upload_retries failed 2 of 50 runs this week. A runner outage on Tuesday failed every test for 20 minutes; those runs were retried and passed.",
+    "changed": false
+  },
+  {
+    "id": "latency-noise",
+    "check": "Watch API latency and tell me if it degrades.",
+    "previous": "API p95 latency is 212 ms; its normal range is 200 to 230 ms.",
+    "current": "API p95 latency is 221 ms; its normal range is 200 to 230 ms.",
+    "changed": false
+  },
+  {
+    "id": "queue-noise",
+    "check": "Check the job queue and tell me if work is piling up.",
+    "previous": "12 jobs are waiting; the oldest has waited 40 s.",
+    "current": "15 jobs are waiting; the oldest has waited 44 s. The queue has held between 8 and 20 jobs all week.",
+    "changed": false
+  },
+  {
+    "id": "staging-known",
+    "check": "Check staging and tell me if it's broken.",
+    "previous": "Staging is down: its database won't start. maria replied that she is restoring it from last night's backup and will say when it is back.",
+    "current": "Staging is still down: its database won't start. maria's restore from last night's backup is still running; she has not said it is back yet.",
+    "changed": false
+  },
+  {
+    "id": "alert-acknowledged",
+    "check": "Check the on-call alerts and tell me about anything unresolved.",
+    "previous": "One alert is open: database replica lag above 30 s since 07:55. sam acknowledged it and is working on it.",
+    "current": "The replica lag alert is still open. sam acknowledged it at 08:02 and is still working on it. No new alerts.",
+    "changed": false
   }
 ]
