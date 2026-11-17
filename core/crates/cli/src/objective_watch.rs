@@ -374,9 +374,13 @@ impl Timeline {
                     now,
                     "supertag",
                     format!(
-                        "{} approval request{} wait for a decision: supertag get approvals",
-                        view.pending_approvals,
-                        if view.pending_approvals == 1 { "" } else { "s" }
+                        "{} for a decision: supertag get approval --objective {} --pending",
+                        if view.pending_approvals == 1 {
+                            "1 approval request waits".to_owned()
+                        } else {
+                            format!("{} approval requests wait", view.pending_approvals)
+                        },
+                        objective.objective_id
                     ),
                 );
                 entry
@@ -985,7 +989,13 @@ mod tests {
             text.contains("2026-11-07 00:00:05Z  builder       Posted to planner: Exporter ready")
         );
         assert!(text.contains(
-            "supertag      2 approval requests wait for a decision: supertag get approvals"
+            "supertag      2 approval requests wait for a decision: supertag get approval --objective ship-sso --pending"
+        ));
+        let mut single = first.clone();
+        single.pending_approvals = 1;
+        let text = lines(&mut Timeline::default(), &single).join("\n");
+        assert!(text.contains(
+            "supertag      1 approval request waits for a decision: supertag get approval --objective ship-sso --pending"
         ));
         let mut cancelled = first.clone();
         let objective = cancelled.objective.as_mut().unwrap();
