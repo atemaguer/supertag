@@ -1053,6 +1053,40 @@ button:disabled {
   gap: 8px;
   padding-left: 4px;
 }
+.schedules {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 6px;
+}
+.schedule {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border-radius: 6px;
+}
+.schedule-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+.schedule-note {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.schedule[data-state="paused"] .schedule-note {
+  color: var(--muted);
+}
+.schedule-when,
+.schedule-error {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0;
+}
 .work-session-count {
   color: var(--muted);
   font-size: 11px;

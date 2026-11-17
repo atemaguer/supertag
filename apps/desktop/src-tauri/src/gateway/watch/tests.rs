@@ -78,6 +78,7 @@ impl operator_events_server::OperatorEvents for WatchScript {
                 WatchKind::Tag as i32,
                 WatchKind::ConversationMessage as i32,
                 WatchKind::Task as i32,
+                WatchKind::Schedule as i32,
                 WatchKind::Memory as i32,
             ]
         );

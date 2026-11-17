@@ -145,6 +145,27 @@ async fn delete_note(
 }
 
 #[tauri::command]
+async fn list_schedules(
+    state: State<'_, GatewayState>,
+    connection_id: String,
+    tag_id: String,
+) -> Result<Vec<gateway::schedules::Schedule>, String> {
+    state.schedules(&connection_id, tag_id).await
+}
+
+#[tauri::command]
+async fn change_schedule(
+    state: State<'_, GatewayState>,
+    connection_id: String,
+    schedule_id: String,
+    action: String,
+) -> Result<gateway::schedules::Schedule, String> {
+    state
+        .change_schedule(&connection_id, schedule_id, &action)
+        .await
+}
+
+#[tauri::command]
 async fn list_tag_options(
     state: State<'_, GatewayState>,
     connection_id: String,
@@ -346,6 +367,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             list_notes,
             delete_note,
             list_network_logs,
+            list_schedules,
+            change_schedule,
             list_tag_options,
             create_tag,
             list_conversations,

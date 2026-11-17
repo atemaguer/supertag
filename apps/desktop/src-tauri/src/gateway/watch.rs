@@ -29,6 +29,11 @@ pub enum WatchUpdate {
         #[serde(rename = "tagId")]
         tag_id: String,
     },
+    /// One of this Tag's Schedules was created or changed.
+    Schedule {
+        #[serde(rename = "tagId")]
+        tag_id: String,
+    },
     /// One of this Tag's notes the caller sees was kept, rewritten, or deleted.
     Memory {
         #[serde(rename = "tagId")]
@@ -160,6 +165,7 @@ async fn read(
             WatchKind::Tag as i32,
             WatchKind::ConversationMessage as i32,
             WatchKind::Task as i32,
+            WatchKind::Schedule as i32,
             WatchKind::Memory as i32,
         ],
     });
@@ -196,6 +202,11 @@ async fn read(
 fn invalidation(change: WatchChange) -> Option<WatchUpdate> {
     match change.kind() {
         WatchKind::Tag => return Some(WatchUpdate::Tag),
+        WatchKind::Schedule if !change.tag_id.is_empty() => {
+            return Some(WatchUpdate::Schedule {
+                tag_id: change.tag_id,
+            });
+        }
         WatchKind::Memory if !change.tag_id.is_empty() => {
             return Some(WatchUpdate::Memory {
                 tag_id: change.tag_id,

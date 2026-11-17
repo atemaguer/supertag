@@ -25,6 +25,7 @@ pub mod memories;
 pub mod network;
 mod new_tag;
 mod profiles;
+pub mod schedules;
 mod watch;
 pub use follow::FollowUpdate;
 pub use new_tag::{NewTag, TagOptions};

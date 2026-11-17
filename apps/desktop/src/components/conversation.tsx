@@ -42,6 +42,7 @@ import { Conversation, ConversationContent } from "./ai-elements/conversation";
 import { Message } from "./ai-elements/message";
 import { Bubble, LiveConversationEntry } from "./conversation-entry";
 import { clamp, ResizeHandle, useStoredWidth } from "./resize";
+import { ScheduleList } from "./schedules";
 import type { TagSummary } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import { TagDetails } from "./tag-details";
@@ -368,6 +369,7 @@ export function ConversationPane({
               <JumpToLatest messages={messages.length} />
             </Conversation>
           )}
+          <ScheduleList gateway={gateway} watch={watch} tagId={tagId} />
           {workSessionCount(tag) && (
             // How much room the Tag has to start longer work, across all its conversations.
             <p className="work-session-count">{workSessionCount(tag)}</p>

@@ -131,6 +131,10 @@ export interface Gateway {
   deleteNote?(memoryId: string): Promise<Note>;
   /** The Tag's newest Task Attempts with a network log, newest first. Operators only. */
   networkLogs?(tagId: string): Promise<NetworkLog[]>;
+  /** The Tag's Schedules the caller can see. */
+  schedules?(tagId: string): Promise<Schedule[]>;
+  /** Pauses, resumes, or deletes a Schedule. A deleted Schedule never fires again. */
+  changeSchedule?(scheduleId: string, action: ScheduleAction): Promise<Schedule>;
   /**
    * The Gateway and principal this connection acts as. What is cached under one scope is
    * never shown under another.
@@ -175,7 +179,9 @@ export type WatchUpdate =
   /** The caller's conversation with the Tag changed, or was marked read. */
   | { kind: "conversation"; tagId: string }
   /** One of the Tag's notes the caller sees was kept, rewritten, or deleted. */
-  | { kind: "memory"; tagId: string };
+  | { kind: "memory"; tagId: string }
+  /** One of the Tag's Schedules was created, changed, or fired. */
+  | { kind: "schedule"; tagId: string };
 
 /** One of a Tag's notes: something it keeps of what it cannot look up again. */
 export interface Note {
@@ -217,6 +223,24 @@ export interface NetworkLog {
   unrecorded: number;
   requests: NetworkRequest[];
 }
+
+/** A wake-up a Tag set for itself or an operator declared: once at a time, or on a recurrence. */
+export interface Schedule {
+  scheduleId: string;
+  tagId: string;
+  note: string;
+  state: "active" | "paused" | "staged" | "done" | "cancelled";
+  atMs?: number;
+  /** A cron expression in an IANA time zone. */
+  every?: { cron: string; timeZone: string };
+  nextDueAtMs?: number;
+  createdBy: string;
+  fireCount: number;
+  missedCount: number;
+  lastFiredAtMs?: number;
+}
+
+export type ScheduleAction = "pause" | "resume" | "delete";
 
 export interface GatewayProfile {
   name: string;
@@ -281,6 +305,9 @@ export function gatewaySession(connectionId: string, scope: string): Gateway {
     notes: (tagId) => invoke("list_notes", { connectionId, tagId }),
     deleteNote: (memoryId) => invoke("delete_note", { connectionId, memoryId }),
     networkLogs: (tagId) => invoke("list_network_logs", { connectionId, tagId }),
+    schedules: (tagId) => invoke("list_schedules", { connectionId, tagId }),
+    changeSchedule: (scheduleId, action) =>
+      invoke("change_schedule", { connectionId, scheduleId, action }),
     readCache: (key) => invoke("read_cache", { connectionId, key }),
     writeCache: (key, value) => invoke("write_cache", { connectionId, key, value }),
   };
