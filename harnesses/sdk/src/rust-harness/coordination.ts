@@ -25,6 +25,7 @@ import {
   TaskState,
   type WorkSession,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
+import type { AttemptScheduleResponse, Schedule } from "./gen/supertag/runtime/v2/schedules_pb.js";
 import { TagSessionAudience } from "./gen/supertag/runtime/v2/tag_sessions_pb.js";
 import { redact } from "./redact.js";
 
@@ -135,6 +136,17 @@ const schemas = {
   }),
   list_objectives: z.strictObject({ limit: sessionLimit, offset }),
   read_objective: z.strictObject({ objectiveId: tagId.optional() }),
+  schedule: z
+    .strictObject({
+      note: nonblankText(4000),
+      at: nonblankText(100).optional(),
+      every: nonblankText(100).optional(),
+      timeZone: nonblankText(100).optional(),
+    })
+    .refine((input) => (input.at === undefined) !== (input.every === undefined), {
+      message: "Give exactly one of at and every.",
+    }),
+  cancel_schedule: z.strictObject({ scheduleId: tagId }),
 };
 
 type Tool = keyof typeof schemas;
@@ -182,6 +194,55 @@ const taskStatus: Record<number, string> = {
 const at = (ms: bigint | undefined) =>
   ms === undefined || ms === 0n ? undefined : new Date(Number(ms)).toISOString();
 const childQuestionSchema = z.strictObject({ text: nonblankText(2000) });
+
+/** A time in `zone`, such as `Mon 17 Nov 2026 09:00 CET`. */
+function localTime(ms: bigint, zone: string) {
+  const options = (timeZone: string): Intl.DateTimeFormatOptions => ({
+    timeZone,
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZoneName: "short",
+  });
+  const date = new Date(Number(ms));
+  try {
+    return new Intl.DateTimeFormat("en-GB", options(zone || "UTC")).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en-GB", options("UTC")).format(date);
+  }
+}
+
+/** One line about a Schedule: its ID, next time, recurrence, and note. */
+export function scheduleLine(schedule: Schedule, zone: string) {
+  const every = schedule.every;
+  const next =
+    schedule.nextDueAtMs === undefined
+      ? "never"
+      : localTime(schedule.nextDueAtMs, every?.timeZone || zone);
+  const recurrence = every ? `every ${every.cron} (${every.timeZone})` : "once";
+  return `${schedule.scheduleId} next ${next}, ${recurrence}: ${schedule.note}`;
+}
+
+/** The `schedule` or `cancel_schedule` result: what changed, then the Session's other ones. */
+export function scheduleSummary(result: AttemptScheduleResponse, created: boolean) {
+  const schedule = result.schedule;
+  if (!schedule) return "The Schedule was not returned.";
+  const lines = [
+    created
+      ? `Scheduled ${scheduleLine(schedule, result.timeZone)}. It takes effect when this turn succeeds.`
+      : `Cancelled ${schedule.scheduleId}.`,
+  ];
+  if (result.pending.length === 0) lines.push("This Session has no other Schedules.");
+  else {
+    lines.push("Other Schedules in this Session:");
+    for (const other of result.pending) lines.push(`- ${scheduleLine(other, result.timeZone)}`);
+  }
+  return lines.join("\n");
+}
 
 export function validCoordinationArguments(tool: string, input: unknown): boolean {
   return Object.hasOwn(schemas, tool) && schemas[tool as Tool].safeParse(input).success;
@@ -279,6 +340,7 @@ export function registerCoordinationTools(
     mailbox,
     workSessions,
     tagSessions,
+    schedules,
     options,
   }: ReturnType<typeof harnessClient>,
   run: Pick<HarnessRun, "task" | "mayAskObjectiveQuestion" | "coordination"> &
@@ -1297,6 +1359,76 @@ export function registerCoordinationTools(
           return refusal(error, "The Objective could not be read.");
         }
       },
+    );
+  }
+  if (run.coordination?.maySchedule) {
+    const zone = run.coordination.timeZone || "UTC";
+    const now = localTime(BigInt(Date.now()), zone);
+    let scheduled = 0;
+    const refused = (error: unknown) => {
+      const failure = ConnectError.from(error);
+      return [
+        Code.PermissionDenied,
+        Code.FailedPrecondition,
+        Code.NotFound,
+        Code.InvalidArgument,
+        Code.AlreadyExists,
+      ].includes(failure.code)
+        ? response(`Refused: ${safeText(failure.rawMessage)}`, true)
+        : response("The Schedule could not be confirmed.", true);
+    };
+    tools.push("schedule", "cancel_schedule");
+    server.registerTool(
+      "schedule",
+      {
+        description: `Ask to be woken later in this Session: once (at) or on a recurrence (every). Use it when someone asks you to check back, follow up, or report on a schedule. When it is due, you get a new turn with the note, and your reply is posted here as a normal message. It takes effect when this turn succeeds. The woken turn may not have this turn's context, so write a note that says exactly what to do and why. at is a duration ahead such as 90m, 2h, or 3d, or a time such as 2026-11-17T09:00, from 1 minute to 366 days ahead. every is a five-field cron expression such as "0 9 * * MON", or @hourly, @daily, or @weekly, at least one hour apart. It was ${now} when this turn started; times without an offset are read in ${zone} unless you pass timeZone, an IANA zone such as Europe/Berlin.`,
+        inputSchema: schemas.schedule,
+        _meta: meta,
+      },
+      ({ note, at, every, timeZone }, tool) =>
+        write(async () => {
+          if (asked) return response("This turn is waiting for an answer.", true);
+          // One operation per call, so a retried call replays its own receipt.
+          scheduled += 1;
+          const operationId = `${configuration.questionOperationPrefix}-schedule-${scheduled}`;
+          try {
+            const result = await call(tool.signal, (config) =>
+              schedules.create(
+                {
+                  operationId,
+                  note: trim(safeText(note)),
+                  at: at ?? "",
+                  every: every ?? "",
+                  ...(timeZone === undefined ? {} : { timeZone }),
+                },
+                config,
+              ),
+            );
+            return response(safeText(scheduleSummary(result, true)));
+          } catch (error) {
+            return refused(error);
+          }
+        }),
+    );
+    server.registerTool(
+      "cancel_schedule",
+      {
+        description:
+          "Cancel one of this Tag's Schedules in this Session by its ID. A turn it already queued still runs.",
+        inputSchema: schemas.cancel_schedule,
+        _meta: meta,
+      },
+      ({ scheduleId }, tool) =>
+        write(async () => {
+          try {
+            const result = await call(tool.signal, (config) =>
+              schedules.cancel({ scheduleId }, config),
+            );
+            return response(safeText(scheduleSummary(result, false)));
+          } catch (error) {
+            return refused(error);
+          }
+        }),
     );
   }
   return {

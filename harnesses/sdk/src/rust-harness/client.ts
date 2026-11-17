@@ -13,6 +13,7 @@ import {
   HarnessWorkspace,
   HarnessWorkstreams,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
+import { HarnessSchedules } from "./gen/supertag/runtime/v2/schedules_pb.js";
 import { HarnessTagSessions } from "./gen/supertag/runtime/v2/tag_sessions_pb.js";
 
 /** This is a Worker-owned, execution-scoped transport, never a public control-plane client. */
@@ -65,6 +66,8 @@ export function harnessClient(endpoint: string, token: string) {
   const workSessions = createClient(HarnessWorkSessions, transport);
   // The Tag's other Sessions and its Objectives, for a root turn.
   const tagSessions = createClient(HarnessTagSessions, transport);
+  // A root turn's follow-ups: later turns of its Tag in its Session.
+  const schedules = createClient(HarnessSchedules, transport);
   const workspace = createClient(HarnessWorkspace, transport);
   const artifacts = createClient(HarnessArtifacts, transport);
   const mcp = createClient(HarnessMcp, transport);
@@ -79,6 +82,7 @@ export function harnessClient(endpoint: string, token: string) {
     mailbox,
     workSessions,
     tagSessions,
+    schedules,
     workspace,
     artifacts,
     mcp,

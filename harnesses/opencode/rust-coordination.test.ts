@@ -1,12 +1,15 @@
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
+  AttemptScheduleResponseSchema,
   HarnessRunSchema,
   harnessClient,
   ListTagSessionsResponseSchema,
   ObjectiveSignal,
   ReadTagSessionResponseSchema,
+  ScheduleState,
   SearchTagSessionsResponseSchema,
   TagSessionAudience,
   tagPortfolio,
@@ -410,6 +413,146 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
         })
       ).isError,
     ).toBe(true);
+  } finally {
+    await client.close();
+    await service.close();
+  }
+});
+
+it("schedules a follow-up in the turn's Session, redacts the note, and reports refusals", async () => {
+  const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
+  const scope = {
+    taskId,
+    tagId,
+    attemptId,
+    secrets: [grpcToken],
+    signal: new AbortController().signal,
+    active: () => true,
+  };
+  const plain = await startCoordination(
+    bridge,
+    create(HarnessRunSchema, { task: { taskId, tagId, sessionId: "ops" }, attemptId }),
+    scope,
+  );
+  expect(plain.tools).toEqual([]);
+  await plain.close();
+
+  const due = 1_900_000_000_000n;
+  const createSchedule = vi
+    .spyOn(bridge.schedules, "create")
+    .mockImplementationOnce(async ({ note }) =>
+      create(AttemptScheduleResponseSchema, {
+        schedule: {
+          scheduleId: "sch_new",
+          note,
+          atMs: due,
+          nextDueAtMs: due,
+          state: ScheduleState.STAGED,
+        },
+        pending: [
+          {
+            scheduleId: "sch_weekly",
+            note: "Summarize open work",
+            nextDueAtMs: due + 3_600_000n,
+            every: { cron: "0 9 * * MON", timeZone: "Europe/Berlin" },
+            state: ScheduleState.ACTIVE,
+          },
+        ],
+        timeZone: "UTC",
+      }),
+    )
+    .mockImplementationOnce(async () => {
+      throw new ConnectError(
+        "every must be at least one hour between occurrences",
+        Code.InvalidArgument,
+      );
+    });
+  const cancel = vi.spyOn(bridge.schedules, "cancel").mockImplementation(async ({ scheduleId }) =>
+    create(AttemptScheduleResponseSchema, {
+      schedule: { scheduleId, note: "x", state: ScheduleState.CANCELLED },
+      timeZone: "UTC",
+    }),
+  );
+  const service = await startCoordination(
+    bridge,
+    create(HarnessRunSchema, {
+      task: { taskId, tagId, sessionId: "ops" },
+      attemptId,
+      coordination: { maySchedule: true, timeZone: "Europe/Berlin" },
+    }),
+    scope,
+  );
+  const client = new Client({ name: "opencode-fixture", version: "1" });
+  try {
+    const [tool] = service.tools;
+    if (!tool) throw new Error("expected private MCP binding");
+    expect(tool.operations).toEqual(["schedule", "cancel_schedule"]);
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(tool.url), {
+        requestInit: { headers: tool.headers },
+      }),
+    );
+    const listed = (await client.listTools()).tools.find(({ name }) => name === "schedule");
+    expect(listed?.description).toContain("read in Europe/Berlin unless you pass timeZone");
+    // Exactly one of at and every; no other fields.
+    for (const args of [
+      { note: "Check PR 412" },
+      { note: "Check PR 412", at: "2h", every: "@daily" },
+      { note: "   ", at: "2h" },
+      { note: "Check PR 412", at: "2h", tag: "other" },
+    ])
+      expect(await client.callTool({ name: "schedule", arguments: args })).toMatchObject({
+        isError: true,
+      });
+    expect(createSchedule).not.toHaveBeenCalled();
+
+    const scheduled = await client.callTool({
+      name: "schedule",
+      arguments: { note: `  Check PR 412 with ${grpcToken} `, at: "2h" },
+    });
+    expect(scheduled.isError).toBeFalsy();
+    expect(createSchedule).toHaveBeenNthCalledWith(
+      1,
+      {
+        operationId: "opencode-schedule-1",
+        note: "Check PR 412 with [REDACTED]",
+        at: "2h",
+        every: "",
+      },
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
+    const text = (scheduled.content as { text: string }[])[0]?.text ?? "";
+    expect(text).toContain("Scheduled sch_new next Sun, 17 Mar 2030, 17:46 UTC, once");
+    expect(text).toContain("It takes effect when this turn succeeds.");
+    expect(text).toContain("- sch_weekly next Sun, 17 Mar 2030, 19:46 CET, every 0 9 * * MON");
+
+    const refused = await client.callTool({
+      name: "schedule",
+      arguments: { note: "Ping", every: "*/5 * * * *", timeZone: "Europe/Berlin" },
+    });
+    expect(refused).toMatchObject({ isError: true });
+    expect((refused.content as { text: string }[])[0]?.text).toBe(
+      "Refused: every must be at least one hour between occurrences",
+    );
+    expect(createSchedule).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        operationId: "opencode-schedule-2",
+        every: "*/5 * * * *",
+        timeZone: "Europe/Berlin",
+      }),
+      expect.anything(),
+    );
+
+    const cancelled = await client.callTool({
+      name: "cancel_schedule",
+      arguments: { scheduleId: "sch_new" },
+    });
+    expect((cancelled.content as { text: string }[])[0]?.text).toContain("Cancelled sch_new.");
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(
+      { scheduleId: "sch_new" },
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
   } finally {
     await client.close();
     await service.close();
