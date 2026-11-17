@@ -228,6 +228,11 @@ func (m model) renderWorkLine(e entry, selected bool, width int) string {
 // workState is a work Session's latest state: what it last reported, else its latest Task's
 // status once read.
 func (m model) workState(id string) string {
+	if d := m.work[id]; d != nil {
+		if closed := d.session.GetClosed(); closed != "" {
+			return "closed: " + closed
+		}
+	}
 	if state := m.workStates[id]; state != "" {
 		return state
 	}

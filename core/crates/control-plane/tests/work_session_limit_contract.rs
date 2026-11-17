@@ -1,7 +1,13 @@
 //! A Tag's open Work Sessions: at its `max_work_sessions`, `start_session` is refused with the
-//! open Work Sessions listed; closing one, by the Tag, an operator, a pulled delivery, or its
-//! Objective closing, makes room, and a closed one cannot be continued.
+//! open Work Sessions listed; closing one, by the Tag, an operator, a pulled delivery, its
+//! Objective closing, or 14 days without activity, makes room, and continuing a closed one
+//! reopens it when there is room.
 mod support;
+
+use std::sync::{
+    Arc,
+    atomic::{AtomicI64, Ordering},
+};
 
 use sqlx::{Connection, Executor};
 use supertag_control_plane::{HostAuthority, Store, StoreError};
@@ -187,7 +193,7 @@ async fn contract(url: String) {
         .await
         .unwrap();
 
-    // A closed Work Session cannot be continued.
+    // Reopening a closed Work Session at the limit is refused with the open ones listed.
     let continued = store
         .continue_work_session(
             &host,
@@ -200,7 +206,7 @@ async fn contract(url: String) {
         )
         .await;
     assert!(
-        matches!(&continued, Err(StoreError::FailedPrecondition(reason)) if reason.contains("is closed")),
+        matches!(&continued, Err(StoreError::FailedPrecondition(reason)) if reason.contains("2 of 2 Work Sessions open")),
         "{continued:?}"
     );
 
@@ -324,6 +330,182 @@ async fn contract(url: String) {
     store.close().await;
 }
 
+async fn finish(store: &Store, host: &HostAuthority, attempt: &InspectAttemptRequest) {
+    store
+        .finish_task(
+            host,
+            &FinishTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+                succeeded: true,
+                result: "Done".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+}
+
+/// Claims, starts and finishes every queued Task, the turns and their reports.
+async fn drain(store: &Store, host: &HostAuthority) {
+    while let Some(assignment) = store
+        .claim_task(host, &Uuid::new_v4().to_string())
+        .await
+        .unwrap()
+    {
+        run_claimed(store, host, assignment).await;
+    }
+}
+
+async fn run_claimed(store: &Store, host: &HostAuthority, assignment: Assignment) {
+    let task = assignment.task.unwrap();
+    let attempt = InspectAttemptRequest {
+        task_id: task.task_id,
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    store
+        .start_task(
+            host,
+            &StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    finish(store, host, &attempt).await;
+}
+
+/// Continuing a closed Work Session reopens it under the limit; 14 days without activity close it.
+async fn reopen_and_idle(url: String) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let now = Arc::clone(&clock);
+    let store = Store::open(&url)
+        .await
+        .unwrap()
+        .with_execution_clock(move || now.load(Ordering::SeqCst));
+    let host = support::register_host(&store, "worker").await;
+    put(&store, "solo", Some(1)).await.unwrap();
+    let say = |text: &str| SendMessageRequest {
+        tag_id: "solo".into(),
+        text: text.into(),
+        operation_id: Uuid::new_v4().to_string(),
+        ..Default::default()
+    };
+    let first = store
+        .send_message(OP, &say("Draft it"))
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    let a = run(&store, &host, &first.task_id).await;
+    let x = store
+        .start_work_session(&host, &start(&a, "x", "Draft"))
+        .await
+        .unwrap();
+    finish(&store, &host, &a).await;
+    drain(&store, &host).await; // the Work Session's turn and its report
+    store
+        .close_work_session(
+            OP,
+            &CloseWorkSessionRequest {
+                work_session_id: x.work_session_id.clone(),
+                delivery_pulled: false,
+            },
+        )
+        .await
+        .unwrap();
+    let second = store
+        .send_message(OP, &say("Another part"))
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    let b = run(&store, &host, &second.task_id).await;
+    let y = store
+        .start_work_session(&host, &start(&b, "y", "Another"))
+        .await
+        .unwrap();
+    let continue_x = |operation: &str| ContinueWorkSessionRequest {
+        attempt: Some(b.clone()),
+        operation_id: operation.into(),
+        work_session_id: x.work_session_id.clone(),
+        message: "Revise it".into(),
+    };
+    let refused = store
+        .continue_work_session(&host, &continue_x("at-limit"))
+        .await;
+    assert!(
+        matches!(&refused, Err(StoreError::FailedPrecondition(reason)) if reason.contains("1 of 1 Work Sessions open")),
+        "{refused:?}"
+    );
+    assert!(
+        store
+            .get_work_session(OP, &x.work_session_id)
+            .await
+            .unwrap()
+            .closed_at_ms
+            .is_some()
+    );
+    store
+        .close_attempt_work_session(&host, &close(&b, &y.work_session_id))
+        .await
+        .unwrap();
+    // Closing leaves Y's queued turn; cancel it so X's turns run next.
+    store.cancel_task(&y.latest_task_id).await.unwrap();
+    let reopened = store
+        .continue_work_session(&host, &continue_x("reopen"))
+        .await
+        .unwrap();
+    assert_eq!(reopened.closed_at_ms, None);
+    assert_eq!(reopened.close_reason(), WorkSessionCloseReason::Unspecified);
+    finish(&store, &host, &b).await;
+    drain(&store, &host).await; // the continued turn and its report
+
+    // Thirteen days later it is still open; fifteen days later the sweep closes it as idle.
+    clock.store(NOW + 13 * 24 * 3_600_000, Ordering::SeqCst);
+    store.sweep_work_sessions().await.unwrap();
+    assert_eq!(
+        store
+            .get_work_session(OP, &x.work_session_id)
+            .await
+            .unwrap()
+            .closed_at_ms,
+        None
+    );
+    clock.store(NOW + 15 * 24 * 3_600_000, Ordering::SeqCst);
+    store.sweep_work_sessions().await.unwrap();
+    let idle = store
+        .get_work_session(OP, &x.work_session_id)
+        .await
+        .unwrap();
+    assert_eq!(idle.close_reason(), WorkSessionCloseReason::Idle);
+    assert_eq!(idle.closed_at_ms, Some(NOW + 15 * 24 * 3_600_000));
+    // The conversation's report turn says why it closed.
+    let page = store
+        .list_messages(
+            OP,
+            &ListMessagesRequest {
+                tag_id: "solo".into(),
+                limit: 20,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        page.messages
+            .iter()
+            .any(|message| message.work_session_report_id.as_deref()
+                == Some(x.work_session_id.as_str())
+                && message.work_session_close_reason() == WorkSessionCloseReason::Idle)
+    );
+    store.close().await;
+}
+
 /// Upgrading closes the Work Sessions that had finished, except each Tag's four newest and one
 /// waiting on an answer, so no Tag starts at its limit and recent work can still be continued.
 async fn upgrade(url: String) {
@@ -424,6 +606,11 @@ async fn sqlite_work_session_limit_contract() {
         directory.path().join("upgrade.db").display()
     ))
     .await;
+    reopen_and_idle(format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("idle.db").display()
+    ))
+    .await;
 }
 
 #[tokio::test]
@@ -434,7 +621,7 @@ async fn postgres_work_session_limit_contract() {
     let admin_url = std::fs::read_to_string(path).unwrap();
     let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
     let mut urls = vec![];
-    for kind in ["limit", "upgrade"] {
+    for kind in ["limit", "upgrade", "idle"] {
         let name = format!("supertag_ws_{kind}_{}", Uuid::new_v4().simple());
         admin
             .execute(format!("CREATE DATABASE {name}").as_str())
@@ -444,12 +631,13 @@ async fn postgres_work_session_limit_contract() {
         url.set_path(&name);
         urls.push((name, url.to_string()));
     }
-    let (limit, upgrade_url) = (urls[0].1.clone(), urls[1].1.clone());
+    let (limit, upgrade_url, idle) = (urls[0].1.clone(), urls[1].1.clone(), urls[2].1.clone());
     let result = tokio::task::LocalSet::new()
         .run_until(async move {
             tokio::task::spawn_local(async move {
                 contract(limit).await;
                 upgrade(upgrade_url).await;
+                reopen_and_idle(idle).await;
             })
             .await
         })

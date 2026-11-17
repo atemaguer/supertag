@@ -255,7 +255,29 @@ func (c *runtimeClient) getWorkSessionDetail(ctx context.Context, id string) (*v
 	case v2.TaskState_TASK_STATE_UNCERTAIN:
 		status = views.TaskStatus_TASK_STATUS_UNSPECIFIED
 	}
-	return &views.Session{Id: id, TagId: work.GetTagId(), Tag: work.GetTagId(), Title: work.GetTitle(), ParentSessionId: work.GetParentSessionId(), ObjectiveId: work.GetObjectiveId(), LatestTaskId: task.GetTaskId(), LatestTaskStatus: status}, nil
+	return &views.Session{Id: id, TagId: work.GetTagId(), Tag: work.GetTagId(), Title: work.GetTitle(), ParentSessionId: work.GetParentSessionId(), ObjectiveId: work.GetObjectiveId(), LatestTaskId: task.GetTaskId(), LatestTaskStatus: status, Closed: CloseReason(work)}, nil
+}
+
+// CloseReason says why a work Session closed, such as `idle`, or is empty while it is open.
+func CloseReason(work *v2.WorkSession) string {
+	if work.ClosedAtMs == nil {
+		return ""
+	}
+	switch work.GetCloseReason() {
+	case v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_IDLE:
+		return "idle"
+	case v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_TAG:
+		return "by the Tag"
+	case v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_OPERATOR:
+		return "by an operator"
+	case v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED:
+		return "delivery pulled"
+	case v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED:
+		return "Objective closed"
+	case v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_UPGRADE:
+		return "finished before the upgrade"
+	}
+	return "closed"
 }
 
 func (c *runtimeClient) taskActivity(ctx context.Context, task string, after int64) ([]Activity, int64, error) {

@@ -1979,8 +1979,8 @@ func (UnimplementedInboxHandler) DecideApproval(context.Context, *connect.Reques
 type WorkSessionsClient interface {
 	Get(context.Context, *connect.Request[runtimev2.GetWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	List(context.Context, *connect.Request[runtimev2.ListWorkSessionsRequest]) (*connect.Response[runtimev2.ListWorkSessionsResponse], error)
-	// Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
-	// Work Session cannot be continued. Closing a closed one changes nothing.
+	// Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. Continuing
+	// a closed one reopens it when the Tag is under its limit. Closing a closed one changes nothing.
 	Close(context.Context, *connect.Request[runtimev2.CloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 }
 
@@ -2042,8 +2042,8 @@ func (c *workSessionsClient) Close(ctx context.Context, req *connect.Request[run
 type WorkSessionsHandler interface {
 	Get(context.Context, *connect.Request[runtimev2.GetWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	List(context.Context, *connect.Request[runtimev2.ListWorkSessionsRequest]) (*connect.Response[runtimev2.ListWorkSessionsResponse], error)
-	// Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
-	// Work Session cannot be continued. Closing a closed one changes nothing.
+	// Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. Continuing
+	// a closed one reopens it when the Tag is under its limit. Closing a closed one changes nothing.
 	Close(context.Context, *connect.Request[runtimev2.CloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 }
 

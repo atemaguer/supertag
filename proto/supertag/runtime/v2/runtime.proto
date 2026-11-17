@@ -493,8 +493,8 @@ message AttemptCapabilities {
 service WorkSessions {
   rpc Get(GetWorkSessionRequest) returns (WorkSession);
   rpc List(ListWorkSessionsRequest) returns (ListWorkSessionsResponse);
-  // Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
-  // Work Session cannot be continued. Closing a closed one changes nothing.
+  // Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. Continuing
+  // a closed one reopens it when the Tag is under its limit. Closing a closed one changes nothing.
   rpc Close(CloseWorkSessionRequest) returns (WorkSession);
 }
 
@@ -519,6 +519,8 @@ enum WorkSessionCloseReason {
   WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED = 4;
   // It had finished when SuperTag began counting open Work Sessions.
   WORK_SESSION_CLOSE_REASON_UPGRADE = 5;
+  // Closed after 14 days without activity: no turn, continuation, or delivery change.
+  WORK_SESSION_CLOSE_REASON_IDLE = 6;
 }
 
 // An operator or client closes a Work Session it may see. `delivery_pulled` records that its
@@ -548,7 +550,8 @@ message WorkSession {
   WorkspaceDeliveryReference workspace_delivery = 12;
   uint64 created_order = 13;
   WorkSessionQuestion question = 14;
-  // Set once it closed. An open Work Session counts toward its parent Tag's `max_work_sessions`.
+  // Set while it is closed. An open Work Session counts toward its parent Tag's
+  // `max_work_sessions`; continuing a closed one reopens it.
   optional int64 closed_at_ms = 15;
   WorkSessionCloseReason close_reason = 16;
 }
@@ -1686,6 +1689,8 @@ message ConversationMessage {
   // Set for a turn a Schedule queued, which has no operator message: the conversation shows
   // only its reply.
   optional string schedule_id = 10;
+  // For a report turn whose Work Session has since closed: why it closed.
+  WorkSessionCloseReason work_session_close_reason = 11;
 }
 
 message ListConversationsRequest {}

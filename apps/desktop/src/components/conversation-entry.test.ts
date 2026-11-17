@@ -279,3 +279,19 @@ it("renders a Schedule's turn as the Tag's reply under a muted caption, with no 
   expect(html).not.toContain("user-turn");
   expect(html).not.toContain("Work Session report");
 });
+
+it("says why a report's work Session closed", () => {
+  const html = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: {
+        order: 3,
+        task,
+        workSessionReportId: "work/dependency",
+        workSessionClosed: "idle",
+      },
+      onActivity: () => {},
+      onSaveArtifact: async () => false,
+    }),
+  );
+  expect(html).toContain("Work Session report · closed: idle");
+});

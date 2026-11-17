@@ -76,6 +76,7 @@ class WorkSessionCloseReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED: _ClassVar[WorkSessionCloseReason]
     WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED: _ClassVar[WorkSessionCloseReason]
     WORK_SESSION_CLOSE_REASON_UPGRADE: _ClassVar[WorkSessionCloseReason]
+    WORK_SESSION_CLOSE_REASON_IDLE: _ClassVar[WorkSessionCloseReason]
 
 class TagMessageOrigin(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -360,6 +361,7 @@ WORK_SESSION_CLOSE_REASON_OPERATOR: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_UPGRADE: WorkSessionCloseReason
+WORK_SESSION_CLOSE_REASON_IDLE: WorkSessionCloseReason
 TAG_MESSAGE_ORIGIN_UNSPECIFIED: TagMessageOrigin
 TAG_MESSAGE_ORIGIN_DIRECT: TagMessageOrigin
 TAG_MESSAGE_ORIGIN_WORKSTREAM: TagMessageOrigin
@@ -2211,7 +2213,7 @@ class Conversation(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., session_id: _Optional[str] = ..., preview: _Optional[str] = ..., preview_from_tag: _Optional[bool] = ..., last_activity_at_ms: _Optional[int] = ..., latest_order: _Optional[int] = ..., read_order: _Optional[int] = ..., unread_count: _Optional[int] = ..., working: _Optional[bool] = ..., latest_work_session_report_id: _Optional[str] = ...) -> None: ...
 
 class ConversationMessage(_message.Message):
-    __slots__ = ("task", "live_input", "work_session_report_id", "events", "events_truncated", "order", "sent_at_ms", "completed_at_ms", "schedule_id")
+    __slots__ = ("task", "live_input", "work_session_report_id", "events", "events_truncated", "order", "sent_at_ms", "completed_at_ms", "schedule_id", "work_session_close_reason")
     TASK_FIELD_NUMBER: _ClassVar[int]
     LIVE_INPUT_FIELD_NUMBER: _ClassVar[int]
     WORK_SESSION_REPORT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2221,6 +2223,7 @@ class ConversationMessage(_message.Message):
     SENT_AT_MS_FIELD_NUMBER: _ClassVar[int]
     COMPLETED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     SCHEDULE_ID_FIELD_NUMBER: _ClassVar[int]
+    WORK_SESSION_CLOSE_REASON_FIELD_NUMBER: _ClassVar[int]
     task: Task
     live_input: LiveInput
     work_session_report_id: str
@@ -2230,7 +2233,8 @@ class ConversationMessage(_message.Message):
     sent_at_ms: int
     completed_at_ms: int
     schedule_id: str
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ..., work_session_report_id: _Optional[str] = ..., events: _Optional[_Iterable[_Union[TaskEvent, _Mapping]]] = ..., events_truncated: _Optional[bool] = ..., order: _Optional[int] = ..., sent_at_ms: _Optional[int] = ..., completed_at_ms: _Optional[int] = ..., schedule_id: _Optional[str] = ...) -> None: ...
+    work_session_close_reason: WorkSessionCloseReason
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ..., work_session_report_id: _Optional[str] = ..., events: _Optional[_Iterable[_Union[TaskEvent, _Mapping]]] = ..., events_truncated: _Optional[bool] = ..., order: _Optional[int] = ..., sent_at_ms: _Optional[int] = ..., completed_at_ms: _Optional[int] = ..., schedule_id: _Optional[str] = ..., work_session_close_reason: _Optional[_Union[WorkSessionCloseReason, str]] = ...) -> None: ...
 
 class ListConversationsRequest(_message.Message):
     __slots__ = ()

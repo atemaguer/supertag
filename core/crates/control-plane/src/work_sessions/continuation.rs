@@ -231,7 +231,7 @@ impl Store {
         let session = sqlx::query("SELECT w.*,k.starter_task_id AS latest_starter_task_id FROM supertag_v2_work_sessions w JOIN supertag_v2_work_session_tasks k ON k.task_id=w.latest_task_id AND k.kind=1 WHERE w.work_session_id=$1 AND w.parent_tag_id=$2 AND w.parent_session_id=$3")
             .bind(&input.work_session_id).bind(&parent.tag_id).bind(&parent.session_id)
             .fetch_optional(&mut *tx).await?.ok_or_else(|| StoreError::NotFound("Work Session was not found in this parent Session".into()))?;
-        super::require_open_in(&mut tx, &input.work_session_id).await?;
+        super::reopen_in(&mut tx, &parent, &input.work_session_id).await?;
         let previous_id: String = session.try_get("latest_task_id")?;
         let target: String = session.try_get("tag_id")?;
         let previous =

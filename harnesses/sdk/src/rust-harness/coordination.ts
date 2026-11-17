@@ -773,7 +773,7 @@ export function registerCoordinationTools(
       "close_session",
       {
         description:
-          "Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. A closed Work Session cannot be continued.",
+          "Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. Continuing it later reopens it.",
         inputSchema: schemas.close_session,
         _meta: meta,
       },
@@ -847,7 +847,12 @@ export function registerCoordinationTools(
                 }),
               );
             }
-          } catch {}
+          } catch (error) {
+            // Reopening a closed Work Session at the limit lists the open ones.
+            const failure = ConnectError.from(error);
+            if (failure.code === Code.FailedPrecondition)
+              return response(safeText(failure.rawMessage), true);
+          }
           return response("The Work Session continuation could not be confirmed.", true);
         }),
     );

@@ -41,6 +41,8 @@ export interface Message {
   workSessionReportId?: string;
   /** The Schedule that queued this turn. It has no message from the operator. */
   scheduleId?: string;
+  /** For a report turn whose work Session has since closed: why, such as `idle`. */
+  workSessionClosed?: string;
   /**
    * What the turn shows from its events, oldest first: each message the Tag wrote and its latest
    * activity or plan. The last is the turn's latest event.

@@ -215,7 +215,9 @@ pub(crate) async fn sweep_in(tx: &mut Transaction<'_, Any>, now_ms: i64) -> Resu
 impl Store {
     pub async fn sweep_work_sessions(&self) -> Result<()> {
         let (mut tx, _) = self.write().await?;
-        sweep_in(&mut tx, self.execution_now_ms()).await?;
+        let now = self.execution_now_ms();
+        sweep_in(&mut tx, now).await?;
+        super::close_idle_in(&mut tx, now).await?;
         tx.commit().await?;
         Ok(())
     }

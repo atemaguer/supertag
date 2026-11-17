@@ -364,7 +364,7 @@ fn validate_page(limit: Option<u32>, cursor: &str) -> Result<()> {
 pub(crate) fn close_spec() -> Value {
     json!({
         "type":"function", "name":"close_session",
-        "description":"Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. A closed Work Session cannot be continued.",
+        "description":"Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. Continuing it later reopens it.",
         "inputSchema":{"type":"object","properties":{
             "sessionId":{"type":"string","minLength":1,"maxLength":256}
         },"required":["sessionId"],"additionalProperties":false}
@@ -643,7 +643,7 @@ impl Client {
             work_session_id: continuation.session_id.clone(),
             message,
         };
-        let result = confirm(async || {
+        let result = confirm_reason(async || {
             self.work_sessions
                 .r#continue(
                     crate::request(input.clone(), token)
@@ -652,8 +652,11 @@ impl Client {
                 .await
         })
         .await?;
-        let Some(receipt) = result else {
-            return Ok(refused());
+        let receipt = match result {
+            Ok(receipt) => receipt,
+            // Reopening a closed Work Session at the limit lists the open ones.
+            Err(Some(reason)) => return Ok(response(crate::auth::redact(reason, secrets), false)),
+            Err(None) => return Ok(refused()),
         };
         ensure!(
             receipt.work_session_id == input.work_session_id

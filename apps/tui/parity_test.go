@@ -549,3 +549,12 @@ func TestWorkPaneShowsTheTagsOpenWorkSessions(t *testing.T) {
 		t.Fatalf("work pane:\n%s", got)
 	}
 }
+
+func TestAClosedWorkSessionShowsWhyItClosed(t *testing.T) {
+	m := runtimeModel(t)
+	m.work["work/1"] = &workDetail{reload: &reload{}, seen: map[string]bool{},
+		session: &views.Session{Id: "work/1", Closed: "idle", LatestTaskStatus: views.TaskStatus_TASK_STATUS_COMPLETED}}
+	if got := m.workState("work/1"); got != "closed: idle" {
+		t.Fatalf("work state = %q", got)
+	}
+}

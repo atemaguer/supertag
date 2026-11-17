@@ -713,6 +713,9 @@ pub struct Message {
     /// The Schedule that queued the turn, which has no message from the operator.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schedule_id: Option<String>,
+    /// For a report turn whose work Session has since closed: why, such as `idle`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_session_closed: Option<String>,
     /// What the turn shows from its events: each message the Tag wrote and its latest activity
     /// or plan, ending at its latest event.
     pub events: Vec<Event>,
@@ -721,9 +724,27 @@ pub struct Message {
     pub events_truncated: bool,
 }
 
+/// Why a work Session closed, as the app shows it after "closed: ".
+fn close_reason(reason: v2::WorkSessionCloseReason) -> Option<String> {
+    use v2::WorkSessionCloseReason as Reason;
+    Some(
+        match reason {
+            Reason::Unspecified => return None,
+            Reason::Idle => "idle",
+            Reason::Tag => "by the Tag",
+            Reason::Operator => "by an operator",
+            Reason::DeliveryPulled => "delivery pulled",
+            Reason::ObjectiveClosed => "Objective closed",
+            Reason::Upgrade => "finished before the upgrade",
+        }
+        .to_owned(),
+    )
+}
+
 impl TryFrom<v2::ConversationMessage> for Message {
     type Error = String;
     fn try_from(value: v2::ConversationMessage) -> Result<Self> {
+        let closed = close_reason(value.work_session_close_reason());
         let mut task = Task::from(
             value
                 .task
@@ -742,6 +763,7 @@ impl TryFrom<v2::ConversationMessage> for Message {
             completed_at_ms: value.completed_at_ms,
             live_input,
             work_session_report_id: value.work_session_report_id,
+            work_session_closed: closed,
             schedule_id: value.schedule_id,
             events: value.events.into_iter().map(Event::from).collect(),
             events_truncated: value.events_truncated,

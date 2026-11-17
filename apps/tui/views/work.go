@@ -364,6 +364,8 @@ type Session struct {
 	LatestTaskId string
 	// Its latest Task's status. Unspecified before it has one.
 	LatestTaskStatus TaskStatus
+	// Why a work Session closed, such as `idle`; empty while it is open.
+	Closed string
 	// When it last had a turn.
 
 	// When it was created.
@@ -495,4 +497,11 @@ func (x *SessionDelivery) GetCheckout() *TaskFiles {
 		return x.Checkout
 	}
 	return nil
+}
+
+func (x *Session) GetClosed() string {
+	if x != nil {
+		return x.Closed
+	}
+	return ""
 }

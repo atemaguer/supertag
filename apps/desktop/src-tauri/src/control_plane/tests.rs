@@ -139,6 +139,7 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
         sent_at_ms: 1_000,
         completed_at_ms: None,
         schedule_id: None,
+        work_session_close_reason: 0,
     })
     .unwrap();
     let json = serde_json::to_value(message).unwrap();
@@ -179,6 +180,7 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
             ..Default::default()
         }),
         work_session_report_id: Some("work/dependency".into()),
+        work_session_close_reason: v2::WorkSessionCloseReason::Idle as i32,
         events: vec![],
         events_truncated: false,
         order: 10,
@@ -189,6 +191,7 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
     .unwrap();
     let json = serde_json::to_value(message).unwrap();
     assert_eq!(json["workSessionReportId"], "work/dependency");
+    assert_eq!(json["workSessionClosed"], "idle");
     assert_eq!(json["task"]["taskId"], "report-task");
     assert_eq!(json["task"]["state"], "succeeded");
     assert_eq!(

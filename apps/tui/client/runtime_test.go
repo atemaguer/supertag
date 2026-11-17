@@ -576,3 +576,14 @@ func TestAScheduledTurnCarriesItsScheduleAndNoMessageFromYou(t *testing.T) {
 		t.Fatalf("scheduled turn = %+v", message)
 	}
 }
+
+// A closed work Session says why, such as `idle`; an open one says nothing.
+func TestCloseReasonNamesWhyAWorkSessionClosed(t *testing.T) {
+	closed := int64(1)
+	if got := CloseReason(&v2.WorkSession{ClosedAtMs: &closed, CloseReason: v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_IDLE}); got != "idle" {
+		t.Fatalf("idle close = %q", got)
+	}
+	if got := CloseReason(&v2.WorkSession{CloseReason: v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_IDLE}); got != "" {
+		t.Fatalf("an open work Session = %q", got)
+	}
+}

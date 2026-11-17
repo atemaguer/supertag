@@ -2256,8 +2256,8 @@ class WorkSessionsServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Close(self, request, context):
-        """Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
-        Work Session cannot be continued. Closing a closed one changes nothing.
+        """Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. Continuing
+        a closed one reopens it when the Tag is under its limit. Closing a closed one changes nothing.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

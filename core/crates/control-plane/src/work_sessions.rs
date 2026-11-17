@@ -249,9 +249,67 @@ pub(crate) async fn close_objective_in(
     Ok(())
 }
 
-/// Refuses a closed Work Session's continuation.
-pub(crate) async fn require_open_in(
+/// Why each of these Work Sessions closed, for the closed ones.
+pub(crate) async fn closed_reasons_in(
     tx: &mut Transaction<'_, Any>,
+    work_session_ids: &[&str],
+) -> Result<std::collections::HashMap<String, i32>> {
+    let mut closed = std::collections::HashMap::new();
+    for chunk in work_session_ids.chunks(crate::store::ID_BATCH) {
+        let sql = format!(
+            "SELECT work_session_id, close_reason FROM supertag_v2_work_sessions
+             WHERE closed_at_ms IS NOT NULL AND work_session_id IN ({})",
+            crate::store::placeholders(1, chunk.len())
+        );
+        let mut query = sqlx::query(&sql);
+        for id in chunk {
+            query = query.bind(*id);
+        }
+        for row in query.fetch_all(&mut **tx).await? {
+            closed.insert(
+                row.try_get("work_session_id")?,
+                row.try_get::<i64, _>("close_reason")? as i32,
+            );
+        }
+    }
+    Ok(closed)
+}
+
+/// A Work Session with no turn, continuation, or delivery change for this long closes.
+pub(crate) const IDLE_CLOSE_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+
+/// Closes Work Sessions idle for [`IDLE_CLOSE_MS`]: their latest turn and report finished that
+/// long ago, so the limit cannot fill up with abandoned work.
+pub(crate) async fn close_idle_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<u64> {
+    let cutoff = now - IDLE_CLOSE_MS;
+    Ok(sqlx::query(
+        "UPDATE supertag_v2_work_sessions SET closed_at_ms=$1, close_reason=$2
+         WHERE closed_at_ms IS NULL
+           AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=supertag_v2_work_sessions.latest_task_id
+                       AND t.state IN ($3,$4,$5) AND t.cleanup_pending=0
+                       AND COALESCE(t.completed_at_ms, t.accepted_at_ms, 0) <= $6)
+           AND NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_reports r
+                           JOIN supertag_v2_tasks report ON report.task_id=r.report_task_id
+                           WHERE r.child_task_id=supertag_v2_work_sessions.latest_task_id
+                             AND (report.state NOT IN ($3,$4,$5)
+                                  OR COALESCE(report.completed_at_ms, report.accepted_at_ms, 0) > $6))",
+    )
+    .bind(now)
+    .bind(WorkSessionCloseReason::Idle as i64)
+    .bind(TaskState::Succeeded as i64)
+    .bind(TaskState::Failed as i64)
+    .bind(TaskState::Cancelled as i64)
+    .bind(cutoff)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected())
+}
+
+/// Continuing a closed Work Session reopens it, when its Tag is under its limit; at the limit,
+/// the continuation is refused with the open Work Sessions, as a start is.
+pub(crate) async fn reopen_in(
+    tx: &mut Transaction<'_, Any>,
+    parent: &Task,
     work_session_id: &str,
 ) -> Result<()> {
     let closed: Option<Option<i64>> = sqlx::query_scalar(
@@ -260,11 +318,17 @@ pub(crate) async fn require_open_in(
     .bind(work_session_id)
     .fetch_optional(&mut **tx)
     .await?;
-    if matches!(closed, Some(Some(_))) {
-        return Err(StoreError::FailedPrecondition(format!(
-            "Work Session {work_session_id} is closed; start a new one"
-        )));
+    if !matches!(closed, Some(Some(_))) {
+        return Ok(());
     }
+    let (open, max) = open_count_in(tx, &parent.tag_id).await?;
+    if open >= max {
+        return Err(limit_refusal_in(tx, parent, open, max).await?);
+    }
+    sqlx::query("UPDATE supertag_v2_work_sessions SET closed_at_ms=NULL, close_reason=0 WHERE work_session_id=$1")
+        .bind(work_session_id)
+        .execute(&mut **tx)
+        .await?;
     Ok(())
 }
 

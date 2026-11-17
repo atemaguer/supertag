@@ -3180,7 +3180,7 @@ Close a Work Session so it no longer counts toward its Tag's limit
 Usage: supertag session [OPTIONS] <COMMAND>
 
 Commands:
-  close  Close a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed Work Session cannot be continued
+  close  Close a Work Session, so it no longer counts toward its Tag's open Work Sessions. Continuing it later reopens it
   help   Print this message or the help of the given subcommand(s)
 
 Options:
@@ -3195,7 +3195,7 @@ Options:
 ## `supertag session close`
 
 ```text
-Close a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed Work Session cannot be continued
+Close a Work Session, so it no longer counts toward its Tag's open Work Sessions. Continuing it later reopens it
 
 Usage: supertag session close [OPTIONS] <WORK_SESSION_ID>
 

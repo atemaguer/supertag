@@ -697,6 +697,7 @@ fn sent(
         sent_at_ms,
         completed_at_ms: None,
         schedule_id: None,
+        work_session_close_reason: 0,
     }
 }
 
@@ -733,10 +734,20 @@ async fn messages_in(
     };
     let mut events = message_events_in(tx, &ids).await?;
     let mut fired = crate::schedules::fired_by_in(tx, &ids).await?;
+    let reports: Vec<&str> = entries
+        .iter()
+        .filter_map(|entry| entry.report_id.as_deref())
+        .collect();
+    let closed = crate::work_sessions::closed_reasons_in(tx, &reports).await?;
     entries
         .into_iter()
         .map(|entry| {
             let schedule_id = fired.remove(&entry.task_id);
+            let work_session_close_reason = entry
+                .report_id
+                .as_ref()
+                .and_then(|id| closed.get(id).copied())
+                .unwrap_or_default();
             // A report or a Schedule's turn has no operator message.
             let is_report = entry.report_id.is_some() || schedule_id.is_some();
             let (events, events_truncated) = events.remove(&entry.task_id).unwrap_or_default();
@@ -762,6 +773,7 @@ async fn messages_in(
                 order: entry.order as u64,
                 sent_at_ms: row.accepted_at_ms.unwrap_or_default(),
                 completed_at_ms: row.completed_at_ms,
+                work_session_close_reason,
                 schedule_id,
             })
         })

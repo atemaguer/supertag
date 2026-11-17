@@ -165,7 +165,10 @@ export function ConversationEntry({
           )}
           {report && (
             <div className="turn-meta">
-              <span className="report-label">Work Session report</span>
+              <span className="report-label">
+                Work Session report
+                {message.workSessionClosed ? ` · closed: ${message.workSessionClosed}` : ""}
+              </span>
             </div>
           )}
           {scheduled && (
