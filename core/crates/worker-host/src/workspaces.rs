@@ -261,13 +261,21 @@ impl Workspaces {
             }
         }
         let workspace = self.open(&spec.workspace_id, &spec.base_commit)?;
+        // A continuation this host already holds, such as one it delivered itself, is not
+        // downloaded again: only its receipt is read.
+        let held = async |reference: &WorkspaceDeliveryReference| {
+            reference.workspace_id == spec.workspace_id
+                && reference.base_commit == spec.base_commit
+                && workspace.holds_commit(&reference.head_commit, cancel).await
+        };
         let previous = tokio::select! {
-            previous = transfers.download_workspace(attempt, token) => previous?,
+            previous = transfers.download_workspace(attempt, token, held) => previous?,
             _ = cancel.cancelled() => return Err(Status::cancelled("workspace preparation cancelled").into()),
         };
         let expected_head = match previous {
             None => Some(spec.base_commit.clone()),
-            Some((reference, payload)) => {
+            Some((reference, None)) => Some(reference.head_commit),
+            Some((reference, Some(payload))) => {
                 ensure!(
                     reference.workspace_id == spec.workspace_id
                         && reference.base_commit == spec.base_commit,
@@ -665,11 +673,14 @@ impl Transfers {
         Ok(received)
     }
 
+    /// The Session's approved continuation, if any: its receipt and, unless `held` says this host
+    /// already has it, its bundle.
     async fn download_workspace(
         &self,
         attempt: &Attempt,
         token: &str,
-    ) -> Result<Option<(WorkspaceDeliveryReference, Vec<u8>)>, Status> {
+        held: impl AsyncFnOnce(&WorkspaceDeliveryReference) -> bool,
+    ) -> Result<Option<(WorkspaceDeliveryReference, Option<Vec<u8>>)>, Status> {
         let mut upstream = request(attempt.inspect(), token)
             .map_err(|_| Status::internal("cannot authenticate workspace download"))?;
         upstream.set_timeout(Duration::from_secs(120));
@@ -695,6 +706,10 @@ impl Transfers {
         if bundle.byte_length == 0 || bundle.byte_length > MAX_WORKSPACE_BLOB_BYTES as u64 {
             return Err(Status::data_loss("workspace bundle size is invalid"));
         }
+        if held(&reference).await {
+            // Dropping the stream stops the transfer.
+            return Ok(Some((reference, None)));
+        }
         let mut bytes = Vec::new();
         while let Some(message) = stream.message().await? {
             let Some(workspace_download::Part::Chunk(chunk)) = message.part else {
@@ -715,7 +730,7 @@ impl Transfers {
                 "workspace bundle does not match its receipt",
             ));
         }
-        Ok(Some((reference, bytes)))
+        Ok(Some((reference, Some(bytes))))
     }
 }
 

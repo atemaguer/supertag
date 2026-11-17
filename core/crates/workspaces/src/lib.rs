@@ -726,6 +726,23 @@ impl Workspace {
 
     /// Import only objects from a Control Plane-approved delivery. An imported head
     /// becomes executable only when a later accepted Task explicitly pins it.
+    /// Whether this host's repository already holds `head`, a commit that contains the
+    /// Workspace's base, so a continuation that ends at it needs no bundle. Git names a commit
+    /// by its content, so the commit held is the one approved.
+    pub async fn holds_commit(&self, head: &str, cancel: &CancellationToken) -> bool {
+        if git::validate_oid(head).is_err() || check_cancelled(cancel).is_err() {
+            return false;
+        }
+        let _guard = self.inner.gate.lock().await;
+        let Ok(repository) = self.repository(cancel).await else {
+            return false;
+        };
+        repository
+            .assert_ancestor(&self.inner.config.base_commit, head, cancel)
+            .await
+            .is_ok()
+    }
+
     pub async fn import_bundle(
         &self,
         bundle_path: &Path,

@@ -553,6 +553,13 @@ async fn an_approved_bundle_restores_continuation_on_another_host_and_cleanup_ke
         base_commit: fixture.base.clone(),
     })
     .unwrap();
+    // Only a host that holds the continuation may skip its bundle.
+    let cancel = CancellationToken::new();
+    assert!(first.holds_commit(&delivery.head_commit, &cancel).await);
+    assert!(second.holds_commit(&fixture.base, &cancel).await);
+    assert!(!second.holds_commit(&delivery.head_commit, &cancel).await);
+    assert!(!second.holds_commit(&"0".repeat(40), &cancel).await);
+    assert!(!second.holds_commit("not a commit", &cancel).await);
     assert!(
         second
             .prepare(
@@ -591,6 +598,7 @@ async fn an_approved_bundle_restores_continuation_on_another_host_and_cleanup_ke
         )
         .await
         .unwrap();
+    assert!(second.holds_commit(&delivery.head_commit, &cancel).await);
     let continued = prepare(
         &second,
         "next",
