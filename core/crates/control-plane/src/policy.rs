@@ -215,6 +215,13 @@ impl Resource for PermissionSet {
                     "only runtime files:write and files:read permissions take paths, exclude, or additionalDirectories",
                 ));
             }
+            if target != Some(PolicyPermissionTarget::Runtime)
+                && (!p.hosts.is_empty() || !p.methods.is_empty() || !p.credential.is_empty())
+            {
+                return Err(invalid(
+                    "only runtime web:fetch permissions take hosts, methods, or credential",
+                ));
+            }
             match target {
                 Some(PolicyPermissionTarget::Runtime) => {
                     if !p.surface_account_id.is_empty()
@@ -232,6 +239,15 @@ impl Resource for PermissionSet {
                             paths: &mut p.paths,
                             exclude: &mut p.exclude,
                             additional_directories: &mut p.additional_directories,
+                        },
+                    )
+                    .map_err(|reason| invalid(&reason))?;
+                    supertag_protocol::network_scope::normalize_permission(
+                        &p.action,
+                        supertag_protocol::network_scope::PermissionNetwork {
+                            hosts: &mut p.hosts,
+                            methods: &mut p.methods,
+                            credential: &mut p.credential,
                         },
                     )
                     .map_err(|reason| invalid(&reason))?;
@@ -269,7 +285,18 @@ impl Resource for PermissionSet {
     }
 }
 fn permission_key(p: &PolicyPermission) -> String {
-    // Two grants of one action with different path scopes stay distinct.
+    // Two grants of one action with different path or network scopes stay distinct.
+    if !p.hosts.is_empty() || !p.methods.is_empty() || !p.credential.is_empty() {
+        return serde_json::to_string(&(
+            p.target,
+            &p.action,
+            &p.surface_account_id,
+            &p.scope,
+            &p.resource,
+            ("network", &p.hosts, &p.methods, &p.credential),
+        ))
+        .expect("permission key serializes");
+    }
     if p.paths.is_empty() && p.exclude.is_empty() && p.additional_directories.is_empty() {
         serde_json::to_string(&(
             p.target,
@@ -1499,12 +1526,32 @@ pub(crate) async fn admission_in(
             .iter()
             .any(|action| action == FILES_WRITE),
     );
+    let network = supertag_protocol::network_scope::compose(
+        policy
+            .snapshot
+            .permission_sets
+            .iter()
+            .flat_map(|set| &set.permissions)
+            .filter(|p| p.target == PolicyPermissionTarget::Runtime as i32)
+            .map(|p| supertag_protocol::network_scope::Grant {
+                action: &p.action,
+                hosts: &p.hosts,
+                methods: &p.methods,
+                credential: &p.credential,
+                // A gated grant is not admitted, so it adds no access of its own.
+                admitted: !p.approval_required,
+            }),
+        base.allowed_actions
+            .iter()
+            .any(|action| action == supertag_protocol::network_scope::WEB_FETCH),
+    );
     project_runtime(
         &mut policy,
         TaskRuntimeAuthority {
             actions: actions.into_iter().collect(),
             approvals: approvals.into_values().collect(),
             files,
+            network,
             ..Default::default()
         },
     )?;
@@ -1610,6 +1657,18 @@ fn project_runtime(
     authority
         .approvals
         .retain(|requirement| authority.actions.binary_search(&requirement.action).is_ok());
+    // A network scope narrows web:fetch; without the action there is nothing to narrow.
+    if authority
+        .actions
+        .binary_search_by(|action| {
+            action
+                .as_str()
+                .cmp(supertag_protocol::network_scope::WEB_FETCH)
+        })
+        .is_err()
+    {
+        authority.network = None;
+    }
     policy.snapshot.runtime_authority = Some(authority);
     size(&policy.snapshot, SNAPSHOT_BYTES)?;
     policy.effective_digest = effective_digest(&policy.snapshot)?;
@@ -1725,6 +1784,8 @@ pub(crate) fn apply_delegated_runtime(
             delegating_task_id: Some(parent.task_id.clone()),
             // The member writes within its own scope; both Tags' exclusions apply.
             files,
+            // Delegation carries no network access: the member keeps its own scope.
+            network: target.network,
         },
     )
 }
@@ -1817,6 +1878,12 @@ pub(crate) fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> 
         .as_ref()
         .and_then(|authority| authority.files.as_ref())
         .filter(|scope| !supertag_protocol::file_scope::is_empty(scope));
+    // So is a network scope.
+    let network = snapshot
+        .runtime_authority
+        .as_ref()
+        .and_then(|authority| authority.network.as_ref())
+        .filter(|scope| !scope.rules.is_empty());
     if permissions.is_empty()
         && contexts.is_empty()
         && execution.is_none()
@@ -1824,6 +1891,7 @@ pub(crate) fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> 
         && runtime.is_none()
         && shared_environment.is_none()
         && files.is_none()
+        && network.is_none()
     {
         return Ok(String::new());
     }
@@ -1839,6 +1907,12 @@ pub(crate) fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> 
             "file_scope",
             (&files.write, &files.read_only, &files.hidden),
             (&files.outside_write, &files.outside_read),
+        ))?);
+    }
+    if let Some(network) = network {
+        encoded.extend(serde_json::to_vec(&(
+            "network_scope",
+            network.encode_to_vec(),
         ))?);
     }
     if let Some(origin) = &snapshot.origin {

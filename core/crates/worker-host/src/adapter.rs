@@ -476,6 +476,8 @@ pub(crate) struct ExecutionInputs<'a> {
     pub processes: crate::journal::Processes,
     /// When a remote sandbox's harness must stop to leave its cleanup margin.
     pub sandbox_execution_ends: Option<Instant>,
+    /// The Attempt's egress proxy variables for the adapter, when its Task has a network scope.
+    pub egress_environment: Vec<(String, std::ffi::OsString)>,
 }
 
 /// Runs the Attempt's adapter. Every error leaves the Attempt's cleanup unconfirmed, and carries
@@ -528,6 +530,7 @@ async fn run(
         mcp,
         processes,
         sandbox_execution_ends,
+        egress_environment,
     }: ExecutionInputs<'_>,
     (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
     (host_token, bootstrap_token, secrets): (&str, String, Arc<Vec<SensitiveValue>>),
@@ -623,6 +626,7 @@ async fn run(
         shutdown,
         (workspace, output_directory),
         &processes,
+        &egress_environment,
     )
     .await;
     bridge.inputs.close();
@@ -651,6 +655,7 @@ async fn supervise(
     shutdown: &CancellationToken,
     (workspace, output_directory): (Option<&Path>, Option<&Path>),
     processes: &crate::journal::Processes,
+    egress_environment: &[(String, std::ffi::OsString)],
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
         return Ok(not_launched(bridge, "Worker Host is shutting down"));
@@ -697,6 +702,7 @@ async fn supervise(
     if let Some(directory) = output_directory {
         command.env(crate::task_outputs::OUTPUT_DIRECTORY, directory);
     }
+    command.envs(egress_environment.iter().map(|(name, value)| (name, value)));
     command.env(
         crate::guardian::ADAPTER_SCRATCH_PARENT,
         options

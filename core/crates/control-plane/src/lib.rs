@@ -32,6 +32,7 @@ mod manifest_relationships;
 mod mcp_effects;
 mod memories;
 mod metrics;
+mod network_logs;
 pub mod objective_limits;
 mod objective_overview;
 mod objectives;
@@ -695,6 +696,17 @@ impl worker_host_server::WorkerHost for ControlPlane {
             .report_cleanup_failure(&principal, &request.into_inner())
             .await?;
         Ok(Response::new(ReportCleanupFailureResponse {}))
+    }
+
+    async fn report_network_log(
+        &self,
+        request: Request<ReportNetworkLogRequest>,
+    ) -> Result<Response<ReportNetworkLogResponse>, Status> {
+        let principal = self.host_authority(&request)?;
+        self.store
+            .report_network_log(&principal, &request.into_inner())
+            .await?;
+        Ok(Response::new(ReportNetworkLogResponse {}))
     }
 
     async fn resolve_workspace_ref(

@@ -1082,6 +1082,7 @@ mod tests {
                 task_artifact_inputs: false,
                 workspace_mounts: vec![],
                 mcp_login_servers: vec![],
+                network_credentials: vec![],
             }),
             ..Default::default()
         };

@@ -263,7 +263,7 @@ class DeleteSurfaceLocationRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., location_id: _Optional[str] = ..., expected_revision: _Optional[int] = ..., dry_run: _Optional[bool] = ...) -> None: ...
 
 class PolicyPermission(_message.Message):
-    __slots__ = ("permission_id", "target", "action", "surface_account_id", "scope", "reference", "resource", "approval_required", "paths", "exclude", "additional_directories")
+    __slots__ = ("permission_id", "target", "action", "surface_account_id", "scope", "reference", "resource", "approval_required", "paths", "exclude", "additional_directories", "hosts", "methods", "credential")
     PERMISSION_ID_FIELD_NUMBER: _ClassVar[int]
     TARGET_FIELD_NUMBER: _ClassVar[int]
     ACTION_FIELD_NUMBER: _ClassVar[int]
@@ -275,6 +275,9 @@ class PolicyPermission(_message.Message):
     PATHS_FIELD_NUMBER: _ClassVar[int]
     EXCLUDE_FIELD_NUMBER: _ClassVar[int]
     ADDITIONAL_DIRECTORIES_FIELD_NUMBER: _ClassVar[int]
+    HOSTS_FIELD_NUMBER: _ClassVar[int]
+    METHODS_FIELD_NUMBER: _ClassVar[int]
+    CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
     permission_id: str
     target: PolicyPermissionTarget
     action: str
@@ -286,7 +289,10 @@ class PolicyPermission(_message.Message):
     paths: _containers.RepeatedScalarFieldContainer[str]
     exclude: _containers.RepeatedScalarFieldContainer[str]
     additional_directories: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, permission_id: _Optional[str] = ..., target: _Optional[_Union[PolicyPermissionTarget, str]] = ..., action: _Optional[str] = ..., surface_account_id: _Optional[str] = ..., scope: _Optional[str] = ..., reference: _Optional[str] = ..., resource: _Optional[str] = ..., approval_required: _Optional[bool] = ..., paths: _Optional[_Iterable[str]] = ..., exclude: _Optional[_Iterable[str]] = ..., additional_directories: _Optional[_Iterable[str]] = ...) -> None: ...
+    hosts: _containers.RepeatedScalarFieldContainer[str]
+    methods: _containers.RepeatedScalarFieldContainer[str]
+    credential: str
+    def __init__(self, permission_id: _Optional[str] = ..., target: _Optional[_Union[PolicyPermissionTarget, str]] = ..., action: _Optional[str] = ..., surface_account_id: _Optional[str] = ..., scope: _Optional[str] = ..., reference: _Optional[str] = ..., resource: _Optional[str] = ..., approval_required: _Optional[bool] = ..., paths: _Optional[_Iterable[str]] = ..., exclude: _Optional[_Iterable[str]] = ..., additional_directories: _Optional[_Iterable[str]] = ..., hosts: _Optional[_Iterable[str]] = ..., methods: _Optional[_Iterable[str]] = ..., credential: _Optional[str] = ...) -> None: ...
 
 class PermissionSet(_message.Message):
     __slots__ = ("set_id", "name", "revision", "approvers", "permissions")
@@ -417,20 +423,22 @@ class RuntimeApprovalRequirement(_message.Message):
     def __init__(self, action: _Optional[str] = ..., permission_set_ids: _Optional[_Iterable[str]] = ..., approvers: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class TaskRuntimeAuthority(_message.Message):
-    __slots__ = ("actions", "approvals", "objective_id", "objective_revision", "delegating_task_id", "files")
+    __slots__ = ("actions", "approvals", "objective_id", "objective_revision", "delegating_task_id", "files", "network")
     ACTIONS_FIELD_NUMBER: _ClassVar[int]
     APPROVALS_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_REVISION_FIELD_NUMBER: _ClassVar[int]
     DELEGATING_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
+    NETWORK_FIELD_NUMBER: _ClassVar[int]
     actions: _containers.RepeatedScalarFieldContainer[str]
     approvals: _containers.RepeatedCompositeFieldContainer[RuntimeApprovalRequirement]
     objective_id: str
     objective_revision: int
     delegating_task_id: str
     files: FileScope
-    def __init__(self, actions: _Optional[_Iterable[str]] = ..., approvals: _Optional[_Iterable[_Union[RuntimeApprovalRequirement, _Mapping]]] = ..., objective_id: _Optional[str] = ..., objective_revision: _Optional[int] = ..., delegating_task_id: _Optional[str] = ..., files: _Optional[_Union[FileScope, _Mapping]] = ...) -> None: ...
+    network: NetworkScope
+    def __init__(self, actions: _Optional[_Iterable[str]] = ..., approvals: _Optional[_Iterable[_Union[RuntimeApprovalRequirement, _Mapping]]] = ..., objective_id: _Optional[str] = ..., objective_revision: _Optional[int] = ..., delegating_task_id: _Optional[str] = ..., files: _Optional[_Union[FileScope, _Mapping]] = ..., network: _Optional[_Union[NetworkScope, _Mapping]] = ...) -> None: ...
 
 class FileScope(_message.Message):
     __slots__ = ("write", "read_only", "hidden", "outside_write", "outside_read")
@@ -445,6 +453,24 @@ class FileScope(_message.Message):
     outside_write: _containers.RepeatedScalarFieldContainer[str]
     outside_read: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, write: _Optional[_Iterable[str]] = ..., read_only: _Optional[_Iterable[str]] = ..., hidden: _Optional[_Iterable[str]] = ..., outside_write: _Optional[_Iterable[str]] = ..., outside_read: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class NetworkScope(_message.Message):
+    __slots__ = ("any_origin", "rules")
+    ANY_ORIGIN_FIELD_NUMBER: _ClassVar[int]
+    RULES_FIELD_NUMBER: _ClassVar[int]
+    any_origin: bool
+    rules: _containers.RepeatedCompositeFieldContainer[NetworkRule]
+    def __init__(self, any_origin: _Optional[bool] = ..., rules: _Optional[_Iterable[_Union[NetworkRule, _Mapping]]] = ...) -> None: ...
+
+class NetworkRule(_message.Message):
+    __slots__ = ("origins", "methods", "credential")
+    ORIGINS_FIELD_NUMBER: _ClassVar[int]
+    METHODS_FIELD_NUMBER: _ClassVar[int]
+    CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
+    origins: _containers.RepeatedScalarFieldContainer[str]
+    methods: _containers.RepeatedScalarFieldContainer[str]
+    credential: str
+    def __init__(self, origins: _Optional[_Iterable[str]] = ..., methods: _Optional[_Iterable[str]] = ..., credential: _Optional[str] = ...) -> None: ...
 
 class PutPermissionSetRequest(_message.Message):
     __slots__ = ("operation_id", "permission_set", "expected_revision")

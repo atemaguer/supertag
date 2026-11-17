@@ -1149,6 +1149,22 @@ impl ManagedHost {
                 .into_iter()
                 .filter_map(|name| std::env::var_os(name).map(|value| (name, value))),
         );
+        // Network credentials reach only the Codex lanes that inject them, never a harness.
+        for (name, variable) in adapter.network_credentials()? {
+            let (_, secret) = self
+                .definition
+                .network_credentials
+                .iter()
+                .find(|(configured, _)| *configured == name)
+                .with_context(|| format!("network credential {name} has no secret"))?;
+            let value = secret
+                .read(&self.environment)
+                .with_context(|| format!("read network credential {name} ({variable})"))?;
+            host.env(
+                supertag_worker_host::egress::credential_source_variable(&name),
+                value,
+            );
+        }
         // The lane presents the Host credential; the guardian clears it for harness children.
         host.env("SUPERTAG_HOST_TOKEN", token);
         let name = format!("Worker Host {} lane {index}", self.definition.name);

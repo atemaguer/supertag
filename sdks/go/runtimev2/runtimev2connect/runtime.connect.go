@@ -299,6 +299,9 @@ const (
 	// WorkerHostReportCleanupFailureProcedure is the fully-qualified name of the WorkerHost's
 	// ReportCleanupFailure RPC.
 	WorkerHostReportCleanupFailureProcedure = "/supertag.runtime.v2.WorkerHost/ReportCleanupFailure"
+	// WorkerHostReportNetworkLogProcedure is the fully-qualified name of the WorkerHost's
+	// ReportNetworkLog RPC.
+	WorkerHostReportNetworkLogProcedure = "/supertag.runtime.v2.WorkerHost/ReportNetworkLog"
 	// WorkerHostResolveWorkspaceRefProcedure is the fully-qualified name of the WorkerHost's
 	// ResolveWorkspaceRef RPC.
 	WorkerHostResolveWorkspaceRefProcedure = "/supertag.runtime.v2.WorkerHost/ResolveWorkspaceRef"
@@ -2796,6 +2799,8 @@ type WorkerHostClient interface {
 	// Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
 	// execution report. The Attempt stays uncertain until the host or an operator resolves it.
 	ReportCleanupFailure(context.Context, *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error)
+	// The Attempt's egress proxy log, for the Task's network log. Each report replaces the last.
+	ReportNetworkLog(context.Context, *connect.Request[runtimev2.ReportNetworkLogRequest]) (*connect.Response[runtimev2.ReportNetworkLogResponse], error)
 	// The commit the running Attempt's host resolved for its Task's Workspace `base_ref`. The first
 	// resolution in a Session wins and is recorded on every unresolved Task of the Session; the
 	// returned Task carries the recorded commit.
@@ -2927,6 +2932,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("ReportCleanupFailure")),
 			connect.WithClientOptions(opts...),
 		),
+		reportNetworkLog: connect.NewClient[runtimev2.ReportNetworkLogRequest, runtimev2.ReportNetworkLogResponse](
+			httpClient,
+			baseURL+WorkerHostReportNetworkLogProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ReportNetworkLog")),
+			connect.WithClientOptions(opts...),
+		),
 		resolveWorkspaceRef: connect.NewClient[runtimev2.ResolveWorkspaceRefRequest, runtimev2.Task](
 			httpClient,
 			baseURL+WorkerHostResolveWorkspaceRefProcedure,
@@ -2957,6 +2968,7 @@ type workerHostClient struct {
 	reclaimAttempt          *connect.Client[runtimev2.ReclaimAttemptRequest, runtimev2.AttemptResolution]
 	reportAppliedLimits     *connect.Client[runtimev2.ReportAppliedLimitsRequest, runtimev2.ReportAppliedLimitsResponse]
 	reportCleanupFailure    *connect.Client[runtimev2.ReportCleanupFailureRequest, runtimev2.ReportCleanupFailureResponse]
+	reportNetworkLog        *connect.Client[runtimev2.ReportNetworkLogRequest, runtimev2.ReportNetworkLogResponse]
 	resolveWorkspaceRef     *connect.Client[runtimev2.ResolveWorkspaceRefRequest, runtimev2.Task]
 }
 
@@ -3055,6 +3067,11 @@ func (c *workerHostClient) ReportCleanupFailure(ctx context.Context, req *connec
 	return c.reportCleanupFailure.CallUnary(ctx, req)
 }
 
+// ReportNetworkLog calls supertag.runtime.v2.WorkerHost.ReportNetworkLog.
+func (c *workerHostClient) ReportNetworkLog(ctx context.Context, req *connect.Request[runtimev2.ReportNetworkLogRequest]) (*connect.Response[runtimev2.ReportNetworkLogResponse], error) {
+	return c.reportNetworkLog.CallUnary(ctx, req)
+}
+
 // ResolveWorkspaceRef calls supertag.runtime.v2.WorkerHost.ResolveWorkspaceRef.
 func (c *workerHostClient) ResolveWorkspaceRef(ctx context.Context, req *connect.Request[runtimev2.ResolveWorkspaceRefRequest]) (*connect.Response[runtimev2.Task], error) {
 	return c.resolveWorkspaceRef.CallUnary(ctx, req)
@@ -3089,6 +3106,8 @@ type WorkerHostHandler interface {
 	// Why the host could not confirm the Attempt's cleanup, redacted by the host, for the Task
 	// execution report. The Attempt stays uncertain until the host or an operator resolves it.
 	ReportCleanupFailure(context.Context, *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error)
+	// The Attempt's egress proxy log, for the Task's network log. Each report replaces the last.
+	ReportNetworkLog(context.Context, *connect.Request[runtimev2.ReportNetworkLogRequest]) (*connect.Response[runtimev2.ReportNetworkLogResponse], error)
 	// The commit the running Attempt's host resolved for its Task's Workspace `base_ref`. The first
 	// resolution in a Session wins and is recorded on every unresolved Task of the Session; the
 	// returned Task carries the recorded commit.
@@ -3216,6 +3235,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("ReportCleanupFailure")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostReportNetworkLogHandler := connect.NewUnaryHandler(
+		WorkerHostReportNetworkLogProcedure,
+		svc.ReportNetworkLog,
+		connect.WithSchema(workerHostMethods.ByName("ReportNetworkLog")),
+		connect.WithHandlerOptions(opts...),
+	)
 	workerHostResolveWorkspaceRefHandler := connect.NewUnaryHandler(
 		WorkerHostResolveWorkspaceRefProcedure,
 		svc.ResolveWorkspaceRef,
@@ -3262,6 +3287,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostReportAppliedLimitsHandler.ServeHTTP(w, r)
 		case WorkerHostReportCleanupFailureProcedure:
 			workerHostReportCleanupFailureHandler.ServeHTTP(w, r)
+		case WorkerHostReportNetworkLogProcedure:
+			workerHostReportNetworkLogHandler.ServeHTTP(w, r)
 		case WorkerHostResolveWorkspaceRefProcedure:
 			workerHostResolveWorkspaceRefHandler.ServeHTTP(w, r)
 		default:
@@ -3347,6 +3374,10 @@ func (UnimplementedWorkerHostHandler) ReportAppliedLimits(context.Context, *conn
 
 func (UnimplementedWorkerHostHandler) ReportCleanupFailure(context.Context, *connect.Request[runtimev2.ReportCleanupFailureRequest]) (*connect.Response[runtimev2.ReportCleanupFailureResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportCleanupFailure is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ReportNetworkLog(context.Context, *connect.Request[runtimev2.ReportNetworkLogRequest]) (*connect.Response[runtimev2.ReportNetworkLogResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportNetworkLog is not implemented"))
 }
 
 func (UnimplementedWorkerHostHandler) ResolveWorkspaceRef(context.Context, *connect.Request[runtimev2.ResolveWorkspaceRefRequest]) (*connect.Response[runtimev2.Task], error) {

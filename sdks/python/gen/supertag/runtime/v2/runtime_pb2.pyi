@@ -2407,7 +2407,7 @@ class ExecutionLimits(_message.Message):
     def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "quiet", "workspace_selection", "applied_execution_limits", "workspace_mount_writes", "execution_report")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "quiet", "workspace_selection", "applied_execution_limits", "workspace_mount_writes", "execution_report", "network_logs")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2434,6 +2434,7 @@ class Task(_message.Message):
     APPLIED_EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_MOUNT_WRITES_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_REPORT_FIELD_NUMBER: _ClassVar[int]
+    NETWORK_LOGS_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -2460,7 +2461,8 @@ class Task(_message.Message):
     applied_execution_limits: AppliedExecutionLimits
     workspace_mount_writes: _containers.RepeatedCompositeFieldContainer[AttemptWorkspaceMountWrites]
     execution_report: TaskExecutionReport
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., quiet: _Optional[bool] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ..., execution_report: _Optional[_Union[TaskExecutionReport, _Mapping]] = ...) -> None: ...
+    network_logs: _containers.RepeatedCompositeFieldContainer[AttemptNetworkLog]
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., quiet: _Optional[bool] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ..., execution_report: _Optional[_Union[TaskExecutionReport, _Mapping]] = ..., network_logs: _Optional[_Iterable[_Union[AttemptNetworkLog, _Mapping]]] = ...) -> None: ...
 
 class TaskExecutionReport(_message.Message):
     __slots__ = ("limit_outcome", "max_reported_tokens", "max_reported_cost", "max_native_agents", "limits_applied", "usage_complete", "complete", "cleanup", "cleanup_failure")
@@ -2493,6 +2495,58 @@ class ReportCleanupFailureRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., reasons: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ReportCleanupFailureResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class NetworkRequestRecord(_message.Message):
+    __slots__ = ("at_ms", "method", "origin", "path", "allowed", "reason", "status", "credential")
+    AT_MS_FIELD_NUMBER: _ClassVar[int]
+    METHOD_FIELD_NUMBER: _ClassVar[int]
+    ORIGIN_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
+    at_ms: int
+    method: str
+    origin: str
+    path: str
+    allowed: bool
+    reason: str
+    status: int
+    credential: str
+    def __init__(self, at_ms: _Optional[int] = ..., method: _Optional[str] = ..., origin: _Optional[str] = ..., path: _Optional[str] = ..., allowed: _Optional[bool] = ..., reason: _Optional[str] = ..., status: _Optional[int] = ..., credential: _Optional[str] = ...) -> None: ...
+
+class NetworkLog(_message.Message):
+    __slots__ = ("requests", "allowed", "denied", "unrecorded")
+    REQUESTS_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_FIELD_NUMBER: _ClassVar[int]
+    DENIED_FIELD_NUMBER: _ClassVar[int]
+    UNRECORDED_FIELD_NUMBER: _ClassVar[int]
+    requests: _containers.RepeatedCompositeFieldContainer[NetworkRequestRecord]
+    allowed: int
+    denied: int
+    unrecorded: int
+    def __init__(self, requests: _Optional[_Iterable[_Union[NetworkRequestRecord, _Mapping]]] = ..., allowed: _Optional[int] = ..., denied: _Optional[int] = ..., unrecorded: _Optional[int] = ...) -> None: ...
+
+class AttemptNetworkLog(_message.Message):
+    __slots__ = ("attempt_id", "log")
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    LOG_FIELD_NUMBER: _ClassVar[int]
+    attempt_id: str
+    log: NetworkLog
+    def __init__(self, attempt_id: _Optional[str] = ..., log: _Optional[_Union[NetworkLog, _Mapping]] = ...) -> None: ...
+
+class ReportNetworkLogRequest(_message.Message):
+    __slots__ = ("attempt", "log")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    LOG_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    log: NetworkLog
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., log: _Optional[_Union[NetworkLog, _Mapping]] = ...) -> None: ...
+
+class ReportNetworkLogResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
@@ -2585,7 +2639,7 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts", "mcp_login_servers")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts", "mcp_login_servers", "network_credentials")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
@@ -2596,6 +2650,7 @@ class HarnessExecutionProfile(_message.Message):
     TASK_ARTIFACT_INPUTS_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_MOUNTS_FIELD_NUMBER: _ClassVar[int]
     MCP_LOGIN_SERVERS_FIELD_NUMBER: _ClassVar[int]
+    NETWORK_CREDENTIALS_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
     allow_unsandboxed_commands: bool
@@ -2606,7 +2661,8 @@ class HarnessExecutionProfile(_message.Message):
     task_artifact_inputs: bool
     workspace_mounts: _containers.RepeatedCompositeFieldContainer[WorkspaceMountCapability]
     mcp_login_servers: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ..., mcp_login_servers: _Optional[_Iterable[str]] = ...) -> None: ...
+    network_credentials: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ..., mcp_login_servers: _Optional[_Iterable[str]] = ..., network_credentials: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class SharedExecutionCapability(_message.Message):
     __slots__ = ("environment_id", "tools", "incarnation_id")

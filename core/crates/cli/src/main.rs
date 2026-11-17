@@ -1158,6 +1158,21 @@ async fn run(command: Command) -> Result<()> {
             );
             let provider_model = adapter.provider_model();
             let mut execution_profile = adapter.execution_profile()?;
+            let network_credentials = adapter
+                .network_credentials()?
+                .into_iter()
+                .map(|(name, variable)| {
+                    let source = supertag_worker_host::egress::credential_source_variable(&name);
+                    let value = std::env::var(&source).with_context(|| {
+                        format!("set {source} to the value of network credential {name}")
+                    })?;
+                    supertag_worker_host::egress::HostCredential::new(&name, &variable, value)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            ensure!(
+                network_credentials.is_empty() || harness == HarnessKind::Codex,
+                "network credentials are injected only for Codex in this release"
+            );
             let workspaces = adapter.workspace_mappings()?;
             use supertag_worker_host::{ProviderAuthority, ProviderConfig};
             let remote_provider = if let Some(executable) = e2b_workspace_provider {
@@ -1318,6 +1333,7 @@ async fn run(command: Command) -> Result<()> {
                 disk_space,
                 keep_awake,
                 labels,
+                network_credentials,
                 lane: supervised_lane.map(|incarnation_id| supertag_worker_host::Lane {
                     incarnation_id,
                     observer: std::sync::Arc::new(|state: supertag_worker_host::LaneState| {

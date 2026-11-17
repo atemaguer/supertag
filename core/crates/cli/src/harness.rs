@@ -89,6 +89,11 @@ pub struct AdapterOptions {
     /// Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox.
     #[arg(long, requires = "harness")]
     allow_unsandboxed_commands: bool,
+    /// NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network
+    /// scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from
+    /// this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials.
+    #[arg(long, value_name = "NAME=VARIABLE", requires = "harness")]
+    network_credential: Vec<String>,
     /// Claude executable used by the Agent SDK.
     #[arg(long, requires = "harness")]
     claude_path: Option<PathBuf>,
@@ -228,8 +233,14 @@ impl AdapterOptions {
                 );
             }
         }
+        let network_credentials = self
+            .network_credentials()?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
         Ok(supertag_protocol::v2::HarnessExecutionProfile {
             mcp_login_servers: vec![],
+            network_credentials,
             model_ids,
             default_model,
             allow_unsandboxed_commands: self.allow_unsandboxed_commands,
@@ -244,6 +255,19 @@ impl AdapterOptions {
             workspace_mounts: vec![],
         })
     }
+    /// Each `--network-credential` as `(name, variable)`, sorted by name, each name once.
+    pub fn network_credentials(&self) -> Result<Vec<(String, String)>> {
+        let mut credentials = std::collections::BTreeMap::new();
+        for value in &self.network_credential {
+            let (name, variable) = supertag_worker_host::egress::parse_credential_flag(value)?;
+            ensure!(
+                credentials.insert(name.clone(), variable).is_none(),
+                "network credential {name} is configured more than once"
+            );
+        }
+        Ok(credentials.into_iter().collect())
+    }
+
     pub fn provider_environment(&self) -> Result<&'static [&'static str]> {
         supertag_worker_host::provider_environment_for(
             self.harness_kind(),
@@ -318,6 +342,9 @@ impl AdapterOptions {
         }
         if self.allow_unsandboxed_commands {
             args.push("--allow-unsandboxed-commands".into());
+        }
+        for credential in &self.network_credential {
+            args.extend(["--network-credential".into(), credential.into()]);
         }
         for model in &self.harness_models {
             args.extend(["--harness-models".into(), model.into()]);

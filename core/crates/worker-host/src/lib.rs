@@ -7,6 +7,7 @@ mod checkpoints;
 mod cleanup_failure;
 pub mod context;
 mod credentials;
+pub mod egress;
 mod enrollment;
 pub mod environment;
 mod failures;
@@ -113,6 +114,8 @@ pub struct HostOptions {
     pub labels: Vec<String>,
     /// Set when a supervisor runs this process as one execution lane of a shared Host.
     pub lane: Option<Lane>,
+    /// Credentials the egress proxy injects for Tasks whose network scope names them.
+    pub network_credentials: Vec<egress::HostCredential>,
 }
 
 /// One supervised execution lane. Every lane of a Host registers the Host's single
@@ -1499,6 +1502,17 @@ async fn run_assignment(
             adapter::failed("Worker Host cannot enforce accepted shared execution placement"),
         );
     }
+    if !supertag_protocol::network_scope::supports(
+        &task,
+        options.harness,
+        &options.execution_profile,
+    ) {
+        return save_finish(
+            journal,
+            attempt,
+            adapter::failed("Worker Host cannot enforce the Task's network scope"),
+        );
+    }
     if !supertag_protocol::output_policy::supports(
         &task,
         options.harness,
@@ -2141,6 +2155,20 @@ async fn run_assignment(
     // The delivery check applies the Task's path scope to what it changed.
     let file_scope = supertag_protocol::file_scope::of_task(&task)
         .map(supertag_protocol::file_scope::Rules::from);
+    // A network scope runs this Attempt's egress proxy for as long as its harness runs.
+    let egress = match supertag_protocol::network_scope::of_task(&task) {
+        Some(scope) => Some(
+            egress::start_for_attempt(
+                scope,
+                &options.network_credentials,
+                &options.state_directory,
+                &attempt.attempt_id,
+            )
+            .await
+            .context("start the Attempt's egress proxy")?,
+        ),
+        None => None,
+    };
     let sandbox_task = defer_sandbox.then(|| task.clone());
     // The harness answers the joined messages in the same turn. The Task's stored prompt keeps
     // only the person's own text.
@@ -2173,6 +2201,10 @@ async fn run_assignment(
                 mcp: mcp.clone(),
                 processes: processes.clone(),
                 sandbox_execution_ends,
+                egress_environment: egress
+                    .as_ref()
+                    .map(|egress| egress.environment.clone())
+                    .unwrap_or_default(),
             },
             (host.clone(), inputs.clone(), coordination.clone()),
             token,
@@ -2244,6 +2276,9 @@ async fn run_assignment(
     stop_reports.cancel();
     if let Some(reports) = reports {
         let _ = reports.await;
+    }
+    if let Some(egress) = egress {
+        egress.finish(host, &attempt, token).await;
     }
     if let Some(mcp) = mcp {
         mcp.close().await;

@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 89;
+        const SCHEMA_VERSION: i64 = 90;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -288,6 +288,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0087_surface_delivery.sql"),
                 include_str!("../migrations/sqlite/0088_tag_memories.sql"),
                 include_str!("../migrations/sqlite/0089_quiet_results.sql"),
+                include_str!("../migrations/sqlite/0090_attempt_network_logs.sql"),
             ]
         } else {
             [
@@ -382,6 +383,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0087_surface_delivery.sql"),
                 include_str!("../migrations/postgresql/0088_tag_memories.sql"),
                 include_str!("../migrations/postgresql/0089_quiet_results.sql"),
+                include_str!("../migrations/postgresql/0090_attempt_network_logs.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -742,6 +744,7 @@ impl Store {
         let mut task = task_row(&row)?;
         task.workspace_mount_writes =
             crate::workspace_mounts::writes_for(&self.pool, task_id).await?;
+        task.network_logs = crate::network_logs::logs_for(&self.pool, task_id).await?;
         Ok(task)
     }
 
@@ -2484,6 +2487,7 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
         workspace_mount_writes: vec![],
         execution_report: None,
         quiet: row.try_get::<i64, _>("quiet")? != 0,
+        network_logs: vec![],
     })
 }
 

@@ -359,6 +359,9 @@ fn unsupported_by_harness(task: &Task) -> Option<(String, String)> {
     if let Some(reason) = supertag_protocol::file_scope::harness_reason(task, harness) {
         return Some(("file-scope".into(), reason));
     }
+    if let Some(reason) = supertag_protocol::network_scope::harness_reason(task, harness) {
+        return Some(("network-scope".into(), reason));
+    }
     // These harnesses load no Skills, so their lanes claim with no context contracts.
     (matches!(
         harness,

@@ -182,7 +182,7 @@ pub(super) fn resolve_attempt(
 
 /// What keeps a host lane for `harness` with `profile` from running the Task, as
 /// `(requirement, summary)`: commands that would run unsandboxed without the host's opt-in, or a
-/// path scope the lane cannot apply. Both depend on the host, so `placement explain` reports
+/// path or network scope the lane cannot apply. Both depend on the host, so `placement explain` reports
 /// them only when no bound host's lane can run the Task.
 pub(crate) fn lane_requirement(
     task: &Task,
@@ -191,6 +191,9 @@ pub(crate) fn lane_requirement(
 ) -> Option<(String, String)> {
     if let Some(reason) = supertag_protocol::file_scope::reason(task, harness, profile) {
         return Some(("file-scope".into(), reason));
+    }
+    if let Some(reason) = supertag_protocol::network_scope::reason(task, harness, profile) {
+        return Some(("network-scope".into(), reason));
     }
     let name = match harness {
         HarnessKind::ClaudeCode => "claude-code",
