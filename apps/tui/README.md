@@ -110,14 +110,17 @@ shows setup instructions. The rail on the left has four sections:
 - **Teams**, each with its number of members. Selecting one shows its members, its turn limit and
   the newest posts of its Workstream, kept current.
 
-The conversation reads like a messaging app. Consecutive messages from you or the Tag form one
+The conversation reads like a messaging app and shows only messages: yours, the Tag's, and its
+result, with short notices for what you need to know, such as why a turn waits, that it failed,
+or that a work Session waits on you. What the Tag does, the commands and tools it runs and its
+work Sessions, is one key away. Consecutive messages from you or the Tag form one
 group under one name, and a time divider (`Today 10:16 PM`, `Yesterday 9:02 AM`) starts the
 history and marks each pause of more than fifteen minutes. Each message the Tag writes while it
 works, starting with its sentence of intent, is its own message, and its result follows, rendered
 as markdown. Under your last message the TUI shows `Sending…` until the Control Plane accepts it,
 then `Sent`, and `Seen` once a Worker Host took its turn up. While its turn runs, an animated
-`···` stays as the turn's last line, after its intent and any messages it writes, with what it
-is doing now as a dim caption beside it, until the result arrives. A sent message
+`···` stays as the turn's last line, after its intent and any messages it writes, until the
+result arrives. A sent message
 shows at once and waits in an outbox, kept on disk, until the Control Plane accepts it; the next
 launch sends what is left again with the same operation ID, so the Tag gets it at most once. One
 that was not delivered says `! Not delivered`: Ctrl-R sends it again, and Ctrl-X takes it back
@@ -141,12 +144,14 @@ lead Tag `supertag init` creates, the new Tag may edit files and run commands. I
 `Operator.PutTag` fenced at revision zero, so it never replaces another Tag, and is selected once
 created. Only operators may create Tags: a client device is told so instead.
 
-In a conversation, up on an empty input selects the last work Session line; up and down move
-between work Session lines and branch lines. Enter expands a work Session line to show its
+In a conversation, up on an empty input opens **Work Sessions**, the work Sessions the
+conversation's turns started, each with its latest state, with the latest selected; up and down
+move between work Session lines and branch lines. Enter expands a work Session line to show its
 Session and latest Task, the commands and tools that Task ran, its report, and what it delivered.
-A work Session that delivered a branch gets a branch line after its report. On either line, `d`
-shows the branch's diff and `o` opens its pull request with `open` on macOS or `xdg-open` on
-Linux. Typing returns to the input, and esc leaves the selection.
+A work Session that delivered a branch gets a branch line after it. On either line, `d` shows the
+branch's diff and `o` opens its pull request with `open` on macOS or `xdg-open` on Linux. Esc
+goes back to the conversation, and from a diff back to Work Sessions. A work Session's report
+stays in the conversation as the Tag's message.
 
 The diff is `git diff BASE...BRANCH`, computed in the directory you started `supertag` in: the
 Control Plane keeps no repository contents. That directory must be a git checkout of the

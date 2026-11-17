@@ -12,7 +12,8 @@ import (
 // messages from one sender form a group under one name, a time divider marks the start of the
 // history and each pause of more than dividerGap, the operator's last message says whether it
 // was delivered and seen, and an animated "···" stays at the tail of a running turn until its
-// result arrives, with what the Tag is doing now as a dim caption beside it.
+// result arrives. It shows only messages and short notices: what the Tag does, its activity and
+// its work Sessions, is in the work Sessions pane.
 
 // dividerGap is the pause between two messages that a time divider marks.
 const dividerGap = 15 * time.Minute
@@ -32,6 +33,12 @@ const (
 	senderYou
 	senderTag
 )
+
+// hidden says the conversation does not show an entry of this kind: a work Session line or
+// activity. Only messages, the result, and short notices such as a waiting reason show.
+func hidden(kind entryKind) bool {
+	return kind == entryWork || kind == entryActivity
+}
 
 func entrySender(kind entryKind) sender {
 	switch kind {
@@ -141,62 +148,42 @@ func timeLabel(t, now time.Time) string {
 }
 
 // renderTranscript renders the conversation with tag: each turn's messages grouped by sender with
-// time dividers, the delivery status of the operator's last message, what the Tag is doing now,
-// then the messages not yet accepted. Each entry's body is rendered once per width, except work
-// Session lines and branch lines, which change as they are selected, expanded and read. It
-// records the selected line's position for refresh to keep it in view, and how many messages
-// the Tag wrote, for the count of new ones.
+// time dividers, short notices, the delivery status of the operator's last message, the typing
+// indicator of a running turn, then the messages not yet accepted. Work Session lines and
+// activity are left to the work Sessions pane. Each entry's body is rendered once per width. It
+// records how many messages the Tag wrote, for the count of new ones.
 func (m model) renderTranscript(c *conversation, tag, name string, width int) string {
-	w := &transcriptWriter{you: bold.Render("you"), tagName: headerStyle.Render(name), width: width, now: m.now(),
-		count: c.selected != nil}
+	w := &transcriptWriter{you: bold.Render("you"), tagName: headerStyle.Render(name), width: width, now: m.now()}
 	wrap := lipgloss.NewStyle().Width(width)
 	queued := m.outbox.of(tag)
-	entries := shownEntries(c)
-	working, reports := anchors(entries)
-	isSelected := func(t target) bool { return c.selected != nil && *c.selected == t }
 	lastYou := ""
 	for _, id := range c.runtime.order {
 		if turn := c.runtime.turns[id]; turn != nil && len(turn.entries) > 0 && turn.entries[0].kind == entryYou {
 			lastYou = id
 		}
 	}
-	index, written := 0, 0
+	written := 0
 	render := func(t *transcript, turn *runtimeTurn, id string) {
 		if t.cacheWidth != width {
 			t.cache, t.cacheWidth = nil, width
 		}
 		for i, e := range t.entries {
-			at := index
-			index++
+			if i >= len(t.cache) {
+				rendered := ""
+				if !hidden(e.kind) {
+					rendered = m.renderEntry(e, width)
+				}
+				t.cache = append(t.cache, rendered)
+			}
+			if hidden(e.kind) {
+				continue
+			}
 			s := entrySender(e.kind)
 			w.from(s)
 			if s == senderTag {
 				written++
 			}
-			anchor := e.kind == entryWork && working[e.session] == at
-			if i >= len(t.cache) {
-				rendered := ""
-				if !anchor {
-					rendered = m.renderEntry(e, width)
-				}
-				t.cache = append(t.cache, rendered)
-			}
-			if anchor {
-				target := target{session: e.session}
-				if isSelected(target) {
-					c.selectedLine = w.lines
-				}
-				w.write(m.renderWorkLine(e, isSelected(target), width))
-			} else {
-				w.write(t.cache[i])
-			}
-			if e.kind == entryReport && reports[e.session] == at && m.work[e.session].branch() != nil {
-				target := target{session: e.session, branch: true}
-				if isSelected(target) {
-					c.selectedLine = w.lines
-				}
-				w.write(m.renderBranchLine(e.session, isSelected(target), width) + "\n")
-			}
+			w.write(t.cache[i])
 			if i == 0 && e.kind == entryYou && id != "" && id == lastYou && len(queued) == 0 {
 				w.write(m.deliveryLine(turn) + "\n")
 			}
@@ -205,13 +192,11 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 			w.from(senderTag)
 			w.write(faint.Render(wrap.Render(t.draft)) + "\n")
 		}
-		switch {
-		case turn != nil && running(turn):
-			// The indicator stays the turn's last line until its result arrives.
+		if turn != nil && running(turn) {
+			// The indicator alone says the Tag works; it stays the turn's last line until its
+			// result arrives.
 			w.from(senderTag)
-			w.write(m.typingLine(t.status, width) + "\n")
-		case t.status != "":
-			w.write(faint.Render(wrap.Render("· "+t.status)) + "\n")
+			w.write(faint.Render(typingFrames[m.typing.frame%len(typingFrames)]) + "\n")
 		}
 	}
 	for _, id := range c.runtime.order {
@@ -241,15 +226,6 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 // not arrived.
 func running(turn *runtimeTurn) bool {
 	return turn.started && !turn.settled && !turn.joined
-}
-
-// typingLine is the typing indicator, with what the Tag is doing now as a dim caption beside it.
-func (m model) typingLine(activity string, width int) string {
-	line := typingFrames[m.typing.frame%len(typingFrames)]
-	if activity != "" {
-		line += "  " + truncate(activity, max(width-lipgloss.Width(line)-2, 1))
-	}
-	return faint.Render(line)
 }
 
 // deliveryLine says how far the operator's last message got: Sent once the Control Plane

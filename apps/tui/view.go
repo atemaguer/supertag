@@ -88,14 +88,15 @@ func (m *model) refresh() {
 		m.setContent(m.renderObjectiveForm())
 	case paneNewTag:
 		m.setContent(m.renderTagForm())
+	case paneWork:
+		m.setContent(m.renderWorkPane())
+		if c := m.shown(); c != nil && c.selected != nil {
+			m.viewport.EnsureVisible(c.selectedLine, 0, 0)
+		}
 	default:
 		atBottom := m.viewport.AtBottom()
 		m.setContent(m.renderConversation())
-		c := m.shown()
-		switch {
-		case c != nil && c.selected != nil:
-			m.viewport.EnsureVisible(c.selectedLine, 0, 0)
-		case atBottom:
+		if atBottom {
 			m.viewport.GotoBottom()
 			m.sawBottom()
 		}
@@ -397,6 +398,8 @@ func (m model) paneTitle() string {
 		return "New Objective · owned by " + terminalText(m.tagLabel(m.form.owner))
 	case paneNewTag:
 		return "New Tag"
+	case paneWork:
+		return "Work Sessions · " + terminalText(m.tagLabel(m.selectedTag()))
 	}
 	tag := m.selectedTag()
 	if tag == "" {
@@ -448,13 +451,14 @@ func (m model) paneHint() string {
 		return m.formHint()
 	case paneNewTag:
 		return m.tagFormHint()
-	case paneConversation:
-		c := m.shown()
-		if c == nil {
-			return "esc quits"
-		}
-		if c.selected != nil {
+	case paneWork:
+		if c := m.shown(); c != nil && c.selected != nil {
 			return m.selectionHint(*c.selected)
+		}
+		return "esc back to the conversation"
+	case paneConversation:
+		if m.shown() == nil {
+			return "esc quits"
 		}
 	}
 	return ""

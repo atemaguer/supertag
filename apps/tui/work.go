@@ -187,75 +187,6 @@ func (m model) targets(c *conversation) []target {
 	return out
 }
 
-// selectionKey handles a key in the conversation pane while a line is selected, and up on an
-// empty input, which selects the last line. ok is false for a key the input takes.
-func (m model) selectionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
-	c := m.shown()
-	if c == nil {
-		return m, nil, false
-	}
-	targets := m.targets(c)
-	if c.selected == nil {
-		if msg.String() == "up" && m.input.Value() == "" && len(targets) > 0 {
-			c.selected = &targets[len(targets)-1]
-			m.input.Blur()
-			m.refresh()
-			return m, nil, true
-		}
-		return m, nil, false
-	}
-	at := -1
-	for i, t := range targets {
-		if t == *c.selected {
-			at = i
-		}
-	}
-	if at < 0 {
-		c.selected = nil
-		m.refresh()
-		return m, m.syncInput(), false
-	}
-	switch msg.String() {
-	case "up", "k":
-		if at > 0 {
-			c.selected = &targets[at-1]
-		}
-	case "down", "j":
-		if at == len(targets)-1 {
-			c.selected = nil
-			m.refresh()
-			return m, m.syncInput(), true
-		}
-		c.selected = &targets[at+1]
-	case "enter":
-		id := c.selected.session
-		m.expanded[id] = !m.expanded[id]
-		m.refresh()
-		if m.expanded[id] {
-			return m, m.reloadWork(id), true
-		}
-		return m, nil, true
-	case "d":
-		return m, m.showDiff(c.selected.session), true
-	case "o":
-		return m, m.openPullRequest(m.work[c.selected.session].pullRequest()), true
-	case "left", "right":
-		return m, nil, true
-	default:
-		if msg.Text == "" {
-			return m, nil, true
-		}
-		c.selected = nil
-		m.refresh()
-		focus := m.syncInput()
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		return m, tea.Batch(focus, cmd), true
-	}
-	m.refresh()
-	return m, nil, true
-}
-
 // selectionHint ends the conversation pane while a line is selected: the keys that act on it.
 func (m model) selectionHint(t target) string {
 	d := m.work[t.session]
@@ -272,14 +203,17 @@ func (m model) selectionHint(t target) string {
 	return strings.Join(append(parts, "esc back"), " · ")
 }
 
-// renderWorkLine renders a work Session's "working" line, and under it, when expanded, its
-// Session, activity, report and delivery.
+// renderWorkLine renders a work Session's line in the work Sessions pane, its title and latest
+// state, and under it, when expanded, its Session, activity, report and delivery.
 func (m model) renderWorkLine(e entry, selected bool, width int) string {
 	marker := "·"
 	if m.expanded[e.session] {
 		marker = "▾"
 	}
-	line := marker + strings.TrimPrefix(e.text, "·")
+	line := marker + " " + e.text
+	if state := m.workState(e.session); state != "" {
+		line += " · " + state
+	}
 	style := faint
 	if selected {
 		style = focusedSel
@@ -289,6 +223,19 @@ func (m model) renderWorkLine(e entry, selected bool, width int) string {
 		return out
 	}
 	return out + m.renderWorkDetail(e.session, width) + "\n"
+}
+
+// workState is a work Session's latest state: what it last reported, else its latest Task's
+// status once read.
+func (m model) workState(id string) string {
+	if state := m.workStates[id]; state != "" {
+		return state
+	}
+	if d := m.work[id]; d != nil && d.session.GetLatestTaskStatus() != views.TaskStatus_TASK_STATUS_UNSPECIFIED {
+		status := d.session.GetLatestTaskStatus()
+		return enumWords(status.String(), "TASK_STATUS_")
+	}
+	return ""
 }
 
 // renderWorkDetail is an expanded work Session: its Session and latest Task, the activity that

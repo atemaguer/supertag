@@ -1220,13 +1220,17 @@ async fn rust_launcher_and_go_tui_follow_one_work_session_report(database: Strin
     tmux.wait_for("Started the investigation.").await?;
     tmux.wait_for("The investigation finished.").await?;
     let pane = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
-    assert!(pane.contains("Bounded investigation"));
+    // The conversation shows only messages; the work Session is one key away.
+    assert!(!pane.contains("Bounded investigation"), "{pane}");
     assert_eq!(
         pane.matches("The investigation finished.").count(),
         1,
         "{pane}"
     );
     assert!(!pane.contains("Inspect child evidence"), "{pane}");
+    tmux.run(&["send-keys", "-t", "runtime", "Up"]).await?;
+    tmux.wait_for("Work Sessions · engineer").await?;
+    tmux.wait_for("Bounded investigation").await?;
     tmux.run(&["send-keys", "-t", "runtime", "C-c"]).await?;
     if let Some(pid) = runtime.id() {
         // SAFETY: this PID belongs to the disposable runtime started above.

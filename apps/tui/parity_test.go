@@ -317,14 +317,13 @@ func TestTheTypingIndicatorStaysAtTheTailUntilTheResult(t *testing.T) {
 		lines := strings.Split(strings.TrimRight(ansi.Strip(m.renderConversation()), "\n"), "\n")
 		return lines[len(lines)-1]
 	}
-	// The intent and the activity leave the indicator last, with the activity as its caption and
-	// no separate status line.
+	// The intent leaves the indicator last, and the activity shows nowhere in the conversation.
 	m = update(t, m, followMsg{tag: "lead", taskID: "running", event: client.FollowEvent{Kind: client.EventMessage, Text: "I'll fix the build.", Sequence: 1}})
 	m = update(t, m, followMsg{tag: "lead", taskID: "running", event: client.FollowEvent{Kind: client.EventStatus, Text: "running: go test ./..."}})
 	got := ansi.Strip(m.renderConversation())
-	if !m.showsTyping() || !strings.Contains(tail(), "running: go test ./...") || strings.Contains(got, "· running:") ||
-		strings.Index(got, "I'll fix the build.") > strings.Index(got, "running: go test") {
-		t.Fatalf("the indicator is not the running turn's last line with its caption:\n%s", got)
+	if !m.showsTyping() || strings.TrimSpace(strings.Trim(tail(), "·")) != "" || strings.Contains(got, "go test") ||
+		!strings.Contains(got, "I'll fix the build.") {
+		t.Fatalf("the indicator alone is not the running turn's last line:\n%s", got)
 	}
 	m = update(t, m, followMsg{tag: "lead", taskID: "running", event: client.FollowEvent{Kind: client.EventReply, Reply: finalReply("Fixed.")}})
 	if m.showsTyping() || strings.Contains(ansi.Strip(m.renderConversation()), "go test") || !strings.Contains(tail(), "Fixed.") {
@@ -508,8 +507,13 @@ func TestACachedConversationDoesNotRepeatItsWorkSessionLines(t *testing.T) {
 	next.cache.principal = "operator:local"
 	next.cachedConversation("lead")
 	next = page(next)
-	if got := ansi.Strip(next.renderConversation()); strings.Count(got, "working: Bounded investigation") != 1 || strings.Count(got, "Region verified.") != 1 {
-		t.Fatalf("a reread of a cached turn repeated its work Session:\n%s", got)
+	if got := ansi.Strip(next.renderConversation()); strings.Contains(got, "Bounded investigation") || strings.Count(got, "Region verified.") != 1 {
+		t.Fatalf("a reread of a cached turn repeated its work Session report or shows its line:\n%s", got)
+	}
+	next.input.Reset()
+	next = update(t, next, key(tea.KeyUp))
+	if got := ansi.Strip(next.renderWorkPane()); next.pane != paneWork || strings.Count(got, "Bounded investigation") != 1 {
+		t.Fatalf("the work Sessions pane lists:\n%s", got)
 	}
 }
 

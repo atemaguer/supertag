@@ -18,11 +18,11 @@ In the same repository, run `supertag`. Select `lead`, type “Read this reposit
 you would improve first,” and press Enter. The reply appears in the conversation. To check a
 delivered branch, ask for a small edit and wait for the Tag's work Session to report.
 
-While the Tag works, the conversation shows what it is doing. Before longer work, the Tag first
-writes one short sentence saying what it is about to do, which appears as its own message as
-soon as the Tag writes it. An animated `···` stays under the Tag's latest message until its
-answer arrives, with a dim caption for its current step, such as a command it runs or a file it
-edits. The first message arrives once the Tag's harness has started and written its first
+While the Tag works, the conversation shows that it is working. Before longer work, the Tag
+first writes one short sentence saying what it is about to do, which appears as its own message
+as soon as the Tag writes it. An animated `···` stays under the Tag's latest message until its
+answer arrives. In the terminal UI the conversation shows only messages; the commands the Tag
+runs and its work Sessions are one key away (↑ on an empty input). The first message arrives once the Tag's harness has started and written its first
 sentence, which takes a few seconds.
 
 If there is no local setup or the Control Plane has no Tags, SuperTag shows how to get started
@@ -75,7 +75,7 @@ In the terminal UI:
 | Ctrl-N | Create a Tag. |
 | Ctrl-R and Ctrl-X | Send a message that was not delivered again, or take it back to edit. |
 | End on empty input | Jump to the latest message. |
-| ↑ on empty input | Select a work Session. Enter expands it. |
+| ↑ on empty input | List the conversation's work Sessions. Enter expands one to show its activity and report. |
 | `d` on a work Session or branch | Show the diff from this checkout. |
 | `o` on a work Session or branch | Open its pull request when one exists. |
 
@@ -93,8 +93,9 @@ in its own Session, or give the Tag an Objective.
 
 The Tag answers a quick question directly. For longer work, such as researching a slow export,
 it can start a **work Session**, a separate thread that runs the work as its own Task. The Tag
-tells you when it starts and reports back when the work finishes or needs a decision. Select
-a work Session and press Enter to see its commands, tool calls, and result.
+tells you when it starts and reports back when the work finishes or needs a decision. In the
+terminal UI, press ↑ on an empty input to list the conversation's work Sessions, and Enter on
+one to see its commands, tool calls, and result.
 
 You can leave the terminal UI while work runs. The report appears in the conversation when you
 return.

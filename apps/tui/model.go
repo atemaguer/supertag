@@ -59,6 +59,9 @@ const (
 	paneNewObjective
 	// paneNewTag creates a Tag.
 	paneNewTag
+	// paneWork lists the work Sessions of the shown conversation, which the conversation itself
+	// does not show.
+	paneWork
 )
 
 // decision is where deciding the shown approval request stands.
@@ -87,14 +90,17 @@ const (
 	entryReply
 	entryDim
 	entryError
-	// entryWork is a work Session's "working" line, which expands to show its activity and
-	// report.
+	// entryWork is a work Session's "working" line. The conversation does not show it; the work
+	// Sessions pane lists it, and it expands there to show its activity and report.
 	entryWork
 	// entryReport is a work Session's report; its branch line follows the latest one.
 	entryReport
 	// entryMessage is a message the Tag wrote while its turn ran, such as the sentence saying
 	// what it is about to do. It shows like a reply.
 	entryMessage
+	// entryActivity is what a turn or its work Sessions did, such as a command they ran. The
+	// conversation does not show it.
+	entryActivity
 )
 
 // entry is one shown item; its text is already filtered for the terminal.
@@ -277,6 +283,9 @@ type model struct {
 	// show their activity and report.
 	work     map[string]*workDetail
 	expanded map[string]bool
+	// workStates is the latest state each work Session reported in a conversation: working,
+	// done, waiting on you, and so on.
+	workStates map[string]string
 	// diff is the diff pane's content.
 	diff *diffView
 	// form is the new Objective form while it shows; tagForm the New Tag form.
@@ -382,6 +391,7 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 		summaries:         map[string]*views.Conversation{},
 		work:              map[string]*workDetail{},
 		expanded:          map[string]bool{},
+		workStates:        map[string]string{},
 		teamViews:         map[string]client.TeamView{},
 		teamErrs:          map[string]string{},
 		teamReload:        &reload{},
@@ -1065,9 +1075,15 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.decide(msg.String())
 	}
 	switch m.pane {
-	case paneConversation:
-		if next, cmd, ok := m.selectionKey(msg); ok {
+	case paneWork:
+		if next, cmd, ok := m.workPaneKey(msg); ok {
 			return next, cmd
+		}
+	case paneConversation:
+		if msg.String() == "up" && m.input.Value() == "" {
+			if cmd, ok := m.openWorkPane(); ok {
+				return m, cmd
+			}
 		}
 		switch msg.String() {
 		case "ctrl+r":
@@ -1324,7 +1340,7 @@ func (m model) inputShown() bool {
 	switch m.pane {
 	case paneConversation:
 		c := m.shown()
-		return c != nil && c.selected == nil
+		return c != nil
 	case paneObjective:
 		return m.objectiveCompose
 	case paneInbox:
@@ -1438,15 +1454,17 @@ func (m *model) saveDraft() {
 // back leaves the diff pane or the new Objective form for the conversation, or clears the conversation's selection; false when there is nothing to go back from.
 func (m *model) back() bool {
 	switch m.pane {
-	case paneConversation:
-		if c := m.shown(); c != nil && c.selected != nil {
+	case paneWork:
+		if c := m.shown(); c != nil {
 			c.selected = nil
-			m.refresh()
-			return true
 		}
-	case paneDiff:
-		m.viewport.SoftWrap = false
 		m.showConversation()
+		return true
+	case paneDiff:
+		// A diff opens from the work Sessions pane, and goes back to it.
+		m.viewport.SoftWrap = false
+		m.pane = paneWork
+		m.refresh()
 		return true
 	case paneNewObjective:
 		m.form = nil
@@ -1565,10 +1583,7 @@ func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd
 		if title != "" {
 			line = title + " " + line
 		}
-		if event.Indent {
-			line = "  " + line
-		}
-		dim(line)
+		c.addFor(entryActivity, event.WorkSession, line)
 		if event.WorkSession != "" && m.expanded[event.WorkSession] {
 			cmd = m.reloadWork(event.WorkSession)
 		}
@@ -1580,13 +1595,18 @@ func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd
 		c.draft, c.status = "", ""
 		c.add(entryError, event.Text)
 	case client.EventWorking:
-		if event.WorkSession == "" {
-			dim("· working: " + title)
-		} else {
-			c.addFor(entryWork, event.WorkSession, "· working: "+title)
+		if event.WorkSession != "" {
+			c.addFor(entryWork, event.WorkSession, title)
+			m.workStates[event.WorkSession] = "working"
 		}
 	case client.EventReport:
-		dim("· " + event.Status + ": " + title)
+		// A work Session that did not simply finish says why, as a short notice over its report.
+		if event.Status != "done" {
+			dim("· " + event.Status + ": " + title)
+		}
+		if event.WorkSession != "" {
+			m.workStates[event.WorkSession] = event.Status
+		}
 		c.addFor(entryReport, event.WorkSession, event.Text)
 		if event.WorkSession != "" {
 			cmd = m.reloadWork(event.WorkSession)
@@ -1598,9 +1618,9 @@ func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd
 		dim("· not continued: " + title)
 		dim(event.Text)
 	case client.EventStillWorking:
-		dim(event.Text)
+		c.add(entryActivity, event.Text)
 	case client.EventJoined:
-		dim("· added to the turn in progress")
+		// The delivery status under the message says it was seen.
 	case client.EventError:
 		c.draft, c.status = "", ""
 		c.add(entryError, event.Text)
