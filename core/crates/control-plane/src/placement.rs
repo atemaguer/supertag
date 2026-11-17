@@ -330,6 +330,9 @@ fn unsupported_by_harness(task: &Task) -> Option<(String, String)> {
     if let Some(reason) = unsupported_runtime_actions(harness, &task.allowed_actions) {
         return Some(("runtime-actions".into(), reason));
     }
+    if let Some(reason) = supertag_protocol::file_scope::harness_reason(task, harness) {
+        return Some(("file-scope".into(), reason));
+    }
     // These harnesses load no Skills, so their lanes claim with no context contracts.
     (matches!(
         harness,
@@ -529,8 +532,27 @@ impl Store {
         let mut hosts = Vec::with_capacity(ids.len());
         let mut carried = Vec::with_capacity(ids.len());
         let mut eligible = Vec::new();
+        // Lanes for the Task's harness, and what keeps each from running it.
+        let mut lanes: Vec<Option<(String, String)>> = vec![];
         for id in ids {
             let status = crate::store::host_status_in(&mut transaction, &id, now).await?;
+            let mut profiles: Vec<(HarnessKind, Option<&HarnessExecutionProfile>)> = status
+                .harnesses
+                .iter()
+                .map(|lane| (lane.harness_kind(), lane.execution_profile.as_ref()))
+                .collect();
+            if profiles.is_empty() {
+                profiles.push((status.harness_kind(), status.execution_profile.as_ref()));
+            }
+            let default = HarnessExecutionProfile::default();
+            lanes.extend(
+                profiles
+                    .into_iter()
+                    .filter(|(harness, _)| *harness == task.harness_kind())
+                    .map(|(harness, profile)| {
+                        crate::store::lane_requirement(&task, harness, profile.unwrap_or(&default))
+                    }),
+            );
             let labels: BTreeSet<String> = status.labels.iter().cloned().collect();
             let missing: Vec<String> = required
                 .iter()
@@ -558,6 +580,12 @@ impl Store {
             )
         } else if let Some(unsupported) = unsupported {
             unsupported
+        } else if let Some(Some(requirement)) = lanes
+            .iter()
+            .all(Option::is_some)
+            .then(|| lanes.first().cloned().flatten())
+        {
+            requirement
         } else if missing.is_empty() {
             (task.state() == TaskState::Queued)
                 .then(|| waiting_for_capacity(task.harness_kind(), &eligible))

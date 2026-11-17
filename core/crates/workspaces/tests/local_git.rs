@@ -87,6 +87,7 @@ fn request(task: &str, attempt: &str, head: Option<String>) -> PrepareRequest {
 fn complete() -> FinalizeRequest {
     FinalizeRequest {
         output_directory: None,
+        file_scope: None,
         summary: "Review complete\nChange: Add the requested behavior".into(),
         outcome: Outcome::Completed,
     }
@@ -182,6 +183,7 @@ async fn isolated_capture_is_durable_exact_and_continues_only_an_explicit_pin() 
                 &checkout,
                 FinalizeRequest {
                     output_directory: None,
+                    file_scope: None,
                     summary: "Different result".into(),
                     outcome: Outcome::Completed
                 },
@@ -500,6 +502,7 @@ async fn changed_requests_cancellation_and_failed_outputs_never_select_a_session
             &checkout,
             FinalizeRequest {
                 output_directory: None,
+                file_scope: None,
                 summary: "Capture failed work".into(),
                 outcome: Outcome::Failed,
             },
@@ -921,5 +924,114 @@ async fn failed_setup_fails_preparation_with_its_untrusted_output() {
         failed.0.contains("installing") && failed.0.contains("broken"),
         "{}",
         failed.0
+    );
+}
+
+/// A completed Attempt delivers only changes inside its path scope. Each out-of-scope add,
+/// modification, or deletion fails it with the path named, and so does a new hard link to a
+/// hidden file, which would deliver that file's contents under an allowed name.
+#[tokio::test]
+async fn delivery_refuses_changes_outside_the_path_scope() {
+    let scoped = || FinalizeRequest {
+        file_scope: Some(supertag_protocol::file_scope::Rules {
+            write: vec!["src/".into()],
+            read_only: vec!["src/generated/".into()],
+            hidden: vec!["**/.env".into(), "secrets/".into()],
+        }),
+        ..complete()
+    };
+    type Change = fn(&Path);
+    let cases: [(&str, Change, Option<&str>); 7] = [
+        (
+            "in scope",
+            |root| {
+                fs::write(root.join("src/lib.rs"), "changed\n").unwrap();
+                fs::write(root.join("src/new.rs"), "new\n").unwrap();
+            },
+            None,
+        ),
+        (
+            "add",
+            |root| fs::write(root.join("new.txt"), "x\n").unwrap(),
+            Some("new.txt (outside the paths the Task may write)"),
+        ),
+        (
+            "modify",
+            |root| fs::write(root.join("README.md"), "x\n").unwrap(),
+            Some("README.md (outside the paths the Task may write)"),
+        ),
+        (
+            "delete",
+            |root| fs::remove_file(root.join("docs/old.md")).unwrap(),
+            Some("docs/old.md (outside the paths the Task may write)"),
+        ),
+        (
+            "read-only",
+            |root| fs::write(root.join("src/generated/schema.rs"), "x\n").unwrap(),
+            Some("src/generated/schema.rs (read-only in the Task's path scope)"),
+        ),
+        (
+            "hidden",
+            |root| fs::write(root.join("src/.env"), "KEY=x\n").unwrap(),
+            Some("src/.env (hidden by the Task's path scope)"),
+        ),
+        (
+            "hard link",
+            |root| fs::hard_link(root.join("secrets/key"), root.join("src/copy")).unwrap(),
+            Some("src/copy (a hard link to a hidden file)"),
+        ),
+    ];
+    for (name, change, refused) in cases {
+        let fixture = Fixture::new();
+        for (path, contents) in [
+            ("src/lib.rs", "lib\n"),
+            ("src/generated/schema.rs", "schema\n"),
+            ("docs/old.md", "old\n"),
+            ("secrets/key", "secret\n"),
+        ] {
+            let path = fixture.source.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, contents).unwrap();
+        }
+        git(&fixture.source, &["add", "-A"]);
+        git(&fixture.source, &["commit", "--quiet", "-m", "Add code"]);
+        let fixture = Fixture {
+            base: git(&fixture.source, &["rev-parse", "HEAD"]),
+            ..fixture
+        };
+        let workspace = fixture.workspace();
+        let checkout = prepare(&workspace, "task", "attempt", None).await;
+        change(&checkout.path);
+        let delivered = workspace
+            .finalize(&checkout, scoped(), &CancellationToken::new())
+            .await;
+        match (refused, delivered) {
+            (None, Ok(delivery)) => assert_ne!(delivery.head_commit, delivery.start_commit),
+            (Some(expected), Err(error)) => {
+                let violation = error
+                    .downcast_ref::<supertag_workspaces::ScopeViolation>()
+                    .unwrap_or_else(|| panic!("{name}: {error:#}"));
+                assert!(
+                    violation.to_string().contains(expected),
+                    "{name}: {violation}"
+                );
+            }
+            (expected, result) => panic!("{name}: expected {expected:?}, got {result:?}"),
+        }
+    }
+    // A failed Attempt delivers nothing, so it is not checked.
+    let fixture = Fixture::new();
+    let workspace = fixture.workspace();
+    let checkout = prepare(&workspace, "task", "attempt", None).await;
+    fs::write(checkout.path.join("README.md"), "x\n").unwrap();
+    let failed = FinalizeRequest {
+        outcome: Outcome::Failed,
+        ..scoped()
+    };
+    assert!(
+        workspace
+            .finalize(&checkout, failed, &CancellationToken::new())
+            .await
+            .is_ok()
     );
 }

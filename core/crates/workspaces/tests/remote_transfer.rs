@@ -113,6 +113,7 @@ impl Fixture {
 fn completed() -> FinalizeRequest {
     FinalizeRequest {
         output_directory: None,
+        file_scope: None,
         summary: "Capture remote work".into(),
         outcome: Outcome::Completed,
     }

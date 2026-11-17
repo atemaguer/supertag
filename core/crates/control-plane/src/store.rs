@@ -25,6 +25,7 @@ mod sqlite_files;
 pub(crate) use authority::lease_is_live;
 pub use enrollments::Role;
 pub(crate) use enrollments::{client_tags_in, enrollee_name};
+pub(crate) use execution::lane_requirement;
 pub use hosts::HostAuthority;
 pub(crate) use hosts::current_scope_in;
 pub(crate) use readiness::status_in as host_status_in;

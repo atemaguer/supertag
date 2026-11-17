@@ -182,6 +182,7 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
             &checkout,
             FinalizeRequest {
                 output_directory: None,
+                file_scope: None,
                 summary: "Change: deliver".into(),
                 outcome: Outcome::Completed,
             },

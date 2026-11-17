@@ -197,7 +197,42 @@ pub struct FinalizeRequest {
     pub outcome: Outcome,
     #[serde(default)]
     pub output_directory: Option<String>,
+    /// The Task's path scope. A completed Attempt that changed a path outside it is not
+    /// delivered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_scope: Option<supertag_protocol::file_scope::Rules>,
 }
+
+/// A completed Attempt changed Workspace paths its path scope does not allow. The Attempt fails
+/// with this message, which names the paths.
+#[derive(Debug)]
+pub struct ScopeViolation {
+    /// Each path and why it is refused, in path order.
+    pub paths: Vec<(String, String)>,
+}
+
+impl std::fmt::Display for ScopeViolation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const SHOWN: usize = 20;
+        write!(
+            formatter,
+            "The Task changed files outside its path scope, so its changes were not delivered: "
+        )?;
+        let named: Vec<String> = self
+            .paths
+            .iter()
+            .take(SHOWN)
+            .map(|(path, reason)| format!("{path} ({reason})"))
+            .collect();
+        write!(formatter, "{}", named.join(", "))?;
+        if self.paths.len() > SHOWN {
+            write!(formatter, ", and {} more", self.paths.len() - SHOWN)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ScopeViolation {}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Delivery {
@@ -503,6 +538,14 @@ impl Workspace {
         let ignored = repository
             .ignored(&checkout.path, &checkout.start_commit, &untracked, cancel)
             .await?;
+        let scope = request
+            .file_scope
+            .as_ref()
+            .filter(|rules| request.outcome == Outcome::Completed && !rules.is_empty());
+        if let Some(rules) = scope {
+            // Capture refuses a file with other links, but this names the path and why.
+            hidden_links(rules, &checkout.path, &all_files, &ignored)?;
+        }
         let mut entries = BTreeMap::new();
         let mut captured_bytes = 0_usize;
         for path in all_files.keys() {
@@ -538,6 +581,9 @@ impl Workspace {
                     oid,
                 },
             );
+        }
+        if let Some(rules) = scope {
+            check_scope(rules, (&base_tree, &entries))?;
         }
         let tree = repository.write_tree(&entries, cancel).await?;
         let original_tree = repository.tree_oid(&checkout.start_commit, cancel).await?;
@@ -942,6 +988,70 @@ fn verify_bundle_head(bytes: &[u8], head: &str, reference: &str) -> Result<()> {
         "bundle does not bind the delivered commit to its receipt"
     );
     Ok(())
+}
+
+/// Every added, modified, or deleted path a completed Attempt delivers must be writable in its
+/// path scope.
+fn check_scope(
+    rules: &supertag_protocol::file_scope::Rules,
+    (base, delivered): (
+        &BTreeMap<String, git::TreeEntry>,
+        &BTreeMap<String, git::TreeEntry>,
+    ),
+) -> Result<()> {
+    let refused: Vec<(String, String)> = base
+        .keys()
+        .chain(delivered.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|path| base.get(*path) != delivered.get(*path))
+        .filter_map(|path| {
+            rules
+                .write_denial(path)
+                .map(|denial| (path.clone(), denial.describe().to_owned()))
+        })
+        .collect();
+    if refused.is_empty() {
+        Ok(())
+    } else {
+        Err(ScopeViolation { paths: refused }.into())
+    }
+}
+
+/// No file the Attempt would deliver may be a hard link to a hidden file: the link would
+/// deliver the hidden file's contents under a name the scope allows. Checkout files start with
+/// one link each, so any such link is new.
+fn hidden_links(
+    rules: &supertag_protocol::file_scope::Rules,
+    root: &Path,
+    all_files: &BTreeMap<String, String>,
+    ignored: &BTreeSet<String>,
+) -> Result<()> {
+    if rules.hidden.is_empty() {
+        return Ok(());
+    }
+    let mut hidden = BTreeSet::new();
+    let mut linked = vec![];
+    for path in all_files.keys() {
+        let Some((device, inode, links)) = paths::file_identity(root, path)? else {
+            continue;
+        };
+        if rules.hidden(path) {
+            hidden.insert((device, inode));
+        } else if links > 1 && !ignored.contains(path) {
+            linked.push((path, (device, inode)));
+        }
+    }
+    let refused: Vec<(String, String)> = linked
+        .into_iter()
+        .filter(|(_, identity)| hidden.contains(identity))
+        .map(|(path, _)| (path.clone(), "a hard link to a hidden file".to_owned()))
+        .collect();
+    if refused.is_empty() {
+        Ok(())
+    } else {
+        Err(ScopeViolation { paths: refused }.into())
+    }
 }
 
 #[cfg(test)]

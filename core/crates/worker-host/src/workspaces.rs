@@ -387,7 +387,7 @@ impl Workspaces {
         &self,
         prepared: &PreparedWorkspace,
         summary: &str,
-        succeeded: bool,
+        (succeeded, file_scope): (bool, Option<supertag_protocol::file_scope::Rules>),
         output_directory: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<PendingWorkspace> {
@@ -398,6 +398,7 @@ impl Workspaces {
                 FinalizeRequest {
                     summary: summary.to_owned(),
                     output_directory: output_directory.map(str::to_owned),
+                    file_scope,
                     outcome: if succeeded {
                         Outcome::Completed
                     } else {
@@ -877,6 +878,7 @@ mod tests {
             }),
             remote_tree: None,
             outputs: None,
+            file_scope: None,
         })?;
         drop(journal);
         drop(workspaces);
@@ -899,7 +901,7 @@ mod tests {
             .finalize(
                 &workspace,
                 &result,
-                succeeded,
+                (succeeded, None),
                 None,
                 &CancellationToken::new(),
             )
@@ -908,7 +910,7 @@ mod tests {
             .finalize(
                 &workspace,
                 &result,
-                succeeded,
+                (succeeded, None),
                 None,
                 &CancellationToken::new(),
             )

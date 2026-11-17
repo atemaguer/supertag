@@ -119,6 +119,9 @@ pub(crate) enum Entry {
         remote_tree: Option<TransferArtifact>,
         #[serde(default)]
         outputs: Option<Box<crate::task_outputs::PendingOutputs>>,
+        /// The Task's path scope, which the delivery check applies after a restart too.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_scope: Option<supertag_protocol::file_scope::Rules>,
     },
     Finish {
         #[serde(flatten)]

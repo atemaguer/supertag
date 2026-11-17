@@ -651,6 +651,7 @@ pub async fn run(
                 workspace,
                 remote_tree,
                 outputs,
+                file_scope,
             } => {
                 // This stage is recorded only after the adapter process group was reaped.
                 // Exact finalization can safely resume after a Host restart.
@@ -687,6 +688,7 @@ pub async fn run(
                             workspace,
                             remote_tree,
                             outputs: Some(pending),
+                            file_scope,
                         })?,
                         Err(_) if shutdown.is_cancelled() => return Ok(()),
                         Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
@@ -789,12 +791,16 @@ pub async fn run(
                             }).await.map_err(|_| Status::internal("Task output cleanup failed"))??;
                         }
                         workspaces
-                            .finalize(&workspace, &result, succeeded, outputs.as_ref().map(|output| output.directory.as_str()), &cancellation)
+                            .finalize(&workspace, &result, (succeeded, file_scope.clone()), outputs.as_ref().map(|output| output.directory.as_str()), &cancellation)
                             .await
-                            .map_err(|_| {
-                                Status::invalid_argument(
-                                    "Workspace output could not be captured safely",
-                                )
+                            .map_err(|error| {
+                                // The delivery check names the out-of-scope paths.
+                                match error.downcast_ref::<supertag_workspaces::ScopeViolation>() {
+                                    Some(violation) => Status::permission_denied(violation.to_string()),
+                                    None => Status::invalid_argument(
+                                        "Workspace output could not be captured safely",
+                                    ),
+                                }
                             })
                     },
                 )
@@ -813,6 +819,9 @@ pub async fn run(
                     })?,
                     Err(_) if shutdown.is_cancelled() => return Ok(()),
                     Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
+                    Err(error) if error.code() == Code::PermissionDenied => {
+                        save_finish(&journal, attempt, adapter::failed(error.message()))?
+                    }
                     Err(_) => save_finish(
                         &journal,
                         attempt,
@@ -1978,6 +1987,9 @@ async fn run_assignment(
                 stop_reports.clone(),
             ))
         });
+    // The delivery check applies the Task's path scope to what it changed.
+    let file_scope = supertag_protocol::file_scope::of_task(&task)
+        .map(supertag_protocol::file_scope::Rules::from);
     let assignment = Assignment {
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
@@ -2082,6 +2094,7 @@ async fn run_assignment(
                 workspace: Box::new(workspace),
                 remote_tree,
                 outputs,
+                file_scope,
             })
         } else {
             record_finish(journal, attempt.clone(), outcome)

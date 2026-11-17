@@ -701,6 +701,22 @@ pub(crate) fn scan_skipping(
     Ok(files)
 }
 
+/// The device, inode, and link count of a regular checkout file, without following links.
+/// `None` for anything else.
+pub(crate) fn file_identity(root: &Path, path: &str) -> Result<Option<(u64, u64, u64)>> {
+    validate_repo_path(path)?;
+    let directory = checkout_parent(root, path)?;
+    let name = path.rsplit('/').next().context("missing filename")?;
+    let metadata = metadata_at(&directory, name)?;
+    Ok(
+        (metadata.st_mode & libc::S_IFMT == libc::S_IFREG).then_some((
+            metadata.st_dev as u64,
+            metadata.st_ino as u64,
+            metadata.st_nlink as u64,
+        )),
+    )
+}
+
 pub(crate) fn read_checkout_file(root: &Path, path: &str) -> Result<CapturedFile> {
     validate_repo_path(path)?;
     let directory = checkout_parent(root, path)?;

@@ -150,16 +150,7 @@ pub(super) fn resolve_attempt(
     {
         return None;
     }
-    if matches!(
-        harness,
-        HarnessKind::ClaudeCode | HarnessKind::Opencode | HarnessKind::Cursor
-    ) && !profile.allow_unsandboxed_commands
-        && profile.shared_execution.is_none()
-        && task
-            .allowed_actions
-            .iter()
-            .any(|action| action == "commands:execute")
-    {
+    if lane_requirement(task, harness, profile).is_some() {
         return None;
     }
     let mut selection = task.execution_selection.clone().unwrap_or_default();
@@ -186,6 +177,45 @@ pub(super) fn resolve_attempt(
         shared_execution: profile.shared_execution.clone(),
         mcp_servers: supertag_protocol::mcp::selected_servers(task, profile),
         task_artifact_inputs: !task.input_artifacts.is_empty(),
+    })
+}
+
+/// What keeps a host lane for `harness` with `profile` from running the Task, as
+/// `(requirement, summary)`: commands that would run unsandboxed without the host's opt-in, or a
+/// path scope the lane cannot apply. Both depend on the host, so `placement explain` reports
+/// them only when no bound host's lane can run the Task.
+pub(crate) fn lane_requirement(
+    task: &Task,
+    harness: HarnessKind,
+    profile: &HarnessExecutionProfile,
+) -> Option<(String, String)> {
+    if let Some(reason) = supertag_protocol::file_scope::reason(task, harness, profile) {
+        return Some(("file-scope".into(), reason));
+    }
+    let name = match harness {
+        HarnessKind::ClaudeCode => "claude-code",
+        HarnessKind::Opencode => "opencode",
+        HarnessKind::Cursor => "cursor",
+        _ => return None,
+    };
+    (!profile.allow_unsandboxed_commands
+        && profile.shared_execution.is_none()
+        && task
+            .allowed_actions
+            .iter()
+            .any(|action| action == "commands:execute"))
+    .then(|| {
+        (
+            "unsandboxed-commands".into(),
+            format!(
+                "{} runs commands without a sandbox, and no bound Worker Host allows it; add {name} to allow-unsandboxed-commands in a Worker Host's supertag.yaml service, or remove commands:execute",
+                match harness {
+                    HarnessKind::ClaudeCode => "Claude Code",
+                    HarnessKind::Opencode => "OpenCode",
+                    _ => "Cursor",
+                }
+            ),
+        )
     })
 }
 
