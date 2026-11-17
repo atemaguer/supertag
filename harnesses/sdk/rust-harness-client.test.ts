@@ -22,6 +22,27 @@ describe("receipt", () => {
     expect(calls).toBe(failures.length + 1);
   });
 
+  it("retries a try the Worker Host's server timed out, which tonic reports as canceled", async () => {
+    let calls = 0;
+    const value = await receipt(async () => {
+      if (calls++ < 2) throw new ConnectError("Timeout expired", Code.Canceled);
+      return "settled";
+    });
+    expect(value).toBe("settled");
+    expect(calls).toBe(3);
+  });
+
+  it("does not repeat a call this adapter canceled", async () => {
+    let calls = 0;
+    await expect(
+      receipt(async () => {
+        calls++;
+        throw new ConnectError("This operation was aborted", Code.Canceled);
+      }),
+    ).rejects.toThrow("This operation was aborted");
+    expect(calls).toBe(1);
+  });
+
   it("does not repeat a call the Worker Host refused", async () => {
     let calls = 0;
     await expect(

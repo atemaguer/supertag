@@ -109,11 +109,25 @@ export async function receipt<T>(call: () => Promise<T>): Promise<T> {
     try {
       return await call();
     } catch (error) {
-      const code = ConnectError.from(error).code;
-      if (![Code.Unavailable, Code.DeadlineExceeded].includes(code)) throw error;
+      if (!retryable(ConnectError.from(error))) throw error;
       await new Promise((resolve) => setTimeout(resolve, Math.min(50 * (attempt + 1), 1_000)));
     }
   }
+}
+
+/**
+ * A try that ran out of time or reached no Worker Host. Each try's `timeoutMs` travels as the
+ * `grpc-timeout` header, and the Worker Host's gRPC server (tonic) ends a call that outlives it
+ * with `Canceled` and the message "Timeout expired", usually just before this client's own timer
+ * reports `DeadlineExceeded`. Any other `Canceled`, such as this adapter aborting its session, is
+ * final.
+ */
+function retryable(error: ConnectError): boolean {
+  return (
+    error.code === Code.Unavailable ||
+    error.code === Code.DeadlineExceeded ||
+    (error.code === Code.Canceled && error.rawMessage === "Timeout expired")
+  );
 }
 
 /**
