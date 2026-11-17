@@ -19,9 +19,25 @@ connections require a loopback IP address.
 
 The TUI lists Tags with your one conversation with each, loads conversation history, sends
 messages, and follows replies. Watch keeps the rail and open conversation current across clients.
-The TUI resumes Watch after an interruption and polls while reconnecting. Each reply follows its own
-Task event sequence through `Operator.ListEvents`. A history page reads its messages' work
-Sessions concurrently, and each conversation stays in memory, so returning to it shows it at once.
+The TUI resumes Watch after an interruption and polls while reconnecting. Each message of a
+history page carries what its turn showed, every message the Tag wrote and its latest activity,
+so a finished turn reads nothing more. Rereading a conversation asks only for what changed since
+the copy on screen: the messages after its latest and the turns it holds unfinished. A running
+turn reads its new events through `Operator.ListEvents` each second, and reads the turn itself
+once its events go quiet; a queued turn reads only the turn. A history page reads its messages'
+work Sessions concurrently, and each conversation stays in memory, so returning to it shows it at
+once.
+
+The TUI also keeps a cache on disk, so `supertag` shows the last Tag's conversation before any
+call to the Control Plane: the Tag list with each conversation's row, the selected Tag, the latest
+50 messages of each conversation shown, with their rendering at the terminal's width, messages not
+yet sent, and unsent drafts. It lives in `supertag/tui/` in the user cache directory, with an
+owner-only directory per Control Plane and principal and an owner-only file per entry, each
+written in one step as `{"schemaVersion": 1, "value": ...}`; an entry in another schema is
+discarded. The principal is the one `Enrollments.WhoAmI` named the last time this credential
+connected, found by a one-way digest of the credential, and is confirmed again before anything is
+written. The cache never holds a credential. Forgetting a saved Control Plane deletes its cache.
+`docs/reference/credential-storage.md` describes it beside the desktop app's.
 
 Ctrl-P opens **Control Planes**, including when only one connection exists. Press `a` to add a
 Control Plane, enter a name, its URL, and an operator token in the masked field, then press Ctrl-S
@@ -73,9 +89,11 @@ The status bar shows which Control Plane it talks to, its Worker Hosts by phase
 reachable. The conversation opens after the Control Plane returns a Tag. An empty Tag list
 shows setup instructions. The rail on the left has four sections:
 
-- **Tags**, each with its state and, under it, the latest message of your conversation with it.
-  The state says `working` while a Task of that conversation is queued or running, and `N new`
-  for replies you have not read. The main pane holds your one conversation with the selected
+- **Tags**, the lead Tag first with a star, then the others by their conversation's latest
+  activity. Each shows its state and, under it, the latest message of your conversation with it.
+  The state says `working` while a Task of that conversation is queued or running, `N new` for
+  replies you have not read, whose preview is bold, and otherwise when the conversation was last
+  active (`14:05`, `Yday`, `Mon`). The main pane holds your one conversation with the selected
   Tag: its history across every Session, then the reply streaming in, and work Sessions as they
   run and report. Showing a finished reply marks the conversation read.
 - **Objectives**, the open ones, each with its spend against a budget in a currency, or why it is
@@ -90,6 +108,36 @@ shows setup instructions. The rail on the left has four sections:
   type the reason. Esc cancels either. Other items show the commands that act on them.
 - **Teams**, each with its number of members. Selecting one shows its members, its turn limit and
   the newest posts of its Workstream, kept current.
+
+The conversation reads like a messaging app. Consecutive messages from you or the Tag form one
+group under one name, and a time divider (`Today 10:16 PM`, `Yesterday 9:02 AM`) starts the
+history and marks each pause of more than fifteen minutes. Each message the Tag writes while it
+works, starting with its sentence of intent, is its own message, and its result follows, rendered
+as markdown. Under your last message the TUI shows `Sending…` until the Control Plane accepts it,
+then `Sent`, and `Seen` once a Worker Host took its turn up. Until the Tag writes its first line,
+an animated `···` shows that it works; its activity line then takes its place. A sent message
+shows at once and waits in an outbox, kept on disk, until the Control Plane accepts it; the next
+launch sends what is left again with the same operation ID, so the Tag gets it at most once. One
+that was not delivered says `! Not delivered`: Ctrl-R sends it again, and Ctrl-X takes it back
+into the input to edit. Scrolled up, the title counts the Tag's messages that arrived since, and
+End on an empty input (or Ctrl-End) jumps to the latest. What you type stays with each Tag
+when you switch Tags and when you quit.
+
+Alt-1 to Alt-9 (or Ctrl-1 to Ctrl-9 where the terminal reports them) open the Tags in rail
+order, and Alt-↑ and Alt-↓ (or Alt-k and Alt-j) the previous and next Tag. On macOS, Alt keys
+need the terminal to send Option as Meta. Ctrl-B folds the rail into a narrow column of Tag
+initials, starred for the lead, with `•` for unread replies and `…` while a Tag works, or expands
+it again. While the rail has the focus, `[` and `]` make the expanded rail narrower or wider. The
+TUI keeps both choices in `preferences.json` beside its cache.
+
+Ctrl-N, or **New Tag** in the command palette, opens a short form to create a Tag: its name, from
+which the permanent ID is derived as `supertag init` names Tags, a harness, and optionally a
+Workspace. Up and down move between the fields, left and right choose the harness and Workspace,
+and enter on the Workspace creates the Tag. The harnesses and Workspaces come from the connected
+Worker Hosts (`Operator.ListHosts`), and every harness is offered when none is connected. Like the
+lead Tag `supertag init` creates, the new Tag may edit files and run commands. It is created with
+`Operator.PutTag` fenced at revision zero, so it never replaces another Tag, and is selected once
+created. Only operators may create Tags: a client device is told so instead.
 
 In a conversation, up on an empty input selects the last work Session line; up and down move
 between work Session lines and branch lines. Enter expands a work Session line to show its
@@ -134,6 +182,7 @@ back.
 - **Task files** lists the files a completed Task captured, by Task ID, and saves the chosen one
   to a destination you type.
 - **Open inbox** shows the first item waiting on you, with the rail on it.
+- **New Tag** opens the form to create a Tag, as Ctrl-N does.
 
 Tab moves between the rail and the main pane; up and down (or `k` and `j`) move through the rail,
 and enter opens the row. Esc quits when there is nothing to go back from, and Ctrl-C quits.
@@ -142,8 +191,9 @@ shows as text.
 
 It talks to the Control Plane through the generated runtime v2 Go client in
 `sdks/go`. `Conversations` sends messages, lists your conversations with their previews and
-unread replies, reads their history, and marks them read. `Operator.ListEvents` pages each
-reply's Task events. `Objectives` lists the open Objectives, describes the selected
+unread replies, reads their history and what changed in it, and marks them read.
+`Operator.ListEvents` reads a running turn's new events. `Operator.PutTag` creates Tags.
+`Enrollments.WhoAmI` names the principal the cache is kept for. `Objectives` lists the open Objectives, describes the selected
 one, and creates Objectives. `Inbox` lists the inbox, answers questions and decides approval
 requests. `WorkSessions` reads a work Session's delivery and activity. `Teams` lists and reads the
 Teams and the shown Team's Workstream. `OperatorEvents.Watch` keeps the rail, the Objective view,
@@ -157,7 +207,9 @@ Build with `./build.sh`, which cross-compiles static binaries for macOS arm64 an
 amd64 into `dist/supertag-tui-GOOS-GOARCH`. It uses the workspace version from `core/Cargo.toml`
 by default. Set `SUPERTAG_TUI_VERSION` when building for a launcher with a
 different version.
-Run the tests with `go test ./...`. The ignored tests in `core/crates/cli/tests/operator_runtime.rs`
+Run the tests with `go test ./...`. `typing_bench_test.go` guards typing latency, and
+`BenchmarkFirstConversation` in `firstpaint_bench_test.go` measures how long a launch takes to show
+the last Tag's conversation, without a cache and with one. The ignored tests in `core/crates/cli/tests/operator_runtime.rs`
 drive a built binary end to end under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
 
 The CLI resolves the Control Plane as every other command does (`--control-plane`,

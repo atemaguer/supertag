@@ -212,6 +212,24 @@ type Conversation struct {
 	Working bool
 	// Set when the latest message is a work Session's report turn, which has no caller message.
 	LatestWorkSessionReportId string
+	// When the latest message was sent or answered; zero when the Control Plane did not say.
+	LastActivityAtMs int64
+	// The latest message's order.
+	LatestOrder uint64
+}
+
+func (x *Conversation) GetLastActivityAtMs() int64 {
+	if x != nil {
+		return x.LastActivityAtMs
+	}
+	return 0
+}
+
+func (x *Conversation) GetLatestOrder() uint64 {
+	if x != nil {
+		return x.LatestOrder
+	}
+	return 0
 }
 
 func (x *Conversation) GetTag() string {
@@ -295,6 +313,58 @@ type Message struct {
 	JoinedTaskId string
 	// The work Sessions this message's turn started or continued, oldest first.
 	WorkSessions []*WorkSession
+	// The messages the Tag wrote while its turn ran, oldest first, such as its sentence of intent.
+	TagMessages []*TagMessage
+	// What the Tag is doing now, from its latest activity or plan event, while the turn runs.
+	Activity string
+	// The sequence of the turn's latest event the message carried; a follow reads after it.
+	LastSequence uint64
+	// A Worker Host took the turn up: it is claimed, running or finished.
+	Started bool
+	// When the turn finished, if it has.
+	CompletedAt *timestamppb.Timestamp
+}
+
+// A message the Tag wrote while its turn ran.
+type TagMessage struct {
+	// The event that recorded it; later messages have larger sequences.
+	Sequence uint64
+	Text     string
+}
+
+func (x *Message) GetTagMessages() []*TagMessage {
+	if x != nil {
+		return x.TagMessages
+	}
+	return nil
+}
+
+func (x *Message) GetActivity() string {
+	if x != nil {
+		return x.Activity
+	}
+	return ""
+}
+
+func (x *Message) GetLastSequence() uint64 {
+	if x != nil {
+		return x.LastSequence
+	}
+	return 0
+}
+
+func (x *Message) GetStarted() bool {
+	if x != nil {
+		return x.Started
+	}
+	return false
+}
+
+func (x *Message) GetCompletedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CompletedAt
+	}
+	return nil
 }
 
 func (x *Message) GetTaskId() string {

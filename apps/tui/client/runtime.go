@@ -13,9 +13,11 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
 	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
@@ -196,12 +198,8 @@ func (c *runtimeClient) listTags(ctx context.Context) ([]*views.Tag, error) {
 	return tags, nil
 }
 
-func (c *runtimeClient) sendMessage(ctx context.Context, tag, text string) (*views.Message, error) {
-	key, err := idempotencyKey()
-	if err != nil {
-		return nil, err
-	}
-	body := &v2.SendMessageRequest{TagId: tag, Text: text, OperationId: key}
+func (c *runtimeClient) sendMessage(ctx context.Context, tag, text, operationID string) (*views.Message, error) {
+	body := &v2.SendMessageRequest{TagId: tag, Text: text, OperationId: operationID}
 	return retrying(ctx, func(ctx context.Context) (*views.Message, error) {
 		res, err := c.conversations.SendMessage(ctx, connect.NewRequest(body))
 		if err != nil {
@@ -227,15 +225,19 @@ func (c *runtimeClient) getMessage(ctx context.Context, tag, id string) (*v2.Con
 	return res.Msg, nil
 }
 
-// How many messages of a history page read their Work Sessions at once.
-const projectConcurrency = 16
+// How many messages of a history page read their Work Sessions at once: a whole page, so a page
+// takes one round trip for them.
+const projectConcurrency = 50
 
-func (c *runtimeClient) listMessages(ctx context.Context, tag string, size int32, cursor string) (MessagePage, error) {
+func (c *runtimeClient) listMessages(ctx context.Context, tag string, query MessageQuery) (MessagePage, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
-	res, err := c.conversations.ListMessages(ctx, connect.NewRequest(&v2.ListMessagesRequest{
-		TagId: tag, Limit: uint32(max(size, 0)), Cursor: cursor,
-	}))
+	request := &v2.ListMessagesRequest{TagId: tag, Limit: uint32(max(query.Limit, 0)), Cursor: query.Cursor}
+	if query.After > 0 && query.ConversationID != "" {
+		request.After, request.ConversationId = query.After, query.ConversationID
+		request.RefreshTaskIds = query.Refresh[max(len(query.Refresh)-maxRefresh, 0):]
+	}
+	res, err := c.conversations.ListMessages(ctx, connect.NewRequest(request))
 	if err != nil {
 		return MessagePage{}, apiError(err)
 	}
@@ -260,8 +262,12 @@ func (c *runtimeClient) listMessages(ctx context.Context, tag string, size int32
 	if err := group.Wait(); err != nil {
 		return MessagePage{}, err
 	}
-	return MessagePage{Messages: items, NextCursor: res.Msg.GetNextCursor(), ConversationID: res.Msg.GetConversationId()}, nil
+	return MessagePage{Messages: items, NextCursor: res.Msg.GetNextCursor(), ConversationID: res.Msg.GetConversationId(),
+		Incremental: res.Msg.GetIncremental()}, nil
 }
+
+// maxRefresh is the most unfinished turns one ListMessages call refreshes.
+const maxRefresh = 128
 
 func (c *runtimeClient) listConversations(ctx context.Context) ([]*views.Conversation, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
@@ -280,6 +286,7 @@ func (c *runtimeClient) listConversations(ctx context.Context) ([]*views.Convers
 			Tag: conv.GetTagId(), Preview: conv.GetPreview(), PreviewFromTag: conv.GetPreviewFromTag(),
 			UnreadCount: int32(min(conv.GetUnreadCount(), math.MaxInt32)), ReadOrder: conv.GetReadOrder(),
 			Working: conv.GetWorking(), LatestWorkSessionReportId: conv.GetLatestWorkSessionReportId(),
+			LastActivityAtMs: conv.GetLastActivityAtMs(), LatestOrder: conv.GetLatestOrder(),
 		})
 	}
 	return conversations, nil
@@ -300,7 +307,15 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 	task := message.GetTask()
 	out := &views.Message{
 		TaskId: task.GetTaskId(), Tag: task.GetTagId(), SessionId: task.GetSessionId(), Order: message.GetOrder(), Text: task.GetPrompt(), Status: views.ReplyStatus_REPLY_STATUS_WAITING,
+		Started: task.GetState() != v2.TaskState_TASK_STATE_QUEUED && task.GetState() != v2.TaskState_TASK_STATE_UNSPECIFIED,
 	}
+	if at := message.GetSentAtMs(); at > 0 {
+		out.CreatedAt = timestamppb.New(time.UnixMilli(at))
+	}
+	if message.CompletedAtMs != nil {
+		out.CompletedAt = timestamppb.New(time.UnixMilli(message.GetCompletedAtMs()))
+	}
+	turnEvents(out, message.GetEvents())
 	if message.GetWorkSessionReportId() != "" {
 		// The prompt instructs the parent to report on child work. It was not
 		// written by the operator and must never appear as their message.
@@ -325,15 +340,30 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 	out.Reply = runtimeReply(task)
 	if out.Reply != nil {
 		out.Status = views.ReplyStatus_REPLY_STATUS_REPLIED
-	} else {
-		switch task.GetState() {
-		case v2.TaskState_TASK_STATE_QUEUED:
-			out.WaitingReason = "Task queued."
-		case v2.TaskState_TASK_STATE_UNCERTAIN:
-			out.WaitingReason = "Execution is uncertain and needs operator recovery."
-		}
+		out.Activity = ""
+	} else if task.GetState() == v2.TaskState_TASK_STATE_UNCERTAIN {
+		out.WaitingReason = "Execution is uncertain and needs operator recovery."
 	}
 	return out
+}
+
+// turnEvents adds what a turn's carried events show to its message: each message the Tag wrote,
+// and what it is doing now from the latest activity or plan event after its last message.
+func turnEvents(out *views.Message, events []*v2.TaskEvent) {
+	for _, event := range events {
+		out.LastSequence = max(out.LastSequence, event.GetSequence())
+		switch event.GetKind() {
+		case v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE:
+			if text := strings.TrimSpace(event.GetText()); text != "" {
+				out.TagMessages = append(out.TagMessages, &views.TagMessage{Sequence: event.GetSequence(), Text: text})
+				out.Activity = ""
+			}
+		case v2.TaskEventKind_TASK_EVENT_KIND_ACTIVITY, v2.TaskEventKind_TASK_EVENT_KIND_PROGRESS:
+			if line := eventLine(event); line != "" {
+				out.Activity = line
+			}
+		}
+	}
 }
 
 func runtimeReply(task *v2.Task) *views.Reply {

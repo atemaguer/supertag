@@ -68,7 +68,7 @@ func taskFilesApp(t *testing.T) *app {
 	}
 	t.Cleanup(a.stop)
 	a.inner.tags, a.inner.selected = runtimeTestTags(), 0
-	a.inner.shown().runtime.head = "task-files"
+	a.inner.shown().runtime.order = []string{"task-files"}
 	a.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	return a
 }
@@ -120,7 +120,7 @@ func TestTaskFilesDialogScopesLateResultsAndCancelsOnSwitch(t *testing.T) {
 	if a.files != nil {
 		t.Fatal("late file list reopened the dialog")
 	}
-	a.inner.shown().runtime.head = ""
+	a.inner.shown().runtime.order = []string{""}
 	a.openTaskFiles()
 	current := a.files
 	a.Update(taskFilesMsg{dialog: old, files: []client.TaskFile{{Path: "stale"}}})
@@ -143,7 +143,7 @@ func TestTaskFilesDialogScopesLateResultsAndCancelsOnSwitch(t *testing.T) {
 
 func TestTaskFilesManualTaskAndObjectivePrefill(t *testing.T) {
 	a := taskFilesApp(t)
-	a.inner.shown().runtime.head = ""
+	a.inner.shown().runtime.order = []string{""}
 	a.openTaskFiles()
 	typeApp(t, a, "private-task")
 	completeTaskFilesAction(t, a)

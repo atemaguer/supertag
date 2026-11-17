@@ -31,7 +31,7 @@ func collect(t *testing.T, events <-chan FollowEvent) []FollowEvent {
 
 // describe writes events as one line each: kind, then the fields that are set.
 func describe(events []FollowEvent) string {
-	names := []string{"waiting", "delta", "message", "status", "activity", "reply", "turn-error", "working", "report", "approval", "not-continued", "still-working", "joined", "error"}
+	names := []string{"waiting", "started", "delta", "message", "status", "activity", "reply", "turn-error", "working", "report", "approval", "not-continued", "still-working", "joined", "error"}
 	var lines []string
 	for _, e := range events {
 		line := names[e.Kind]

@@ -55,8 +55,8 @@ func (a *app) openTaskFiles() tea.Cmd {
 			task = message.task
 		}
 	} else if a.inner.pane == paneConversation {
-		if conversation := a.inner.shown(); conversation != nil {
-			task = conversation.runtime.head
+		if conversation := a.inner.shown(); conversation != nil && len(conversation.runtime.order) > 0 {
+			task = conversation.runtime.order[len(conversation.runtime.order)-1]
 		}
 	}
 	if task != "" {

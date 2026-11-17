@@ -137,10 +137,22 @@ func (d *workDetail) pullRequest() string {
 	return d.session.GetDelivery().GetDelivery().GetPullRequest().GetUrl()
 }
 
+// shownEntries are the conversation's entries in the order it shows them: each turn's, oldest
+// first, then those of the conversation itself.
+func shownEntries(c *conversation) []entry {
+	var entries []entry
+	for _, id := range c.runtime.order {
+		if turn := c.runtime.turns[id]; turn != nil {
+			entries = append(entries, turn.entries...)
+		}
+	}
+	return append(entries, c.entries...)
+}
+
 // anchors are the index of each work Session's first "working" line, and of its latest report.
-func anchors(c *conversation) (working, reports map[string]int) {
+func anchors(entries []entry) (working, reports map[string]int) {
 	working, reports = map[string]int{}, map[string]int{}
-	for i, e := range c.entries {
+	for i, e := range entries {
 		if e.session == "" {
 			continue
 		}
@@ -158,9 +170,10 @@ func anchors(c *conversation) (working, reports map[string]int) {
 
 // targets are the lines of a conversation up and down choose between, top to bottom.
 func (m model) targets(c *conversation) []target {
-	working, reports := anchors(c)
+	entries := shownEntries(c)
+	working, reports := anchors(entries)
 	var out []target
-	for i, e := range c.entries {
+	for i, e := range entries {
 		if e.session == "" {
 			continue
 		}
@@ -335,9 +348,10 @@ func (m model) latestReport(id string) string {
 	if c == nil {
 		return ""
 	}
-	_, reports := anchors(c)
+	entries := shownEntries(c)
+	_, reports := anchors(entries)
 	if i, ok := reports[id]; ok {
-		return c.entries[i].text
+		return entries[i].text
 	}
 	return ""
 }

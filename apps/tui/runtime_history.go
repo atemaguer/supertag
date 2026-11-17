@@ -1,14 +1,13 @@
 package main
 
 import (
+	"cmp"
 	"context"
-	"errors"
+	"math"
 	"slices"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
 	"github.com/atemaguer/supertag/apps/tui/views"
@@ -22,24 +21,72 @@ type runtimeTurn struct {
 	settled     bool
 	joined      bool
 	needsFollow bool
+	// started says a Worker Host took the turn up.
+	started bool
+	// after is the sequence of the latest message the Tag wrote that the turn shows.
+	after uint64
 	// order is the message's place in the conversation; zero when not yet known.
 	order uint64
+	// sentAt and completedAt are when the message was sent and its turn finished; zero when not
+	// known.
+	sentAt, completedAt time.Time
+	// stop ends the turn's follow.
+	stop context.CancelFunc
 }
 
 type runtimeHistory struct {
 	turns    map[string]*runtimeTurn
 	order    []string
 	revision uint64
-	sending  int
 	readErr  string
-	// head is the newest Task from an authoritative page, independent of
-	// messages added by individual local send receipts. conversationID is the
-	// conversation that page came from.
-	head, conversationID string
-	read                 bool
-	workShown            map[string]bool
+	// conversationID is the conversation the turns came from.
+	conversationID string
+	read           bool
+	workShown      map[string]bool
 	// markedRead is the order up to which the conversation was last marked read.
 	markedRead uint64
+}
+
+// latestOrder is the order of the latest message held, zero when none is known.
+func (h *runtimeHistory) latestOrder() uint64 {
+	var latest uint64
+	for _, turn := range h.turns {
+		latest = max(latest, turn.order)
+	}
+	return latest
+}
+
+// unsettled are the turns held that the Control Plane may still change, oldest first.
+func (h *runtimeHistory) unsettled() []string {
+	var ids []string
+	for _, id := range h.order {
+		if turn := h.turns[id]; turn != nil && turn.order > 0 && (!turn.settled || turn.needsFollow) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// reset forgets every turn held, and ends their follows.
+func (h *runtimeHistory) reset() {
+	for _, turn := range h.turns {
+		if turn.stop != nil {
+			turn.stop()
+		}
+	}
+	h.order, h.turns, h.workShown, h.markedRead = nil, nil, nil, 0
+}
+
+// sortOrder puts the turns in the conversation's order; one whose order is not known yet stays
+// after them, in the order it was added.
+func (h *runtimeHistory) sortOrder() {
+	key := func(id string) uint64 {
+		if turn := h.turns[id]; turn != nil && turn.order > 0 {
+			return turn.order
+		}
+		return math.MaxUint64
+	}
+	slices.SortStableFunc(h.order, func(a, b string) int { return cmp.Compare(key(a), key(b)) })
 }
 
 func (m model) reloadShownHistory() tea.Cmd {
@@ -68,50 +115,28 @@ func (m model) reloadHistory(tag string) tea.Cmd {
 	return m.loadHistory(tag)
 }
 
-// loadHistory reads the conversation with tag back to the newest message already shown, or its
-// newest page the first time.
+// loadHistory reads what changed in the conversation with tag since the copy held: the messages
+// after its latest, and the turns it holds unfinished. Without a copy, it reads the newest page.
 func (m model) loadHistory(tag string) tea.Cmd {
 	h := &m.conversation(tag).runtime
-	revision, head, conversationID, read := h.revision, h.head, h.conversationID, h.read
+	query := client.MessageQuery{Limit: historyPage}
+	if latest := h.latestOrder(); h.read && h.conversationID != "" && latest > 0 {
+		query.After, query.ConversationID, query.Refresh = latest, h.conversationID, h.unsettled()
+	}
+	revision := h.revision
 	displayed := slices.Clone(h.order)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(m.ctx, 15*time.Second)
 		defer cancel()
-		msg := historyMsg{tag: tag, revision: revision}
-		var messages []*views.Message
-		cursor := ""
-		seen := map[string]bool{}
-		for {
-			page, err := m.client.ListMessages(ctx, tag, historyPage, cursor)
-			if err != nil {
-				msg.err = err
-				return msg
-			}
-			if cursor == "" {
-				msg.conversationID = page.ConversationID
-			} else if page.ConversationID != msg.conversationID {
-				msg.err = errors.New("Control Plane conversation was replaced while loading history")
-				return msg
-			}
-			messages = append(messages, page.Messages...)
-			replaced := conversationID != "" && msg.conversationID != conversationID
-			if replaced {
-				// A replaced conversation starts with its own history.
-				displayed = nil
-			}
-			if !read || page.NextCursor == "" || replaced || slices.ContainsFunc(page.Messages, func(item *views.Message) bool {
-				return item.GetTaskId() == head
-			}) {
-				msg.items = client.History(tag, messages, displayed...)
-				return msg
-			}
-			if seen[page.NextCursor] {
-				msg.err = errors.New("Control Plane conversation cursor did not advance")
-				return msg
-			}
-			seen[page.NextCursor] = true
-			cursor = page.NextCursor
+		page, err := m.client.ListMessages(ctx, tag, query)
+		if err != nil {
+			return historyMsg{tag: tag, revision: revision, err: err}
 		}
+		if !page.Incremental {
+			displayed = nil
+		}
+		return historyMsg{tag: tag, revision: revision, conversationID: page.ConversationID, incremental: page.Incremental,
+			items: client.History(tag, page.Messages, displayed...)}
 	}
 }
 
@@ -131,22 +156,21 @@ func (m *model) showRuntimeHistory(msg historyMsg) tea.Cmd {
 	if msg.err != nil {
 		c.runtime.readErr = terminalText(msg.err.Error())
 	} else {
-		c.runtime.readErr = ""
-		c.runtime.read = true
-		if len(msg.items) == 0 || (c.runtime.conversationID != "" && c.runtime.conversationID != msg.conversationID) {
-			// The conversation is empty, or was replaced and starts with its own history.
-			c.runtime.order, c.runtime.turns, c.runtime.head = nil, nil, ""
-			c.runtime.workShown, c.runtime.markedRead = nil, 0
+		h := &c.runtime
+		h.readErr = ""
+		if !msg.incremental && !h.continues(msg) {
+			// The conversation was replaced or is empty, or more arrived than one page holds: the
+			// page is the conversation's newest, and replaces what was held.
+			h.reset()
 		}
-		c.runtime.conversationID = msg.conversationID
-		if len(msg.items) != 0 {
-			c.runtime.head = msg.items[len(msg.items)-1].Message.GetTaskId()
-		}
+		h.read = true
+		h.conversationID = msg.conversationID
 		for _, item := range msg.items {
 			cmds = append(cmds, m.runtimeItem(msg.tag, item))
 		}
-		c.runtime.mergeOrder(msg.items)
+		h.sortOrder()
 		cmds = append(cmds, m.markRead(msg.tag))
+		m.cacheChanged(conversationKey(msg.tag))
 	}
 	if m.showsConversation(msg.tag) {
 		m.refresh()
@@ -157,38 +181,41 @@ func (m *model) showRuntimeHistory(msg historyMsg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// mergeOrder uses the Control Plane's order within the latest page and retains
-// messages already displayed after they fall off that page.
-func (h *runtimeHistory) mergeOrder(items []client.HistoryItem) {
-	page := make([]string, 0, len(items))
-	onPage := make(map[string]bool, len(items))
-	for _, item := range items {
-		id := item.Message.GetTaskId()
-		if id != "" && !onPage[id] {
-			page = append(page, id)
-			onPage[id] = true
+// continues says a newest page reaches back to what the history holds, so it adds to it rather
+// than replacing it.
+func (h *runtimeHistory) continues(msg historyMsg) bool {
+	if len(msg.items) == 0 || len(h.turns) == 0 || h.conversationID != msg.conversationID {
+		return false
+	}
+	oldest := uint64(math.MaxUint64)
+	for _, item := range msg.items {
+		if h.turns[item.Message.GetTaskId()] != nil {
+			return true
+		}
+		if order := item.Message.GetOrder(); order > 0 {
+			oldest = min(oldest, order)
 		}
 	}
-	for i, id := range h.order {
-		if onPage[id] {
-			order := append(append(make([]string, 0, len(h.order)), h.order[:i]...), page...)
-			for _, old := range h.order[i:] {
-				if !onPage[old] {
-					order = append(order, old)
-				}
-			}
-			h.order = order
-			return
-		}
-	}
+	return oldest <= h.latestOrder()+1
 }
 
+// runtimeSent takes the Control Plane's receipt for a queued message: the message leaves the
+// outbox and shows as its turn. A failed attempt stays in the outbox as not delivered.
 func (m *model) runtimeSent(msg sentMsg) tea.Cmd {
 	c := m.conversation(msg.tag)
-	c.runtime.sending = max(c.runtime.sending-1, 0)
+	if entry := m.outbox.find(msg.operationID); entry != nil {
+		entry.sending = false
+		if msg.err != nil {
+			entry.Error = terminalText(msg.err.Error())
+		} else {
+			m.outbox.remove(msg.operationID)
+		}
+		m.cacheChanged(outboxKey)
+	}
 	if msg.err != nil {
-		m.fail(msg.err)
-		m.addEntry(msg.tag, entryError, msg.err.Error())
+		if m.showsConversation(msg.tag) {
+			m.refresh()
+		}
 		return nil
 	}
 	m.connected, m.status = true, "connected"
@@ -203,11 +230,14 @@ func (m *model) runtimeSent(msg sentMsg) tea.Cmd {
 		for _, item := range client.History(msg.tag, []*views.Message{msg.message}, source...) {
 			cmds = append(cmds, m.runtimeItem(msg.tag, item))
 		}
+		c.runtime.sortOrder()
+		m.cacheChanged(conversationKey(msg.tag))
 		if m.showsConversation(msg.tag) {
 			cmds = append(cmds, m.reloadHistory(msg.tag))
 		}
 	}
 	if m.showsConversation(msg.tag) {
+		m.viewport.GotoBottom()
 		m.refresh()
 	}
 	return tea.Batch(cmds...)
@@ -227,29 +257,32 @@ func (m *model) runtimeItem(tag string, item client.HistoryItem) tea.Cmd {
 	var cmds []tea.Cmd
 	if turn != nil && (turn.following || !turn.joined || joined) {
 		turn.joined = turn.joined || joined
-		turn.order = max(turn.order, item.Message.GetOrder())
+		turn.times(item.Message)
 		turn.needsFollow = item.Follow
-		// The follower already displays this turn's events. A snapshot can
-		// supply a final reply after a failed follow without repeating it.
-		if !turn.following {
-			for _, event := range item.Events {
-				if runtimeFinal(event) || client.WorkEventKey(event) != "" {
-					cmds = append(cmds, m.applyRuntimeTurn(h, turn, event))
-				}
+		// A snapshot adds what the turn showed since it was last read: its start, the messages
+		// the Tag wrote, what it does now, its final reply and its work, without repeating any
+		// that its follow already showed.
+		for _, event := range item.Events {
+			switch {
+			case runtimeFinal(event), client.WorkEventKey(event) != "",
+				event.Kind == client.EventStarted, event.Kind == client.EventMessage, event.Kind == client.EventStatus:
+				cmds = append(cmds, m.applyRuntimeTurn(h, turn, event))
 			}
-			if item.Follow {
-				turn.following = true
-				cmds = append(cmds, waitForTask(tag, id, m.follower.Follow(m.ctx, tag, item.Message, item.Shown)))
-			}
+		}
+		if item.Follow && !turn.following {
+			cmds = append(cmds, m.followTurn(tag, id, turn, item))
 		}
 		return tea.Batch(cmds...)
 	}
 	if turn == nil {
 		h.order = append(h.order, id)
+	} else if turn.stop != nil {
+		turn.stop()
 	}
 	// A joined input can be withdrawn and run as its own Task. Replace any
 	// transcript attributed to the earlier source when that delivery clears.
-	turn = &runtimeTurn{joined: joined, needsFollow: item.Follow, order: item.Message.GetOrder()}
+	turn = &runtimeTurn{joined: joined, needsFollow: item.Follow}
+	turn.times(item.Message)
 	h.turns[id] = turn
 	if item.Message.GetText() != "" {
 		turn.add(entryYou, item.Message.GetText())
@@ -258,22 +291,53 @@ func (m *model) runtimeItem(tag string, item client.HistoryItem) tea.Cmd {
 		cmds = append(cmds, m.applyRuntimeTurn(h, turn, event))
 	}
 	if item.Follow {
-		turn.following = true
-		cmds = append(cmds, waitForTask(tag, id, m.follower.Follow(m.ctx, tag, item.Message, item.Shown)))
+		cmds = append(cmds, m.followTurn(tag, id, turn, item))
 	}
 	return tea.Batch(cmds...)
+}
+
+// times records the message's order and when it was sent and finished.
+func (t *runtimeTurn) times(message *views.Message) {
+	t.order = max(t.order, message.GetOrder())
+	if at := message.GetCreatedAt(); at != nil {
+		t.sentAt = at.AsTime()
+	}
+	if at := message.GetCompletedAt(); at != nil {
+		t.completedAt = at.AsTime()
+	}
+}
+
+// followTurn follows a turn that still has a reply or work to show, until it settles or the turn
+// is replaced.
+func (m *model) followTurn(tag, id string, turn *runtimeTurn, item client.HistoryItem) tea.Cmd {
+	ctx, stop := context.WithCancel(m.ctx)
+	turn.following, turn.stop = true, stop
+	follow := waitForTask(tag, id, m.follower.Follow(ctx, tag, item.Message, item.Shown))
+	return func() tea.Msg {
+		msg := follow()
+		switch msg := msg.(type) {
+		case followMsg:
+			msg.turn = turn
+			return msg
+		case followDoneMsg:
+			msg.turn = turn
+			return msg
+		}
+		return msg
+	}
 }
 
 func (m *model) runtimeFollow(msg followMsg) tea.Cmd {
 	h := &m.conversation(msg.tag).runtime
 	turn := h.turns[msg.taskID]
-	if turn == nil {
+	if turn == nil || (msg.turn != nil && msg.turn != turn) {
 		return nil
 	}
 	cmds := []tea.Cmd{m.applyRuntimeTurn(h, turn, msg.event)}
 	for _, event := range msg.more {
 		cmds = append(cmds, m.applyRuntimeTurn(h, turn, event))
 	}
+	m.cacheChanged(conversationKey(msg.tag))
 	if m.showsConversation(msg.tag) {
 		m.refresh()
 	}
@@ -281,7 +345,7 @@ func (m *model) runtimeFollow(msg followMsg) tea.Cmd {
 }
 
 func (m *model) runtimeFollowDone(msg followDoneMsg) tea.Cmd {
-	if turn := m.conversation(msg.tag).runtime.turns[msg.taskID]; turn != nil {
+	if turn := m.conversation(msg.tag).runtime.turns[msg.taskID]; turn != nil && (msg.turn == nil || msg.turn == turn) {
 		turn.following = false
 		if (!turn.settled || turn.joined || turn.needsFollow) && m.showsConversation(msg.tag) {
 			return m.reloadHistory(msg.tag)
@@ -336,8 +400,25 @@ func (m *model) applyRuntimeTurn(history *runtimeHistory, turn *runtimeTurn, eve
 		}
 		history.workShown[key] = true
 	}
-	if event.Kind == client.EventJoined {
+	switch event.Kind {
+	case client.EventJoined:
 		turn.joined = true
+	case client.EventStarted:
+		turn.started = true
+		return nil
+	case client.EventStatus:
+		if turn.settled {
+			return nil
+		}
+	case client.EventMessage:
+		if event.Sequence != 0 {
+			if event.Sequence <= turn.after {
+				return nil
+			}
+			turn.after = event.Sequence
+		}
+	case client.EventReply, client.EventTurnError:
+		turn.started = true
 	}
 	if runtimeFinal(event) {
 		if turn.settled {
@@ -346,37 +427,4 @@ func (m *model) applyRuntimeTurn(history *runtimeHistory, turn *runtimeTurn, eve
 		turn.settled = true
 	}
 	return m.applyTranscript(&turn.transcript, event)
-}
-
-func (m model) renderRuntimeHistory(c *conversation, name string, width int) string {
-	var out strings.Builder
-	wrap := lipgloss.NewStyle().Width(width)
-	render := func(t *transcript) {
-		if t.cacheWidth != width {
-			t.cache, t.cacheWidth = nil, width
-		}
-		for i, entry := range t.entries {
-			if i >= len(t.cache) {
-				t.cache = append(t.cache, m.renderEntry(entry, name, width))
-			}
-			out.WriteString(t.cache[i])
-		}
-		if t.draft != "" {
-			out.WriteString(headerStyle.Render(name) + "\n" + faint.Render(wrap.Render(t.draft)) + "\n\n")
-		}
-		if t.status != "" {
-			out.WriteString(faint.Render(wrap.Render("· "+t.status)) + "\n\n")
-		}
-	}
-	for _, id := range c.runtime.order {
-		render(&c.runtime.turns[id].transcript)
-	}
-	render(&c.transcript)
-	if c.runtime.sending > 0 {
-		out.WriteString(faint.Render("Sending message…") + "\n")
-	}
-	if c.runtime.readErr != "" {
-		out.WriteString(errorStyle.Render(wrap.Render("Could not load the conversation history: "+c.runtime.readErr)) + "\n")
-	}
-	return strings.TrimRight(out.String(), "\n")
 }

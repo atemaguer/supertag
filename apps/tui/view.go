@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
@@ -13,8 +14,6 @@ import (
 
 	"github.com/atemaguer/supertag/apps/tui/client"
 )
-
-const railWidth = 24
 
 var (
 	accent      = lipgloss.Color("12")
@@ -53,7 +52,7 @@ func (md *markdown) render(text string, width int) string {
 	return strings.Trim(out, "\n")
 }
 
-func (m model) paneWidth() int { return max(m.width-railWidth-2, 10) }
+func (m model) paneWidth() int { return max(m.width-m.railWidth()-2, 10) }
 
 // layout sizes the viewport and input to the window: one status line, and in the pane a header,
 // the conversation and the input line.
@@ -66,6 +65,9 @@ func (m *model) layout() {
 		for i := range m.form.fields {
 			m.form.fields[i].SetWidth(m.paneWidth() - 3)
 		}
+	}
+	if m.tagForm != nil {
+		m.tagForm.name.SetWidth(m.paneWidth() - 3)
 	}
 	m.refresh()
 }
@@ -84,6 +86,8 @@ func (m *model) refresh() {
 		m.setContent(m.renderTeam())
 	case paneNewObjective:
 		m.setContent(m.renderObjectiveForm())
+	case paneNewTag:
+		m.setContent(m.renderTagForm())
 	default:
 		atBottom := m.viewport.AtBottom()
 		m.setContent(m.renderConversation())
@@ -93,6 +97,7 @@ func (m *model) refresh() {
 			m.viewport.EnsureVisible(c.selectedLine, 0, 0)
 		case atBottom:
 			m.viewport.GotoBottom()
+			m.sawBottom()
 		}
 	}
 }
@@ -111,95 +116,51 @@ func (m model) renderConversation() string {
 		case m.tagsErr != nil:
 			return wrap.Render("Could not check for Tags on this Control Plane.\n\n" + terminalText(m.tagsErr.Error()))
 		default:
+			if m.tagAdminRefusal() == "" {
+				return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
+					"Press ctrl+n to create one, or run supertag tag put --help for setup.")
+			}
 			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
 				"Run supertag tag put --help for setup. For a shared Control Plane, ask its operator to set up a Tag.")
 		}
 	}
 	name := terminalText(m.tagLabel(tag))
-	width := m.paneWidth()
 	c := m.conversations[tag]
-
 	if c == nil || !c.loaded {
 		return faint.Render(wrap.Render("Reading the conversation…"))
 	}
-	if text := m.renderRuntimeHistory(c, name, width); text != "" {
+	if text := m.renderTranscript(c, tag, name, m.paneWidth()); text != "" {
 		return text
 	}
-
-	if c == nil || (len(c.entries) == 0 && c.draft == "") {
-		return faint.Render(wrap.Render("Say something to " + name + ". You have one conversation with it."))
-	}
-	if c.cacheWidth != width {
-		c.cache, c.cacheWidth = nil, width
-	}
-	working, reports := anchors(c)
-	var out strings.Builder
-	lines := 0
-	write := func(s string) {
-		out.WriteString(s)
-		lines += strings.Count(s, "\n")
-	}
-	isSelected := func(t target) bool { return c.selected != nil && *c.selected == t }
-	for i, e := range c.entries {
-		anchor := e.kind == entryWork && working[e.session] == i
-		if i >= len(c.cache) {
-			rendered := ""
-			if !anchor {
-				rendered = m.renderEntry(e, name, width)
-			}
-			c.cache = append(c.cache, rendered)
-		}
-		if anchor {
-			t := target{session: e.session}
-			if isSelected(t) {
-				c.selectedLine = lines
-			}
-			write(m.renderWorkLine(e, isSelected(t), width))
-			continue
-		}
-		write(c.cache[i])
-		if e.kind == entryReport && reports[e.session] == i && m.work[e.session].branch() != nil {
-			t := target{session: e.session, branch: true}
-			if isSelected(t) {
-				c.selectedLine = lines
-			}
-			write(m.renderBranchLine(e.session, isSelected(t), width) + "\n\n")
-		}
-	}
-	text := out.String()
-	if c.draft != "" {
-		text += headerStyle.Render(name) + "\n" + faint.Render(wrap.Render(c.draft)) + "\n"
-	}
-	if c.status != "" {
-		text += faint.Render(wrap.Render("· "+c.status)) + "\n"
-	}
-	return strings.TrimRight(text, "\n")
+	return faint.Render(wrap.Render("Say something to " + name + ". You have one conversation with it."))
 }
 
-// renderEntry renders an entry that does not change once added.
-func (m model) renderEntry(e entry, name string, width int) string {
+// renderEntry renders the body of an entry that does not change once added, without its sender.
+func (m model) renderEntry(e entry, width int) string {
 	wrap := lipgloss.NewStyle().Width(width)
 	switch e.kind {
 	case entryYou:
-		return bold.Render("you") + "\n" + wrap.Render(e.text) + "\n\n"
+		return wrap.Render(e.text) + "\n"
 	case entryReply, entryReport, entryMessage:
-		return headerStyle.Render(name) + "\n" + m.md.render(e.text, width) + "\n\n"
+		return m.md.render(e.text, width) + "\n"
 	case entryError:
-		return errorStyle.Render(wrap.Render(e.text)) + "\n\n"
+		return errorStyle.Render(wrap.Render(e.text)) + "\n"
 	}
 	return faint.Render(wrap.Render(e.text)) + "\n"
 }
-
-// railContent is the rail's text width: railWidth less its right border and padding.
-const railContent = railWidth - 2
 
 // renderRail lists the Tags, the open Objectives and what waits on you, one row each, cut to
 // fit, scrolled so the row under the cursor shows.
 func (m model) renderRail(height int) string { return m.railBlock(height).text }
 
-// railLines are the rail's rows at height, before the rail's border and padding.
+// railLines are the rail's rows at height, before the rail's border and padding. The folded rail
+// shows each Tag's initials, starred for the lead, with a dot for unread replies or "…" while it
+// works.
 func (m model) railLines(height int) string {
 	paneKey := m.paneKey()
+	railContent := m.railContent()
+	narrow := m.rail != nil && m.rail.Collapsed
+	now := m.now()
 	var lines []string
 	cursorLine := 0
 	at := 0
@@ -222,49 +183,92 @@ func (m model) railLines(height int) string {
 		}
 		line := style.Render(truncate(label, labelWidth))
 		if state != "" {
+			if r.kind == rowTag {
+				// A Tag's state or time sits at the rail's right edge, as in a messaging app's list.
+				line += strings.Repeat(" ", max(labelWidth-lipgloss.Width(truncate(label, labelWidth)), 0))
+			}
 			line += " " + faint.Render(state)
 		}
 		lines = append(lines, line)
 	}
-	section := func(title, err string) {
+	section := func(title, short, err string) {
+		if narrow {
+			title = short
+		}
 		lines = append(lines, headerStyle.Render(truncate(title, railContent)))
-		if err != "" {
+		if err != "" && !narrow {
 			lines = append(lines, errorStyle.Render(truncate(strings.Join(strings.Fields(err), " "), railContent)))
 		}
 	}
 
-	section("Tags", "")
+	section("Tags", "Tags", "")
 	for i, tag := range m.tags {
 		summary := m.summaries[m.tagReference(tag)]
-		add(row{rowTag, i}, terminalText(railTagName(tag)), railState(tag, summary))
+		if narrow {
+			add(row{rowTag, i}, narrowTag(tag, summary), "")
+			continue
+		}
+		add(row{rowTag, i}, terminalText(railTagName(tag)), railState(tag, summary, now))
 		if preview := railPreview(summary); preview != "" {
-			lines = append(lines, faint.Render(truncate("  "+preview, railContent)))
+			style := faint
+			if summary.GetUnreadCount() > 0 {
+				style = bold
+			}
+			lines = append(lines, style.Render(truncate("  "+preview, railContent)))
 		}
 	}
 	if len(m.objectives) > 0 || m.objectivesErr != "" {
-		section("Objectives", m.objectivesErr)
+		section("Objectives", "Obj", m.objectivesErr)
 		for i, objective := range m.objectives {
-			add(row{rowObjective, i}, objectiveName(objective), objectiveState(objective))
+			state := objectiveState(objective)
+			if narrow {
+				state = ""
+			}
+			add(row{rowObjective, i}, objectiveName(objective), state)
 		}
 	}
 	waiting := fmt.Sprintf("Waiting on you (%d)", len(m.inbox.Items))
+	short := fmt.Sprintf("?%d", len(m.inbox.Items))
 	if m.inbox.Truncated {
 		waiting = fmt.Sprintf("Waiting on you (%d+)", len(m.inbox.Items))
+		short += "+"
 	}
-	section(waiting, m.inboxErr)
+	section(waiting, short, m.inboxErr)
 	for i, item := range m.inbox.Items {
 		add(row{rowInbox, i}, m.inboxRow(item), "")
 	}
 	if len(m.teams) > 0 || m.teamsErr != "" {
-		section("Teams", m.teamsErr)
+		section("Teams", "Team", m.teamsErr)
 		for i, team := range m.teams {
-			add(row{rowTeam, i}, terminalText(team.GetName()), teamState(team))
+			state := teamState(team)
+			if narrow {
+				state = ""
+			}
+			add(row{rowTeam, i}, terminalText(team.GetName()), state)
 		}
 	}
 
 	first := max(cursorLine-height+1, 0)
 	lines = lines[first:min(first+height, len(lines))]
 	return strings.Join(lines, "\n")
+}
+
+// narrowTag is a Tag's row in the folded rail: a star for the lead, its initials, and a dot for
+// unread replies or "…" while it works.
+func narrowTag(tag *views.Tag, summary *views.Conversation) string {
+	marker := " "
+	if tag.GetSpec().GetLead() {
+		marker = "★"
+	}
+	state := " "
+	switch {
+	case summary.GetWorking():
+		state = "…"
+	case summary.GetUnreadCount() > 0:
+		state = "•"
+	}
+	name := initials(terminalText(tagName(tag)))
+	return marker + name + strings.Repeat(" ", max(2-lipgloss.Width(name), 0)) + state
 }
 
 // tagName is a Tag's name.
@@ -284,9 +288,10 @@ var tagPhases = map[views.TagPhase]string{
 	views.TagPhase_TAG_PHASE_RETIRED: "retired",
 }
 
-// railState is what the rail shows beside a Tag: its phase, or, while it is active, that it works
-// in your conversation or how many of its replies there you have not read.
-func railState(tag *views.Tag, summary *views.Conversation) string {
+// railState is what the rail shows beside a Tag: while it is active, that it works in your
+// conversation, how many of its replies there you have not read, or when the conversation was
+// last active; otherwise its phase.
+func railState(tag *views.Tag, summary *views.Conversation, now time.Time) string {
 	phase := tag.GetStatus().GetPhase()
 	if phase == views.TagPhase_TAG_PHASE_ACTIVE {
 		switch {
@@ -295,6 +300,7 @@ func railState(tag *views.Tag, summary *views.Conversation) string {
 		case summary.GetUnreadCount() > 0:
 			return fmt.Sprintf("%d new", summary.GetUnreadCount())
 		}
+		return railTime(summary.GetLastActivityAtMs(), now)
 	}
 	return tagPhases[phase]
 }
@@ -389,6 +395,8 @@ func (m model) paneTitle() string {
 		return "Team · " + terminalText(name)
 	case paneNewObjective:
 		return "New Objective · owned by " + terminalText(m.tagLabel(m.form.owner))
+	case paneNewTag:
+		return "New Tag"
 	}
 	tag := m.selectedTag()
 	if tag == "" {
@@ -397,7 +405,13 @@ func (m model) paneTitle() string {
 		}
 		return "SuperTag"
 	}
-	return terminalText(m.tagLabel(tag))
+	title := terminalText(m.tagLabel(tag))
+	if n := m.newSince(); n == 1 {
+		title += " · ↓ 1 new message · end jumps to it"
+	} else if n > 1 {
+		title += fmt.Sprintf(" · ↓ %d new messages · end jumps to them", n)
+	}
+	return title
 }
 
 // paneHint ends a pane that has no input line: the keys that act on it.
@@ -432,6 +446,8 @@ func (m model) paneHint() string {
 		return "Live · its Workstream updates as members post"
 	case paneNewObjective:
 		return m.formHint()
+	case paneNewTag:
+		return m.tagFormHint()
 	case paneConversation:
 		c := m.shown()
 		if c == nil {

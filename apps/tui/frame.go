@@ -24,6 +24,7 @@ type frame struct {
 	rail       block
 	railLines  string
 	railHeight int
+	railWidth  int
 	railSet    bool
 }
 
@@ -87,9 +88,10 @@ func (m model) viewportBlock() *block {
 // railBlock is the rail at height rows, styled and measured again only when its rows changed.
 func (m model) railBlock(height int) *block {
 	lines := m.railLines(height)
-	if !m.frame.railSet || m.frame.railLines != lines || m.frame.railHeight != height {
-		rail := railStyle.Width(railWidth).Height(height).MaxHeight(height).Render(lines)
+	if !m.frame.railSet || m.frame.railLines != lines || m.frame.railHeight != height || m.frame.railWidth != m.railWidth() {
+		rail := railStyle.Width(m.railWidth()).Height(height).MaxHeight(height).Render(lines)
 		m.frame.rail, m.frame.railLines, m.frame.railHeight, m.frame.railSet = measure(rail), lines, height, true
+		m.frame.railWidth = m.railWidth()
 	}
 	return &m.frame.rail
 }

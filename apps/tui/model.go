@@ -57,6 +57,8 @@ const (
 	paneTeam
 	// paneNewObjective declares a new Objective owned by the selected Tag.
 	paneNewObjective
+	// paneNewTag creates a Tag.
+	paneNewTag
 )
 
 // decision is where deciding the shown approval request stands.
@@ -128,6 +130,9 @@ type conversation struct {
 	selected *target
 	// selectedLine is the line of the selected target in the last rendering.
 	selectedLine int
+	// written counts the messages the Tag wrote in the last rendering, and seen those of them the
+	// operator saw at the bottom of the conversation.
+	written, seen int
 }
 
 // add appends an entry, filtering its text for the terminal.
@@ -167,13 +172,16 @@ type (
 		items []client.HistoryItem
 		// conversationID identifies the conversation the history was read from.
 		conversationID string
-		err            error
-		revision       uint64
+		// incremental says items are only what changed since the history held.
+		incremental bool
+		err         error
+		revision    uint64
 	}
 	sentMsg struct {
-		tag     string
-		message *views.Message
-		err     error
+		tag         string
+		operationID string
+		message     *views.Message
+		err         error
 	}
 	followMsg struct {
 		tag, taskID string
@@ -181,8 +189,13 @@ type (
 		// more are the events that were already waiting behind event, in order.
 		more   []client.FollowEvent
 		events <-chan client.FollowEvent
+		// turn is the turn the follow shows; a replaced turn's follow shows nothing more.
+		turn *runtimeTurn
 	}
-	followDoneMsg struct{ tag, taskID string }
+	followDoneMsg struct {
+		tag, taskID string
+		turn        *runtimeTurn
+	}
 	// markedMsg is how marking a conversation read up to order went.
 	markedMsg struct {
 		tag   string
@@ -266,8 +279,9 @@ type model struct {
 	expanded map[string]bool
 	// diff is the diff pane's content.
 	diff *diffView
-	// form is the new Objective form while it shows.
-	form *objectiveForm
+	// form is the new Objective form while it shows; tagForm the New Tag form.
+	form    *objectiveForm
+	tagForm *tagForm
 	// notice is what came of the last action on a conversation's selection, such as opening a
 	// pull request; the next key clears it.
 	notice note
@@ -341,6 +355,15 @@ type model struct {
 	// switchable says the status bar offers switching to another Control Plane.
 	switchable bool
 
+	// outbox holds the messages not yet accepted; cache is what the model keeps on disk.
+	outbox *outbox
+	cache  *modelCache
+	// rail is the rail's layout; typing animates the typing indicator.
+	rail   *railLayout
+	typing *typing
+	// clock is the time the conversation shows; nil for the system clock.
+	clock func() time.Time
+
 	connected bool
 	status    string
 }
@@ -382,6 +405,9 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 		viewport:          viewport.New(),
 		md:                &markdown{},
 		frame:             &frame{},
+		outbox:            &outbox{},
+		rail:              &railLayout{Width: defaultRailWidth},
+		typing:            &typing{},
 		polling:           true,
 		status:            "connecting",
 	}
@@ -389,7 +415,11 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 
 func (m model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadTeams(),
-		m.reloadHosts(), m.pollAfter(), m.hostsAfter()}
+		m.reloadHosts(), m.pollAfter(), m.hostsAfter(), m.whoAmI(), m.resumeOutbox()}
+	if tag := m.selectedTag(); tag != "" && m.conversation(tag).loaded {
+		// The cache showed the conversation; bring it up to date at once.
+		cmds = append(cmds, m.reloadHistory(tag))
+	}
 	if m.watcher != nil {
 		cmds = append(cmds, waitForWatch(m.watcher.Run(m.ctx)))
 	}
@@ -440,13 +470,6 @@ func (m model) reloadOverview() tea.Cmd {
 func (m model) reloadAll() tea.Cmd {
 	return tea.Batch(m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadOverview(),
 		m.reloadTeams(), m.reloadTeam(), m.reloadHosts(), m.reloadShownHistory())
-}
-
-func (m model) send(tag, text string) tea.Cmd {
-	return func() tea.Msg {
-		message, err := m.client.SendMessage(m.ctx, tag, text)
-		return sentMsg{tag: tag, message: message, err: err}
-	}
 }
 
 // followBatch is the most events one followMsg carries.
@@ -536,8 +559,11 @@ func (m *model) selectTag() tea.Cmd {
 	if m.pane != paneConversation {
 		return nil
 	}
-	m.refresh()
 	tag := m.selectedTag()
+	if tag != "" {
+		m.cachedConversation(tag)
+	}
+	m.refresh()
 	if tag == "" {
 		return nil
 	}
@@ -550,7 +576,36 @@ func (m *model) fail(err error) {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	updated := next.(model)
+	if flush := updated.scheduleFlush(); flush != nil {
+		cmd = tea.Batch(cmd, flush)
+	}
+	if tick := updated.animateTyping(); tick != nil {
+		cmd = tea.Batch(cmd, tick)
+	}
+	return updated, cmd
+}
+
+func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case cacheFlushMsg:
+		return m, m.flush(false)
+
+	case principalMsg:
+		return m, m.confirmPrincipal(msg)
+
+	case typingTickMsg:
+		m.typingTick()
+		return m, nil
+
+	case tagOptionsMsg:
+		m.tagOptionsRead(msg)
+		return m, nil
+
+	case tagCreatedMsg:
+		return m, m.tagCreated(msg)
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
@@ -570,11 +625,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		current := m.selectedTag()
 		m.tags = msg.tags
 		m.selected = 0
+		m.sortTags()
 		for i, tag := range m.tags {
 			if m.tagReference(tag) == current {
 				m.selected = i
 			}
 		}
+		m.cacheChanged(rosterKey)
+		m.cacheChanged(selectedKey)
 		m.connected, m.status = true, "connected"
 		m.placeCursor()
 		var focusCmd tea.Cmd
@@ -696,6 +754,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, c := range msg.conversations {
 			m.summaries[c.GetTag()] = c
 		}
+		m.sortTags()
+		m.placeCursor()
+		m.cacheChanged(rosterKey)
 		return m, tea.Batch(again, m.markRead(m.selectedTag()))
 
 	case pollMsg:
@@ -733,7 +794,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case followMsg:
 		cmd := m.runtimeFollow(msg)
-		return m, tea.Batch(cmd, waitForTask(msg.tag, msg.taskID, msg.events))
+		next := waitForTask(msg.tag, msg.taskID, msg.events)
+		if turn := msg.turn; turn != nil {
+			wait := next
+			next = func() tea.Msg {
+				switch msg := wait().(type) {
+				case followMsg:
+					msg.turn = turn
+					return msg
+				case followDoneMsg:
+					msg.turn = turn
+					return msg
+				default:
+					return msg
+				}
+			}
+		}
+		return m, tea.Batch(cmd, next)
 
 	case followDoneMsg:
 		return m, m.runtimeFollowDone(msg)
@@ -775,6 +852,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pane == paneNewObjective && m.form != nil {
 			var field tea.Cmd
 			m.form.fields[m.form.field], field = m.form.fields[m.form.field].Update(msg)
+			cmd = tea.Batch(cmd, field)
+		}
+		if m.pane == paneNewTag && m.tagForm != nil {
+			var field tea.Cmd
+			m.tagForm.name, field = m.tagForm.name.Update(msg)
 			cmd = tea.Batch(cmd, field)
 		}
 	}
@@ -919,7 +1001,22 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "pgdown":
 		m.viewport.PageDown()
+		m.sawBottom()
 		return m, nil
+	case "ctrl+b":
+		return m, m.toggleRail()
+	case newTagKey:
+		if m.pane != paneNewTag {
+			return m, m.openTagForm()
+		}
+		return m, nil
+	case "alt+up", "ctrl+up", "alt+k":
+		return m, m.stepTag(-1)
+	case "alt+down", "ctrl+down", "alt+j":
+		return m, m.stepTag(1)
+	}
+	if n, ok := tagKey(msg.String()); ok {
+		return m, m.selectNthTag(n)
 	}
 	if msg.String() == "m" && m.pane == paneObjective && !m.objectiveCompose {
 		return m, m.composeObjectiveMessage()
@@ -938,6 +1035,10 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.focus == focusRail {
 		switch msg.String() {
+		case "[", "<":
+			return m, m.resizeRail(-railStep)
+		case "]", ">":
+			return m, m.resizeRail(railStep)
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -965,8 +1066,25 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if next, cmd, ok := m.selectionKey(msg); ok {
 			return next, cmd
 		}
+		switch msg.String() {
+		case "ctrl+r":
+			return m, m.retryOutbox()
+		case "ctrl+x":
+			if m.editUndelivered() {
+				return m, nil
+			}
+		case "end", "ctrl+end":
+			if m.input.Value() == "" || msg.String() == "ctrl+end" {
+				m.jumpToLatest()
+				return m, nil
+			}
+		}
 	case paneNewObjective:
 		if next, cmd, ok := m.formKey(msg); ok {
+			return next, cmd
+		}
+	case paneNewTag:
+		if next, cmd, ok := m.tagFormKey(msg); ok {
 			return next, cmd
 		}
 	case paneDiff:
@@ -989,13 +1107,18 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "down":
 		m.viewport.ScrollDown(1)
+		m.sawBottom()
 		return m, nil
 	}
 	if !m.inputShown() {
 		return m, nil
 	}
+	before := m.input.Value()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	if m.pane == paneConversation && m.input.Value() != before {
+		m.cacheChanged(draftsKey)
+	}
 	return m, cmd
 }
 
@@ -1015,7 +1138,7 @@ func (m *model) submit() tea.Cmd {
 			m.input.Reset()
 			return m.openObjectiveForm("")
 		}
-		if tag == "" || !m.conversation(tag).loaded {
+		if tag == "" {
 			return nil
 		}
 		m.input.Reset()
@@ -1050,11 +1173,17 @@ func (m *model) submit() tea.Cmd {
 	return nil
 }
 
-// sendConversation sends text to the Tag's conversation.
+// sendConversation sends text to the Tag's conversation. It shows at once, and waits in the
+// outbox until the Control Plane accepts it.
 func (m *model) sendConversation(tag, text string) tea.Cmd {
-	m.conversation(tag).runtime.sending++
-	m.refresh()
-	return m.send(tag, text)
+	delete(m.drafts, "conversation:"+tag)
+	m.cacheChanged(draftsKey)
+	cmd := m.queue(tag, text)
+	if m.showsConversation(tag) {
+		m.viewport.GotoBottom()
+		m.refresh()
+	}
+	return cmd
 }
 
 // sendGoal sends `/goal <outcome>` to the conversation on screen, whose Tag then owns the
@@ -1062,7 +1191,7 @@ func (m *model) sendConversation(tag, text string) tea.Cmd {
 // outcome filled in.
 func (m *model) sendGoal(outcome string) tea.Cmd {
 	tag := m.selectedTag()
-	if m.pane == paneConversation && tag != "" && m.conversation(tag).loaded {
+	if m.pane == paneConversation && tag != "" {
 		return m.sendConversation(tag, "/goal "+outcome)
 	}
 	return m.openObjectiveForm(outcome)
@@ -1173,6 +1302,13 @@ func (m *model) syncInput() tea.Cmd {
 			}
 		}
 	}
+	if f := m.tagForm; f != nil {
+		if m.pane == paneNewTag && m.focus == focusInput && f.field == tagFieldName && !f.sending {
+			cmd = f.name.Focus()
+		} else {
+			f.name.Blur()
+		}
+	}
 	if m.focus == focusInput && m.inputShown() {
 		return m.input.Focus()
 	}
@@ -1281,7 +1417,7 @@ func (m model) draftKey() string {
 	switch m.pane {
 	case paneConversation:
 		return "conversation:" + m.selectedTag()
-	case paneDiff, paneNewObjective:
+	case paneDiff, paneNewObjective, paneNewTag:
 		return ""
 	}
 	return m.paneKey()
@@ -1311,6 +1447,10 @@ func (m *model) back() bool {
 		return true
 	case paneNewObjective:
 		m.form = nil
+		m.showConversation()
+		return true
+	case paneNewTag:
+		m.tagForm = nil
 		m.showConversation()
 		return true
 	}
@@ -1367,7 +1507,7 @@ func (m *model) choose() tea.Cmd {
 		return nil
 	}
 	m.saveDraft()
-	m.decision, m.itemNote, m.form = decisionNone, note{}, nil
+	m.decision, m.itemNote, m.form, m.tagForm = decisionNone, note{}, nil, nil
 	m.viewport.SoftWrap = false
 	var cmd tea.Cmd
 	switch r.kind {
@@ -1388,6 +1528,8 @@ func (m *model) choose() tea.Cmd {
 		cmd = m.reloadTeam()
 	}
 	m.input.SetValue(m.drafts[m.draftKey()])
+	m.cacheChanged(selectedKey)
+	m.cacheChanged(draftsKey)
 	focusCmd := m.syncInput()
 	m.refresh()
 	if m.pane == paneConversation {

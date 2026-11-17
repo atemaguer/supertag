@@ -349,17 +349,17 @@ func TestRailRowsFitAndScrollToTheSelection(t *testing.T) {
 	m := start(t, testModel(t, &fakeControlPlane{tags: tags(names...)}))
 	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 10})
 	rail := ansi.Strip(m.renderRail(9))
-	if rows := strings.Split(rail, "\n"); len(rows) != 9 || !strings.Contains(rows[1], "00-security-re… active") || !strings.Contains(rows[2], "01-security-re… active") {
+	if rows := strings.Split(rail, "\n"); len(rows) != 9 || !strings.Contains(rows[1], "00-security-reviewer") || !strings.Contains(rows[2], "01-security-reviewer") {
 		t.Fatalf("rail rows wrap:\n%s", rail)
 	}
 	m = update(t, m, key(tea.KeyTab))
 	for range 11 {
 		m = update(t, m, key(tea.KeyDown))
 	}
-	if rail := ansi.Strip(m.renderRail(9)); !strings.Contains(rail, "11-security-re…") || strings.Contains(rail, "00-security") {
+	if rail := ansi.Strip(m.renderRail(9)); !strings.Contains(rail, "11-security-reviewer") || strings.Contains(rail, "00-security") {
 		t.Fatalf("rail does not scroll:\n%s", rail)
 	}
-	if !strings.Contains(m.renderRail(9), focusedSel.Render("11-security-re…")) {
+	if !strings.Contains(m.renderRail(9), focusedSel.Render("11-security-reviewer")) {
 		t.Fatalf("the selected last Tag is not highlighted:\n%s", m.renderRail(9))
 	}
 }

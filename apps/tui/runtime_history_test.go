@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -51,6 +50,12 @@ func runtimeHistoryMessage(id, text, reply string) *views.Message {
 	}
 }
 
+// ordered gives a message its place in the conversation.
+func ordered(message *views.Message, order uint64) *views.Message {
+	message.Order = order
+	return message
+}
+
 // runtimeConversationID identifies the conversation runtimePage reads.
 const runtimeConversationID = "conversation-lead"
 
@@ -66,11 +71,11 @@ func runtimeConversationWatch(tag string) watchMsg {
 
 func TestRuntimeWatchMergesExternalAndLocalTurnsOnce(t *testing.T) {
 	m := runtimeModel(t)
-	prior := runtimeHistoryMessage("first", "Previous request", "Previous answer")
+	prior := ordered(runtimeHistoryMessage("first", "Previous request", "Previous answer"), 1)
 	m = update(t, m, runtimePage(0, prior))
 	c := m.shown()
 	m.input.SetValue("My submitted turn")
-	if cmd := m.submit(); cmd == nil || c.runtime.sending != 1 {
+	if cmd := m.submit(); cmd == nil || len(m.outbox.of("lead")) != 1 {
 		t.Fatal("submitting should start a send")
 	}
 	m.input.SetValue("Keep this unsent draft")
@@ -83,13 +88,13 @@ func TestRuntimeWatchMergesExternalAndLocalTurnsOnce(t *testing.T) {
 	if !c.historyReload.running || !c.historyReload.again {
 		t.Fatal("repeated notices should coalesce while a history read is running")
 	}
-	remote := runtimeHistoryMessage("remote", "Sent from desktop", "Answer from desktop")
-	local := runtimeHistoryMessage("local", "My submitted turn", "Answer to me")
+	remote := ordered(runtimeHistoryMessage("remote", "Sent from desktop", "Answer from desktop"), 2)
+	local := ordered(runtimeHistoryMessage("local", "My submitted turn", "Answer to me"), 3)
 	// A commit and its Watch notice can both precede the send receipt.
 	m = update(t, m, runtimePage(0, local, remote, prior))
-	m = update(t, m, sentMsg{tag: "lead", message: local})
+	m = update(t, m, sentMsg{tag: "lead", operationID: m.outbox.of("lead")[0].OperationID, message: local})
 	m = update(t, m, runtimePage(0, local, remote, prior))
-	if !slices.Equal(c.runtime.order, []string{"first", "remote", "local"}) || c.runtime.sending != 0 {
+	if !slices.Equal(c.runtime.order, []string{"first", "remote", "local"}) || len(m.outbox.of("lead")) != 0 {
 		t.Fatalf("runtime history = %+v", c.runtime)
 	}
 	got := ansi.Strip(m.renderConversation())
@@ -105,12 +110,12 @@ func TestRuntimeWatchMergesExternalAndLocalTurnsOnce(t *testing.T) {
 
 func TestRuntimeHistoryOrdersTheReceiptAfterEarlierExternalTurns(t *testing.T) {
 	m := runtimeModel(t)
-	old := runtimeHistoryMessage("old", "Old request", "Old reply")
+	old := ordered(runtimeHistoryMessage("old", "Old request", "Old reply"), 1)
 	m = update(t, m, runtimePage(0, old))
 	c := m.shown()
 	m.reloadShownHistory()
-	local := runtimeHistoryMessage("local", "Local request", "Local reply")
-	remote := runtimeHistoryMessage("remote", "Earlier remote request", "Remote reply")
+	local := ordered(runtimeHistoryMessage("local", "Local request", "Local reply"), 3)
+	remote := ordered(runtimeHistoryMessage("remote", "Earlier remote request", "Remote reply"), 2)
 	m = update(t, m, sentMsg{tag: "lead", message: local})
 	m = update(t, m, runtimePage(0, remote, old))
 	if !slices.Equal(c.runtime.order, []string{"old", "local"}) {
@@ -120,7 +125,7 @@ func TestRuntimeHistoryOrdersTheReceiptAfterEarlierExternalTurns(t *testing.T) {
 	if !slices.Equal(c.runtime.order, []string{"old", "remote", "local"}) {
 		t.Fatalf("history did not follow Control Plane order: %v", c.runtime.order)
 	}
-	newer := runtimeHistoryMessage("new", "New request", "New reply")
+	newer := ordered(runtimeHistoryMessage("new", "New request", "New reply"), 4)
 	m = update(t, m, runtimePage(c.runtime.revision, newer, local))
 	if !slices.Equal(c.runtime.order, []string{"old", "remote", "local", "new"}) {
 		t.Fatalf("a rolling page dropped old history: %v", c.runtime.order)
@@ -154,41 +159,23 @@ func TestRuntimeWatchResyncLossAndUnwatchedOverviewPolling(t *testing.T) {
 	}
 }
 
-func TestRuntimeHistoryReplaysPagesToTheLastAuthoritativeMessage(t *testing.T) {
-	reply := func(id string) *v2.ConversationMessage {
-		session := "session"
-		if id == "first" {
-			// A conversation's history spans its Sessions.
-			session = "earlier-session"
+func TestRuntimeHistoryReadsOnlyWhatChanged(t *testing.T) {
+	message := func(id string, order uint64, state v2.TaskState) *v2.ConversationMessage {
+		task := &v2.Task{TaskId: id, TagId: "lead", SessionId: "session", Prompt: id, State: state}
+		if state == v2.TaskState_TASK_STATE_SUCCEEDED {
+			task.Result = proto.String("Done " + id)
 		}
-		return &v2.ConversationMessage{Task: &v2.Task{
-			TaskId: id, TagId: "lead", SessionId: session, Prompt: id,
-			State: v2.TaskState_TASK_STATE_SUCCEEDED, Result: proto.String("Done"),
-		}}
+		return &v2.ConversationMessage{Task: task, Order: order,
+			Events: []*v2.TaskEvent{{Sequence: 1, Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE, Text: "Looking at " + id}}}
 	}
-	seen := make(chan string, 5)
-	handler := connect.NewUnaryHandler(rpc.ConversationsListMessagesProcedure,
-		func(_ context.Context, req *connect.Request[v2.ListMessagesRequest]) (*connect.Response[v2.ListMessagesResponse], error) {
-			if req.Msg.GetTagId() != "lead" {
-				t.Errorf("unexpected history scope: %v", req.Msg)
-			}
-			seen <- req.Msg.GetCursor()
-			page := &v2.ListMessagesResponse{ConversationId: runtimeConversationID}
-			switch req.Msg.GetCursor() {
-			case "":
-				page.Messages, page.NextCursor = []*v2.ConversationMessage{reply("fourth")}, "p1"
-			case "p1":
-				page.Messages, page.NextCursor = []*v2.ConversationMessage{reply("third")}, "p2"
-			case "p2":
-				page.Messages, page.NextCursor = []*v2.ConversationMessage{reply("second"), reply("first")}, "unused"
-			default:
-				return nil, fmt.Errorf("unexpected cursor %q", req.Msg.GetCursor())
-			}
-			return connect.NewResponse(page), nil
-		},
-	)
+	requests := make(chan *v2.ListMessagesRequest, 5)
+	var answer func(*v2.ListMessagesRequest) *v2.ListMessagesResponse
 	mux := http.NewServeMux()
-	mux.Handle(rpc.ConversationsListMessagesProcedure, handler)
+	mux.Handle(rpc.ConversationsListMessagesProcedure, connect.NewUnaryHandler(rpc.ConversationsListMessagesProcedure,
+		func(_ context.Context, req *connect.Request[v2.ListMessagesRequest]) (*connect.Response[v2.ListMessagesResponse], error) {
+			requests <- req.Msg
+			return connect.NewResponse(answer(req.Msg)), nil
+		}))
 	mux.Handle(rpc.WorkSessionsListProcedure, connect.NewUnaryHandler(rpc.WorkSessionsListProcedure,
 		func(_ context.Context, _ *connect.Request[v2.ListWorkSessionsRequest]) (*connect.Response[v2.ListWorkSessionsResponse], error) {
 			return connect.NewResponse(&v2.ListWorkSessionsResponse{}), nil
@@ -200,23 +187,65 @@ func TestRuntimeHistoryReplaysPagesToTheLastAuthoritativeMessage(t *testing.T) {
 	server.Start()
 	t.Cleanup(server.Close)
 	m := runtimeModelAt(t, server.URL)
-	m = update(t, m, runtimePage(0, runtimeHistoryMessage("first", "Old request", "Old reply")))
-	// A local receipt from the newest page does not change the catch-up boundary.
-	m = update(t, m, sentMsg{tag: "lead", message: runtimeHistoryMessage("fourth", "Latest", "Done")})
-	msg := m.loadHistory("lead")()
-	m = update(t, m, msg)
-	if got := m.shown().runtime.order; msg.(historyMsg).err != nil || !slices.Equal(got, []string{"first", "second", "third", "fourth"}) {
-		t.Fatalf("history = %v, %v", got, msg.(historyMsg).err)
+	load := func() {
+		t.Helper()
+		msg := m.loadHistory("lead")()
+		if err := msg.(historyMsg).err; err != nil {
+			t.Fatal(err)
+		}
+		m = update(t, m, msg)
 	}
-	if len(seen) != 3 {
-		t.Fatalf("loaded %d pages, want three", len(seen))
+
+	// The first read takes the newest page, and the turns carry the messages the Tag wrote.
+	answer = func(*v2.ListMessagesRequest) *v2.ListMessagesResponse {
+		return &v2.ListMessagesResponse{ConversationId: runtimeConversationID, Messages: []*v2.ConversationMessage{
+			message("second", 2, v2.TaskState_TASK_STATE_RUNNING), message("first", 1, v2.TaskState_TASK_STATE_SUCCEEDED)}}
+	}
+	load()
+	if req := <-requests; req.GetAfter() != 0 || req.GetConversationId() != "" {
+		t.Fatalf("a first read asked for changes: %v", req)
+	}
+	got := ansi.Strip(m.renderConversation())
+	for _, text := range []string{"Looking at first", "Done first", "Looking at second"} {
+		if !strings.Contains(got, text) {
+			t.Fatalf("%q is missing from:\n%s", text, got)
+		}
+	}
+
+	// The next read asks only for what changed: messages after the latest, and the unfinished
+	// turn's state.
+	answer = func(*v2.ListMessagesRequest) *v2.ListMessagesResponse {
+		return &v2.ListMessagesResponse{ConversationId: runtimeConversationID, Incremental: true, Messages: []*v2.ConversationMessage{
+			message("third", 3, v2.TaskState_TASK_STATE_QUEUED), message("second", 2, v2.TaskState_TASK_STATE_SUCCEEDED)}}
+	}
+	load()
+	if req := <-requests; req.GetAfter() != 2 || req.GetConversationId() != runtimeConversationID ||
+		!slices.Equal(req.GetRefreshTaskIds(), []string{"second"}) {
+		t.Fatalf("a later read asked for %v", req)
+	}
+	if order := m.shown().runtime.order; !slices.Equal(order, []string{"first", "second", "third"}) {
+		t.Fatalf("history = %v", order)
+	}
+	if got := ansi.Strip(m.renderConversation()); strings.Count(got, "Looking at second") != 1 || !strings.Contains(got, "Done second") {
+		t.Fatalf("a changed turn did not settle once:\n%s", got)
+	}
+
+	// More news than a page holds comes as the newest page, which replaces what was held.
+	answer = func(*v2.ListMessagesRequest) *v2.ListMessagesResponse {
+		return &v2.ListMessagesResponse{ConversationId: runtimeConversationID, Messages: []*v2.ConversationMessage{
+			message("ninety", 90, v2.TaskState_TASK_STATE_SUCCEEDED)}}
+	}
+	load()
+	<-requests
+	if order := m.shown().runtime.order; !slices.Equal(order, []string{"ninety"}) {
+		t.Fatalf("a newest page past a gap kept the old history: %v", order)
 	}
 }
 
 func TestRuntimeHistorySpansSessionsUntilTheConversationIsReplaced(t *testing.T) {
 	m := runtimeModel(t)
-	m = update(t, m, runtimePage(0, runtimeHistoryMessage("old", "Old Session", "Old reply")))
-	next := runtimeHistoryMessage("new", "Current Session", "Current reply")
+	m = update(t, m, runtimePage(0, ordered(runtimeHistoryMessage("old", "Old Session", "Old reply"), 1)))
+	next := ordered(runtimeHistoryMessage("new", "Current Session", "Current reply"), 2)
 	next.SessionId = "another-session"
 	m = update(t, m, runtimePage(0, next))
 	if got := m.shown().runtime.order; !slices.Equal(got, []string{"old", "new"}) {
@@ -267,7 +296,7 @@ func TestRuntimeWorkReportsDeduplicateAcrossFollowHistoryAndLaterContinuation(t 
 	if strings.Count(got, "First child report") != 1 || strings.Count(got, "Check the release") != 1 {
 		t.Fatalf("report repeated across root and report row:\n%s", got)
 	}
-	if m.shown().runtime.head != "report-1" || !slices.Contains(m.shown().runtime.order, "report-1") {
+	if !slices.Contains(m.shown().runtime.order, "report-1") {
 		t.Fatal("rendering a report must preserve its real Task as the pagination head")
 	}
 	// A future continuation of the same Work Session has a distinct report Task.

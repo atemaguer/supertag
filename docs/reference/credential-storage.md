@@ -80,6 +80,18 @@ directory on macOS and `~/.local/share` on Linux. Each Control Plane and princip
 owner-only directory there. The cache never holds a credential. Forgetting a saved Control Plane
 deletes its cache.
 
+The terminal UI keeps the same kind of cache, so `supertag` shows the last Tag's conversation
+before the Control Plane answers: the Tag list with each conversation's row, the selected Tag,
+the latest 50 messages of each conversation shown, messages not yet sent, and unsent drafts. It
+keeps them in `supertag/tui/` in the user cache directory (`~/Library/Caches` on macOS,
+`~/.cache` on Linux), in an owner-only directory per Control Plane and principal, with one
+owner-only file per entry, each replaced in one step. To find the principal before the Control
+Plane answers, it records whom each credential acted as under a one-way digest of the
+credential, which cannot be used to connect. The cache never holds a credential. An entry in
+another format is discarded. Forgetting a saved Control Plane deletes its cache; deleting the
+directory loses only unsent messages and drafts. The rail's width and whether it is folded are
+kept beside it, in `preferences.json`.
+
 ### Gateway credential vault
 
 The Gateway reads each collaboration surface's secrets from its vault when it starts, at the

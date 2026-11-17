@@ -59,7 +59,7 @@ func TestRuntimeWorkSessionHistoryKeepsReportTaskAndCursorWithoutInternalPrompt(
 		return report.Task, nil
 	})
 	c := testRuntime(t, mux, false)
-	listed, err := c.ListMessages(t.Context(), "lead", 10, "original-cursor")
+	listed, err := c.ListMessages(t.Context(), "lead", MessageQuery{Limit: 10, Cursor: "original-cursor"})
 	page := listed.Messages
 	if err != nil || listed.NextCursor != "unchanged-next" || len(page) != 2 {
 		t.Fatalf("page = %+v %v", listed, err)
@@ -138,7 +138,7 @@ func TestRuntimeWorkSessionHistoryUsesExactChildTurnAfterContinuation(t *testing
 		return message(req.GetTaskId()).Task, nil
 	})
 	c := testRuntime(t, mux, false)
-	listed, err := c.ListMessages(t.Context(), "lead", 10, "")
+	listed, err := c.ListMessages(t.Context(), "lead", MessageQuery{Limit: 10})
 	page := listed.Messages
 	if err != nil || len(page) != 4 || listed.NextCursor != "historical-page" {
 		t.Fatalf("history = %+v, %v", listed, err)

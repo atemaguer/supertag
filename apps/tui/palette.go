@@ -20,6 +20,7 @@ const (
 	commandSwitchControlPlane
 	commandOpenInbox
 	commandTaskFiles
+	commandNewTag
 )
 
 // paletteCommand is one row of the palette: what it does, and what it applies to.
@@ -49,7 +50,7 @@ func (p palette) goal() (string, bool) {
 // slashOpensPalette says whether `/` opens the palette rather than being typed: on an empty input
 // line, or where the pane has no input line. Objective forms and follow-ups take `/` as text.
 func (m model) slashOpensPalette() bool {
-	if (m.pane == paneNewObjective || m.objectiveCompose) && m.focus == focusInput {
+	if (m.pane == paneNewObjective || m.pane == paneNewTag || m.objectiveCompose) && m.focus == focusInput {
 		return false
 	}
 	return m.focus == focusRail || !m.inputShown() || m.input.Value() == ""
@@ -70,6 +71,11 @@ func (a *app) commands() []paletteCommand {
 	out = append(out, paletteCommand{commandSwitchControlPlane, "Control Planes · add or switch", about + " · " + switchKey})
 
 	out = append(out, paletteCommand{commandTaskFiles, "Task files", "save files from a completed Task"})
+	newTag := "a name, a harness and a Workspace · " + newTagKey
+	if refusal := a.inner.tagAdminRefusal(); refusal != "" {
+		newTag = "operators only"
+	}
+	out = append(out, paletteCommand{commandNewTag, "New Tag", newTag})
 
 	waiting := fmt.Sprintf("%d waiting", len(a.inner.inbox.Items))
 	if a.inner.inbox.Truncated {
@@ -161,6 +167,8 @@ func (a *app) run(id commandID) tea.Cmd {
 		return a.openTaskFiles()
 	case commandOpenInbox:
 		cmd = a.inner.openInbox()
+	case commandNewTag:
+		cmd = a.inner.openTagForm()
 	}
 	return a.scope(cmd)
 }

@@ -29,6 +29,18 @@ type fakeControlPlane struct {
 	rpc.UnimplementedOperatorEventsHandler
 	rpc.UnimplementedTeamsHandler
 	rpc.UnimplementedWorkSessionsHandler
+	rpc.UnimplementedEnrollmentsHandler
+
+	// principal answers WhoAmI; empty refuses it, so the cache never learns whom it acts as.
+	principal string
+	// send answers SendMessage; nil refuses it. sends are its requests, in order.
+	send  func(*v2.SendMessageRequest) (*v2.ConversationMessage, error)
+	sends []*v2.SendMessageRequest
+	// putTags are the PutTag requests, in order; putTagErr, when set, refuses them.
+	putTags   []*v2.PutTagRequest
+	putTagErr error
+	// hostStatus answers ListHosts with runtime host statuses, before hostList.
+	hostStatus []*v2.WorkerHostStatus
 
 	token string
 	// tags answers ListTags; an error refuses it.
@@ -54,7 +66,13 @@ type fakeControlPlane struct {
 	marks []*v2.MarkConversationReadRequest
 }
 
-func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
+func (f *fakeControlPlane) start(t testing.TB) *httptest.Server {
+	t.Helper()
+	return f.startWith(t, nil)
+}
+
+// startWith serves the fake behind wrap, such as one that adds a round trip to every call.
+func (f *fakeControlPlane) startWith(t testing.TB, wrap func(http.Handler) http.Handler) *httptest.Server {
 	t.Helper()
 	if f.token == "" {
 		f.token = "secret"
@@ -69,7 +87,8 @@ func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
 	mux.Handle(rpc.NewOperatorEventsHandler(f))
 	mux.Handle(rpc.NewTeamsHandler(f))
 	mux.Handle(rpc.NewWorkSessionsHandler(f))
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle(rpc.NewEnrollmentsHandler(f))
+	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != rpc.ProtocolNegotiationNegotiateProcedure && r.Header.Get("Authorization") != "Bearer "+f.token {
 			f.mu.Lock()
 			f.badAuth++
@@ -81,13 +100,55 @@ func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
 			return
 		}
 		mux.ServeHTTP(w, r)
-	}))
+	})
+	if wrap != nil {
+		handler = wrap(handler)
+	}
+	server := httptest.NewUnstartedServer(handler)
 	server.EnableHTTP2 = true
 	server.Config.Protocols = new(http.Protocols)
 	server.Config.Protocols.SetUnencryptedHTTP2(true)
 	server.Start()
 	t.Cleanup(server.Close)
 	return server
+}
+
+func (f *fakeControlPlane) WhoAmI(context.Context, *connect.Request[v2.WhoAmIRequest]) (*connect.Response[v2.WhoAmIResponse], error) {
+	if f.principal == "" {
+		return nil, connect.NewError(connect.CodeUnimplemented, nil)
+	}
+	return connect.NewResponse(&v2.WhoAmIResponse{Principal: f.principal}), nil
+}
+
+func (f *fakeControlPlane) SendMessage(_ context.Context, req *connect.Request[v2.SendMessageRequest]) (*connect.Response[v2.ConversationMessage], error) {
+	f.mu.Lock()
+	f.sends = append(f.sends, req.Msg)
+	send := f.send
+	f.mu.Unlock()
+	if send == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("the Control Plane is restarting"))
+	}
+	message, err := send(req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(message), nil
+}
+
+func (f *fakeControlPlane) sent() []*v2.SendMessageRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.sends)
+}
+
+func (f *fakeControlPlane) PutTag(_ context.Context, req *connect.Request[v2.PutTagRequest]) (*connect.Response[v2.Tag], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.putTags = append(f.putTags, req.Msg)
+	if f.putTagErr != nil {
+		return nil, f.putTagErr
+	}
+	return connect.NewResponse(&v2.Tag{TagId: req.Msg.GetTagId(), Name: req.Msg.GetName(), HarnessKind: req.Msg.GetHarnessKind(), Revision: 1}), nil
 }
 
 func (f *fakeControlPlane) reads() int {
@@ -120,7 +181,7 @@ func (f *fakeControlPlane) ListHosts(context.Context, *connect.Request[v2.ListHo
 	if f.hostErr != nil {
 		return nil, f.hostErr
 	}
-	res := &v2.ListHostsResponse{}
+	res := &v2.ListHostsResponse{Hosts: f.hostStatus}
 	if f.hostList != nil {
 		for _, host := range f.hostList() {
 			phase := map[views.WorkerHostPhase]v2.HostPhase{

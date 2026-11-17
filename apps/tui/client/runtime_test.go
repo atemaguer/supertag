@@ -211,17 +211,17 @@ func TestRuntimeV2TagsAndConversations(t *testing.T) {
 	if req := marked.Load(); req.GetTagId() != "lead" || req.GetOrder() != 4 {
 		t.Fatalf("MarkConversationRead request = %v", req)
 	}
-	sent, err := c.SendMessage(ctx, "lead", "Verify SSO")
-	if err != nil || sent.GetTaskId() != "first" || sent.GetOrder() != 5 || sent.GetWaitingReason() != "Task queued." {
+	sent, err := c.SendMessage(ctx, "lead", "Verify SSO", "operation-1")
+	if err != nil || sent.GetTaskId() != "first" || sent.GetOrder() != 5 || sent.GetStarted() || sent.GetWaitingReason() != "" {
 		t.Fatalf("SendMessage = %v, %v", sent, err)
 	}
 	mu.Lock()
 	keys := slices.Clone(operations)
 	mu.Unlock()
-	if len(keys) != 2 || keys[0] == "" || keys[0] != keys[1] {
+	if len(keys) != 2 || keys[0] != "operation-1" || keys[0] != keys[1] {
 		t.Fatalf("send retry operation IDs = %v", keys)
 	}
-	page, err := c.ListMessages(ctx, "lead", 10, "message-cursor")
+	page, err := c.ListMessages(ctx, "lead", MessageQuery{Limit: 10, Cursor: "message-cursor"})
 	if err != nil || page.NextCursor != "more-messages" || page.ConversationID != "conversation-lead" || len(page.Messages) != 2 ||
 		page.Messages[0].GetText() != "Verify SSO" || page.Messages[1].GetSessionId() != "session-0" {
 		t.Fatalf("ListMessages = %+v, %v", page, err)
@@ -262,6 +262,9 @@ func TestRuntimeV2FollowsEventPagesAfterTransientFailure(t *testing.T) {
 			return nil, connect.NewError(connect.CodeUnavailable, errors.New("Control Plane restarted"))
 		case 3:
 			return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: runtimeEventPage + 1, Text: "last piece", Kind: v2.TaskEventKind_TASK_EVENT_KIND_ACTIVITY}}}, nil
+		case 4:
+			// No new events: the follow reads the turn, which finished.
+			return &v2.ListEventsResponse{}, nil
 		default:
 			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("unexpected event request"))
 		}
@@ -274,10 +277,10 @@ func TestRuntimeV2FollowsEventPagesAfterTransientFailure(t *testing.T) {
 	for i := 1; i <= runtimeEventPage; i++ {
 		want = append(want, fmt.Sprintf("message piece %d", i))
 	}
-	expect(t, events, append(want, "status last piece", "reply done")...)
+	expect(t, events, append(append([]string{"started"}, want...), "status last piece", "reply done")...)
 	mu.Lock()
 	defer mu.Unlock()
-	if !slices.Equal(cursors, []uint64{0, runtimeEventPage, runtimeEventPage}) {
+	if !slices.Equal(cursors, []uint64{0, runtimeEventPage, runtimeEventPage, runtimeEventPage + 1}) {
 		t.Fatalf("event cursors = %v", cursors)
 	}
 }
@@ -300,6 +303,8 @@ func TestRuntimeV2FollowsWithdrawnInputAsItsOwnTask(t *testing.T) {
 			if withdrawn.Load() {
 				msg.LiveInput.State = v2.LiveInputState_LIVE_INPUT_STATE_WITHDRAWN
 				msg.Task.Result = proto.String("own reply")
+				// A finished turn carries its messages; the follow reads no events.
+				msg.Events = []*v2.TaskEvent{{Sequence: 1, Text: "own event", Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE}}
 			}
 			return msg, nil
 		default:
@@ -307,10 +312,8 @@ func TestRuntimeV2FollowsWithdrawnInputAsItsOwnTask(t *testing.T) {
 		}
 	})
 	testRPC(mux, rpc.OperatorListEventsProcedure, func(_ context.Context, req *v2.ListEventsRequest) (*v2.ListEventsResponse, error) {
-		if req.GetTaskId() != "follower" || req.GetAfterSequence() != 0 {
-			t.Errorf("ListEvents request = %v", req)
-		}
-		return &v2.ListEventsResponse{Events: []*v2.TaskEvent{{Sequence: 1, Text: "own event", Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE}}}, nil
+		t.Errorf("a finished turn read its events: %v", req)
+		return &v2.ListEventsResponse{}, nil
 	})
 	c := testRuntime(t, mux, false)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -324,7 +327,7 @@ func TestRuntimeV2FollowsWithdrawnInputAsItsOwnTask(t *testing.T) {
 		t.Fatalf("joined history = %v", history)
 	}
 	expect(t, history[1].Events, "joined")
-	expect(t, collect(t, testFollower(c).Follow(ctx, "lead", follower, history[1].Shown)), "message own event", "reply own reply")
+	expect(t, collect(t, testFollower(c).Follow(ctx, "lead", follower, history[1].Shown)), "started", "message own event", "reply own reply")
 }
 
 func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
@@ -409,7 +412,7 @@ func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expect(t, collect(t, testFollower(c).FollowObjective(ctx, sent.GetTag(), msg)), "reply Verified")
+	expect(t, collect(t, testFollower(c).FollowObjective(ctx, sent.GetTag(), msg)), "started", "reply Verified")
 }
 
 func TestRuntimeV2TeamsAndWorkstream(t *testing.T) {

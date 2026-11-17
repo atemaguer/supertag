@@ -229,7 +229,7 @@ func TestRuntimeV2CrossesAWSSTunnelWithInnerTLS(t *testing.T) {
 		t.Fatalf("ListTags through the tunnel failed: %v", err)
 	}
 	text := strings.Repeat("t", 600*1024)
-	sent, err := c.SendMessage(ctx, "lead", text)
+	sent, err := c.SendMessage(ctx, "lead", text, "tunnel-operation")
 	if err != nil || sent.GetText() != text {
 		t.Fatalf("SendMessage through the tunnel failed: %v", err)
 	}

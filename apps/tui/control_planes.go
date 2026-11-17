@@ -271,8 +271,26 @@ func (a *app) forgetControlPlane() {
 		return
 	}
 	a.savedControlPlanes = profiles.ControlPlanes
+	if a.current < 0 || a.current >= len(a.contexts) || cacheOrigin(a.contexts[a.current]) != cacheOrigin(target) {
+		// What the terminal UI cached from this Control Plane goes with it, unless it is still
+		// connected.
+		if cache := openCache(cacheOrigin(target)); cache != nil && !a.reachable(target) {
+			cache.forget()
+		}
+	}
 	a.refreshControlPlanes(a.contexts[a.current])
 	a.choiceErr = "Forgot the saved connection. Active connections stay open until you switch or quit."
+}
+
+// reachable says another connection the terminal UI offers, besides target, is to target's
+// Control Plane.
+func (a *app) reachable(target client.Target) bool {
+	for _, other := range append(append([]client.Target(nil), a.launchContexts...), a.savedControlPlanes...) {
+		if other != target && cacheOrigin(other) == cacheOrigin(target) {
+			return true
+		}
+	}
+	return cacheOrigin(a.local) == cacheOrigin(target) && a.local.URL != ""
 }
 
 func (a *app) refreshControlPlanes(active client.Target) {

@@ -27,15 +27,25 @@ few seconds.
 
 If there is no local setup or the Control Plane has no Tags, SuperTag shows how to get started
 with `supertag init`. For a shared Control Plane, ask its operator to set up a Tag. An operator can
-also create one in the desktop app with **+** in its sidebar, or ⌘N.
+also create one with Ctrl-N in the terminal UI, or with **+** in the desktop app's sidebar, or ⌘N:
+give it a name, from which its permanent ID is derived, a harness, and optionally a Workspace.
 
 | Key | Action |
 | --- | --- |
 | Ctrl-K | Open the command palette. |
 | Ctrl-P | Switch Control Planes. **Local** is the one `supertag up` runs on this machine. |
+| Alt-1 to Alt-9 | Open the Tags in rail order. |
+| Alt-↑ and Alt-↓ | Open the previous and next Tag. |
+| Ctrl-B | Fold the rail into a column of Tag initials, or expand it. |
+| Ctrl-N | Create a Tag. |
+| Ctrl-R and Ctrl-X | Send a message that was not delivered again, or take it back to edit. |
+| End on empty input | Jump to the latest message. |
 | ↑ on empty input | Select a work Session. Enter expands it. |
 | `d` on a work Session or branch | Show the diff from this checkout. |
 | `o` on a work Session or branch | Open its pull request when one exists. |
+
+On macOS, Alt keys need your terminal to send Option as Meta (Esc+), as iTerm2, Ghostty and
+Terminal can be set to.
 
 To give `lead` an **Objective**, an outcome it owns, type `/goal` followed by the outcome and how
 to verify it, and press Enter. The message goes to the conversation like any other, and the Control
@@ -45,11 +55,16 @@ to open its progress view. Enter `/goal` on its own to choose a Team or budget b
 it. A currency budget requires a
 [harness](../concepts/workers.md) that can enforce a reported cost limit.
 
-The desktop app reads like a messaging app. The lead Tag sits at the top of the sidebar, and
-under your last message it shows **Sent** once the Control Plane has it and **Seen** once a
-Worker Host has taken it up. A message that is not delivered stays in the conversation with
+The terminal UI and the desktop app read like a messaging app. The lead Tag sits at the top of
+the rail with a star, and the other Tags follow by their latest activity. Your messages and the
+Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.
+Under your last message they show **Sent** once the Control Plane has it and **Seen** once a
+Worker Host has taken it up, and until the Tag writes its first line, an animated `···` shows
+that it is working. A message that is not delivered stays in the conversation with
 **Retry**, which sends it at most once, and **Edit**. What you have not sent stays with each Tag
-until you come back, even after a restart. Drag the sidebar's edge to resize it, or past its
+until you come back, even after a restart, and a message not yet accepted is sent again the next
+time you open the app. When you scroll up, the terminal UI counts the Tag's new messages in its
+title, and End jumps to them. Drag the sidebar's edge to resize it, or past its
 narrowest to fold it into a rail of avatars; ⌘B does the same. The Task activity pane resizes from
 its edge too. ⌘1 to
 ⌘9 open the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘F searches them by name; use
@@ -116,8 +131,8 @@ For a coding agent that operates SuperTag from a separate conversation, see
 
 ## Check that it worked
 
-Your conversation shows under its Tag with its latest message, and the desktop app marks replies
-you have not read. An Objective's conversation is titled by the Objective. A work Session the Tag started appears
+Your conversation shows under its Tag with its latest message, and the terminal UI and the
+desktop app mark replies you have not read. An Objective's conversation is titled by the Objective. A work Session the Tag started appears
 beneath the conversation that started it; `supertag get session --parent-session SESSION_ID`
 lists them, and `supertag describe session ID` shows one with its latest Task and report.
 

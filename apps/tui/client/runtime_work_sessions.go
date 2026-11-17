@@ -163,6 +163,18 @@ func (c *runtimeClient) projectWork(ctx context.Context, work *v2.WorkSession, r
 
 func (c *runtimeClient) projectMessage(ctx context.Context, message *v2.ConversationMessage) (*views.Message, error) {
 	out := runtimeMessage(message)
+	if message.GetEventsTruncated() {
+		// The message left out the turn's earliest messages; read them all once.
+		events, err := c.allEvents(ctx, message.GetTask().GetTaskId())
+		if err != nil {
+			return nil, err
+		}
+		out.TagMessages, out.Activity = nil, ""
+		turnEvents(out, events)
+		if out.GetReply() != nil {
+			out.Activity = ""
+		}
+	}
 	works, err := c.messageWorkSessions(ctx, message)
 	if err != nil {
 		return nil, err
@@ -178,6 +190,30 @@ func (c *runtimeClient) projectMessage(ctx context.Context, message *v2.Conversa
 		out.Reply, out.WaitingReason = nil, ""
 	}
 	return out, nil
+}
+
+// maxTurnEventPages bounds reading a turn's every event.
+const maxTurnEventPages = 64
+
+// allEvents reads a turn's events, oldest first.
+func (c *runtimeClient) allEvents(ctx context.Context, task string) ([]*v2.TaskEvent, error) {
+	var all []*v2.TaskEvent
+	var after uint64
+	for range maxTurnEventPages {
+		events, err := c.listEvents(ctx, task, after)
+		if err != nil {
+			return nil, err
+		}
+		for _, event := range events {
+			if event.GetSequence() > after {
+				all, after = append(all, event), event.GetSequence()
+			}
+		}
+		if len(events) < runtimeEventPage {
+			break
+		}
+	}
+	return all, nil
 }
 
 // isWorkReport uses the authoritative report Task link, never prompt text.

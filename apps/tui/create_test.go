@@ -47,23 +47,23 @@ func TestGoalIsSentToTheConversation(t *testing.T) {
 	conv.loaded = true
 
 	m.input.SetValue("/goal Ship the release notes")
-	if cmd := m.submit(); cmd == nil || m.form != nil || m.pane != paneConversation || conv.runtime.sending != 1 {
-		t.Fatalf("/goal with an outcome must be sent: form=%v pane=%v sending=%d", m.form != nil, m.pane, conv.runtime.sending)
+	if cmd := m.submit(); cmd == nil || m.form != nil || m.pane != paneConversation || len(m.outbox.of("lead")) != 1 {
+		t.Fatalf("/goal with an outcome must be sent: form=%v pane=%v sending=%d", m.form != nil, m.pane, len(m.outbox.of("lead")))
 	}
-	if cmd := m.sendGoal("Ship the docs"); cmd == nil || m.form != nil || conv.runtime.sending != 2 {
-		t.Fatalf("the palette's /goal must be sent: form=%v sending=%d", m.form != nil, conv.runtime.sending)
+	if cmd := m.sendGoal("Ship the docs"); cmd == nil || m.form != nil || len(m.outbox.of("lead")) != 2 {
+		t.Fatalf("the palette's /goal must be sent: form=%v sending=%d", m.form != nil, len(m.outbox.of("lead")))
 	}
 
 	m.input.SetValue("/goal")
 	m.submit()
-	if m.form == nil || m.pane != paneNewObjective || m.form.fields[fieldOutcome].Value() != "" || conv.runtime.sending != 2 {
-		t.Fatalf("/goal alone must open the form: pane=%v sending=%d", m.pane, conv.runtime.sending)
+	if m.form == nil || m.pane != paneNewObjective || m.form.fields[fieldOutcome].Value() != "" || len(m.outbox.of("lead")) != 2 {
+		t.Fatalf("/goal alone must open the form: pane=%v sending=%d", m.pane, len(m.outbox.of("lead")))
 	}
 
 	// Away from a conversation, the palette's /goal fills in the form and sends nothing yet.
 	m.form, m.pane = nil, paneInbox
 	m.sendGoal("Ship the docs")
-	if m.form == nil || m.form.fields[fieldOutcome].Value() != "Ship the docs" || m.form.sending || conv.runtime.sending != 2 {
+	if m.form == nil || m.form.fields[fieldOutcome].Value() != "Ship the docs" || m.form.sending || len(m.outbox.of("lead")) != 2 {
 		t.Fatal("the palette's /goal away from a conversation must fill in the form")
 	}
 }

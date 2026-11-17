@@ -15,6 +15,9 @@ import (
 
 const runtimeEventPage = 32
 
+// messageReadEvery is the most polls of a busy turn's events before its message is read again.
+const messageReadEvery = 5
+
 // GetObjectiveMessage reads an owner Session Task through the operator API.
 func (c *Client) GetObjectiveMessage(ctx context.Context, tag, id string) (*views.Message, error) {
 	message, err := c.runtime.getObjectiveTask(ctx, tag, id)
@@ -56,12 +59,22 @@ type runtimeFollow struct {
 	after     uint64
 	shown     *Shown
 	objective bool
+	// running says the source turn was last read claimed or running; only then do its events
+	// grow, so only then are they read.
+	running bool
+	// quiet says the last read of the running turn's events found none new: the next poll reads
+	// the turn itself, which may have finished.
+	quiet bool
+	// reads counts the polls since the turn itself was last read; a busy turn is still read
+	// every few polls, for its work Sessions.
+	reads     int
 	children  map[string]uint64
 	workSince time.Time
 }
 
 func (f *Follower) followRuntime(ctx context.Context, tag, id string, shown *Shown, objective bool, emit func(...FollowEvent)) error {
-	state := runtimeFollow{tag: tag, task: id, delegated: shown.joinedOnPage, shown: shown, objective: objective, children: map[string]uint64{}}
+	state := runtimeFollow{tag: tag, task: id, delegated: shown.joinedOnPage, shown: shown, objective: objective,
+		children: map[string]uint64{}, source: id, after: shown.after}
 	interval := f.Interval
 	if interval <= 0 {
 		interval = time.Second
@@ -99,12 +112,31 @@ func (f *Follower) followRuntime(ctx context.Context, tag, id string, shown *Sho
 	return nil
 }
 
+// pollRuntime reads what changed of the followed turn. While the turn runs, a poll reads only its
+// new events with Operator.ListEvents, until a poll finds none; the next then reads the turn
+// itself, its state, the events it carries and its work Sessions. A queued or finished turn reads
+// no events: the message carries every message its Tag wrote.
 func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit func(...FollowEvent)) (done, more bool, err error) {
 	runtime := f.Client.runtime
+	if state.running && !state.quiet && !state.shown.replied && state.reads < messageReadEvery {
+		state.reads++
+		events, err := runtime.listEvents(ctx, state.source, state.after)
+		if err != nil {
+			return false, false, err
+		}
+		if more, err := state.emitEvents(events, emit); more || err != nil {
+			return false, more, err
+		}
+		state.quiet = len(events) == 0
+		if !state.quiet {
+			return false, false, nil
+		}
+	}
 	read := runtime.getMessage
 	if state.objective {
 		read = runtime.getObjectiveTask
 	}
+	state.reads = 0
 	message, err := read(ctx, state.tag, state.task)
 	if err != nil {
 		return false, false, err
@@ -137,27 +169,29 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 		state.shown.replied = true
 	}
 	if !state.shown.replied {
-		events, err := runtime.listEvents(ctx, source, state.after)
-		if err != nil {
+		switch task.GetState() {
+		case v2.TaskState_TASK_STATE_QUEUED, v2.TaskState_TASK_STATE_UNSPECIFIED:
+			state.running = false
+		default:
+			emit(state.shown.start()...)
+			state.running, state.quiet = true, false
+		}
+		carried := message.GetEvents()
+		if message.GetEventsTruncated() && len(carried) > 0 && carried[0].GetSequence() > state.after+1 {
+			// The message left out messages this follow has not shown; read them in order.
+			events, err := runtime.listEvents(ctx, source, state.after)
+			if err != nil {
+				return false, false, err
+			}
+			if more, err := state.emitEvents(events, emit); more || err != nil {
+				return false, more, err
+			}
+		}
+		if _, err := state.emitEvents(carried, emit); err != nil {
 			return false, false, err
 		}
-		previous := state.after
-		for _, event := range events {
-			if event.GetSequence() <= state.after {
-				continue
-			}
-			state.after = event.GetSequence()
-			if shown, ok := turnEvent(event); ok {
-				emit(shown)
-			}
-		}
-		if len(events) >= runtimeEventPage {
-			if state.after == previous {
-				return false, false, workSessionDataLoss("Control Plane event cursor did not advance.")
-			}
-			return false, true, nil
-		}
 		if reply := runtimeReply(task); reply != nil {
+			state.running = false
 			emit(state.shown.reply(reply)...)
 		}
 	}
@@ -204,13 +238,36 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 	return settled, more, nil
 }
 
+// emitEvents shows the turn's events after those already shown, in order. more says a full page
+// was read, so more may wait.
+func (state *runtimeFollow) emitEvents(events []*v2.TaskEvent, emit func(...FollowEvent)) (more bool, err error) {
+	previous := state.after
+	for _, event := range events {
+		if event.GetSequence() <= state.after {
+			continue
+		}
+		state.after = event.GetSequence()
+		state.shown.after = state.after
+		if shown, ok := turnEvent(event); ok {
+			emit(shown)
+		}
+	}
+	if len(events) >= runtimeEventPage {
+		if state.after == previous {
+			return false, workSessionDataLoss("Control Plane event cursor did not advance.")
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 // turnEvent is what a recorded event of the followed turn shows: a message the Tag wrote, or a
 // status line saying what it is doing.
 func turnEvent(event *v2.TaskEvent) (FollowEvent, bool) {
 	switch event.GetKind() {
 	case v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE:
 		if strings.TrimSpace(event.GetText()) != "" {
-			return FollowEvent{Kind: EventMessage, Text: strings.TrimSpace(event.GetText())}, true
+			return FollowEvent{Kind: EventMessage, Text: strings.TrimSpace(event.GetText()), Sequence: event.GetSequence()}, true
 		}
 	case v2.TaskEventKind_TASK_EVENT_KIND_ACTIVITY, v2.TaskEventKind_TASK_EVENT_KIND_PROGRESS:
 		if text := eventLine(event); text != "" {

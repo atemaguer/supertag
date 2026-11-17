@@ -16,10 +16,13 @@ type EventKind int
 const (
 	// EventWaiting says why the turn has not started (Text), once per reason.
 	EventWaiting EventKind = iota
+	// EventStarted says a Worker Host took the turn up.
+	EventStarted
 	// EventDelta is reply text as the Tag writes it (Text). The final reply replaces it.
 	EventDelta
 	// EventMessage is a whole message the Tag wrote while its turn runs (Text), such as the
 	// sentence saying what it is about to do. Each is its own message; the final reply follows.
+	// Sequence is the event that recorded it.
 	EventMessage
 	// EventStatus is what the Tag is doing now (Text), such as a command it runs. Only the
 	// latest is shown, in a status line under the turn, until the reply arrives.
@@ -73,7 +76,10 @@ type Shown struct {
 	joined       bool
 	joinedOnPage string
 	replied      bool
-	waiting      map[string]bool
+	started      bool
+	// after is the sequence of the turn's latest event shown.
+	after   uint64
+	waiting map[string]bool
 	// sessions holds the latest snapshot of each work Session, in the order first seen.
 	sessions []*views.WorkSession
 	// tasks is the Task each work Session was last shown working on.
@@ -100,6 +106,14 @@ func (s *Shown) join() []FollowEvent {
 	}
 	s.joined = true
 	return []FollowEvent{{Kind: EventJoined}}
+}
+
+func (s *Shown) start() []FollowEvent {
+	if s.started {
+		return nil
+	}
+	s.started = true
+	return []FollowEvent{{Kind: EventStarted}}
 }
 
 func (s *Shown) wait(reason string) []FollowEvent {
@@ -269,10 +283,22 @@ func History(tag string, page []*views.Message, displayedTaskIDs ...string) []Hi
 		}
 		if isWorkReport(message) {
 			shown.replied = true
-		} else if message.GetStatus() == views.ReplyStatus_REPLY_STATUS_REPLIED {
-			item.Events = append(item.Events, shown.reply(message.GetReply())...)
 		} else {
-			item.Events = append(item.Events, shown.wait(message.GetWaitingReason())...)
+			if message.GetStarted() {
+				item.Events = append(item.Events, shown.start()...)
+			}
+			for _, said := range message.GetTagMessages() {
+				item.Events = append(item.Events, FollowEvent{Kind: EventMessage, Text: said.Text, Sequence: said.Sequence})
+			}
+			shown.after = message.GetLastSequence()
+			if message.GetStatus() == views.ReplyStatus_REPLY_STATUS_REPLIED {
+				item.Events = append(item.Events, shown.reply(message.GetReply())...)
+			} else {
+				item.Events = append(item.Events, shown.wait(message.GetWaitingReason())...)
+				if activity := message.GetActivity(); activity != "" {
+					item.Events = append(item.Events, FollowEvent{Kind: EventStatus, Text: activity})
+				}
+			}
 		}
 		item.Events = append(item.Events, shown.message(message)...)
 		item.Events = uniqueWorkEvents(item.Events, workEvents)

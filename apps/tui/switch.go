@@ -25,7 +25,11 @@ func dial(version string) connector {
 		if err != nil {
 			return model{}, err
 		}
-		return newModel(ctx, c, client.NewFollower(c), client.NewWatcher(c, watchKinds...)), nil
+		m := newModel(ctx, c, client.NewFollower(c), client.NewWatcher(c, watchKinds...))
+		m.cache = newModelCache(openCache(cacheOrigin(target)), target.Token)
+		m.rail = loadRailLayout()
+		m.hydrate()
+		return m, nil
 	}
 }
 
@@ -96,6 +100,7 @@ func (a *app) start(i int) error {
 	a.closeTaskFiles()
 	a.closeControlPlaneDialog()
 	if a.cancel != nil {
+		a.inner.flush(true)
 		a.cancel()
 		a.inner.client.Close()
 	}
@@ -111,11 +116,12 @@ func (a *app) start(i int) error {
 	return nil
 }
 
-// stop ends the current model's streams and calls.
+// stop ends the current model's streams and calls, and writes what its cache has not written.
 func (a *app) stop() {
 	a.closeTaskFiles()
 	a.closeControlPlaneDialog()
 	if a.cancel != nil {
+		a.inner.flush(true)
 		a.cancel()
 		a.inner.client.Close()
 	}

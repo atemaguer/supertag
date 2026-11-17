@@ -102,11 +102,11 @@ func (c *Client) ListTags(ctx context.Context) ([]*views.Tag, error) {
 	return c.runtime.listTags(ctx)
 }
 
-// SendMessage sends text to the caller's conversation with the Tag. A retry after a failure
-// that may not have reached the Control Plane reuses the same idempotency key, so the Tag gets
-// the message once.
-func (c *Client) SendMessage(ctx context.Context, tag, text string) (*views.Message, error) {
-	return c.runtime.sendMessage(ctx, tag, text)
+// SendMessage sends text to the caller's conversation with the Tag. operationID names the
+// message: every attempt with the same ID, including one after a restart, delivers it at most
+// once. A failure that may not have reached the Control Plane is retried with it.
+func (c *Client) SendMessage(ctx context.Context, tag, text, operationID string) (*views.Message, error) {
+	return c.runtime.sendMessage(ctx, tag, text, operationID)
 }
 
 // retrying makes an idempotent call, retrying it twice after a failure that may not have reached
@@ -143,13 +143,32 @@ type MessagePage struct {
 	// ConversationID identifies the conversation. It changes only when the conversation is
 	// replaced, and is empty before the caller's first message to the Tag.
 	ConversationID string
+	// Incremental says the page holds only what changed since the query's After. Otherwise it is
+	// the newest page, which replaces the caller's copy.
+	Incremental bool
 }
 
-// ListMessages returns one page of the caller's conversation with the Tag, newest first. Its
-// messages can belong to different Sessions of the conversation.
-func (c *Client) ListMessages(ctx context.Context, tag string, pageSize int32, pageToken string) (MessagePage, error) {
-	return c.runtime.listMessages(ctx, tag, pageSize, pageToken)
+// MessageQuery is what ListMessages reads.
+type MessageQuery struct {
+	Limit int32
+	// Cursor reads the page before a page's NextCursor.
+	Cursor string
+	// After, with ConversationID, the conversation a copy came from, reads only what changed
+	// since the copy's latest order: later messages and the current state of Refresh, the turns
+	// the copy holds unfinished. The latest 128 are refreshed.
+	After          uint64
+	ConversationID string
+	Refresh        []string
 }
+
+// ListMessages returns one page of the caller's conversation with the Tag, newest first, or what
+// changed since a copy of it. Its messages can belong to different Sessions of the conversation.
+func (c *Client) ListMessages(ctx context.Context, tag string, query MessageQuery) (MessagePage, error) {
+	return c.runtime.listMessages(ctx, tag, query)
+}
+
+// NewOperationID names a message to send, so that sending it again delivers it at most once.
+func NewOperationID() (string, error) { return idempotencyKey() }
 
 // ListConversations returns the caller's conversations, one per Tag it has talked to, the latest
 // active first.
