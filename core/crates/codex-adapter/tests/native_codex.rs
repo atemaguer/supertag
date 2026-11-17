@@ -3496,8 +3496,17 @@ async fn native_stay_quiet_finishes_quietly_only_with_the_capability() -> Result
         let observed = server.observed.lock().await;
         let outcome = observed.outcome.as_ref().context("outcome")?;
         ensure!(outcome.succeeded, "{}", outcome.result);
-        // The final text stays the result; the turn is quiet only when it may be.
-        assert_eq!(outcome.result, "Nothing changed");
+        // A quiet turn's note replaces its final text; the turn is quiet only when it may be.
+        if may_stay_quiet {
+            assert!(
+                outcome.result.starts_with("CI is green"),
+                "{}",
+                outcome.result
+            );
+            assert!(!outcome.result.contains(KEY));
+        } else {
+            assert_eq!(outcome.result, "Nothing changed");
+        }
         assert_eq!(outcome.quiet, may_stay_quiet);
         let manifest =
             String::from_utf8_lossy(&outcome.checkpoint.as_ref().context("checkpoint")?.payload)

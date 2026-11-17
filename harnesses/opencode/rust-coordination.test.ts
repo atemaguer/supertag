@@ -802,9 +802,13 @@ it("offers stay_quiet only to a turn no person waits on, and finishes it quietly
     const note = await service.quietNote();
     expect(note).toBe("CI is green [REDACTED]");
 
-    // The final text stays the result; with none, the note is. A report or a failure posts.
-    const succeeded = { succeeded: true, result: "No change", waitingApprovalIds: [] };
-    expect(withObjectiveReport(succeeded, undefined, note)).toEqual({ ...succeeded, quiet: true });
+    // The note is the result, whatever text came first. A report or a failure posts.
+    const succeeded = { succeeded: true, result: "I'll check CI.", waitingApprovalIds: [] };
+    expect(withObjectiveReport(succeeded, undefined, note)).toEqual({
+      ...succeeded,
+      result: "CI is green [REDACTED]",
+      quiet: true,
+    });
     expect(withObjectiveReport({ ...succeeded, result: " " }, undefined, note)).toEqual({
       ...succeeded,
       result: "CI is green [REDACTED]",

@@ -171,12 +171,10 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         Some(report) if succeeded => (report.summary, report.signal as i32),
         _ => (result, ObjectiveSignal::Progress as i32),
     };
-    // A quiet turn keeps its final text as its result, or its note when it wrote none.
+    // A quiet turn's note is its result: nothing is posted, and the note says why better than
+    // whatever text Codex wrote first.
     let quiet = questions.quiet_note().filter(|_| succeeded);
-    let result = match &quiet {
-        Some(note) if result.trim().is_empty() => note.clone(),
-        _ => result,
-    };
+    let result = quiet.clone().unwrap_or(result);
     harness
         .complete(request(
             HarnessCompleteRequest {

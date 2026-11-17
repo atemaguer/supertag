@@ -153,6 +153,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A turn that stays quiet records its `stay_quiet` note as its result in every harness, rather
+  than whatever text it wrote first, so `describe task` says why it posted nothing.
 - Clients connect to the Gateway, which forwards their calls to the Control Plane and authorizes
   each as the caller's own credential. `supertag up` always starts a Gateway. The CLI takes
   `--gateway` and `SUPERTAG_GATEWAY_URL` (Worker Hosts keep `--control-plane`); the desktop app

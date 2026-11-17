@@ -317,8 +317,8 @@ export interface ObjectiveReport {
 /**
  * Applies a reported Objective status to a successful outcome. The summary becomes the turn's
  * result. A turn that waits for approvals, or failed, finishes as progress instead. Without a
- * report, a turn that called `stay_quiet` finishes quietly, its note the result when it wrote
- * no final text.
+ * report, a turn that called `stay_quiet` finishes quietly with its note as the result: nothing
+ * is posted, and the note says why better than whatever text the agent wrote first.
  */
 export function withObjectiveReport<
   T extends Pick<HarnessCompleteRequest, "result" | "succeeded"> & {
@@ -332,7 +332,7 @@ export function withObjectiveReport<
   if (!outcome.succeeded || outcome.waitingApprovalIds?.length) return outcome;
   if (report) return { ...outcome, result: report.summary, objectiveSignal: report.signal };
   if (quiet === undefined) return outcome;
-  return { ...outcome, result: trim(outcome.result) ? outcome.result : quiet, quiet: true };
+  return { ...outcome, result: quiet, quiet: true };
 }
 
 export interface CoordinationScope {

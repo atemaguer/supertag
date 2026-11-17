@@ -678,8 +678,7 @@ stay_quiet(note: "CI is green on main; nothing changed since yesterday.")
 - **What it does.** The turn succeeds and nothing is posted to its thread or conversation. The
   conversation leaves it out, and it raises nothing unread. A reported Objective status or a wait
   for approvals still posts.
-- **What stays.** The Task, its events, and its result: the Tag's final text, or the note when it
-  wrote none. `supertag describe task` shows `quiet: true`, and the Schedule still names it as its
+- **What stays.** The Task, its events, and its result, which is the note. `supertag describe task` shows `quiet: true`, and the Schedule still names it as its
   latest turn.
 
 **How a Tag's messages land.** The Control Plane counts a Tag's unprompted turns that had someone

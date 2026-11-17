@@ -270,7 +270,7 @@ impl Stream {
     }
 
     /// The final response and thread. A quiet turn (`stay_quiet`) may end without final text;
-    /// its result is then empty, and the adapter records the quiet note instead.
+    /// the adapter records its quiet note as the result.
     pub(crate) fn finish(self, quiet: bool) -> Result<(String, String)> {
         ensure!(
             self.thread.is_some(),
