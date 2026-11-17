@@ -12,6 +12,82 @@ pub(crate) struct Policy {
     pub(crate) writable_roots: Vec<PathBuf>,
     /// The Task's path scope, applied by the `supertag` permission profile.
     pub(crate) scope: Option<Scope>,
+    /// The Worker Host's egress proxy for the Task's network scope.
+    pub(crate) egress: Option<Egress>,
+}
+
+/// The Attempt's egress proxy, from the Worker Host.
+#[derive(Clone, Default)]
+pub(crate) struct Egress {
+    /// `http://supertag:PASSWORD@127.0.0.1:PORT`.
+    pub(crate) proxy: String,
+    /// The Attempt CA's certificate, and a bundle of the host's roots plus it.
+    pub(crate) ca_certificate: PathBuf,
+    pub(crate) ca_bundle: PathBuf,
+    /// Each credential's sandbox variable and its placeholder.
+    pub(crate) placeholders: std::collections::BTreeMap<String, String>,
+    /// Host names a narrowed scope reaches; empty when the scope only binds credentials and
+    /// commands may reach any origin directly.
+    pub(crate) hosts: std::collections::BTreeSet<String>,
+    pub(crate) narrowed: bool,
+}
+
+/// CA variables common tools read, pointed at the bundle.
+const CA_BUNDLE_VARIABLES: [&str; 5] = [
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "PIP_CERT",
+    "GIT_SSL_CAINFO",
+];
+const PROXY_VARIABLES: [&str; 4] = ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"];
+
+impl Egress {
+    /// Variables Codex sets in every command: the CA, each placeholder, and, when commands reach
+    /// the network directly, the proxy itself. Under a narrowed scope Codex points commands at
+    /// its own managed proxy, which forwards to this one.
+    pub(crate) fn command_environment(&self) -> Result<Vec<(String, String)>> {
+        let path = |path: &Path| {
+            path.to_str()
+                .map(str::to_owned)
+                .context("egress CA path must be UTF-8")
+        };
+        let mut variables = vec![];
+        for name in CA_BUNDLE_VARIABLES {
+            variables.push((name.to_owned(), path(&self.ca_bundle)?));
+        }
+        variables.push((
+            "NODE_EXTRA_CA_CERTS".to_owned(),
+            path(&self.ca_certificate)?,
+        ));
+        if !self.narrowed {
+            for name in PROXY_VARIABLES {
+                variables.push((name.to_owned(), self.proxy.clone()));
+            }
+            for name in ["NO_PROXY", "no_proxy"] {
+                variables.push((name.to_owned(), "localhost,127.0.0.1,::1".to_owned()));
+            }
+        }
+        for (name, placeholder) in &self.placeholders {
+            variables.push((name.clone(), placeholder.clone()));
+        }
+        Ok(variables)
+    }
+
+    /// Variables of the Codex process itself. Under a narrowed scope its managed proxy reads the
+    /// upstream proxy from them, and `NO_PROXY=*` keeps Codex's own model traffic direct.
+    pub(crate) fn process_environment(&self) -> Vec<(String, String)> {
+        if !self.narrowed {
+            return vec![];
+        }
+        let mut variables: Vec<(String, String)> = PROXY_VARIABLES
+            .iter()
+            .map(|name| ((*name).to_owned(), self.proxy.clone()))
+            .collect();
+        variables.push(("NO_PROXY".to_owned(), "*".to_owned()));
+        variables.push(("no_proxy".to_owned(), "*".to_owned()));
+        variables
+    }
 }
 
 /// A Task's path scope, resolved on this Worker Host.
@@ -61,6 +137,7 @@ impl Policy {
             network: has("web:fetch"),
             writable_roots: vec![],
             scope: None,
+            egress: None,
         };
         ensure!(
             !policy.write || disposable,
@@ -109,8 +186,13 @@ pub(crate) fn user_home() -> Result<PathBuf> {
 /// run commands only through it. Native code-mode commands reached a non-loopback endpoint under
 /// the limited network profile in the Codex 0.163.0 macOS integration probe, so it runs only when
 /// the Task also admits web:fetch and the sandbox allows the network anyway.
+///
+/// A narrowed network scope keeps it off too: code-mode commands would bypass the sandbox's
+/// network policy and so the egress proxy's allow-list.
 pub(crate) fn code_mode_host(policy: &Policy) -> bool {
-    policy.commands && policy.network
+    policy.commands
+        && policy.network
+        && !policy.egress.as_ref().is_some_and(|egress| egress.narrowed)
 }
 
 pub(crate) fn arguments(
@@ -201,7 +283,35 @@ pub(crate) fn arguments(
                 ":read-only"
             }
         ));
-        if policy.network {
+        if let Some(egress) = policy.egress.as_ref().filter(|egress| egress.narrowed) {
+            // A narrowed network scope: the sandbox allows only loopback, and Codex's managed
+            // proxy allows only the scope's hosts and forwards each connection to the Attempt's
+            // egress proxy, the upstream in the Codex process's HTTPS_PROXY, which checks the
+            // origin, method, and credentials (probed on Codex 0.163.0).
+            ensure!(
+                !egress.hosts.is_empty(),
+                "a narrowed network scope needs at least one host for Codex"
+            );
+            configuration.extend(
+                [
+                    "permissions.supertag.network.enabled=true",
+                    "permissions.supertag.network.mode=\"full\"",
+                    "permissions.supertag.network.allow_local_binding=true",
+                    "permissions.supertag.network.allow_upstream_proxy=true",
+                    "features.network_proxy.enabled=true",
+                ]
+                .map(str::to_owned),
+            );
+            configuration.push(format!(
+                "{DOMAINS}={}",
+                inline_table(
+                    egress
+                        .hosts
+                        .iter()
+                        .map(|host| (host.clone(), "allow".to_owned()))
+                )?
+            ));
+        } else if policy.network {
             // web:fetch: direct, unrestricted outbound network, as Codex's legacy
             // `workspace-write` mode with `network_access`. Without the network proxy the
             // profile's network grant leaves sockets open (probed on Codex 0.163.0); the mode
@@ -243,10 +353,56 @@ pub(crate) fn arguments(
         );
         configuration.push("sandbox_mode=\"read-only\"".into());
     }
+    if let Some(egress) = &policy.egress {
+        configuration.push(format!(
+            "{COMMAND_ENVIRONMENT}={}",
+            inline_table(egress.command_environment()?)?
+        ));
+    }
     for value in configuration {
         args.extend(["--config".into(), value]);
     }
     Ok(args)
+}
+
+const DOMAINS: &str = "permissions.supertag.network.domains";
+const COMMAND_ENVIRONMENT: &str = "shell_environment_policy.set";
+
+/// A TOML inline table of strings, `{ "key" = "value", ... }`.
+fn inline_table(entries: impl IntoIterator<Item = (String, String)>) -> Result<String> {
+    let entries = entries
+        .into_iter()
+        .map(|(key, value)| {
+            Ok(format!(
+                "{} = {}",
+                serde_json::to_string(&key)?,
+                serde_json::to_string(&value)?
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(format!("{{ {} }}", entries.join(", ")))
+}
+
+/// The inline tables of [`arguments`], as JSON objects for a resumed thread.
+fn table_value(key: &str, policy: &Policy) -> Result<Option<serde_json::Value>> {
+    let Some(egress) = &policy.egress else {
+        return Ok(None);
+    };
+    let entries: Vec<(String, String)> = match key {
+        DOMAINS => egress
+            .hosts
+            .iter()
+            .map(|host| (host.clone(), "allow".to_owned()))
+            .collect(),
+        COMMAND_ENVIRONMENT => egress.command_environment()?,
+        _ => return Ok(None),
+    };
+    Ok(Some(serde_json::Value::Object(
+        entries
+            .into_iter()
+            .map(|(key, value)| (key, serde_json::Value::from(value)))
+            .collect(),
+    )))
 }
 
 /// Reapply the current Task's policy when resuming a native thread. Native
@@ -261,7 +417,9 @@ pub(crate) fn thread_parameters(
         let (key, raw) = pair[1]
             .split_once('=')
             .context("invalid owned Codex configuration")?;
-        let value = if key == "permissions.supertag.filesystem" {
+        let value = if let Some(table) = table_value(key, policy)? {
+            table
+        } else if key == "permissions.supertag.filesystem" {
             serde_json::Value::Object(
                 filesystem(workspace, policy)?
                     .into_iter()
@@ -770,6 +928,104 @@ mod tests {
             );
             assert_eq!(resumed["config"]["features.network_proxy.enabled"], false);
         }
+        Ok(())
+    }
+
+    fn egress(narrowed: bool) -> Egress {
+        Egress {
+            proxy: "http://supertag:pw@127.0.0.1:4100".into(),
+            ca_certificate: "/state/egress/ca.pem".into(),
+            ca_bundle: "/state/egress/bundle.pem".into(),
+            placeholders: [(
+                "GITHUB_TOKEN".to_owned(),
+                "supertag-credential-github-x".to_owned(),
+            )]
+            .into(),
+            hosts: if narrowed {
+                ["api.github.com".to_owned(), "pypi.org".to_owned()].into()
+            } else {
+                Default::default()
+            },
+            narrowed,
+        }
+    }
+
+    #[test]
+    fn a_narrowed_network_scope_sends_commands_through_the_managed_and_egress_proxies() -> Result<()>
+    {
+        let workspace = tempfile::tempdir()?;
+        let ws = workspace.path().canonicalize()?;
+        let mut policy = Policy::from_actions(
+            &actions(&["files:write", "commands:execute", "web:fetch"]),
+            true,
+        )?;
+        policy.egress = Some(egress(true));
+        let args = arguments(&ws, None, None, &policy)?;
+        for expected in [
+            "permissions.supertag.network.enabled=true",
+            "permissions.supertag.network.mode=\"full\"",
+            "permissions.supertag.network.allow_upstream_proxy=true",
+            "features.network_proxy.enabled=true",
+            "permissions.supertag.network.domains={ \"api.github.com\" = \"allow\", \"pypi.org\" = \"allow\" }",
+            // Code-mode commands would bypass the sandbox's network policy.
+            "features.code_mode_host=false",
+        ] {
+            assert!(args.contains(&expected.to_owned()), "{expected}: {args:?}");
+        }
+        let environment = args
+            .iter()
+            .find(|arg| arg.starts_with("shell_environment_policy.set="))
+            .unwrap();
+        assert!(environment.contains("\"SSL_CERT_FILE\" = \"/state/egress/bundle.pem\""));
+        assert!(environment.contains("\"NODE_EXTRA_CA_CERTS\" = \"/state/egress/ca.pem\""));
+        assert!(environment.contains("\"GITHUB_TOKEN\" = \"supertag-credential-github-x\""));
+        // Codex points commands at its own managed proxy; the password stays in Codex's process.
+        assert!(!environment.contains("HTTPS_PROXY"), "{environment}");
+        let process = policy.egress.as_ref().unwrap().process_environment();
+        assert!(process.contains(&(
+            "HTTPS_PROXY".into(),
+            "http://supertag:pw@127.0.0.1:4100".into()
+        )));
+        assert!(process.contains(&("NO_PROXY".into(), "*".into())));
+        let resumed = thread_parameters(&ws, &policy, &args)?;
+        assert_eq!(
+            resumed["config"]["permissions.supertag.network.domains"]["pypi.org"],
+            "allow"
+        );
+        assert_eq!(
+            resumed["config"]["shell_environment_policy.set"]["GITHUB_TOKEN"],
+            "supertag-credential-github-x"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_credential_only_scope_keeps_direct_network_and_offers_the_proxy() -> Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let ws = workspace.path().canonicalize()?;
+        let mut policy = Policy::from_actions(
+            &actions(&["files:write", "commands:execute", "web:fetch"]),
+            true,
+        )?;
+        policy.egress = Some(egress(false));
+        let args = arguments(&ws, None, None, &policy)?;
+        assert!(args.contains(&"features.network_proxy.enabled=false".to_owned()));
+        assert!(args.contains(&"features.code_mode_host=true".to_owned()));
+        assert!(!args.iter().any(|arg| arg.contains("network.domains")));
+        let environment = args
+            .iter()
+            .find(|arg| arg.starts_with("shell_environment_policy.set="))
+            .unwrap();
+        assert!(environment.contains("\"HTTPS_PROXY\" = \"http://supertag:pw@127.0.0.1:4100\""));
+        assert!(environment.contains("\"NO_PROXY\" = \"localhost,127.0.0.1,::1\""));
+        assert!(
+            policy
+                .egress
+                .as_ref()
+                .unwrap()
+                .process_environment()
+                .is_empty()
+        );
         Ok(())
     }
 

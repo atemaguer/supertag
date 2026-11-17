@@ -298,6 +298,9 @@ async fn execute(
             output_directory: output_directory.clone(),
         });
     }
+    if let Some(scope) = supertag_protocol::network_scope::of_task(task) {
+        policy.egress = Some(egress(&options.environment, scope)?);
+    }
     let effort = task
         .attempt_execution
         .as_ref()
@@ -330,6 +333,13 @@ async fn execute(
             "Task output directory is outside this Attempt"
         );
         environment.insert("SUPERTAG_OUTPUT_DIR".into(), path.into_os_string());
+    }
+    // Under a narrowed network scope, Codex's managed proxy forwards to the Attempt's egress
+    // proxy, which it reads from these; Codex's own traffic stays direct.
+    if let Some(egress) = &policy.egress {
+        for (name, value) in egress.process_environment() {
+            environment.insert(name.into(), value.into());
+        }
     }
     // Secrets belonging to the transport are never forwarded to the native process.
     environment.remove(&OsString::from("SUPERTAG_HOST_TOKEN"));
@@ -610,4 +620,36 @@ async fn verify_version(
         .await
         .context("could not reap Codex version probe")?;
     outcome.context("Codex version probe timed out")?
+}
+
+/// The Worker Host's egress proxy for a Task with a network scope. Without it Codex cannot keep
+/// the Task to its scope, so the Attempt fails before Codex starts.
+fn egress(
+    environment: &BTreeMap<OsString, OsString>,
+    scope: &supertag_protocol::v2::NetworkScope,
+) -> Result<config::Egress> {
+    let variable = |name: &str| {
+        environment
+            .get(OsStr::new(name))
+            .and_then(|value| value.to_str())
+            .map(str::to_owned)
+            .with_context(|| {
+                format!("Codex cannot apply this Task's network scope without the Worker Host's egress proxy ({name} is missing)")
+            })
+    };
+    let placeholders: BTreeMap<String, String> =
+        serde_json::from_str(&variable("SUPERTAG_EGRESS_PLACEHOLDERS")?)
+            .context("invalid egress placeholders")?;
+    Ok(config::Egress {
+        proxy: variable("SUPERTAG_EGRESS_PROXY")?,
+        ca_certificate: PathBuf::from(variable("SUPERTAG_EGRESS_CA_CERTIFICATE")?),
+        ca_bundle: PathBuf::from(variable("SUPERTAG_EGRESS_CA_BUNDLE")?),
+        placeholders,
+        hosts: if supertag_protocol::network_scope::narrows(scope) {
+            supertag_protocol::network_scope::host_names(scope)
+        } else {
+            Default::default()
+        },
+        narrowed: supertag_protocol::network_scope::narrows(scope),
+    })
 }
