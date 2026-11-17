@@ -110,6 +110,7 @@ const schemas = {
     workspace: tagId.optional(),
     tag: tagId.optional(),
   }),
+  close_session: z.strictObject({ sessionId: z.string().regex(workSessionId) }),
   continue_session: z.strictObject({
     sessionId: z.string().regex(workSessionId),
     message: nonblankText(8000),
@@ -700,12 +701,14 @@ export function registerCoordinationTools(
     );
   }
   if (run.coordination?.mayStartWorkSession && parentSession) {
+    const capacity = run.coordination.maxWorkSessions
+      ? ` This Tag has ${run.coordination.openWorkSessions} of ${run.coordination.maxWorkSessions} Work Sessions open; close one that is done with close_session.`
+      : "";
     tools.push("start_session");
     server.registerTool(
       "start_session",
       {
-        description:
-          "Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction. You may specify the accepted Workspace ID. When this Task owns an Objective, you can delegate to an eligible Tag on its Team.",
+        description: `Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction. You may specify the accepted Workspace ID. When this Task owns an Objective, you can delegate to an eligible Tag on its Team.${capacity}`,
         inputSchema: schemas.start_session,
         _meta: meta,
       },
@@ -755,8 +758,48 @@ export function registerCoordinationTools(
                 }),
               );
             }
-          } catch {}
+          } catch (error) {
+            // At its limit, the Tag reads which Work Sessions are open and continues or closes
+            // one; the turn goes on.
+            const failure = ConnectError.from(error);
+            if (failure.code === Code.FailedPrecondition)
+              return response(safeText(failure.rawMessage), true);
+          }
           return response("The Work Session start could not be confirmed.", true);
+        }),
+    );
+    tools.push("close_session");
+    server.registerTool(
+      "close_session",
+      {
+        description:
+          "Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. A closed Work Session cannot be continued.",
+        inputSchema: schemas.close_session,
+        _meta: meta,
+      },
+      ({ sessionId }, tool) =>
+        write(async () => {
+          try {
+            const closed = await call(tool.signal, (config) =>
+              workSessions.close({ workSessionId: sessionId }, config),
+            );
+            if (
+              closed.workSessionId === sessionId &&
+              closed.parentTagId === scope.tagId &&
+              closed.closedAtMs !== undefined
+            )
+              return response(JSON.stringify({ status: "closed", workSessionId: sessionId }));
+          } catch (error) {
+            const failure = ConnectError.from(error);
+            if (failure.code === Code.FailedPrecondition)
+              return response(safeText(failure.rawMessage), true);
+            if ([Code.NotFound, Code.PermissionDenied].includes(failure.code))
+              return response(
+                "That Work Session was not found among this Tag's Work Sessions you may see.",
+                true,
+              );
+          }
+          return response("The Work Session close could not be confirmed.", true);
         }),
     );
   }

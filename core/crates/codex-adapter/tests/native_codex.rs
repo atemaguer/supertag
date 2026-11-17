@@ -782,6 +782,14 @@ impl HarnessTagSessions for HarnessFixture {
 
 #[tonic::async_trait]
 impl HarnessWorkSessions for HarnessFixture {
+    async fn close(
+        &self,
+        request: Request<supertag_protocol::v2::HarnessCloseWorkSessionRequest>,
+    ) -> Result<Response<WorkSession>, Status> {
+        self.authenticate(&request)?;
+        Err(Status::not_found("Work Session was not found"))
+    }
+
     async fn start(
         &self,
         request: Request<HarnessStartWorkSessionRequest>,

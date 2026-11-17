@@ -8,9 +8,10 @@ use supertag_protocol::{
     v2::{
         ApprovalState, CommitReview, CommitReviewDecision, CommitReviewResponse,
         CommitReviewSubmission, HarnessAskWorkSessionQuestionRequest,
-        HarnessContinueWorkSessionRequest, HarnessPostWorkstreamRequest, HarnessReadMailboxRequest,
-        HarnessReadReviewPatchRequest, HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest,
-        HarnessStartWorkSessionRequest, TagMessageOrigin, TaskState, WorkspaceDeliveryReference,
+        HarnessCloseWorkSessionRequest, HarnessContinueWorkSessionRequest,
+        HarnessPostWorkstreamRequest, HarnessReadMailboxRequest, HarnessReadReviewPatchRequest,
+        HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest, HarnessStartWorkSessionRequest,
+        TagMessageOrigin, TaskState, WorkspaceDeliveryReference,
         commit_review_submission::Kind as ReviewKind, harness_mailbox_client::HarnessMailboxClient,
         harness_work_sessions_client::HarnessWorkSessionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
@@ -35,6 +36,7 @@ pub(crate) enum Arguments {
     Start(StartSession),
     Continue(ContinueSession),
     TagSessions(crate::tag_sessions::Call),
+    CloseSession(String),
     Schedule(crate::schedules::Call),
     Report(crate::questions::ObjectiveReport),
 }
@@ -358,6 +360,36 @@ fn validate_page(limit: Option<u32>, cursor: &str) -> Result<()> {
     Ok(())
 }
 
+/// The `close_session` tool, offered with `start_session`.
+pub(crate) fn close_spec() -> Value {
+    json!({
+        "type":"function", "name":"close_session",
+        "description":"Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. A closed Work Session cannot be continued.",
+        "inputSchema":{"type":"object","properties":{
+            "sessionId":{"type":"string","minLength":1,"maxLength":256}
+        },"required":["sessionId"],"additionalProperties":false}
+    })
+}
+
+/// The `close_session` arguments: the Work Session's ID.
+pub(crate) fn close_arguments(params: &Value) -> Result<Option<String>> {
+    if params["namespace"] != "supertag" || params["tool"] != "close_session" {
+        return Ok(None);
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields, rename_all = "camelCase")]
+    struct Close {
+        session_id: String,
+    }
+    let close: Close = serde_json::from_value(params["arguments"].clone())
+        .context("invalid Codex close_session arguments")?;
+    ensure!(
+        bounded_identity(&close.session_id),
+        "invalid Work Session ID"
+    );
+    Ok(Some(close.session_id))
+}
+
 pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
     let mut tools = vec![json!({
         "type":"function", "name":"post",
@@ -507,7 +539,7 @@ impl Client {
             workspace_id: start.workspace,
             target_tag_id: start.tag,
         };
-        let receipt = confirm(async || {
+        let receipt = confirm_reason(async || {
             self.work_sessions
                 .start(
                     crate::request(input.clone(), token)
@@ -516,8 +548,14 @@ impl Client {
                 .await
         })
         .await?;
-        let Some(receipt) = receipt else {
-            return Ok(refused());
+        let receipt = match receipt {
+            Ok(receipt) => receipt,
+            // At its limit, the Tag reads which Work Sessions are open and continues or closes
+            // one; the turn goes on.
+            Err(Some(reason)) => {
+                return Ok(response(crate::auth::redact(reason, secrets), false));
+            }
+            Err(None) => return Ok(refused()),
         };
         ensure!(
             receipt.parent_tag_id == tag
@@ -538,6 +576,49 @@ impl Client {
         Ok(response(
             json!({ "sessionId": receipt.work_session_id, "title": title, "status":"accepted" })
                 .to_string(),
+            true,
+        ))
+    }
+
+    /// `close_session`: closes one of the Tag's Work Sessions so it no longer counts toward its
+    /// limit.
+    pub(crate) async fn close_session(
+        &mut self,
+        work_session_id: &str,
+        tag: &str,
+        token: &str,
+        secrets: &[String],
+    ) -> Result<Value> {
+        let input = HarnessCloseWorkSessionRequest {
+            work_session_id: work_session_id.to_owned(),
+        };
+        let receipt = confirm_reason(async || {
+            self.work_sessions
+                .close(
+                    crate::request(input.clone(), token)
+                        .map_err(|_| Status::unauthenticated("invalid execution credential"))?,
+                )
+                .await
+        })
+        .await?;
+        let receipt = match receipt {
+            Ok(receipt) => receipt,
+            Err(Some(reason)) => return Ok(response(crate::auth::redact(reason, secrets), false)),
+            Err(None) => {
+                return Ok(response(
+                    "That Work Session was not found among this Tag's Work Sessions you may see.",
+                    false,
+                ));
+            }
+        };
+        ensure!(
+            receipt.work_session_id == work_session_id
+                && receipt.parent_tag_id == tag
+                && receipt.closed_at_ms.is_some(),
+            "Work Session close receipt has mismatched identity"
+        );
+        Ok(response(
+            json!({ "sessionId": receipt.work_session_id, "status": "closed" }).to_string(),
             true,
         ))
     }
@@ -1051,6 +1132,41 @@ pub(crate) fn refused() -> Value {
     )
 }
 
+/// Like [`confirm`], but a failed precondition carries the Control Plane's reason, which the
+/// model can act on.
+async fn confirm_reason<T>(
+    mut call: impl AsyncFnMut() -> Result<Response<T>, Status>,
+) -> Result<std::result::Result<T, Option<String>>> {
+    for retry in 0..3 {
+        match call().await {
+            Ok(receipt) => return Ok(Ok(receipt.into_inner())),
+            Err(status)
+                if retry < 2
+                    && matches!(status.code(), Code::Unavailable | Code::DeadlineExceeded) =>
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(status) if status.code() == Code::FailedPrecondition => {
+                return Ok(Err(Some(status.message().to_owned())));
+            }
+            Err(status)
+                if matches!(
+                    status.code(),
+                    Code::PermissionDenied
+                        | Code::Unauthenticated
+                        | Code::AlreadyExists
+                        | Code::InvalidArgument
+                        | Code::NotFound
+                ) =>
+            {
+                return Ok(Err(None));
+            }
+            Err(_) => break,
+        }
+    }
+    bail!("could not confirm the coordination receipt")
+}
+
 async fn confirm<T>(
     mut call: impl AsyncFnMut() -> Result<Response<T>, Status>,
 ) -> Result<Option<T>> {
@@ -1085,6 +1201,28 @@ async fn confirm<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_session_takes_one_work_session_id() {
+        let call = |arguments: Value| {
+            close_arguments(
+                &json!({"namespace":"supertag","tool":"close_session","arguments":arguments}),
+            )
+        };
+        assert_eq!(
+            call(json!({"sessionId":"work/1"})).unwrap().as_deref(),
+            Some("work/1")
+        );
+        assert!(call(json!({})).is_err());
+        assert!(call(json!({"sessionId":"work/1","reason":"done"})).is_err());
+        assert!(call(json!({"sessionId":""})).is_err());
+        assert!(
+            close_arguments(&json!({"namespace":"supertag","tool":"start_session","arguments":{}}))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(close_spec()["inputSchema"]["additionalProperties"], false);
+    }
 
     #[test]
     fn commit_review_schema_is_versioned_and_arguments_are_exclusive() {

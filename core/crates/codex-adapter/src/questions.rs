@@ -31,6 +31,7 @@ pub(crate) const ARTIFACT_ATTACH_SUFFIX: &str = "+artifact-attach-v1";
 pub(crate) const ARTIFACT_CAPTURE_SUFFIX: &str = "+artifact-capture-v1";
 pub(crate) const TAG_SESSIONS_SUFFIX: &str = "+tag-sessions-v2";
 pub(crate) const SCHEDULE_SUFFIX: &str = "+schedule-v1";
+pub(crate) const CLOSE_SESSION_SUFFIX: &str = "+close-session-v1";
 pub(crate) const OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-v1";
 pub(crate) const ONGOING_OBJECTIVE_REPORT_SUFFIX: &str = "+objective-report-ongoing-v1";
 const ONGOING_COMPLETION_REFUSED: &str = "This Objective is ongoing, so it never completes; only an operator ends it. Report ready_for_review or blocked instead, or finish the turn without a report.";
@@ -47,6 +48,8 @@ pub(crate) struct Tools {
     pub(crate) tag_sessions: bool,
     /// `schedule` and `cancel_schedule`, for a root turn.
     pub(crate) schedule: bool,
+    /// `close_session`, with `start_session`.
+    pub(crate) close_sessions: bool,
     /// `report_objective`, for the owner Session of an open Objective.
     pub(crate) report_objective: Reporting,
 }
@@ -101,6 +104,7 @@ impl Tools {
             || self.acquire_artifacts
             || self.tag_sessions
             || self.schedule
+            || self.close_sessions
             || self.report_objective.offered()
     }
 
@@ -135,6 +139,9 @@ impl Tools {
         if self.schedule {
             manifest.push_str(SCHEDULE_SUFFIX);
         }
+        if self.close_sessions {
+            manifest.push_str(CLOSE_SESSION_SUFFIX);
+        }
         manifest.push_str(self.report_objective.suffix());
         manifest
     }
@@ -155,6 +162,11 @@ impl Tools {
         }
         if params["tool"] == "report_objective" && self.report_objective.offered() {
             return Ok(Arguments::Report(validate_report(params)?));
+        }
+        if self.close_sessions
+            && let Some(id) = coordination::close_arguments(params)?
+        {
+            return Ok(Arguments::CloseSession(id));
         }
         if self.schedule
             && params["namespace"] == "supertag"
@@ -281,6 +293,29 @@ impl Bridge {
                 .as_array_mut()
                 .expect("tool specifications")
                 .extend(crate::tag_sessions::tool_specs());
+        }
+        if self.tools.close_sessions {
+            specs[0]["tools"]
+                .as_array_mut()
+                .expect("tool specifications")
+                .push(coordination::close_spec());
+        }
+        // The Tag's open Work Sessions, so the model knows its room before it starts one.
+        if self.capabilities.may_start_work_session && self.capabilities.max_work_sessions > 0 {
+            for tool in specs[0]["tools"]
+                .as_array_mut()
+                .expect("tool specifications")
+            {
+                if tool["name"] == "start_session" {
+                    let description = tool["description"].as_str().unwrap_or_default().to_owned();
+                    tool["description"] = json!(format!(
+                        "{} This Tag has {} of {} Work Sessions open; close one that is done with close_session.",
+                        description,
+                        self.capabilities.open_work_sessions,
+                        self.capabilities.max_work_sessions
+                    ));
+                }
+            }
         }
         if self.tools.schedule {
             specs[0]["tools"]
@@ -467,6 +502,15 @@ impl Bridge {
             {
                 self.tag_sessions
                     .call(call, &self.token, &self.secrets)
+                    .await?
+            }
+            Arguments::CloseSession(id)
+                if self.current.close_sessions
+                    && self.capabilities.may_start_work_session
+                    && !self.asked =>
+            {
+                self.coordination
+                    .close_session(id, &self.tag_id, &self.token, &self.secrets)
                     .await?
             }
             Arguments::Schedule(call)
@@ -733,6 +777,7 @@ mod tests {
             attach_artifacts: false,
             tag_sessions: false,
             schedule: false,
+            close_sessions: false,
             report_objective,
         };
         let params = call(json!({"status":"completed","summary":"Done"}));

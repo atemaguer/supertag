@@ -16,7 +16,9 @@ import {
   TaskEventKind,
   TaskState,
   tagPortfolio,
+  WorkSessionCloseReason,
   WorkSessionQuestionSchema,
+  WorkSessionSchema,
   withObjectiveReport,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { expect, it, vi } from "vitest";
@@ -580,6 +582,74 @@ it("schedules a follow-up in the turn's Session, redacts the note, and reports r
       { scheduleId: "sch_new" },
       expect.objectContaining({ timeoutMs: 5000 }),
     );
+  } finally {
+    await client.close();
+    await service.close();
+  }
+});
+
+it("shows the open Work Sessions, passes the limit's refusal to the model, and closes one", async () => {
+  const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
+  const refusal =
+    'This Tag has 8 of 8 Work Sessions open, its limit, so no new one started.\n- work/1 "Draft" (reported, this conversation)';
+  const start = vi.spyOn(bridge.workSessions, "start").mockImplementation(async () => {
+    throw new ConnectError(refusal, Code.FailedPrecondition);
+  });
+  const close = vi
+    .spyOn(bridge.workSessions, "close")
+    .mockImplementation(async ({ workSessionId }) =>
+      create(WorkSessionSchema, {
+        workSessionId,
+        parentTagId: tagId,
+        closedAtMs: 1n,
+        closeReason: WorkSessionCloseReason.TAG,
+      }),
+    );
+  const service = await startCoordination(
+    bridge,
+    create(HarnessRunSchema, {
+      task: { taskId, tagId, sessionId: "conversation/1" },
+      attemptId,
+      coordination: { mayStartWorkSession: true, openWorkSessions: 8, maxWorkSessions: 8 },
+    }),
+    {
+      taskId,
+      tagId,
+      attemptId,
+      secrets: [grpcToken],
+      signal: new AbortController().signal,
+      active: () => true,
+    },
+  );
+  const client = new Client({ name: "opencode-fixture", version: "1" });
+  try {
+    const [tool] = service.tools;
+    if (!tool) throw new Error("expected private MCP binding");
+    expect(tool.operations).toEqual(["start_session", "close_session"]);
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(tool.url), {
+        requestInit: { headers: tool.headers },
+      }),
+    );
+    const listed = (await client.listTools()).tools.find(({ name }) => name === "start_session");
+    expect(listed?.description).toContain("This Tag has 8 of 8 Work Sessions open");
+    const refused = await client.callTool({
+      name: "start_session",
+      arguments: { title: "More", instruction: "Do more" },
+    });
+    expect(refused).toMatchObject({ isError: true });
+    expect((refused.content as { text: string }[])[0]?.text).toBe(refusal);
+    expect(start).toHaveBeenCalledOnce();
+    const sessionId = "work/1ed2c531-904a-419e-b7af-332f10537ba2";
+    const closed = await client.callTool({ name: "close_session", arguments: { sessionId } });
+    expect(closed.isError).toBeFalsy();
+    expect(close).toHaveBeenCalledExactlyOnceWith(
+      { workSessionId: sessionId },
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
+    expect(
+      await client.callTool({ name: "close_session", arguments: { sessionId: "not-a-session" } }),
+    ).toMatchObject({ isError: true });
   } finally {
     await client.close();
     await service.close();

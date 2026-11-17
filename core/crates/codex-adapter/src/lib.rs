@@ -128,6 +128,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         attach_artifacts: attached.may_materialize_artifacts,
         tag_sessions: capabilities.may_read_tag_sessions,
         schedule: capabilities.may_schedule,
+        close_sessions: capabilities.may_start_work_session,
         report_objective: questions::Reporting::new(&capabilities),
     };
     let reread = tools.tag_sessions;
