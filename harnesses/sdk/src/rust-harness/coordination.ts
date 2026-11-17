@@ -156,6 +156,7 @@ const schemas = {
     }),
   cancel_schedule: z.strictObject({ scheduleId: tagId }),
   remember: z.strictObject({ text: nonblankText(500), replaces: tagId.optional() }),
+  stay_quiet: z.strictObject({ note: nonblankText(500) }),
   forget: z.strictObject({ memoryId: tagId }),
 };
 
@@ -243,6 +244,10 @@ export function scheduleLine(schedule: Schedule, zone: string) {
   return `${schedule.scheduleId} next ${next}, ${recurrence}: ${schedule.note}`;
 }
 
+/** What `stay_quiet` says. Matches the Codex adapter's `questions::QUIET_DESCRIPTION`. */
+export const STAY_QUIET_DESCRIPTION =
+  "Finish this turn without posting anything, when it found nothing that needs a person's attention: no reply is posted to the thread or conversation and nothing counts as unread. The note says why in one line; it is kept in the Tag's history, never posted. Use it only when nothing changed or nothing needs anyone; when something does, write the reply instead. Call this last, then finish the turn.";
+
 /**
  * What the `remember` tool says a note is for. Matches the Codex adapter's
  * `memory::REMEMBER_DESCRIPTION`.
@@ -310,15 +315,23 @@ export interface ObjectiveReport {
 
 /**
  * Applies a reported Objective status to a successful outcome. The summary becomes the turn's
- * result. A turn that waits for approvals, or failed, finishes as progress instead.
+ * result. A turn that waits for approvals, or failed, finishes as progress instead. Without a
+ * report, a turn that called `stay_quiet` finishes quietly, its note the result when it wrote
+ * no final text.
  */
 export function withObjectiveReport<
   T extends Pick<HarnessCompleteRequest, "result" | "succeeded"> & {
     waitingApprovalIds?: string[];
   },
->(outcome: T, report: ObjectiveReport | undefined): T & { objectiveSignal?: ObjectiveSignal } {
-  if (!report || !outcome.succeeded || outcome.waitingApprovalIds?.length) return outcome;
-  return { ...outcome, result: report.summary, objectiveSignal: report.signal };
+>(
+  outcome: T,
+  report: ObjectiveReport | undefined,
+  quiet?: string,
+): T & { objectiveSignal?: ObjectiveSignal; quiet?: boolean } {
+  if (!outcome.succeeded || outcome.waitingApprovalIds?.length) return outcome;
+  if (report) return { ...outcome, result: report.summary, objectiveSignal: report.signal };
+  if (quiet === undefined) return outcome;
+  return { ...outcome, result: trim(outcome.result) ? outcome.result : quiet, quiet: true };
 }
 
 export interface CoordinationScope {
@@ -396,6 +409,7 @@ export function registerCoordinationTools(
   const reviewDeliveries = new Map<string, string>();
   let asked = false;
   let report: ObjectiveReport | undefined;
+  let quiet: string | undefined;
   let writes = Promise.resolve();
   const meta = configuration.meta ?? {};
   const safeText = (text: string) => redact(text, scope.secrets);
@@ -724,6 +738,25 @@ export function registerCoordinationTools(
           report = { signal: reportedSignal[status], summary: trim(safeText(summary)) };
           return response(
             "Objective status recorded. It applies when this turn ends, and your summary becomes this turn's result. Finish the turn now.",
+          );
+        }),
+    );
+  }
+  if (run.coordination?.mayStayQuiet) {
+    tools.push("stay_quiet");
+    server.registerTool(
+      "stay_quiet",
+      { description: STAY_QUIET_DESCRIPTION, inputSchema: schemas.stay_quiet, _meta: meta },
+      ({ note }) =>
+        write(async () => {
+          if (asked) return response("This turn is waiting for an answer.", true);
+          if (report)
+            return response("This turn reported the Objective's status, which is posted.", true);
+          if (pending.size || scope.hasPendingExternalApprovals?.())
+            return response("This turn is waiting for an approval decision.", true);
+          quiet = trim(safeText(note));
+          return response(
+            "Recorded: nothing from this turn is posted. Finish the turn now without further tool calls.",
           );
         }),
     );
@@ -1631,6 +1664,11 @@ export function registerCoordinationTools(
     async objectiveReport(): Promise<ObjectiveReport | undefined> {
       await writes;
       return asked ? undefined : report;
+    },
+    /** Why this turn stays quiet, if it called `stay_quiet` and asked nothing. */
+    async quietNote(): Promise<string | undefined> {
+      await writes;
+      return asked ? undefined : quiet;
     },
   };
 }

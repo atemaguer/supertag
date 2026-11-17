@@ -333,8 +333,9 @@ async fn work_session_limits_show_and_an_operator_closes_one(database: String) -
 
 /// A built-in harness's `schedule` call reaches the Control Plane through the Worker Host and
 /// takes effect when its turn succeeds. When the Control Plane's clock passes the time, the
-/// maintenance sweep queues the Tag's next turn in the same Session, and a Worker Host runs it.
-/// The operator commands create, pause, resume, read, and delete a Schedule.
+/// maintenance sweep queues the Tag's next turn in the same Session, and a Worker Host runs it;
+/// that turn may stay quiet, and a person's may not. The operator commands create, pause,
+/// resume, read, and delete a Schedule.
 async fn a_tag_schedules_a_follow_up_that_the_sweep_fires(database: String) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -374,11 +375,15 @@ async fn a_tag_schedules_a_follow_up_that_the_sweep_fires(database: String) -> R
         &public(&services),
         &root.join("first"),
         None,
-        &["--schedule=2h"],
+        &["--schedule=2h", "--stay-quiet"],
     ))
     .await?;
     let first = json(cli(&["get", "task", field(&submitted, "task_id")?])).await?;
-    ensure!(first["state"] == "TASK_STATE_SUCCEEDED", "{first}");
+    // A person's message is always answered, even when the harness asks to stay quiet.
+    ensure!(
+        first["state"] == "TASK_STATE_SUCCEEDED" && first["quiet"] == false,
+        "{first}"
+    );
     let listed = json(cli(&["get", "schedules", "--tag", "lead"])).await?;
     let schedules = listed["schedules"].as_array().context("schedules")?;
     ensure!(schedules.len() == 1, "{listed}");
@@ -415,12 +420,14 @@ async fn a_tag_schedules_a_follow_up_that_the_sweep_fires(database: String) -> R
         &public(&services),
         &root.join("second"),
         None,
-        &["--schedule=2h"],
+        &["--schedule=2h", "--stay-quiet"],
     ))
     .await?;
     let woken = json(cli(&["get", "task", &woken])).await?;
     ensure!(
         woken["state"] == "TASK_STATE_SUCCEEDED"
+            // No person waits on a Schedule's turn, so it may finish quietly.
+            && woken["quiet"] == true
             && woken["session_id"] == "ops"
             // The fixture's result repeats the prompt it ran.
             && field(&woken, "result")?.contains("Scheduled wake-up.")

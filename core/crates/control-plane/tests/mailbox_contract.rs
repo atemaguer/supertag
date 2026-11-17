@@ -272,6 +272,14 @@ async fn durable_delivery(url: &str) {
     .await;
     let running = start(&store, &recipient, &first).await;
     assert_eq!(running.session_id, "inbox:recipient");
+    // No person waits on an inbox turn, so it may finish quietly.
+    assert!(
+        store
+            .attempt_capabilities(&recipient, &first)
+            .await
+            .unwrap()
+            .may_stay_quiet
+    );
     assert!(running.instructions.starts_with("Identity recipient"));
     assert_eq!(running.harness_kind(), HarnessKind::Codex);
     assert_eq!(running.allowed_actions, ["files:read"]);

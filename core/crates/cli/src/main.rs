@@ -2838,6 +2838,14 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "open_work_sessions": tag.open_work_sessions,
         "memory": tag.memory,
         "memory_reviewed_at_ms": tag.memory_reviewed_at_ms,
+        // How the Tag's unprompted messages were received; only `describe tag` reads it.
+        "attention": tag.attention.as_ref().map(|attention| json!({
+            "window_days": attention.window_days,
+            "posted": attention.posted,
+            "read": attention.read,
+            "answered": attention.answered,
+            "quiet": attention.quiet,
+        })),
         "revision": tag.revision,
         "instructions": tag.instructions,
         "allowed_actions": tag.allowed_actions,
@@ -2862,7 +2870,7 @@ fn print_task(task: &Task) -> Result<()> {
 fn task_json(task: &Task) -> serde_json::Value {
     json!({
         "task_id": task.task_id, "tag_id": task.tag_id, "session_id": task.session_id,
-        "state": task.state().as_str_name(), "result": task.result, "attempt_id": task.attempt_id,
+        "state": task.state().as_str_name(), "result": task.result, "quiet": task.quiet, "attempt_id": task.attempt_id,
         "harness": task.harness_kind().as_str_name(),
         "shared_execution_environment_id": supertag_protocol::shared_execution::environment(task.policy_snapshot.as_ref()),
         "file_scope": supertag_protocol::file_scope::of_task(task).map(|scope| json!({

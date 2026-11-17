@@ -153,6 +153,7 @@ async fn contract(store: &Store) {
         succeeded: true,
         objective_signal: 0,
         checkpoint_sha256: None,
+        quiet: false,
     };
     let completed = store.finish_task(owner, &finish).await.unwrap();
     assert_eq!(completed.state, TaskState::Succeeded as i32);
@@ -232,6 +233,7 @@ async fn contract(store: &Store) {
         succeeded: true,
         objective_signal: 0,
         checkpoint_sha256: None,
+        quiet: false,
     };
     let cancelled = store.finish_task(&cleanup_host, &finish).await.unwrap();
     assert_eq!(cancelled.state, TaskState::Cancelled as i32);
@@ -277,6 +279,7 @@ async fn contract(store: &Store) {
             succeeded: true,
             objective_signal: 0,
             checkpoint_sha256: None,
+            quiet: false,
         };
         let (cancel, complete) = tokio::join!(
             store.cancel_task(&task.task_id),

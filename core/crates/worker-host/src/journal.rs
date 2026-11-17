@@ -124,6 +124,9 @@ pub(crate) enum Entry {
         objective_signal: i32,
         #[serde(default)]
         waiting_approval_ids: Vec<String>,
+        /// The turn asked to finish quietly (`stay_quiet`).
+        #[serde(default)]
+        quiet: bool,
         checkpoint: Option<PendingCheckpoint>,
         workspace: Box<PreparedWorkspace>,
         #[serde(default)]
@@ -143,6 +146,8 @@ pub(crate) enum Entry {
         objective_signal: i32,
         #[serde(default)]
         waiting_approval_ids: Vec<String>,
+        #[serde(default)]
+        quiet: bool,
         #[serde(default)]
         checkpoint: Option<PendingCheckpoint>,
         #[serde(default)]

@@ -53,6 +53,7 @@ async fn finish(store: &Store, task_id: &str, succeeded: bool) -> FinishTaskRequ
         succeeded,
         objective_signal: 0,
         checkpoint_sha256: None,
+        quiet: false,
     };
     store.finish_task(&host, &finish).await.unwrap();
     finish

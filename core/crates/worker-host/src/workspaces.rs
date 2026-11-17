@@ -932,6 +932,7 @@ mod tests {
             succeeded: true,
             objective_signal: 0,
             waiting_approval_ids: vec!["test-approval".into()],
+            quiet: false,
             checkpoint: None,
             workspace: Box::new(PreparedWorkspace {
                 workspace_id: "project".into(),
@@ -951,6 +952,7 @@ mod tests {
             succeeded,
             objective_signal,
             waiting_approval_ids,
+            quiet,
             checkpoint,
             workspace,
             ..
@@ -986,6 +988,7 @@ mod tests {
             succeeded,
             objective_signal,
             waiting_approval_ids,
+            quiet,
             checkpoint,
             workspace: Some(Box::new(first)),
             prepared: Some(workspace),

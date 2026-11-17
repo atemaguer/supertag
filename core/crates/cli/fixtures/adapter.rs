@@ -933,11 +933,20 @@ async fn main() -> Result<()> {
         }
         _ => ObjectiveSignal::Progress,
     };
+    // `--stay-quiet` finishes quietly, as a built-in harness's `stay_quiet` tool does, on a turn
+    // no person is waiting on.
+    let quiet = std::env::args().any(|arg| arg == "--stay-quiet")
+        && succeeded
+        && run
+            .coordination
+            .as_ref()
+            .is_some_and(|scope| scope.may_stay_quiet);
     harness
         .complete(authenticated_request(
             HarnessCompleteRequest {
                 result,
                 succeeded,
+                quiet,
                 objective_signal: objective_signal as i32,
                 checkpoint: (succeeded && checkpoints::enabled())
                     .then(|| checkpoints::checkpoint(&task)),

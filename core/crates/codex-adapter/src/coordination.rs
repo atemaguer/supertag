@@ -40,6 +40,7 @@ pub(crate) enum Arguments {
     Schedule(crate::schedules::Call),
     Memory(crate::memory::Call),
     Report(crate::questions::ObjectiveReport),
+    Quiet(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

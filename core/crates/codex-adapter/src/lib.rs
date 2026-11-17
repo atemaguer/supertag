@@ -138,6 +138,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         schedule: capabilities.may_schedule,
         close_sessions: capabilities.may_start_work_session,
         memory: capabilities.may_remember,
+        quiet: capabilities.may_stay_quiet,
         report_objective: questions::Reporting::new(&capabilities),
     };
     let reread = tools.tag_sessions;
@@ -170,12 +171,19 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         Some(report) if succeeded => (report.summary, report.signal as i32),
         _ => (result, ObjectiveSignal::Progress as i32),
     };
+    // A quiet turn keeps its final text as its result, or its note when it wrote none.
+    let quiet = questions.quiet_note().filter(|_| succeeded);
+    let result = match &quiet {
+        Some(note) if result.trim().is_empty() => note.clone(),
+        _ => result,
+    };
     harness
         .complete(request(
             HarnessCompleteRequest {
                 result,
                 succeeded,
                 objective_signal,
+                quiet: quiet.is_some(),
                 checkpoint,
                 waiting_approval_ids: if succeeded {
                     questions.waiting_approvals()

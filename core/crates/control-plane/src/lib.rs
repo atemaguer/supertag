@@ -6,6 +6,7 @@ mod artifact_context;
 mod artifact_direct;
 mod artifact_publications;
 mod artifact_volumes;
+mod attention;
 mod audit;
 mod audit_sink;
 mod budget_pool;

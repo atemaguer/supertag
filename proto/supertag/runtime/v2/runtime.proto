@@ -490,6 +490,10 @@ message AttemptCapabilities {
   // A root turn of a Tag with memory may write and forget the Tag's notes (AttemptMemory),
   // unless an outside event, such as a GitHub or Linear webhook, started it.
   bool may_remember = 17;
+  // No person is waiting on this turn (a Schedule fire, a memory review, an inbox turn, or an
+  // Objective notice), so it may finish quietly: FinishTaskRequest.quiet. A person's message is
+  // always answered.
+  bool may_stay_quiet = 18;
 }
 
 // Operators see the work started in Sessions they can access.
@@ -1620,6 +1624,20 @@ message Tag {
   bool memory = 6800;
   // When the Tag last reviewed its work and tidied its notes.
   optional int64 memory_reviewed_at_ms = 6801;
+  // How the Tag's unprompted messages were received over the last `window_days`; read with GetTag.
+  AttentionSummary attention = 6900;
+}
+
+// A Tag's unprompted messages: the replies of turns no person asked for (Schedule fires and
+// Objective notices) that reached a person, and the checks that found nothing and stayed quiet.
+message AttentionSummary {
+  uint32 posted = 1;
+  // Posted messages a person read in their conversation; surfaces have no read receipts.
+  uint32 read = 2;
+  // Posted messages a person answered in the same Session within a day.
+  uint32 answered = 3;
+  uint32 quiet = 4;
+  uint32 window_days = 5;
 }
 
 message ListTagsRequest {
@@ -1670,12 +1688,15 @@ message Conversation {
   uint64 latest_order = 7;
   // How far the caller has read, as a message order; zero when it never has.
   uint64 read_order = 8;
-  // Finished replies after `read_order`.
+  // Finished replies after `read_order`, without quiet turns.
   uint32 unread_count = 9;
   // A Task of this conversation is queued or running.
   bool working = 10;
   // Set when the latest message is a Work Session's report turn, which has no caller message.
   optional string latest_work_session_report_id = 11;
+  // The latest message is the Tag's question, still unanswered: its turn asked an Objective
+  // question that waits for an answer.
+  bool asking = 12;
 }
 
 message ConversationMessage {
@@ -1837,6 +1858,9 @@ message Task {
   // Optional output requirements frozen when the Task is accepted.
   TaskOutputPolicy output_policy = 20;
   repeated AcceptedTaskArtifactInput input_artifacts = 21;
+  // The turn succeeded quietly: it found nothing that needs attention, so nothing was posted and
+  // its conversation does not show it. Its result says why.
+  bool quiet = 22;
   // How a surface message selected this Task's GitHub Workspace: request, origin or default.
   // Absent when the Tag's configured Workspace (or none) was used.
   optional string workspace_selection = 3500;
@@ -2276,6 +2300,9 @@ message FinishTaskRequest {
   WorkspaceDeliveryReference workspace_delivery = 8;
   repeated string waiting_approval_ids = 9;
   repeated ArtifactSelection artifacts = 10;
+  // The turn found nothing that needs attention (`stay_quiet`): it posts nothing to its surface or
+  // conversation. Honored only for a successful progress turn that `may_stay_quiet`.
+  bool quiet = 11;
 }
 
 message HarnessAttachRequest {}
@@ -2599,6 +2626,8 @@ message HarnessCompleteRequest {
   ObjectiveSignal objective_signal = 3;
   SessionCheckpoint checkpoint = 4;
   repeated string waiting_approval_ids = 5;
+  // The turn called `stay_quiet`; see FinishTaskRequest.quiet.
+  bool quiet = 6;
 }
 
 message HarnessCompleteResponse {}

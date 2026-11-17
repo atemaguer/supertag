@@ -11,12 +11,8 @@ export async function startCoordination(
   run: HarnessRun,
   scope: CoordinationScope,
 ) {
-  const { server, waitingApprovalIds, objectiveReport, close } = await startCoordinationHttp(
-    bridge,
-    run,
-    scope,
-    "opencode",
-  );
+  const { server, waitingApprovalIds, objectiveReport, quietNote, close } =
+    await startCoordinationHttp(bridge, run, scope, "opencode");
   return {
     tools: server
       ? [
@@ -31,6 +27,7 @@ export async function startCoordination(
       : [],
     waitingApprovalIds,
     objectiveReport,
+    quietNote,
     close,
   };
 }

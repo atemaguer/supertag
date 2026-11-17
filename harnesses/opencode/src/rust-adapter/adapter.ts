@@ -483,10 +483,14 @@ export async function runAdapter(
       active = false;
       cancellation.throwIfAborted();
       const result = parts.join("\n");
-      if (!result.trim()) throw new SafeOpenCodeFailure("OpenCode ended without a final response.");
+      // A quiet turn may end without final text; its note becomes the result.
+      const quiet = await coordination.quietNote();
+      if (!result.trim() && quiet === undefined)
+        throw new SafeOpenCodeFailure("OpenCode ended without a final response.");
       outcome = withObjectiveReport(
         { succeeded: true, result, waitingApprovalIds: await coordination.waitingApprovalIds() },
         await coordination.objectiveReport(),
+        quiet,
       );
     } finally {
       active = false;

@@ -73,7 +73,8 @@ impl Store {
         let session: String = row.try_get("session_id")?;
         let scope = crate::work_sessions::task_scope_in(&mut tx, &attempt.task_id).await?;
         let kind = scope.as_ref().map(|scope| scope.kind);
-        // A memory review reads the Tag's work and keeps its notes; it reaches no one.
+        // A memory review reads the Tag's work and keeps its notes; it reaches no one, and it ends
+        // with `stay_quiet`.
         let review = crate::memories::review_session(&session);
         let is_root =
             !crate::work_sessions::reserved_session(&session) && kind.is_none() && !review;
@@ -111,6 +112,7 @@ impl Store {
             portfolio.push('\n');
             portfolio.push_str(&schedules);
         }
+        let may_stay_quiet = crate::attention::may_stay_quiet_in(&mut tx, &task).await?;
         let tag: String = row.try_get("tag_id")?;
         let may_use_workstream = !review
             && match crate::teams::workstreams::workstream_for_task_in(
@@ -146,6 +148,7 @@ impl Store {
             open_work_sessions,
             max_work_sessions,
             may_remember,
+            may_stay_quiet,
         })
     }
 

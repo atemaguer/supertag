@@ -10,7 +10,7 @@
 //!
 //! The maintenance sweep queues a review turn in the Tag's reserved `memory:` Session once a day
 //! after enough work. The review reads the Tag's shared Sessions and rewrites its shared notes;
-//! it has no tool that reaches anyone, and its Session has no reply destination, so it posts
+//! it has no tool that reaches anyone, and it ends with `stay_quiet` (attention.rs), so it posts
 //! nothing.
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
@@ -686,7 +686,7 @@ fn review_prompt(since: Option<i64>, sessions: &[String]) -> String {
         None => "so far".to_owned(),
     };
     let mut text = format!(
-        "Memory review. Review your work {since}. Read the Sessions below with read_session, and read_turn for detail; you may see only shared Sessions. Then update your notes: merge duplicates, replace what is stale, add only lasting lessons and pointers, and forget what no longer matters. Don't contact anyone. Finish with one line saying what you changed."
+        "Memory review. Review your work {since}. Read the Sessions below with read_session, and read_turn for detail; you may see only shared Sessions. Then update your notes: merge duplicates, replace what is stale, add only lasting lessons and pointers, and forget what no longer matters. Don't contact anyone. Finish by calling stay_quiet with one line saying what you changed."
     );
     if sessions.is_empty() {
         text.push_str("\nSessions: none listed; use list_sessions.");

@@ -145,6 +145,7 @@ fn finish(identity: &InspectAttemptRequest) -> FinishTaskRequest {
         succeeded: true,
         objective_signal: ObjectiveSignal::Progress.into(),
         checkpoint_sha256: None,
+        quiet: false,
     }
 }
 

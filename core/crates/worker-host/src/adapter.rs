@@ -403,6 +403,7 @@ impl Harness for Bridge {
             || outcome.result.contains('\0')
             || ObjectiveSignal::try_from(outcome.objective_signal).is_err()
             || (!outcome.succeeded && outcome.objective_signal != ObjectiveSignal::Progress as i32)
+            || (!outcome.succeeded && outcome.quiet)
             || (!outcome.waiting_approval_ids.is_empty()
                 && (!outcome.succeeded
                     || outcome.objective_signal != ObjectiveSignal::Progress as i32
@@ -909,6 +910,7 @@ pub(crate) fn failed(message: &str) -> HarnessCompleteRequest {
         objective_signal: 0,
         checkpoint: None,
         waiting_approval_ids: vec![],
+        quiet: false,
     }
 }
 

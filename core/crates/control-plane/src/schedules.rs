@@ -910,7 +910,15 @@ async fn fire_in(
         }
         None => schedule.session_id.clone(),
     };
-    let prompt = prompt(&schedule, row, (due, next), missed, now, default)?;
+    let received = crate::attention::schedule_line_in(tx, &schedule.schedule_id).await?;
+    let prompt = prompt(
+        &schedule,
+        row,
+        (due, next),
+        missed,
+        (now, default),
+        received.as_deref(),
+    )?;
     let order = next_order(tx).await?;
     let task = Box::pin(insert_task(tx, order, &schedule.tag_id, &session, &prompt)).await?;
     crate::objectives::objective_link_task_in(tx, &task).await?;
@@ -951,8 +959,8 @@ fn prompt(
     row: &AnyRow,
     (due, next): (i64, Option<i64>),
     missed: u64,
-    now: i64,
-    default: Tz,
+    (now, default): (i64, Tz),
+    received: Option<&str>,
 ) -> Result<String> {
     let zone = match &schedule.every {
         Some(every) => zone(Some(&every.time_zone), default)?,
@@ -987,7 +995,11 @@ fn prompt(
         (Some(_), None) => text.push_str(" This Schedule does not occur again."),
         (None, _) => text.push_str(" This was a one-off."),
     }
-    text.push_str(" Do what the note asks. Your reply is posted as a normal message; if nothing needs attention, say so in one line.");
+    text.push_str(" Do what the note asks. Your reply is posted as a normal message; if nothing needs attention, call stay_quiet with one line saying why, and nothing is posted.");
+    if let Some(line) = received {
+        text.push(' ');
+        text.push_str(line);
+    }
     Ok(text)
 }
 

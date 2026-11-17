@@ -52,6 +52,7 @@ export async function startCoordinationHttp(
     tools: operations,
     waitingApprovalIds,
     objectiveReport,
+    quietNote,
   } = registerCoordinationTools(
     protocol,
     bridge,
@@ -69,6 +70,7 @@ export async function startCoordinationHttp(
       secrets: [],
       waitingApprovalIds,
       objectiveReport,
+      quietNote,
       async close() {},
     };
 
@@ -143,6 +145,7 @@ export async function startCoordinationHttp(
       secrets: [authorization, bearer],
       waitingApprovalIds,
       objectiveReport,
+      quietNote,
       close,
     };
   } catch (error) {
