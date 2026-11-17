@@ -10,7 +10,7 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
         ApprovalRule, GetTagRequest, HarnessKind, ListTagsRequest, PolicyExecutionSettings,
-        PutTagRequest, RetireTagRequest, WorkspaceSpec, operator_client::OperatorClient,
+        PutTagRequest, RetireTagRequest, StartRate, WorkspaceSpec, operator_client::OperatorClient,
     },
 };
 
@@ -100,6 +100,51 @@ pub struct PutArgs {
     /// keeps no notes and does not review. Omit to keep it as it is; a new Tag keeps memory.
     #[arg(long, num_args = 0..=1, default_missing_value = "true")]
     memory: Option<bool>,
+    /// At most how many of the Tag's Task Attempts start per period, as STARTS/PERIOD such as
+    /// 10/1h (periods in m, h, or d, from 1m to 7d), or none to remove it. A Task over it waits;
+    /// a person's message always starts. Omit to keep it as it is; a new Tag has none.
+    #[arg(long, value_parser = parse_start_rate)]
+    start_rate: Option<StartRate>,
+}
+
+/// `STARTS/PERIOD`, such as `10/1h`, or `none`, which removes the limit.
+pub(crate) fn parse_start_rate(value: &str) -> Result<StartRate, String> {
+    if value.trim().eq_ignore_ascii_case("none") {
+        return Ok(StartRate::default());
+    }
+    let refused = || format!("{value:?} is not STARTS/PERIOD, such as 10/1h, or none");
+    let (starts, period) = value.trim().split_once('/').ok_or_else(refused)?;
+    let starts: u32 = starts.trim().parse().map_err(|_| refused())?;
+    let period = period.trim();
+    let (count, unit) = period.split_at(period.len().saturating_sub(1));
+    let count: u64 = count.parse().map_err(|_| refused())?;
+    let unit_ms = match unit {
+        "m" => 60_000,
+        "h" => 3_600_000,
+        "d" => 86_400_000,
+        _ => return Err(refused()),
+    };
+    let per_ms = count.checked_mul(unit_ms).ok_or_else(refused)?;
+    if !(1..=10_000).contains(&starts) {
+        return Err("a start rate allows 1 to 10,000 starts".into());
+    }
+    if !(60_000..=7 * 86_400_000).contains(&per_ms) {
+        return Err("a start rate's period is 1m to 7d".into());
+    }
+    Ok(StartRate { starts, per_ms })
+}
+
+/// A start rate as `10/1h`.
+pub(crate) fn start_rate_text(rate: &StartRate) -> String {
+    let per = rate.per_ms / 60_000;
+    let period = if per.is_multiple_of(1440) {
+        format!("{}d", per / 1440)
+    } else if per.is_multiple_of(60) {
+        format!("{}h", per / 60)
+    } else {
+        format!("{per}m")
+    };
+    format!("{}/{period}", rate.starts)
 }
 
 // Options for `supertag get tags`: active Tags, and optionally retired identities.
@@ -154,6 +199,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 lead,
                 max_work_sessions,
                 memory,
+                start_rate,
             } = *args;
             let mounts = workspace_mounts
                 .as_deref()
@@ -211,6 +257,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                             harness: None,
                             shared_execution_environment_id: shared_execution_environment,
                         }),
+                        start_rate,
                     },
                     &token,
                 )?)
@@ -223,6 +270,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 "lead": tag.lead,
                 "max_work_sessions": tag.max_work_sessions,
                 "memory": tag.memory,
+                "start_rate": tag.start_rate.as_ref().map(start_rate_text),
             })
         }
         TagCommand::Retire { tag_id, dry_run } => {
@@ -272,4 +320,24 @@ pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value
         "tags": page.tags.iter().map(tag_json).collect::<Vec<_>>(),
         "next_cursor": page.next_cursor,
     }))
+}
+
+#[cfg(test)]
+mod start_rate_tests {
+    use super::*;
+
+    #[test]
+    fn start_rates_parse_as_starts_per_period() {
+        let rate = parse_start_rate("10/1h").unwrap();
+        assert_eq!((rate.starts, rate.per_ms), (10, 3_600_000));
+        assert_eq!(start_rate_text(&rate), "10/1h");
+        assert_eq!(parse_start_rate(" 3/90m ").unwrap().per_ms, 90 * 60_000);
+        assert_eq!(start_rate_text(&parse_start_rate("1/7d").unwrap()), "1/7d");
+        assert_eq!(parse_start_rate("none").unwrap().starts, 0);
+        for refused in [
+            "0/1h", "10/30s", "10/8d", "10", "ten/1h", "10/h", "10001/1h",
+        ] {
+            assert!(parse_start_rate(refused).is_err(), "{refused}");
+        }
+    }
 }

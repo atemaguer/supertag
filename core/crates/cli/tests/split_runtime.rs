@@ -479,6 +479,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
             execution: None,
             allowed_actions: vec!["files:write".into()],
             memory: None,
+            start_rate: None,
         })?)
         .await?
         .into_inner();
@@ -847,6 +848,7 @@ async fn attempt_time_limit_stops_the_adapter_and_fails_the_task(database: Strin
             execution: None,
             allowed_actions: vec!["files:read".into()],
             memory: None,
+            start_rate: None,
         })?)
         .await?;
     let accepted = client
@@ -918,6 +920,7 @@ async fn killed_worker_host_stops_adapter_and_restart_reclaims_without_rerunning
             execution: None,
             allowed_actions: vec!["files:read".into()],
             memory: None,
+            start_rate: None,
         })?)
         .await?;
     let accepted = client
@@ -1171,6 +1174,7 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint(
             execution: None,
             allowed_actions: vec!["files:read".into()],
             memory: None,
+            start_rate: None,
         })?)
         .await?;
     let children = direct_children(restarted.child.id())?;
@@ -1210,6 +1214,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
             execution: None,
             allowed_actions: vec!["files:read".into()],
             memory: None,
+            start_rate: None,
         })?)
         .await?;
     let first = client
@@ -1750,6 +1755,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
             execution: None,
             allowed_actions: vec!["files:read".into()],
             memory: None,
+            start_rate: None,
         })?)
         .await?;
     let mut policy =
@@ -2066,6 +2072,7 @@ async fn configure_slack_surface(services: &Services, credentials: &Credentials)
             execution: None,
             allowed_actions: vec!["files:read".into()],
             memory: None,
+            start_rate: None,
         })?)
         .await?;
     let mut policy =
@@ -2644,6 +2651,7 @@ async fn control_plane_partition_expires_execution_and_requires_audited_retry_be
             execution: None,
             allowed_actions: vec!["files:read".into()],
             memory: None,
+            start_rate: None,
         })?)
         .await?;
     let accepted = operator

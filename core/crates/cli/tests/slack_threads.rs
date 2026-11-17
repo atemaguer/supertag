@@ -658,6 +658,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
                 workspace: None,
                 harness_kind: 0,
                 memory: None,
+                start_rate: None,
             })?)
             .await?;
     }

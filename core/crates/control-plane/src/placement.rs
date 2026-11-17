@@ -644,6 +644,11 @@ impl Store {
             });
             carried.push(labels);
         }
+        let held = if task.state() == TaskState::Queued {
+            crate::start_rates::held_until_in(&mut transaction, &task, now).await?
+        } else {
+            None
+        };
         transaction.commit().await?;
         let missing = missing_labels(&required, &carried);
         let (requirement, summary) = if hosts.is_empty() {
@@ -659,6 +664,19 @@ impl Store {
             .then(|| lanes.first().cloned().flatten())
         {
             requirement
+        } else if let Some((rate, next)) = held {
+            (
+                "start-rate".to_owned(),
+                format!(
+                    "Tag {} started {} Task Attempts in the last {}, its start rate; the next can start at {}",
+                    task.tag_id,
+                    rate.starts,
+                    crate::start_rates::describe(&rate)
+                        .split_once('/')
+                        .map_or("", |(_, per)| per),
+                    crate::start_rates::clock(next, self.time_zone()),
+                ),
+            )
         } else if missing.is_empty() {
             (task.state() == TaskState::Queued)
                 .then(|| waiting_for_capacity(task.harness_kind(), &eligible))

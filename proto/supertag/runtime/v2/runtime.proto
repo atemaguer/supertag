@@ -1616,6 +1616,19 @@ message PutTagRequest {
   // Whether the Tag keeps memory: notes it writes with `remember` and a daily review of its
   // work. Omitted keeps the current value; a new Tag keeps memory.
   optional bool memory = 6800;
+  // At most how many of the Tag's Task Attempts start per period. Omitted keeps the current
+  // value; `starts` 0 removes the limit. A new Tag has none.
+  optional StartRate start_rate = 7000;
+}
+
+// A cap on how often a Tag's Task Attempts start: at most `starts` in any `per_ms` window. A
+// Task over it stays queued until the window has room; a person's turn always starts, and
+// counts.
+message StartRate {
+  // 1 to 10,000; 0 in PutTagRequest removes the limit.
+  uint32 starts = 1;
+  // 1 minute to 7 days.
+  uint64 per_ms = 2;
 }
 
 message Tag {
@@ -1644,6 +1657,10 @@ message Tag {
   optional int64 memory_reviewed_at_ms = 6801;
   // How the Tag's unprompted messages were received over the last `window_days`; read with GetTag.
   AttentionSummary attention = 6900;
+  // The Tag's start rate, when it has one.
+  StartRate start_rate = 7000;
+  // How many of its Task Attempts started in the start rate's current window; read with GetTag.
+  uint32 starts_in_window = 7001;
 }
 
 // A Tag's unprompted messages: the replies of turns no person asked for (Schedule fires and

@@ -47,6 +47,30 @@ limited in three places:
 
 `supertag metrics` shows queued Tasks, host capacity, and how long Tasks waited.
 
+### Start rates
+
+Concurrency limits how many Tasks run at once, not how many start in an hour. A **start rate**
+caps how often a Tag's Task Attempts start, to smooth bursts such as many Schedules coming due at
+09:00:
+
+```sh
+supertag tag put lead --instructions "Release engineering" --start-rate 10/1h
+supertag tag put lead --instructions "Release engineering" --start-rate none
+```
+
+The rate is `STARTS/PERIOD`, from 1 to 10,000 starts in 1 minute (`1m`) to 7 days (`7d`), and a
+window slides over the last period. While a Tag has started that many Task Attempts in the last
+period, its next Task stays queued and starts when the oldest start leaves the window. Nothing is
+dropped, and other Tags keep running. A person's message always starts at once and counts toward
+the rate, so the Tag's own background work, such as Schedule wake-ups, Objective notices, and
+inbox turns, is what waits. A retried Task Attempt is a new start.
+
+A waiting turn says so wherever a waiting turn's reason shows, such as "Tag lead started 10 Task
+Attempts in the last 1h, its start rate; the next can start at 2026-11-17 10:42 UTC".
+`supertag placement explain TASK` reports the requirement `start-rate`, and
+`supertag describe tag` shows `start_rate` with how many Task Attempts started in the current
+window. A Tag manifest sets it with `spec.startRate`. A new Tag has no start rate.
+
 ### Objective turns
 
 An Objective's owner turns and its work Sessions draw on the Objective's budget. When the budget is

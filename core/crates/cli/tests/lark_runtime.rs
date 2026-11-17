@@ -264,6 +264,7 @@ async fn put_tag(public: &str, credentials: &Credentials) -> Result<()> {
             workspace: None,
             harness_kind: 0,
             memory: None,
+            start_rate: None,
         })?)
         .await?;
     Ok(())

@@ -16,6 +16,11 @@ within the pre-1.0 compatibility policy described in
 - Operators see a Tag's network log, the web requests its Task Attempts made through the Worker
   Host's egress proxy, allowed or refused, in the desktop app's Tag details under **Network** and
   under **Network** in the terminal UI's command palette.
+- Start rates cap how often a Tag's Task Attempts start, such as at most 10 an hour, to smooth
+  bursts like many Schedules coming due at once: `supertag tag put TAG --start-rate 10/1h`, or
+  `spec.startRate` in a Tag manifest. A Task over the rate stays queued until the window has room,
+  and says when it can start; a person's message always starts. `describe tag` shows the rate and
+  the starts in the current window, and `placement explain` reports `start-rate`.
 - See and delete what a Tag remembers: the desktop app lists a Tag's notes in its details panel,
   opened from the Tag's name, and the terminal UI under Notes in the command palette. Each note
   records when a turn last had it in its context (`last_seen_at` in `supertag describe memory`),

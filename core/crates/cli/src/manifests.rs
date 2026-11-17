@@ -130,6 +130,18 @@ struct TagSpec {
     max_work_sessions: Option<u32>,
     /// Whether the Tag keeps memory: notes and a daily review. Omitted keeps the current value.
     memory: Option<bool>,
+    /// At most how many Task Attempts start per period. Omitted keeps the current value;
+    /// `starts: 0` removes it.
+    start_rate: Option<StartRateSpec>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StartRateSpec {
+    starts: u32,
+    /// A period such as `90m`, `1h`, or `1d`; omitted with `starts: 0`.
+    #[serde(default)]
+    per: String,
 }
 
 #[derive(Deserialize)]

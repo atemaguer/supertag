@@ -782,6 +782,7 @@ impl<'a> Catalog<'a> {
             spec.lead.is_some(),
             spec.max_work_sessions.is_some(),
             spec.memory.is_some(),
+            spec.start_rate.is_some(),
         ];
         let mut value = PutTagRequest {
             tag_id: name.into(),
@@ -806,6 +807,16 @@ impl<'a> Catalog<'a> {
             lead: spec.lead,
             max_work_sessions: spec.max_work_sessions,
             memory: spec.memory,
+            start_rate: spec
+                .start_rate
+                .map(|rate| {
+                    if rate.starts == 0 {
+                        return Ok(StartRate::default());
+                    }
+                    crate::tags::parse_start_rate(&format!("{}/{}", rate.starts, rate.per))
+                        .map_err(|error| anyhow::anyhow!("spec.startRate: {error}"))
+                })
+                .transpose()?,
         };
         ensure!(
             value.instructions.len() <= 65_536,
@@ -1039,6 +1050,12 @@ impl<'a> Catalog<'a> {
                 old.map(|v| flag(!v.memory)),
                 flag(!value.memory.unwrap_or(true)),
             ),
+            // No start rate is the unset value, which no manager owns.
+            field(
+                "spec.startRate",
+                old.map(|v| start_rate(v.start_rate.as_ref())),
+                start_rate(value.start_rate.as_ref().filter(|rate| rate.starts > 0)),
+            ),
         ]
         .into_iter()
         .zip(declared)
@@ -1055,6 +1072,9 @@ impl<'a> Catalog<'a> {
                     .max_work_sessions
                     .is_none_or(|max| max == old.max_work_sessions)
                 && value.memory.is_none_or(|memory| memory == old.memory)
+                && value.start_rate.as_ref().is_none_or(|rate| {
+                    Some(rate).filter(|rate| rate.starts > 0) == old.start_rate.as_ref()
+                })
         });
         Ok((!unchanged).then_some((prior.is_some(), Write::Tag(value))))
     }
@@ -1620,6 +1640,16 @@ fn work_session_limit(value: u32) -> Vec<u8> {
     } else {
         value.to_le_bytes().to_vec()
     }
+}
+
+fn start_rate(value: Option<&StartRate>) -> Vec<u8> {
+    value.map_or_else(Vec::new, |rate| {
+        [
+            u64::from(rate.starts).to_le_bytes(),
+            rate.per_ms.to_le_bytes(),
+        ]
+        .concat()
+    })
 }
 
 fn flag(value: bool) -> Vec<u8> {

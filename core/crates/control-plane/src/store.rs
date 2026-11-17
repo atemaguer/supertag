@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 93;
+        const SCHEMA_VERSION: i64 = 94;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -292,6 +292,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0091_event_receipt_expiry.sql"),
                 include_str!("../migrations/sqlite/0092_failure_detail.sql"),
                 include_str!("../migrations/sqlite/0093_memory_watch.sql"),
+                include_str!("../migrations/sqlite/0094_start_rate.sql"),
             ]
         } else {
             [
@@ -390,6 +391,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0091_event_receipt_expiry.sql"),
                 include_str!("../migrations/postgresql/0092_failure_detail.sql"),
                 include_str!("../migrations/postgresql/0093_memory_watch.sql"),
+                include_str!("../migrations/postgresql/0094_start_rate.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -514,6 +516,7 @@ impl Store {
             lead: None,
             max_work_sessions: None,
             memory: None,
+            start_rate: None,
         })
         .await
     }
@@ -542,6 +545,7 @@ impl Store {
             lead,
             max_work_sessions,
             memory,
+            start_rate,
         } = input;
         let tag_id = tag_id.as_str();
         let instructions = instructions.as_str();
@@ -630,7 +634,8 @@ impl Store {
             crate::work_sessions::max_work_sessions_in(transaction, tag_id, max_work_sessions)
                 .await?;
         let memory = crate::memories::enabled_in(transaction, tag_id, memory).await?;
-        let row = sqlx::query("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead, max_work_sessions, memory) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead, max_work_sessions=excluded.max_work_sessions, memory=excluded.memory RETURNING revision, memory_reviewed_at_ms")
+        let start_rate = crate::start_rates::requested_in(transaction, tag_id, start_rate).await?;
+        let row = sqlx::query("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead, max_work_sessions, memory, start_rate_starts, start_rate_per_ms) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead, max_work_sessions=excluded.max_work_sessions, memory=excluded.memory, start_rate_starts=excluded.start_rate_starts, start_rate_per_ms=excluded.start_rate_per_ms RETURNING revision, memory_reviewed_at_ms")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
             .bind(workspace.as_ref().map(|spec| &spec.base_commit))
@@ -644,6 +649,8 @@ impl Store {
             .bind(i64::from(lead))
             .bind(i64::from(max_work_sessions))
             .bind(i64::from(memory))
+            .bind(start_rate.as_ref().map(|rate| i64::from(rate.starts)))
+            .bind(start_rate.as_ref().map(|rate| rate.per_ms as i64))
             .fetch_one(&mut **transaction).await?;
         let revision: i64 = row.try_get("revision")?;
         Ok(Tag {
@@ -666,6 +673,8 @@ impl Store {
             memory,
             memory_reviewed_at_ms: row.try_get("memory_reviewed_at_ms")?,
             attention: None,
+            start_rate,
+            starts_in_window: 0,
         })
     }
 

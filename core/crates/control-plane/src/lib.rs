@@ -46,6 +46,7 @@ pub mod reply_progress;
 mod review_artifacts;
 mod schedules;
 mod spend;
+mod start_rates;
 mod store;
 mod surface_objectives;
 mod surface_policy;
@@ -1062,6 +1063,7 @@ mod tests {
             lead: None,
             max_work_sessions: None,
             memory: None,
+            start_rate: None,
         };
         assert_eq!(
             cp.put_tag(Request::new(tag.clone()))

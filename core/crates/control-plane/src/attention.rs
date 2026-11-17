@@ -84,6 +84,12 @@ async fn turn_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<Turn> {
     })
 }
 
+/// Whether a person is waiting on this turn: their message started or joined it, or they acted
+/// on its approval.
+pub(crate) async fn person_turn_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<bool> {
+    Ok(turn_in(tx, task).await? == Turn::Person)
+}
+
 /// Whether no person is waiting on this turn, so it may finish quietly.
 pub(crate) async fn may_stay_quiet_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<bool> {
     Ok(matches!(

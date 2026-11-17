@@ -571,6 +571,7 @@ async fn put_builder(credentials: &Credentials, control_plane: &str) -> Result<(
             workspace: None,
             harness_kind: 0,
             memory: None,
+            start_rate: None,
         })?)
         .await?;
     Ok(())

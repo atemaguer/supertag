@@ -2875,6 +2875,13 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "open_work_sessions": tag.open_work_sessions,
         "memory": tag.memory,
         "memory_reviewed_at_ms": tag.memory_reviewed_at_ms,
+        // At most how many Task Attempts start per period, and how many started in the current
+        // window; only `describe tag` reads the count.
+        "start_rate": tag.start_rate.as_ref().map(|rate| json!({
+            "starts": rate.starts,
+            "per": crate::tags::start_rate_text(rate).split_once('/').map(|(_, per)| per.to_owned()),
+            "in_window": tag.starts_in_window,
+        })),
         // How the Tag's unprompted messages were received; only `describe tag` reads it.
         "attention": tag.attention.as_ref().map(|attention| json!({
             "window_days": attention.window_days,

@@ -92,6 +92,8 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         memory: row.try_get::<i64, _>("memory")? != 0,
         memory_reviewed_at_ms: row.try_get("memory_reviewed_at_ms")?,
         attention: None,
+        start_rate: crate::start_rates::from_row(row)?,
+        starts_in_window: 0,
     })
 }
 
@@ -146,8 +148,9 @@ impl Store {
             .await?
             .ok_or_else(|| missing(tag_id))?;
         let mut tag = tag_from_row(&row)?;
-        tag.attention =
-            Some(crate::attention::summary_in(&mut tx, tag_id, self.execution_now_ms()).await?);
+        let now = self.execution_now_ms();
+        tag.attention = Some(crate::attention::summary_in(&mut tx, tag_id, now).await?);
+        tag.starts_in_window = crate::start_rates::in_window_in(&mut tx, tag_id, now).await?;
         tx.commit().await?;
         Ok(tag)
     }

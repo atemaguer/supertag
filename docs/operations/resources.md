@@ -153,7 +153,7 @@ a network scope is in [Network scopes](../reference/iam.md#network-scopes).
 | `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `reference`, `surfaceAccountId`, `scope`, and `approvalRequired`; `paths`, `exclude`, and `additionalDirectories` on `files:write` and `files:read`; `hosts`, `methods`, `paths`, and `credential` on `web:fetch`; and the set's `approvers` |
 | `ContextSet` | Knowledge items a Task may receive, each with an `itemKey`, `type`, `version`, and `config`, and optionally `required` |
 | `Role` | `purpose`, `instructions`, `permissionSets`, `contextSets`, and `execution` |
-| `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, `acceptsMessagesFrom`, `lead`, and `maxWorkSessions` |
+| `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, `acceptsMessagesFrom`, `lead`, `maxWorkSessions`, `memory`, and `startRate` |
 | `Team` | `members` and `maxConcurrency` |
 | `Objective` | An outcome; see [Declare Objectives](#declare-objectives) |
 | `Workspace` | A GitHub repository source: `github` with `accountId`, `repositoryId`, `repository`, and a `revision` or `commitSha`, and optionally `pullRequestBase`. A repository on a Worker Host is not a manifest; map it in the host's `workspaces` in `supertag.yaml` |

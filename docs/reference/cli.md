@@ -2540,6 +2540,8 @@ Options:
           How many Work Sessions the Tag may have open at once, across all its conversations, from 1 to 64. Omit to keep it as it is; a new Tag gets 8
       --memory [<MEMORY>]
           Keep memory: notes the Tag writes and a daily review of its work. With false, the Tag keeps no notes and does not review. Omit to keep it as it is; a new Tag keeps memory [possible values: true, false]
+      --start-rate <START_RATE>
+          At most how many of the Tag's Task Attempts start per period, as STARTS/PERIOD such as 10/1h (periods in m, h, or d, from 1m to 7d), or none to remove it. A Task over it waits; a person's message always starts. Omit to keep it as it is; a new Tag has none
   -h, --help
           Print help
 ```
