@@ -63,3 +63,21 @@ export function shorten(text: string): string {
   if (chars.length <= MAX_ACTIVITY && lines.length <= 1) return line;
   return `${chars.slice(0, MAX_ACTIVITY - 1).join("")}…`;
 }
+
+/**
+ * The text a partial-message event adds to the message Claude is writing. Text blocks are joined
+ * with a newline, as the completed message's are.
+ */
+export function streamedText(event: { type: string }, streamed: { blocks: number }) {
+  const part = event as {
+    type: string;
+    delta?: { type?: string; text?: string };
+    content_block?: { type?: string };
+  };
+  if (part.type === "message_start") streamed.blocks = 0;
+  if (part.type === "content_block_start" && part.content_block?.type === "text")
+    return streamed.blocks++ > 0 ? "\n" : undefined;
+  if (part.type === "content_block_delta" && part.delta?.type === "text_delta")
+    return part.delta.text || undefined;
+  return undefined;
+}

@@ -279,6 +279,8 @@ const (
 	WorkerHostReportAttemptUsageProcedure = "/supertag.runtime.v2.WorkerHost/ReportAttemptUsage"
 	// WorkerHostAppendEventProcedure is the fully-qualified name of the WorkerHost's AppendEvent RPC.
 	WorkerHostAppendEventProcedure = "/supertag.runtime.v2.WorkerHost/AppendEvent"
+	// WorkerHostPublishTextProcedure is the fully-qualified name of the WorkerHost's PublishText RPC.
+	WorkerHostPublishTextProcedure = "/supertag.runtime.v2.WorkerHost/PublishText"
 	// WorkerHostAskQuestionProcedure is the fully-qualified name of the WorkerHost's AskQuestion RPC.
 	WorkerHostAskQuestionProcedure = "/supertag.runtime.v2.WorkerHost/AskQuestion"
 	// WorkerHostFinishTaskProcedure is the fully-qualified name of the WorkerHost's FinishTask RPC.
@@ -407,6 +409,8 @@ const (
 	HarnessSettleLiveInputProcedure = "/supertag.runtime.v2.Harness/SettleLiveInput"
 	// HarnessPublishProcedure is the fully-qualified name of the Harness's Publish RPC.
 	HarnessPublishProcedure = "/supertag.runtime.v2.Harness/Publish"
+	// HarnessPublishTextProcedure is the fully-qualified name of the Harness's PublishText RPC.
+	HarnessPublishTextProcedure = "/supertag.runtime.v2.Harness/PublishText"
 	// HarnessReportUsageProcedure is the fully-qualified name of the Harness's ReportUsage RPC.
 	HarnessReportUsageProcedure = "/supertag.runtime.v2.Harness/ReportUsage"
 	// HarnessCompleteProcedure is the fully-qualified name of the Harness's Complete RPC.
@@ -2712,6 +2716,10 @@ type WorkerHostClient interface {
 	GetAttemptResolution(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error)
 	ReportAttemptUsage(context.Context, *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error)
+	// The text of the message the running Attempt's Tag is writing now, redacted, while it is
+	// written. The Control Plane keeps it in memory only and shows it to the turn's conversation
+	// until the message is recorded as an event.
+	PublishText(context.Context, *connect.Request[runtimev2.PublishTaskTextRequest]) (*connect.Response[runtimev2.PublishTaskTextResponse], error)
 	AskQuestion(context.Context, *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
 	FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	// The restarted host of an interrupted Attempt proves every process it recorded for the
@@ -2817,6 +2825,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("AppendEvent")),
 			connect.WithClientOptions(opts...),
 		),
+		publishText: connect.NewClient[runtimev2.PublishTaskTextRequest, runtimev2.PublishTaskTextResponse](
+			httpClient,
+			baseURL+WorkerHostPublishTextProcedure,
+			connect.WithSchema(workerHostMethods.ByName("PublishText")),
+			connect.WithClientOptions(opts...),
+		),
 		askQuestion: connect.NewClient[runtimev2.AskQuestionRequest, runtimev2.ObjectiveQuestion](
 			httpClient,
 			baseURL+WorkerHostAskQuestionProcedure,
@@ -2871,6 +2885,7 @@ type workerHostClient struct {
 	getAttemptResolution    *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GetAttemptResolutionResponse]
 	reportAttemptUsage      *connect.Client[runtimev2.ReportAttemptUsageRequest, runtimev2.ReportAttemptUsageResponse]
 	appendEvent             *connect.Client[runtimev2.AppendEventRequest, runtimev2.TaskEvent]
+	publishText             *connect.Client[runtimev2.PublishTaskTextRequest, runtimev2.PublishTaskTextResponse]
 	askQuestion             *connect.Client[runtimev2.AskQuestionRequest, runtimev2.ObjectiveQuestion]
 	finishTask              *connect.Client[runtimev2.FinishTaskRequest, runtimev2.Task]
 	reclaimAttempt          *connect.Client[runtimev2.ReclaimAttemptRequest, runtimev2.AttemptResolution]
@@ -2944,6 +2959,11 @@ func (c *workerHostClient) AppendEvent(ctx context.Context, req *connect.Request
 	return c.appendEvent.CallUnary(ctx, req)
 }
 
+// PublishText calls supertag.runtime.v2.WorkerHost.PublishText.
+func (c *workerHostClient) PublishText(ctx context.Context, req *connect.Request[runtimev2.PublishTaskTextRequest]) (*connect.Response[runtimev2.PublishTaskTextResponse], error) {
+	return c.publishText.CallUnary(ctx, req)
+}
+
 // AskQuestion calls supertag.runtime.v2.WorkerHost.AskQuestion.
 func (c *workerHostClient) AskQuestion(ctx context.Context, req *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error) {
 	return c.askQuestion.CallUnary(ctx, req)
@@ -2989,6 +3009,10 @@ type WorkerHostHandler interface {
 	GetAttemptResolution(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error)
 	ReportAttemptUsage(context.Context, *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error)
+	// The text of the message the running Attempt's Tag is writing now, redacted, while it is
+	// written. The Control Plane keeps it in memory only and shows it to the turn's conversation
+	// until the message is recorded as an event.
+	PublishText(context.Context, *connect.Request[runtimev2.PublishTaskTextRequest]) (*connect.Response[runtimev2.PublishTaskTextResponse], error)
 	AskQuestion(context.Context, *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error)
 	FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	// The restarted host of an interrupted Attempt proves every process it recorded for the
@@ -3090,6 +3114,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("AppendEvent")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostPublishTextHandler := connect.NewUnaryHandler(
+		WorkerHostPublishTextProcedure,
+		svc.PublishText,
+		connect.WithSchema(workerHostMethods.ByName("PublishText")),
+		connect.WithHandlerOptions(opts...),
+	)
 	workerHostAskQuestionHandler := connect.NewUnaryHandler(
 		WorkerHostAskQuestionProcedure,
 		svc.AskQuestion,
@@ -3154,6 +3184,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostReportAttemptUsageHandler.ServeHTTP(w, r)
 		case WorkerHostAppendEventProcedure:
 			workerHostAppendEventHandler.ServeHTTP(w, r)
+		case WorkerHostPublishTextProcedure:
+			workerHostPublishTextHandler.ServeHTTP(w, r)
 		case WorkerHostAskQuestionProcedure:
 			workerHostAskQuestionHandler.ServeHTTP(w, r)
 		case WorkerHostFinishTaskProcedure:
@@ -3225,6 +3257,10 @@ func (UnimplementedWorkerHostHandler) ReportAttemptUsage(context.Context, *conne
 
 func (UnimplementedWorkerHostHandler) AppendEvent(context.Context, *connect.Request[runtimev2.AppendEventRequest]) (*connect.Response[runtimev2.TaskEvent], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.AppendEvent is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) PublishText(context.Context, *connect.Request[runtimev2.PublishTaskTextRequest]) (*connect.Response[runtimev2.PublishTaskTextResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.PublishText is not implemented"))
 }
 
 func (UnimplementedWorkerHostHandler) AskQuestion(context.Context, *connect.Request[runtimev2.AskQuestionRequest]) (*connect.Response[runtimev2.ObjectiveQuestion], error) {
@@ -4536,6 +4572,9 @@ type HarnessClient interface {
 	TakeLiveInput(context.Context, *connect.Request[runtimev2.HarnessTakeLiveInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error)
 	SettleLiveInput(context.Context, *connect.Request[runtimev2.HarnessSettleLiveInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
 	Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error)
+	// Text of the message the harness is writing now, as it arrives. The Worker Host batches and
+	// redacts it; the completed message is published as a MESSAGE event, which replaces it.
+	PublishText(context.Context, *connect.Request[runtimev2.HarnessPublishTextRequest]) (*connect.Response[runtimev2.HarnessPublishTextResponse], error)
 	ReportUsage(context.Context, *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	Complete(context.Context, *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error)
 }
@@ -4581,6 +4620,12 @@ func NewHarnessClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 			connect.WithSchema(harnessMethods.ByName("Publish")),
 			connect.WithClientOptions(opts...),
 		),
+		publishText: connect.NewClient[runtimev2.HarnessPublishTextRequest, runtimev2.HarnessPublishTextResponse](
+			httpClient,
+			baseURL+HarnessPublishTextProcedure,
+			connect.WithSchema(harnessMethods.ByName("PublishText")),
+			connect.WithClientOptions(opts...),
+		),
 		reportUsage: connect.NewClient[runtimev2.HarnessUsageRequest, runtimev2.ReportAttemptUsageResponse](
 			httpClient,
 			baseURL+HarnessReportUsageProcedure,
@@ -4603,6 +4648,7 @@ type harnessClient struct {
 	takeLiveInput          *connect.Client[runtimev2.HarnessTakeLiveInputRequest, runtimev2.TakeInputResponse]
 	settleLiveInput        *connect.Client[runtimev2.HarnessSettleLiveInputRequest, runtimev2.LiveInput]
 	publish                *connect.Client[runtimev2.HarnessPublishRequest, runtimev2.TaskEvent]
+	publishText            *connect.Client[runtimev2.HarnessPublishTextRequest, runtimev2.HarnessPublishTextResponse]
 	reportUsage            *connect.Client[runtimev2.HarnessUsageRequest, runtimev2.ReportAttemptUsageResponse]
 	complete               *connect.Client[runtimev2.HarnessCompleteRequest, runtimev2.HarnessCompleteResponse]
 }
@@ -4632,6 +4678,11 @@ func (c *harnessClient) Publish(ctx context.Context, req *connect.Request[runtim
 	return c.publish.CallUnary(ctx, req)
 }
 
+// PublishText calls supertag.runtime.v2.Harness.PublishText.
+func (c *harnessClient) PublishText(ctx context.Context, req *connect.Request[runtimev2.HarnessPublishTextRequest]) (*connect.Response[runtimev2.HarnessPublishTextResponse], error) {
+	return c.publishText.CallUnary(ctx, req)
+}
+
 // ReportUsage calls supertag.runtime.v2.Harness.ReportUsage.
 func (c *harnessClient) ReportUsage(ctx context.Context, req *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error) {
 	return c.reportUsage.CallUnary(ctx, req)
@@ -4649,6 +4700,9 @@ type HarnessHandler interface {
 	TakeLiveInput(context.Context, *connect.Request[runtimev2.HarnessTakeLiveInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error)
 	SettleLiveInput(context.Context, *connect.Request[runtimev2.HarnessSettleLiveInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
 	Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error)
+	// Text of the message the harness is writing now, as it arrives. The Worker Host batches and
+	// redacts it; the completed message is published as a MESSAGE event, which replaces it.
+	PublishText(context.Context, *connect.Request[runtimev2.HarnessPublishTextRequest]) (*connect.Response[runtimev2.HarnessPublishTextResponse], error)
 	ReportUsage(context.Context, *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	Complete(context.Context, *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error)
 }
@@ -4690,6 +4744,12 @@ func NewHarnessHandler(svc HarnessHandler, opts ...connect.HandlerOption) (strin
 		connect.WithSchema(harnessMethods.ByName("Publish")),
 		connect.WithHandlerOptions(opts...),
 	)
+	harnessPublishTextHandler := connect.NewUnaryHandler(
+		HarnessPublishTextProcedure,
+		svc.PublishText,
+		connect.WithSchema(harnessMethods.ByName("PublishText")),
+		connect.WithHandlerOptions(opts...),
+	)
 	harnessReportUsageHandler := connect.NewUnaryHandler(
 		HarnessReportUsageProcedure,
 		svc.ReportUsage,
@@ -4714,6 +4774,8 @@ func NewHarnessHandler(svc HarnessHandler, opts ...connect.HandlerOption) (strin
 			harnessSettleLiveInputHandler.ServeHTTP(w, r)
 		case HarnessPublishProcedure:
 			harnessPublishHandler.ServeHTTP(w, r)
+		case HarnessPublishTextProcedure:
+			harnessPublishTextHandler.ServeHTTP(w, r)
 		case HarnessReportUsageProcedure:
 			harnessReportUsageHandler.ServeHTTP(w, r)
 		case HarnessCompleteProcedure:
@@ -4745,6 +4807,10 @@ func (UnimplementedHarnessHandler) SettleLiveInput(context.Context, *connect.Req
 
 func (UnimplementedHarnessHandler) Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.Publish is not implemented"))
+}
+
+func (UnimplementedHarnessHandler) PublishText(context.Context, *connect.Request[runtimev2.HarnessPublishTextRequest]) (*connect.Response[runtimev2.HarnessPublishTextResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.PublishText is not implemented"))
 }
 
 func (UnimplementedHarnessHandler) ReportUsage(context.Context, *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error) {

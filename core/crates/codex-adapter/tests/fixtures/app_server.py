@@ -146,6 +146,9 @@ def finish_events():
             completed = True
         elif kind in ("turn.failed", "error"):
             notify("turn/completed", {"threadId": thread, "turn": {"id": turn, "status": "failed", "items": [], "error": {"message": "synthetic-codex-provider-secret"}}})
+        elif kind == "agent_message.delta":
+            # Reply text as Codex writes it, before the completed item.
+            notify("item/agentMessage/delta", {"threadId": thread, "turnId": event.get("turnId", turn), "itemId": event.get("item_id", "answer"), "delta": event["delta"]})
         elif kind == "plan.raw":
             # A plan notification exactly as given, for plans the adapter must tolerate.
             notify("turn/plan/updated", {"threadId": thread, "turnId": event.get("turnId", turn), "explanation": None, "plan": event["plan"]})

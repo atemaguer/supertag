@@ -14,10 +14,11 @@ use supertag_protocol::{
     v2::{
         AdapterBootstrap, HarnessAskQuestionRequest, HarnessAskWorkSessionQuestionRequest,
         HarnessAttachRequest, HarnessCompleteRequest, HarnessContinueWorkSessionRequest,
-        HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessSendTagMessageRequest,
-        HarnessSettleLiveInputRequest, HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest,
-        LiveInput, LiveInputReceipt, LiveInputState, ObjectiveSignal, TagMessageOrigin,
-        TaskEventKind, harness_client::HarnessClient, harness_mailbox_client::HarnessMailboxClient,
+        HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessPublishTextRequest,
+        HarnessSendTagMessageRequest, HarnessSettleLiveInputRequest,
+        HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest, LiveInput, LiveInputReceipt,
+        LiveInputState, ObjectiveSignal, TagMessageOrigin, TaskEventKind,
+        harness_client::HarnessClient, harness_mailbox_client::HarnessMailboxClient,
         harness_questions_client::HarnessQuestionsClient,
         harness_work_sessions_client::HarnessWorkSessionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
@@ -790,6 +791,29 @@ async fn main() -> Result<()> {
                 )?)
                 .await?;
             sequence += 1;
+        }
+        // Then it writes its answer, a few words at a time, and quotes its own credential split
+        // across two pieces: the Worker Host shows the text as it is written, never a part of
+        // the credential. The recorded answer replaces it.
+        let (head, tail) = bootstrap.token.split_at(bootstrap.token.len() / 2);
+        for piece in [
+            "Streaming the ",
+            "answer with ",
+            head,
+            tail,
+            " in it, done. ",
+        ] {
+            harness
+                .publish_text(authenticated_request(
+                    HarnessPublishTextRequest {
+                        after_sequence: sequence - 1,
+                        text: piece.into(),
+                    },
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await?;
+            sleep(Duration::from_millis(work / 10)).await;
         }
         sleep(Duration::from_millis(work)).await;
     }

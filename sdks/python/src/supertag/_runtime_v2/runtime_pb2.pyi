@@ -2236,12 +2236,14 @@ class FollowConversationRequest(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., after: _Optional[int] = ..., refresh_task_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class FollowConversationResponse(_message.Message):
-    __slots__ = ("messages", "waits")
+    __slots__ = ("messages", "waits", "texts")
     MESSAGES_FIELD_NUMBER: _ClassVar[int]
     WAITS_FIELD_NUMBER: _ClassVar[int]
+    TEXTS_FIELD_NUMBER: _ClassVar[int]
     messages: ListMessagesResponse
     waits: _containers.RepeatedCompositeFieldContainer[TurnWait]
-    def __init__(self, messages: _Optional[_Union[ListMessagesResponse, _Mapping]] = ..., waits: _Optional[_Iterable[_Union[TurnWait, _Mapping]]] = ...) -> None: ...
+    texts: _containers.RepeatedCompositeFieldContainer[TurnText]
+    def __init__(self, messages: _Optional[_Union[ListMessagesResponse, _Mapping]] = ..., waits: _Optional[_Iterable[_Union[TurnWait, _Mapping]]] = ..., texts: _Optional[_Iterable[_Union[TurnText, _Mapping]]] = ...) -> None: ...
 
 class TurnWait(_message.Message):
     __slots__ = ("task_id", "reason")
@@ -2250,6 +2252,16 @@ class TurnWait(_message.Message):
     task_id: str
     reason: str
     def __init__(self, task_id: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
+
+class TurnText(_message.Message):
+    __slots__ = ("task_id", "after_sequence", "text")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    after_sequence: int
+    text: str
+    def __init__(self, task_id: _Optional[str] = ..., after_sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
 
 class MarkConversationReadRequest(_message.Message):
     __slots__ = ("tag_id", "order")
@@ -3288,6 +3300,38 @@ class HarnessPublishRequest(_message.Message):
     text: str
     kind: TaskEventKind
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ..., kind: _Optional[_Union[TaskEventKind, str]] = ...) -> None: ...
+
+class HarnessPublishTextRequest(_message.Message):
+    __slots__ = ("after_sequence", "text")
+    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    after_sequence: int
+    text: str
+    def __init__(self, after_sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
+
+class HarnessPublishTextResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class PublishTaskTextRequest(_message.Message):
+    __slots__ = ("task_id", "attempt_id", "lease_token", "after_sequence", "revision", "text")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    attempt_id: str
+    lease_token: str
+    after_sequence: int
+    revision: int
+    text: str
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., after_sequence: _Optional[int] = ..., revision: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
+
+class PublishTaskTextResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class HarnessCompleteRequest(_message.Message):
     __slots__ = ("result", "succeeded", "objective_signal", "checkpoint", "waiting_approval_ids")

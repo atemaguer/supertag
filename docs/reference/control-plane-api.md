@@ -142,6 +142,12 @@ changed since that copy, exactly as `ListMessages` would return it; a client wit
 none and gets the newest page. Each later response holds only the messages that changed since the
 one before. A response with nothing set is a heartbeat, sent at least every 15 seconds.
 
+While a turn runs, a response can also carry `texts`: the text of the message its Tag is writing
+now, all of it so far, as the harness streams it. The Worker Host redacts it before it leaves, and
+the Control Plane keeps it in memory only. Show it in the message's place; once the message is
+recorded as one of the turn's events, the same response clears the text, and the turn's result
+replaces it too. Harnesses that do not stream send no text.
+
 For an operator, a response also says why a queued turn still waits for a Worker Host, such as an
 uncertain Task Attempt that holds a host's only slot, once the turn has waited about two seconds.
 An empty reason says the earlier one no longer holds.

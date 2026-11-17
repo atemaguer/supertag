@@ -31,7 +31,7 @@ import {
   tagPortfolio,
   withObjectiveReport,
 } from "@supertag/worker-sdk/internal/rust-harness";
-import { claudeToolActivity } from "../activity.js";
+import { claudeToolActivity, streamedText } from "../activity.js";
 import { ClaudeProcessTree } from "../process-tree.js";
 import {
   type ClaudeProgressItem,
@@ -446,6 +446,8 @@ export async function runAdapter(
   let nativeSessionId: string | undefined;
   let mirrorFailed = false;
   let eventSequence = 0n;
+  // How many text blocks of the message Claude is writing have streamed.
+  const streamed = { blocks: 0 };
   const progressItems = new Map<string, ClaudeProgressItem>();
   let nativeUsageSequence = 0n;
   let costOnlySequence = 0n;
@@ -776,7 +778,18 @@ export async function runAdapter(
           client.publish({ sequence, text: event, kind: TaskEventKind.PROGRESS }, options()),
         );
       }
+      if (message.type === "stream_event") {
+        // The reply text as Claude writes it, shown while the turn runs. The Worker Host batches
+        // and redacts it; the completed assistant message below replaces it. Text is shown
+        // only, so a lost send never fails the turn.
+        const text = streamedText(message.event, streamed);
+        if (text)
+          await client
+            .publishText({ afterSequence: eventSequence, text }, options())
+            .catch(() => {});
+      }
       if (message.type === "assistant") {
+        streamed.blocks = 0;
         // Each completed assistant message is its own conversation message, shown at once: the
         // sentence saying what Claude is about to do arrives before its first tool call.
         const text = message.message.content

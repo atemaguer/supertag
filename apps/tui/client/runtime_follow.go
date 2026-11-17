@@ -83,6 +83,8 @@ type runtimeFollow struct {
 	working bool
 	// hostWait is why the turn waits for a Worker Host, as last shown.
 	hostWait string
+	// text is the text of the message the Tag is writing, as last shown.
+	text string
 }
 
 // streamOpen is how long a follow waits for its conversation's stream to open before it reads
@@ -251,7 +253,15 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 		}
 		if reply := runtimeReply(task); reply != nil {
 			state.running = false
+			state.text = ""
 			emit(state.shown.reply(reply)...)
+		} else if state.stream != nil {
+			// The message the Tag is writing shows as it is written, after the messages it
+			// recorded.
+			if text := state.stream.text(source); text != state.text {
+				state.text = text
+				emit(FollowEvent{Kind: EventDelta, Text: text})
+			}
 		}
 	}
 	if pushed && !state.shown.replied && time.Since(state.worksRead) < time.Second {

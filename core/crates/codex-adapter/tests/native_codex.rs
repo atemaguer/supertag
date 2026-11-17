@@ -50,10 +50,10 @@ use supertag_protocol::{
         AdapterBootstrap, AppliedExecutionLimits, ConfirmExecutionLimitsResponse,
         ExecutionLimitEnforcement, ExecutionLimits, HarnessAskQuestionRequest,
         HarnessAttachRequest, HarnessCompleteRequest, HarnessCompleteResponse,
-        HarnessPublishRequest, HarnessRun, HarnessSettleLiveInputRequest,
-        HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput, LiveInputReceipt,
-        LiveInputState, ObjectiveQuestion, ReportAttemptUsageResponse, ReportedCostLimit,
-        SessionCheckpoint, TakeInputResponse, Task, TaskEvent, TaskEventKind,
+        HarnessPublishRequest, HarnessPublishTextRequest, HarnessPublishTextResponse, HarnessRun,
+        HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput,
+        LiveInputReceipt, LiveInputState, ObjectiveQuestion, ReportAttemptUsageResponse,
+        ReportedCostLimit, SessionCheckpoint, TakeInputResponse, Task, TaskEvent, TaskEventKind,
         harness_questions_server::{HarnessQuestions, HarnessQuestionsServer},
         harness_server::{Harness, HarnessServer},
     },
@@ -71,6 +71,7 @@ struct Observed {
     resolved_skills: Vec<supertag_protocol::v2::ResolvedSkill>,
     policy_snapshot: Option<supertag_protocol::v2::TaskPolicySnapshot>,
     events: Vec<HarnessPublishRequest>,
+    texts: Vec<HarnessPublishTextRequest>,
     outcome: Option<HarnessCompleteRequest>,
     usage: Vec<HarnessUsageRequest>,
     execution_limits: Option<ExecutionLimits>,
@@ -320,6 +321,14 @@ impl Harness for HarnessFixture {
         };
         observed.events.push(event);
         Ok(Response::new(result))
+    }
+    async fn publish_text(
+        &self,
+        request: Request<HarnessPublishTextRequest>,
+    ) -> Result<Response<HarnessPublishTextResponse>, Status> {
+        self.authenticate(&request)?;
+        self.observed.lock().await.texts.push(request.into_inner());
+        Ok(Response::new(HarnessPublishTextResponse {}))
     }
     async fn complete(
         &self,
@@ -2047,6 +2056,8 @@ async fn each_message_is_its_own_event_and_commands_and_edits_are_activity_lines
             json!({"type":"item.started","item":{"id":"run","type":"command_execution","command":format!("pnpm test --token {KEY}\nsecond line"),"aggregated_output":"","status":"in_progress"}}),
             json!({"type":"item.completed","item":{"id":"run","type":"command_execution","command":"pnpm test","aggregated_output":"ok","status":"completed"}}),
             json!({"type":"item.completed","item":{"id":"edit","type":"file_change","changes":[{"path":"src/a.rs","kind":"update"},{"path":"src/b.rs","kind":"add"}],"status":"completed"}}),
+            json!({"type":"agent_message.delta","delta":"Fixed the "}),
+            json!({"type":"agent_message.delta","delta":"failing test."}),
             json!({"type":"item.completed","item":{"id":"answer","type":"agent_message","text":"Fixed the failing test."}}),
             json!({"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}),
         ]),
@@ -2082,6 +2093,13 @@ async fn each_message_is_its_own_event_and_commands_and_edits_are_activity_lines
             (TaskEventKind::Message, "Fixed the failing test."),
         ]
     );
+    // The answer's text is shown as Codex writes it, after the edit.
+    let texts: Vec<(u64, &str)> = observed
+        .texts
+        .iter()
+        .map(|text| (text.after_sequence, text.text.as_str()))
+        .collect();
+    assert_eq!(texts, [(3, "Fixed the "), (3, "failing test.")]);
     Ok(())
 }
 

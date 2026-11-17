@@ -268,7 +268,26 @@ it("shows the Tag's messages and its result as the conversation's follow pushes 
   changed(turn("running", [intent]));
   expect(host.querySelector(".task-wait")).toBeNull();
   expect(host.textContent).toContain("I'll look at the build.");
-  changed(turn("succeeded", [intent], "The build passes."));
+  // The answer streams into its own bubble as it is written, until it is recorded.
+  act(() => push?.({ kind: "changed", texts: [{ taskId: "t1", text: "The build " }] }));
+  expect(host.querySelector(".writing")?.textContent).toContain("The build");
+  act(() => push?.({ kind: "changed", texts: [{ taskId: "t1", text: "The build passes" }] }));
+  expect(host.querySelector(".writing")?.textContent).toContain("The build passes");
+  const answer = { sequence: 2, kind: "message" as const, text: "The build passes." };
+  act(() =>
+    push?.({
+      kind: "changed",
+      messages: {
+        conversationId: "c1",
+        incremental: true,
+        messages: [turn("running", [intent, answer])],
+      },
+      texts: [{ taskId: "t1", text: "" }],
+    }),
+  );
+  expect(host.querySelector(".writing")).toBeNull();
+  expect(host.querySelectorAll(".tag-message")).toHaveLength(2);
+  changed(turn("succeeded", [intent, answer], "The build passes."));
   expect(host.textContent).toContain("The build passes.");
   // Pushed changes need no reads of the conversation.
   expect(messages).toHaveBeenCalledTimes(reads);

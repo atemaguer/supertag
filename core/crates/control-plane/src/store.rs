@@ -730,6 +730,7 @@ impl Store {
         crate::work_sessions::reports::settle_in(&mut transaction, &task, self.execution_now_ms())
             .await?;
         transaction.commit().await?;
+        self.text_finished(task_id);
         Ok(task)
     }
 
@@ -1117,6 +1118,9 @@ impl Store {
             .await?;
         }
         transaction.commit().await?;
+        if kind == supertag_protocol::v2::TaskEventKind::Message {
+            self.text_recorded(&input.task_id, input.sequence);
+        }
         Ok(TaskEvent {
             sequence: input.sequence,
             text: input.text.clone(),
@@ -1249,6 +1253,7 @@ impl Store {
             supertag_protocol::crash_point("control-plane.finish", "before-commit");
         }
         transaction.commit().await?;
+        self.text_finished(&input.task_id);
         Ok(task)
     }
 

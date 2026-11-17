@@ -23,7 +23,9 @@ Do not build one when Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents fit
    (increasing `sequence`, and a `kind`: `TASK_EVENT_KIND_MESSAGE` for each whole message the agent
    writes, `TASK_EVENT_KIND_ACTIVITY` for one line from a tool call's input, or
    `TASK_EVENT_KIND_PROGRESS` for `progress.updated` plan JSON), usage with
-   `Harness.ReportUsage`, and enforced limits with `Harness.ConfirmExecutionLimits`.
+   `Harness.ReportUsage`, and enforced limits with `Harness.ConfirmExecutionLimits`. Optionally
+   stream reply text as it is written with `Harness.PublishText` (`after_sequence` is the last
+   published event's sequence); the whole message, published afterwards, replaces it.
 4. End with `Harness.Complete`: `result`, `succeeded`, and a `checkpoint` if the agent can resume.
 
 Never print the token or pass it to the agent. The messages are in

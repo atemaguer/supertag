@@ -32,9 +32,11 @@ const WAIT_EVERY: Duration = Duration::from_secs(3);
 /// The most unfinished turns a follow refreshes, as ListMessages allows.
 const TRACKED: usize = 128;
 
-/// In-process signals for open follows.
+/// In-process signals for open follows, and the text of the messages running turns write.
 pub(crate) struct Live {
     changes: tokio::sync::watch::Sender<u64>,
+    text_changes: tokio::sync::watch::Sender<u64>,
+    pub(crate) texts: super::texts::Texts,
     closing: CancellationToken,
 }
 
@@ -42,8 +44,17 @@ impl Default for Live {
     fn default() -> Self {
         Self {
             changes: tokio::sync::watch::Sender::new(0),
+            text_changes: tokio::sync::watch::Sender::new(0),
+            texts: Default::default(),
             closing: CancellationToken::new(),
         }
+    }
+}
+
+impl Live {
+    pub(crate) fn texts_changed(&self) {
+        self.text_changes
+            .send_modify(|version| *version = version.wrapping_add(1));
     }
 }
 
@@ -116,10 +127,12 @@ impl Store {
         let operator = principal.starts_with("operator:");
         let principal = principal.to_owned();
         let mut changes = self.live.changes.subscribe();
+        let mut text_changes = self.live.text_changes.subscribe();
         let closing = self.live.closing.clone();
         let output = async_stream::try_stream! {
             let mut copy = Copy::default();
             let mut waits = Waits::default();
+            let mut texts = TextsShown::default();
             let mut page = Some(first);
             let mut last_emit = Instant::now();
             let mut opened = false;
@@ -131,9 +144,11 @@ impl Store {
                         response.waits = waits.update(&store, &copy).await.map_err(Status::from)?;
                     }
                 }
+                response.texts = texts.update(&store.live.texts, &copy);
                 if !opened
                     || response.messages.is_some()
                     || !response.waits.is_empty()
+                    || !response.texts.is_empty()
                     || last_emit + HEARTBEAT <= Instant::now()
                 {
                     opened = true;
@@ -146,14 +161,19 @@ impl Store {
                 let deadline = (last_emit + HEARTBEAT)
                     .min(Instant::now() + RECHECK)
                     .min(wait_check.unwrap_or_else(|| Instant::now() + HEARTBEAT));
-                let draining_now = tokio::select! {
+                let wake = tokio::select! {
                     biased;
-                    _ = closing.cancelled() => true,
-                    _ = changes.changed() => false,
-                    _ = tokio::time::sleep_until(deadline) => false,
+                    _ = closing.cancelled() => Wake::Draining,
+                    _ = changes.changed() => Wake::Stored,
+                    _ = text_changes.changed() => Wake::Text,
+                    _ = tokio::time::sleep_until(deadline) => Wake::Timer,
                 };
-                if draining_now {
-                    Err(draining())?;
+                match wake {
+                    Wake::Draining => Err(draining())?,
+                    // Text the Tag is writing needs no read, unless its message was recorded:
+                    // then the message and the cleared text go out together.
+                    Wake::Text if !texts.cleared(&store.live.texts) => continue,
+                    _ => {}
                 }
                 let (head, changed) = store
                     .conversation_changed_since(&read.tag_id, position)
@@ -167,6 +187,60 @@ impl Store {
             }
         };
         Ok(Box::pin(output))
+    }
+}
+
+enum Wake {
+    Draining,
+    Stored,
+    Text,
+    Timer,
+}
+
+/// The version of each turn's text last sent.
+#[derive(Default)]
+struct TextsShown {
+    sent: HashMap<String, u64>,
+}
+
+impl TextsShown {
+    /// The text that changed of the client's running turns; empty text clears what was sent.
+    fn update(&mut self, texts: &super::texts::Texts, copy: &Copy) -> Vec<TurnText> {
+        let mut changed = Vec::new();
+        let mut current = HashSet::new();
+        for turn in copy.unfinished.iter().filter(|turn| !turn.queued) {
+            let Some(shown) = texts.shown(&turn.task_id) else {
+                continue;
+            };
+            current.insert(turn.task_id.as_str());
+            if self.sent.insert(turn.task_id.clone(), shown.version) != Some(shown.version) {
+                changed.push(TurnText {
+                    task_id: turn.task_id.clone(),
+                    after_sequence: shown.after_sequence,
+                    text: shown.text,
+                });
+            }
+        }
+        let gone: Vec<String> = self
+            .sent
+            .keys()
+            .filter(|id| !current.contains(id.as_str()))
+            .cloned()
+            .collect();
+        for task_id in gone {
+            self.sent.remove(&task_id);
+            changed.push(TurnText {
+                task_id,
+                after_sequence: 0,
+                text: String::new(),
+            });
+        }
+        changed
+    }
+
+    /// Whether text sent before is gone, as when its message was recorded.
+    fn cleared(&self, texts: &super::texts::Texts) -> bool {
+        self.sent.keys().any(|id| texts.shown(id).is_none())
     }
 }
 

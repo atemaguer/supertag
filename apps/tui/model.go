@@ -1572,9 +1572,9 @@ func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd
 	case client.EventWaiting:
 		dim("· waiting: " + terminalText(event.Text))
 	case client.EventDelta:
-		c.draft += terminalLines(event.Text)
+		c.draft = terminalLines(event.Text)
 	case client.EventMessage:
-		c.status = ""
+		c.draft, c.status = "", ""
 		c.add(entryMessage, event.Text)
 	case client.EventStatus:
 		c.status = terminalText(event.Text)

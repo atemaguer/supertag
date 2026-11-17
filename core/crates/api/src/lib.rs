@@ -940,6 +940,16 @@ impl WorkerHost for Api {
         Ok(event)
     }
 
+    async fn publish_text(
+        &self,
+        request: Request<PublishTaskTextRequest>,
+    ) -> Result<Response<PublishTaskTextResponse>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).publish_text(request).await
+        })
+        .await
+    }
+
     async fn finish_task(
         &self,
         request: Request<FinishTaskRequest>,

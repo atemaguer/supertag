@@ -138,8 +138,11 @@ func (m *model) objectiveReplyRead(msg objectiveReplyMsg) tea.Cmd {
 		case client.EventJoined:
 			message.waiting = "The message joined the owner's turn in progress."
 		case client.EventDelta:
-			message.waiting = ""
-			message.reply += terminalLines(msg.event.Text)
+			// The text the owner is writing replaces what was shown of it; empty clears it.
+			if msg.event.Text != "" {
+				message.waiting = ""
+				message.reply = terminalLines(msg.event.Text)
+			}
 		case client.EventMessage:
 			// The owner's latest message shows until its final reply replaces it.
 			message.waiting = ""

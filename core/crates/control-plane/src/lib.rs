@@ -690,6 +690,17 @@ impl worker_host_server::WorkerHost for ControlPlane {
         Ok(Response::new(event))
     }
 
+    async fn publish_text(
+        &self,
+        request: Request<PublishTaskTextRequest>,
+    ) -> Result<Response<PublishTaskTextResponse>, Status> {
+        let principal = self.host_authority(&request)?;
+        self.store
+            .publish_text(&principal, &request.into_inner())
+            .await?;
+        Ok(Response::new(PublishTaskTextResponse {}))
+    }
+
     async fn finish_task(
         &self,
         request: Request<FinishTaskRequest>,

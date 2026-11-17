@@ -33,12 +33,15 @@ pub enum FollowUpdate {
     Ready,
     /// The stream dropped; it reopens on its own, and the view reads on a timer meanwhile.
     Lost,
-    /// What changed: messages as `list_messages` returns them, and why queued turns wait.
+    /// What changed: messages as `list_messages` returns them, why queued turns wait, and the
+    /// text of the messages running turns are writing.
     Changed {
         #[serde(skip_serializing_if = "Option::is_none")]
         messages: Option<Messages>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         waits: Vec<TurnWait>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        texts: Vec<TurnText>,
     },
 }
 
@@ -48,6 +51,15 @@ pub enum FollowUpdate {
 pub struct TurnWait {
     pub task_id: String,
     pub reason: String,
+}
+
+/// The text of the message a running turn's Tag is writing now, all of it so far; empty text
+/// clears it. The message, once recorded, or the turn's result replaces it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnText {
+    pub task_id: String,
+    pub text: String,
 }
 
 /// Where a reopened stream resumes: the conversation, its latest order, and its unfinished turns.
@@ -246,8 +258,20 @@ async fn read(
                 reason: wait.reason,
             })
             .collect();
-        if messages.is_some() || !waits.is_empty() {
-            send(FollowUpdate::Changed { messages, waits })?;
+        let texts: Vec<TurnText> = response
+            .texts
+            .into_iter()
+            .map(|text| TurnText {
+                task_id: text.task_id,
+                text: text.text,
+            })
+            .collect();
+        if messages.is_some() || !waits.is_empty() || !texts.is_empty() {
+            send(FollowUpdate::Changed {
+                messages,
+                waits,
+                texts,
+            })?;
         }
     }
 }

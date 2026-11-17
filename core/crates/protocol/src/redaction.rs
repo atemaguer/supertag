@@ -509,6 +509,41 @@ pub fn redaction_span(values: &[SensitiveValue]) -> usize {
         .unwrap_or(0)
 }
 
+/// How much of `text`, which more text may follow, can be shown before it is complete: up to its
+/// last whitespace, so a credential still being written is never cut short, and before any
+/// unfinished start of a known value's encoded form. Redact the prefix before showing it.
+pub fn streamable_prefix(text: &str, values: &[SensitiveValue]) -> usize {
+    let mut cut = text
+        .char_indices()
+        .rev()
+        .find(|(_, c)| c.is_whitespace())
+        .map_or(0, |(index, c)| index + c.len_utf8());
+    let forms: Vec<String> = values
+        .iter()
+        .flat_map(|value| match value {
+            SensitiveValue::High(value) => encoded_forms(value),
+            SensitiveValue::Low(value) => vec![value.clone()],
+        })
+        .filter(|form| form.chars().any(char::is_whitespace))
+        .collect();
+    // A value with whitespace in it can still be unfinished at the cut: show only what comes
+    // before its start.
+    loop {
+        let shown = &text[..cut];
+        let open = forms.iter().find_map(|form| {
+            (1..form.len())
+                .filter(|end| form.is_char_boundary(*end))
+                .filter(|end| shown.ends_with(&form[..*end]))
+                .map(|end| cut - end)
+                .min()
+        });
+        match open {
+            Some(start) if start < cut => cut = start,
+            _ => return cut,
+        }
+    }
+}
+
 /// Applies `transform` to the text outside `[REDACTED]` markers and artifact references.
 fn outside_protected(input: &str, transform: impl Fn(&str) -> String) -> String {
     let mut output = String::with_capacity(input.len());
@@ -961,6 +996,31 @@ mod tests {
         let started = std::time::Instant::now();
         let _ = redact_text(&labels, &[Low("abcd".into())], false);
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_streamed_prefix_never_shows_part_of_a_credential() {
+        let values = [High("sk-live-123456".into()), High("two words".into())];
+        let shown =
+            |text: &str| redact_text(&text[..streamable_prefix(text, &values)], &values, false);
+        // A word still being written waits for the whitespace after it.
+        assert_eq!(shown("Using key sk-live-12"), "Using key ");
+        assert_eq!(
+            shown("Using key sk-live-123456 now"),
+            "Using key [REDACTED] "
+        );
+        // A value with whitespace in it waits until it is complete.
+        assert_eq!(shown("The phrase is two "), "The phrase is ");
+        assert_eq!(
+            shown("The phrase is two words and"),
+            "The phrase is [REDACTED] "
+        );
+        assert_eq!(shown("nothing yet"), "nothing ");
+        assert_eq!(shown("unfinished"), "");
+        assert_eq!(
+            streamable_prefix("héllo wörld ", &values),
+            "héllo wörld ".len()
+        );
     }
 
     #[test]

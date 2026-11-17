@@ -57,6 +57,7 @@ export function ConversationEntry({
   message,
   events = [],
   wait,
+  writing,
   activeTask,
   delivery,
   divider,
@@ -68,6 +69,8 @@ export function ConversationEntry({
   events?: readonly TaskEvent[];
   /** Why the queued turn has not started, such as a Worker Host slot an uncertain Attempt keeps. */
   wait?: string;
+  /** The text of the message the Tag is writing now, shown as it is written. */
+  writing?: string;
   /** The delivery of the operator's message, shown when it is their last one. */
   delivery?: string;
   /** When a time divider precedes this exchange: its time in milliseconds since the epoch. */
@@ -84,8 +87,11 @@ export function ConversationEntry({
   const activityTask = joined ? input.taskId : task.taskId;
   const turn = turnView(joined ? [] : events, task.result);
   const working = RUNNING.has(task.state);
+  // The message the Tag is writing streams into its own bubble until it is recorded.
+  const written = !joined && !task.result && writing?.trim() ? writing : undefined;
   const bubbles = [
     ...turn.messages.map((text) => ({ text, className: "tag-message" })),
+    ...(written ? [{ text: written, className: "tag-message writing" }] : []),
     ...(task.result && !joined ? [{ text: task.result, className: "result-text" }] : []),
   ];
   // While the turn runs the Tag is typing, after whatever it has written so far, until its result.

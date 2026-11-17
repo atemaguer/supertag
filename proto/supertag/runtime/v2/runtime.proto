@@ -725,6 +725,10 @@ service WorkerHost {
   rpc GetAttemptResolution(InspectAttemptRequest) returns (GetAttemptResolutionResponse);
   rpc ReportAttemptUsage(ReportAttemptUsageRequest) returns (ReportAttemptUsageResponse);
   rpc AppendEvent(AppendEventRequest) returns (TaskEvent);
+  // The text of the message the running Attempt's Tag is writing now, redacted, while it is
+  // written. The Control Plane keeps it in memory only and shows it to the turn's conversation
+  // until the message is recorded as an event.
+  rpc PublishText(PublishTaskTextRequest) returns (PublishTaskTextResponse);
   rpc AskQuestion(AskQuestionRequest) returns (ObjectiveQuestion);
   rpc FinishTask(FinishTaskRequest) returns (Task);
   // The restarted host of an interrupted Attempt proves every process it recorded for the
@@ -982,6 +986,9 @@ service Harness {
   rpc TakeLiveInput(HarnessTakeLiveInputRequest) returns (TakeInputResponse);
   rpc SettleLiveInput(HarnessSettleLiveInputRequest) returns (LiveInput);
   rpc Publish(HarnessPublishRequest) returns (TaskEvent);
+  // Text of the message the harness is writing now, as it arrives. The Worker Host batches and
+  // redacts it; the completed message is published as a MESSAGE event, which replaces it.
+  rpc PublishText(HarnessPublishTextRequest) returns (HarnessPublishTextResponse);
   rpc ReportUsage(HarnessUsageRequest) returns (ReportAttemptUsageResponse);
   rpc Complete(HarnessCompleteRequest) returns (HarnessCompleteResponse);
 }
@@ -1676,11 +1683,22 @@ message FollowConversationResponse {
   // Why queued turns still wait for a Worker Host, once a turn has waited a moment; an empty
   // reason says an earlier one no longer holds. Sent to operators only.
   repeated TurnWait waits = 2;
+  // The text of the message a running turn's Tag is writing now, as it is written. It is never
+  // stored: the message, once recorded as one of the turn's events, or the turn's result replaces
+  // it. Empty text clears what was shown.
+  repeated TurnText texts = 3;
 }
 
 message TurnWait {
   string task_id = 1;
   string reason = 2;
+}
+
+message TurnText {
+  string task_id = 1;
+  // The turn's event the text follows; the message it becomes has a later sequence.
+  uint64 after_sequence = 2;
+  string text = 3;
 }
 
 message MarkConversationReadRequest {
@@ -2454,6 +2472,28 @@ message HarnessPublishRequest {
   string text = 2;
   TaskEventKind kind = 3;
 }
+
+// More text of the message being written. `after_sequence` is the sequence of the last event the
+// harness published, so text after a different one starts a new message.
+message HarnessPublishTextRequest {
+  uint64 after_sequence = 1;
+  string text = 2;
+}
+
+message HarnessPublishTextResponse {}
+
+// The redacted text so far of the message an Attempt's Tag is writing after event
+// `after_sequence`. A later `revision` replaces an earlier one.
+message PublishTaskTextRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+  uint64 after_sequence = 4;
+  uint64 revision = 5;
+  string text = 6;
+}
+
+message PublishTaskTextResponse {}
 
 message HarnessCompleteRequest {
   string result = 1;

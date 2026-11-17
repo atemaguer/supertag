@@ -45,8 +45,9 @@ the rail with a star, and the other Tags follow by their latest activity. Your m
 Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.
 Under your last message they show **Sent** once the Control Plane has it and **Seen** once a
 Worker Host has taken it up, and the animated `···` stays at the end of the Tag's reply until
-its answer arrives. Each of the Tag's messages appears as soon as the Control Plane records it. A message that is not delivered stays in the conversation with
-**Retry**, which sends it at most once, and **Edit**. What you have not sent stays with each Tag
+its answer arrives. Each of the Tag's messages appears as soon as the Control Plane records it,
+and with Codex or Claude Code its text appears as it is written. A message that is not
+delivered stays in the conversation with **Retry**, which sends it at most once, and **Edit**. What you have not sent stays with each Tag
 until you come back, even after a restart, and a message not yet accepted is sent again the next
 time you open the app. When you scroll up, the terminal UI counts the Tag's new messages in its
 title, and End jumps to them.

@@ -18,7 +18,9 @@ const (
 	EventWaiting EventKind = iota
 	// EventStarted says a Worker Host took the turn up.
 	EventStarted
-	// EventDelta is reply text as the Tag writes it (Text). The final reply replaces it.
+	// EventDelta is the text of the message the Tag is writing now, all of it so far (Text). It
+	// replaces what was shown of it; the message, once recorded, or the final reply replaces it,
+	// and empty Text clears it.
 	EventDelta
 	// EventMessage is a whole message the Tag wrote while its turn runs (Text), such as the
 	// sentence saying what it is about to do. Each is its own message; the final reply follows.

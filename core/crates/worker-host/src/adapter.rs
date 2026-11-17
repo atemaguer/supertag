@@ -7,6 +7,7 @@ mod mcp;
 mod questions;
 mod review_artifacts;
 mod tag_sessions;
+mod text;
 mod work_sessions;
 mod workspace;
 pub(crate) use workspace::RemoteWorkspace;
@@ -36,11 +37,11 @@ use supertag_protocol::{
         AdapterBootstrap, AppendEventRequest, AppliedExecutionLimits, Assignment,
         ConfirmExecutionLimitsResponse, ExecutionLimits, HarnessAttachRequest,
         HarnessCompleteRequest, HarnessCompleteResponse, HarnessKind, HarnessPublishRequest,
-        HarnessRun, HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest,
-        HarnessUsageRequest, InspectAttemptRequest, LiveInput, ObjectiveSignal,
-        ReportAppliedLimitsRequest, ReportAttemptUsageRequest, ReportAttemptUsageResponse,
-        ReportedCostLimit, ResolvedSkill, SessionCheckpoint, TakeInputResponse, TaskEvent,
-        TaskState,
+        HarnessPublishTextRequest, HarnessPublishTextResponse, HarnessRun,
+        HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, HarnessUsageRequest,
+        InspectAttemptRequest, LiveInput, ObjectiveSignal, ReportAppliedLimitsRequest,
+        ReportAttemptUsageRequest, ReportAttemptUsageResponse, ReportedCostLimit, ResolvedSkill,
+        SessionCheckpoint, TakeInputResponse, TaskEvent, TaskEventKind, TaskState,
         harness_server::{Harness, HarnessServer},
     },
     validate_checkpoint_reference,
@@ -84,6 +85,8 @@ struct Bridge {
     artifact_capacity: Arc<Semaphore>,
     /// Secrets this host knows, hidden from every text the harness sends upstream.
     secrets: Arc<Vec<SensitiveValue>>,
+    /// The message the harness is writing now.
+    text: text::SharedTextStream,
 }
 
 #[derive(Default)]
@@ -295,7 +298,18 @@ impl Harness for Bridge {
             .await?;
         supertag_protocol::crash_point("worker-host.append-event", "answered");
         drop(state);
+        if event.kind == TaskEventKind::Message as i32 {
+            // The recorded message replaces the text written so far.
+            *self.text.lock().unwrap() = Default::default();
+        }
         Ok(Response::new(event))
+    }
+
+    async fn publish_text(
+        &self,
+        request: Request<HarnessPublishTextRequest>,
+    ) -> Result<Response<HarnessPublishTextResponse>, Status> {
+        Bridge::publish_text(self, request).await
     }
 
     async fn report_usage(
@@ -569,6 +583,7 @@ async fn run(
         artifact_inputs,
         artifact_capacity: Arc::new(Semaphore::new(1)),
         secrets,
+        text: Arc::default(),
     };
     let stop_server = CancellationToken::new();
     let mut server = tokio::spawn(

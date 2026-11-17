@@ -24,12 +24,12 @@ history page carries what its turn showed, every message the Tag wrote and its l
 so a finished turn reads nothing more. Rereading a conversation asks only for what changed since
 the copy on screen: the messages after its latest and the turns it holds unfinished. While a turn
 is followed, `Conversations.FollowConversation` pushes each change of its conversation as the
-Control Plane records it: a new state, each message the Tag writes, its latest activity, the
-result, and why a queued turn still waits for a Worker Host. One stream per Tag serves every
-followed turn of that conversation, and it reopens from what it holds after a drop. While it is
-down, or for an Objective's Task, the follow reads the turn each second instead. A history page reads its messages'
-work Sessions concurrently, and each conversation stays in memory, so returning to it shows it at
-once.
+Control Plane records it: a new state, each message the Tag writes, the text of the message it
+is writing now, as it is written, its latest activity, the result, and why a queued turn still
+waits for a Worker Host. One stream per Tag serves every followed turn of that conversation, and
+it reopens from what it holds after a drop. While it is down, or for an Objective's Task, the
+follow reads the turn each second instead. A history page reads its messages' work Sessions
+concurrently, and each conversation stays in memory, so returning to it shows it at once.
 
 The TUI also keeps a cache on disk, so `supertag` shows the last Tag's conversation before any
 call to the Control Plane: the Tag list with each conversation's row, the selected Tag, the latest

@@ -3237,6 +3237,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AppendEventRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.FromString,
                 _registered_method=True)
+        self.PublishText = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/PublishText',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PublishTaskTextRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PublishTaskTextResponse.FromString,
+                _registered_method=True)
         self.AskQuestion = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/AskQuestion',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskQuestionRequest.SerializeToString,
@@ -3346,6 +3351,15 @@ class WorkerHostServicer:
 
     def AppendEvent(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PublishText(self, request, context):
+        """The text of the message the running Attempt's Tag is writing now, redacted, while it is
+        written. The Control Plane keeps it in memory only and shows it to the turn's conversation
+        until the message is recorded as an event.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -3461,6 +3475,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.AppendEvent,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AppendEventRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.SerializeToString,
+            ),
+            'PublishText': grpc.unary_unary_rpc_method_handler(
+                    servicer.PublishText,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PublishTaskTextRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PublishTaskTextResponse.SerializeToString,
             ),
             'AskQuestion': grpc.unary_unary_rpc_method_handler(
                     servicer.AskQuestion,
@@ -3844,6 +3863,33 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/AppendEvent',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AppendEventRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PublishText(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/PublishText',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.PublishTaskTextRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.PublishTaskTextResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -5892,6 +5938,11 @@ class HarnessStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.FromString,
                 _registered_method=True)
+        self.PublishText = channel.unary_unary(
+                '/supertag.runtime.v2.Harness/PublishText',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishTextRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishTextResponse.FromString,
+                _registered_method=True)
         self.ReportUsage = channel.unary_unary(
                 '/supertag.runtime.v2.Harness/ReportUsage',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessUsageRequest.SerializeToString,
@@ -5939,6 +5990,14 @@ class HarnessServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def PublishText(self, request, context):
+        """Text of the message the harness is writing now, as it arrives. The Worker Host batches and
+        redacts it; the completed message is published as a MESSAGE event, which replaces it.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ReportUsage(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -5978,6 +6037,11 @@ def add_HarnessServicer_to_server(servicer, server):
                     servicer.Publish,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.SerializeToString,
+            ),
+            'PublishText': grpc.unary_unary_rpc_method_handler(
+                    servicer.PublishText,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishTextRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishTextResponse.SerializeToString,
             ),
             'ReportUsage': grpc.unary_unary_rpc_method_handler(
                     servicer.ReportUsage,
@@ -6127,6 +6191,33 @@ class Harness:
             '/supertag.runtime.v2.Harness/Publish',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PublishText(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Harness/PublishText',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishTextRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishTextResponse.FromString,
             options,
             channel_credentials,
             insecure,

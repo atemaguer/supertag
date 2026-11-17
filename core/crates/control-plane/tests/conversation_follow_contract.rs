@@ -155,6 +155,85 @@ async fn exercise(database: &str) {
         assert_eq!(events.last().unwrap().sequence, sequence);
         assert_eq!(events.last().unwrap().text, text);
     }
+    // The text of the message being written is pushed as it changes, never stored, and goes
+    // with its message once that is recorded.
+    let text = |revision: u64, after_sequence: u64, text: &str| PublishTaskTextRequest {
+        task_id: sent_task.task_id.clone(),
+        attempt_id: assignment.attempt_id.clone(),
+        lease_token: assignment.lease_token.clone(),
+        after_sequence,
+        revision,
+        text: text.into(),
+    };
+    let next_texts = async |stream: &mut _| {
+        let response: FollowConversationResponse =
+            next(stream, PUSHED).await.expect("no text was pushed");
+        response.texts
+    };
+    store
+        .publish_text(&host, &text(1, 2, "The build "))
+        .await
+        .unwrap();
+    let pushed = next_texts(&mut alice).await;
+    assert_eq!(
+        pushed,
+        [TurnText {
+            task_id: sent_task.task_id.clone(),
+            after_sequence: 2,
+            text: "The build ".into()
+        }]
+    );
+    store
+        .publish_text(&host, &text(2, 2, "The build passes "))
+        .await
+        .unwrap();
+    assert_eq!(next_texts(&mut alice).await[0].text, "The build passes ");
+    // An older revision, or text after an earlier event, changes nothing.
+    store.publish_text(&host, &text(1, 2, "The")).await.unwrap();
+    store
+        .publish_text(&host, &text(3, 1, "Stale"))
+        .await
+        .unwrap();
+    assert_eq!(next(&mut alice, Duration::from_millis(300)).await, None);
+    store
+        .append_event(
+            &host,
+            &append(3, TaskEventKind::Message, "The build passes."),
+        )
+        .await
+        .unwrap();
+    let recorded = next(&mut alice, PUSHED).await.unwrap();
+    assert_eq!(
+        recorded.messages.unwrap().messages[0]
+            .events
+            .last()
+            .unwrap()
+            .text,
+        "The build passes."
+    );
+    assert_eq!(
+        recorded.texts,
+        [TurnText {
+            task_id: sent_task.task_id.clone(),
+            after_sequence: 0,
+            text: String::new()
+        }]
+    );
+    // Text of a recorded message, sent late, is not shown again.
+    store
+        .publish_text(&host, &text(3, 2, "The build passes."))
+        .await
+        .unwrap();
+    assert_eq!(next(&mut alice, Duration::from_millis(300)).await, None);
+    // Only a running Attempt's host may show text.
+    let other = support::register_host(&store, "other-host").await;
+    assert!(
+        store
+            .publish_text(&other, &text(4, 3, "Not mine"))
+            .await
+            .is_err()
+    );
+
     store
         .finish_task(
             &host,

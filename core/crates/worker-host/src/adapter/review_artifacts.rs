@@ -202,6 +202,7 @@ mod tests {
             artifact_inputs: None,
             artifact_capacity: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
             secrets: std::sync::Arc::default(),
+            text: Default::default(),
         }
     }
 

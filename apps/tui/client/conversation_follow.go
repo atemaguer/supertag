@@ -29,7 +29,9 @@ type conversationStream struct {
 	ended    bool
 	messages map[string]pushedMessage
 	waits    map[string]string
-	changed  chan struct{}
+	// texts is the text of the message each running turn is writing now.
+	texts   map[string]string
+	changed chan struct{}
 	// What a reconnect resumes from: the conversation, its latest order, and the turns the
 	// stream last saw unfinished.
 	conversationID string
@@ -60,7 +62,7 @@ func (c *Client) followConversation(tag string) (*conversationStream, func()) {
 	if stream == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		stream = &conversationStream{cancel: cancel, messages: map[string]pushedMessage{}, waits: map[string]string{},
-			changed: make(chan struct{}), unfinished: map[string]bool{}}
+			texts: map[string]string{}, changed: make(chan struct{}), unfinished: map[string]bool{}}
 		streams.tags[tag] = stream
 		go stream.run(ctx, c, tag)
 	}
@@ -84,8 +86,9 @@ func (s *conversationStream) run(ctx context.Context, c *Client, tag string) {
 	for ctx.Err() == nil {
 		live, err := s.read(ctx, c, tag)
 		s.update(func() bool {
-			changed := s.live
+			changed := s.live || len(s.texts) > 0
 			s.live = false
+			clear(s.texts)
 			return changed
 		})
 		if ctx.Err() != nil {
@@ -166,6 +169,14 @@ func (s *conversationStream) apply(tag string, response *v2.FollowConversationRe
 			changed = true
 		}
 	}
+	for _, text := range response.GetTexts() {
+		if text.GetText() == "" {
+			delete(s.texts, text.GetTaskId())
+		} else {
+			s.texts[text.GetTaskId()] = text.GetText()
+		}
+		changed = true
+	}
 	for _, wait := range response.GetWaits() {
 		if wait.GetReason() == "" {
 			delete(s.waits, wait.GetTaskId())
@@ -240,6 +251,13 @@ func (s *conversationStream) hostWait(id string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.waits[id]
+}
+
+// text is the text of the message a running turn is writing now, as last pushed.
+func (s *conversationStream) text(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.texts[id]
 }
 
 // isLive says the stream is open.

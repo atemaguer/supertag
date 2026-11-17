@@ -5,9 +5,9 @@ use std::{future::Future, pin::Pin, time::Duration};
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use supertag_protocol::v2::{
-    HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput,
-    LiveInputReceipt, LiveInputState, NativeTokenUsage, TakeInputResponse, Task, TaskEventKind,
-    harness_client::HarnessClient,
+    HarnessPublishTextRequest, HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest,
+    HarnessUsageRequest, LiveInput, LiveInputReceipt, LiveInputState, NativeTokenUsage,
+    TakeInputResponse, Task, TaskEventKind, harness_client::HarnessClient,
 };
 use tokio::{
     io::{AsyncWriteExt, BufReader},
@@ -597,7 +597,30 @@ impl Stream {
                         .unwrap_or("default")
                 )
             }
-            // Output deltas are represented by the authoritative completed item.
+            // The reply text as Codex writes it, shown while the turn runs. The completed
+            // `agentMessage` item is the authoritative message and replaces it; text for
+            // another turn is skipped.
+            "item/agentMessage/delta" => {
+                let active = self.turn_requested
+                    && !self.completed
+                    && params["turnId"].as_str() == self.turn.as_deref();
+                if let Some(delta) = params["delta"]
+                    .as_str()
+                    .filter(|delta| active && !delta.is_empty())
+                {
+                    harness
+                        .publish_text(request(
+                            HarnessPublishTextRequest {
+                                after_sequence: self.sequence,
+                                text: delta.to_owned(),
+                            },
+                            token,
+                        )?)
+                        .await
+                        .context("could not show Codex's reply as it is written")?;
+                }
+            }
+            // Other output deltas are represented by the authoritative completed item.
             method if method.starts_with("item/") && method.ends_with("/delta") => {}
             method
                 if method.starts_with("codex/")

@@ -18,16 +18,21 @@ import (
 // pushingConversations answers FollowConversation with each page in turn, then holds the stream.
 type pushingConversations struct {
 	rpc.UnimplementedConversationsHandler
-	pages []*v2.ListMessagesResponse
-	gets  atomic.Int32
+	pages     []*v2.ListMessagesResponse
+	responses []*v2.FollowConversationResponse
+	gets      atomic.Int32
 }
 
 func (p *pushingConversations) FollowConversation(ctx context.Context, req *connect.Request[v2.FollowConversationRequest], stream *connect.ServerStream[v2.FollowConversationResponse]) error {
 	if req.Msg.GetTagId() != "lead" {
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("unexpected Tag"))
 	}
+	responses := p.responses
 	for _, page := range p.pages {
-		if err := stream.Send(&v2.FollowConversationResponse{Messages: page}); err != nil {
+		responses = append(responses, &v2.FollowConversationResponse{Messages: page})
+	}
+	for _, response := range responses {
+		if err := stream.Send(response); err != nil {
 			return err
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -68,4 +73,35 @@ func TestRuntimeV2FollowsPushedChangesWithoutReadingThem(t *testing.T) {
 	if gets := conversations.gets.Load(); gets != 0 {
 		t.Fatalf("a pushed follow read the message %d times", gets)
 	}
+}
+
+func TestRuntimeV2ShowsTheTextTheTagIsWritingUntilItsMessageIsRecorded(t *testing.T) {
+	turn := func(state v2.TaskState, result *string, events ...*v2.TaskEvent) *v2.FollowConversationResponse {
+		return &v2.FollowConversationResponse{Messages: &v2.ListMessagesResponse{ConversationId: "conversation/lead", Incremental: true,
+			Messages: []*v2.ConversationMessage{{Order: 1, Events: events, Task: &v2.Task{TagId: "lead", TaskId: "t1", State: state, Result: result}}}}}
+	}
+	text := func(text string) *v2.FollowConversationResponse {
+		return &v2.FollowConversationResponse{Texts: []*v2.TurnText{{TaskId: "t1", AfterSequence: 1, Text: text}}}
+	}
+	intent := &v2.TaskEvent{Sequence: 1, Text: "I'll look at the build.", Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE}
+	answer := &v2.TaskEvent{Sequence: 2, Text: "The build passes.", Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE}
+	recorded := turn(v2.TaskState_TASK_STATE_RUNNING, nil, intent, answer)
+	recorded.Texts = []*v2.TurnText{{TaskId: "t1"}}
+	conversations := &pushingConversations{responses: []*v2.FollowConversationResponse{
+		turn(v2.TaskState_TASK_STATE_RUNNING, nil, intent),
+		text("The build "),
+		text("The build passes"),
+		recorded,
+		turn(v2.TaskState_TASK_STATE_SUCCEEDED, proto.String("The build passes."), intent, answer),
+	}}
+	mux := http.NewServeMux()
+	mux.Handle(rpc.NewConversationsHandler(conversations))
+	c := testRuntime(t, mux, false)
+	follower := testFollower(c)
+	follower.Interval = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := collect(t, follower.Follow(ctx, "lead", message("t1"), nil))
+	expect(t, events, "started", "message I'll look at the build.", "delta The build ", "delta The build passes",
+		"message The build passes.", "delta", "reply The build passes.")
 }

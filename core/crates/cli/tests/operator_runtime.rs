@@ -107,6 +107,8 @@ database_tests! {
     #[tokio::test]
     captured_artifact_bytes_survive_control_plane_restart_with_private_metadata;
     #[tokio::test]
+    a_followed_conversation_streams_redacted_reply_text_before_the_answer;
+    #[tokio::test]
     #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
     go_tui_lists_and_saves_completed_task_files;
     #[tokio::test]
@@ -1031,6 +1033,108 @@ async fn bare_launcher_saves_and_switches_control_plane_rosters(database: String
     for mut child in services {
         child.kill().await?;
     }
+    Ok(())
+}
+
+/// The fixture adapter writes its answer a few words at a time, quoting its own credential split
+/// across two pieces. A client following the conversation sees the text as it is written, each
+/// snapshot redacted and never a part of the credential, then the recorded answer.
+async fn a_followed_conversation_streams_redacted_reply_text_before_the_answer(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::Builder::new()
+        .prefix("stream-")
+        .tempdir_in("/tmp")?;
+    let state = directory.path().join("state");
+    let mut up = up_command(
+        &database,
+        &[
+            "up",
+            "--foreground",
+            "--adapter",
+            ADAPTER,
+            "--adapter-arg=--conversation-fixture=800",
+        ],
+    );
+    up.arg("--state-directory").arg(&state);
+    let (mut runtime, endpoint) = service(up).await?;
+    let mut put = command(&["tag", "put", "engineer", "--instructions", "Answer"]);
+    put.arg("--state-directory").arg(&state);
+    ensure!(timeout(WAIT, put.output()).await??.status.success());
+    let credentials: Value =
+        serde_json::from_slice(&std::fs::read(state.join("credentials.json"))?)?;
+    let token = credentials["operator_token"]
+        .as_str()
+        .context("test operator credential missing")?;
+    let mut conversations =
+        conversations_client::ConversationsClient::new(channel(&endpoint).await?);
+    let mut follow = conversations
+        .follow_conversation(authenticated_request(
+            FollowConversationRequest {
+                tag_id: "engineer".into(),
+                ..Default::default()
+            },
+            token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let sent = conversations
+        .send_message(authenticated_request(
+            SendMessageRequest {
+                tag_id: "engineer".into(),
+                operation_id: "stream".into(),
+                text: "Stream it".into(),
+                ..Default::default()
+            },
+            token,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .task
+        .context("sent message has no Task")?;
+    let full = "Streaming the answer with [REDACTED] in it, done. ";
+    let mut texts = Vec::new();
+    let result = loop {
+        let response = timeout(WAIT, follow.message())
+            .await??
+            .context("the follow ended")?;
+        for text in response.texts {
+            ensure!(text.task_id == sent.task_id);
+            texts.push(text.text);
+        }
+        let finished = response
+            .messages
+            .into_iter()
+            .flat_map(|page| page.messages)
+            .find_map(|message| {
+                message
+                    .task
+                    .filter(|task| task.task_id == sent.task_id && task.result.is_some())
+            });
+        if let Some(task) = finished {
+            break task.result.unwrap_or_default();
+        }
+    };
+    ensure!(result.contains("Stream it"), "{result}");
+    let shown: Vec<&String> = texts.iter().filter(|text| !text.is_empty()).collect();
+    ensure!(!shown.is_empty(), "no text was streamed before the answer");
+    for text in &shown {
+        ensure!(
+            full.starts_with(text.as_str()),
+            "a streamed text is not part of the redacted answer: {text:?}"
+        );
+    }
+    ensure!(
+        shown.last().map(|text| text.as_str()) == Some(full),
+        "{shown:?}"
+    );
+    if let Some(pid) = runtime.id() {
+        // SAFETY: this PID belongs to the supervised disposable runtime.
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    }
+    assert!(timeout(WAIT, runtime.wait()).await??.success());
     Ok(())
 }
 

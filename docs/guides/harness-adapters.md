@@ -42,6 +42,12 @@ Worker Host ── claims Task ── starts adapter ── writes bootstrap to 
      `Running make test`. People see the latest in a status line. Build it from a tool call's
      input, never its output.
    - `TASK_EVENT_KIND_PROGRESS`: a plan, as `progress.updated` JSON with a `summary` and `items`.
+
+   If your agent streams its reply, also send each piece of text as it arrives with
+   `PublishText`, naming the sequence of the last event you published as `after_sequence`. People
+   watch it appear in the message's place; the Worker Host batches it and hides credentials, and
+   it is never stored. Publish the whole message afterwards as usual; it replaces the streamed
+   text. Text is shown only, so a failed `PublishText` need not fail the turn.
 6. A message that arrives while the Task runs can be taken with `TakeLiveInput` and settled with
    `SettleLiveInput`; the adapter must handle accepted input before it completes.
 7. `Complete` ends the Task Attempt with the result text, whether it succeeded, a new Session

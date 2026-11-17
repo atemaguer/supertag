@@ -134,12 +134,22 @@ export interface TurnWait {
 }
 
 /**
+ * The text of the message a running turn's Tag is writing now, all of it so far; empty text
+ * clears it. The message, once recorded, or the turn's result replaces it.
+ */
+export interface TurnText {
+  taskId: string;
+  text: string;
+}
+
+/**
  * What a conversation follow pushes: `ready` once its stream is open, `lost` when it dropped (it
- * reopens on its own), and `changed` with the messages that changed and why queued turns wait.
+ * reopens on its own), and `changed` with the messages that changed, why queued turns wait, and
+ * the text running turns are writing.
  */
 export type FollowUpdate =
   | { kind: "ready" | "lost" }
-  | { kind: "changed"; messages?: MessagePage; waits?: TurnWait[] };
+  | { kind: "changed"; messages?: MessagePage; waits?: TurnWait[]; texts?: TurnText[] };
 
 export type WatchUpdate =
   | { kind: "ready" | "resync" | "lost" | "tag" }
