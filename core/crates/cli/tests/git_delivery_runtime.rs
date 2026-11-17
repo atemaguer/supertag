@@ -175,7 +175,7 @@ impl Credentials {
 
     /// The operator's CLI on the Control Plane's machine: it shares the Control Plane's vault.
     fn cli(&self, public: &str, args: &[&str]) -> Command {
-        let mut command = self.command(&[args[0], "--control-plane", public]);
+        let mut command = self.command(&[args[0], "--gateway", public]);
         command
             .args(&args[1..])
             .env("SUPERTAG_STATE_DIR", &self.state);
