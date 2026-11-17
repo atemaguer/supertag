@@ -329,6 +329,13 @@ func (m model) renderStatus() string {
 	} else if hosts := m.hostSummary(); hosts != "" {
 		left += hosts + "  "
 	}
+	shown := ""
+	if m.pane == paneConversation {
+		shown = m.selectedTag()
+	}
+	if unread := unreadTotal(m.summaries, shown); unread > 0 {
+		left += fmt.Sprintf("%d unread  ", unread)
+	}
 	left += "ctrl+k commands  "
 	if m.switchable {
 		left += "ctrl+p Control Planes  "
@@ -361,6 +368,8 @@ func (m model) View() tea.View {
 	}
 	v := tea.NewView(composeScreen(m.railBlock(bodyHeight), m.viewportBlock(), header, bottom, m.renderStatus(), bodyHeight))
 	v.AltScreen = true
+	// A reply in the conversation in front notifies while the terminal is in the background.
+	v.ReportFocus = true
 	return v
 }
 

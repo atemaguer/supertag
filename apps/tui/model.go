@@ -345,6 +345,13 @@ type model struct {
 	polling                                                       bool
 	tagReload, convReload, objReload, inboxReload, overviewReload *reload
 
+	// notify is what a Tag's reply or question in a conversation not in front does
+	// (SUPERTAG_TUI_NOTIFY); notified is the conversation list last read from the Control Plane,
+	// nil before the first; blurred says the terminal reported losing the focus.
+	notify   notifyLevel
+	notified map[string]*views.Conversation
+	blurred  bool
+
 	input    textinput.Model
 	viewport viewport.Model
 	width    int
@@ -389,6 +396,7 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 		watcher:           w,
 		conversations:     map[string]*conversation{},
 		summaries:         map[string]*views.Conversation{},
+		notify:            notifyLevelFromEnv(),
 		work:              map[string]*workDetail{},
 		expanded:          map[string]bool{},
 		workStates:        map[string]string{},
@@ -627,6 +635,14 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tagCreatedMsg:
 		return m, m.tagCreated(msg)
 
+	case tea.FocusMsg:
+		m.blurred = false
+		return m, nil
+
+	case tea.BlurMsg:
+		m.blurred = true
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
@@ -778,7 +794,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sortTags()
 		m.placeCursor()
 		m.cacheChanged(rosterKey)
-		return m, tea.Batch(again, m.markRead(m.selectedTag()))
+		return m, tea.Batch(again, m.markRead(m.selectedTag()), m.notifyChanged(msg.conversations))
 
 	case pollMsg:
 		if m.live {

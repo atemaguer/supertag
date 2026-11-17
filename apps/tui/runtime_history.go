@@ -83,6 +83,15 @@ func (h *runtimeHistory) reset() {
 	h.order, h.turns, h.workShown, h.markedRead = nil, nil, nil, 0
 }
 
+// remove forgets one turn, and ends its follow.
+func (h *runtimeHistory) remove(id string) {
+	if turn := h.turns[id]; turn != nil && turn.stop != nil {
+		turn.stop()
+	}
+	delete(h.turns, id)
+	h.order = slices.DeleteFunc(h.order, func(held string) bool { return held == id })
+}
+
 // sortOrder puts the turns in the conversation's order; one whose order is not known yet stays
 // after them, in the order it was added.
 func (h *runtimeHistory) sortOrder() {
@@ -172,6 +181,11 @@ func (m *model) showRuntimeHistory(msg historyMsg) tea.Cmd {
 		h.read = true
 		h.conversationID = msg.conversationID
 		for _, item := range msg.items {
+			if item.Message.Quiet {
+				// A turn that finished quietly leaves the conversation.
+				h.remove(item.Message.GetTaskId())
+				continue
+			}
 			cmds = append(cmds, m.runtimeItem(msg.tag, item))
 		}
 		h.sortOrder()

@@ -216,6 +216,12 @@ type Conversation struct {
 	LastActivityAtMs int64
 	// The latest message's order.
 	LatestOrder uint64
+	// The latest message is the Tag's question, still unanswered.
+	Asking bool
+}
+
+func (x *Conversation) GetAsking() bool {
+	return x != nil && x.Asking
 }
 
 func (x *Conversation) GetLastActivityAtMs() int64 {
@@ -326,6 +332,9 @@ type Message struct {
 	Started bool
 	// When the turn finished, if it has.
 	CompletedAt *timestamppb.Timestamp
+	// The turn finished quietly: no person waited on it and it found nothing to say, so the
+	// conversation does not show it.
+	Quiet bool
 }
 
 // A message the Tag wrote while its turn ran.
