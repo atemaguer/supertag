@@ -38,6 +38,9 @@ desktop notification through the terminal. `SUPERTAG_TUI_NOTIFY` sets it: `all` 
 outside the conversation in front. Turns that finished quietly (`Task.quiet`) leave the
 conversation.
 
+The command palette's **Notes** lists the selected Tag's notes you may see, with who sees each and
+when a turn last used it, and `x` deletes the selected one. Watch keeps the list current.
+
 The TUI also keeps a cache on disk, so `supertag` shows the last Tag's conversation before any
 call to the Control Plane: the Tag list with each conversation's row, the selected Tag, the latest
 50 messages of each conversation shown, with their rendering at the terminal's width, messages not

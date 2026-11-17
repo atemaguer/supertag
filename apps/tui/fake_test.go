@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -70,6 +71,42 @@ type fakeControlPlane struct {
 	hostReads     int
 	// marks are the MarkConversationRead requests, in order.
 	marks []*v2.MarkConversationReadRequest
+	// memories answers ListMemories, newest first; deleted are the DeleteMemory requests.
+	memories []*v2.Memory
+	deleted  []string
+}
+
+// fakeMemories serves the fake's notes.
+type fakeMemories struct {
+	rpc.UnimplementedMemoriesHandler
+	f *fakeControlPlane
+}
+
+func (m fakeMemories) List(_ context.Context, req *connect.Request[v2.ListMemoriesRequest]) (*connect.Response[v2.ListMemoriesResponse], error) {
+	f := m.f
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*v2.Memory
+	for _, memory := range f.memories {
+		if memory.GetTagId() == req.Msg.GetTagId() {
+			out = append(out, memory)
+		}
+	}
+	return connect.NewResponse(&v2.ListMemoriesResponse{Memories: out}), nil
+}
+
+func (m fakeMemories) Delete(_ context.Context, req *connect.Request[v2.GetMemoryRequest]) (*connect.Response[v2.Memory], error) {
+	f := m.f
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, memory := range f.memories {
+		if memory.GetMemoryId() == req.Msg.GetMemoryId() {
+			f.memories = append(f.memories[:i], f.memories[i+1:]...)
+			f.deleted = append(f.deleted, memory.GetMemoryId())
+			return connect.NewResponse(memory), nil
+		}
+	}
+	return nil, connect.NewError(connect.CodeNotFound, errors.New("Memory was not found"))
 }
 
 func (f *fakeControlPlane) start(t testing.TB) *httptest.Server {
@@ -94,6 +131,7 @@ func (f *fakeControlPlane) startWith(t testing.TB, wrap func(http.Handler) http.
 	mux.Handle(rpc.NewTeamsHandler(f))
 	mux.Handle(rpc.NewWorkSessionsHandler(f))
 	mux.Handle(rpc.NewEnrollmentsHandler(f))
+	mux.Handle(rpc.NewMemoriesHandler(fakeMemories{f: f}))
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != rpc.ProtocolNegotiationNegotiateProcedure && r.Header.Get("Authorization") != "Bearer "+f.token {
 			f.mu.Lock()

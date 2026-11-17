@@ -27,6 +27,7 @@ const (
 	commandCreateObjective
 	commandTaskFiles
 	commandOpenInbox
+	commandNotes
 )
 
 // paletteCommand is one row of the palette: a Tag in the Tags section, or an action in the
@@ -109,6 +110,7 @@ func (a *app) commands() []paletteCommand {
 
 	if tag := terminalText(a.inner.selectedTag()); tag != "" {
 		out = append(out, paletteCommand{id: commandCreateObjective, title: "/goal · Create Objective", about: "owned by " + tag})
+		out = append(out, paletteCommand{id: commandNotes, title: "Notes", about: "what " + tag + " remembers · delete a note"})
 	}
 	out = append(out, paletteCommand{id: commandTaskFiles, title: "Task files", about: "save files from a completed Task"})
 
@@ -248,6 +250,8 @@ func (a *app) run(c paletteCommand) tea.Cmd {
 		cmd = a.inner.openObjectiveForm("")
 	case commandTaskFiles:
 		return a.openTaskFiles()
+	case commandNotes:
+		return a.openNotes()
 	case commandOpenInbox:
 		cmd = a.inner.openInbox()
 	case commandNewTag:

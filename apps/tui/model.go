@@ -35,6 +35,7 @@ var watchKinds = []views.WatchKind{
 	views.WatchKind_WATCH_KIND_APPROVAL,
 	views.WatchKind_WATCH_KIND_WORKSTREAM_POST,
 	views.WatchKind_WATCH_KIND_TEAM,
+	views.WatchKind_WATCH_KIND_MEMORY,
 }
 
 type focus int

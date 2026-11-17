@@ -57,6 +57,7 @@ type app struct {
 	// palette is the command palette while it shows.
 	palette            *palette
 	files              *taskFilesDialog
+	notes              *notesDialog
 	controlPlaneStore  *controlPlaneStore
 	savedControlPlanes []client.Target
 	controlPlaneDialog *controlPlaneDialog
@@ -98,6 +99,7 @@ func (a *app) start(i int) error {
 		return err
 	}
 	a.closeTaskFiles()
+	a.closeNotes()
 	a.closeControlPlaneDialog()
 	if a.cancel != nil {
 		a.inner.flush(true)
@@ -119,6 +121,7 @@ func (a *app) start(i int) error {
 // stop ends the current model's streams and calls, and writes what its cache has not written.
 func (a *app) stop() {
 	a.closeTaskFiles()
+	a.closeNotes()
 	a.closeControlPlaneDialog()
 	if a.cancel != nil {
 		a.inner.flush(true)
@@ -160,6 +163,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.files != nil {
 			return a, a.taskFilesKey(msg)
+		}
+		if a.notes != nil {
+			return a, a.notesKey(msg)
 		}
 		if a.palette != nil {
 			return a, a.paletteKeyPress(msg)
@@ -224,12 +230,13 @@ func (a *app) forward(msg tea.Msg) tea.Cmd {
 	if !a.hasTarget {
 		return nil
 	}
-	if a.taskFilesMessage(msg) {
+	if a.taskFilesMessage(msg) || a.notesMessage(msg) {
 		return nil
 	}
+	watched := a.notesWatched(msg)
 	next, cmd := a.inner.Update(msg)
 	a.inner = next.(model)
-	return a.scope(cmd)
+	return tea.Batch(a.scope(cmd), watched)
 }
 
 // chooseKey moves through the Control Plane list and switches to the chosen one.
@@ -328,7 +335,7 @@ func ownMessage(msg tea.Msg) bool {
 }
 
 func (a *app) View() tea.View {
-	if (!a.choosing && a.palette == nil && a.files == nil && a.controlPlaneDialog == nil) || a.width == 0 {
+	if (!a.choosing && a.palette == nil && a.files == nil && a.notes == nil && a.controlPlaneDialog == nil) || a.width == 0 {
 		if !a.hasTarget {
 			return tea.NewView("")
 		}
@@ -340,6 +347,9 @@ func (a *app) View() tea.View {
 	}
 	if a.files != nil {
 		shown = a.renderTaskFiles
+	}
+	if a.notes != nil {
+		shown = a.renderNotes
 	}
 	if a.controlPlaneDialog != nil {
 		shown = a.renderControlPlaneDialog

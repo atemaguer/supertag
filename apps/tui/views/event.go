@@ -47,21 +47,24 @@ const (
 	// or deleted. `id` and `team_id` are the Team's ID. Reread it with
 	// `TeamService.GetTeam`, which fails with `NotFound` once it is deleted.
 	WatchKind_WATCH_KIND_TEAM WatchKind = 9
+	// A Tag's note was kept, rewritten, or deleted. `id` is the note's ID and `tag` its Tag's.
+	WatchKind_WATCH_KIND_MEMORY WatchKind = 11
 )
 
 // Enum value maps for WatchKind.
 var (
 	WatchKind_name = map[int32]string{
-		0: "WATCH_KIND_UNSPECIFIED",
-		1: "WATCH_KIND_TAG",
-		2: "WATCH_KIND_SESSION",
-		3: "WATCH_KIND_TASK",
-		4: "WATCH_KIND_OBJECTIVE",
-		5: "WATCH_KIND_INBOX_ITEM",
-		6: "WATCH_KIND_APPROVAL",
-		7: "WATCH_KIND_CONVERSATION_MESSAGE",
-		8: "WATCH_KIND_WORKSTREAM_POST",
-		9: "WATCH_KIND_TEAM",
+		0:  "WATCH_KIND_UNSPECIFIED",
+		1:  "WATCH_KIND_TAG",
+		2:  "WATCH_KIND_SESSION",
+		3:  "WATCH_KIND_TASK",
+		4:  "WATCH_KIND_OBJECTIVE",
+		5:  "WATCH_KIND_INBOX_ITEM",
+		6:  "WATCH_KIND_APPROVAL",
+		7:  "WATCH_KIND_CONVERSATION_MESSAGE",
+		8:  "WATCH_KIND_WORKSTREAM_POST",
+		9:  "WATCH_KIND_TEAM",
+		11: "WATCH_KIND_MEMORY",
 	}
 	WatchKind_value = map[string]int32{
 		"WATCH_KIND_UNSPECIFIED":          0,
@@ -74,6 +77,7 @@ var (
 		"WATCH_KIND_CONVERSATION_MESSAGE": 7,
 		"WATCH_KIND_WORKSTREAM_POST":      8,
 		"WATCH_KIND_TEAM":                 9,
+		"WATCH_KIND_MEMORY":               11,
 	}
 )
 
