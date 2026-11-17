@@ -439,6 +439,50 @@ async fn contract(url: String) {
             (run.task_id(), LiveInputState::Accepted)
         ]
     );
+    // A Schedule firing into the conversation is the Tag's own turn: it splits the batch.
+    let ask = |text: &'static str| SendMessageRequest {
+        tag_id: "builder".into(),
+        operation_id: format!("send-{text}"),
+        text: text.into(),
+        ..Default::default()
+    };
+    store
+        .send_message(OPERATOR, &ask("before the Schedule"))
+        .await
+        .unwrap();
+    store
+        .create_schedule(
+            OPERATOR,
+            &CreateScheduleRequest {
+                operation_id: "schedule".into(),
+                tag_id: "builder".into(),
+                note: "Check the deploy".into(),
+                at: "1h".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    clock.fetch_add(60 * 60 * 1000, Ordering::SeqCst);
+    assert_eq!(store.sweep_schedules().await.unwrap(), 1);
+    store
+        .send_message(OPERATOR, &ask("after the Schedule"))
+        .await
+        .unwrap();
+    let mut runs = Vec::new();
+    for index in 0..3 {
+        let run = Run::claim(&store, &host, &format!("scheduled-{index}")).await;
+        runs.push((
+            run.assignment.task.as_ref().unwrap().prompt.clone(),
+            run.joined().len(),
+        ));
+        run.start(&store, &host).await;
+        run.finish(&store, &host).await;
+    }
+    assert_eq!(runs[0], ("before the Schedule".into(), 0));
+    assert!(runs[1].0.contains("Check the deploy"), "{runs:?}");
+    assert_eq!(runs[1].1, 0);
+    assert_eq!(runs[2], ("after the Schedule".into(), 0));
     assert!(
         store
             .claim_task(&host, "nothing-left")

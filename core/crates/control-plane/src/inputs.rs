@@ -523,15 +523,16 @@ pub(crate) async fn joined_in(
 }
 
 /// A message a person sent: in a conversation, in a Slack, Teams or Lark thread, or as live input.
-/// Not an internal turn such as a Schedule firing, a notice, a Mailbox delivery or a report, and
-/// not a GitHub or Linear event.
+/// Not an internal turn such as a Schedule firing (which a conversation also shows), a notice, a
+/// Mailbox delivery or a report, and not a GitHub or Linear event.
 async fn person_message_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<bool> {
     let found: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 WHERE EXISTS (SELECT 1 FROM supertag_v2_conversation_messages WHERE task_id=$1)
+        "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM supertag_v2_schedule_fires WHERE task_id=$1)
+            AND (EXISTS (SELECT 1 FROM supertag_v2_conversation_messages WHERE task_id=$1)
             OR EXISTS (SELECT 1 FROM supertag_v2_slack_messages WHERE task_id=$1)
             OR EXISTS (SELECT 1 FROM supertag_v2_lark_messages WHERE task_id=$1)
             OR EXISTS (SELECT 1 FROM supertag_v2_microsoft_teams_activities WHERE task_id=$1)
-            OR EXISTS (SELECT 1 FROM supertag_v2_live_inputs WHERE follower_task_id=$1)",
+            OR EXISTS (SELECT 1 FROM supertag_v2_live_inputs WHERE follower_task_id=$1))",
     )
     .bind(task_id)
     .fetch_optional(&mut **tx)
