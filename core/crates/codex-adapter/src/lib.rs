@@ -8,6 +8,7 @@ mod coordination;
 mod events;
 mod pricing;
 mod questions;
+mod schedules;
 mod skills;
 mod tag_sessions;
 
@@ -128,6 +129,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         acquire_artifacts: attached.may_acquire_artifacts,
         attach_artifacts: attached.may_materialize_artifacts,
         tag_sessions: capabilities.may_read_tag_sessions,
+        schedule: capabilities.may_schedule,
         report_objective: questions::Reporting::new(&capabilities),
     };
     let tools = previous_tools.unwrap_or(questions::Tools {
@@ -136,6 +138,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         acquire_artifacts: attached.checkpoint.is_none() && attached.may_acquire_artifacts,
         attach_artifacts: attached.checkpoint.is_none() && attached.may_materialize_artifacts,
         tag_sessions: attached.checkpoint.is_none() && capabilities.may_read_tag_sessions,
+        schedule: attached.checkpoint.is_none() && capabilities.may_schedule,
         report_objective: if attached
             .checkpoint
             .as_ref()

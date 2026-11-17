@@ -313,6 +313,8 @@ pub(crate) fn coordination_inventory(
     } else {
         (crate::questions::Reporting::None, manifest)
     };
+    let schedule = manifest.strip_suffix(crate::questions::SCHEDULE_SUFFIX);
+    let manifest = schedule.unwrap_or(&manifest).to_owned();
     let tag_sessions = manifest.strip_suffix(crate::questions::TAG_SESSIONS_SUFFIX);
     let manifest = tag_sessions.unwrap_or(&manifest).to_owned();
     let attach = manifest.strip_suffix(crate::questions::ARTIFACT_ATTACH_SUFFIX);
@@ -326,12 +328,18 @@ pub(crate) fn coordination_inventory(
     let capture = remaining.strip_suffix(crate::questions::ARTIFACT_CAPTURE_SUFFIX);
     let coordination = match capture.unwrap_or(remaining) {
         crate::questions::NONE
-            if capture.is_some() || acquire.is_some() || tag_sessions.is_some() =>
+            if capture.is_some()
+                || acquire.is_some()
+                || tag_sessions.is_some()
+                || schedule.is_some() =>
         {
             Some(crate::coordination::Inventory::None)
         }
         crate::questions::OBJECTIVE_ASK
-            if capture.is_some() || acquire.is_some() || tag_sessions.is_some() =>
+            if capture.is_some()
+                || acquire.is_some()
+                || tag_sessions.is_some()
+                || schedule.is_some() =>
         {
             Some(crate::coordination::Inventory::Ask)
         }
@@ -357,6 +365,7 @@ pub(crate) fn coordination_inventory(
         acquire_artifacts: acquire.is_some(),
         attach_artifacts: attach.is_some(),
         tag_sessions: tag_sessions.is_some(),
+        schedule: schedule.is_some(),
         report_objective: report,
     })
 }
