@@ -324,8 +324,8 @@ async fn contract(url: String) {
     store.close().await;
 }
 
-/// Upgrading closes the Work Sessions that had finished, except one waiting on an answer, so no
-/// Tag starts at its limit.
+/// Upgrading closes the Work Sessions that had finished, except each Tag's four newest and one
+/// waiting on an answer, so no Tag starts at its limit and recent work can still be continued.
 async fn upgrade(url: String) {
     sqlx::any::install_default_drivers();
     let mut connection = sqlx::AnyConnection::connect(&url).await.unwrap();
@@ -361,14 +361,22 @@ async fn upgrade(url: String) {
            ('parent','lead','p','Plan','Lead','[]',1,3,1),
            ('done','lead','work/done','Child','Lead','[]',1,3,2),
            ('asking','lead','work/asking','Child','Lead','[]',1,3,3),
-           ('running','lead','work/running','Child','Lead','[]',1,2,4);
+           ('running','lead','work/running','Child','Lead','[]',1,2,4),
+           ('n1','lead','work/n1','Child','Lead','[]',1,3,5),
+           ('n2','lead','work/n2','Child','Lead','[]',1,4,6),
+           ('n3','lead','work/n3','Child','Lead','[]',1,3,7),
+           ('n4','lead','work/n4','Child','Lead','[]',1,3,8);
          INSERT INTO supertag_v2_work_sessions (work_session_id,title,parent_tag_id,parent_session_id,starter_task_id,tag_id,latest_task_id,created_order) VALUES
            ('work/done','Done','lead','p','parent','lead','done',2),
            ('work/asking','Asking','lead','p','parent','lead','asking',3),
-           ('work/running','Running','lead','p','parent','lead','running',4);
+           ('work/running','Running','lead','p','parent','lead','running',4),
+           ('work/n1','Newer','lead','p','parent','lead','n1',5),
+           ('work/n2','Newer','lead','p','parent','lead','n2',6),
+           ('work/n3','Newer','lead','p','parent','lead','n3',7),
+           ('work/n4','Newest','lead','p','parent','lead','n4',8);
          INSERT INTO supertag_v2_work_session_questions (attempt_id,task_id,work_session_id,operation_id,text,asked_at_ms,published_at_ms) VALUES
            ('a','asking','work/asking','o','Which branch?',1,1);
-         UPDATE supertag_v2_write_order SET revision=4 WHERE singleton=1;",
+         UPDATE supertag_v2_write_order SET revision=8 WHERE singleton=1;",
     )
     .execute(&mut connection)
     .await
@@ -392,6 +400,10 @@ async fn upgrade(url: String) {
         [
             ("work/asking", false, 0),
             ("work/done", true, WorkSessionCloseReason::Upgrade as i64),
+            ("work/n1", false, 0),
+            ("work/n2", false, 0),
+            ("work/n3", false, 0),
+            ("work/n4", false, 0),
             ("work/running", false, 0),
         ]
     );

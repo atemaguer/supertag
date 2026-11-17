@@ -9,11 +9,15 @@ ALTER TABLE supertag_v2_work_sessions ADD COLUMN close_reason SMALLINT NOT NULL 
 CREATE INDEX supertag_v2_work_sessions_open
     ON supertag_v2_work_sessions (parent_tag_id, closed_at_ms);
 
--- Work Sessions that had finished before SuperTag counted open ones close now, unless they wait
--- on an answer to their question, so no Tag starts at its limit.
+-- Work Sessions that had finished before SuperTag counted open ones close now, so no Tag starts
+-- at its limit. Each Tag's four newest stay open to be continued, and so does one waiting on an
+-- answer to its question.
 UPDATE supertag_v2_work_sessions SET closed_at_ms = CAST(EXTRACT(EPOCH FROM now()) * 1000 AS BIGINT), close_reason = 5
 WHERE EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id = supertag_v2_work_sessions.latest_task_id
               AND t.state IN (3, 4, 5) AND t.cleanup_pending = 0)
+  AND (SELECT COUNT(*) FROM supertag_v2_work_sessions newer
+       WHERE newer.parent_tag_id = supertag_v2_work_sessions.parent_tag_id
+         AND newer.created_order > supertag_v2_work_sessions.created_order) >= 4
   AND NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_questions q
                   WHERE q.work_session_id = supertag_v2_work_sessions.work_session_id
                     AND q.published_at_ms IS NOT NULL AND q.answer_task_id IS NULL);

@@ -682,6 +682,7 @@ async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
                 name: None,
                 harness: "codex".into(),
                 workspace_id: None,
+                max_work_sessions: None,
             },
         )
         .await
@@ -956,6 +957,7 @@ async fn an_operator_creates_a_tag_once_with_the_lead_tag_defaults() {
         name: Some("Reviewer".into()),
         harness: "claude_code".into(),
         workspace_id: None,
+        max_work_sessions: None,
     };
     let created = client.create_tag(id, new_tag()).await.unwrap();
     assert_eq!(created.tag_id, "reviewer");

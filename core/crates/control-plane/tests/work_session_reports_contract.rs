@@ -525,12 +525,15 @@ async fn contract(url: String) {
     let pool = sqlx::AnyPool::connect(&url).await.unwrap();
     let host = support::register_host(&store, "worker").await;
     let other = support::register_host(&store, "other").await;
+    // These scenarios start more Work Sessions than the default limit of open ones.
     store
-        .put_tag(
-            "owner",
-            "Original accepted instructions",
-            vec!["files:read".into()],
-        )
+        .put_tag_spec(PutTagRequest {
+            tag_id: "owner".into(),
+            instructions: "Original accepted instructions".into(),
+            allowed_actions: vec!["files:read".into()],
+            max_work_sessions: Some(64),
+            ..Default::default()
+        })
         .await
         .unwrap();
 
