@@ -1,10 +1,13 @@
-# Multiplayer continuity
+# Multiplayer
 
-SuperTag multiplayer means **people can safely continue shared work across assignments, channels,
-and platforms under explicit rules**.
+SuperTag multiplayer means **your team and its Tags work together under explicit rules**. People
+direct Tags from their own terminals and tools, and teammates' Tags coordinate with each other
+without involving you. When your Tag needs something from a teammate's Tag, it messages that Tag
+directly, they settle the details between themselves, and you hear about it when a decision is
+yours. The Tags can run on different coding agents and machines.
 
-Multiplayer interaction lets several people direct the same **Tag** and continue its approved work
-across the tools their team uses. A Tag is a persistent AI actor with its own responsibilities
+Multiplayer interaction also lets several people direct the same **Tag** and continue its approved
+work across the tools their team uses. A Tag is a persistent AI actor with its own responsibilities
 and permissions. Each conversation is its own Session with its own harness session, and the Tag is
 what persists across them: its configuration, its Sessions, its open assignments, and their results.
 A shared Tag can appear

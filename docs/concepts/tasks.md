@@ -362,5 +362,5 @@ This message path does not infer answers to specific harness clarification or pe
 ## Where to go next
 
 - Learn how [Worker Hosts and harnesses](workers.md) execute a Task Attempt.
-- See how [multiplayer continuity](multiplayer.md) shares completed work.
+- See how [multiplayer](multiplayer.md) shares completed work.
 - Inspect Tasks and Task Attempts with the [resource commands](../operations/resources.md).

@@ -8,7 +8,9 @@ of posts. A **Worker Host** is a machine or sandbox that runs work. See the
 [glossary](../reference/glossary.md) for other terms.
 
 Use this guide to keep a Tag responsible for work that becomes necessary again as conditions
-change. In the example, a support manager maintains the Team's response policy as overdue tickets
+change. A Tag with an enduring responsibility acts on it without being asked: a new Sentry error,
+a PagerDuty alert, a failed CI run on main, or a dependency advisory wakes it, and it decides
+what to do. In the example, a support manager maintains the Team's response policy as overdue tickets
 reveal gaps.
 
 An ordinary Objective must keep moving: a turn that ends with nothing running and nothing asked
@@ -93,12 +95,14 @@ terminal UI, press `m`, and enter it. For example, “Overdue ticket 42: first r
 90 minutes against a 30-minute target. Plan: enterprise.” Press Enter to send it as the
 manager's next turn.
 
-For a monitoring script, call the [Control Plane API](../reference/control-plane-api.md) with an
+For a monitoring script, or a small webhook relay that forwards alerts from tools like Sentry,
+PagerDuty, or your CI, call the [Control Plane API](../reference/control-plane-api.md) with an
 Operator Token. `supertag get objective support-policy` shows the Objective's `owner_tag_id` and
 `session_id`. Check `Inbox.ListItems` first and hold the report while the manager waits for an
 answer. Then send the report as the next turn of the Objective's conversation with
 `Conversations.SendMessage`: `tag_id` is the owner, `conversation` is the Objective's
-`session_id`, `text` is the report's summary, and `operation_id` is a key unique to that report.
+`session_id`, `text` is the report's summary, and `operation_id` is a key unique to that report,
+such as the alert's ID.
 Reuse the same key when retrying delivery, so a lost response never sends the report twice.
 
 If the Objective has a Slack or Lark home thread, you can also reply there. See

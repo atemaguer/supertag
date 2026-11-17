@@ -113,5 +113,5 @@ or accountability, create a separate Tag instead. See
 - Follow one request through [Tasks and Sessions](tasks.md).
 - Learn when to use [Context Sets versus Permission Sets](context-and-permissions.md).
 - Decide whether a responsibility needs a [Tag or a Role](roles.md#when-to-use-a-tag-or-a-role).
-- See how shared work enables [multiplayer continuity](multiplayer.md).
+- See how shared work enables [multiplayer](multiplayer.md).
 - For policy snapshots, actions, and security invariants, continue to the [IAM reference](../reference/iam.md).

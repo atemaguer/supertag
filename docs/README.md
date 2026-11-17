@@ -87,7 +87,7 @@ Once those ideas are clear, learn where the organization and its work run:
 - A [Worker Host](concepts/workers.md) is a machine or sandbox that provides execution capacity.
 - A **harness adapter** runs each Task Attempt on an agent system such as Codex, Claude Code, or
   Cursor. The [execution overview](concepts/workers.md) explains how it fits together.
-- [Multiplayer continuity](concepts/multiplayer.md) explains how people share completed work safely.
+- [Multiplayer](concepts/multiplayer.md) explains how teammates and their Tags work together and share completed work safely.
 - [Persistence](concepts/persistence.md) explains what survives when a sandbox or host dies.
 
 The **Gateway** is a separate, optional service that receives and sends collaboration surface

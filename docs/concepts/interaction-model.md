@@ -71,7 +71,7 @@ and the working loop.
 
 ## Compare `/goal`, Projects, and SuperTag
 
-Two features in coding agents cover part of this model. As of **October 2026**, their documentation
+Two features in coding agents cover part of this model. As of **November 2026**, their documentation
 describes them as follows:
 
 | Feature | Documented behavior | How SuperTag relates |
@@ -79,7 +79,7 @@ describes them as follows:
 | [`/goal` in Claude Code](https://code.claude.com/docs/en/goal) | Sets a completion condition for the current session. After each turn, a model checks the condition, and Claude keeps working until it holds. | An Objective is a completion condition for a team. It lasts across sessions and machines, and budgets and approvals apply. |
 | [`/goal` in Codex](https://learn.chatgpt.com/docs/developer-commands?surface=cli) | Keeps a goal attached to the active chat while work continues. You can edit, pause, resume, or clear it. | The Objective belongs to the organization, not to one chat. |
 | [Projects in Claude Code](https://code.claude.com/docs/en/claude-projects) | One conversation starts a thread for each task and runs the threads as parallel cloud sessions that share repositories, instructions, and memory. | A conversation with a Tag can start a work Session for each longer task, up to four running at once, and the Tag reports each result back in that conversation. Each Tag has its own permissions and runs on the hosts you choose. |
-| [Projects in Cursor](https://cursor.com/docs/agent/projects) | A coordinator agent plans the work, delegates it to agents running in parallel on Cloud Agents, and returns finished work to you. | The owning Tag plans the work and starts Sessions for it, including Sessions of other Team members; they run on Worker Hosts you connect, with any supported harness. |
+| [Projects in Cursor](https://cursor.com/docs/agent/projects) | A coordinator agent plans the work, delegates it to agents running in parallel on Cloud Agents, and returns finished work to you. Teammates can join a Project, each with their own coordinator, and the coordinators sync with each other. | The owning Tag plans the work and starts Sessions for it, including Sessions of other Team members; they run on Worker Hosts you connect, with any supported harness. Teammates' Tags message each other and share their Team's Workstream, on different coding agents and machines. |
 
 Project capabilities change. The questions below help you compare their documented behavior with
 SuperTag without assuming that the products use the same contracts.
@@ -99,6 +99,6 @@ needs within the coding product you already use. Choose SuperTag when you want a
 engineering work, with recorded ownership, work, and limits across sessions and execution
 environments.
 
-For details, see [multiplayer continuity](multiplayer.md),
+For details, see [multiplayer](multiplayer.md),
 [Worker Hosts and harnesses](workers.md), and
 [monetary budgets](../reference/coordination.md#monetary-budgets).
