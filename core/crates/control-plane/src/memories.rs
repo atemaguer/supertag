@@ -588,12 +588,16 @@ impl Store {
 const GONE: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.attempt_id=supertag_v2_tag_memories.origin_attempt_id AND t.state IN ($3,$4))";
 
 /// Tags due a review: they keep memory, finished enough root turns since their last review, and
-/// last reviewed long enough ago.
+/// last reviewed long enough ago. A Tag never reviewed waits the same interval from its first
+/// finished turn, so a new Tag's first few quick exchanges don't trigger a review at once.
 async fn due_reviews(pool: &sqlx::AnyPool, now: i64) -> Result<Vec<String>> {
     Ok(sqlx::query_scalar(
         "SELECT g.tag_id FROM supertag_v2_tags g
          WHERE g.memory=1 AND g.retired_at_ms IS NULL
-           AND (g.memory_reviewed_at_ms IS NULL OR g.memory_reviewed_at_ms<=$1)
+           AND (g.memory_reviewed_at_ms<=$1
+                OR (g.memory_reviewed_at_ms IS NULL AND EXISTS (
+                    SELECT 1 FROM supertag_v2_tasks f
+                    WHERE f.tag_id=g.tag_id AND f.state=$2 AND f.completed_at_ms<=$1)))
            AND (SELECT COUNT(*) FROM supertag_v2_tasks t
                 WHERE t.tag_id=g.tag_id AND t.state=$2 AND t.completed_at_ms IS NOT NULL
                   AND t.completed_at_ms>COALESCE(g.memory_reviewed_at_ms,0)

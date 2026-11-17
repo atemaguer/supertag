@@ -413,6 +413,12 @@ async fn contract(url: &str) {
         let turn = say(&store, &host, ALICE, &format!("Work {index}")).await;
         finish(&store, &host, &turn, true).await;
     }
+    assert_eq!(
+        store.sweep_memory().await.unwrap(),
+        0,
+        "a Tag never reviewed waits a day from its first finished turn"
+    );
+    clock.store(BASE + 25 * HOUR, Ordering::SeqCst);
     assert_eq!(store.sweep_memory().await.unwrap(), 1);
     assert_eq!(
         store.sweep_memory().await.unwrap(),
@@ -420,7 +426,7 @@ async fn contract(url: &str) {
         "one review at a time"
     );
     let tag = store.get_tag(TAG).await.unwrap();
-    assert_eq!(tag.memory_reviewed_at_ms, Some(BASE));
+    assert_eq!(tag.memory_reviewed_at_ms, Some(BASE + 25 * HOUR));
     let review = store
         .claim_task(&host, &Uuid::new_v4().to_string())
         .await
@@ -440,7 +446,8 @@ async fn contract(url: &str) {
 /// The review turn's tools: read the Tag's shared Sessions and keep its shared notes, nothing
 /// that reaches anyone. A Tag without memory gets neither notes nor reviews.
 async fn review_contract(url: &str) {
-    let clock = Arc::new(AtomicI64::new(BASE));
+    // The first ten turns finish a day before BASE, so the first review is due at BASE.
+    let clock = Arc::new(AtomicI64::new(BASE - 25 * HOUR));
     let source = clock.clone();
     let store = Store::open(url)
         .await
@@ -459,6 +466,7 @@ async fn review_contract(url: &str) {
         let turn = say(&store, &host, ALICE, &format!("Work {index}")).await;
         finish(&store, &host, &turn, true).await;
     }
+    clock.store(BASE, Ordering::SeqCst);
     assert_eq!(store.sweep_memory().await.unwrap(), 1);
     let task = store
         .claim_task(&host, &Uuid::new_v4().to_string())
