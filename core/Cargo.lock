@@ -2928,6 +2928,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "supertag-protocol",
+ "supertag-worker-host",
  "supertag-workspaces",
  "tempfile",
  "tokio",

@@ -284,8 +284,11 @@ pub fn host_names(scope: &NetworkScope) -> BTreeSet<String> {
 #[derive(Clone, Debug, Default)]
 pub struct Rules {
     any_origin: bool,
-    rules: Vec<(Vec<(String, u16)>, Vec<String>, String)>,
+    rules: Vec<CompiledRule>,
 }
+
+/// A rule's origins as `(host, port)`, its methods, and its credential.
+type CompiledRule = (Vec<(String, u16)>, Vec<String>, String);
 
 fn origin_parts(origin: &str) -> Option<(String, u16)> {
     let rest = origin.strip_prefix("https://")?;

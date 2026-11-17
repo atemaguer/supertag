@@ -32,7 +32,7 @@ async fn proxy(
     let scope = NetworkScope {
         any_origin: false,
         rules: vec![
-            rule(&[origin.clone()], &["GET", "POST"], ""),
+            rule(std::slice::from_ref(&origin), &["GET", "POST"], ""),
             rule(&[origin], &["GET"], "github"),
         ],
     };

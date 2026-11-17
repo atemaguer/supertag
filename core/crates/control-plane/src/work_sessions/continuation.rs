@@ -416,6 +416,7 @@ mod tests {
                     objective_revision: Some(1),
                     delegating_task_id: Some("first-owner-task".into()),
                     files: None,
+                    network: None,
                 }),
                 ..Default::default()
             }),

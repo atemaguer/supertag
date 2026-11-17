@@ -625,8 +625,7 @@ async fn run(
         (valid_until, execution_ends),
         shutdown,
         (workspace, output_directory),
-        &processes,
-        &egress_environment,
+        (&processes, &egress_environment),
     )
     .await;
     bridge.inputs.close();
@@ -654,8 +653,7 @@ async fn supervise(
     (valid_until, execution_ends): (Instant, Instant),
     shutdown: &CancellationToken,
     (workspace, output_directory): (Option<&Path>, Option<&Path>),
-    processes: &crate::journal::Processes,
-    egress_environment: &[(String, std::ffi::OsString)],
+    (processes, egress_environment): (&crate::journal::Processes, &[(String, std::ffi::OsString)]),
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
         return Ok(not_launched(bridge, "Worker Host is shutting down"));
