@@ -353,16 +353,21 @@ pub async fn run(
     }
     let workspaces =
         workspaces::Workspaces::new(&options.state_directory, options.workspaces.clone())?;
+    // Checkouts a crash left moved aside but not yet deleted.
+    if !options.once {
+        workspaces.purge_all_discarded_in_background();
+    }
     // Terminal proof is durable; finishing local cleanup needs neither the source
     // repository nor a new network registration.
     if let Some(Entry::Terminal { attempt, prepared }) = journal.load()? {
-        cleanup_terminal(
+        let discarded = cleanup_terminal(
             &journal,
             &workspaces,
             &options.state_directory,
             &attempt,
             prepared.as_deref(),
         )?;
+        purge_discarded(discarded, options.once);
         if options.once {
             ready();
             return Ok(());
@@ -1185,7 +1190,8 @@ pub async fn run(
                 journal.save(&Entry::Terminal { attempt, prepared })?;
             }
             Entry::Terminal { attempt, prepared } => {
-                cleanup_terminal(&journal, &workspaces, &options.state_directory, &attempt, prepared.as_deref())?;
+                let discarded = cleanup_terminal(&journal, &workspaces, &options.state_directory, &attempt, prepared.as_deref())?;
+                purge_discarded(discarded, options.once);
                 if let Some(ready) = ready.take() {
                     ready();
                 }
@@ -1221,19 +1227,41 @@ fn recovery_notice(attempt: &Attempt) -> String {
     )
 }
 
+/// Ends a settled Attempt's local state. Its checkout is only moved aside here; deleting it,
+/// which took seconds for a large repository, overlaps the next claim: see `purge_discarded`.
+/// Returns the workspace state directory to purge.
 fn cleanup_terminal(
     journal: &Journal,
     workspaces: &workspaces::Workspaces,
     state_directory: &std::path::Path,
     attempt: &Attempt,
     prepared: Option<&workspaces::PreparedWorkspace>,
-) -> Result<()> {
+) -> Result<Option<std::path::PathBuf>> {
     workspace_mounts::cleanup(state_directory, &attempt.attempt_id)?;
-    if let Some(prepared) = prepared {
-        workspaces.discard(prepared)?;
-    }
+    let discarded = prepared
+        .map(|prepared| workspaces.discard(prepared))
+        .transpose()?;
     context::discard_attempt(state_directory, &attempt.attempt_id)?;
-    journal.clear()
+    journal.clear()?;
+    Ok(discarded)
+}
+
+/// Deletes a discarded checkout in the background, so the next claim does not wait for it. A
+/// `--once` host has no next claim and deletes it before it exits.
+fn purge_discarded(state: Option<std::path::PathBuf>, once: bool) {
+    let Some(state) = state else {
+        return;
+    };
+    let purge = move || {
+        if let Err(error) = supertag_workspaces::purge_discarded(&state) {
+            failures::note_unrecorded("Discarded checkouts could not be deleted", &error);
+        }
+    };
+    if once {
+        purge();
+    } else {
+        std::thread::spawn(purge);
+    }
 }
 
 fn discard_prelaunch(
@@ -1247,13 +1275,15 @@ fn discard_prelaunch(
         .map(|entry| entry.prepared(attempt))
         .transpose()?
         .flatten();
-    cleanup_terminal(
+    let discarded = cleanup_terminal(
         journal,
         workspaces,
         &options.state_directory,
         attempt,
         prepared.as_deref(),
-    )
+    )?;
+    purge_discarded(discarded, options.once);
+    Ok(())
 }
 
 async fn resolved(

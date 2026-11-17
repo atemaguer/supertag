@@ -348,6 +348,7 @@ impl Workspace {
             "artifacts",
             "temporary",
             "mcp",
+            DISCARDED,
         ] {
             paths::create_private_root(&root.join(name))?;
         }
@@ -899,15 +900,17 @@ impl Workspace {
                     .is_some(),
             "cannot remove a checkout before its delivery receipt is durable"
         );
+        let discarded = self.inner.root.join(DISCARDED);
         match fs::symlink_metadata(&checkout.path) {
             Ok(_) => {
-                paths::remove_owned_directory(&checkout.path)?;
+                paths::verify_directory(&checkout.path)?;
+                discard(&checkout.path, &discarded)?;
                 File::open(checkout.path.parent().expect("checkout parent"))?.sync_all()?;
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
-        transfer::discard_staging(&self.inner.root.join("records").join(id))?;
+        transfer::discard_staging(&self.inner.root.join("records").join(id), &discarded)?;
         Ok(())
     }
 
@@ -962,6 +965,60 @@ pub async fn complete_delivery_bundle(
         "complete delivery bundle exceeds its size limit"
     );
     Ok(bundle)
+}
+
+/// Where removed checkouts wait for `purge_discarded`, inside the workspace state directory.
+const DISCARDED: &str = "discarded";
+
+/// Moves an owned directory into `discarded` with one rename, so the caller does not wait for
+/// its files to be deleted. A checkout of a large repository took seconds to delete, and the
+/// Worker Host claimed its next Task only after it.
+fn discard(directory: &Path, discarded: &Path) -> Result<()> {
+    paths::verify_directory(discarded)?;
+    let name = format!(
+        "{}-{}",
+        directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("directory"),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos())
+    );
+    fs::rename(directory, discarded.join(name))?;
+    File::open(discarded)?.sync_all()?;
+    Ok(())
+}
+
+/// Deletes what checkout removal moved aside in the workspace state directory `state_dir`.
+/// Needs no workspace lock: nothing else reads or writes `discarded`, so a Worker Host runs this
+/// in the background while it claims and prepares its next Task, and again at start for
+/// anything a crash left. Two concurrent purges are harmless.
+pub fn purge_discarded(state_dir: &Path) -> Result<()> {
+    let discarded = paths::planned_path(state_dir)?.join(DISCARDED);
+    let entries = match fs::read_dir(&discarded) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    paths::verify_directory(&discarded)?;
+    for entry in entries {
+        let path = entry?.path();
+        let removed = match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                fs::remove_dir_all(&path)
+            }
+            Ok(_) => fs::remove_file(&path),
+            Err(error) => Err(error),
+        };
+        match removed {
+            Ok(()) => {}
+            // Another purge got there first.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 fn identity(task_id: &str, attempt_id: &str) -> String {

@@ -492,7 +492,7 @@ pub(super) fn require_restored(directory: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn discard_staging(directory: &Path) -> Result<()> {
+pub(super) fn discard_staging(directory: &Path, discarded: &Path) -> Result<()> {
     // The caller already matched the exact preparation to the owned checkout.
     // Only these fixed private transfer paths are disposable; published delivery
     // artifacts and JSON receipts retain their independent lifetime.
@@ -500,7 +500,8 @@ pub(super) fn discard_staging(directory: &Path) -> Result<()> {
     for name in ["return-checkout", "replaced-checkout"] {
         let path = directory.join(name);
         if fs::symlink_metadata(&path).is_ok() {
-            paths::remove_owned_directory(&path)?;
+            paths::verify_directory(&path)?;
+            super::discard(&path, discarded)?;
         }
     }
     for name in ["return.tree", "export.bundle"] {

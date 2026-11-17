@@ -530,7 +530,9 @@ impl Workspaces {
         Ok(reference)
     }
 
-    pub fn discard(&self, prepared: &PreparedWorkspace) -> Result<()> {
+    /// Moves the Attempt's checkout aside and returns the workspace state directory whose
+    /// `purge_discarded` deletes it, which the caller may run in the background.
+    pub fn discard(&self, prepared: &PreparedWorkspace) -> Result<PathBuf> {
         let identity = format!(
             "{:x}",
             Sha256::digest(serde_json::to_vec(&(
@@ -538,8 +540,30 @@ impl Workspaces {
                 &prepared.checkout.base_commit
             ))?)
         );
-        Workspace::open_existing(&self.directory.join(identity))?
-            .discard_checkout(&prepared.checkout)
+        let state = self.directory.join(identity);
+        Workspace::open_existing(&state)?.discard_checkout(&prepared.checkout)?;
+        Ok(state)
+    }
+
+    /// Deletes checkouts moved aside in every workspace state directory, as a crash may have
+    /// left them. Runs in a background thread; failures go to the Worker Host log.
+    pub fn purge_all_discarded_in_background(&self) {
+        let directory = self.directory.clone();
+        std::thread::spawn(move || {
+            let Ok(entries) = std::fs::read_dir(&directory) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                if entry.file_type().is_ok_and(|kind| kind.is_dir())
+                    && let Err(error) = supertag_workspaces::purge_discarded(&entry.path())
+                {
+                    crate::failures::note_unrecorded(
+                        "Discarded checkouts could not be deleted",
+                        &error,
+                    );
+                }
+            }
+        });
     }
 }
 

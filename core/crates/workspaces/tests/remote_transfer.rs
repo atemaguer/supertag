@@ -547,6 +547,13 @@ async fn terminal_discard_removes_only_transfer_copies_and_tolerates_incomplete_
     workspace.remove_checkout(&checkout).unwrap();
     workspace.remove_checkout(&checkout).unwrap();
     assert!(!checkout.path.exists());
+    // Removal only moved the checkout aside; a purge, which needs no workspace lock and so can
+    // run while the next Attempt prepares, deletes it.
+    let discarded = fixture.state.join("discarded");
+    assert!(fs::read_dir(&discarded).unwrap().next().is_some());
+    supertag_workspaces::purge_discarded(&fixture.state).unwrap();
+    supertag_workspaces::purge_discarded(&fixture.state).unwrap();
+    assert!(fs::read_dir(&discarded).unwrap().next().is_none());
     assert!(!record.join("return.tree").exists());
     assert!(!exported.bundle.path.exists());
     for name in [
