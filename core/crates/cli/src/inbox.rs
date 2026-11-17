@@ -46,7 +46,7 @@ pub struct ItemListArgs {
     cursor: String,
 }
 
-// Options for `supertag get approvals`.
+// Options for `supertag get approval`.
 #[derive(Args)]
 pub struct ApprovalListArgs {
     /// Only approvals for this Objective.

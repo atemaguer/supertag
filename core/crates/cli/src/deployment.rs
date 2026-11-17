@@ -187,7 +187,7 @@ impl Platform {
     fn next_steps(self) -> &'static str {
         match self {
             Self::Compose => {
-                "Put each role's TLS files in its own directory (see deploy/native/README.md), then start deploy/compose.native.yaml with deploy/compose.native.ingress.yaml, passing these files as SUPERTAG_POSTGRES_ENV_FILE, SUPERTAG_CONTROL_ENV_FILE, and SUPERTAG_GATEWAY_ENV_FILE. Add --profile gateway to run the Gateway for collaboration surfaces."
+                "Put each role's TLS files in its own directory (see deploy/native/README.md), then start deploy/compose.native.yaml with deploy/compose.native.ingress.yaml, passing these files as SUPERTAG_CONTROL_ENV_FILE and SUPERTAG_GATEWAY_ENV_FILE. When setup wrote postgres.env, also add deploy/compose.native.postgres.yaml and pass that file as SUPERTAG_POSTGRES_ENV_FILE. Add --profile gateway to run the Gateway for collaboration surfaces."
             }
             Self::Fly => {
                 "Import control-plane.env into the supertag-control-plane app with `fly secrets import`, set its TLS PEM secrets, then deploy deploy/native/fly/control-plane.toml. For collaboration surfaces, also import gateway.env into the supertag-gateway app and deploy deploy/native/fly/gateway.toml (see deploy/native/README.md)."
@@ -1697,6 +1697,7 @@ mod tests {
         let railway_gateway = read("native/railway/gateway.json");
         let compose = read("compose.native.yaml");
         let ingress = read("compose.native.ingress.yaml");
+        let postgres = read("compose.native.postgres.yaml");
         let entrypoint = read("docker/rust-hosted-entrypoint.sh");
         let dockerfile = read("docker/rust-service.Dockerfile");
 
@@ -1781,10 +1782,17 @@ mod tests {
         assert!(compose.contains(&format!(
             "\"--checkpoint-directory\", \"{STATE_DIRECTORY}/checkpoints\""
         )));
-        // PostgreSQL is healthy only once it accepts TCP connections, not while its first-start
-        // init server listens on the Unix socket alone; every service restarts after a failure.
-        assert!(compose.contains("pg_isready -h 127.0.0.1 -p 5432"));
-        assert_eq!(compose.matches("restart: unless-stopped").count(), 3);
+        // PostgreSQL runs only from its overlay, so an external database needs no PostgreSQL
+        // env file. It is healthy only once it accepts TCP connections, not while its
+        // first-start init server listens on the Unix socket alone; every service restarts
+        // after a failure.
+        assert!(
+            !compose.contains("  postgres:") && !compose.contains("SUPERTAG_POSTGRES_ENV_FILE")
+        );
+        assert!(postgres.contains("pg_isready -h 127.0.0.1 -p 5432"));
+        assert!(postgres.contains("SUPERTAG_POSTGRES_ENV_FILE"));
+        assert_eq!(compose.matches("restart: unless-stopped").count(), 2);
+        assert_eq!(postgres.matches("restart: unless-stopped").count(), 1);
         assert!(ingress.contains("ports:") && ingress.contains(&format!(":{CONTROL_PLANE_PORT}")));
         assert!(!ingress.contains("gateway:"));
     }

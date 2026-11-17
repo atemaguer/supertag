@@ -47,6 +47,9 @@ within the pre-1.0 compatibility policy described in
 - `supertag init` writes `concurrency: 3` for this machine's Worker Host, so it runs up to three
   Task Attempts per harness at once. Before, it ran one, and one stuck Task held every Tag on that
   harness.
+- Docker Compose runs PostgreSQL from its own overlay, `deploy/compose.native.postgres.yaml`.
+  A deployment with an external database leaves it out and no longer needs
+  `SUPERTAG_POSTGRES_ENV_FILE`; one that uses the `postgres.env` setup writes adds the overlay.
 - A Permission Set that names a Tag as an approver (`tag:<id>`) is refused. Such an entry was
   accepted but never honoured: no Tag decides an approval request.
 - The README's multiplayer diagram shows personal and shared Tags coordinating work across local

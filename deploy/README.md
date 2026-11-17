@@ -13,7 +13,8 @@ deploy/
     rust-hosted-entrypoint.sh Hosted-image entrypoint: prepares state and TLS, then drops root
     rust-hosted-pair.sh       Runs a Control Plane and a Gateway in one hosted container
     worker/Dockerfile         Base image for Workspace sandboxes
-  compose.native.yaml         Docker Compose: PostgreSQL, Control Plane, optional Gateway
+  compose.native.yaml         Docker Compose: Control Plane, optional Gateway
+  compose.native.postgres.yaml Compose overlay that runs PostgreSQL, without an external database
   compose.native.ingress.yaml Compose ingress overlay
   native/                     Compose notes, Fly.io, and Railway
   render/render.yaml          Render Blueprint (WebSocket tunnel)

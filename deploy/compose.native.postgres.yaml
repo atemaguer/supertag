@@ -1,0 +1,29 @@
+# Runs PostgreSQL beside the Control Plane in deploy/compose.native.yaml, for a deployment whose
+# setup generated postgres.env because SUPERTAG_DATABASE_URL was not set:
+#   docker compose -f deploy/compose.native.yaml -f deploy/compose.native.postgres.yaml \
+#     -f deploy/compose.native.ingress.yaml up -d --wait
+# Leave this file out when control-plane.env names an external database.
+services:
+  postgres:
+    image: ${SUPERTAG_POSTGRES_IMAGE:-postgres:17-alpine}
+    env_file: ${SUPERTAG_POSTGRES_ENV_FILE:?provide the PostgreSQL env file}
+    volumes:
+      - postgres-state:/var/lib/postgresql/data
+    networks: [runtime]
+    restart: unless-stopped
+    # Over TCP: the image's first-start init server listens only on its Unix socket, so a
+    # socket check reports healthy before the Control Plane can connect.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 15s
+
+  control-plane:
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-state:

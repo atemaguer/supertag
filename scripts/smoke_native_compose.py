@@ -72,7 +72,7 @@ def smoke(control_image, gateway_image, fixture):
             "stop_grace_period": "15s",
         }}, "volumes": {"worker-state": {}}}))
         prefix = ["docker", "compose", "--project-directory", str(root), "--project-name", identifier, "--file", str(REPO / "deploy/compose.native.yaml"),
-                  "--file", str(override)]
+                  "--file", str(REPO / "deploy/compose.native.postgres.yaml"), "--file", str(override)]
         def compose(*arguments, timeout=90):
             return run([*prefix, *arguments], env, timeout=timeout)
         operator_token = ["--env", f"SUPERTAG_OPERATOR_TOKEN={credentials['operator']}"]

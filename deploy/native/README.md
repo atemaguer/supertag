@@ -45,7 +45,7 @@ Gateway named `local`.
 
 | Platform | Definitions | Public Control Plane path | Gateway to Control Plane |
 | --- | --- | --- | --- |
-| Docker Compose | [`../compose.native.yaml`](../compose.native.yaml), [`../compose.native.ingress.yaml`](../compose.native.ingress.yaml) | Published port on the Control Plane only | Internal Compose network, `control-plane:3434` |
+| Docker Compose | [`../compose.native.yaml`](../compose.native.yaml), [`../compose.native.postgres.yaml`](../compose.native.postgres.yaml), [`../compose.native.ingress.yaml`](../compose.native.ingress.yaml) | Published port on the Control Plane only | Internal Compose network, `control-plane:3434` |
 | Fly.io | [`fly/control-plane.toml`](fly/control-plane.toml), [`fly/gateway.toml`](fly/gateway.toml) | TCP service on 443 with `handlers = []` | 6PN, `supertag-control-plane.internal:3434` |
 | Railway | [`railway/control-plane.json`](railway/control-plane.json), [`railway/gateway.json`](railway/gateway.json) | TCP Proxy to port 3434 | Private network, `supertag-control-plane.railway.internal:3434` |
 | Render | [`../render/render.yaml`](../render/render.yaml) | Web service: the WebSocket tunnel on port 8080 | Background worker, through the public `wss://` URL |
@@ -201,10 +201,13 @@ export SUPERTAG_CONTROL_ENV_FILE=$PWD/supertag-deployment/control-plane.env
 export SUPERTAG_GATEWAY_ENV_FILE=$PWD/supertag-deployment/gateway.env
 export SUPERTAG_CONTROL_TLS_DIRECTORY=... SUPERTAG_GATEWAY_TLS_DIRECTORY=...
 export SUPERTAG_CONTROL_PLANE_PUBLISH=0.0.0.0:443
-docker compose -f deploy/compose.native.yaml -f deploy/compose.native.ingress.yaml up -d --wait
+docker compose -f deploy/compose.native.yaml -f deploy/compose.native.postgres.yaml \
+  -f deploy/compose.native.ingress.yaml up -d --wait
 ```
 
-Add `--profile gateway` to also run the Gateway. Its server CA goes in the Gateway's TLS
+With an external database (`SUPERTAG_DATABASE_URL` given to setup), leave out
+`compose.native.postgres.yaml` and `SUPERTAG_POSTGRES_ENV_FILE`. Add `--profile gateway` to also
+run the Gateway. Its server CA goes in the Gateway's TLS
 directory. To also require client certificates, add `SUPERTAG_TLS_CLIENT_CA_FILE`, plus
 `SUPERTAG_CLIENT_CERT_FILE` and `SUPERTAG_CLIENT_KEY_FILE` for its health probe, to
 `control-plane.env`, and give every client, the Gateway included, a certificate (see

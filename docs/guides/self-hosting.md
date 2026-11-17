@@ -80,9 +80,13 @@ export SUPERTAG_GATEWAY_ENV_FILE=$PWD/supertag-deployment/gateway.env
 export SUPERTAG_CONTROL_TLS_DIRECTORY=$PWD/tls/control-plane
 export SUPERTAG_GATEWAY_TLS_DIRECTORY=$PWD/tls/gateway
 export SUPERTAG_CONTROL_PLANE_PUBLISH=0.0.0.0:443
-docker compose -f deploy/compose.native.yaml -f deploy/compose.native.ingress.yaml up -d --wait
+docker compose -f deploy/compose.native.yaml -f deploy/compose.native.postgres.yaml \
+  -f deploy/compose.native.ingress.yaml up -d --wait
 ```
 
+`deploy/compose.native.postgres.yaml` runs PostgreSQL beside the Control Plane, for the
+`postgres.env` setup writes. When you gave setup a database URL, leave out that file and
+`SUPERTAG_POSTGRES_ENV_FILE`; the Control Plane reaches your database through the ingress network.
 Add `--profile gateway` to also run the Gateway. The files and TLS layout are described in
 [Docker Compose](../../deploy/native/README.md#docker-compose).
 

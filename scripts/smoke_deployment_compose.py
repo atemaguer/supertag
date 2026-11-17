@@ -1,7 +1,7 @@
 """Rehearse a deployment made with `supertag setup deployment compose` on disposable containers.
 
 The Control Plane, the Gateway (profile `gateway`), and PostgreSQL run from
-deploy/compose.native.yaml plus deploy/compose.native.ingress.yaml, configured by the files setup
+deploy/compose.native.yaml with its PostgreSQL and ingress overlays, configured by the files setup
 wrote, a disposable TLS authority, and the client CA a Gateway needs (documented in
 deploy/native/README.md). Only the Control Plane is published. Two Worker Hosts run outside
 Compose with the credential-free fixture adapter and connect outbound to it. The Gateway, which
@@ -246,6 +246,7 @@ def rehearse(args):
                                  "        read_only: true\n")
             prefix = ["docker", "compose", "--project-directory", str(root), "--project-name", identifier,
                       "--file", str(REPO / "deploy/compose.native.yaml"),
+                      "--file", str(REPO / "deploy/compose.native.postgres.yaml"),
                       "--file", str(REPO / "deploy/compose.native.ingress.yaml"), "--file", str(slow_init)]
 
             def compose(*arguments, timeout=WAIT):
