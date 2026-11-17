@@ -11,6 +11,7 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- `supertag placement explain` names each Worker Host's own reason a Task can't run there: `harness`, `file-scope` or `unsandboxed-commands`.
 - A Tag has at most 8 work Sessions open at once, across all its conversations and Objectives;
   set `maxWorkSessions` (1 to 64) with `supertag tag put --max-work-sessions`, a Tag manifest,
   or the New Tag form. A work Session stays open after it reports, for `continue_session`, until
@@ -148,6 +149,7 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- OpenCode path scopes deny every letter-case spelling of hidden and read-only paths, so `SeCrEtS/key` no longer gets past a hidden `secrets/` on case-insensitive file systems.
 - Codex installed with `npm install -g @openai/codex` no longer fails with "Codex version probe
   timed out". SuperTag runs the native Codex binary behind the npm launcher instead of starting
   Node for every Codex process, and gives the version probe the 30-second startup bound.
