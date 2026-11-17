@@ -373,13 +373,21 @@ async fn a_gateway_forwards_calls_as_their_caller_and_never_widens_them(
     // A Tag's network log names other people's Tasks' origins and paths: operators only.
     let network_logs = "/supertag.runtime.v2.NetworkLogs/List";
     assert_eq!(
-        raw_code(&gateway, network_logs, &[("authorization", &format!("Bearer {client}"))])
-            .await?,
+        raw_code(
+            &gateway,
+            network_logs,
+            &[("authorization", &format!("Bearer {client}"))]
+        )
+        .await?,
         Code::PermissionDenied
     );
     assert_ne!(
-        raw_code(&gateway, network_logs, &[("authorization", &format!("Bearer {admin}"))])
-            .await?,
+        raw_code(
+            &gateway,
+            network_logs,
+            &[("authorization", &format!("Bearer {admin}"))]
+        )
+        .await?,
         Code::PermissionDenied,
         "the Gateway must forward an operator's network log read"
     );
