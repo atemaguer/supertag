@@ -1117,6 +1117,10 @@ fn plan_progress(params: &Value) -> Option<String> {
 }
 
 #[cfg(test)]
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{os::unix::fs::PermissionsExt, process::Stdio};
@@ -1362,11 +1366,15 @@ mod tests {
         let pointer = std::fs::read_to_string(linked.join(".git"))?;
         let mut policy =
             Policy::from_actions(&["files:write".into(), "commands:execute".into()], true)?;
-        // Linux runners may not permit Codex's sandbox at all; macOS always does.
+        // Linux needs bubblewrap and unprivileged user namespaces for Codex's sandbox; macOS
+        // always permits it. The CI runtime lane requires `codex-sandbox`, so it cannot skip.
         let probe = sandboxed(&executable, &root, &clone, &policy, "true").await;
         if cfg!(not(target_os = "macos")) && probe.as_ref().map_or(true, |r| r["exitCode"] != 0) {
             // terminal-safe: test-only skip notice on standard error.
-            eprintln!("skipping: Codex cannot start its sandbox here: {probe:?}");
+            super::prerequisites::missing::<()>(
+                "codex-sandbox",
+                &format!("Codex cannot start its sandbox here: {probe:?}"),
+            )?;
             return Ok(());
         }
         // A linked worktree: its `gitdir:` pointer, the common Git directory, and the

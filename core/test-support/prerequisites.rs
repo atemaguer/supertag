@@ -1,9 +1,9 @@
 //! Prerequisite gates shared by ignored fixture tests.
 //!
 //! Ignored tests need local fixtures such as an isolated PostgreSQL server, Node, the Python
-//! agents runtime, the terminal UI, an isolated Linux root, or Docker. Without one, a test
-//! reports the skip on stderr and passes, so `--include-ignored` stays usable on a partial
-//! workstation.
+//! agents runtime, the terminal UI, an isolated Linux root, Docker, or Codex's native sandbox.
+//! Without one, a test reports the skip on stderr and passes, so `--include-ignored` stays usable
+//! on a partial workstation.
 //! Required lanes set `SUPERTAG_RUST_TEST_REQUIRE` to a comma-separated list of prerequisite
 //! names (or `all`); any listed prerequisite that is absent then fails the test.
 #![allow(dead_code)]
@@ -22,6 +22,7 @@ pub const KNOWN: &[&str] = &[
     "tui",
     "linux-root",
     "docker",
+    "codex-sandbox",
 ];
 
 /// Whether the running lane requires `name`. Unknown names in the require list fail so a typo

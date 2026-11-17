@@ -66,9 +66,10 @@ jobs:
         working-directory: core
     env:
       SUPERTAG_RUST_TEST_DATABASE_URL: postgresql://supertag:rust-port-ci-database@localhost:5432/supertag_test
-      # Required lane: a missing PostgreSQL, Node, Python agents, or terminal UI fixture fails the
-      # gated test instead of skipping it. Linux-root cases run in the linux-root job below.
-      SUPERTAG_RUST_TEST_REQUIRE: postgres,node,agents-python,tui
+      # Required lane: a missing PostgreSQL, Node, Python agents, terminal UI, or Codex sandbox
+      # fixture fails the gated test instead of skipping it. Linux-root cases run in the
+      # linux-root job below.
+      SUPERTAG_RUST_TEST_REQUIRE: postgres,node,agents-python,tui,codex-sandbox
     steps:
       - uses: actions/checkout@v4
       # Restores the registry and third-party dependency builds; workspace crates are never cached.
@@ -99,7 +100,11 @@ jobs:
         working-directory: .
         run: |
           sudo apt-get update
-          sudo apt-get install -y tmux
+          sudo apt-get install -y tmux bubblewrap
+          # Codex's Linux sandbox runs bubblewrap as this user; Ubuntu's AppArmor policy denies
+          # unprivileged user namespaces unless a profile grants them, so lift that restriction.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --ro-bind / / --unshare-user --unshare-net true
           python -m pip install uv==0.9.5
           pnpm install --frozen-lockfile
           uv venv "$RUNNER_TEMP/supertag-python-runtime" --python 3.13
