@@ -350,9 +350,10 @@ that protection when the Workspace sits under another writable root, such as `/t
 and paths outside the writable roots on its own. With `web:fetch`, the adapter uses Codex's
 workspace-write sandbox, which keeps `.git` read-only itself.
 
-Claude Code's and OpenCode's file tools refuse a write to any `.git` path in the worktree or a
-Volume copy. Their commands, which need `allow-unsandboxed-commands`, can still write anything
-the Worker Host's user can.
+Claude Code's, OpenCode's, and Cursor's file tools refuse a write to any `.git` path in the
+worktree or a Volume copy, in any letter case, since macOS treats `.GIT` as `.git`. Cursor's
+file tools are SuperTag's own, and its native sandbox never sees the Workspace. Their commands,
+which need `allow-unsandboxed-commands`, can still write anything the Worker Host's user can.
 
 SuperTag's own Git commands on a Workspace also run nothing the repository configures. They turn
 off hooks, fsmonitor, the pager, external diff, and the `ext` transport. Before reading a

@@ -40,6 +40,12 @@ export interface OpenCodeCopy {
  * worktree, followed by `/*`, and `edit` with the file's path relative to the worktree. The last
  * matching rule wins, and `*` matches across `/`.
  */
+/**
+ * Every spelling of `.git`: a macOS filesystem treats `.GIT` as `.git`, and OpenCode 1.15.12
+ * matches permission patterns case-sensitively, without character classes.
+ */
+const GIT_NAMES = [".git", ".gIt", ".giT", ".gIT", ".Git", ".GiT", ".GIt", ".GIT"];
+
 export function openCodePermissions(
   actions: readonly string[],
   copies: readonly OpenCodeCopy[] = [],
@@ -54,7 +60,9 @@ export function openCodePermissions(
       ? {
           "*": "allow",
           ...Object.fromEntries(
-            [".git", ".git/*", "*/.git", "*/.git/*"].map((pattern) => [pattern, "deny"]),
+            GIT_NAMES.flatMap((name) =>
+              [name, `${name}/*`, `*/${name}`, `*/${name}/*`].map((pattern) => [pattern, "deny"]),
+            ),
           ),
           ...(worktree === undefined
             ? {}

@@ -131,7 +131,8 @@ async function withinRoots(cwd: string, path: unknown, roots: readonly string[])
 }
 
 /**
- * Whether `path` names Git metadata (any `.git` entry) inside one of `roots`. SuperTag runs `git`
+ * Whether `path` names Git metadata (any `.git` entry, in any case, which a macOS filesystem
+ * treats alike) inside one of `roots`. SuperTag runs `git`
  * in these directories outside any sandbox, so a file tool must never change their metadata.
  */
 async function insideGitMetadata(
@@ -157,7 +158,7 @@ async function insideGitMetadata(
         part !== ".." &&
         !part.startsWith("../") &&
         !isAbsolute(part) &&
-        part.split(/[\\/]/).includes(".git")
+        part.split(/[\\/]/).some((name) => name.toLowerCase() === ".git")
       );
     }),
   );

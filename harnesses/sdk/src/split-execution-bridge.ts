@@ -155,6 +155,14 @@ function integer(value: unknown, fallback: number, maximum: number, minimum = 0)
     throw new Error("Invalid numeric tool argument");
   return Math.min(value as number, maximum);
 }
+/**
+ * Whether a path relative to a root names Git metadata. SuperTag runs `git` in the workspace and
+ * its copies outside any sandbox, so no write tool may change it. Case-insensitive, because a
+ * macOS or Windows filesystem treats `.GIT` as `.git`.
+ */
+function gitMetadata(relativePath: string): boolean {
+  return relativePath.split("/").some((part) => part.toLowerCase() === ".git");
+}
 function contained(root: string, path: string): boolean {
   return path === root || path.startsWith(root === "/" ? root : `${root}/`);
 }
@@ -388,6 +396,12 @@ export function createWorkspaceToolBridge(
       throw new Error(`Execution root is redirected: ${selected.path}`);
     if (!contained(physicalRoot, physicalPath))
       throw new Error(`Execution path escapes workspace or allowed roots: ${inputPath}`);
+    if (
+      write &&
+      (gitMetadata(posix.relative(selected.path, candidate)) ||
+        gitMetadata(posix.relative(physicalRoot, physicalPath)))
+    )
+      throw new Error(`Execution path is Git metadata: ${inputPath}`);
     if (write) {
       for (const readonlyRoot of roots.filter((allowed) => !allowed.writable)) {
         const resolvedReadOnlyRoot = await realPath(readonlyRoot.path, signal);

@@ -145,9 +145,16 @@ it("projects the admitted model, credentials and manager tools into a private na
 });
 
 it("never lets OpenCode edit Git metadata the host later runs git in", () => {
-  // OpenCode 1.15.12 refused `apply_patch` into `.git/` and `sub/.git/` under these rules and
-  // allowed it under a bare `edit: "allow"`; the last matching rule wins.
-  const denied = { ".git": "deny", ".git/*": "deny", "*/.git": "deny", "*/.git/*": "deny" };
+  // OpenCode 1.15.12 refused `apply_patch` into `.git/`, `.GIT/`, and `sub/.Git/` under these
+  // rules and allowed it under a bare `edit: "allow"`. It matches patterns case-sensitively and
+  // has no character classes, while a macOS filesystem treats `.GIT` as `.git`, so every
+  // spelling is denied. The last matching rule wins.
+  const names = [".git", ".gIt", ".giT", ".gIT", ".Git", ".GiT", ".GIt", ".GIT"];
+  const denied = Object.fromEntries(
+    names.flatMap((name) =>
+      [name, `${name}/*`, `*/${name}`, `*/${name}/*`].map((pattern) => [pattern, "deny"]),
+    ),
+  );
   expect(openCodePermissions(["files:read", "files:write"]).edit).toEqual({
     "*": "allow",
     ...denied,

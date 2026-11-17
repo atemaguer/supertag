@@ -770,6 +770,9 @@ it("denies native file writes to Git metadata the host later runs git in", async
     ["Read", join(workspace, ".git/config"), "allow"],
     ["Write", join(workspace, ".git"), "deny"],
     ["Write", join(workspace, ".git/config"), "deny"],
+    // A macOS filesystem treats `.GIT` as `.git`.
+    ["Write", join(workspace, ".GIT/config"), "deny"],
+    ["Edit", join(workspace, ".Git/hooks/pre-push"), "deny"],
     ["Edit", join(workspace, ".git/hooks/pre-commit"), "deny"],
     ["Write", join(workspace, "nested/.git/config"), "deny"],
     ["Write", join(workspace, "linked-metadata/config"), "deny"],

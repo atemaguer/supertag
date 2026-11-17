@@ -67,6 +67,9 @@ within the pre-1.0 compatibility policy described in
   Volume copy, and Claude Code's and OpenCode's file tools refuse `.git` writes. SuperTag's own
   Git reads refuse a checkout whose Git directory names another common directory, and never use
   the `ext` transport or an external diff the repository configures.
+- Security: Cursor's file tools on a local Worker Host could write the Workspace's `.git`, and
+  OpenCode's could write it spelled `.GIT`, which macOS treats as `.git`. Both now refuse any
+  `.git` path in any letter case, in the Workspace and its Volume copies.
 - A Codex Task signed in with `CODEX_API_KEY` or `OPENAI_API_KEY` no longer fails with `401
   Unauthorized`: the key is staged as the Task's Codex sign-in, because `codex app-server` ignores
   it in the environment. A model stream that Codex retries no longer fails the turn, and the
