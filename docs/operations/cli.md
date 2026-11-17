@@ -46,7 +46,8 @@ Tag's name; for OpenCode it also asks for a `provider/model`. It writes
 - a `control-plane` service, which also creates a `local-tools` Permission Set, a `Lead` Role,
   and the `lead` Tag, bound to the repository's Workspace and following the branch checked out
   when `init` ran; and
-- a `host` service named after this machine, which maps the repository as a Workspace.
+- a `host` service named after this machine, which maps the repository as a Workspace and runs
+  up to three Task Attempts at once (`concurrency: 3`), so one stuck Task does not hold every Tag.
 
 When you choose Claude Code, Cursor, or OpenCode, `init` explains that it runs commands as you,
 without a sandbox, so its Tags should get only trusted work, and asks whether to allow that,

@@ -20,6 +20,9 @@ use crate::{harness_checks, lifecycle, local_config};
 const DEFAULT_PORT: u16 = 3434;
 const PERMISSION_SET: &str = "local-tools";
 const ROLE: &str = "Lead";
+/// Task Attempts the local Worker Host runs at once per harness, so one stuck Task does not hold
+/// every Tag on that harness.
+const CONCURRENCY: u32 = 3;
 
 #[derive(Args)]
 pub struct InitArgs {
@@ -681,6 +684,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
     let mut host = json!({
         "type": "host",
         "harnesses": [harness],
+        "concurrency": CONCURRENCY,
         "workspaces": { answers.workspace.clone(): repository.root },
     });
     if let Some(model) = &answers.model {
@@ -796,6 +800,8 @@ mod tests {
             assert_eq!(provision[2]["spec"]["workspace"], binding);
             // The Tag init creates is the Control Plane's lead Tag.
             assert_eq!(provision[2]["spec"]["lead"], true);
+            // The local host runs three Task Attempts per harness at once.
+            assert_eq!(document["services"][machine_name()]["concurrency"], 3);
             let sources = provision
                 .into_iter()
                 .map(crate::manifests::ProvisionSource::Inline)

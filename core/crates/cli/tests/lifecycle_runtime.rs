@@ -729,6 +729,7 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
         .to_string();
     let rendered = machine.ok(&["config"])?;
     assert!(rendered.contains("      - codex\n"), "{rendered}");
+    assert!(rendered.contains("    concurrency: 3\n"), "{rendered}");
     assert!(
         rendered.contains(&format!(
             "      my-project: {}",

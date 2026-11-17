@@ -52,7 +52,9 @@ or in a disposable machine when the work is untrusted.
 ### Run several Tasks at once
 
 `concurrency` sets how many Task Attempts each harness on the host runs at once, from 1 through
-16; the default is 1. `supertag up` changes running hosts' concurrency without restarting them.
+16; the default is 1, and the host `supertag init` writes sets 3. With 1, one stuck Task Attempt
+holds that harness for every Tag on the host. `supertag up` changes running hosts' concurrency
+without restarting them.
 Teams can also cap how many of their Tasks run at once; see [Teams](teams.md).
 
 ### Limit how long a Task Attempt runs

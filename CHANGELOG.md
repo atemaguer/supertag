@@ -31,6 +31,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- `supertag init` writes `concurrency: 3` for this machine's Worker Host, so it runs up to three
+  Task Attempts per harness at once. Before, it ran one, and one stuck Task held every Tag on that
+  harness.
 - The README's multiplayer diagram shows personal and shared Tags coordinating work across local
   machines, teammates' machines, and VMs.
 - The SuperTag protocol version is now 3, because conversations changed on the wire since 0.3.0.

@@ -51,7 +51,8 @@ and needs no terminal. It writes `~/.supertag/supertag.yaml` and starts, in the 
   following the branch checked out when `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as the Workspace,
-  named after the repository by default.
+  named after the repository by default, and runs up to three Task Attempts at once
+  (`concurrency: 3`).
 
 Nothing is written to the repository; state lives in `~/.supertag/`. Each new Session of `lead`
 starts from the current commit of the branch `init` found (`workspace.ref`). When HEAD is

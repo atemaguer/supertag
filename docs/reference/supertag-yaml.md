@@ -189,7 +189,8 @@ most 64. Changing a host's labels restarts that host on the next `supertag up`.
 
 `concurrency` is per harness: `harnesses: [codex, claude-code]` with `concurrency: 2` runs up to
 two Codex and two Claude Code Task Attempts at once. When only `concurrency` changes,
-`supertag up` changes the running host without restarting it.
+`supertag up` changes the running host without restarting it. The host `supertag init` writes
+sets `concurrency: 3`.
 
 ### Unsandboxed harnesses
 
