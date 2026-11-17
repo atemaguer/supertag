@@ -1021,7 +1021,10 @@ async fn a_conversation_follow_pushes_sent_messages_through_the_api_tier() {
         .unwrap();
     let wait = Duration::from_secs(5);
     let next = async |receive: &mut tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>| {
-        tokio::time::timeout(wait, receive.recv()).await.unwrap().unwrap()
+        tokio::time::timeout(wait, receive.recv())
+            .await
+            .unwrap()
+            .unwrap()
     };
     assert_eq!(next(&mut receive).await["kind"], "ready");
     let sent = client
@@ -1040,7 +1043,10 @@ async fn a_conversation_follow_pushes_sent_messages_through_the_api_tier() {
         changed["messages"]["messages"][0]["task"]["taskId"],
         sent.task.task_id.as_str()
     );
-    assert_eq!(changed["messages"]["messages"][0]["task"]["state"], "queued");
+    assert_eq!(
+        changed["messages"]["messages"][0]["task"]["state"],
+        "queued"
+    );
     client.stop_follow(&follow).await;
     control_plane_task.abort();
     cp_task.abort();
