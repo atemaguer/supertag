@@ -98,7 +98,7 @@ decision is yours. The Tags can run on different coding agents and machines, so
 a Tag on your laptop running Claude Code can work with one on a teammate's machine running Codex
 toward the same Objective.
 
-![Slack, GitHub, and Linear connect to one hosted Control Plane. Its Worker Hosts include laptops running Claude Code and Codex, and a CI runner or cloud machine.](assets/images/supertag-shared-control-plane.png)
+![You, Alex, and Sam direct your respective Tags alongside shared Tags for a team or organization, including shared specialists. The Tags coordinate with one another, and their work sessions run across Worker Hosts including your machine, teammates' machines, and sandboxes. One shared Control Plane coordinates the team.](assets/images/supertag-shared-control-plane.png)
 
 [How multiplayer works](docs/concepts/multiplayer.md) · [Self-host SuperTag](docs/guides/self-hosting.md)
 
