@@ -10,6 +10,25 @@ pub(crate) struct Policy {
     pub(crate) network: bool,
     /// Read-write Workspace copies outside the checkout the Task may change.
     pub(crate) writable_roots: Vec<PathBuf>,
+    /// The Task's path scope, applied by the `supertag` permission profile.
+    pub(crate) scope: Option<Scope>,
+}
+
+/// A Task's path scope, resolved on this Worker Host.
+#[derive(Clone, Default)]
+pub(crate) struct Scope {
+    pub(crate) files: supertag_protocol::v2::FileScope,
+    /// Canonical outside directories: writable, then readable.
+    pub(crate) outside_write: Vec<PathBuf>,
+    pub(crate) outside_read: Vec<PathBuf>,
+    /// The Attempt's output directory, which stays writable when Workspace writes are narrowed.
+    pub(crate) output_directory: Option<PathBuf>,
+}
+
+impl Scope {
+    fn narrows_writes(&self) -> bool {
+        !self.files.write.is_empty()
+    }
 }
 
 impl Policy {
@@ -40,6 +59,7 @@ impl Policy {
             search: has("web:search"),
             network: has("web:fetch"),
             writable_roots: vec![],
+            scope: None,
         };
         ensure!(
             !policy.write || disposable,
@@ -51,6 +71,37 @@ impl Policy {
         );
         Ok(policy)
     }
+}
+
+/// The Worker Host user's home from the password database. The adapter gives Codex a private
+/// `HOME`, so `$HOME` does not name the directory a path scope's `~/` means.
+pub(crate) fn user_home() -> Result<PathBuf> {
+    use std::{ffi::CStr, os::unix::ffi::OsStrExt};
+    let mut buffer = vec![0_u8; 16 * 1024];
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut found = std::ptr::null_mut();
+    // SAFETY: every pointer is valid for the call and the buffer outlives `entry`'s strings.
+    let status = unsafe {
+        libc::getpwuid_r(
+            libc::getuid(),
+            &mut entry,
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &mut found,
+        )
+    };
+    ensure!(
+        status == 0 && !found.is_null() && !entry.pw_dir.is_null(),
+        "could not find the Worker Host user's home directory"
+    );
+    // SAFETY: getpwuid_r succeeded, so pw_dir is a NUL-terminated string inside `buffer`.
+    let home = unsafe { CStr::from_ptr(entry.pw_dir) };
+    let home = PathBuf::from(std::ffi::OsStr::from_bytes(home.to_bytes()));
+    ensure!(
+        home.is_absolute(),
+        "the Worker Host user's home is not absolute"
+    );
+    Ok(home)
 }
 
 /// Whether Codex may start its code-mode host. Code-mode-only models, every current Codex model,
@@ -134,16 +185,22 @@ pub(crate) fn arguments(
         "web_search=\"{}\"",
         if policy.search { "live" } else { "disabled" }
     ));
+    ensure!(
+        policy.scope.is_none() || !policy.network,
+        "Codex cannot apply a path scope to a web:fetch Task yet"
+    );
     if policy.network {
         configuration.push("sandbox_mode=\"workspace-write\"".into());
         configuration.push("sandbox_workspace_write.network_access=true".into());
-    } else if policy.commands || policy.write {
+    } else if policy.commands || policy.write || policy.scope.is_some() {
         // Exact legacy profile: permit loopback only for admitted commands and
         // deny external sockets via the limited network proxy's empty allowlist.
+        // A path scope that narrows Workspace writes starts from `:read-only` and grants each
+        // write path explicitly.
         configuration.push("default_permissions=\"supertag\"".into());
         configuration.push(format!(
             "permissions.supertag.extends=\"{}\"",
-            if policy.write {
+            if policy.write && !policy.scope.as_ref().is_some_and(Scope::narrows_writes) {
                 ":workspace"
             } else {
                 ":read-only"
@@ -252,6 +309,74 @@ fn filesystem(workspace: &Path, policy: &Policy) -> Result<Vec<(String, &'static
         for name in PROTECTED_ENTRIES {
             entries.push((utf8(&root.join(name), "Workspace copy path")?, "read"));
         }
+    }
+    if let Some(scope) = &policy.scope {
+        entries.extend(scoped_entries(workspace, policy, scope)?);
+    }
+    // One grant per path, the strongest: a path scope never weakens a protected entry.
+    let strength = |access: &str| match access {
+        "deny" => 2,
+        "read" => 1,
+        _ => 0,
+    };
+    let mut unique: Vec<(String, &'static str)> = Vec::with_capacity(entries.len());
+    for (path, access) in entries {
+        match unique.iter_mut().find(|(existing, _)| *existing == path) {
+            Some(entry) if strength(access) > strength(entry.1) => entry.1 = access,
+            Some(_) => {}
+            None => unique.push((path, access)),
+        }
+    }
+    Ok(unique)
+}
+
+/// The profile entries for a Task's path scope. SuperTag's pattern semantics, translated:
+/// a write path is an exact path or subtree; a read-only entry stays readable; a hidden entry
+/// or glob is denied with its whole subtree, because Codex matches a deny glob against the
+/// path itself only. Outside directories are already canonical.
+fn scoped_entries(
+    workspace: &Path,
+    policy: &Policy,
+    scope: &Scope,
+) -> Result<Vec<(String, &'static str)>> {
+    let utf8 = |path: &Path| {
+        path.to_str()
+            .map(str::to_owned)
+            .context("path scope entry must be UTF-8")
+    };
+    let inside = |entry: &str| workspace.join(entry.trim_end_matches('/'));
+    let mut entries = vec![];
+    if policy.write && scope.narrows_writes() {
+        // The temporary directory stays writable for tools. The Workspace itself is named
+        // read-only, which outranks `:tmpdir` when the Workspace lies inside it.
+        entries.push((":tmpdir".to_owned(), "write"));
+        entries.push((utf8(workspace)?, "read"));
+        for entry in &scope.files.write {
+            entries.push((utf8(&inside(entry))?, "write"));
+        }
+        if let Some(output) = &scope.output_directory {
+            entries.push((utf8(output)?, "write"));
+        }
+    }
+    if policy.write {
+        for path in &scope.outside_write {
+            entries.push((utf8(path)?, "write"));
+        }
+    }
+    for path in scope.outside_read.iter().chain(if policy.write {
+        &[][..]
+    } else {
+        &scope.outside_write[..]
+    }) {
+        entries.push((utf8(path)?, "read"));
+    }
+    for entry in &scope.files.read_only {
+        entries.push((utf8(&inside(entry))?, "read"));
+    }
+    for entry in &scope.files.hidden {
+        let path = utf8(&inside(entry))?;
+        entries.push((format!("{path}/**"), "deny"));
+        entries.push((path, "deny"));
     }
     Ok(entries)
 }
@@ -442,6 +567,98 @@ mod tests {
                 object(protected(&separated), &[&root.join("separate.git")])
             );
         }
+        Ok(())
+    }
+
+    fn scope(files: supertag_protocol::v2::FileScope) -> Scope {
+        Scope {
+            files,
+            ..Default::default()
+        }
+    }
+
+    /// A path scope maps onto the profile: narrowed writes start from `:read-only`, read-only
+    /// entries stay `read`, hidden entries deny their subtree too, and the protected entries
+    /// stay. A resumed thread gets the same table.
+    #[test]
+    fn a_path_scope_extends_the_supertag_profile() -> Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let ws = workspace.path().canonicalize()?;
+        let at = |entry: &str| ws.join(entry).to_str().unwrap().to_owned();
+        let mut policy = Policy::from_actions(
+            &actions(&["files:read", "files:write", "commands:execute"]),
+            true,
+        )?;
+        let mut narrowed = scope(supertag_protocol::v2::FileScope {
+            write: vec!["src/".into(), "package.json".into()],
+            read_only: vec!["src/generated/".into(), ".git/".into()],
+            hidden: vec!["**/.env".into(), "secrets/".into()],
+            ..Default::default()
+        });
+        narrowed.outside_write = vec![PathBuf::from("/opt/cache")];
+        narrowed.outside_read = vec![PathBuf::from("/opt/data")];
+        narrowed.output_directory = Some(ws.join(".supertag/outputs/a"));
+        policy.scope = Some(narrowed);
+        let args = arguments(&ws, None, None, &policy)?;
+        assert!(args.contains(&"permissions.supertag.extends=\":read-only\"".into()));
+        let mut expected = protected(&ws);
+        expected.extend([
+            (":tmpdir".to_owned(), "write"),
+            (ws.to_str().unwrap().to_owned(), "read"),
+            (at("src"), "write"),
+            (at("package.json"), "write"),
+            (at(".supertag/outputs/a"), "write"),
+            ("/opt/cache".to_owned(), "write"),
+            ("/opt/data".to_owned(), "read"),
+            (at("src/generated"), "read"),
+            (format!("{}/**", at("**/.env")), "deny"),
+            (at("**/.env"), "deny"),
+            (format!("{}/**", at("secrets")), "deny"),
+            (at("secrets"), "deny"),
+        ]);
+        assert_eq!(grants(&ws, &policy)?, object(expected.clone(), &[]));
+        // A whole-Workspace write keeps `:workspace` and adds only the narrowing entries.
+        policy.scope = Some(scope(supertag_protocol::v2::FileScope {
+            read_only: vec!["Cargo.lock".into()],
+            ..Default::default()
+        }));
+        let args = arguments(&ws, None, None, &policy)?;
+        assert!(args.contains(&"permissions.supertag.extends=\":workspace\"".into()));
+        let mut expected = protected(&ws);
+        expected.push((at("Cargo.lock"), "read"));
+        assert_eq!(grants(&ws, &policy)?, object(expected, &[]));
+        // Hiding `.git` strengthens its protected entry instead of duplicating it.
+        policy.scope = Some(scope(supertag_protocol::v2::FileScope {
+            hidden: vec![".git/".into()],
+            ..Default::default()
+        }));
+        let table = grants(&ws, &policy)?;
+        assert_eq!(table[at(".git")], "deny");
+        // A read-only Task with a scope uses the profile too, so hidden entries apply.
+        let mut reader = Policy::from_actions(&actions(&["files:read"]), false)?;
+        reader.scope = Some(scope(supertag_protocol::v2::FileScope {
+            hidden: vec!["secrets/".into()],
+            ..Default::default()
+        }));
+        let args = arguments(&ws, None, None, &reader)?;
+        assert!(args.contains(&"permissions.supertag.extends=\":read-only\"".into()));
+        assert!(!args.contains(&"sandbox_mode=\"read-only\"".into()));
+        // web:fetch runs in Codex's own sandbox mode, which cannot apply a scope yet.
+        let mut fetch = Policy::from_actions(
+            &actions(&["files:write", "commands:execute", "web:fetch"]),
+            true,
+        )?;
+        fetch.scope = Some(scope(supertag_protocol::v2::FileScope {
+            write: vec!["src/".into()],
+            ..Default::default()
+        }));
+        assert!(arguments(&ws, None, None, &fetch).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn finds_the_users_home_in_the_password_database() -> Result<()> {
+        assert!(user_home()?.is_absolute());
         Ok(())
     }
 

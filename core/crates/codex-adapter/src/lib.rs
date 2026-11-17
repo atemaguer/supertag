@@ -264,6 +264,33 @@ async fn execute(
         .filter(|mount| mount.read_write)
         .map(|mount| PathBuf::from(&mount.destination))
         .collect();
+    let output_directory = options
+        .environment
+        .get(&OsString::from("SUPERTAG_OUTPUT_DIR"))
+        .map(|path| PathBuf::from(path).canonicalize())
+        .transpose()?;
+    if let Some(files) = supertag_protocol::file_scope::of_task(task) {
+        ensure!(
+            supertag_protocol::file_scope::harness_reason(
+                task,
+                supertag_protocol::v2::HarnessKind::Codex
+            )
+            .is_none(),
+            "Codex cannot apply this Task's path scope; see supertag placement explain"
+        );
+        let home = config::user_home()?;
+        let reserved = [workspace.as_path(), options.state_directory.as_path()];
+        let resolve = |entries: &[String]| {
+            supertag_protocol::file_scope::resolve_outside(entries, &home, &reserved)
+                .map_err(anyhow::Error::msg)
+        };
+        policy.scope = Some(config::Scope {
+            files: files.clone(),
+            outside_write: resolve(&files.outside_write)?,
+            outside_read: resolve(&files.outside_read)?,
+            output_directory: output_directory.clone(),
+        });
+    }
     let effort = task
         .attempt_execution
         .as_ref()
@@ -277,11 +304,7 @@ async fn execute(
         checkpoint::check_context(checkpoint, &skills.manifest)?;
     }
     let mut environment = authentication.environment(&options.environment);
-    if let Some(path) = options
-        .environment
-        .get(&OsString::from("SUPERTAG_OUTPUT_DIR"))
-    {
-        let path = PathBuf::from(path).canonicalize()?;
+    if let Some(path) = output_directory {
         let relative = path
             .strip_prefix(&workspace)?
             .to_str()

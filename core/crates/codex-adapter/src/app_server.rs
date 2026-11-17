@@ -1479,4 +1479,107 @@ mod tests {
         );
         Ok(())
     }
+
+    /// Codex's configured sandbox applies a Task's path scope to commands: writes outside the
+    /// write paths or into a read-only entry fail, hidden files cannot be read by `cat`, `grep`,
+    /// Python, or through a symbolic or hard link, and an outside directory is writable.
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native sandbox probe"]
+    async fn installed_sandbox_applies_the_tasks_path_scope() -> Result<()> {
+        use crate::config::Scope;
+        use supertag_protocol::v2::FileScope;
+        let executable = std::env::var_os("SUPERTAG_TEST_CODEX_BINARY")
+            .context("set SUPERTAG_TEST_CODEX_BINARY")?;
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().canonicalize()?;
+        let workspace = root.join("workspace");
+        let cache = root.join("cache");
+        let data = root.join("data");
+        for path in [
+            workspace.join("src/generated"),
+            workspace.join("apps/web"),
+            workspace.join("secrets"),
+            workspace.join("outputs"),
+            cache.clone(),
+            data.clone(),
+        ] {
+            std::fs::create_dir_all(path)?;
+        }
+        fixture_git(&workspace, &["init", "--quiet"])?;
+        let secret = "SECRET_VALUE_7f3a";
+        for (path, contents) in [
+            (".env", format!("KEY={secret}\n")),
+            ("apps/web/.env", format!("KEY={secret}\n")),
+            ("secrets/key", format!("{secret}\n")),
+            ("README.md", "readme\n".to_owned()),
+            ("src/generated/schema.rs", "generated\n".to_owned()),
+        ] {
+            std::fs::write(workspace.join(path), contents)?;
+        }
+        std::fs::write(data.join("input"), "data\n")?;
+        let mut policy =
+            Policy::from_actions(&["files:write".into(), "commands:execute".into()], true)?;
+        policy.scope = Some(Scope {
+            files: FileScope {
+                write: vec!["src/".into()],
+                read_only: vec!["src/generated/".into()],
+                hidden: vec!["**/.env".into(), "secrets/".into()],
+                ..Default::default()
+            },
+            outside_write: vec![cache.clone()],
+            outside_read: vec![data.clone()],
+            output_directory: Some(workspace.join("outputs")),
+        });
+        let probe = sandboxed(&executable, &root, &workspace, &policy, "true").await;
+        if cfg!(not(target_os = "macos")) && probe.as_ref().map_or(true, |r| r["exitCode"] != 0) {
+            // terminal-safe: test-only skip notice on standard error.
+            eprintln!("skipping: Codex cannot start its sandbox here: {probe:?}");
+            return Ok(());
+        }
+        let attempts = format!(
+            "echo ok > src/written.rs; echo ok > outputs/report.md; echo x > README.md; \
+             echo x > src/generated/schema.rs; echo x > src/generated/new.rs; echo x > new-top; \
+             cat .env; cat apps/web/.env; cat secrets/key; grep -r KEY .; \
+             python3 -c 'print(open(\".env\").read())'; \
+             ln -s ../.env src/link; cat src/link; ln .env src/hard; cat src/hard; \
+             echo x > .env; echo x > apps/web/.env.local; mkdir -p deep/.env; \
+             printf x > .git/hooks/pre-commit; echo ok > {cache}/written; cat {data}/input; \
+             echo x > {data}/written; true",
+            cache = cache.display(),
+            data = data.display(),
+        );
+        let result = sandboxed(&executable, &root, &workspace, &policy, &attempts).await?;
+        let output = result.to_string();
+        assert!(!output.contains(secret), "a hidden file leaked: {result}");
+        assert!(output.contains("data"), "{result}");
+        for (path, expected) in [
+            (workspace.join("src/written.rs"), Some("ok\n")),
+            (workspace.join("outputs/report.md"), Some("ok\n")),
+            (cache.join("written"), Some("ok\n")),
+            (workspace.join("README.md"), Some("readme\n")),
+            (
+                workspace.join("src/generated/schema.rs"),
+                Some("generated\n"),
+            ),
+            (workspace.join("src/generated/new.rs"), None),
+            (workspace.join("new-top"), None),
+            (workspace.join("src/hard"), None),
+            (workspace.join("apps/web/.env.local"), None),
+            (workspace.join(".git/hooks/pre-commit"), None),
+            (data.join("written"), None),
+        ] {
+            assert_eq!(
+                std::fs::read_to_string(&path).ok().as_deref(),
+                expected,
+                "{}: {result}",
+                path.display()
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(workspace.join(".env"))?,
+            format!("KEY={secret}\n")
+        );
+        assert!(!workspace.join("deep/.env").exists(), "{result}");
+        Ok(())
+    }
 }
