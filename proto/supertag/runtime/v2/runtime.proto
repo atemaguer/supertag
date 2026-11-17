@@ -487,6 +487,9 @@ message AttemptCapabilities {
   // conversations and Objectives, and how many it may have (the Tag's `max_work_sessions`).
   uint32 open_work_sessions = 15;
   uint32 max_work_sessions = 16;
+  // A root turn of a Tag with memory may write and forget the Tag's notes (AttemptMemory),
+  // unless an outside event, such as a GitHub or Linear webhook, started it.
+  bool may_remember = 17;
 }
 
 // Operators see the work started in Sessions they can access.
@@ -1587,6 +1590,9 @@ message PutTagRequest {
   // How many Work Sessions the Tag may have open at once, across all its conversations and
   // Objectives; from 1 to 64. Omitted keeps the current value; a new Tag gets 8.
   optional uint32 max_work_sessions = 6700;
+  // Whether the Tag keeps memory: notes it writes with `remember` and a daily review of its
+  // work. Omitted keeps the current value; a new Tag keeps memory.
+  optional bool memory = 6800;
 }
 
 message Tag {
@@ -1609,6 +1615,10 @@ message Tag {
   uint32 max_work_sessions = 6700;
   // How many Work Sessions the Tag has open now, when the Tag is read with GetTag or ListTags.
   uint32 open_work_sessions = 6701;
+  // Whether the Tag keeps memory (see PutTagRequest.memory).
+  bool memory = 6800;
+  // When the Tag last reviewed its work and tidied its notes.
+  optional int64 memory_reviewed_at_ms = 6801;
 }
 
 message ListTagsRequest {

@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/runtime.proto";
+
+// A Tag's memory: a few short notes the Tag keeps of what it cannot look up again, such as a
+// person's preferences, corrections, decisions and their reasons, and pointers to where things
+// live. Every root turn reads the notes it may see as untrusted state, never as instructions.
+//
+// A note is shared, or private to one person when a turn in that person's conversation wrote it.
+// A turn sees the shared notes and its own person's private notes, never another person's.
+//
+// Operators list and delete every note. A client lists and deletes the notes of its own
+// conversations and the shared notes. People never write notes directly; they tell the Tag.
+service Memories {
+  rpc List(ListMemoriesRequest) returns (ListMemoriesResponse);
+  rpc Get(GetMemoryRequest) returns (Memory);
+  rpc Delete(GetMemoryRequest) returns (Memory);
+}
+
+// Called by a Worker Host for the turn it runs. A note written or forgotten during a turn takes
+// effect only when that turn succeeds; a failed, cancelled, or expired turn changes nothing.
+service AttemptMemory {
+  rpc Remember(AttemptRememberRequest) returns (AttemptMemoryResponse);
+  rpc Forget(AttemptForgetRequest) returns (AttemptMemoryResponse);
+}
+
+// Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
+// Attempt it supervises; an adapter leaves it unset.
+service HarnessMemory {
+  rpc Remember(AttemptRememberRequest) returns (AttemptMemoryResponse);
+  rpc Forget(AttemptForgetRequest) returns (AttemptMemoryResponse);
+}
+
+enum MemoryState {
+  MEMORY_STATE_UNSPECIFIED = 0;
+  // Written by a turn that has not finished yet.
+  MEMORY_STATE_STAGED = 1;
+  MEMORY_STATE_ACTIVE = 2;
+  // Forgotten or replaced by a turn that has not finished yet.
+  MEMORY_STATE_FORGETTING = 3;
+}
+
+message Memory {
+  string memory_id = 1;
+  string tag_id = 2;
+  // At most 500 characters.
+  string text = 3;
+  // Unset for a shared note; the principal whose conversation wrote a private note.
+  optional string audience = 4;
+  MemoryState state = 5;
+  // `tag:ID` for the Tag that wrote it.
+  string created_by = 6;
+  // The turn that wrote it.
+  optional string source_task_id = 7;
+  int64 created_at_ms = 8;
+  int64 updated_at_ms = 9;
+}
+
+message ListMemoriesRequest {
+  optional string tag_id = 1;
+}
+
+// Newest first.
+message ListMemoriesResponse {
+  repeated Memory memories = 1;
+}
+
+message GetMemoryRequest {
+  string memory_id = 1;
+}
+
+// The `remember` tool. A note takes this turn's audience. `replaces` names a note this turn may
+// see, which the new note replaces when the turn succeeds.
+message AttemptRememberRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  // 1 to 500 characters.
+  string text = 3;
+  optional string replaces = 4;
+}
+
+// The `forget` tool, for a note this turn may see.
+message AttemptForgetRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string memory_id = 3;
+}
+
+message AttemptMemoryResponse {
+  Memory memory = 1;
+  // The notes this turn sees after the call, newest first, staged changes included.
+  repeated Memory notes = 2;
+}

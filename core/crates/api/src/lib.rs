@@ -26,6 +26,7 @@ mod inputs;
 mod mailbox;
 mod manifest_relationships;
 mod mcp_effects;
+mod memories;
 mod metrics;
 mod operator_access;
 mod passthrough;
@@ -218,6 +219,8 @@ impl Api {
             self.attempt_tag_sessions_service(),
             self.schedules_service(),
             self.attempt_schedules_service(),
+            self.memories_service(),
+            self.attempt_memory_service(),
             self.attempt_mcp_effects_service(),
             self.attempt_changed_paths_service(),
             self.attempt_effects_service(),

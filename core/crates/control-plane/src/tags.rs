@@ -89,6 +89,8 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         open_work_sessions: row
             .try_get::<i64, _>("open_work_sessions")
             .map_or(0, |open| open as u32),
+        memory: row.try_get::<i64, _>("memory")? != 0,
+        memory_reviewed_at_ms: row.try_get("memory_reviewed_at_ms")?,
     })
 }
 
@@ -245,6 +247,7 @@ async fn retire_unused_in(
     .await?;
     crate::apply_sets::forget(tx, "Tag", tag_id).await?;
     crate::schedules::retire_tag_in(tx, tag_id, now_ms).await?;
+    crate::memories::retire_tag_in(tx, tag_id).await?;
     Ok(row)
 }
 

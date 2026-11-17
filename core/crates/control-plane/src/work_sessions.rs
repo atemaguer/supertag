@@ -171,7 +171,9 @@ async fn insert_child_in(
 /// Direct owner Objective reports may start follow-up work. An approval
 /// continuation remains scoped to its original report and cannot gain this right.
 pub(crate) async fn may_start_in(tx: &mut Transaction<'_, Any>, parent: &Task) -> Result<bool> {
-    if crate::mailbox::private_session(&parent.session_id) {
+    if crate::mailbox::private_session(&parent.session_id)
+        || crate::memories::review_session(&parent.session_id)
+    {
         return Ok(false);
     }
     match task_scope_in(tx, &parent.task_id).await? {

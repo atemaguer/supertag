@@ -417,6 +417,7 @@ pub(crate) async fn may_schedule_in(tx: &mut Transaction<'_, Any>, task: &Task) 
         .any(|action| action == SCHEDULE_CREATE_ACTION)
         || crate::work_sessions::reserved_session(&task.session_id)
         || crate::mailbox::private_session(&task.session_id)
+        || crate::memories::review_session(&task.session_id)
     {
         return Ok(false);
     }

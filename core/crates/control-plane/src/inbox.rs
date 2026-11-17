@@ -73,7 +73,10 @@ impl Store {
         let session: String = row.try_get("session_id")?;
         let scope = crate::work_sessions::task_scope_in(&mut tx, &attempt.task_id).await?;
         let kind = scope.as_ref().map(|scope| scope.kind);
-        let is_root = !crate::work_sessions::reserved_session(&session) && kind.is_none();
+        // A memory review reads the Tag's work and keeps its notes; it reaches no one.
+        let review = crate::memories::review_session(&session);
+        let is_root =
+            !crate::work_sessions::reserved_session(&session) && kind.is_none() && !review;
         let task = crate::store::task_row(&row)?;
         let may_request_commit_review = kind == Some(crate::work_sessions::REPORT)
             && crate::commit_reviews::may_request_in(&mut tx, &task).await?;
@@ -91,6 +94,13 @@ impl Store {
                 Some(viewer) => Some(crate::tag_sessions::portfolio_in(&mut tx, &viewer).await?),
                 None => None,
             };
+        let may_remember = crate::memories::may_remember_in(&mut tx, &task, kind).await?;
+        if let Some(portfolio) = tag_portfolio.as_mut()
+            && let Some(notes) = crate::memories::portfolio_in(&mut tx, &task, may_remember).await?
+        {
+            portfolio.push('\n');
+            portfolio.push_str(&notes);
+        }
         let may_schedule = crate::schedules::may_schedule_in(&mut tx, &task).await?;
         if may_schedule
             && let Some(portfolio) = tag_portfolio.as_mut()
@@ -101,21 +111,22 @@ impl Store {
             portfolio.push_str(&schedules);
         }
         let tag: String = row.try_get("tag_id")?;
-        let may_use_workstream = match crate::teams::workstreams::workstream_for_task_in(
-            &mut tx,
-            &attempt.task_id,
-            &tag,
-        )
-        .await
-        {
-            Ok(_) => true,
-            Err(
-                StoreError::FailedPrecondition(_)
-                | StoreError::NotFound(_)
-                | StoreError::PermissionDenied,
-            ) => false,
-            Err(error) => return Err(error),
-        };
+        let may_use_workstream = !review
+            && match crate::teams::workstreams::workstream_for_task_in(
+                &mut tx,
+                &attempt.task_id,
+                &tag,
+            )
+            .await
+            {
+                Ok(_) => true,
+                Err(
+                    StoreError::FailedPrecondition(_)
+                    | StoreError::NotFound(_)
+                    | StoreError::PermissionDenied,
+                ) => false,
+                Err(error) => return Err(error),
+            };
         tx.commit().await?;
         Ok(AttemptCapabilities {
             may_ask_objective_question,
@@ -133,6 +144,7 @@ impl Store {
             time_zone: self.time_zone().name().to_owned(),
             open_work_sessions,
             max_work_sessions,
+            may_remember,
         })
     }
 

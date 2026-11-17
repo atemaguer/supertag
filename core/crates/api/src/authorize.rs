@@ -192,6 +192,11 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("Schedules", "Pause", OC),
     ("Schedules", "Resume", OC),
     ("Schedules", "Delete", OC),
+    // A client lists and deletes the shared notes and its own conversations' notes.
+    ("Memories", "*", O),
+    ("Memories", "List", OC),
+    ("Memories", "Get", OC),
+    ("Memories", "Delete", OC),
     ("ObjectiveOverviews", "*", O),
     ("ObjectiveOverviews", "GetObjectiveOverview", OC),
     ("OperatorEvents", "*", O),
@@ -228,6 +233,7 @@ const TABLE: &[(&str, &str, u16)] = &[
     // A root turn reads its own Tag's Sessions and Objectives through its Worker Host.
     ("AttemptTagSessions", "*", HOST),
     ("AttemptSchedules", "*", HOST),
+    ("AttemptMemory", "*", HOST),
     ("AttemptWorkSessions", "*", HOST),
     ("AttemptMcpEffects", "*", HOST),
     ("AttemptChangedPaths", "*", HOST),
@@ -262,6 +268,7 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("HarnessMcp", "*", PEER_LOCAL),
     ("HarnessQuestions", "*", PEER_LOCAL),
     ("HarnessSchedules", "*", PEER_LOCAL),
+    ("HarnessMemory", "*", PEER_LOCAL),
     ("HarnessTagSessions", "*", PEER_LOCAL),
     ("HarnessWorkSessions", "*", PEER_LOCAL),
     ("HarnessWorkspace", "*", PEER_LOCAL),

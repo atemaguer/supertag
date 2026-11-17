@@ -161,7 +161,8 @@ async fn audience_at(
         .await?;
         return Ok(Audience::Private(principal));
     }
-    if crate::mailbox::private_session(&session) {
+    // The inbox, and the review that reads the Tag's shared work, are shared.
+    if crate::mailbox::private_session(&session) || crate::memories::review_session(&session) {
         return Ok(Audience::Shared);
     }
     if session.starts_with("surface-status:") {

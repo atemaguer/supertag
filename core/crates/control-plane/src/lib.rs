@@ -29,6 +29,7 @@ mod mailbox;
 mod manifest_fields;
 mod manifest_relationships;
 mod mcp_effects;
+mod memories;
 mod metrics;
 pub mod objective_limits;
 mod objective_overview;
@@ -197,6 +198,7 @@ impl ControlPlane {
         self.store.sweep_ephemeral_hosts().await?;
         self.store.sweep_schedules().await?;
         self.store.sweep_checkpoints().await?;
+        self.store.sweep_memory().await?;
         self.store.prune_watch().await?;
         Ok(())
     }
@@ -993,6 +995,7 @@ mod tests {
             allowed_actions: vec![],
             lead: None,
             max_work_sessions: None,
+            memory: None,
         };
         assert_eq!(
             cp.put_tag(Request::new(tag.clone()))

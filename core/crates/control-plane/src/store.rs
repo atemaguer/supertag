@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 87;
+        const SCHEMA_VERSION: i64 = 88;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -286,6 +286,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0085_checkpoint_garbage.sql"),
                 include_str!("../migrations/sqlite/0086_work_session_limit.sql"),
                 include_str!("../migrations/sqlite/0087_surface_delivery.sql"),
+                include_str!("../migrations/sqlite/0088_tag_memories.sql"),
             ]
         } else {
             [
@@ -378,6 +379,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0085_checkpoint_garbage.sql"),
                 include_str!("../migrations/postgresql/0086_work_session_limit.sql"),
                 include_str!("../migrations/postgresql/0087_surface_delivery.sql"),
+                include_str!("../migrations/postgresql/0088_tag_memories.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -501,6 +503,7 @@ impl Store {
             expected_revision: None,
             lead: None,
             max_work_sessions: None,
+            memory: None,
         })
         .await
     }
@@ -528,6 +531,7 @@ impl Store {
             expected_revision,
             lead,
             max_work_sessions,
+            memory,
         } = input;
         let tag_id = tag_id.as_str();
         let instructions = instructions.as_str();
@@ -601,7 +605,8 @@ impl Store {
         let max_work_sessions =
             crate::work_sessions::max_work_sessions_in(transaction, tag_id, max_work_sessions)
                 .await?;
-        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead, max_work_sessions) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead, max_work_sessions=excluded.max_work_sessions RETURNING revision")
+        let memory = crate::memories::enabled_in(transaction, tag_id, memory).await?;
+        let row = sqlx::query("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead, max_work_sessions, memory) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead, max_work_sessions=excluded.max_work_sessions, memory=excluded.memory RETURNING revision, memory_reviewed_at_ms")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
             .bind(workspace.as_ref().map(|spec| &spec.base_commit))
@@ -614,7 +619,9 @@ impl Store {
             .bind(crate::workspaces::encode_base_ref(workspace.as_ref()))
             .bind(i64::from(lead))
             .bind(i64::from(max_work_sessions))
+            .bind(i64::from(memory))
             .fetch_one(&mut **transaction).await?;
+        let revision: i64 = row.try_get("revision")?;
         Ok(Tag {
             tag_id: tag_id.into(),
             instructions: instructions.into(),
@@ -632,6 +639,8 @@ impl Store {
             open_work_sessions: crate::work_sessions::open_count_in(transaction, tag_id)
                 .await?
                 .0,
+            memory,
+            memory_reviewed_at_ms: row.try_get("memory_reviewed_at_ms")?,
         })
     }
 
@@ -652,6 +661,9 @@ impl Store {
         }
         if crate::mailbox::private_session(&input.session_id) {
             return Err(invalid("Mailbox Sessions are reserved for delivery"));
+        }
+        if crate::memories::review_session(&input.session_id) {
+            return Err(invalid("memory Sessions are reserved for the Tag's review"));
         }
         text("prompt", &input.prompt, MAX_TASK_PROMPT_BYTES)?;
         let mut digest = format!(
@@ -1280,6 +1292,7 @@ impl Store {
             crate::approvals::finish_in(&mut transaction, &task, input, now).await?;
             crate::work_sessions::questions::finish_in(&mut transaction, &task, input, now).await?;
             crate::schedules::finish_in(&mut transaction, &task, now).await?;
+            crate::memories::finish_in(&mut transaction, &task, now).await?;
         }
         if state == TaskState::Running && task.state() == TaskState::Succeeded {
             sqlx::query("UPDATE supertag_v2_tasks SET completed_at_ms=$1 WHERE task_id=$2")
@@ -1328,8 +1341,10 @@ impl Store {
         name("event ID", &input.event_id)?;
         name("Tag ID", &input.tag_id)?;
         name("Session ID", &input.session_id)?;
-        if crate::mailbox::private_session(&input.session_id) {
-            return Err(invalid("Mailbox Sessions are reserved for delivery"));
+        if crate::mailbox::private_session(&input.session_id)
+            || crate::memories::review_session(&input.session_id)
+        {
+            return Err(invalid("Mailbox and memory Sessions are reserved"));
         }
         if crate::conversations::private_session(&input.session_id) {
             return Err(StoreError::FailedPrecondition(

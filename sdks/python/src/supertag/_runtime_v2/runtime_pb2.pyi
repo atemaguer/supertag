@@ -961,7 +961,7 @@ class AskQuestionRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class AttemptCapabilities(_message.Message):
-    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing", "may_schedule", "time_zone", "open_work_sessions", "max_work_sessions")
+    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing", "may_schedule", "time_zone", "open_work_sessions", "max_work_sessions", "may_remember")
     MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     MAY_USE_WORKSTREAM_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_MAILBOX_FIELD_NUMBER: _ClassVar[int]
@@ -977,6 +977,7 @@ class AttemptCapabilities(_message.Message):
     TIME_ZONE_FIELD_NUMBER: _ClassVar[int]
     OPEN_WORK_SESSIONS_FIELD_NUMBER: _ClassVar[int]
     MAX_WORK_SESSIONS_FIELD_NUMBER: _ClassVar[int]
+    MAY_REMEMBER_FIELD_NUMBER: _ClassVar[int]
     may_ask_objective_question: bool
     may_use_workstream: bool
     may_read_mailbox: bool
@@ -992,7 +993,8 @@ class AttemptCapabilities(_message.Message):
     time_zone: str
     open_work_sessions: int
     max_work_sessions: int
-    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ..., may_schedule: _Optional[bool] = ..., time_zone: _Optional[str] = ..., open_work_sessions: _Optional[int] = ..., max_work_sessions: _Optional[int] = ...) -> None: ...
+    may_remember: bool
+    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ..., may_schedule: _Optional[bool] = ..., time_zone: _Optional[str] = ..., open_work_sessions: _Optional[int] = ..., max_work_sessions: _Optional[int] = ..., may_remember: _Optional[bool] = ...) -> None: ...
 
 class CloseWorkSessionRequest(_message.Message):
     __slots__ = ("work_session_id", "delivery_pulled")
@@ -2081,7 +2083,7 @@ class HostRecord(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., revoked: _Optional[bool] = ...) -> None: ...
 
 class PutTagRequest(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution", "name", "expected_revision", "lead", "max_work_sessions")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules", "execution", "name", "expected_revision", "lead", "max_work_sessions", "memory")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -2093,6 +2095,7 @@ class PutTagRequest(_message.Message):
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
     LEAD_FIELD_NUMBER: _ClassVar[int]
     MAX_WORK_SESSIONS_FIELD_NUMBER: _ClassVar[int]
+    MEMORY_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -2104,10 +2107,11 @@ class PutTagRequest(_message.Message):
     expected_revision: int
     lead: bool
     max_work_sessions: int
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., expected_revision: _Optional[int] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ...) -> None: ...
+    memory: bool
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., expected_revision: _Optional[int] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on", "lead", "max_work_sessions", "open_work_sessions")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on", "lead", "max_work_sessions", "open_work_sessions", "memory", "memory_reviewed_at_ms")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -2122,6 +2126,8 @@ class Tag(_message.Message):
     LEAD_FIELD_NUMBER: _ClassVar[int]
     MAX_WORK_SESSIONS_FIELD_NUMBER: _ClassVar[int]
     OPEN_WORK_SESSIONS_FIELD_NUMBER: _ClassVar[int]
+    MEMORY_FIELD_NUMBER: _ClassVar[int]
+    MEMORY_REVIEWED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -2136,7 +2142,9 @@ class Tag(_message.Message):
     lead: bool
     max_work_sessions: int
     open_work_sessions: int
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., open_work_sessions: _Optional[int] = ...) -> None: ...
+    memory: bool
+    memory_reviewed_at_ms: int
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., open_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ..., memory_reviewed_at_ms: _Optional[int] = ...) -> None: ...
 
 class ListTagsRequest(_message.Message):
     __slots__ = ("limit", "cursor", "include_retired")

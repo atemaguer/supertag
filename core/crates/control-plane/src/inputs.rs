@@ -63,6 +63,11 @@ impl Store {
                 "Mailbox Tasks receive input through delivery".into(),
             ));
         }
+        if crate::memories::review_session(&session_id) {
+            return Err(StoreError::FailedPrecondition(
+                "a memory review takes no input".into(),
+            ));
+        }
         if crate::conversations::private_session(&session_id) {
             return Err(StoreError::FailedPrecondition(
                 "send messages through the conversation".into(),
