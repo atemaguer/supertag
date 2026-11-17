@@ -142,9 +142,10 @@ pub async fn up(options: LocalOptions, shutdown: impl Future<Output = ()>) -> Re
         .unwrap_or_default()
         .into_iter()
         .filter_map(|mapping| match mapping.source {
-            supertag_worker_host::WorkspaceSource::Local(path) => {
-                Some((mapping.workspace_id, path))
-            }
+            supertag_worker_host::WorkspaceSource::Local(path) => Some((
+                mapping.workspace_id,
+                crate::delivery_branches::LocalLanding::new(path),
+            )),
             supertag_worker_host::WorkspaceSource::ControlPlane => None,
         })
         .collect();

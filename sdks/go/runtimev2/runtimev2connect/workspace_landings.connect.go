@@ -39,6 +39,9 @@ const (
 	WorkspaceLandingsGetProcedure = "/supertag.runtime.v2.WorkspaceLandings/Get"
 	// WorkspaceLandingsListProcedure is the fully-qualified name of the WorkspaceLandings's List RPC.
 	WorkspaceLandingsListProcedure = "/supertag.runtime.v2.WorkspaceLandings/List"
+	// WorkspaceLandingsReturnConflictProcedure is the fully-qualified name of the WorkspaceLandings's
+	// ReturnConflict RPC.
+	WorkspaceLandingsReturnConflictProcedure = "/supertag.runtime.v2.WorkspaceLandings/ReturnConflict"
 	// GitDeliveryListPendingSourcesProcedure is the fully-qualified name of the GitDelivery's
 	// ListPendingSources RPC.
 	GitDeliveryListPendingSourcesProcedure = "/supertag.runtime.v2.GitDelivery/ListPendingSources"
@@ -56,6 +59,9 @@ const (
 type WorkspaceLandingsClient interface {
 	Get(context.Context, *connect.Request[runtimev2.GetWorkspaceLandingRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error)
 	List(context.Context, *connect.Request[runtimev2.ListWorkspaceLandingsRequest]) (*connect.Response[runtimev2.ListWorkspaceLandingsResponse], error)
+	// A local Workspace's merge, which `supertag up` makes in the operator's own repository,
+	// conflicted: the Session receives a follow-up Task that merges the target and resolves it.
+	ReturnConflict(context.Context, *connect.Request[runtimev2.ReturnLandingConflictRequest]) (*connect.Response[runtimev2.Task], error)
 }
 
 // NewWorkspaceLandingsClient constructs a client for the supertag.runtime.v2.WorkspaceLandings
@@ -81,13 +87,20 @@ func NewWorkspaceLandingsClient(httpClient connect.HTTPClient, baseURL string, o
 			connect.WithSchema(workspaceLandingsMethods.ByName("List")),
 			connect.WithClientOptions(opts...),
 		),
+		returnConflict: connect.NewClient[runtimev2.ReturnLandingConflictRequest, runtimev2.Task](
+			httpClient,
+			baseURL+WorkspaceLandingsReturnConflictProcedure,
+			connect.WithSchema(workspaceLandingsMethods.ByName("ReturnConflict")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // workspaceLandingsClient implements WorkspaceLandingsClient.
 type workspaceLandingsClient struct {
-	get  *connect.Client[runtimev2.GetWorkspaceLandingRequest, runtimev2.WorkspaceLanding]
-	list *connect.Client[runtimev2.ListWorkspaceLandingsRequest, runtimev2.ListWorkspaceLandingsResponse]
+	get            *connect.Client[runtimev2.GetWorkspaceLandingRequest, runtimev2.WorkspaceLanding]
+	list           *connect.Client[runtimev2.ListWorkspaceLandingsRequest, runtimev2.ListWorkspaceLandingsResponse]
+	returnConflict *connect.Client[runtimev2.ReturnLandingConflictRequest, runtimev2.Task]
 }
 
 // Get calls supertag.runtime.v2.WorkspaceLandings.Get.
@@ -100,11 +113,19 @@ func (c *workspaceLandingsClient) List(ctx context.Context, req *connect.Request
 	return c.list.CallUnary(ctx, req)
 }
 
+// ReturnConflict calls supertag.runtime.v2.WorkspaceLandings.ReturnConflict.
+func (c *workspaceLandingsClient) ReturnConflict(ctx context.Context, req *connect.Request[runtimev2.ReturnLandingConflictRequest]) (*connect.Response[runtimev2.Task], error) {
+	return c.returnConflict.CallUnary(ctx, req)
+}
+
 // WorkspaceLandingsHandler is an implementation of the supertag.runtime.v2.WorkspaceLandings
 // service.
 type WorkspaceLandingsHandler interface {
 	Get(context.Context, *connect.Request[runtimev2.GetWorkspaceLandingRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error)
 	List(context.Context, *connect.Request[runtimev2.ListWorkspaceLandingsRequest]) (*connect.Response[runtimev2.ListWorkspaceLandingsResponse], error)
+	// A local Workspace's merge, which `supertag up` makes in the operator's own repository,
+	// conflicted: the Session receives a follow-up Task that merges the target and resolves it.
+	ReturnConflict(context.Context, *connect.Request[runtimev2.ReturnLandingConflictRequest]) (*connect.Response[runtimev2.Task], error)
 }
 
 // NewWorkspaceLandingsHandler builds an HTTP handler from the service implementation. It returns
@@ -126,12 +147,20 @@ func NewWorkspaceLandingsHandler(svc WorkspaceLandingsHandler, opts ...connect.H
 		connect.WithSchema(workspaceLandingsMethods.ByName("List")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workspaceLandingsReturnConflictHandler := connect.NewUnaryHandler(
+		WorkspaceLandingsReturnConflictProcedure,
+		svc.ReturnConflict,
+		connect.WithSchema(workspaceLandingsMethods.ByName("ReturnConflict")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.WorkspaceLandings/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkspaceLandingsGetProcedure:
 			workspaceLandingsGetHandler.ServeHTTP(w, r)
 		case WorkspaceLandingsListProcedure:
 			workspaceLandingsListHandler.ServeHTTP(w, r)
+		case WorkspaceLandingsReturnConflictProcedure:
+			workspaceLandingsReturnConflictHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -147,6 +176,10 @@ func (UnimplementedWorkspaceLandingsHandler) Get(context.Context, *connect.Reque
 
 func (UnimplementedWorkspaceLandingsHandler) List(context.Context, *connect.Request[runtimev2.ListWorkspaceLandingsRequest]) (*connect.Response[runtimev2.ListWorkspaceLandingsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceLandings.List is not implemented"))
+}
+
+func (UnimplementedWorkspaceLandingsHandler) ReturnConflict(context.Context, *connect.Request[runtimev2.ReturnLandingConflictRequest]) (*connect.Response[runtimev2.Task], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceLandings.ReturnConflict is not implemented"))
 }
 
 // GitDeliveryClient is a client for the supertag.runtime.v2.GitDelivery service.

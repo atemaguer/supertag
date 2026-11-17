@@ -572,6 +572,63 @@ impl Store {
         Ok(value)
     }
 
+    /// A local Workspace's merge conflicted in the operator's repository: the Session gets the
+    /// same merge follow-up a remote Workspace's conflict gives it.
+    pub async fn return_landing_conflict(
+        &self,
+        principal: &str,
+        input: &ReturnLandingConflictRequest,
+    ) -> Result<Task> {
+        policy::operator(principal)?;
+        name("operation ID", &input.operation_id)?;
+        name("Tag ID", &input.tag_id)?;
+        name("Session ID", &input.session_id)?;
+        if !git_remote::valid_merge_target(&input.target)
+            || !supertag_protocol::valid_git_commit(&input.target_commit)
+            || input.conflicts.is_empty()
+            || input.conflicts.len() > MAX_CONFLICTS
+        {
+            return Err(invalid(
+                "a conflict names the merge target, its commit, and the conflicting paths",
+            ));
+        }
+        let digest = policy::digest("return-landing-conflict", input);
+        let (mut tx, _) = self.write().await?;
+        if let Some(prior) =
+            policy::replay::<Task>(&mut tx, principal, &input.operation_id, &digest).await?
+        {
+            return Ok(prior);
+        }
+        let head: Option<String> = sqlx::query_scalar("SELECT d.task_id FROM supertag_v2_workspace_heads h JOIN supertag_v2_workspace_deliveries d ON d.attempt_id=h.attempt_id WHERE h.tag_id=$1 AND h.session_id=$2 AND d.committed_at_ms IS NOT NULL")
+            .bind(&input.tag_id).bind(&input.session_id).fetch_optional(&mut *tx).await?;
+        let head = head.ok_or_else(|| {
+            StoreError::NotFound("the Session has no delivered Workspace commits".into())
+        })?;
+        if !crate::conversations::task_access_in(&mut tx, principal, &head).await? {
+            return Err(StoreError::NotFound(
+                "the Session has no delivered Workspace commits".into(),
+            ));
+        }
+        let value = WorkspaceLanding {
+            task_id: head,
+            target: input.target.clone(),
+            target_commit: input.target_commit.clone(),
+            conflicts: input.conflicts.clone(),
+            ..Default::default()
+        };
+        let task = match follow_up_in(&mut tx, &value).await? {
+            Ok(task) => task_in(&mut tx, &task).await?,
+            Err(reason) => {
+                return Err(StoreError::FailedPrecondition(format!(
+                    "no follow-up Task was started: {reason}"
+                )));
+            }
+        };
+        policy::receipt(&mut tx, principal, &input.operation_id, &digest, &task).await?;
+        tx.commit().await?;
+        Ok(task)
+    }
+
     pub async fn get_workspace_landing(
         &self,
         principal: &str,
@@ -654,6 +711,17 @@ impl workspace_landings_server::WorkspaceLandings for ControlPlane {
         Ok(Response::new(
             self.store
                 .list_workspace_landings(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+    async fn return_conflict(
+        &self,
+        request: Request<ReturnLandingConflictRequest>,
+    ) -> std::result::Result<Response<Task>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .return_landing_conflict(&principal, request.get_ref())
                 .await?,
         ))
     }

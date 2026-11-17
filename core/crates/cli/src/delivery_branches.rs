@@ -1,5 +1,6 @@
 //! Session branches in the operator's repository: `supertag fetch`, and the local supervisor's
-//! automatic import of each delivered Task of a Workspace one of its Worker Hosts maps.
+//! automatic import of each delivered Task of a Workspace one of its Worker Hosts maps, followed
+//! by the Workspace's `land` ([`crate::local_landing`]).
 //!
 //! A Worker Host never writes the operator's repository. Its delivery is a verified bundle the
 //! Control Plane accepted; this machine downloads it from the Control Plane, checks it against the
@@ -14,7 +15,7 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
-use serde_json::{Value, json};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
@@ -277,9 +278,11 @@ async fn download(
     Ok(())
 }
 
-/// Where the local supervisor imports deliveries: each mapped Workspace whose delivery is
-/// `branch`, by Workspace ID.
-pub type Repositories = BTreeMap<String, PathBuf>;
+pub use crate::local_landing::LocalLanding;
+
+/// Where the local supervisor lands deliveries: each mapped Workspace whose `land` is not
+/// `patch`, by Workspace ID.
+pub type Repositories = BTreeMap<String, LocalLanding>;
 
 const STATE: &str = "session-branches.json";
 
@@ -293,7 +296,26 @@ pub async fn follow(
     repositories: Repositories,
     log: impl Fn(&str) + Send + Sync + 'static,
 ) {
-    let mut resume = read_resume(&directory).unwrap_or_default();
+    let state = read_state(&directory);
+    let mut resume = state.resume_token;
+    let pending: crate::local_landing::Pending =
+        std::sync::Arc::new(tokio::sync::Mutex::new(state.pending_merges));
+    let log = std::sync::Arc::new(log);
+    // Sessions of `merge` Workspaces whose work finishes later merge on their own schedule.
+    let merges = repositories
+        .values()
+        .any(|landing| landing.merge.is_some())
+        .then(|| {
+            tokio::spawn(merge_loop(
+                endpoint.clone(),
+                token.clone(),
+                directory.clone(),
+                repositories.clone(),
+                pending.clone(),
+                log.clone(),
+            ))
+        });
+    let _merges = merges.map(AbortOnDrop);
     // Deliveries already in their branch; a Task's later changes need no second download.
     let mut imported = HashSet::new();
     let mut delay = Duration::from_millis(250);
@@ -327,9 +349,9 @@ pub async fn follow(
                             &channel,
                             &token,
                             &change.id,
-                            &repositories,
+                            (&repositories, &pending),
                             &mut imported,
-                            &log,
+                            &*log,
                         )
                         .await
                         {
@@ -348,7 +370,7 @@ pub async fn follow(
                     continue;
                 }
                 resume = event.resume_token;
-                if let Err(error) = write_resume(&directory, &resume) {
+                if let Err(error) = write_state(&directory, &resume, &*pending.lock().await) {
                     log(&format!("Session branch import state was not saved: {error:#}"));
                 }
             }
@@ -371,7 +393,7 @@ async fn import_task(
     channel: &ProtocolChannel,
     token: &str,
     task_id: &str,
-    repositories: &Repositories,
+    (repositories, pending): (&Repositories, &crate::local_landing::Pending),
     imported: &mut HashSet<String>,
     log: &(impl Fn(&str) + Send + Sync),
 ) -> Result<()> {
@@ -394,9 +416,10 @@ async fn import_task(
     let Some(delivery) = task.workspace_delivery.clone() else {
         return Ok(());
     };
-    let Some(repository) = repositories.get(&delivery.workspace_id) else {
+    let Some(landing) = repositories.get(&delivery.workspace_id) else {
         return Ok(());
     };
+    let repository = &landing.path;
     // A remote Workspace lands on its own remote instead.
     if task.state() != TaskState::Succeeded
         || delivery.head_commit == delivery.base_commit
@@ -409,9 +432,9 @@ async fn import_task(
         return Ok(());
     }
     let accepted = Accepted {
-        task_id: task.task_id,
-        tag_id: task.tag_id,
-        session_id: task.session_id,
+        task_id: task.task_id.clone(),
+        tag_id: task.tag_id.clone(),
+        session_id: task.session_id.clone(),
         delivery,
     };
     let (branch, outcome) = import(channel, token, &accepted, repository).await?;
@@ -424,19 +447,82 @@ async fn import_task(
             repository.display()
         ));
     }
-    Ok(())
+    crate::local_landing::imported(&task, &branch, landing, pending, log).await
 }
 
-fn read_resume(directory: &Path) -> Option<String> {
-    let bytes = std::fs::read(directory.join(STATE)).ok()?;
-    let value: Value = serde_json::from_slice(&bytes).ok()?;
-    value["resume_token"].as_str().map(str::to_owned)
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
-fn write_resume(directory: &Path, resume: &str) -> Result<()> {
+/// Merges each pending Session once its work is done, every few seconds.
+async fn merge_loop(
+    endpoint: String,
+    token: String,
+    directory: PathBuf,
+    repositories: Repositories,
+    pending: crate::local_landing::Pending,
+    log: std::sync::Arc<impl Fn(&str) + Send + Sync + 'static>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(3));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        interval.tick().await;
+        if pending.lock().await.is_empty() {
+            continue;
+        }
+        let result: Result<bool> = async {
+            let channel = crate::network::operator_channel(
+                &crate::network::endpoint_with_timeout(endpoint.clone(), Duration::from_secs(30))
+                    .await?,
+            )
+            .await?;
+            crate::local_landing::merge_pending(&channel, &token, &repositories, &pending, &*log)
+                .await
+        }
+        .await;
+        match result {
+            Ok(true) => {
+                let resume = read_state(&directory).resume_token;
+                if let Err(error) = write_state(&directory, &resume, &*pending.lock().await) {
+                    log(&format!("Session merge state was not saved: {error:#}"));
+                }
+            }
+            Ok(false) => {}
+            Err(error) => log(&format!("Session merges were not checked: {error:#}")),
+        }
+    }
+}
+
+/// The supervisor's resume token and the Sessions waiting to be merged, across restarts.
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+struct State {
+    #[serde(default)]
+    resume_token: String,
+    #[serde(default)]
+    pending_merges: BTreeMap<String, crate::local_landing::PendingMerge>,
+}
+
+fn read_state(directory: &Path) -> State {
+    std::fs::read(directory.join(STATE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn write_state(
+    directory: &Path,
+    resume: &str,
+    pending: &BTreeMap<String, crate::local_landing::PendingMerge>,
+) -> Result<()> {
     crate::local::write_private(
         directory,
         STATE,
-        json!({ "resume_token": resume }).to_string().as_bytes(),
+        &serde_json::to_vec(&State {
+            resume_token: resume.to_owned(),
+            pending_merges: pending.clone(),
+        })?,
     )
 }

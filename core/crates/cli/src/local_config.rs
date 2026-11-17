@@ -139,7 +139,7 @@ enum ProvisionEntry {
     File(PathBuf),
     Inline(serde_json::Value),
 }
-/// A Workspace's local repository: a path, or a path and how deliveries reach it.
+/// A Workspace's local repository: a path, or a path and where Session changes land.
 #[derive(Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 enum WorkspaceMapping {
@@ -147,30 +147,39 @@ enum WorkspaceMapping {
     Detailed {
         path: PathBuf,
         #[serde(default)]
-        delivery: Delivery,
+        land: Option<Land>,
         /// Shell command that prepares each new Task checkout; see `--workspace-setup`.
         #[serde(default)]
         setup: Option<String>,
     },
 }
-/// `branch` imports each delivered Task into the repository as its Session branch; `patch`
-/// leaves the repository alone, and the patch and bundle stay downloadable.
-#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+/// Where a local Workspace's Session changes land: `local` (the default) imports each
+/// delivered Task into the repository as its Session branch; `patch` leaves the repository
+/// alone, and the patch and bundle stay downloadable; `{push: REMOTE}` also pushes each
+/// Session branch to that remote; `{merge: BRANCH}` merges a Session into that local branch
+/// once its work is reported done, and with `push` pushes it.
+#[derive(Clone, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum Land {
+    Mode(LandMode),
+    Remote {
+        #[serde(default)]
+        merge: Option<String>,
+        #[serde(default)]
+        push: Option<String>,
+    },
+}
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-enum Delivery {
-    #[default]
-    Branch,
+enum LandMode {
+    Local,
     Patch,
 }
 impl WorkspaceMapping {
-    fn parts(&self) -> (&Path, Delivery, Option<&str>) {
+    fn parts(&self) -> (&Path, Option<&Land>, Option<&str>) {
         match self {
-            Self::Path(path) => (path, Delivery::Branch, None),
-            Self::Detailed {
-                path,
-                delivery,
-                setup,
-            } => (path, *delivery, setup.as_deref()),
+            Self::Path(path) => (path, None, None),
+            Self::Detailed { path, land, setup } => (path, land.as_ref(), setup.as_deref()),
         }
     }
 }
@@ -705,10 +714,43 @@ fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> 
         let mut session_branches = BTreeMap::new();
         for (id, workspace) in &workspaces {
             identifier(id)?;
-            let (path, delivery, setup) = workspace.parts();
+            let (path, land, setup) = workspace.parts();
             let path = resolve_path(base, path)?;
-            if delivery == Delivery::Branch && remote.is_none() {
-                session_branches.insert(id.clone(), path.clone());
+            let landing = match land {
+                None | Some(Land::Mode(LandMode::Local)) => {
+                    Some(crate::delivery_branches::LocalLanding::new(path.clone()))
+                }
+                Some(Land::Mode(LandMode::Patch)) => None,
+                Some(Land::Remote { merge, push }) => {
+                    ensure!(
+                        merge.is_some() || push.is_some(),
+                        "Workspace {id}: land names merge, push, or both"
+                    );
+                    if let Some(target) = merge {
+                        ensure!(
+                            supertag_protocol::git_remote::valid_merge_target(target),
+                            "Workspace {id}: land.merge is a branch name outside supertag/"
+                        );
+                    }
+                    if let Some(remote) = push {
+                        ensure!(
+                            !remote.is_empty()
+                                && !remote.starts_with('-')
+                                && !remote.chars().any(|c| c.is_whitespace() || c.is_control()),
+                            "Workspace {id}: land.push names a git remote of the repository, such as origin"
+                        );
+                    }
+                    Some(crate::delivery_branches::LocalLanding {
+                        path: path.clone(),
+                        merge: merge.clone(),
+                        push: push.clone(),
+                    })
+                }
+            };
+            if let Some(landing) = landing
+                && remote.is_none()
+            {
+                session_branches.insert(id.clone(), landing);
             }
             mapping.extend([
                 OsString::from("--workspace-id"),
@@ -1468,8 +1510,9 @@ secrets:
             br#"services:
   control-plane: {type: control-plane, ports: ["127.0.0.1:0"]}
   branch: {type: host, adapter: ./adapter, workspaces: {app: ./app}}
-  explicit: {type: host, adapter: ./adapter, workspaces: {web: {path: ./web, delivery: branch, setup: npm ci}}}
-  patch: {type: host, adapter: ./adapter, workspaces: {docs: {path: ./docs, delivery: patch}}}
+  explicit: {type: host, adapter: ./adapter, workspaces: {web: {path: ./web, land: local, setup: npm ci}}}
+  patch: {type: host, adapter: ./adapter, workspaces: {docs: {path: ./docs, land: patch}}}
+  merging: {type: host, adapter: ./adapter, workspaces: {notes: {path: ./notes, land: {merge: agents, push: origin}}}}
   remote: {type: host, control-plane: "https://plane.example", adapter: ./adapter, workspaces: {api: ./api}}
 "#,
             Path::new("/trusted"),
@@ -1484,13 +1527,26 @@ secrets:
                 .session_branches
                 .clone()
         };
+        let local = |path: &str| crate::delivery_branches::LocalLanding::new(PathBuf::from(path));
         assert_eq!(
             branches("branch"),
-            [("app".to_owned(), PathBuf::from("/trusted/./app"))].into()
+            [("app".to_owned(), local("/trusted/./app"))].into()
         );
         assert_eq!(
             branches("explicit"),
-            [("web".to_owned(), PathBuf::from("/trusted/./web"))].into()
+            [("web".to_owned(), local("/trusted/./web"))].into()
+        );
+        assert_eq!(
+            branches("merging"),
+            [(
+                "notes".to_owned(),
+                crate::delivery_branches::LocalLanding {
+                    path: PathBuf::from("/trusted/./notes"),
+                    merge: Some("agents".into()),
+                    push: Some("origin".into()),
+                }
+            )]
+            .into()
         );
         // A Workspace's setup command reaches its host's Workers.
         let explicit = c.hosts.iter().find(|h| h.name == "explicit").unwrap();
@@ -1513,10 +1569,13 @@ secrets:
         );
         // Another Control Plane's host: this file has no operator credential for it.
         assert!(branches("remote").is_empty());
-        let valid = br#"services: {h: {type: host, adapter: ./a, control-plane: "https://p.example", workspaces: {app: {path: ./app, delivery: patch}}}}"#;
+        let valid = br#"services: {h: {type: host, adapter: ./a, control-plane: "https://p.example", workspaces: {app: {path: ./app, land: patch}}}}"#;
         assert!(parse(valid, Path::new("/trusted"), |_| None).is_ok());
         for invalid in [
-            &br#"services: {h: {type: host, adapter: ./a, control-plane: "https://p.example", workspaces: {app: {path: ./app, delivery: pull-request}}}}"#[..],
+            &br#"services: {h: {type: host, adapter: ./a, control-plane: "https://p.example", workspaces: {app: {path: ./app, land: pull-request}}}}"#[..],
+            br#"services: {h: {type: host, adapter: ./a, workspaces: {app: {path: ./app, land: {merge: supertag/x}}}}}"#,
+            br#"services: {h: {type: host, adapter: ./a, workspaces: {app: {path: ./app, land: {}}}}}"#,
+            br#"services: {h: {type: host, adapter: ./a, workspaces: {app: {path: ./app, delivery: patch}}}}"#,
             br#"services: {h: {type: host, adapter: ./a, control-plane: "https://p.example", workspaces: {app: {path: ./app, typo: 1}}}}"#,
         ] {
             assert!(parse(invalid, Path::new("/trusted"), |_| None).is_err());

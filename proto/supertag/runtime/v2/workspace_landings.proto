@@ -8,6 +8,9 @@ import "supertag/runtime/v2/workspaces.proto";
 service WorkspaceLandings {
   rpc Get(GetWorkspaceLandingRequest) returns (WorkspaceLanding);
   rpc List(ListWorkspaceLandingsRequest) returns (ListWorkspaceLandingsResponse);
+  // A local Workspace's merge, which `supertag up` makes in the operator's own repository,
+  // conflicted: the Session receives a follow-up Task that merges the target and resolves it.
+  rpc ReturnConflict(ReturnLandingConflictRequest) returns (Task);
 }
 
 // Internal to the Control Plane: git delivery pins each Session's source and lands verified
@@ -71,6 +74,15 @@ message WorkspaceLanding {
 }
 
 message GetWorkspaceLandingRequest { string landing_id = 1; }
+message ReturnLandingConflictRequest {
+  string operation_id = 1;
+  string tag_id = 2;
+  string session_id = 3;
+  // The merge target, the commit it named, and the conflicting paths.
+  string target = 4;
+  string target_commit = 5;
+  repeated string conflicts = 6;
+}
 message ListWorkspaceLandingsRequest {
   string task_id = 1;
   uint32 limit = 2;

@@ -382,6 +382,91 @@ func (x *GetWorkspaceLandingRequest) GetLandingId() string {
 	return ""
 }
 
+type ReturnLandingConflictRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	OperationId string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	TagId       string                 `protobuf:"bytes,2,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`
+	SessionId   string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// The merge target, the commit it named, and the conflicting paths.
+	Target        string   `protobuf:"bytes,4,opt,name=target,proto3" json:"target,omitempty"`
+	TargetCommit  string   `protobuf:"bytes,5,opt,name=target_commit,json=targetCommit,proto3" json:"target_commit,omitempty"`
+	Conflicts     []string `protobuf:"bytes,6,rep,name=conflicts,proto3" json:"conflicts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReturnLandingConflictRequest) Reset() {
+	*x = ReturnLandingConflictRequest{}
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReturnLandingConflictRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReturnLandingConflictRequest) ProtoMessage() {}
+
+func (x *ReturnLandingConflictRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReturnLandingConflictRequest.ProtoReflect.Descriptor instead.
+func (*ReturnLandingConflictRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ReturnLandingConflictRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *ReturnLandingConflictRequest) GetTagId() string {
+	if x != nil {
+		return x.TagId
+	}
+	return ""
+}
+
+func (x *ReturnLandingConflictRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ReturnLandingConflictRequest) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *ReturnLandingConflictRequest) GetTargetCommit() string {
+	if x != nil {
+		return x.TargetCommit
+	}
+	return ""
+}
+
+func (x *ReturnLandingConflictRequest) GetConflicts() []string {
+	if x != nil {
+		return x.Conflicts
+	}
+	return nil
+}
+
 type ListWorkspaceLandingsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -394,7 +479,7 @@ type ListWorkspaceLandingsRequest struct {
 
 func (x *ListWorkspaceLandingsRequest) Reset() {
 	*x = ListWorkspaceLandingsRequest{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -406,7 +491,7 @@ func (x *ListWorkspaceLandingsRequest) String() string {
 func (*ListWorkspaceLandingsRequest) ProtoMessage() {}
 
 func (x *ListWorkspaceLandingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -419,7 +504,7 @@ func (x *ListWorkspaceLandingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspaceLandingsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkspaceLandingsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{2}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListWorkspaceLandingsRequest) GetTaskId() string {
@@ -460,7 +545,7 @@ type ListWorkspaceLandingsResponse struct {
 
 func (x *ListWorkspaceLandingsResponse) Reset() {
 	*x = ListWorkspaceLandingsResponse{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -472,7 +557,7 @@ func (x *ListWorkspaceLandingsResponse) String() string {
 func (*ListWorkspaceLandingsResponse) ProtoMessage() {}
 
 func (x *ListWorkspaceLandingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -485,7 +570,7 @@ func (x *ListWorkspaceLandingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspaceLandingsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkspaceLandingsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{3}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListWorkspaceLandingsResponse) GetLandings() []*WorkspaceLanding {
@@ -518,7 +603,7 @@ type WorkspaceSourcePin struct {
 
 func (x *WorkspaceSourcePin) Reset() {
 	*x = WorkspaceSourcePin{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -530,7 +615,7 @@ func (x *WorkspaceSourcePin) String() string {
 func (*WorkspaceSourcePin) ProtoMessage() {}
 
 func (x *WorkspaceSourcePin) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -543,7 +628,7 @@ func (x *WorkspaceSourcePin) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceSourcePin.ProtoReflect.Descriptor instead.
 func (*WorkspaceSourcePin) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *WorkspaceSourcePin) GetPinId() string {
@@ -605,7 +690,7 @@ type ListPendingWorkspaceSourcesRequest struct {
 
 func (x *ListPendingWorkspaceSourcesRequest) Reset() {
 	*x = ListPendingWorkspaceSourcesRequest{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -617,7 +702,7 @@ func (x *ListPendingWorkspaceSourcesRequest) String() string {
 func (*ListPendingWorkspaceSourcesRequest) ProtoMessage() {}
 
 func (x *ListPendingWorkspaceSourcesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -630,7 +715,7 @@ func (x *ListPendingWorkspaceSourcesRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ListPendingWorkspaceSourcesRequest.ProtoReflect.Descriptor instead.
 func (*ListPendingWorkspaceSourcesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{5}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListPendingWorkspaceSourcesRequest) GetAfterOrder() uint64 {
@@ -657,7 +742,7 @@ type ListPendingWorkspaceSourcesResponse struct {
 
 func (x *ListPendingWorkspaceSourcesResponse) Reset() {
 	*x = ListPendingWorkspaceSourcesResponse{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -669,7 +754,7 @@ func (x *ListPendingWorkspaceSourcesResponse) String() string {
 func (*ListPendingWorkspaceSourcesResponse) ProtoMessage() {}
 
 func (x *ListPendingWorkspaceSourcesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -682,7 +767,7 @@ func (x *ListPendingWorkspaceSourcesResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ListPendingWorkspaceSourcesResponse.ProtoReflect.Descriptor instead.
 func (*ListPendingWorkspaceSourcesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{6}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListPendingWorkspaceSourcesResponse) GetPins() []*WorkspaceSourcePin {
@@ -714,7 +799,7 @@ type PinWorkspaceSourceRequest struct {
 
 func (x *PinWorkspaceSourceRequest) Reset() {
 	*x = PinWorkspaceSourceRequest{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -726,7 +811,7 @@ func (x *PinWorkspaceSourceRequest) String() string {
 func (*PinWorkspaceSourceRequest) ProtoMessage() {}
 
 func (x *PinWorkspaceSourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -739,7 +824,7 @@ func (x *PinWorkspaceSourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PinWorkspaceSourceRequest.ProtoReflect.Descriptor instead.
 func (*PinWorkspaceSourceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{7}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *PinWorkspaceSourceRequest) GetPinId() string {
@@ -786,7 +871,7 @@ type ClaimWorkspaceLandingRequest struct {
 
 func (x *ClaimWorkspaceLandingRequest) Reset() {
 	*x = ClaimWorkspaceLandingRequest{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -798,7 +883,7 @@ func (x *ClaimWorkspaceLandingRequest) String() string {
 func (*ClaimWorkspaceLandingRequest) ProtoMessage() {}
 
 func (x *ClaimWorkspaceLandingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -811,7 +896,7 @@ func (x *ClaimWorkspaceLandingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimWorkspaceLandingRequest.ProtoReflect.Descriptor instead.
 func (*ClaimWorkspaceLandingRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{8}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ClaimWorkspaceLandingRequest) GetOperationId() string {
@@ -831,7 +916,7 @@ type WorkspaceLandingLease struct {
 
 func (x *WorkspaceLandingLease) Reset() {
 	*x = WorkspaceLandingLease{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -843,7 +928,7 @@ func (x *WorkspaceLandingLease) String() string {
 func (*WorkspaceLandingLease) ProtoMessage() {}
 
 func (x *WorkspaceLandingLease) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -856,7 +941,7 @@ func (x *WorkspaceLandingLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceLandingLease.ProtoReflect.Descriptor instead.
 func (*WorkspaceLandingLease) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{9}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *WorkspaceLandingLease) GetLandingId() string {
@@ -888,7 +973,7 @@ type ClaimWorkspaceLandingResponse struct {
 
 func (x *ClaimWorkspaceLandingResponse) Reset() {
 	*x = ClaimWorkspaceLandingResponse{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -900,7 +985,7 @@ func (x *ClaimWorkspaceLandingResponse) String() string {
 func (*ClaimWorkspaceLandingResponse) ProtoMessage() {}
 
 func (x *ClaimWorkspaceLandingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -913,7 +998,7 @@ func (x *ClaimWorkspaceLandingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimWorkspaceLandingResponse.ProtoReflect.Descriptor instead.
 func (*ClaimWorkspaceLandingResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{10}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ClaimWorkspaceLandingResponse) GetLanding() *WorkspaceLanding {
@@ -969,7 +1054,7 @@ type RecordWorkspaceLandingRequest struct {
 
 func (x *RecordWorkspaceLandingRequest) Reset() {
 	*x = RecordWorkspaceLandingRequest{}
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -981,7 +1066,7 @@ func (x *RecordWorkspaceLandingRequest) String() string {
 func (*RecordWorkspaceLandingRequest) ProtoMessage() {}
 
 func (x *RecordWorkspaceLandingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_workspace_landings_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -994,7 +1079,7 @@ func (x *RecordWorkspaceLandingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecordWorkspaceLandingRequest.ProtoReflect.Descriptor instead.
 func (*RecordWorkspaceLandingRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{11}
+	return file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RecordWorkspaceLandingRequest) GetLease() *WorkspaceLandingLease {
@@ -1086,7 +1171,15 @@ const file_supertag_runtime_v2_workspace_landings_proto_rawDesc = "" +
 	"\x12_follow_up_task_id\";\n" +
 	"\x1aGetWorkspaceLandingRequest\x12\x1d\n" +
 	"\n" +
-	"landing_id\x18\x01 \x01(\tR\tlandingId\"\x8f\x01\n" +
+	"landing_id\x18\x01 \x01(\tR\tlandingId\"\xd2\x01\n" +
+	"\x1cReturnLandingConflictRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x15\n" +
+	"\x06tag_id\x18\x02 \x01(\tR\x05tagId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x16\n" +
+	"\x06target\x18\x04 \x01(\tR\x06target\x12#\n" +
+	"\rtarget_commit\x18\x05 \x01(\tR\ftargetCommit\x12\x1c\n" +
+	"\tconflicts\x18\x06 \x03(\tR\tconflicts\"\x8f\x01\n" +
 	"\x1cListWorkspaceLandingsRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\rR\x05limit\x12!\n" +
@@ -1155,10 +1248,11 @@ const file_supertag_runtime_v2_workspace_landings_proto_rawDesc = "" +
 	"\x1eWORKSPACE_LANDING_STATE_LANDED\x10\x03\x12$\n" +
 	" WORKSPACE_LANDING_STATE_CONFLICT\x10\x04\x12 \n" +
 	"\x1cWORKSPACE_LANDING_STATE_HELD\x10\x05\x12&\n" +
-	"\"WORKSPACE_LANDING_STATE_SUPERSEDED\x10\x062\xe1\x01\n" +
+	"\"WORKSPACE_LANDING_STATE_SUPERSEDED\x10\x062\xc1\x02\n" +
 	"\x11WorkspaceLandings\x12]\n" +
 	"\x03Get\x12/.supertag.runtime.v2.GetWorkspaceLandingRequest\x1a%.supertag.runtime.v2.WorkspaceLanding\x12m\n" +
-	"\x04List\x121.supertag.runtime.v2.ListWorkspaceLandingsRequest\x1a2.supertag.runtime.v2.ListWorkspaceLandingsResponse2\xbb\x04\n" +
+	"\x04List\x121.supertag.runtime.v2.ListWorkspaceLandingsRequest\x1a2.supertag.runtime.v2.ListWorkspaceLandingsResponse\x12^\n" +
+	"\x0eReturnConflict\x121.supertag.runtime.v2.ReturnLandingConflictRequest\x1a\x19.supertag.runtime.v2.Task2\xbb\x04\n" +
 	"\vGitDelivery\x12\x87\x01\n" +
 	"\x12ListPendingSources\x127.supertag.runtime.v2.ListPendingWorkspaceSourcesRequest\x1a8.supertag.runtime.v2.ListPendingWorkspaceSourcesResponse\x12d\n" +
 	"\tPinSource\x12..supertag.runtime.v2.PinWorkspaceSourceRequest\x1a'.supertag.runtime.v2.WorkspaceSourcePin\x12n\n" +
@@ -1179,54 +1273,58 @@ func file_supertag_runtime_v2_workspace_landings_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_workspace_landings_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_supertag_runtime_v2_workspace_landings_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_supertag_runtime_v2_workspace_landings_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_supertag_runtime_v2_workspace_landings_proto_goTypes = []any{
 	(WorkspaceLandingMode)(0),                   // 0: supertag.runtime.v2.WorkspaceLandingMode
 	(WorkspaceLandingState)(0),                  // 1: supertag.runtime.v2.WorkspaceLandingState
 	(*WorkspaceLanding)(nil),                    // 2: supertag.runtime.v2.WorkspaceLanding
 	(*GetWorkspaceLandingRequest)(nil),          // 3: supertag.runtime.v2.GetWorkspaceLandingRequest
-	(*ListWorkspaceLandingsRequest)(nil),        // 4: supertag.runtime.v2.ListWorkspaceLandingsRequest
-	(*ListWorkspaceLandingsResponse)(nil),       // 5: supertag.runtime.v2.ListWorkspaceLandingsResponse
-	(*WorkspaceSourcePin)(nil),                  // 6: supertag.runtime.v2.WorkspaceSourcePin
-	(*ListPendingWorkspaceSourcesRequest)(nil),  // 7: supertag.runtime.v2.ListPendingWorkspaceSourcesRequest
-	(*ListPendingWorkspaceSourcesResponse)(nil), // 8: supertag.runtime.v2.ListPendingWorkspaceSourcesResponse
-	(*PinWorkspaceSourceRequest)(nil),           // 9: supertag.runtime.v2.PinWorkspaceSourceRequest
-	(*ClaimWorkspaceLandingRequest)(nil),        // 10: supertag.runtime.v2.ClaimWorkspaceLandingRequest
-	(*WorkspaceLandingLease)(nil),               // 11: supertag.runtime.v2.WorkspaceLandingLease
-	(*ClaimWorkspaceLandingResponse)(nil),       // 12: supertag.runtime.v2.ClaimWorkspaceLandingResponse
-	(*RecordWorkspaceLandingRequest)(nil),       // 13: supertag.runtime.v2.RecordWorkspaceLandingRequest
-	(*WorkspaceDeliveryReference)(nil),          // 14: supertag.runtime.v2.WorkspaceDeliveryReference
-	(*Workspace)(nil),                           // 15: supertag.runtime.v2.Workspace
-	(*BlobHolder)(nil),                          // 16: supertag.runtime.v2.BlobHolder
+	(*ReturnLandingConflictRequest)(nil),        // 4: supertag.runtime.v2.ReturnLandingConflictRequest
+	(*ListWorkspaceLandingsRequest)(nil),        // 5: supertag.runtime.v2.ListWorkspaceLandingsRequest
+	(*ListWorkspaceLandingsResponse)(nil),       // 6: supertag.runtime.v2.ListWorkspaceLandingsResponse
+	(*WorkspaceSourcePin)(nil),                  // 7: supertag.runtime.v2.WorkspaceSourcePin
+	(*ListPendingWorkspaceSourcesRequest)(nil),  // 8: supertag.runtime.v2.ListPendingWorkspaceSourcesRequest
+	(*ListPendingWorkspaceSourcesResponse)(nil), // 9: supertag.runtime.v2.ListPendingWorkspaceSourcesResponse
+	(*PinWorkspaceSourceRequest)(nil),           // 10: supertag.runtime.v2.PinWorkspaceSourceRequest
+	(*ClaimWorkspaceLandingRequest)(nil),        // 11: supertag.runtime.v2.ClaimWorkspaceLandingRequest
+	(*WorkspaceLandingLease)(nil),               // 12: supertag.runtime.v2.WorkspaceLandingLease
+	(*ClaimWorkspaceLandingResponse)(nil),       // 13: supertag.runtime.v2.ClaimWorkspaceLandingResponse
+	(*RecordWorkspaceLandingRequest)(nil),       // 14: supertag.runtime.v2.RecordWorkspaceLandingRequest
+	(*WorkspaceDeliveryReference)(nil),          // 15: supertag.runtime.v2.WorkspaceDeliveryReference
+	(*Workspace)(nil),                           // 16: supertag.runtime.v2.Workspace
+	(*BlobHolder)(nil),                          // 17: supertag.runtime.v2.BlobHolder
+	(*Task)(nil),                                // 18: supertag.runtime.v2.Task
 }
 var file_supertag_runtime_v2_workspace_landings_proto_depIdxs = []int32{
 	0,  // 0: supertag.runtime.v2.WorkspaceLanding.mode:type_name -> supertag.runtime.v2.WorkspaceLandingMode
-	14, // 1: supertag.runtime.v2.WorkspaceLanding.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	15, // 1: supertag.runtime.v2.WorkspaceLanding.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
 	1,  // 2: supertag.runtime.v2.WorkspaceLanding.state:type_name -> supertag.runtime.v2.WorkspaceLandingState
 	2,  // 3: supertag.runtime.v2.ListWorkspaceLandingsResponse.landings:type_name -> supertag.runtime.v2.WorkspaceLanding
-	15, // 4: supertag.runtime.v2.WorkspaceSourcePin.selector:type_name -> supertag.runtime.v2.Workspace
-	15, // 5: supertag.runtime.v2.WorkspaceSourcePin.resolved:type_name -> supertag.runtime.v2.Workspace
-	6,  // 6: supertag.runtime.v2.ListPendingWorkspaceSourcesResponse.pins:type_name -> supertag.runtime.v2.WorkspaceSourcePin
+	16, // 4: supertag.runtime.v2.WorkspaceSourcePin.selector:type_name -> supertag.runtime.v2.Workspace
+	16, // 5: supertag.runtime.v2.WorkspaceSourcePin.resolved:type_name -> supertag.runtime.v2.Workspace
+	7,  // 6: supertag.runtime.v2.ListPendingWorkspaceSourcesResponse.pins:type_name -> supertag.runtime.v2.WorkspaceSourcePin
 	2,  // 7: supertag.runtime.v2.ClaimWorkspaceLandingResponse.landing:type_name -> supertag.runtime.v2.WorkspaceLanding
-	16, // 8: supertag.runtime.v2.ClaimWorkspaceLandingResponse.holder:type_name -> supertag.runtime.v2.BlobHolder
-	11, // 9: supertag.runtime.v2.RecordWorkspaceLandingRequest.lease:type_name -> supertag.runtime.v2.WorkspaceLandingLease
+	17, // 8: supertag.runtime.v2.ClaimWorkspaceLandingResponse.holder:type_name -> supertag.runtime.v2.BlobHolder
+	12, // 9: supertag.runtime.v2.RecordWorkspaceLandingRequest.lease:type_name -> supertag.runtime.v2.WorkspaceLandingLease
 	1,  // 10: supertag.runtime.v2.RecordWorkspaceLandingRequest.state:type_name -> supertag.runtime.v2.WorkspaceLandingState
 	3,  // 11: supertag.runtime.v2.WorkspaceLandings.Get:input_type -> supertag.runtime.v2.GetWorkspaceLandingRequest
-	4,  // 12: supertag.runtime.v2.WorkspaceLandings.List:input_type -> supertag.runtime.v2.ListWorkspaceLandingsRequest
-	7,  // 13: supertag.runtime.v2.GitDelivery.ListPendingSources:input_type -> supertag.runtime.v2.ListPendingWorkspaceSourcesRequest
-	9,  // 14: supertag.runtime.v2.GitDelivery.PinSource:input_type -> supertag.runtime.v2.PinWorkspaceSourceRequest
-	10, // 15: supertag.runtime.v2.GitDelivery.Claim:input_type -> supertag.runtime.v2.ClaimWorkspaceLandingRequest
-	11, // 16: supertag.runtime.v2.GitDelivery.Renew:input_type -> supertag.runtime.v2.WorkspaceLandingLease
-	13, // 17: supertag.runtime.v2.GitDelivery.Record:input_type -> supertag.runtime.v2.RecordWorkspaceLandingRequest
-	2,  // 18: supertag.runtime.v2.WorkspaceLandings.Get:output_type -> supertag.runtime.v2.WorkspaceLanding
-	5,  // 19: supertag.runtime.v2.WorkspaceLandings.List:output_type -> supertag.runtime.v2.ListWorkspaceLandingsResponse
-	8,  // 20: supertag.runtime.v2.GitDelivery.ListPendingSources:output_type -> supertag.runtime.v2.ListPendingWorkspaceSourcesResponse
-	6,  // 21: supertag.runtime.v2.GitDelivery.PinSource:output_type -> supertag.runtime.v2.WorkspaceSourcePin
-	12, // 22: supertag.runtime.v2.GitDelivery.Claim:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
-	12, // 23: supertag.runtime.v2.GitDelivery.Renew:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
-	2,  // 24: supertag.runtime.v2.GitDelivery.Record:output_type -> supertag.runtime.v2.WorkspaceLanding
-	18, // [18:25] is the sub-list for method output_type
-	11, // [11:18] is the sub-list for method input_type
+	5,  // 12: supertag.runtime.v2.WorkspaceLandings.List:input_type -> supertag.runtime.v2.ListWorkspaceLandingsRequest
+	4,  // 13: supertag.runtime.v2.WorkspaceLandings.ReturnConflict:input_type -> supertag.runtime.v2.ReturnLandingConflictRequest
+	8,  // 14: supertag.runtime.v2.GitDelivery.ListPendingSources:input_type -> supertag.runtime.v2.ListPendingWorkspaceSourcesRequest
+	10, // 15: supertag.runtime.v2.GitDelivery.PinSource:input_type -> supertag.runtime.v2.PinWorkspaceSourceRequest
+	11, // 16: supertag.runtime.v2.GitDelivery.Claim:input_type -> supertag.runtime.v2.ClaimWorkspaceLandingRequest
+	12, // 17: supertag.runtime.v2.GitDelivery.Renew:input_type -> supertag.runtime.v2.WorkspaceLandingLease
+	14, // 18: supertag.runtime.v2.GitDelivery.Record:input_type -> supertag.runtime.v2.RecordWorkspaceLandingRequest
+	2,  // 19: supertag.runtime.v2.WorkspaceLandings.Get:output_type -> supertag.runtime.v2.WorkspaceLanding
+	6,  // 20: supertag.runtime.v2.WorkspaceLandings.List:output_type -> supertag.runtime.v2.ListWorkspaceLandingsResponse
+	18, // 21: supertag.runtime.v2.WorkspaceLandings.ReturnConflict:output_type -> supertag.runtime.v2.Task
+	9,  // 22: supertag.runtime.v2.GitDelivery.ListPendingSources:output_type -> supertag.runtime.v2.ListPendingWorkspaceSourcesResponse
+	7,  // 23: supertag.runtime.v2.GitDelivery.PinSource:output_type -> supertag.runtime.v2.WorkspaceSourcePin
+	13, // 24: supertag.runtime.v2.GitDelivery.Claim:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
+	13, // 25: supertag.runtime.v2.GitDelivery.Renew:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
+	2,  // 26: supertag.runtime.v2.GitDelivery.Record:output_type -> supertag.runtime.v2.WorkspaceLanding
+	19, // [19:27] is the sub-list for method output_type
+	11, // [11:19] is the sub-list for method input_type
 	11, // [11:11] is the sub-list for extension type_name
 	11, // [11:11] is the sub-list for extension extendee
 	0,  // [0:11] is the sub-list for field type_name
@@ -1246,7 +1344,7 @@ func file_supertag_runtime_v2_workspace_landings_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_workspace_landings_proto_rawDesc), len(file_supertag_runtime_v2_workspace_landings_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

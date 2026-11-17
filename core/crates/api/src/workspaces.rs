@@ -195,4 +195,15 @@ impl workspace_landings_server::WorkspaceLandings for Api {
         })
         .await
     }
+    async fn return_conflict(
+        &self,
+        request: Request<ReturnLandingConflictRequest>,
+    ) -> Result<Response<Task>, Status> {
+        self.forward(request, |channel, request| async {
+            workspace_landings_client::WorkspaceLandingsClient::new(channel)
+                .return_conflict(request)
+                .await
+        })
+        .await
+    }
 }

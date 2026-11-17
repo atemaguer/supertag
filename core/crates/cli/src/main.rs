@@ -17,6 +17,7 @@ mod inputs;
 mod lifecycle;
 mod local;
 mod local_config;
+mod local_landing;
 mod mailbox;
 mod manifests;
 mod mcp;

@@ -85,6 +85,22 @@ class GetWorkspaceLandingRequest(_message.Message):
     landing_id: str
     def __init__(self, landing_id: _Optional[str] = ...) -> None: ...
 
+class ReturnLandingConflictRequest(_message.Message):
+    __slots__ = ("operation_id", "tag_id", "session_id", "target", "target_commit", "conflicts")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    TARGET_FIELD_NUMBER: _ClassVar[int]
+    TARGET_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    CONFLICTS_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    tag_id: str
+    session_id: str
+    target: str
+    target_commit: str
+    conflicts: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, operation_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., target: _Optional[str] = ..., target_commit: _Optional[str] = ..., conflicts: _Optional[_Iterable[str]] = ...) -> None: ...
+
 class ListWorkspaceLandingsRequest(_message.Message):
     __slots__ = ("task_id", "limit", "before_order", "session_id")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]

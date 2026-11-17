@@ -3,6 +3,7 @@
 import grpc
 import warnings
 
+from supertag.runtime.v2 import runtime_pb2 as supertag_dot_runtime_dot_v2_dot_runtime__pb2
 from supertag.runtime.v2 import workspace_landings_pb2 as supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2
 
 GRPC_GENERATED_VERSION = '1.85.1'
@@ -46,6 +47,11 @@ class WorkspaceLandingsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListWorkspaceLandingsRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListWorkspaceLandingsResponse.FromString,
                 _registered_method=True)
+        self.ReturnConflict = channel.unary_unary(
+                '/supertag.runtime.v2.WorkspaceLandings/ReturnConflict',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ReturnLandingConflictRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+                _registered_method=True)
 
 
 class WorkspaceLandingsServicer:
@@ -65,6 +71,14 @@ class WorkspaceLandingsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReturnConflict(self, request, context):
+        """A local Workspace's merge, which `supertag up` makes in the operator's own repository,
+        conflicted: the Session receives a follow-up Task that merges the target and resolves it.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkspaceLandingsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -77,6 +91,11 @@ def add_WorkspaceLandingsServicer_to_server(servicer, server):
                     servicer.List,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListWorkspaceLandingsRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListWorkspaceLandingsResponse.SerializeToString,
+            ),
+            'ReturnConflict': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReturnConflict,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ReturnLandingConflictRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -135,6 +154,33 @@ class WorkspaceLandings:
             '/supertag.runtime.v2.WorkspaceLandings/List',
             supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListWorkspaceLandingsRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListWorkspaceLandingsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReturnConflict(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkspaceLandings/ReturnConflict',
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ReturnLandingConflictRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
             options,
             channel_credentials,
             insecure,

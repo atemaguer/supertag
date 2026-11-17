@@ -502,6 +502,12 @@ fn rule(path: &str) -> Option<Rule> {
                     .map_or("", |credential| credential.name.as_str())
             )
         ),
+        ("WorkspaceLandings", "ReturnConflict") => rule!(
+            "workspace-landing.return-conflict",
+            "Session",
+            ReturnLandingConflictRequest,
+            |value| named("Session", &value.session_id)
+        ),
         ("WorkspaceCredentials", "Delete") => rule!(
             "workspace-credential.delete",
             "WorkspaceCredential",
