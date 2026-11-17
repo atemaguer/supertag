@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/runtime.proto";
+
+// A Schedule wakes one Tag later: once (`at`, a follow-up) or on a recurrence (`every`). When it
+// is due, the Control Plane queues an ordinary turn for the Tag in the Schedule's Session; it never
+// starts a run itself, so the Session's queue, its Objective's pause, limits and budget, and the
+// Tag's current policy all apply to the turn.
+//
+// Operators see every Schedule. A client sees the Schedules that wake its own conversations.
+service Schedules {
+  // Wakes the Tag in the caller's conversation with it.
+  rpc Create(CreateScheduleRequest) returns (Schedule);
+  rpc Get(GetScheduleRequest) returns (Schedule);
+  rpc List(ListSchedulesRequest) returns (ListSchedulesResponse);
+  // An active Schedule stops firing until it is resumed.
+  rpc Pause(GetScheduleRequest) returns (Schedule);
+  // A resumed recurring Schedule fires at its next occurrence after now; a resumed one-off
+  // whose time passed fires at once.
+  rpc Resume(GetScheduleRequest) returns (Schedule);
+  // Cancels the Schedule. A turn it already queued stays queued.
+  rpc Delete(GetScheduleRequest) returns (Schedule);
+}
+
+// Called by a Worker Host for the turn it runs. A Schedule created during a turn takes effect
+// only when that turn succeeds; a failed, cancelled, or expired turn creates none.
+service AttemptSchedules {
+  rpc Create(CreateAttemptScheduleRequest) returns (AttemptScheduleResponse);
+  rpc Cancel(CancelAttemptScheduleRequest) returns (AttemptScheduleResponse);
+}
+
+// Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
+// Attempt it supervises; an adapter leaves it unset.
+service HarnessSchedules {
+  rpc Create(CreateAttemptScheduleRequest) returns (AttemptScheduleResponse);
+  rpc Cancel(CancelAttemptScheduleRequest) returns (AttemptScheduleResponse);
+}
+
+enum ScheduleState {
+  SCHEDULE_STATE_UNSPECIFIED = 0;
+  // Created by a turn that has not finished yet.
+  SCHEDULE_STATE_STAGED = 1;
+  SCHEDULE_STATE_ACTIVE = 2;
+  SCHEDULE_STATE_PAUSED = 3;
+  // A one-off that fired.
+  SCHEDULE_STATE_DONE = 4;
+  SCHEDULE_STATE_CANCELLED = 5;
+}
+
+// A five-field cron expression, or @hourly, @daily, or @weekly, evaluated in an IANA time zone.
+message ScheduleRecurrence {
+  string cron = 1;
+  string time_zone = 2;
+}
+
+message Schedule {
+  string schedule_id = 1;
+  string tag_id = 2;
+  // Where the Schedule fires. For a conversation, its latest Session at fire time.
+  string session_id = 3;
+  // What the Tag asked to be reminded of, or the operator's instruction.
+  string note = 4;
+  // Exactly one of `at_ms` (a one-off) and `every` (a recurrence) is set.
+  optional int64 at_ms = 5;
+  ScheduleRecurrence every = 6;
+  ScheduleState state = 7;
+  // When it fires next; unset once it is done or cancelled.
+  optional int64 next_due_at_ms = 8;
+  // `tag:ID` for a Schedule a Tag created, or the operator or client principal.
+  string created_by = 9;
+  int64 created_at_ms = 10;
+  // The Objective whose Session it fires in; closing the Objective cancels it.
+  optional string objective_id = 11;
+  uint64 fire_count = 12;
+  // Occurrences that passed without a turn: while the Control Plane was down, or while the
+  // Schedule's previous turn was still queued.
+  uint64 missed_count = 13;
+  // The latest turn it queued.
+  optional string last_task_id = 14;
+  optional int64 last_fired_at_ms = 15;
+  // The principal whose conversation it fires in, when it fires in a conversation.
+  optional string audience = 16;
+}
+
+// Exactly one of `at` and `every`.
+//   at:    a duration ahead ("90m", "2h", "3d") or an RFC 3339 time ("2026-11-17T09:00", read in
+//          `time_zone` when it has no offset), from 1 minute to 366 days ahead.
+//   every: a five-field cron expression ("0 9 * * MON") or @hourly, @daily, or @weekly, at
+//          least one hour apart.
+// `time_zone` is an IANA zone; it defaults to the Control Plane's time zone.
+message CreateScheduleRequest {
+  string operation_id = 1;
+  string tag_id = 2;
+  // At most 4,000 characters.
+  string note = 3;
+  string at = 4;
+  string every = 5;
+  optional string time_zone = 6;
+}
+
+message GetScheduleRequest {
+  string schedule_id = 1;
+}
+
+// Without `include_finished`, only staged, active, and paused Schedules.
+message ListSchedulesRequest {
+  optional string tag_id = 1;
+  bool include_finished = 2;
+}
+
+// Next due first.
+message ListSchedulesResponse {
+  repeated Schedule schedules = 1;
+}
+
+// The `schedule` tool. It fires in the turn's own Session (for a conversation, the
+// conversation's latest Session). Fields as in CreateScheduleRequest.
+message CreateAttemptScheduleRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string note = 3;
+  string at = 4;
+  string every = 5;
+  optional string time_zone = 6;
+}
+
+// The `cancel_schedule` tool, for a Schedule of the turn's own Tag.
+message CancelAttemptScheduleRequest {
+  InspectAttemptRequest attempt = 1;
+  string schedule_id = 2;
+}
+
+message AttemptScheduleResponse {
+  Schedule schedule = 1;
+  // The Tag's other staged and active Schedules in this Session, next due first.
+  repeated Schedule pending = 2;
+  // The Control Plane's time zone, in which the result reads times.
+  string time_zone = 3;
+}

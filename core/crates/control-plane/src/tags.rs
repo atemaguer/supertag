@@ -234,6 +234,7 @@ async fn retire_unused_in(
     .fetch_one(&mut **tx)
     .await?;
     crate::apply_sets::forget(tx, "Tag", tag_id).await?;
+    crate::schedules::retire_tag_in(tx, tag_id, now_ms).await?;
     Ok(row)
 }
 

@@ -333,6 +333,7 @@ impl Store {
         let latest = history_at_orders_in(&mut tx, &latest_orders).await?;
         let ids: Vec<&str> = latest.iter().map(|entry| entry.task_id.as_str()).collect();
         let tasks = tasks_in(&mut tx, &ids).await?;
+        let fired = crate::schedules::fired_by_in(&mut tx, &ids).await?;
         for entry in &latest {
             let Some(row) = tasks.get(&entry.task_id) else {
                 continue;
@@ -348,7 +349,9 @@ impl Store {
                 .filter(|result| !result.is_empty() && finished(row.task.state()));
             let (preview, from_tag) = match reply {
                 Some(reply) => (reply, true),
-                None if entry.report_id.is_some() => ("", true),
+                None if entry.report_id.is_some() || fired.contains_key(&entry.task_id) => {
+                    ("", true)
+                }
                 None => (row.task.prompt.as_str(), false),
             };
             conversation.preview = preview.chars().take(PREVIEW_CHARS).collect();
@@ -652,8 +655,13 @@ async fn changes_in(
     Ok((bytes <= PAGE_BYTES).then_some(messages))
 }
 
+/// A new conversation Session's ID.
+pub(crate) fn new_session_id() -> String {
+    format!("{SESSION_PREFIX}{}", Uuid::new_v4())
+}
+
 /// The Session the conversation continues: the one its latest message is in.
-async fn session_in(
+pub(crate) async fn session_in(
     tx: &mut Transaction<'_, Any>,
     principal: &str,
     tag: &str,
@@ -702,6 +710,7 @@ fn sent(
         order: order as u64,
         sent_at_ms,
         completed_at_ms: None,
+        schedule_id: None,
     }
 }
 
@@ -737,17 +746,21 @@ async fn messages_in(
         inputs_for_followers_in(tx, &followers).await?
     };
     let mut events = message_events_in(tx, &ids).await?;
+    let mut fired = crate::schedules::fired_by_in(tx, &ids).await?;
     entries
         .into_iter()
         .map(|entry| {
-            let is_report = entry.report_id.is_some();
+            let schedule_id = fired.remove(&entry.task_id);
+            // A report or a Schedule's turn has no operator message.
+            let is_report = entry.report_id.is_some() || schedule_id.is_some();
             let (events, events_truncated) = events.remove(&entry.task_id).unwrap_or_default();
             let row = tasks
                 .get(&entry.task_id)
                 .ok_or_else(|| StoreError::NotFound("Task was not found".into()))?;
             let mut task = row.task.clone();
             if is_report {
-                // Report input is execution data. The conversation only presents its reply.
+                // Report and wake-up input is execution data. The conversation only presents
+                // its reply.
                 task.prompt.clear();
             }
             Ok(ConversationMessage {
@@ -763,6 +776,7 @@ async fn messages_in(
                 order: entry.order as u64,
                 sent_at_ms: row.accepted_at_ms.unwrap_or_default(),
                 completed_at_ms: row.completed_at_ms,
+                schedule_id,
             })
         })
         .collect()

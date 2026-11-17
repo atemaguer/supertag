@@ -953,6 +953,7 @@ impl Store {
         record.change_status(ObjectiveStatus::Completed, now_ms);
         save_in(&mut tx, &record).await?;
         cancel_open_in(&mut tx, &input.objective_id, None).await?;
+        crate::schedules::close_objective_in(&mut tx, &input.objective_id, now_ms).await?;
         receipt_in(
             &mut tx,
             principal,
@@ -1049,6 +1050,7 @@ pub(crate) async fn objective_action_in(
                 record.change_status(ObjectiveStatus::Cancelled, now_ms);
             }
             cancel_open_in(tx, &input.objective_id, None).await?;
+            crate::schedules::close_objective_in(tx, &input.objective_id, now_ms).await?;
         }
         _ => return Err(invalid("unknown Objective action")),
     }
@@ -1091,6 +1093,7 @@ pub(crate) async fn review_in(
         // "Approved by operator" fallback has nothing to fill.
         record.change_status(ObjectiveStatus::Completed, now_ms);
         cancel_open_in(tx, &input.objective_id, None).await?;
+        crate::schedules::close_objective_in(tx, &input.objective_id, now_ms).await?;
         report_completion_in(tx, &record, now_ms).await?;
     } else {
         if input.feedback.trim().is_empty() {
@@ -1356,6 +1359,7 @@ pub(crate) async fn objective_finish_in(
             )
             .await?
             || crate::commit_reviews::pending_objective_in(tx, &id).await?
+            || crate::schedules::objective_waits_in(tx, &id).await?
         {
             return Ok(());
         }
@@ -1413,6 +1417,7 @@ pub(crate) async fn objective_finish_in(
     save_in(tx, &record).await?;
     if record.closed() {
         cancel_open_in(tx, &id, Some(&task.task_id)).await?;
+        crate::schedules::close_objective_in(tx, &id, now_ms).await?;
     }
     if status == ObjectiveStatus::Completed {
         report_completion_in(tx, &record, now_ms).await?;

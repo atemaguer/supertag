@@ -4844,8 +4844,13 @@ type AttemptCapabilities struct {
 	// With `may_ask_objective_question`: the Objective is ongoing, so only an operator ends it
 	// and its owner may report it ready for review or blocked, never completed.
 	ObjectiveOngoing bool `protobuf:"varint,12,opt,name=objective_ongoing,json=objectiveOngoing,proto3" json:"objective_ongoing,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// A root turn may schedule a later turn of its Tag in its Session (AttemptSchedules), unless
+	// the Tag's policy requires approval for `schedule:create`.
+	MaySchedule bool `protobuf:"varint,13,opt,name=may_schedule,json=maySchedule,proto3" json:"may_schedule,omitempty"`
+	// The Control Plane's IANA time zone, in which `schedule` reads a time that names none.
+	TimeZone      string `protobuf:"bytes,14,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AttemptCapabilities) Reset() {
@@ -4953,6 +4958,20 @@ func (x *AttemptCapabilities) GetObjectiveOngoing() bool {
 		return x.ObjectiveOngoing
 	}
 	return false
+}
+
+func (x *AttemptCapabilities) GetMaySchedule() bool {
+	if x != nil {
+		return x.MaySchedule
+	}
+	return false
+}
+
+func (x *AttemptCapabilities) GetTimeZone() string {
+	if x != nil {
+		return x.TimeZone
+	}
+	return ""
 }
 
 type WorkSession struct {
@@ -12209,6 +12228,9 @@ type ConversationMessage struct {
 	SentAtMs int64 `protobuf:"varint,8,opt,name=sent_at_ms,json=sentAtMs,proto3" json:"sent_at_ms,omitempty"`
 	// When the turn finished, if it has.
 	CompletedAtMs *int64 `protobuf:"varint,9,opt,name=completed_at_ms,json=completedAtMs,proto3,oneof" json:"completed_at_ms,omitempty"`
+	// Set for a turn a Schedule queued, which has no operator message: the conversation shows
+	// only its reply.
+	ScheduleId    *string `protobuf:"bytes,10,opt,name=schedule_id,json=scheduleId,proto3,oneof" json:"schedule_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12297,6 +12319,13 @@ func (x *ConversationMessage) GetCompletedAtMs() int64 {
 		return *x.CompletedAtMs
 	}
 	return 0
+}
+
+func (x *ConversationMessage) GetScheduleId() string {
+	if x != nil && x.ScheduleId != nil {
+		return *x.ScheduleId
+	}
+	return ""
 }
 
 type ListConversationsRequest struct {
@@ -23871,7 +23900,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12AskQuestionRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"\xe9\x04\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\xa9\x05\n" +
 	"\x13AttemptCapabilities\x12;\n" +
 	"\x1amay_ask_objective_question\x18\x01 \x01(\bR\x17mayAskObjectiveQuestion\x12,\n" +
 	"\x12may_use_workstream\x18\x02 \x01(\bR\x10mayUseWorkstream\x12(\n" +
@@ -23883,7 +23912,9 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x19may_request_commit_review\x18\b \x01(\bR\x16mayRequestCommitReview\x121\n" +
 	"\x15may_read_tag_sessions\x18\t \x01(\bR\x12mayReadTagSessions\x12#\n" +
 	"\rtag_portfolio\x18\v \x01(\tR\ftagPortfolio\x12+\n" +
-	"\x11objective_ongoing\x18\f \x01(\bR\x10objectiveOngoingJ\x04\b\n" +
+	"\x11objective_ongoing\x18\f \x01(\bR\x10objectiveOngoing\x12!\n" +
+	"\fmay_schedule\x18\r \x01(\bR\vmaySchedule\x12\x1b\n" +
+	"\ttime_zone\x18\x0e \x01(\tR\btimeZoneJ\x04\b\n" +
 	"\x10\vR\x14may_create_objective\"\xda\x05\n" +
 	"\vWorkSession\x12&\n" +
 	"\x0fwork_session_id\x18\x01 \x01(\tR\rworkSessionId\x12\x14\n" +
@@ -24483,7 +24514,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\aworking\x18\n" +
 	" \x01(\bR\aworking\x12E\n" +
 	"\x1dlatest_work_session_report_id\x18\v \x01(\tH\x00R\x19latestWorkSessionReportId\x88\x01\x01B \n" +
-	"\x1e_latest_work_session_report_id\"\xb0\x03\n" +
+	"\x1e_latest_work_session_report_id\"\xe6\x03\n" +
 	"\x13ConversationMessage\x12-\n" +
 	"\x04task\x18\x01 \x01(\v2\x19.supertag.runtime.v2.TaskR\x04task\x12=\n" +
 	"\n" +
@@ -24494,9 +24525,13 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x05order\x18\a \x01(\x04R\x05order\x12\x1c\n" +
 	"\n" +
 	"sent_at_ms\x18\b \x01(\x03R\bsentAtMs\x12+\n" +
-	"\x0fcompleted_at_ms\x18\t \x01(\x03H\x01R\rcompletedAtMs\x88\x01\x01B\x19\n" +
+	"\x0fcompleted_at_ms\x18\t \x01(\x03H\x01R\rcompletedAtMs\x88\x01\x01\x12$\n" +
+	"\vschedule_id\x18\n" +
+	" \x01(\tH\x02R\n" +
+	"scheduleId\x88\x01\x01B\x19\n" +
 	"\x17_work_session_report_idB\x12\n" +
-	"\x10_completed_at_ms\"\x1a\n" +
+	"\x10_completed_at_msB\x0e\n" +
+	"\f_schedule_id\"\x1a\n" +
 	"\x18ListConversationsRequest\"d\n" +
 	"\x19ListConversationsResponse\x12G\n" +
 	"\rconversations\x18\x01 \x03(\v2!.supertag.runtime.v2.ConversationR\rconversations\"\xc3\x01\n" +

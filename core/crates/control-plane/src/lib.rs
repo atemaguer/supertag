@@ -39,6 +39,7 @@ mod policy;
 mod replies;
 pub mod reply_progress;
 mod review_artifacts;
+mod schedules;
 mod spend;
 mod store;
 mod surface_objectives;
@@ -122,6 +123,12 @@ impl ControlPlane {
         });
     }
 
+    /// Supplies the Control Plane's clock, for tests that move time forward.
+    pub fn with_execution_clock(mut self, clock: impl Fn() -> i64 + Send + Sync + 'static) -> Self {
+        self.store = self.store.with_execution_clock(clock);
+        self
+    }
+
     /// Also writes every committed audit entry to `sink`.
     pub fn with_audit_sink(mut self, sink: crate::AuditSink) -> Self {
         self.store = self.store.with_audit_sink(sink);
@@ -176,6 +183,7 @@ impl ControlPlane {
         self.store.sweep_replies().await?;
         self.store.sweep_github_publications().await?;
         self.store.sweep_ephemeral_hosts().await?;
+        self.store.sweep_schedules().await?;
         self.store.prune_watch().await?;
         Ok(())
     }

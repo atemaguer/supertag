@@ -81,11 +81,20 @@ impl Store {
             crate::work_sessions::continuation::may_continue_in(&mut tx, &task, scope.as_ref())
                 .await?;
         let may_start_work_session = crate::work_sessions::may_start_in(&mut tx, &task).await?;
-        let tag_portfolio =
+        let mut tag_portfolio =
             match crate::tag_sessions::viewer_in(&mut tx, task.clone(), kind).await? {
                 Some(viewer) => Some(crate::tag_sessions::portfolio_in(&mut tx, &viewer).await?),
                 None => None,
             };
+        let may_schedule = crate::schedules::may_schedule_in(&mut tx, &task).await?;
+        if may_schedule
+            && let Some(portfolio) = tag_portfolio.as_mut()
+            && let Some(schedules) =
+                crate::schedules::portfolio_in(&mut tx, &task, self.time_zone()).await?
+        {
+            portfolio.push('\n');
+            portfolio.push_str(&schedules);
+        }
         let tag: String = row.try_get("tag_id")?;
         let may_use_workstream = match crate::teams::workstreams::workstream_for_task_in(
             &mut tx,
@@ -115,6 +124,8 @@ impl Store {
             may_read_tag_sessions: tag_portfolio.is_some(),
             tag_portfolio: tag_portfolio.unwrap_or_default(),
             objective_ongoing,
+            may_schedule,
+            time_zone: self.time_zone().name().to_owned(),
         })
     }
 

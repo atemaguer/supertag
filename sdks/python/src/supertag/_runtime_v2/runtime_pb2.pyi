@@ -944,7 +944,7 @@ class AskQuestionRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class AttemptCapabilities(_message.Message):
-    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing")
+    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review", "may_read_tag_sessions", "tag_portfolio", "objective_ongoing", "may_schedule", "time_zone")
     MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     MAY_USE_WORKSTREAM_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_MAILBOX_FIELD_NUMBER: _ClassVar[int]
@@ -956,6 +956,8 @@ class AttemptCapabilities(_message.Message):
     MAY_READ_TAG_SESSIONS_FIELD_NUMBER: _ClassVar[int]
     TAG_PORTFOLIO_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_ONGOING_FIELD_NUMBER: _ClassVar[int]
+    MAY_SCHEDULE_FIELD_NUMBER: _ClassVar[int]
+    TIME_ZONE_FIELD_NUMBER: _ClassVar[int]
     may_ask_objective_question: bool
     may_use_workstream: bool
     may_read_mailbox: bool
@@ -967,7 +969,9 @@ class AttemptCapabilities(_message.Message):
     may_read_tag_sessions: bool
     tag_portfolio: str
     objective_ongoing: bool
-    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ...) -> None: ...
+    may_schedule: bool
+    time_zone: str
+    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ..., may_read_tag_sessions: _Optional[bool] = ..., tag_portfolio: _Optional[str] = ..., objective_ongoing: _Optional[bool] = ..., may_schedule: _Optional[bool] = ..., time_zone: _Optional[str] = ...) -> None: ...
 
 class WorkSession(_message.Message):
     __slots__ = ("work_session_id", "title", "parent_tag_id", "parent_session_id", "starter_task_id", "tag_id", "latest_task_id", "latest_task_state", "report_task_id", "report_task_state", "objective_id", "workspace_delivery", "created_order", "question")
@@ -2152,7 +2156,7 @@ class Conversation(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., session_id: _Optional[str] = ..., preview: _Optional[str] = ..., preview_from_tag: _Optional[bool] = ..., last_activity_at_ms: _Optional[int] = ..., latest_order: _Optional[int] = ..., read_order: _Optional[int] = ..., unread_count: _Optional[int] = ..., working: _Optional[bool] = ..., latest_work_session_report_id: _Optional[str] = ...) -> None: ...
 
 class ConversationMessage(_message.Message):
-    __slots__ = ("task", "live_input", "work_session_report_id", "events", "events_truncated", "order", "sent_at_ms", "completed_at_ms")
+    __slots__ = ("task", "live_input", "work_session_report_id", "events", "events_truncated", "order", "sent_at_ms", "completed_at_ms", "schedule_id")
     TASK_FIELD_NUMBER: _ClassVar[int]
     LIVE_INPUT_FIELD_NUMBER: _ClassVar[int]
     WORK_SESSION_REPORT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2161,6 +2165,7 @@ class ConversationMessage(_message.Message):
     ORDER_FIELD_NUMBER: _ClassVar[int]
     SENT_AT_MS_FIELD_NUMBER: _ClassVar[int]
     COMPLETED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    SCHEDULE_ID_FIELD_NUMBER: _ClassVar[int]
     task: Task
     live_input: LiveInput
     work_session_report_id: str
@@ -2169,7 +2174,8 @@ class ConversationMessage(_message.Message):
     order: int
     sent_at_ms: int
     completed_at_ms: int
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ..., work_session_report_id: _Optional[str] = ..., events: _Optional[_Iterable[_Union[TaskEvent, _Mapping]]] = ..., events_truncated: _Optional[bool] = ..., order: _Optional[int] = ..., sent_at_ms: _Optional[int] = ..., completed_at_ms: _Optional[int] = ...) -> None: ...
+    schedule_id: str
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ..., work_session_report_id: _Optional[str] = ..., events: _Optional[_Iterable[_Union[TaskEvent, _Mapping]]] = ..., events_truncated: _Optional[bool] = ..., order: _Optional[int] = ..., sent_at_ms: _Optional[int] = ..., completed_at_ms: _Optional[int] = ..., schedule_id: _Optional[str] = ...) -> None: ...
 
 class ListConversationsRequest(_message.Message):
     __slots__ = ()

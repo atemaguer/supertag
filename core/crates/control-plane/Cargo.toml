@@ -9,6 +9,9 @@ anyhow.workspace = true
 async-stream = "0.3"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono-tz = "0.10"
+croner = "4"
+iana-time-zone = "0.1"
 http = "1"
 http-body = "1"
 libc.workspace = true

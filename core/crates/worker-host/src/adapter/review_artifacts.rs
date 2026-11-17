@@ -187,6 +187,10 @@ mod tests {
                     channel.clone(),
                     headers.clone(),
                 ),
+                schedules: supertag_protocol::v2::attempt_schedules_client::AttemptSchedulesClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
             },
             state: Default::default(),
             attached: Default::default(),

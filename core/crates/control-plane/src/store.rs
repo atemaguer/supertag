@@ -95,11 +95,13 @@ pub struct Store {
     migrated: Option<(i64, i64)>,
     /// Wakes open conversation follows after a change.
     pub(crate) live: Arc<crate::conversations::Live>,
+    /// The zone Schedules read times in when a request names none.
+    pub(crate) time_zone: chrono_tz::Tz,
 }
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 83;
+        const SCHEMA_VERSION: i64 = 84;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -279,6 +281,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0081_task_event_kind.sql"),
                 include_str!("../migrations/sqlite/0082_lead_tag.sql"),
                 include_str!("../migrations/sqlite/0083_one_conversation_per_tag.sql"),
+                include_str!("../migrations/sqlite/0084_schedules.sql"),
             ]
         } else {
             [
@@ -367,6 +370,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0081_task_event_kind.sql"),
                 include_str!("../migrations/postgresql/0082_lead_tag.sql"),
                 include_str!("../migrations/postgresql/0083_one_conversation_per_tag.sql"),
+                include_str!("../migrations/postgresql/0084_schedules.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -403,6 +407,7 @@ impl Store {
             migrated: (version > 0 && version < SCHEMA_VERSION)
                 .then_some((version, SCHEMA_VERSION)),
             live: Arc::default(),
+            time_zone: crate::schedules::default_zone(),
         })
     }
 
@@ -1224,6 +1229,7 @@ impl Store {
         if state == TaskState::Running {
             crate::approvals::finish_in(&mut transaction, &task, input, now).await?;
             crate::work_sessions::questions::finish_in(&mut transaction, &task, input, now).await?;
+            crate::schedules::finish_in(&mut transaction, &task, now).await?;
         }
         if state == TaskState::Running && task.state() == TaskState::Succeeded {
             sqlx::query("UPDATE supertag_v2_tasks SET completed_at_ms=$1 WHERE task_id=$2")
