@@ -56,8 +56,10 @@ lead Tag's Tasks that run commands wait. `--yes` allows it and prints how to und
 [Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
 
 The `local-tools` Permission Set grants `commands:execute` and `files:write`. For a Codex `lead`,
-grant `web:fetch` as well before it runs commands: current Codex models run commands only in
-Codex code mode, which SuperTag starts only for Tasks that may also fetch from the web. See
+it also grants `web:fetch`, and `init` says so: current Codex models run commands only in Codex
+code mode, which SuperTag starts only for Tasks that may also fetch from the web. Code-mode
+commands can reach the network. To keep them offline, remove `web:fetch` from `supertag.yaml`,
+select a Codex model that is not code-mode-only, and run `supertag up`. See
 [Codex commands and models](requirements.md#codex-commands-and-models).
 
 Each new Session of `lead` starts from that branch's current commit (`workspace.ref`), so commits

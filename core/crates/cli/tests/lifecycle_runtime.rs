@@ -716,6 +716,10 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
         "{stdout}"
     );
     assert!(stdout.contains("  codex: signed in"), "{stdout}");
+    assert!(
+        stdout.contains("Gave the Codex lead web:fetch in the local-tools Permission Set"),
+        "{stdout}"
+    );
     let file = machine.state.join("supertag.yaml");
     assert_eq!(fs::metadata(&file)?.permissions().mode() & 0o777, 0o600);
     let services = machine.ok(&["config", "--services"])?;
@@ -730,6 +734,7 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     let rendered = machine.ok(&["config"])?;
     assert!(rendered.contains("      - codex\n"), "{rendered}");
     assert!(rendered.contains("    concurrency: 3\n"), "{rendered}");
+    assert!(rendered.contains("action: web:fetch"), "{rendered}");
     assert!(
         rendered.contains(&format!(
             "      my-project: {}",

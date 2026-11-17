@@ -643,7 +643,12 @@ fn answers(
             );
             true
         }
-        _ => false,
+        (Found::Codex, _) => {
+            outln!(
+                "  Gave the Codex lead web:fetch in the local-tools Permission Set: current Codex models run commands only in Codex code mode, which SuperTag starts only for Tasks that may also fetch from the web, so its commands can reach the network. To keep them offline, remove web:fetch from supertag.yaml, select a Codex model that is not code-mode-only, and run supertag up."
+            );
+            false
+        }
     };
     let workspace = match ask.as_deref_mut() {
         None => repository.name.clone(),
@@ -693,6 +698,15 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
     if answers.unsandboxed {
         host["allow-unsandboxed-commands"] = json!([harness]);
     }
+    let mut permissions = vec![
+        json!({ "target": "runtime", "action": "commands:execute" }),
+        json!({ "target": "runtime", "action": "files:write" }),
+    ];
+    // Current Codex models run commands only in code mode, which SuperTag starts only for a Task
+    // that may also fetch from the web: without it the lead could not run commands at all.
+    if answers.harness == Found::Codex {
+        permissions.push(json!({ "target": "runtime", "action": "web:fetch" }));
+    }
     json!({
         "version": 1,
         "name": lifecycle::DEFAULT_INSTANCE,
@@ -705,10 +719,7 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
                         "apiVersion": "supertag/v1",
                         "kind": "PermissionSet",
                         "metadata": { "name": PERMISSION_SET },
-                        "spec": { "permissions": [
-                            { "target": "runtime", "action": "commands:execute" },
-                            { "target": "runtime", "action": "files:write" },
-                        ] },
+                        "spec": { "permissions": permissions },
                     },
                     {
                         "apiVersion": "supertag/v1",
@@ -800,6 +811,14 @@ mod tests {
             assert_eq!(provision[2]["spec"]["workspace"], binding);
             // The Tag init creates is the Control Plane's lead Tag.
             assert_eq!(provision[2]["spec"]["lead"], true);
+            // A Codex lead may fetch from the web, so it can run commands in Codex code mode.
+            let actions: Vec<&str> = provision[0]["spec"]["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|permission| permission["action"].as_str().unwrap())
+                .collect();
+            assert_eq!(actions, ["commands:execute", "files:write", "web:fetch"]);
             // The local host runs three Task Attempts per harness at once.
             assert_eq!(document["services"][machine_name()]["concurrency"], 3);
             let sources = provision
@@ -808,6 +827,31 @@ mod tests {
                 .collect();
             assert_eq!(crate::manifests::validate_provision(sources).unwrap(), 3);
         }
+    }
+
+    #[test]
+    fn grants_web_fetch_only_to_a_codex_lead() {
+        let repository = Repository {
+            root: PathBuf::from("/work/app"),
+            name: "app".into(),
+            start: Start::Branch("main".into()),
+        };
+        let answers = Answers {
+            port: DEFAULT_PORT,
+            harness: Found::ClaudeCode,
+            model: None,
+            unsandboxed: true,
+            workspace: "app".into(),
+            tag: "lead".into(),
+        };
+        let document = document(&answers, &repository);
+        let permissions =
+            &document["services"]["control-plane"]["provision"][0]["spec"]["permissions"];
+        assert_eq!(permissions.as_array().unwrap().len(), 2, "{permissions}");
+        assert!(
+            !permissions.to_string().contains("web:fetch"),
+            "{permissions}"
+        );
     }
 
     #[test]

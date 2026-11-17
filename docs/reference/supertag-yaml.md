@@ -31,7 +31,9 @@ repositories.
 
 `supertag init` writes a file like this for the repository you run it in. It provisions a
 `local-tools` Permission Set, a `Lead` Role, and the Control Plane's lead Tag, which follows the
-current branch. The host
+current branch. For a Codex lead, `local-tools` also grants `web:fetch`, because current Codex
+models run commands only in Codex code mode; see
+[Codex commands and models](../operations/requirements.md#codex-commands-and-models). The host
 service is named after the machine:
 
 ```yaml
@@ -49,6 +51,7 @@ services:
           permissions:
             - { target: runtime, action: commands:execute }
             - { target: runtime, action: files:write }
+            - { target: runtime, action: web:fetch }
       - apiVersion: supertag/v1
         kind: Role
         metadata: { name: Lead }
@@ -66,6 +69,7 @@ services:
   studio:
     type: host
     harnesses: [codex]
+    concurrency: 3
     workspaces:
       app: /Users/you/code/app
 ```

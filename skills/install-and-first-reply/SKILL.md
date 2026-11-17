@@ -47,7 +47,7 @@ OpenCode, it also asks whether to let that harness run commands without a sandbo
 and needs no terminal. It writes `~/.supertag/supertag.yaml` and starts, in the background:
 
 - a `control-plane` service, which creates the Permission Set `local-tools` (`commands:execute`
-  and `files:write`), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
+  and `files:write`, plus `web:fetch` for Codex), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
   following the branch checked out when `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as the Workspace,
@@ -62,32 +62,11 @@ output. To follow another branch or pin a commit, apply a Tag manifest; see [Wor
 Operator commands use these local services without a flag; `--control-plane NAME` targets
 another Control Plane.
 
-If `lead` runs on Codex, grant it `web:fetch` before creating an Objective. Current Codex models
-run commands only in Codex code mode, which SuperTag starts only for a Task that also has
-`web:fetch`; without it, a Task that may run commands fails when its turn starts. `web:fetch` also
-opens the network to its commands; see
+If `lead` runs on Codex, `local-tools` also grants `web:fetch`, and `init` says so. Current Codex
+models run commands only in Codex code mode, which SuperTag starts only for a Task that also has
+`web:fetch`. `web:fetch` also opens the network to its commands; to keep them offline, remove it
+from `supertag.yaml` and select a Codex model that is not code-mode-only. See
 [Codex commands and models](../../docs/operations/requirements.md#codex-commands-and-models).
-Write this manifest to `local-tools.yaml`:
-
-```yaml
-apiVersion: supertag/v1
-kind: PermissionSet
-metadata: { name: local-tools }
-spec:
-  permissions:
-    - { target: runtime, action: commands:execute }
-    - { target: runtime, action: files:write }
-    - { target: runtime, action: web:fetch }
-```
-
-```sh
-supertag diff -f local-tools.yaml
-supertag apply -f local-tools.yaml --force-conflicts
-```
-
-`diff` shows the change and a `conflict` line for `permissions`, because no apply has owned the
-value `init` created; `--force-conflicts` takes it over. An Objective records its owner's runtime
-actions when it is created, so apply this first.
 
 ## 3. Create the first Objective
 

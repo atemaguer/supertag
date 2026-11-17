@@ -31,6 +31,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- When the lead Tag runs on Codex, `supertag init` adds `web:fetch` to the `local-tools`
+  Permission Set and says so. Current Codex models run commands only in Codex code mode, which
+  SuperTag starts only for Tasks that may also fetch from the web, so a Codex lead created by
+  `init` could not run commands.
 - `supertag init` writes `concurrency: 3` for this machine's Worker Host, so it runs up to three
   Task Attempts per harness at once. Before, it ran one, and one stuck Task held every Tag on that
   harness.

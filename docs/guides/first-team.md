@@ -71,8 +71,8 @@ supertag describe tag builder
 The Role grants the same local file-editing and command permissions that `init` gave `lead`.
 Membership of a Team grants none of these. Give this builder only work you trust to run on the
 selected host. A Session the lead starts for `builder` works in the lead's Workspace, so the
-builder needs no Workspace binding of its own. If your harness is Codex, a current Codex model runs
-commands only when the Tag also has `web:fetch`; see
+builder needs no Workspace binding of its own. If your harness is Codex, `local-tools` also grants
+`web:fetch`, which current Codex models need to run commands; see
 [Codex commands and models](../operations/requirements.md#codex-commands-and-models).
 
 ## 2. Create the Team
