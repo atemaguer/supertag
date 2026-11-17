@@ -20,8 +20,8 @@ use crate::observe::{Output, describe_text};
 use crate::{
     Connection, artifact_publications, artifacts, auth_keys, connect_operator, enrollments,
     github_publications, github_workspaces, host_status, inbox, inputs, mailbox, objectives,
-    operator_access, policy, replies, request, surface_policy, tags, tasks, teams, volumes,
-    work_sessions, workspace_mounts,
+    operator_access, policy, replies, request, schedules, surface_policy, tags, tasks, teams,
+    volumes, work_sessions, workspace_mounts,
 };
 
 /// A resource kind. The singular is the canonical name; the plural is accepted too.
@@ -91,6 +91,8 @@ pub enum Kind {
     Question,
     #[value(alias = "inbox-items")]
     InboxItem,
+    #[value(alias = "schedules")]
+    Schedule,
 }
 
 /// One row of the resource kind table. Outside `describe`'s title, the command tree carries these
@@ -282,6 +284,13 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "inbox-items",
         "Inbox Item",
         [false, true, false, true],
+    ),
+    kind(
+        Kind::Schedule,
+        "schedule",
+        "schedules",
+        "Schedule",
+        LIST_DELETE,
     ),
 ];
 
@@ -542,6 +551,15 @@ pub enum GetCommand {
         #[command(flatten)]
         list: inbox::ItemListArgs,
     },
+    /// Read one Schedule: its next time, recurrence, missed occurrences, and latest turn, or
+    /// list the Schedules that have not finished.
+    #[command(visible_alias = "schedules")]
+    Schedule {
+        /// Schedule ID. Omit to list.
+        id: Option<String>,
+        #[command(flatten)]
+        list: schedules::ListArgs,
+    },
 }
 
 /// `supertag delete KIND ID`.
@@ -594,6 +612,14 @@ pub enum DeleteCommand {
         id: String,
         #[command(flatten)]
         args: surface_policy::DeleteArgs,
+    },
+    /// Cancel a Schedule. A turn it already queued stays queued.
+    #[command(visible_alias = "schedules")]
+    Schedule {
+        /// Schedule ID.
+        id: String,
+        #[command(flatten)]
+        args: schedules::DeleteArgs,
     },
 }
 
@@ -740,6 +766,10 @@ pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
         }
         GetCommand::Question { id } => (Kind::Question, id),
         GetCommand::InboxItem { list } => return print(inbox::list_items(connection, list)).await,
+        GetCommand::Schedule { id: Some(id), .. } => (Kind::Schedule, id),
+        GetCommand::Schedule { id: None, list } => {
+            return print(schedules::list(connection, list)).await;
+        }
     };
     let (channel, token) = connect_operator(connection).await?;
     print(fetch(channel, &token, kind, id)).await
@@ -784,6 +814,7 @@ async fn fetch(channel: ProtocolChannel, token: &str, kind: Kind, id: String) ->
         Kind::SurfaceLocation => surface_policy::fetch_location(channel, token, id).await,
         Kind::Approval => inbox::fetch_approval(channel, token, id).await,
         Kind::Question => inbox::fetch_question(channel, token, id).await,
+        Kind::Schedule => schedules::fetch(channel, token, id).await,
         Kind::RoleAssignment
         | Kind::MailboxGrant
         | Kind::Message
@@ -836,6 +867,7 @@ pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()
         DeleteCommand::SurfaceLocation { id, args } => {
             (format!("SurfaceLocation/{id}"), args.dry_run)
         }
+        DeleteCommand::Schedule { id, args } => (format!("Schedule/{id}"), args.dry_run),
     };
     let deleted = async {
         match command {
@@ -853,6 +885,7 @@ pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()
             DeleteCommand::SurfaceLocation { id, args } => {
                 surface_policy::delete_location(connection, id, args).await
             }
+            DeleteCommand::Schedule { id, args } => schedules::delete(connection, id, args).await,
         }
     };
     if dry_run {

@@ -38,6 +38,7 @@ mod profiles;
 mod removed_hosts;
 mod replies;
 mod resources;
+mod schedules;
 mod service_manager;
 mod status;
 mod surface_policy;
@@ -684,6 +685,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         connection: Connection,
         #[command(flatten)]
         args: delivery_branches::FetchArgs,
+    },
+    /// Wake a Tag later in your conversation with it, or pause and resume a Schedule.
+    Schedule {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: schedules::ScheduleCommand,
     },
     /// Resolve a message whose delivery to a running Task is uncertain.
     Input {
@@ -1394,6 +1402,10 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => inputs::run(connection, command).await?,
+        Command::Schedule {
+            connection,
+            command,
+        } => schedules::run(connection, command).await?,
         Command::Objective {
             connection,
             command,
@@ -1438,6 +1450,22 @@ async fn control_plane(
     }
     if let Some(audit_log) = &options.audit_log {
         plane = plane.with_audit_sink(supertag_control_plane::AuditSink::parse(audit_log)?);
+    }
+    // Tests move the Control Plane's clock forward by the milliseconds this file holds, so a
+    // Schedule falls due without waiting.
+    #[cfg(feature = "test-fixtures")]
+    if let Some(path) = std::env::var_os("SUPERTAG_TEST_CLOCK_OFFSET_FILE") {
+        let path = std::path::PathBuf::from(path);
+        plane = plane.with_execution_clock(move || {
+            let offset = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|value| value.trim().parse::<i64>().ok())
+                .unwrap_or(0);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_millis() as i64);
+            now.saturating_add(offset)
+        });
     }
     // The deployment's default thread for Objective notices (TypeScript parity). It is shared
     // by every replica, so a replica started with another value says what it replaced.
@@ -1741,6 +1769,8 @@ async fn state_owner(
         .add_service(plane.attempt_work_sessions_service())
         .add_service(plane.attempt_mailbox_service())
         .add_service(plane.attempt_tag_sessions_service())
+        .add_service(plane.schedules_service())
+        .add_service(plane.attempt_schedules_service())
         .add_service(plane.attempt_mcp_effects_service())
         .add_service(plane.attempt_changed_paths_service())
         .add_service(plane.attempt_effects_service())

@@ -12,14 +12,15 @@ use prost::Message;
 use supertag_protocol::{
     authenticated_request,
     v2::{
-        AdapterBootstrap, HarnessAskQuestionRequest, HarnessAskWorkSessionQuestionRequest,
-        HarnessAttachRequest, HarnessCompleteRequest, HarnessContinueWorkSessionRequest,
-        HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessPublishTextRequest,
+        AdapterBootstrap, CreateAttemptScheduleRequest, HarnessAskQuestionRequest,
+        HarnessAskWorkSessionQuestionRequest, HarnessAttachRequest, HarnessCompleteRequest,
+        HarnessContinueWorkSessionRequest, HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessPublishTextRequest,
         HarnessSendTagMessageRequest, HarnessSettleLiveInputRequest,
         HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest, LiveInput, LiveInputReceipt,
         LiveInputState, ObjectiveSignal, TagMessageOrigin, TaskEventKind,
         harness_client::HarnessClient, harness_mailbox_client::HarnessMailboxClient,
         harness_questions_client::HarnessQuestionsClient,
+        harness_schedules_client::HarnessSchedulesClient,
         harness_work_sessions_client::HarnessWorkSessionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
     },
@@ -816,6 +817,35 @@ async fn main() -> Result<()> {
             sleep(Duration::from_millis(work / 10)).await;
         }
         sleep(Duration::from_millis(work)).await;
+    }
+    // `--schedule=<at>` asks to be woken that far ahead, as a built-in harness's `schedule`
+    // tool does, on a turn that may schedule. The woken turn does not schedule again.
+    if let Some(at) =
+        std::env::args().find_map(|arg| arg.strip_prefix("--schedule=").map(str::to_owned))
+        && run
+            .coordination
+            .as_ref()
+            .is_some_and(|scope| scope.may_schedule)
+        && !task.prompt.starts_with("Scheduled wake-up.")
+    {
+        let mut schedules = HarnessSchedulesClient::connect(bootstrap.endpoint.clone()).await?;
+        let created = schedules
+            .create(authenticated_request(
+                CreateAttemptScheduleRequest {
+                    attempt: None,
+                    operation_id: "fixture-schedule".into(),
+                    note: "Check PR 412".into(),
+                    at,
+                    every: String::new(),
+                    time_zone: None,
+                },
+                &bootstrap.token,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        let schedule = created.schedule.context("created Schedule")?;
+        result.push_str(&format!("\nScheduled {}", schedule.schedule_id));
     }
     harness
         .publish(authenticated_request(

@@ -230,6 +230,168 @@ database_tests! {
     slack_message_selects_only_an_authorized_github_workspace;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     an_owner_report_finishes_its_objective_through_the_worker_host;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    a_tag_schedules_a_follow_up_that_the_sweep_fires;
+}
+
+/// A built-in harness's `schedule` call reaches the Control Plane through the Worker Host and
+/// takes effect when its turn succeeds. When the Control Plane's clock passes the time, the
+/// maintenance sweep queues the Tag's next turn in the same Session, and a Worker Host runs it.
+/// The operator commands create, pause, resume, read, and delete a Schedule.
+async fn a_tag_schedules_a_follow_up_that_the_sweep_fires(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let offset = root.join("clock-offset");
+    std::fs::write(&offset, "0")?;
+    let credentials = Credentials::new();
+    let services = Services::start(&credentials, &database, |plane| {
+        plane
+            .env("SUPERTAG_TEST_CLOCK_OFFSET_FILE", &offset)
+            .env("SUPERTAG_TIME_ZONE", "UTC");
+    })
+    .await?;
+    let cli = |args: &[&str]| services.cli(&credentials, args);
+    json(cli(&[
+        "tag",
+        "put",
+        "lead",
+        "--instructions",
+        "Release engineering",
+        "--allow",
+        "files:read",
+    ]))
+    .await?;
+    let submitted = json(cli(&[
+        "task",
+        "submit",
+        "--tag",
+        "lead",
+        "--session",
+        "ops",
+        "Check PR 412 again in two hours",
+    ]))
+    .await?;
+    success(credentials.worker(
+        &public(&services),
+        &root.join("first"),
+        None,
+        &["--schedule=2h"],
+    ))
+    .await?;
+    let first = json(cli(&["get", "task", field(&submitted, "task_id")?])).await?;
+    ensure!(first["state"] == "TASK_STATE_SUCCEEDED", "{first}");
+    let listed = json(cli(&["get", "schedules", "--tag", "lead"])).await?;
+    let schedules = listed["schedules"].as_array().context("schedules")?;
+    ensure!(schedules.len() == 1, "{listed}");
+    let schedule = &schedules[0];
+    let id = field(schedule, "schedule_id")?.to_owned();
+    ensure!(
+        field(&first, "result")?.contains(&id),
+        "the tool result names the Schedule: {first}"
+    );
+    ensure!(
+        schedule["state"] == "SCHEDULE_STATE_ACTIVE"
+            && schedule["session_id"] == "ops"
+            && schedule["created_by"] == "tag:lead"
+            && schedule["note"] == "Check PR 412",
+        "{schedule}"
+    );
+
+    // Two hours and a minute later, the sweep queues the follow-up.
+    std::fs::write(&offset, (2 * 3_600_000 + 60_000).to_string())?;
+    let fired = timeout(WAIT, async {
+        loop {
+            let read = json(cli(&["get", "schedule", &id])).await?;
+            if read["state"] == "SCHEDULE_STATE_DONE" {
+                return Ok::<_, anyhow::Error>(read);
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .context("the Schedule did not fire")??;
+    ensure!(fired["fire_count"] == 1, "{fired}");
+    let woken = field(&fired, "last_task_id")?.to_owned();
+    success(credentials.worker(
+        &public(&services),
+        &root.join("second"),
+        None,
+        &["--schedule=2h"],
+    ))
+    .await?;
+    let woken = json(cli(&["get", "task", &woken])).await?;
+    ensure!(
+        woken["state"] == "TASK_STATE_SUCCEEDED"
+            && woken["session_id"] == "ops"
+            // The fixture's result repeats the prompt it ran.
+            && field(&woken, "result")?.contains("Scheduled wake-up.")
+            && field(&woken, "result")?.contains("\"Check PR 412\""),
+        "{woken}"
+    );
+    // The woken turn did not schedule again.
+    let listed = json(cli(&["get", "schedules", "--tag", "lead"])).await?;
+    ensure!(listed["schedules"] == json!([]), "{listed}");
+
+    // An operator's Schedule, paused, resumed, read, and deleted.
+    let created = json(cli(&[
+        "schedule",
+        "create",
+        "--tag",
+        "lead",
+        "--every",
+        "0 9 * * MON",
+        "--time-zone",
+        "Europe/Berlin",
+        "Summarize open work",
+    ]))
+    .await?;
+    let id = field(&created, "schedule_id")?.to_owned();
+    ensure!(
+        created["every"] == json!({"cron": "0 9 * * MON", "time_zone": "Europe/Berlin"})
+            && created["created_by"] == "operator:local"
+            && created["audience"] == "operator:local",
+        "{created}"
+    );
+    let paused = json(cli(&["schedule", "pause", &id])).await?;
+    ensure!(paused["state"] == "SCHEDULE_STATE_PAUSED", "{paused}");
+    let resumed = json(cli(&["schedule", "resume", &id])).await?;
+    ensure!(resumed["state"] == "SCHEDULE_STATE_ACTIVE", "{resumed}");
+    let described = success(cli(&["describe", "schedule", &id])).await?;
+    ensure!(
+        String::from_utf8_lossy(&described.stdout).contains("Summarize open work"),
+        "{}",
+        String::from_utf8_lossy(&described.stdout)
+    );
+    let dry_run = success(cli(&["delete", "schedule", &id, "--dry-run"])).await?;
+    ensure!(
+        String::from_utf8_lossy(&dry_run.stdout).trim() == format!("delete Schedule/{id}"),
+        "{}",
+        String::from_utf8_lossy(&dry_run.stdout)
+    );
+    let deleted = json(cli(&["delete", "schedule", &id])).await?;
+    ensure!(deleted["state"] == "SCHEDULE_STATE_CANCELLED", "{deleted}");
+    let all = json(cli(&["get", "schedules", "--all"])).await?;
+    ensure!(
+        all["schedules"].as_array().map_or(0, Vec::len) == 2,
+        "{all}"
+    );
+    let refused = output(cli(&[
+        "schedule",
+        "create",
+        "--tag",
+        "lead",
+        "--every",
+        "*/5 * * * *",
+        "Too often",
+    ]))
+    .await?;
+    ensure!(
+        !refused.status.success()
+            && String::from_utf8_lossy(&refused.stderr).contains("at least one hour"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    services.stop().await
 }
 
 /// A built-in harness's `report_objective` call reaches the Control Plane through the
