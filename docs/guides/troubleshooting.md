@@ -80,6 +80,8 @@ and serves its harness and model. `placement explain` names which is missing:
 | No host serves the harness or model | Add the harness or model to a host's `harnesses` or `models` |
 | Hosts are busy or draining | Wait, raise `concurrency`, or `supertag host resume HOST` |
 | An uncertain Task Attempt keeps a host's slot | Confirm it stopped, then run the `supertag task resolve-attempt` command it names |
+| `unsandboxed-commands`: no host lets the harness run commands | Add the harness to a host's `allow-unsandboxed-commands`, or remove `commands:execute` |
+| `file-scope`: the harness cannot enforce the Task's path scope | Run the Tag on a harness that can, or change the scope; see [Path scopes](../reference/iam.md#path-scopes) |
 
 ## 6. Check the harness
 

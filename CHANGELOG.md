@@ -11,6 +11,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Permission Sets can scope file access to paths. A `files:write` grant takes `paths` it may
+  write and `exclude` entries that stay read-only; a `files:read` grant takes `exclude` entries
+  that are hidden, with `*`, `**`, and `?` globs; both take `additionalDirectories` outside the
+  Workspace. Codex enforces scopes in its sandbox, for commands too; Claude Code, OpenCode, and
+  remote Cursor enforce them in their file tools. The Worker Host fails a Task Attempt that
+  changed paths outside its scope and names them. A Task whose harness cannot enforce its scope
+  waits, and `supertag placement explain` reports a `file-scope` requirement. It now also
+  reports `unsandboxed-commands` when no bound Worker Host lets the harness run commands.
+
 - A Tag's conversation shows each message the Tag writes while it works, as soon as it writes
   it: every Tag opens longer work with one short sentence saying what it is about to do. A status
   line under the turn shows its current step, such as a command it runs, in the terminal UI and

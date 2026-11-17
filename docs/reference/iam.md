@@ -360,6 +360,143 @@ off hooks, fsmonitor, the pager, external diff, and the `ext` transport. Before 
 checkout, the Worker Host refuses one whose Git configuration changed, or whose Git directory
 names another common directory. It never follows a `.git` file to a Git directory elsewhere.
 
+### Path scopes
+
+A path scope narrows a Permission Set's file grants to parts of the Task's Workspace. For
+example, a Builder Role may write only `src/` and `tests/`, never read `.env` files, and let
+commands write pip's cache. Path scopes live only in Permission Sets. A Tag's own
+`allowedActions` stay whole-Workspace.
+
+A runtime `files:write` or `files:read` permission takes three optional fields:
+
+| Field | On `files:write` | On `files:read` |
+| --- | --- | --- |
+| `paths` | Workspace directories or exact files the Task may write. Omitted: the whole Workspace | Not allowed yet. Reads cover the whole Workspace except `exclude` |
+| `exclude` | Workspace paths that stay readable but are never written | Workspace paths that are neither read nor written. Only here may an entry be a glob: `*`, `**`, and `?` |
+| `additionalDirectories` | Directories outside the Workspace that are writable | Directories outside the Workspace that are readable |
+
+```yaml
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: app-code }
+spec:
+  permissions:
+    - target: runtime
+      action: files:write
+      paths: [src/, tests/]
+      exclude: [src/generated/]
+      additionalDirectories: ["~/.cache/pip"]
+    - target: runtime
+      action: files:read
+      exclude: ["**/.env", "**/.env.*", secrets/]
+    - { target: runtime, action: commands:execute }
+```
+
+Entries follow these rules:
+
+- Workspace entries are relative to the Workspace root and anchored there. `.env` names only the
+  top-level file; `**/.env` names one at any depth. An entry names a file or a whole directory.
+  `src/**` means `src/`.
+- `paths` and `files:write` `exclude` entries are literal: no globs.
+- An entry may not contain `..` or `.` segments, a backslash, or a control character. Each field
+  holds at most 64 entries of at most 1024 bytes.
+- `additionalDirectories` entries are absolute or start with `~/`, the only place `~` is allowed.
+  `~` is the Worker Host user's home directory. The directory must exist on the Worker Host, or
+  the Task Attempt fails before the harness starts.
+- `~`, `/`, `~/.supertag`, and directories that hold SuperTag or harness state or credentials
+  are refused, for example `~/.codex`, `~/.claude`, `~/.config/opencode`, and `~/.ssh`. So is a
+  directory that contains one of them, such as `~/.config`. The Worker Host also refuses an
+  entry that overlaps the Workspace or the harness's private home.
+- A path scope never makes a protected entry writable. `paths` may not name `.git`, `.codex`,
+  `.agents`, `.aws`, `.claude`, `.cursor`, `.opencode`, or `.supertag`, in any letter case. An
+  `exclude` may name them: `exclude: [.git/]` on `files:read` hides history from the agent.
+
+`supertag apply` and `supertag diff` refuse an invalid entry and say why.
+
+### Combining path scopes
+
+Every Permission Set a Task receives applies. SuperTag unions the grants. A `files:write` grant
+without `paths`, including a Tag's own `files:write`, makes the whole Workspace writable.
+Precedence is: a `files:read` exclude (hidden) beats a `files:write` exclude (read-only), which
+beats `paths`. A set that only hides, such as `{ action: files:read, exclude: [secrets/] }`, adds
+no access of its own, so you can attach it to every Role.
+
+Hidden and read-only entries match in any letter case, because macOS opens `SECRETS/x` as
+`secrets/x`. `paths` match exactly. Each path is checked after symlinks resolve, so a link
+cannot reach a hidden or read-only file.
+
+A Task keeps the scope recorded when SuperTag accepted it. `supertag describe task` shows it
+under `file_scope`, for example
+`Writes src/, tests/, ~/.cache/pip · Read-only src/generated/ · Hidden **/.env, secrets/`. When
+an Objective owner delegates a write, the member writes within its own `paths`, and both Tags'
+exclusions apply.
+
+Path scopes govern the agent's tools and commands, not the harness itself. The harness's private
+home, the Task Attempt's output directory, Skill files, Volume copies, and the temporary
+directory keep their usual access.
+
+### Path scope enforcement
+
+A harness enforces a scope at one of three strengths:
+
+| Strength | Meaning |
+| --- | --- |
+| operating system | The kernel refuses the access, for commands and file tools alike |
+| tool | SuperTag or the harness refuses the file-tool call. Commands are not confined |
+| delivery | The Worker Host refuses to deliver Workspace changes outside the write scope |
+
+| Harness | File tools | Commands |
+| --- | --- | --- |
+| Codex | operating system: the `supertag` permission profile | operating system. Not yet with `web:fetch`: such a Task waits |
+| Claude Code | tool: SuperTag's file-tool hook and Claude Code's own deny rules | write scope at delivery; hidden entries not enforced, so such a Task waits |
+| OpenCode | tool: OpenCode's `edit` and `read` rules | write scope at delivery; hidden entries not enforced, so such a Task waits |
+| Cursor, remote or shared execution | tool: SuperTag's Workspace tools | write or hidden scope not enforced, so such a Task waits |
+| Cursor, local | not supported yet: a scoped Task waits | — |
+
+SuperTag works out the strength a Task needs. It never asks you to declare one:
+
+- Commands with hidden entries need the operating system. Only Codex qualifies today.
+- Commands with `paths` or a `files:write` exclude need delivery, so the Task needs a Workspace.
+- Without `commands:execute`, every harness above except local Cursor applies the scope with its
+  file tools.
+- Cursor cannot grant `additionalDirectories`. Custom harnesses cannot apply any scope.
+
+A Task no host can run waits. `supertag placement explain TASK` names the `file-scope`
+requirement and why, for example:
+
+```text
+Claude Code cannot keep commands from reading hidden paths (**/.env); run the Tag on Codex, or
+remove commands:execute from its Permission Sets
+```
+
+Current Codex models run commands only with `web:fetch`, as
+[Codex commands and models](../operations/requirements.md#codex-commands-and-models) explains.
+Until Codex applies path scopes to `web:fetch` Tasks, a Codex Task with a path scope therefore
+runs without commands in practice.
+
+### Path scope delivery check
+
+When a Task Attempt completes, the Worker Host checks every Workspace path it added, changed, or
+deleted. A path outside `paths`, in a read-only entry, or hidden fails the Task Attempt. Its
+result names the paths, at most 20. Nothing is delivered. This check covers commands and any
+harness tool. It does not stop a change that is undone before the Task Attempt ends, or a write
+outside the Workspace.
+
+### Path scope limits
+
+- Codex on Linux matches hidden globs against the files that exist when it starts. A checked-in
+  `.env` stays hidden; a matching file the agent creates later is not. Prefer literal hidden
+  entries for paths an agent might create.
+- A hard link reaches a file through a different name. On macOS, Codex's sandbox refuses to
+  link a hidden file. A harness without that boundary could link one into an allowed path. The
+  delivery check therefore refuses a delivered file that is a hard link to a hidden file.
+- Claude Code applies its deny rules to `Grep` and `Glob` results. OpenCode does not, so a
+  scope with hidden entries turns off OpenCode's `grep` tool. Both list the names of hidden
+  files, as an operating-system sandbox does; neither reads them.
+- OpenCode matches its rules in exact letter case. SuperTag adds case spellings of short names,
+  but on macOS a mixed-case spelling of a long hidden name can pass OpenCode's own rules.
+- An Objective's runtime actions narrow which actions its Tasks get, not their paths.
+
 ### Fail-closed behavior
 
 Unknown runtime actions do not enable anything in the built-in harnesses. A harness must fail closed when it cannot enforce an admitted policy. Permission checks select tools; execution-environment isolation, filesystem mounts, and network policy provide the hard boundary.

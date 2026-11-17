@@ -101,9 +101,31 @@ Worker Host must carry, from the host's `labels` in `supertag.yaml` or its host 
 [Codex commands and models](requirements.md#codex-commands-and-models) for why the example grants
 `web:fetch`.
 
+A file grant can name the paths it covers. This set lets a Task write only `src/` and `tests/`,
+never change `src/generated/`, never read `.env` files or `secrets/`, and write pip's cache:
+
+```yaml
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: app-code }
+spec:
+  permissions:
+    - target: runtime
+      action: files:write
+      paths: [src/, tests/]
+      exclude: [src/generated/]
+      additionalDirectories: ["~/.cache/pip"]
+    - target: runtime
+      action: files:read
+      exclude: ["**/.env", "**/.env.*", secrets/]
+```
+
+Which harnesses can enforce each part, and when a Task waits instead, is in
+[Path scopes](../reference/iam.md#path-scopes).
+
 | Kind | Declares |
 | --- | --- |
-| `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `reference`, `surfaceAccountId`, `scope`, and `approvalRequired`; and the set's `approvers` |
+| `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `reference`, `surfaceAccountId`, `scope`, and `approvalRequired`; `paths`, `exclude`, and `additionalDirectories` on `files:write` and `files:read`; and the set's `approvers` |
 | `ContextSet` | Knowledge items a Task may receive, each with an `itemKey`, `type`, `version`, and `config`, and optionally `required` |
 | `Role` | `purpose`, `instructions`, `permissionSets`, `contextSets`, and `execution` |
 | `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, `acceptsMessagesFrom`, and `lead` |
