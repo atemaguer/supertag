@@ -165,7 +165,10 @@ pub(crate) async fn prepare(
         .allocate(
             &record.owner(),
             timeout,
-            &allowed_actions,
+            (
+                &allowed_actions,
+                supertag_protocol::file_scope::of_task(task),
+            ),
             (environment, &start),
             cancel,
         )

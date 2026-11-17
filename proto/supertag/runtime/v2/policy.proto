@@ -156,6 +156,16 @@ message PolicyPermission {
   string reference = 6;
   string resource = 7;
   bool approval_required = 8;
+  // Path scopes, on runtime files:write and files:read only. Workspace-relative directories or
+  // exact paths. On files:write, the only Workspace paths it may write; empty means the whole
+  // Workspace. files:read takes none: reads cover the whole Workspace minus `exclude`.
+  repeated string paths = 9;
+  // Workspace-relative paths never written (files:write: they stay readable) or never read or
+  // written (files:read, where `*`, `**` and `?` globs are allowed). Excludes win over `paths`.
+  repeated string exclude = 10;
+  // Directories outside the Workspace, absolute or starting with `~/`: writable on
+  // files:write, readable on files:read.
+  repeated string additional_directories = 11;
 }
 message PermissionSet {
   string set_id = 1;
@@ -245,6 +255,25 @@ message TaskRuntimeAuthority {
   optional string objective_id = 3;
   optional uint64 objective_revision = 4;
   optional string delegating_task_id = 5;
+  // The path scope composed from the accepted Permission Sets. Absent: no restriction beyond
+  // the accepted actions.
+  FileScope files = 6;
+}
+
+// A Task's file scope, composed when it is accepted. Workspace entries are relative to the
+// Workspace root and match the path after symlinks resolve. Precedence: hidden beats read-only
+// beats write.
+message FileScope {
+  // Workspace directories or exact paths the Task may write. Empty: the whole Workspace.
+  repeated string write = 1;
+  // Workspace directories or exact paths that stay readable but are never written.
+  repeated string read_only = 2;
+  // Workspace paths or `*`, `**`, `?` globs that are neither read nor written.
+  repeated string hidden = 3;
+  // Directories outside the Workspace, `~/` or absolute and unexpanded, that are writable.
+  repeated string outside_write = 4;
+  // Directories outside the Workspace that are readable.
+  repeated string outside_read = 5;
 }
 
 message PutPermissionSetRequest {

@@ -2798,6 +2798,14 @@ fn task_json(task: &Task) -> serde_json::Value {
         "state": task.state().as_str_name(), "result": task.result, "attempt_id": task.attempt_id,
         "harness": task.harness_kind().as_str_name(),
         "shared_execution_environment_id": supertag_protocol::shared_execution::environment(task.policy_snapshot.as_ref()),
+        "file_scope": supertag_protocol::file_scope::of_task(task).map(|scope| json!({
+            "summary": supertag_protocol::file_scope::summary(scope),
+            "write": scope.write,
+            "read_only": scope.read_only,
+            "hidden": scope.hidden,
+            "outside_write": scope.outside_write,
+            "outside_read": scope.outside_read,
+        })),
         "workspace": task.workspace.as_ref().map(|spec| json!({
             "workspace_id": spec.workspace_id,
             // The commit the Task starts from: pinned by its Tag, or resolved from `ref` when the

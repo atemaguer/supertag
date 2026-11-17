@@ -6,6 +6,7 @@ use tonic::{Request, Status, metadata::MetadataValue};
 pub mod artifacts;
 pub mod changed_paths;
 mod crash_points;
+pub mod file_scope;
 #[cfg(feature = "crash-points")]
 pub use crash_points::crash_now;
 pub use crash_points::{CRASH_MARKER_ENV, CRASH_POINT_ENV, crash_point};

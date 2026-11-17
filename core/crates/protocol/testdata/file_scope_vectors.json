@@ -1,0 +1,108 @@
+{
+  "description": "Path scope matching vectors. The Rust matcher (supertag_protocol::file_scope) and the TypeScript matcher (@supertag/worker-sdk) both run every case. Paths are Workspace-relative and already resolved.",
+  "cases": [
+    {
+      "name": "no scope",
+      "checks": [
+        { "path": "README.md", "read": true, "write": true, "searchMayContainHidden": false },
+        { "path": "src/a.rs", "read": true, "write": true }
+      ]
+    },
+    {
+      "name": "write paths are anchored subtrees or exact files",
+      "write": ["src/", "tests/", "package.json"],
+      "checks": [
+        { "path": "src/a.rs", "read": true, "write": true },
+        { "path": "src", "read": true, "write": true },
+        { "path": "src/deep/b.rs", "read": true, "write": true },
+        { "path": "srcx/a.rs", "read": true, "write": false },
+        { "path": "app/src/a.rs", "read": true, "write": false },
+        { "path": "package.json", "read": true, "write": true },
+        { "path": "package.json.bak", "read": true, "write": false },
+        { "path": "README.md", "read": true, "write": false },
+        { "path": "tests/x/y", "read": true, "write": true }
+      ]
+    },
+    {
+      "name": "write paths match case-sensitively",
+      "write": ["src/"],
+      "checks": [
+        { "path": "SRC/a.rs", "read": true, "write": false },
+        { "path": "src/A.rs", "read": true, "write": true }
+      ]
+    },
+    {
+      "name": "read-only beats write and matches case-insensitively",
+      "write": ["src/"],
+      "readOnly": ["src/generated/", "Cargo.lock"],
+      "checks": [
+        { "path": "src/generated/x.rs", "read": true, "write": false },
+        { "path": "src/Generated/x.rs", "read": true, "write": false },
+        { "path": "src/generated", "read": true, "write": false },
+        { "path": "src/generatedx.rs", "read": true, "write": true },
+        { "path": "cargo.LOCK", "read": true, "write": false },
+        { "path": "src/lib.rs", "read": true, "write": true }
+      ]
+    },
+    {
+      "name": "hidden globs match at any depth only through **",
+      "hidden": ["**/.env", "**/.env.*", "secrets/", "*.pem"],
+      "checks": [
+        { "path": ".env", "read": false, "write": false, "searchMayContainHidden": true },
+        { "path": "apps/web/.env", "read": false, "write": false },
+        { "path": "apps/web/.ENV", "read": false, "write": false },
+        { "path": ".env.local", "read": false, "write": false },
+        { "path": "apps/.env.production", "read": false, "write": false },
+        { "path": ".envrc", "read": true, "write": true },
+        { "path": "env/.env/inner", "read": false, "write": false },
+        { "path": "secrets/key", "read": false, "write": false },
+        { "path": "SECRETS/key", "read": false, "write": false },
+        { "path": "secrets", "read": false, "write": false, "searchMayContainHidden": true },
+        { "path": "app/secrets/key", "read": true, "write": true },
+        { "path": "server.pem", "read": false, "write": false },
+        { "path": "certs/server.pem", "read": true, "write": true },
+        { "path": "src/main.rs", "read": true, "write": true, "searchMayContainHidden": true },
+        { "path": "", "read": true, "write": true, "searchMayContainHidden": true }
+      ]
+    },
+    {
+      "name": "hidden beats write and read-only",
+      "write": ["config/"],
+      "readOnly": ["config/"],
+      "hidden": ["config/secret.json"],
+      "checks": [
+        { "path": "config/secret.json", "read": false, "write": false },
+        { "path": "config/app.json", "read": true, "write": false }
+      ]
+    },
+    {
+      "name": "search roots",
+      "hidden": ["secrets/", "apps/*/private/", "?.key"],
+      "checks": [
+        { "path": "src", "read": true, "write": true, "searchMayContainHidden": false },
+        { "path": "", "read": true, "write": true, "searchMayContainHidden": true },
+        { "path": "apps", "read": true, "write": true, "searchMayContainHidden": true },
+        { "path": "apps/web", "read": true, "write": true, "searchMayContainHidden": true },
+        { "path": "apps/web/src", "read": true, "write": true, "searchMayContainHidden": false },
+        {
+          "path": "apps/web/private/x",
+          "read": false,
+          "write": false,
+          "searchMayContainHidden": true
+        },
+        { "path": "a.key", "read": false, "write": false },
+        { "path": "ab.key", "read": true, "write": true },
+        { "path": "secrets/deep", "read": false, "write": false, "searchMayContainHidden": true }
+      ]
+    },
+    {
+      "name": "a hidden .git entry hides history",
+      "hidden": [".git/"],
+      "checks": [
+        { "path": ".git/config", "read": false, "write": false },
+        { "path": ".GIT/HEAD", "read": false, "write": false },
+        { "path": "src/.git", "read": true, "write": true }
+      ]
+    }
+  ]
+}

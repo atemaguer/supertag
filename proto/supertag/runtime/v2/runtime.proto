@@ -1156,6 +1156,8 @@ message RemoteWorkspaceAllocateRequest {
   // A preparation sandbox: Stage takes a bundle of the trusted commit alone and runs the setup
   // lines, and Snapshot records the result. With `prepared_artifact`, preparation is warm.
   bool prepare = 3501;
+  // The Task's path scope, which the provider's file tools apply after resolving symlinks.
+  FileScope file_scope = 3600;
 }
 
 // A sandbox image and setup derived only from the trusted commit's devcontainer subset.

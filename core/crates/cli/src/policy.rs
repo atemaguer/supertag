@@ -126,6 +126,12 @@ struct GrantSpec {
     resource: String,
     #[serde(default)]
     approval_required: bool,
+    #[serde(default)]
+    paths: Vec<String>,
+    #[serde(default)]
+    exclude: Vec<String>,
+    #[serde(default)]
+    additional_directories: Vec<String>,
 }
 
 impl From<PermissionSpec> for PermissionSet {
@@ -150,6 +156,9 @@ impl From<PermissionSpec> for PermissionSet {
                     reference: grant.reference,
                     resource: grant.resource,
                     approval_required: grant.approval_required,
+                    paths: grant.paths,
+                    exclude: grant.exclude,
+                    additional_directories: grant.additional_directories,
                     ..Default::default()
                 })
                 .collect(),
@@ -525,11 +534,24 @@ pub async fn run_assignment(connection: Connection, command: AssignmentCommand) 
 }
 
 pub(crate) fn permission_json(set: PermissionSet) -> Value {
-    let permissions = set.permissions.into_iter().map(|grant| json!({
-        "permission_id":grant.permission_id, "target":grant.target().as_str_name().trim_start_matches("POLICY_PERMISSION_TARGET_").to_ascii_lowercase(),
-        "action":grant.action, "surface_account_id":grant.surface_account_id, "scope":grant.scope,
-        "reference":grant.reference, "resource":grant.resource, "approval_required":grant.approval_required,
-    })).collect::<Vec<_>>();
+    let permissions = set.permissions.into_iter().map(|grant| {
+        let mut value = json!({
+            "permission_id":grant.permission_id, "target":grant.target().as_str_name().trim_start_matches("POLICY_PERMISSION_TARGET_").to_ascii_lowercase(),
+            "action":grant.action, "surface_account_id":grant.surface_account_id, "scope":grant.scope,
+            "reference":grant.reference, "resource":grant.resource, "approval_required":grant.approval_required,
+        });
+        // Path scopes appear only on the file grants that have them.
+        for (key, values) in [
+            ("paths", grant.paths),
+            ("exclude", grant.exclude),
+            ("additional_directories", grant.additional_directories),
+        ] {
+            if !values.is_empty() {
+                value[key] = json!(values);
+            }
+        }
+        value
+    }).collect::<Vec<_>>();
     json!({ "set_id":set.set_id, "name":set.name, "revision":set.revision, "approvers":set.approvers, "permissions":permissions })
 }
 

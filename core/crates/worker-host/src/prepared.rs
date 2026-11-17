@@ -298,7 +298,7 @@ async fn build(
             .allocate(
                 &record.owner(),
                 PREPARATION_LIFETIME,
-                &[],
+                (&[], None),
                 (Some(request), &Start::Prepare { from }),
                 cancel,
             )

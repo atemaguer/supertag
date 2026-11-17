@@ -284,7 +284,7 @@ impl RemoteProvider {
         &self,
         owner: &RemoteWorkspaceOwner,
         lifetime: Duration,
-        allowed_actions: &[String],
+        (allowed_actions, file_scope): (&[String], Option<&FileScope>),
         (environment, start): (Option<RemoteWorkspaceEnvironment>, &Start),
         cancel: &CancellationToken,
     ) -> Result<String> {
@@ -325,6 +325,7 @@ impl RemoteProvider {
                         owner: Some(owner.clone()),
                         timeout_ms,
                         allowed_actions: allowed_actions.to_vec(),
+                        file_scope: file_scope.cloned(),
                         environment,
                         prepared_artifact,
                         prepare,
@@ -1439,7 +1440,7 @@ mod tests {
                 .allocate(
                     &owner(),
                     Duration::from_secs(60),
-                    &["files:read".into(), "files:write".into()],
+                    (&["files:read".into(), "files:write".into()], None),
                     (Some(environment.clone()), &Start::Fresh),
                     &CancellationToken::new()
                 )
@@ -1468,7 +1469,7 @@ mod tests {
                 .allocate(
                     &owner(),
                     Duration::from_secs(60),
-                    &[],
+                    (&[], None),
                     (None, &start),
                     &CancellationToken::new(),
                 )
@@ -1481,7 +1482,7 @@ mod tests {
                 .allocate(
                     &owner(),
                     Duration::from_secs(60),
-                    &[],
+                    (&[], None),
                     (None, &Start::Prepared("im prepared".into())),
                     &CancellationToken::new(),
                 )
@@ -1652,7 +1653,7 @@ mod tests {
                 .allocate(
                     &owner(),
                     Duration::from_secs(60),
-                    &["commands:execute".into()],
+                    (&["commands:execute".into()], None),
                     (None, &Start::Fresh),
                     &CancellationToken::new()
                 )

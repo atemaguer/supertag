@@ -200,7 +200,17 @@ impl Resource for PermissionSet {
             p.scope = p.scope.trim().into();
             p.reference = p.reference.trim().into();
             p.resource = p.resource.trim().into();
-            match PolicyPermissionTarget::try_from(p.target).ok() {
+            let target = PolicyPermissionTarget::try_from(p.target).ok();
+            if target != Some(PolicyPermissionTarget::Runtime)
+                && (!p.paths.is_empty()
+                    || !p.exclude.is_empty()
+                    || !p.additional_directories.is_empty())
+            {
+                return Err(invalid(
+                    "only runtime files:write and files:read permissions take paths, exclude, or additionalDirectories",
+                ));
+            }
+            match target {
                 Some(PolicyPermissionTarget::Runtime) => {
                     if !p.surface_account_id.is_empty()
                         || !p.scope.is_empty()
@@ -211,6 +221,15 @@ impl Resource for PermissionSet {
                             "runtime permission cannot carry surface or MCP resource fields",
                         ));
                     }
+                    supertag_protocol::file_scope::normalize_permission(
+                        &p.action,
+                        supertag_protocol::file_scope::PermissionPaths {
+                            paths: &mut p.paths,
+                            exclude: &mut p.exclude,
+                            additional_directories: &mut p.additional_directories,
+                        },
+                    )
+                    .map_err(|reason| invalid(&reason))?;
                 }
                 Some(PolicyPermissionTarget::Surface) => {
                     name("surface account", &p.surface_account_id)?;
@@ -245,13 +264,25 @@ impl Resource for PermissionSet {
     }
 }
 fn permission_key(p: &PolicyPermission) -> String {
-    serde_json::to_string(&(
-        p.target,
-        &p.action,
-        &p.surface_account_id,
-        &p.scope,
-        &p.resource,
-    ))
+    // Two grants of one action with different path scopes stay distinct.
+    if p.paths.is_empty() && p.exclude.is_empty() && p.additional_directories.is_empty() {
+        serde_json::to_string(&(
+            p.target,
+            &p.action,
+            &p.surface_account_id,
+            &p.scope,
+            &p.resource,
+        ))
+    } else {
+        serde_json::to_string(&(
+            p.target,
+            &p.action,
+            &p.surface_account_id,
+            &p.scope,
+            &p.resource,
+            (&p.paths, &p.exclude, &p.additional_directories),
+        ))
+    }
     .expect("strings serialize")
 }
 fn element_id(input: &str, prior: Option<&String>) -> Result<String> {
@@ -1455,11 +1486,31 @@ pub(crate) async fn admission_in(
         snapshot,
         effective_digest: String::new(),
     };
+    let files = supertag_protocol::file_scope::compose(
+        policy
+            .snapshot
+            .permission_sets
+            .iter()
+            .flat_map(|set| &set.permissions)
+            .filter(|p| p.target == PolicyPermissionTarget::Runtime as i32)
+            .map(|p| supertag_protocol::file_scope::Grant {
+                action: &p.action,
+                paths: &p.paths,
+                exclude: &p.exclude,
+                additional_directories: &p.additional_directories,
+                // A gated file grant is not admitted, so it adds no access of its own.
+                admitted: !p.approval_required,
+            }),
+        base.allowed_actions
+            .iter()
+            .any(|action| action == FILES_WRITE),
+    );
     project_runtime(
         &mut policy,
         TaskRuntimeAuthority {
             actions: actions.into_iter().collect(),
             approvals: approvals.into_values().collect(),
+            files,
             ..Default::default()
         },
     )?;
@@ -1631,6 +1682,8 @@ pub(crate) fn apply_delegated_runtime(
 ) -> Result<()> {
     let target = policy.snapshot.runtime_authority.take().unwrap_or_default();
     let source = runtime_authority(parent);
+    let files =
+        supertag_protocol::file_scope::delegate(target.files.as_ref(), source.files.as_ref());
     let mut actions: BTreeSet<String> = source
         .actions
         .into_iter()
@@ -1676,6 +1729,8 @@ pub(crate) fn apply_delegated_runtime(
             objective_id: Some(objective_id.to_owned()),
             objective_revision: Some(revision),
             delegating_task_id: Some(parent.task_id.clone()),
+            // The member writes within its own scope; both Tags' exclusions apply.
+            files,
         },
     )
 }
@@ -1762,12 +1817,19 @@ pub(crate) fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> 
             .collect();
         Some((delegate_write, approvals))
     });
+    // A path scope is authority a live-input join must match too.
+    let files = snapshot
+        .runtime_authority
+        .as_ref()
+        .and_then(|authority| authority.files.as_ref())
+        .filter(|scope| !supertag_protocol::file_scope::is_empty(scope));
     if permissions.is_empty()
         && contexts.is_empty()
         && execution.is_none()
         && snapshot.origin.is_none()
         && runtime.is_none()
         && shared_environment.is_none()
+        && files.is_none()
     {
         return Ok(String::new());
     }
@@ -1777,6 +1839,13 @@ pub(crate) fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> 
     }
     if let Some(runtime) = runtime {
         encoded.extend(serde_json::to_vec(&runtime)?);
+    }
+    if let Some(files) = files {
+        encoded.extend(serde_json::to_vec(&(
+            "file_scope",
+            (&files.write, &files.read_only, &files.hidden),
+            (&files.outside_write, &files.outside_read),
+        ))?);
     }
     if let Some(origin) = &snapshot.origin {
         let coordinates = origin.scope.as_ref().map(Message::encode_to_vec);
@@ -1955,6 +2024,34 @@ impl policy_catalog_server::PolicyCatalog for ControlPlane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_scope_changes_the_effective_policy() {
+        let unscoped = TaskPolicySnapshot {
+            runtime_authority: Some(TaskRuntimeAuthority {
+                actions: vec!["files:write".into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(effective_digest(&unscoped).unwrap(), "");
+        let mut empty = unscoped.clone();
+        empty.runtime_authority.as_mut().unwrap().files = Some(FileScope::default());
+        assert_eq!(effective_digest(&empty).unwrap(), "");
+        let mut scoped = unscoped.clone();
+        scoped.runtime_authority.as_mut().unwrap().files = Some(FileScope {
+            write: vec!["src/".into()],
+            ..Default::default()
+        });
+        let narrow = effective_digest(&scoped).unwrap();
+        assert!(!narrow.is_empty());
+        scoped.runtime_authority.as_mut().unwrap().files = Some(FileScope {
+            write: vec!["src/".into()],
+            hidden: vec!["**/.env".into()],
+            ..Default::default()
+        });
+        assert_ne!(effective_digest(&scoped).unwrap(), narrow);
+    }
 
     #[test]
     fn effective_policy_ignores_catalog_identity_and_unions_required_approvers() {

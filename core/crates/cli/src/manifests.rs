@@ -606,4 +606,33 @@ mod tests {
             assert!(parse(kind, spec.clone()).is_err(), "{kind} accepted {spec}");
         }
     }
+
+    #[test]
+    fn permission_sets_carry_path_scopes() {
+        let manifest = parse(
+            "PermissionSet",
+            json!({"permissions": [
+                {"target": "runtime", "action": "files:write", "paths": ["src/", "tests/"],
+                 "exclude": ["src/generated/"], "additionalDirectories": ["~/.cache/pip"]},
+                {"target": "runtime", "action": "files:read", "exclude": ["**/.env", "secrets/"]},
+            ]}),
+        )
+        .unwrap();
+        let Resource::PermissionSet(set) = manifest.resource else {
+            panic!("not a Permission Set");
+        };
+        assert_eq!(set.permissions[0].paths, ["src/", "tests/"]);
+        assert_eq!(set.permissions[0].exclude, ["src/generated/"]);
+        assert_eq!(set.permissions[0].additional_directories, ["~/.cache/pip"]);
+        assert_eq!(set.permissions[1].exclude, ["**/.env", "secrets/"]);
+        // One spelling per field, as everywhere in manifests.
+        assert!(
+            parse(
+                "PermissionSet",
+                json!({"permissions": [{"target": "runtime", "action": "files:write",
+                       "additional_directories": ["~/.cache/pip"]}]}),
+            )
+            .is_err()
+        );
+    }
 }

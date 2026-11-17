@@ -351,7 +351,253 @@ async fn contract(url: String) {
     ));
     validation(&store).await;
     composition(&store).await;
+    path_scopes(&store).await;
     store.close().await;
+}
+
+fn scoped(
+    id: &str,
+    action: &str,
+    (paths, exclude, extra): (&[&str], &[&str], &[&str]),
+) -> PutPermissionSetRequest {
+    let strings = |values: &[&str]| values.iter().map(|value| (*value).to_owned()).collect();
+    let mut request = permission(id, action);
+    let grant = &mut request.permission_set.as_mut().unwrap().permissions[0];
+    grant.paths = strings(paths);
+    grant.exclude = strings(exclude);
+    grant.additional_directories = strings(extra);
+    request
+}
+
+async fn path_scopes(store: &Store) {
+    // Entries are canonical: sorted, deduplicated, `dir/**` written as `dir/`.
+    let code = store
+        .put_permission_set(
+            OP,
+            &scoped(
+                "scope-code",
+                "files:write",
+                (
+                    &["tests/", "src/**", "src/"],
+                    &["src/generated"],
+                    &["~/.cache/pip/"],
+                ),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(code.permissions[0].paths, ["src/", "tests/"]);
+    assert_eq!(code.permissions[0].exclude, ["src/generated"]);
+    assert_eq!(code.permissions[0].additional_directories, ["~/.cache/pip"]);
+    // Two grants of one action with different scopes stay distinct in one set.
+    let mut both = scoped("scope-docs", "files:write", (&["docs/"], &[], &[]));
+    both.permission_set
+        .as_mut()
+        .unwrap()
+        .permissions
+        .push(PolicyPermission {
+            target: PolicyPermissionTarget::Runtime as i32,
+            action: "files:write".into(),
+            paths: vec!["examples/".into()],
+            ..Default::default()
+        });
+    assert_eq!(
+        store
+            .put_permission_set(OP, &both)
+            .await
+            .unwrap()
+            .permissions
+            .len(),
+        2
+    );
+    store
+        .put_permission_set(
+            OP,
+            &scoped(
+                "scope-hide",
+                "files:read",
+                (&[], &["**/.env", "secrets/"], &[]),
+            ),
+        )
+        .await
+        .unwrap();
+    // A set that grants the whole Workspace but hides one file also narrows the others.
+    let mut hide_in_write = scoped("scope-wide", "files:write", (&[], &["Cargo.lock"], &[]));
+    hide_in_write
+        .permission_set
+        .as_mut()
+        .unwrap()
+        .permissions
+        .push(PolicyPermission {
+            target: PolicyPermissionTarget::Runtime as i32,
+            action: "commands:execute".into(),
+            ..Default::default()
+        });
+    store.put_permission_set(OP, &hide_in_write).await.unwrap();
+    let submit = |tag: &str, operation: &str| SubmitTaskRequest {
+        output_policy: None,
+        execution_limits: None,
+        operation_id: operation.into(),
+        tag_id: tag.into(),
+        session_id: operation.into(),
+        prompt: "Change code".into(),
+        input_artifacts: vec![],
+    };
+    let assign = |role: &str, tag: &str| AssignRoleRequest {
+        operation_id: format!("assign-{role}-{tag}"),
+        role: role.into(),
+        tag_id: tag.into(),
+    };
+    store.put_tag("scoped", "Base", vec![]).await.unwrap();
+    store
+        .put_role(
+            OP,
+            &role("scope-builder", &["scope-code", "scope-docs"], &[]),
+        )
+        .await
+        .unwrap();
+    store
+        .put_role(OP, &role("scope-guard", &["scope-hide"], &[]))
+        .await
+        .unwrap();
+    for name in ["scope-builder", "scope-guard"] {
+        store
+            .assign_role(OP, &assign(name, "scoped"))
+            .await
+            .unwrap();
+    }
+    let task = store
+        .submit_task(OP, &submit("scoped", "scoped-one"))
+        .await
+        .unwrap();
+    assert_eq!(task.allowed_actions, ["files:read", "files:write"]);
+    let files = task
+        .policy_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.runtime_authority.as_ref())
+        .and_then(|authority| authority.files.clone())
+        .expect("a composed path scope");
+    // The union of the Roles' sets; the hide-only set adds no access of its own.
+    assert_eq!(files.write, ["docs/", "examples/", "src/", "tests/"]);
+    assert_eq!(files.read_only, ["src/generated"]);
+    assert_eq!(files.hidden, ["**/.env", "secrets/"]);
+    assert_eq!(files.outside_write, ["~/.cache/pip"]);
+    // A grant without paths, here in a third Role, widens writes to the whole Workspace; the
+    // exclusions of every set still apply.
+    store
+        .put_role(OP, &role("scope-widen", &["scope-wide"], &[]))
+        .await
+        .unwrap();
+    store
+        .assign_role(OP, &assign("scope-widen", "scoped"))
+        .await
+        .unwrap();
+    let task = store
+        .submit_task(OP, &submit("scoped", "scoped-two"))
+        .await
+        .unwrap();
+    let files = task
+        .policy_snapshot
+        .unwrap()
+        .runtime_authority
+        .unwrap()
+        .files
+        .unwrap();
+    assert!(files.write.is_empty());
+    assert_eq!(files.read_only, ["Cargo.lock", "src/generated"]);
+    assert_eq!(files.hidden, ["**/.env", "secrets/"]);
+    // A Tag's direct files:write is whole-Workspace too.
+    store
+        .put_tag("direct", "Base", vec!["files:write".into()])
+        .await
+        .unwrap();
+    store
+        .assign_role(OP, &assign("scope-builder", "direct"))
+        .await
+        .unwrap();
+    let task = store
+        .submit_task(OP, &submit("direct", "direct-one"))
+        .await
+        .unwrap();
+    let files = task
+        .policy_snapshot
+        .unwrap()
+        .runtime_authority
+        .unwrap()
+        .files
+        .unwrap();
+    assert!(files.write.is_empty());
+    assert_eq!(files.read_only, ["src/generated"]);
+    // Without any path field, a Task keeps no scope at all.
+    store
+        .put_tag("plain", "Base", vec!["files:write".into()])
+        .await
+        .unwrap();
+    let task = store
+        .submit_task(OP, &submit("plain", "plain-one"))
+        .await
+        .unwrap();
+    assert!(task.policy_snapshot.is_none_or(|snapshot| {
+        snapshot
+            .runtime_authority
+            .is_none_or(|authority| authority.files.is_none())
+    }));
+    // Invalid entries are refused with a reason.
+    for (index, (action, fields, needle)) in [
+        (
+            "commands:execute",
+            (&["src/"][..], &[][..], &[][..]),
+            "takes no paths",
+        ),
+        (
+            "files:delegate-write",
+            (&[], &["src/"], &[]),
+            "takes no paths",
+        ),
+        (
+            "files:read",
+            (&["src/"], &[], &[]),
+            "files:read takes no paths",
+        ),
+        ("files:write", (&["src/*.rs"], &[], &[]), "is a glob"),
+        ("files:write", (&["../up"], &[], &[]), ". or .."),
+        (
+            "files:write",
+            (&[".git/hooks"], &[], &[]),
+            "stays read-only",
+        ),
+        ("files:write", (&[".claude/"], &[], &[]), "stays read-only"),
+        (
+            "files:write",
+            (&["~/x"], &[], &[]),
+            "only in additionalDirectories",
+        ),
+        ("files:write", (&[], &[], &["~"]), "whole home"),
+        ("files:write", (&[], &[], &["/"]), "whole filesystem"),
+        ("files:write", (&[], &[], &["~/.supertag/x"]), "overlaps"),
+        ("files:read", (&[], &[], &["~/.codex"]), "overlaps"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let request = scoped(&format!("bad-scope-{index}"), action, fields);
+        match store.put_permission_set(OP, &request).await {
+            Err(StoreError::InvalidArgument(reason)) => {
+                assert!(reason.contains(needle), "{action} {fields:?}: {reason}")
+            }
+            other => panic!("{action} {fields:?} was not refused: {other:?}"),
+        }
+    }
+    // A path field on a surface or MCP grant is refused too.
+    let mut surface = scoped("bad-surface-scope", "post", (&["src/"], &[], &[]));
+    let grant = &mut surface.permission_set.as_mut().unwrap().permissions[0];
+    grant.target = PolicyPermissionTarget::Surface as i32;
+    grant.surface_account_id = "slack".into();
+    grant.scope = "channel".into();
+    assert!(matches!(
+        store.put_permission_set(OP, &surface).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
 }
 
 async fn previous_schema(url: &str) {

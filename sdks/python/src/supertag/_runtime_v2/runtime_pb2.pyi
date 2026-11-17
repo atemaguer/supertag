@@ -1644,20 +1644,22 @@ class RemoteWorkspaceOwner(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., host_generation: _Optional[int] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., allocation_id: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceAllocateRequest(_message.Message):
-    __slots__ = ("owner", "timeout_ms", "allowed_actions", "environment", "prepared_artifact", "prepare")
+    __slots__ = ("owner", "timeout_ms", "allowed_actions", "environment", "prepared_artifact", "prepare", "file_scope")
     OWNER_FIELD_NUMBER: _ClassVar[int]
     TIMEOUT_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
     PREPARED_ARTIFACT_FIELD_NUMBER: _ClassVar[int]
     PREPARE_FIELD_NUMBER: _ClassVar[int]
+    FILE_SCOPE_FIELD_NUMBER: _ClassVar[int]
     owner: RemoteWorkspaceOwner
     timeout_ms: int
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
     environment: RemoteWorkspaceEnvironment
     prepared_artifact: str
     prepare: bool
-    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., environment: _Optional[_Union[RemoteWorkspaceEnvironment, _Mapping]] = ..., prepared_artifact: _Optional[str] = ..., prepare: _Optional[bool] = ...) -> None: ...
+    file_scope: _policy_pb2.FileScope
+    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., environment: _Optional[_Union[RemoteWorkspaceEnvironment, _Mapping]] = ..., prepared_artifact: _Optional[str] = ..., prepare: _Optional[bool] = ..., file_scope: _Optional[_Union[_policy_pb2.FileScope, _Mapping]] = ...) -> None: ...
 
 class RemoteWorkspaceEnvironment(_message.Message):
     __slots__ = ("image", "dockerfile_commands", "user", "setup_commands")

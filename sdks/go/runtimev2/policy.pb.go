@@ -1681,8 +1681,18 @@ type PolicyPermission struct {
 	Reference        string                 `protobuf:"bytes,6,opt,name=reference,proto3" json:"reference,omitempty"`
 	Resource         string                 `protobuf:"bytes,7,opt,name=resource,proto3" json:"resource,omitempty"`
 	ApprovalRequired bool                   `protobuf:"varint,8,opt,name=approval_required,json=approvalRequired,proto3" json:"approval_required,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Path scopes, on runtime files:write and files:read only. Workspace-relative directories or
+	// exact paths. On files:write, the only Workspace paths it may write; empty means the whole
+	// Workspace. files:read takes none: reads cover the whole Workspace minus `exclude`.
+	Paths []string `protobuf:"bytes,9,rep,name=paths,proto3" json:"paths,omitempty"`
+	// Workspace-relative paths never written (files:write: they stay readable) or never read or
+	// written (files:read, where `*`, `**` and `?` globs are allowed). Excludes win over `paths`.
+	Exclude []string `protobuf:"bytes,10,rep,name=exclude,proto3" json:"exclude,omitempty"`
+	// Directories outside the Workspace, absolute or starting with `~/`: writable on
+	// files:write, readable on files:read.
+	AdditionalDirectories []string `protobuf:"bytes,11,rep,name=additional_directories,json=additionalDirectories,proto3" json:"additional_directories,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *PolicyPermission) Reset() {
@@ -1769,6 +1779,27 @@ func (x *PolicyPermission) GetApprovalRequired() bool {
 		return x.ApprovalRequired
 	}
 	return false
+}
+
+func (x *PolicyPermission) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+func (x *PolicyPermission) GetExclude() []string {
+	if x != nil {
+		return x.Exclude
+	}
+	return nil
+}
+
+func (x *PolicyPermission) GetAdditionalDirectories() []string {
+	if x != nil {
+		return x.AdditionalDirectories
+	}
+	return nil
 }
 
 type PermissionSet struct {
@@ -2476,8 +2507,11 @@ type TaskRuntimeAuthority struct {
 	ObjectiveId       *string                       `protobuf:"bytes,3,opt,name=objective_id,json=objectiveId,proto3,oneof" json:"objective_id,omitempty"`
 	ObjectiveRevision *uint64                       `protobuf:"varint,4,opt,name=objective_revision,json=objectiveRevision,proto3,oneof" json:"objective_revision,omitempty"`
 	DelegatingTaskId  *string                       `protobuf:"bytes,5,opt,name=delegating_task_id,json=delegatingTaskId,proto3,oneof" json:"delegating_task_id,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The path scope composed from the accepted Permission Sets. Absent: no restriction beyond
+	// the accepted actions.
+	Files         *FileScope `protobuf:"bytes,6,opt,name=files,proto3" json:"files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskRuntimeAuthority) Reset() {
@@ -2545,6 +2579,97 @@ func (x *TaskRuntimeAuthority) GetDelegatingTaskId() string {
 	return ""
 }
 
+func (x *TaskRuntimeAuthority) GetFiles() *FileScope {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+// A Task's file scope, composed when it is accepted. Workspace entries are relative to the
+// Workspace root and match the path after symlinks resolve. Precedence: hidden beats read-only
+// beats write.
+type FileScope struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Workspace directories or exact paths the Task may write. Empty: the whole Workspace.
+	Write []string `protobuf:"bytes,1,rep,name=write,proto3" json:"write,omitempty"`
+	// Workspace directories or exact paths that stay readable but are never written.
+	ReadOnly []string `protobuf:"bytes,2,rep,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
+	// Workspace paths or `*`, `**`, `?` globs that are neither read nor written.
+	Hidden []string `protobuf:"bytes,3,rep,name=hidden,proto3" json:"hidden,omitempty"`
+	// Directories outside the Workspace, `~/` or absolute and unexpanded, that are writable.
+	OutsideWrite []string `protobuf:"bytes,4,rep,name=outside_write,json=outsideWrite,proto3" json:"outside_write,omitempty"`
+	// Directories outside the Workspace that are readable.
+	OutsideRead   []string `protobuf:"bytes,5,rep,name=outside_read,json=outsideRead,proto3" json:"outside_read,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileScope) Reset() {
+	*x = FileScope{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileScope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileScope) ProtoMessage() {}
+
+func (x *FileScope) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileScope.ProtoReflect.Descriptor instead.
+func (*FileScope) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *FileScope) GetWrite() []string {
+	if x != nil {
+		return x.Write
+	}
+	return nil
+}
+
+func (x *FileScope) GetReadOnly() []string {
+	if x != nil {
+		return x.ReadOnly
+	}
+	return nil
+}
+
+func (x *FileScope) GetHidden() []string {
+	if x != nil {
+		return x.Hidden
+	}
+	return nil
+}
+
+func (x *FileScope) GetOutsideWrite() []string {
+	if x != nil {
+		return x.OutsideWrite
+	}
+	return nil
+}
+
+func (x *FileScope) GetOutsideRead() []string {
+	if x != nil {
+		return x.OutsideRead
+	}
+	return nil
+}
+
 type PutPermissionSetRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
@@ -2556,7 +2681,7 @@ type PutPermissionSetRequest struct {
 
 func (x *PutPermissionSetRequest) Reset() {
 	*x = PutPermissionSetRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[35]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2568,7 +2693,7 @@ func (x *PutPermissionSetRequest) String() string {
 func (*PutPermissionSetRequest) ProtoMessage() {}
 
 func (x *PutPermissionSetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[35]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2581,7 +2706,7 @@ func (x *PutPermissionSetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutPermissionSetRequest.ProtoReflect.Descriptor instead.
 func (*PutPermissionSetRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{35}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *PutPermissionSetRequest) GetOperationId() string {
@@ -2616,7 +2741,7 @@ type PutContextSetRequest struct {
 
 func (x *PutContextSetRequest) Reset() {
 	*x = PutContextSetRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[36]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2628,7 +2753,7 @@ func (x *PutContextSetRequest) String() string {
 func (*PutContextSetRequest) ProtoMessage() {}
 
 func (x *PutContextSetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[36]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2641,7 +2766,7 @@ func (x *PutContextSetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutContextSetRequest.ProtoReflect.Descriptor instead.
 func (*PutContextSetRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{36}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *PutContextSetRequest) GetOperationId() string {
@@ -2676,7 +2801,7 @@ type PutRoleRequest struct {
 
 func (x *PutRoleRequest) Reset() {
 	*x = PutRoleRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[37]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2688,7 +2813,7 @@ func (x *PutRoleRequest) String() string {
 func (*PutRoleRequest) ProtoMessage() {}
 
 func (x *PutRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[37]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2701,7 +2826,7 @@ func (x *PutRoleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutRoleRequest.ProtoReflect.Descriptor instead.
 func (*PutRoleRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{37}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *PutRoleRequest) GetOperationId() string {
@@ -2734,7 +2859,7 @@ type GetPolicyResourceRequest struct {
 
 func (x *GetPolicyResourceRequest) Reset() {
 	*x = GetPolicyResourceRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[38]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2746,7 +2871,7 @@ func (x *GetPolicyResourceRequest) String() string {
 func (*GetPolicyResourceRequest) ProtoMessage() {}
 
 func (x *GetPolicyResourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[38]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2759,7 +2884,7 @@ func (x *GetPolicyResourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPolicyResourceRequest.ProtoReflect.Descriptor instead.
 func (*GetPolicyResourceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{38}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *GetPolicyResourceRequest) GetReference() string {
@@ -2779,7 +2904,7 @@ type ListPolicyResourcesRequest struct {
 
 func (x *ListPolicyResourcesRequest) Reset() {
 	*x = ListPolicyResourcesRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[39]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2791,7 +2916,7 @@ func (x *ListPolicyResourcesRequest) String() string {
 func (*ListPolicyResourcesRequest) ProtoMessage() {}
 
 func (x *ListPolicyResourcesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[39]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2804,7 +2929,7 @@ func (x *ListPolicyResourcesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPolicyResourcesRequest.ProtoReflect.Descriptor instead.
 func (*ListPolicyResourcesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{39}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ListPolicyResourcesRequest) GetLimit() uint32 {
@@ -2831,7 +2956,7 @@ type ListPermissionSetsResponse struct {
 
 func (x *ListPermissionSetsResponse) Reset() {
 	*x = ListPermissionSetsResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[40]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2843,7 +2968,7 @@ func (x *ListPermissionSetsResponse) String() string {
 func (*ListPermissionSetsResponse) ProtoMessage() {}
 
 func (x *ListPermissionSetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[40]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2856,7 +2981,7 @@ func (x *ListPermissionSetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPermissionSetsResponse.ProtoReflect.Descriptor instead.
 func (*ListPermissionSetsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{40}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ListPermissionSetsResponse) GetPermissionSets() []*PermissionSet {
@@ -2883,7 +3008,7 @@ type ListContextSetsResponse struct {
 
 func (x *ListContextSetsResponse) Reset() {
 	*x = ListContextSetsResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[41]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2895,7 +3020,7 @@ func (x *ListContextSetsResponse) String() string {
 func (*ListContextSetsResponse) ProtoMessage() {}
 
 func (x *ListContextSetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[41]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2908,7 +3033,7 @@ func (x *ListContextSetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListContextSetsResponse.ProtoReflect.Descriptor instead.
 func (*ListContextSetsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{41}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ListContextSetsResponse) GetContextSets() []*ContextSet {
@@ -2935,7 +3060,7 @@ type ListRolesResponse struct {
 
 func (x *ListRolesResponse) Reset() {
 	*x = ListRolesResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[42]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2947,7 +3072,7 @@ func (x *ListRolesResponse) String() string {
 func (*ListRolesResponse) ProtoMessage() {}
 
 func (x *ListRolesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[42]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2960,7 +3085,7 @@ func (x *ListRolesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRolesResponse.ProtoReflect.Descriptor instead.
 func (*ListRolesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{42}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ListRolesResponse) GetRoles() []*Role {
@@ -2990,7 +3115,7 @@ type DeletePolicyResourceRequest struct {
 
 func (x *DeletePolicyResourceRequest) Reset() {
 	*x = DeletePolicyResourceRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[43]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3002,7 +3127,7 @@ func (x *DeletePolicyResourceRequest) String() string {
 func (*DeletePolicyResourceRequest) ProtoMessage() {}
 
 func (x *DeletePolicyResourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[43]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3015,7 +3140,7 @@ func (x *DeletePolicyResourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePolicyResourceRequest.ProtoReflect.Descriptor instead.
 func (*DeletePolicyResourceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{43}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *DeletePolicyResourceRequest) GetOperationId() string {
@@ -3055,7 +3180,7 @@ type DeletePolicyResourceResponse struct {
 
 func (x *DeletePolicyResourceResponse) Reset() {
 	*x = DeletePolicyResourceResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[44]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3067,7 +3192,7 @@ func (x *DeletePolicyResourceResponse) String() string {
 func (*DeletePolicyResourceResponse) ProtoMessage() {}
 
 func (x *DeletePolicyResourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[44]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3080,7 +3205,7 @@ func (x *DeletePolicyResourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePolicyResourceResponse.ProtoReflect.Descriptor instead.
 func (*DeletePolicyResourceResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{44}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *DeletePolicyResourceResponse) GetDeleted() bool {
@@ -3101,7 +3226,7 @@ type AssignRoleRequest struct {
 
 func (x *AssignRoleRequest) Reset() {
 	*x = AssignRoleRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[45]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3113,7 +3238,7 @@ func (x *AssignRoleRequest) String() string {
 func (*AssignRoleRequest) ProtoMessage() {}
 
 func (x *AssignRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[45]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3126,7 +3251,7 @@ func (x *AssignRoleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssignRoleRequest.ProtoReflect.Descriptor instead.
 func (*AssignRoleRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{45}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *AssignRoleRequest) GetOperationId() string {
@@ -3163,7 +3288,7 @@ type ListRoleAssignmentsRequest struct {
 
 func (x *ListRoleAssignmentsRequest) Reset() {
 	*x = ListRoleAssignmentsRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[46]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3175,7 +3300,7 @@ func (x *ListRoleAssignmentsRequest) String() string {
 func (*ListRoleAssignmentsRequest) ProtoMessage() {}
 
 func (x *ListRoleAssignmentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[46]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3188,7 +3313,7 @@ func (x *ListRoleAssignmentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRoleAssignmentsRequest.ProtoReflect.Descriptor instead.
 func (*ListRoleAssignmentsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{46}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ListRoleAssignmentsRequest) GetRole() string {
@@ -3236,7 +3361,7 @@ type ListRoleAssignmentsResponse struct {
 
 func (x *ListRoleAssignmentsResponse) Reset() {
 	*x = ListRoleAssignmentsResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[47]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3248,7 +3373,7 @@ func (x *ListRoleAssignmentsResponse) String() string {
 func (*ListRoleAssignmentsResponse) ProtoMessage() {}
 
 func (x *ListRoleAssignmentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[47]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3261,7 +3386,7 @@ func (x *ListRoleAssignmentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRoleAssignmentsResponse.ProtoReflect.Descriptor instead.
 func (*ListRoleAssignmentsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{47}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ListRoleAssignmentsResponse) GetAssignments() []*RoleAssignment {
@@ -3289,7 +3414,7 @@ type DeactivateRoleAssignmentRequest struct {
 
 func (x *DeactivateRoleAssignmentRequest) Reset() {
 	*x = DeactivateRoleAssignmentRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[48]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3301,7 +3426,7 @@ func (x *DeactivateRoleAssignmentRequest) String() string {
 func (*DeactivateRoleAssignmentRequest) ProtoMessage() {}
 
 func (x *DeactivateRoleAssignmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[48]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3314,7 +3439,7 @@ func (x *DeactivateRoleAssignmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeactivateRoleAssignmentRequest.ProtoReflect.Descriptor instead.
 func (*DeactivateRoleAssignmentRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{48}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *DeactivateRoleAssignmentRequest) GetOperationId() string {
@@ -3348,7 +3473,7 @@ type PolicyArtifactContextSnapshot struct {
 
 func (x *PolicyArtifactContextSnapshot) Reset() {
 	*x = PolicyArtifactContextSnapshot{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[49]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3360,7 +3485,7 @@ func (x *PolicyArtifactContextSnapshot) String() string {
 func (*PolicyArtifactContextSnapshot) ProtoMessage() {}
 
 func (x *PolicyArtifactContextSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[49]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3373,7 +3498,7 @@ func (x *PolicyArtifactContextSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyArtifactContextSnapshot.ProtoReflect.Descriptor instead.
 func (*PolicyArtifactContextSnapshot) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{49}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *PolicyArtifactContextSnapshot) GetSource() *SurfacePolicyOrigin {
@@ -3410,7 +3535,7 @@ type PolicyArtifactContextEntry struct {
 
 func (x *PolicyArtifactContextEntry) Reset() {
 	*x = PolicyArtifactContextEntry{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[50]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3422,7 +3547,7 @@ func (x *PolicyArtifactContextEntry) String() string {
 func (*PolicyArtifactContextEntry) ProtoMessage() {}
 
 func (x *PolicyArtifactContextEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[50]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3435,7 +3560,7 @@ func (x *PolicyArtifactContextEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyArtifactContextEntry.ProtoReflect.Descriptor instead.
 func (*PolicyArtifactContextEntry) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{50}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *PolicyArtifactContextEntry) GetArtifactId() string {
@@ -3635,7 +3760,7 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\vlocation_id\x18\x02 \x01(\tR\n" +
 	"locationId\x12+\n" +
 	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\x12\x17\n" +
-	"\adry_run\x18\x04 \x01(\bR\x06dryRun\"\xbf\x02\n" +
+	"\adry_run\x18\x04 \x01(\bR\x06dryRun\"\xa6\x03\n" +
 	"\x10PolicyPermission\x12#\n" +
 	"\rpermission_id\x18\x01 \x01(\tR\fpermissionId\x12C\n" +
 	"\x06target\x18\x02 \x01(\x0e2+.supertag.runtime.v2.PolicyPermissionTargetR\x06target\x12\x16\n" +
@@ -3644,7 +3769,11 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\x05scope\x18\x05 \x01(\tR\x05scope\x12\x1c\n" +
 	"\treference\x18\x06 \x01(\tR\treference\x12\x1a\n" +
 	"\bresource\x18\a \x01(\tR\bresource\x12+\n" +
-	"\x11approval_required\x18\b \x01(\bR\x10approvalRequired\"\xbd\x01\n" +
+	"\x11approval_required\x18\b \x01(\bR\x10approvalRequired\x12\x14\n" +
+	"\x05paths\x18\t \x03(\tR\x05paths\x12\x18\n" +
+	"\aexclude\x18\n" +
+	" \x03(\tR\aexclude\x125\n" +
+	"\x16additional_directories\x18\v \x03(\tR\x15additionalDirectories\"\xbd\x01\n" +
 	"\rPermissionSet\x12\x15\n" +
 	"\x06set_id\x18\x01 \x01(\tR\x05setId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -3706,16 +3835,23 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\x1aRuntimeApprovalRequirement\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12,\n" +
 	"\x12permission_set_ids\x18\x02 \x03(\tR\x10permissionSetIds\x12\x1c\n" +
-	"\tapprovers\x18\x03 \x03(\tR\tapprovers\"\xcd\x02\n" +
+	"\tapprovers\x18\x03 \x03(\tR\tapprovers\"\x83\x03\n" +
 	"\x14TaskRuntimeAuthority\x12\x18\n" +
 	"\aactions\x18\x01 \x03(\tR\aactions\x12M\n" +
 	"\tapprovals\x18\x02 \x03(\v2/.supertag.runtime.v2.RuntimeApprovalRequirementR\tapprovals\x12&\n" +
 	"\fobjective_id\x18\x03 \x01(\tH\x00R\vobjectiveId\x88\x01\x01\x122\n" +
 	"\x12objective_revision\x18\x04 \x01(\x04H\x01R\x11objectiveRevision\x88\x01\x01\x121\n" +
-	"\x12delegating_task_id\x18\x05 \x01(\tH\x02R\x10delegatingTaskId\x88\x01\x01B\x0f\n" +
+	"\x12delegating_task_id\x18\x05 \x01(\tH\x02R\x10delegatingTaskId\x88\x01\x01\x124\n" +
+	"\x05files\x18\x06 \x01(\v2\x1e.supertag.runtime.v2.FileScopeR\x05filesB\x0f\n" +
 	"\r_objective_idB\x15\n" +
 	"\x13_objective_revisionB\x15\n" +
-	"\x13_delegating_task_id\"\xcf\x01\n" +
+	"\x13_delegating_task_id\"\x9e\x01\n" +
+	"\tFileScope\x12\x14\n" +
+	"\x05write\x18\x01 \x03(\tR\x05write\x12\x1b\n" +
+	"\tread_only\x18\x02 \x03(\tR\breadOnly\x12\x16\n" +
+	"\x06hidden\x18\x03 \x03(\tR\x06hidden\x12#\n" +
+	"\routside_write\x18\x04 \x03(\tR\foutsideWrite\x12!\n" +
+	"\foutside_read\x18\x05 \x03(\tR\voutsideRead\"\xcf\x01\n" +
 	"\x17PutPermissionSetRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12I\n" +
 	"\x0epermission_set\x18\x02 \x01(\v2\".supertag.runtime.v2.PermissionSetR\rpermissionSet\x120\n" +
@@ -3851,7 +3987,7 @@ func file_supertag_runtime_v2_policy_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_policy_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_supertag_runtime_v2_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
+var file_supertag_runtime_v2_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
 var file_supertag_runtime_v2_policy_proto_goTypes = []any{
 	(PolicyPermissionTarget)(0),             // 0: supertag.runtime.v2.PolicyPermissionTarget
 	(RoleStatus)(0),                         // 1: supertag.runtime.v2.RoleStatus
@@ -3891,22 +4027,23 @@ var file_supertag_runtime_v2_policy_proto_goTypes = []any{
 	(*TaskPolicySnapshot)(nil),              // 35: supertag.runtime.v2.TaskPolicySnapshot
 	(*RuntimeApprovalRequirement)(nil),      // 36: supertag.runtime.v2.RuntimeApprovalRequirement
 	(*TaskRuntimeAuthority)(nil),            // 37: supertag.runtime.v2.TaskRuntimeAuthority
-	(*PutPermissionSetRequest)(nil),         // 38: supertag.runtime.v2.PutPermissionSetRequest
-	(*PutContextSetRequest)(nil),            // 39: supertag.runtime.v2.PutContextSetRequest
-	(*PutRoleRequest)(nil),                  // 40: supertag.runtime.v2.PutRoleRequest
-	(*GetPolicyResourceRequest)(nil),        // 41: supertag.runtime.v2.GetPolicyResourceRequest
-	(*ListPolicyResourcesRequest)(nil),      // 42: supertag.runtime.v2.ListPolicyResourcesRequest
-	(*ListPermissionSetsResponse)(nil),      // 43: supertag.runtime.v2.ListPermissionSetsResponse
-	(*ListContextSetsResponse)(nil),         // 44: supertag.runtime.v2.ListContextSetsResponse
-	(*ListRolesResponse)(nil),               // 45: supertag.runtime.v2.ListRolesResponse
-	(*DeletePolicyResourceRequest)(nil),     // 46: supertag.runtime.v2.DeletePolicyResourceRequest
-	(*DeletePolicyResourceResponse)(nil),    // 47: supertag.runtime.v2.DeletePolicyResourceResponse
-	(*AssignRoleRequest)(nil),               // 48: supertag.runtime.v2.AssignRoleRequest
-	(*ListRoleAssignmentsRequest)(nil),      // 49: supertag.runtime.v2.ListRoleAssignmentsRequest
-	(*ListRoleAssignmentsResponse)(nil),     // 50: supertag.runtime.v2.ListRoleAssignmentsResponse
-	(*DeactivateRoleAssignmentRequest)(nil), // 51: supertag.runtime.v2.DeactivateRoleAssignmentRequest
-	(*PolicyArtifactContextSnapshot)(nil),   // 52: supertag.runtime.v2.PolicyArtifactContextSnapshot
-	(*PolicyArtifactContextEntry)(nil),      // 53: supertag.runtime.v2.PolicyArtifactContextEntry
+	(*FileScope)(nil),                       // 38: supertag.runtime.v2.FileScope
+	(*PutPermissionSetRequest)(nil),         // 39: supertag.runtime.v2.PutPermissionSetRequest
+	(*PutContextSetRequest)(nil),            // 40: supertag.runtime.v2.PutContextSetRequest
+	(*PutRoleRequest)(nil),                  // 41: supertag.runtime.v2.PutRoleRequest
+	(*GetPolicyResourceRequest)(nil),        // 42: supertag.runtime.v2.GetPolicyResourceRequest
+	(*ListPolicyResourcesRequest)(nil),      // 43: supertag.runtime.v2.ListPolicyResourcesRequest
+	(*ListPermissionSetsResponse)(nil),      // 44: supertag.runtime.v2.ListPermissionSetsResponse
+	(*ListContextSetsResponse)(nil),         // 45: supertag.runtime.v2.ListContextSetsResponse
+	(*ListRolesResponse)(nil),               // 46: supertag.runtime.v2.ListRolesResponse
+	(*DeletePolicyResourceRequest)(nil),     // 47: supertag.runtime.v2.DeletePolicyResourceRequest
+	(*DeletePolicyResourceResponse)(nil),    // 48: supertag.runtime.v2.DeletePolicyResourceResponse
+	(*AssignRoleRequest)(nil),               // 49: supertag.runtime.v2.AssignRoleRequest
+	(*ListRoleAssignmentsRequest)(nil),      // 50: supertag.runtime.v2.ListRoleAssignmentsRequest
+	(*ListRoleAssignmentsResponse)(nil),     // 51: supertag.runtime.v2.ListRoleAssignmentsResponse
+	(*DeactivateRoleAssignmentRequest)(nil), // 52: supertag.runtime.v2.DeactivateRoleAssignmentRequest
+	(*PolicyArtifactContextSnapshot)(nil),   // 53: supertag.runtime.v2.PolicyArtifactContextSnapshot
+	(*PolicyArtifactContextEntry)(nil),      // 54: supertag.runtime.v2.PolicyArtifactContextEntry
 }
 var file_supertag_runtime_v2_policy_proto_depIdxs = []int32{
 	3,  // 0: supertag.runtime.v2.SurfaceAccountIdentity.slack:type_name -> supertag.runtime.v2.SlackSurfaceIdentity
@@ -3928,7 +4065,7 @@ var file_supertag_runtime_v2_policy_proto_depIdxs = []int32{
 	16, // 16: supertag.runtime.v2.ListSurfaceLocationsResponse.locations:type_name -> supertag.runtime.v2.SurfaceLocation
 	0,  // 17: supertag.runtime.v2.PolicyPermission.target:type_name -> supertag.runtime.v2.PolicyPermissionTarget
 	27, // 18: supertag.runtime.v2.PermissionSet.permissions:type_name -> supertag.runtime.v2.PolicyPermission
-	52, // 19: supertag.runtime.v2.PolicyContextItem.artifact_snapshot:type_name -> supertag.runtime.v2.PolicyArtifactContextSnapshot
+	53, // 19: supertag.runtime.v2.PolicyContextItem.artifact_snapshot:type_name -> supertag.runtime.v2.PolicyArtifactContextSnapshot
 	29, // 20: supertag.runtime.v2.ContextSet.items:type_name -> supertag.runtime.v2.PolicyContextItem
 	1,  // 21: supertag.runtime.v2.Role.status:type_name -> supertag.runtime.v2.RoleStatus
 	31, // 22: supertag.runtime.v2.Role.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
@@ -3942,63 +4079,64 @@ var file_supertag_runtime_v2_policy_proto_depIdxs = []int32{
 	17, // 30: supertag.runtime.v2.TaskPolicySnapshot.origin:type_name -> supertag.runtime.v2.SurfacePolicyOrigin
 	37, // 31: supertag.runtime.v2.TaskPolicySnapshot.runtime_authority:type_name -> supertag.runtime.v2.TaskRuntimeAuthority
 	36, // 32: supertag.runtime.v2.TaskRuntimeAuthority.approvals:type_name -> supertag.runtime.v2.RuntimeApprovalRequirement
-	28, // 33: supertag.runtime.v2.PutPermissionSetRequest.permission_set:type_name -> supertag.runtime.v2.PermissionSet
-	30, // 34: supertag.runtime.v2.PutContextSetRequest.context_set:type_name -> supertag.runtime.v2.ContextSet
-	32, // 35: supertag.runtime.v2.PutRoleRequest.role:type_name -> supertag.runtime.v2.Role
-	28, // 36: supertag.runtime.v2.ListPermissionSetsResponse.permission_sets:type_name -> supertag.runtime.v2.PermissionSet
-	30, // 37: supertag.runtime.v2.ListContextSetsResponse.context_sets:type_name -> supertag.runtime.v2.ContextSet
-	32, // 38: supertag.runtime.v2.ListRolesResponse.roles:type_name -> supertag.runtime.v2.Role
-	2,  // 39: supertag.runtime.v2.ListRoleAssignmentsRequest.status:type_name -> supertag.runtime.v2.RoleAssignmentStatus
-	33, // 40: supertag.runtime.v2.ListRoleAssignmentsResponse.assignments:type_name -> supertag.runtime.v2.RoleAssignment
-	17, // 41: supertag.runtime.v2.PolicyArtifactContextSnapshot.source:type_name -> supertag.runtime.v2.SurfacePolicyOrigin
-	53, // 42: supertag.runtime.v2.PolicyArtifactContextSnapshot.artifacts:type_name -> supertag.runtime.v2.PolicyArtifactContextEntry
-	38, // 43: supertag.runtime.v2.PolicyCatalog.PutPermissionSet:input_type -> supertag.runtime.v2.PutPermissionSetRequest
-	41, // 44: supertag.runtime.v2.PolicyCatalog.GetPermissionSet:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
-	42, // 45: supertag.runtime.v2.PolicyCatalog.ListPermissionSets:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
-	46, // 46: supertag.runtime.v2.PolicyCatalog.DeletePermissionSet:input_type -> supertag.runtime.v2.DeletePolicyResourceRequest
-	39, // 47: supertag.runtime.v2.PolicyCatalog.PutContextSet:input_type -> supertag.runtime.v2.PutContextSetRequest
-	41, // 48: supertag.runtime.v2.PolicyCatalog.GetContextSet:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
-	42, // 49: supertag.runtime.v2.PolicyCatalog.ListContextSets:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
-	46, // 50: supertag.runtime.v2.PolicyCatalog.DeleteContextSet:input_type -> supertag.runtime.v2.DeletePolicyResourceRequest
-	40, // 51: supertag.runtime.v2.PolicyCatalog.PutRole:input_type -> supertag.runtime.v2.PutRoleRequest
-	41, // 52: supertag.runtime.v2.PolicyCatalog.GetRole:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
-	42, // 53: supertag.runtime.v2.PolicyCatalog.ListRoles:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
-	48, // 54: supertag.runtime.v2.PolicyCatalog.AssignRole:input_type -> supertag.runtime.v2.AssignRoleRequest
-	49, // 55: supertag.runtime.v2.PolicyCatalog.ListRoleAssignments:input_type -> supertag.runtime.v2.ListRoleAssignmentsRequest
-	51, // 56: supertag.runtime.v2.PolicyCatalog.DeactivateRoleAssignment:input_type -> supertag.runtime.v2.DeactivateRoleAssignmentRequest
-	18, // 57: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceAccount:input_type -> supertag.runtime.v2.PutSurfaceAccountRequest
-	19, // 58: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceAccount:input_type -> supertag.runtime.v2.GetSurfaceAccountRequest
-	20, // 59: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceAccounts:input_type -> supertag.runtime.v2.ListSurfaceAccountsRequest
-	22, // 60: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceLocation:input_type -> supertag.runtime.v2.PutSurfaceLocationRequest
-	23, // 61: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceLocation:input_type -> supertag.runtime.v2.GetSurfaceLocationRequest
-	24, // 62: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceLocations:input_type -> supertag.runtime.v2.ListSurfaceLocationsRequest
-	26, // 63: supertag.runtime.v2.SurfacePolicyCatalog.DeleteSurfaceLocation:input_type -> supertag.runtime.v2.DeleteSurfaceLocationRequest
-	28, // 64: supertag.runtime.v2.PolicyCatalog.PutPermissionSet:output_type -> supertag.runtime.v2.PermissionSet
-	28, // 65: supertag.runtime.v2.PolicyCatalog.GetPermissionSet:output_type -> supertag.runtime.v2.PermissionSet
-	43, // 66: supertag.runtime.v2.PolicyCatalog.ListPermissionSets:output_type -> supertag.runtime.v2.ListPermissionSetsResponse
-	47, // 67: supertag.runtime.v2.PolicyCatalog.DeletePermissionSet:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
-	30, // 68: supertag.runtime.v2.PolicyCatalog.PutContextSet:output_type -> supertag.runtime.v2.ContextSet
-	30, // 69: supertag.runtime.v2.PolicyCatalog.GetContextSet:output_type -> supertag.runtime.v2.ContextSet
-	44, // 70: supertag.runtime.v2.PolicyCatalog.ListContextSets:output_type -> supertag.runtime.v2.ListContextSetsResponse
-	47, // 71: supertag.runtime.v2.PolicyCatalog.DeleteContextSet:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
-	32, // 72: supertag.runtime.v2.PolicyCatalog.PutRole:output_type -> supertag.runtime.v2.Role
-	32, // 73: supertag.runtime.v2.PolicyCatalog.GetRole:output_type -> supertag.runtime.v2.Role
-	45, // 74: supertag.runtime.v2.PolicyCatalog.ListRoles:output_type -> supertag.runtime.v2.ListRolesResponse
-	33, // 75: supertag.runtime.v2.PolicyCatalog.AssignRole:output_type -> supertag.runtime.v2.RoleAssignment
-	50, // 76: supertag.runtime.v2.PolicyCatalog.ListRoleAssignments:output_type -> supertag.runtime.v2.ListRoleAssignmentsResponse
-	33, // 77: supertag.runtime.v2.PolicyCatalog.DeactivateRoleAssignment:output_type -> supertag.runtime.v2.RoleAssignment
-	9,  // 78: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceAccount:output_type -> supertag.runtime.v2.SurfaceAccount
-	9,  // 79: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceAccount:output_type -> supertag.runtime.v2.SurfaceAccount
-	21, // 80: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceAccounts:output_type -> supertag.runtime.v2.ListSurfaceAccountsResponse
-	16, // 81: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceLocation:output_type -> supertag.runtime.v2.SurfaceLocation
-	16, // 82: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceLocation:output_type -> supertag.runtime.v2.SurfaceLocation
-	25, // 83: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceLocations:output_type -> supertag.runtime.v2.ListSurfaceLocationsResponse
-	47, // 84: supertag.runtime.v2.SurfacePolicyCatalog.DeleteSurfaceLocation:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
-	64, // [64:85] is the sub-list for method output_type
-	43, // [43:64] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	38, // 33: supertag.runtime.v2.TaskRuntimeAuthority.files:type_name -> supertag.runtime.v2.FileScope
+	28, // 34: supertag.runtime.v2.PutPermissionSetRequest.permission_set:type_name -> supertag.runtime.v2.PermissionSet
+	30, // 35: supertag.runtime.v2.PutContextSetRequest.context_set:type_name -> supertag.runtime.v2.ContextSet
+	32, // 36: supertag.runtime.v2.PutRoleRequest.role:type_name -> supertag.runtime.v2.Role
+	28, // 37: supertag.runtime.v2.ListPermissionSetsResponse.permission_sets:type_name -> supertag.runtime.v2.PermissionSet
+	30, // 38: supertag.runtime.v2.ListContextSetsResponse.context_sets:type_name -> supertag.runtime.v2.ContextSet
+	32, // 39: supertag.runtime.v2.ListRolesResponse.roles:type_name -> supertag.runtime.v2.Role
+	2,  // 40: supertag.runtime.v2.ListRoleAssignmentsRequest.status:type_name -> supertag.runtime.v2.RoleAssignmentStatus
+	33, // 41: supertag.runtime.v2.ListRoleAssignmentsResponse.assignments:type_name -> supertag.runtime.v2.RoleAssignment
+	17, // 42: supertag.runtime.v2.PolicyArtifactContextSnapshot.source:type_name -> supertag.runtime.v2.SurfacePolicyOrigin
+	54, // 43: supertag.runtime.v2.PolicyArtifactContextSnapshot.artifacts:type_name -> supertag.runtime.v2.PolicyArtifactContextEntry
+	39, // 44: supertag.runtime.v2.PolicyCatalog.PutPermissionSet:input_type -> supertag.runtime.v2.PutPermissionSetRequest
+	42, // 45: supertag.runtime.v2.PolicyCatalog.GetPermissionSet:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
+	43, // 46: supertag.runtime.v2.PolicyCatalog.ListPermissionSets:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
+	47, // 47: supertag.runtime.v2.PolicyCatalog.DeletePermissionSet:input_type -> supertag.runtime.v2.DeletePolicyResourceRequest
+	40, // 48: supertag.runtime.v2.PolicyCatalog.PutContextSet:input_type -> supertag.runtime.v2.PutContextSetRequest
+	42, // 49: supertag.runtime.v2.PolicyCatalog.GetContextSet:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
+	43, // 50: supertag.runtime.v2.PolicyCatalog.ListContextSets:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
+	47, // 51: supertag.runtime.v2.PolicyCatalog.DeleteContextSet:input_type -> supertag.runtime.v2.DeletePolicyResourceRequest
+	41, // 52: supertag.runtime.v2.PolicyCatalog.PutRole:input_type -> supertag.runtime.v2.PutRoleRequest
+	42, // 53: supertag.runtime.v2.PolicyCatalog.GetRole:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
+	43, // 54: supertag.runtime.v2.PolicyCatalog.ListRoles:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
+	49, // 55: supertag.runtime.v2.PolicyCatalog.AssignRole:input_type -> supertag.runtime.v2.AssignRoleRequest
+	50, // 56: supertag.runtime.v2.PolicyCatalog.ListRoleAssignments:input_type -> supertag.runtime.v2.ListRoleAssignmentsRequest
+	52, // 57: supertag.runtime.v2.PolicyCatalog.DeactivateRoleAssignment:input_type -> supertag.runtime.v2.DeactivateRoleAssignmentRequest
+	18, // 58: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceAccount:input_type -> supertag.runtime.v2.PutSurfaceAccountRequest
+	19, // 59: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceAccount:input_type -> supertag.runtime.v2.GetSurfaceAccountRequest
+	20, // 60: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceAccounts:input_type -> supertag.runtime.v2.ListSurfaceAccountsRequest
+	22, // 61: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceLocation:input_type -> supertag.runtime.v2.PutSurfaceLocationRequest
+	23, // 62: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceLocation:input_type -> supertag.runtime.v2.GetSurfaceLocationRequest
+	24, // 63: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceLocations:input_type -> supertag.runtime.v2.ListSurfaceLocationsRequest
+	26, // 64: supertag.runtime.v2.SurfacePolicyCatalog.DeleteSurfaceLocation:input_type -> supertag.runtime.v2.DeleteSurfaceLocationRequest
+	28, // 65: supertag.runtime.v2.PolicyCatalog.PutPermissionSet:output_type -> supertag.runtime.v2.PermissionSet
+	28, // 66: supertag.runtime.v2.PolicyCatalog.GetPermissionSet:output_type -> supertag.runtime.v2.PermissionSet
+	44, // 67: supertag.runtime.v2.PolicyCatalog.ListPermissionSets:output_type -> supertag.runtime.v2.ListPermissionSetsResponse
+	48, // 68: supertag.runtime.v2.PolicyCatalog.DeletePermissionSet:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
+	30, // 69: supertag.runtime.v2.PolicyCatalog.PutContextSet:output_type -> supertag.runtime.v2.ContextSet
+	30, // 70: supertag.runtime.v2.PolicyCatalog.GetContextSet:output_type -> supertag.runtime.v2.ContextSet
+	45, // 71: supertag.runtime.v2.PolicyCatalog.ListContextSets:output_type -> supertag.runtime.v2.ListContextSetsResponse
+	48, // 72: supertag.runtime.v2.PolicyCatalog.DeleteContextSet:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
+	32, // 73: supertag.runtime.v2.PolicyCatalog.PutRole:output_type -> supertag.runtime.v2.Role
+	32, // 74: supertag.runtime.v2.PolicyCatalog.GetRole:output_type -> supertag.runtime.v2.Role
+	46, // 75: supertag.runtime.v2.PolicyCatalog.ListRoles:output_type -> supertag.runtime.v2.ListRolesResponse
+	33, // 76: supertag.runtime.v2.PolicyCatalog.AssignRole:output_type -> supertag.runtime.v2.RoleAssignment
+	51, // 77: supertag.runtime.v2.PolicyCatalog.ListRoleAssignments:output_type -> supertag.runtime.v2.ListRoleAssignmentsResponse
+	33, // 78: supertag.runtime.v2.PolicyCatalog.DeactivateRoleAssignment:output_type -> supertag.runtime.v2.RoleAssignment
+	9,  // 79: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceAccount:output_type -> supertag.runtime.v2.SurfaceAccount
+	9,  // 80: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceAccount:output_type -> supertag.runtime.v2.SurfaceAccount
+	21, // 81: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceAccounts:output_type -> supertag.runtime.v2.ListSurfaceAccountsResponse
+	16, // 82: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceLocation:output_type -> supertag.runtime.v2.SurfaceLocation
+	16, // 83: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceLocation:output_type -> supertag.runtime.v2.SurfaceLocation
+	25, // 84: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceLocations:output_type -> supertag.runtime.v2.ListSurfaceLocationsResponse
+	48, // 85: supertag.runtime.v2.SurfacePolicyCatalog.DeleteSurfaceLocation:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
+	65, // [65:86] is the sub-list for method output_type
+	44, // [44:65] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_policy_proto_init() }
@@ -4024,17 +4162,17 @@ func file_supertag_runtime_v2_policy_proto_init() {
 	file_supertag_runtime_v2_policy_proto_msgTypes[19].OneofWrappers = []any{}
 	file_supertag_runtime_v2_policy_proto_msgTypes[28].OneofWrappers = []any{}
 	file_supertag_runtime_v2_policy_proto_msgTypes[34].OneofWrappers = []any{}
-	file_supertag_runtime_v2_policy_proto_msgTypes[35].OneofWrappers = []any{}
 	file_supertag_runtime_v2_policy_proto_msgTypes[36].OneofWrappers = []any{}
 	file_supertag_runtime_v2_policy_proto_msgTypes[37].OneofWrappers = []any{}
-	file_supertag_runtime_v2_policy_proto_msgTypes[50].OneofWrappers = []any{}
+	file_supertag_runtime_v2_policy_proto_msgTypes[38].OneofWrappers = []any{}
+	file_supertag_runtime_v2_policy_proto_msgTypes[51].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_policy_proto_rawDesc), len(file_supertag_runtime_v2_policy_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   51,
+			NumMessages:   52,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
