@@ -646,9 +646,16 @@ async fn lark_websocket_replays_after_failed_admission_and_keeps_activated_threa
         .iter()
         .enumerate()
     {
-        let mut quick = payload(&format!("quick-{index}"), &format!("om_quick{index}"), false);
+        let mut quick = payload(
+            &format!("quick-{index}"),
+            &format!("om_quick{index}"),
+            false,
+        );
         quick["event"]["message"]["content"] = json!({ "text": text }).to_string().into();
-        assert_eq!(connection.event(&quick, &format!("quick-{index}")).await?, 200);
+        assert_eq!(
+            connection.event(&quick, &format!("quick-{index}")).await?,
+            200
+        );
     }
     let first = receipt(&private, &credentials, "quick-0", "om_quick0", false).await?;
     mock.responses.add_permits(1);

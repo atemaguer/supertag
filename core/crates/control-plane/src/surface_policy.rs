@@ -222,7 +222,7 @@ pub(crate) async fn admit_connector_task_in(
 /// A chat message's admission: its Task (`None` when the surface admits no new work) and whether
 /// that Task is a settled Control Plane answer, or the refusal to answer once in its thread.
 pub(crate) enum Admission {
-    Admitted(Option<Task>, bool),
+    Admitted(Box<Option<Task>>, bool),
     Refused(String),
 }
 
@@ -231,8 +231,8 @@ impl Admission {
         use crate::surface_objectives::Handled;
         match handled {
             Handled::Ordinary => None,
-            Handled::Work(task) => Some(Self::Admitted(task, false)),
-            Handled::Status(task) => Some(Self::Admitted(Some(task), true)),
+            Handled::Work(task) => Some(Self::Admitted(Box::new(task), false)),
+            Handled::Status(task) => Some(Self::Admitted(Box::new(Some(task)), true)),
             Handled::Refused(text) => Some(Self::Refused(text)),
         }
     }

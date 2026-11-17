@@ -509,7 +509,12 @@ async fn three_quick_messages_get_one_acknowledgement_and_one_reply(
     let mention = payload("EvQUICK1", THREAD, true, "check why CI is red");
     for message in [
         mention.clone(),
-        payload("EvQUICK2", "1794470000.200000", false, "also the flaky test"),
+        payload(
+            "EvQUICK2",
+            "1794470000.200000",
+            false,
+            "also the flaky test",
+        ),
         payload("EvQUICK3", "1794470000.300000", false, "and open a PR"),
     ] {
         assert_eq!(signed(&http, &message).await?, reqwest::StatusCode::OK);

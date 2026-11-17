@@ -631,7 +631,10 @@ async fn microsoft_signed_activity_and_threaded_reply_survive_split_process_rest
     assert_eq!(mock.tokens.load(Ordering::SeqCst), 2);
     // Three quick messages in the thread: one run answers them together with one reply.
     let quick = ["1741000000003", "1741000000004", "1741000000005"];
-    for (id, text) in quick.iter().zip(["check CI", "also the flaky test", "and open a PR"]) {
+    for (id, text) in quick
+        .iter()
+        .zip(["check CI", "also the flaky test", "and open a PR"])
+    {
         let mut message = payload(id);
         message["text"] = format!("<at>SuperTag</at> {text}").into();
         assert_eq!(signed(&web, &message, claims(), "rotated").await?, 200);
@@ -645,7 +648,9 @@ async fn microsoft_signed_activity_and_threaded_reply_survive_split_process_rest
     assert_eq!(requests.len(), 3, "one reply answers the three messages");
     let reply = requests[2].to_string();
     assert!(
-        reply.contains("check CI") && reply.contains("also the flaky test") && reply.contains("and open a PR"),
+        reply.contains("check CI")
+            && reply.contains("also the flaky test")
+            && reply.contains("and open a PR"),
         "{reply}"
     );
     drop(requests);

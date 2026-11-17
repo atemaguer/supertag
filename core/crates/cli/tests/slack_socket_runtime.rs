@@ -785,7 +785,11 @@ async fn socket_mode_acknowledges_admitted_events_and_reconnects(database: Strin
             .filter(|text| text.starts_with("Original Tag"))
             .collect();
         assert_eq!(finals.len(), 1, "{texts:?}");
-        for message in ["Continue with option A", "Verify the result", "and open a PR"] {
+        for message in [
+            "Continue with option A",
+            "Verify the result",
+            "and open a PR",
+        ] {
             assert!(finals[0].contains(message), "{texts:?}");
         }
         // Everything else is the one acknowledgement, posted once and edited in place.

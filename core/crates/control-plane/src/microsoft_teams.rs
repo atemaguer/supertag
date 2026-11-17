@@ -132,7 +132,7 @@ impl Store {
         };
         let audit_call = crate::surface_objectives::audit_call_id(account, &event);
         let (task, answered) = match admitted {
-            Admission::Admitted(task, answered) => (task, answered),
+            Admission::Admitted(task, answered) => (*task, answered),
             Admission::Refused(text) => {
                 if route.is_none() {
                     insert_route(&mut tx, account, input).await?;
@@ -290,7 +290,9 @@ async fn admit(
     Ok(match Admission::from_handled(handled) {
         Some(admission) => admission,
         None => Admission::Admitted(
-            admit_connector_task_in(tx, order, origin, session, &input.prompt, now_ms).await?,
+            Box::new(
+                admit_connector_task_in(tx, order, origin, session, &input.prompt, now_ms).await?,
+            ),
             false,
         ),
     })
