@@ -36,7 +36,10 @@ fn ignores_unmentioned_bots_and_unconfigured_routes() {
         ("/from/role", json!("bot")),
         ("/from/aadObjectId", json!(APP)),
         // A person in the tenant who is not on allowed-users is never admitted.
-        ("/from/aadObjectId", json!("66666666-6666-4666-8666-666666666666")),
+        (
+            "/from/aadObjectId",
+            json!("66666666-6666-4666-8666-666666666666"),
+        ),
         ("/channelData/team/aadGroupId", json!(TENANT)),
         ("/channelData/channel/id", json!("19:elsewhere")),
         ("/conversation/conversationType", json!("personal")),
