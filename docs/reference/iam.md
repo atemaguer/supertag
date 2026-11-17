@@ -168,10 +168,9 @@ Runtime permissions use the same Permission Set but have a different target:
 | `browser:use` | Use browser or computer-control tools. No built-in harness supports it yet |
 | `schedule:create` | Set and cancel [Schedules](coordination.md#schedules), wake-ups for the Tag itself, with the `schedule` and `cancel_schedule` tools |
 
-`schedule:create` is granted like any other runtime action. The Permission Set `supertag init`
-writes includes it, and so do Tags created from the desktop app and the terminal UI. Leave it out
-of a Tag's Permission Sets and the Tag cannot schedule. It enables only SuperTag's own tools, never
-a harness tool.
+`schedule:create` is an ordinary runtime action. Add `schedule:create` to a Permission Set to let
+a Tag schedule; Tags created by `supertag init`, the desktop app, or the terminal UI have it. A
+Tag without it cannot schedule. It offers only SuperTag's own tools, never a harness tool.
 
 Other `namespace:action` names can be stored but enable nothing in the built-in harnesses. Published actions should describe authority, not a particular harness API.
 
