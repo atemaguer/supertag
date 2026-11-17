@@ -76,6 +76,12 @@ the Tag, before the Gateway replies.
   messages, and files or cards are outside this path.
 - Gateway credentials authenticate only ingress and replies. See
   [credential storage](../reference/credential-storage.md).
+- Several quick mentions in a thread get one answer. A message sent while the Tag works goes into
+  its current turn when the harness supports that; otherwise the next turn reads every message
+  waiting in the thread. See [messages while work is running](../concepts/tasks.md#messages-while-work-is-running).
+- A message the thread's Objective refuses, for example because it is paused, gets one short
+  answer in the thread that says why. A redelivered activity gets no second answer. A redelivered
+  activity with different content is acknowledged and never admitted.
 
 ## If something goes wrong
 

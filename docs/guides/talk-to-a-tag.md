@@ -235,8 +235,10 @@ lists them, and `supertag describe session ID` shows one with its latest Task an
 - **The terminal UI stops following a reply after losing its connection.** Open `supertag` again
   and select the same conversation. The reply and work Session reports appear there as they arrive.
 - **You send a message while the Tag is still replying.** If the Tag's harness accepts input while
-  it works, your message can join the turn in progress. Otherwise it waits for its own turn.
-  A joined message the Tag has yet to read when the turn ends gets a turn of its own.
+  it works, your message can join the turn in progress. Otherwise it waits, and the next turn
+  reads it together with any other messages you sent meanwhile, then answers them once. A joined
+  message the Tag has yet to read when the turn ends waits for the next turn the same way. See
+  [messages while work is running](../concepts/tasks.md#messages-while-work-is-running).
 - **`The requesting Task already finished; request expired`.** The work Session no longer waits
   on that request: it moved on to a later Task, or its Task ended without waiting on it. If the
   work Session still needs the action, its next call creates a new request and notice.

@@ -285,7 +285,6 @@ impl Store {
                 include_str!("../migrations/sqlite/0084_schedules.sql"),
                 include_str!("../migrations/sqlite/0085_checkpoint_garbage.sql"),
                 include_str!("../migrations/sqlite/0086_work_session_limit.sql"),
-||||||| parent of 8d3fba3f (Fold and batch a person's messages, and answer refusals once)
                 include_str!("../migrations/sqlite/0087_surface_delivery.sql"),
             ]
         } else {
@@ -378,7 +377,6 @@ impl Store {
                 include_str!("../migrations/postgresql/0084_schedules.sql"),
                 include_str!("../migrations/postgresql/0085_checkpoint_garbage.sql"),
                 include_str!("../migrations/postgresql/0086_work_session_limit.sql"),
-||||||| parent of 8d3fba3f (Fold and batch a person's messages, and answer refusals once)
                 include_str!("../migrations/postgresql/0087_surface_delivery.sql"),
             ]
         };

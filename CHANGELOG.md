@@ -62,6 +62,13 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Several quick messages get one answer. In Slack, Microsoft Teams and Lark, a message sent while
+  the Tag works goes into its current turn when the harness supports that, as it already did in
+  conversations. Otherwise the next turn reads every message waiting in the thread or
+  conversation, up to 10 messages and 16 KiB, and answers them together. Three quick Slack
+  messages now get one "Got it" and one reply instead of three of each. Only the message that
+  starts a run is acknowledged, and the acknowledgement adds "Also reading your follow-up." when
+  another joins it. The Tag's own turns, such as a Schedule firing, still run on their own.
 - When the lead Tag runs on Codex, `supertag init` adds `web:fetch` to the `local-tools`
   Permission Set and says so. Current Codex models run commands only in Codex code mode, which
   SuperTag starts only for Tasks that may also fetch from the web, so a Codex lead created by
@@ -134,6 +141,12 @@ within the pre-1.0 compatibility policy described in
 - `supertag sign-in` handles Ctrl-C, SIGTERM, and a closed terminal from the moment its probe
   starts. A signal right after the probe started used to end the command without stopping the
   probe or removing its temporary home, which holds the harness credentials.
+- A Slack, Microsoft Teams or Lark message the Tag refuses gets one short answer in the thread that
+  says why, such as a paused Objective or a mention of another Tag in a thread that belongs to one.
+  Before, a refused message was left for the provider to retry and then dropped, and the person
+  heard nothing; an Objective's home thread answered with a reply that counted as a Task. Gateways
+  now also acknowledge an event that can never be admitted, such as a redelivery with different
+  content, instead of leaving the provider to retry it.
 - Upgrading from 0.3.0 no longer strands the old services. `supertag up` restarts services that
   run another build of SuperTag with this CLI's executable, including under a per-user service
   unit, and prints `Restarted SuperTag: 0.3.0 (protocol 2) → …` and any database migration the

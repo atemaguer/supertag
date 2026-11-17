@@ -70,6 +70,20 @@ The local Gateway serves one location per Surface Account; remove a location wit
 Mention `@SuperTag` in the channel. The Tag replies in a thread. Later replies in the thread
 continue the same **Session**, one thread of the Tag's work, without another mention.
 
+The Tag posts "Got it" when it starts on your message, edits that message as it works, and
+replaces it with the answer. You can send several messages in a row. A message sent while the Tag
+works goes into its current turn when the harness supports that, and the "Got it" message gains
+"Also reading your follow-up." Otherwise the message waits, and the next turn reads every message
+waiting in the thread. Either way, each turn posts one "Got it" message and one answer:
+
+```text
+you   @lead can you check why CI is red on #412
+lead  Got it. I'm looking into this now.        <- edited in place
+you   also the flaky cursor test
+you   and post the fix as a PR if it's small
+lead  (the same message becomes the answer to all three)
+```
+
 ## Use a hosted Gateway
 
 On a shared deployment, enroll the account against the Control Plane and name the Gateway that
@@ -105,8 +119,15 @@ Worker Host. See [MCP tools](worker-tools.md).
   Tag.
 - Each message goes through the channel's current location and authorization.
 - The Control Plane stores each event before the Gateway acknowledges it. Over Socket Mode, an
-  event the Control Plane did not accept stays unacknowledged, and Slack delivers it again. Over
+  event the Control Plane could not store stays unacknowledged, and Slack delivers it again. Over
   HTTP, the Gateway also checks Slack's timestamp and signature.
+- Slack can deliver one message several times, and as both `app_mention` and `message`. The Tag
+  still answers it once.
+- A message the Tag can't take gets one short answer in the thread that says why, for example when
+  the thread's Objective is paused, or when you mention another Tag in a thread that belongs to
+  this one. A redelivery of that message gets no second answer.
+- A redelivery under the same event ID with different content, and a malformed event, are
+  acknowledged and never admitted. The Gateway log notes them.
 - Over Socket Mode, the Gateway reconnects when Slack asks it to or the connection drops. It stops
   with an error when Slack refuses the app-level token or Socket Mode is turned off for the app.
 - The starter manifest does not subscribe to private channel messages.

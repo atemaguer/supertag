@@ -328,20 +328,23 @@ signal completion.
 ### Messages while work is running
 
 A Session has one active conversational execution. New human messages are persisted before
-routing. When the active harness advertises native input support, SuperTag delivers the message
-to that exact Task Attempt using the harness's queue or steering behavior. An accepted input is
-not also executed as a separate Task, unless the harness withdraws it unread at the final result,
-as described below. Messages with different execution requirements or authority wait for a
-separate execution. A `/goal` message never reaches a turn: the Control Plane creates its Objective
-and answers it.
+routing. This holds for a conversation in the desktop app or the terminal UI, and
+for a thread in Slack, Microsoft Teams or Lark. When the active harness advertises native input
+support, SuperTag delivers the message to that exact Task Attempt using the harness's queue or
+steering behavior. An accepted input is not also executed as a separate Task, unless the harness
+withdraws it unread at the final result, as described below. Messages with different execution
+requirements or authority wait for a separate execution. A `/goal` message never reaches a turn:
+the Control Plane creates its Objective and answers it. SuperTag never interrupts a running turn
+for a new message.
 
 An uncertain acknowledgement holds the message to avoid duplicate delivery. If the same Task
 Attempt later confirms that it withdrew the unread message, SuperTag clears that uncertainty.
-The message runs once as its own Task in the Session's next turn.
+The message waits for the Session's next turn and runs there once.
 
-Without live input support, messages wait in Session order. Before the next execution starts,
-SuperTag refreshes its Session's recap and selects the Session's native state, if it can resume it.
-Sessions started beneath this one still run independently.
+Without live input support, messages wait in Session order, as described in
+[messages that wait](#messages-that-wait). Before the next execution starts, SuperTag refreshes
+its Session's recap and selects the Session's native state, if it can resume it. Sessions started
+beneath this one still run independently.
 
 Codex supports steering. Claude Code runs through the Agent SDK and supports queueing. Claude Code
 reads queued input at its next turn boundary: between tool calls, or as a new turn after a turn
@@ -350,7 +353,7 @@ takes no more input, and input it hasn't taken yet waits for the next Task Attem
 still holds taken input the model hasn't read, SuperTag kills the process at once and waits for
 it to exit before it uses the result. That unread input also waits for the next Task Attempt, even
 when Claude Code had already accepted it: another Tag's message returns to the Tag's inbox, and a
-person's message in the thread runs as its own Task after the current work, once. Nothing after
+person's message in the thread waits for the next turn, once. Nothing after
 the final result changes the Task Attempt's outcome: no later turn, error, cancellation, or time
 limit. For example, cancelling while SuperTag waits for Claude Code to exit still completes the
 Task Attempt with that result. Only a cleanup failure does: the Task Attempt then fails. After the final result, SuperTag also refuses every tool call. It kills Claude Code at any
@@ -363,6 +366,26 @@ the Control Plane queue. A custom
 [harness adapter](../guides/harness-adapters.md) takes live input with `Harness.TakeLiveInput` and
 records what it did with `SettleLiveInput`; it must process accepted input before it completes the
 Task Attempt and exports its checkpoint.
+
+### Messages that wait
+
+When the next execution starts, it also takes in the person's messages queued behind it. Several
+quick messages get one turn and one reply:
+
+```text
+you   check why CI is red on #412
+you   also the flaky cursor test
+you   and post the fix as a PR if it's small
+Tag   (one turn reads all three; one reply answers them)
+```
+
+The first message runs, and the harness gets the later ones after its prompt, oldest first. Each
+joined message settles as input that Task accepted, so it gets no reply of its own. A turn takes
+in at most 10 messages and 16 KiB of joined text. The Tag's own turns end the run of messages it
+takes in, which keeps them in order: a Schedule firing, a notice, a Mailbox delivery or a report.
+So does a message with a different audience or execution requirements. GitHub and Linear events
+always run as their own turns. The first claim of a turn fixes the messages it answers: a retry
+or a replayed claim presents the same ones.
 
 ### When delivery is uncertain
 

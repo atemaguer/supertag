@@ -88,6 +88,12 @@ without another mention.
   sandbox that runs the Task, provides them with the `lark` MCP preset, and the Tag's
   **Permission Sets**, its allowed actions, grant them. See
   [MCP tools](worker-tools.md#lark--feishu).
+- Several quick messages in a thread get one answer. A message sent while the Tag works goes into
+  its current turn when the harness supports that; otherwise the next turn reads every message
+  waiting in the thread. See [messages while work is running](../concepts/tasks.md#messages-while-work-is-running).
+- Mentioning another Tag in a chat that belongs to this one gets one short answer in the thread
+  that says which Tag the chat belongs to. A redelivered event gets no second answer. A
+  redelivered event with different content is acknowledged and never admitted.
 
 ## If something goes wrong
 

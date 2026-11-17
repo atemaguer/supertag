@@ -80,6 +80,34 @@ Retrying is safe. The same `event_id` with the same content returns the same Tas
 `event_id` with different content fails with `ALREADY_EXISTS`. An account that has a Surface Account
 with location policy must use its provider's `Accept*Event` call instead; `AcceptEvent` refuses it with `PERMISSION_DENIED`.
 
+A Task `AcceptEvent` admits always runs as its own turn. It never joins another turn.
+
+## The built-in chat connectors
+
+The Slack, Microsoft Teams and Lark connectors call their provider's call instead:
+`AcceptSlackEvent`, `AcceptMicrosoftTeamsActivity` and `AcceptLarkEvent`. Each stores the event
+and answers before the connector acknowledges the event to the provider. They differ from
+`AcceptEvent` in three ways:
+
+- **A message can join another turn.** If the thread's Session is running, the Control Plane
+  offers the new message to that Task Attempt as live input. If the harness takes it, the
+  returned Task settles as `SUCCEEDED` with the result `Input accepted by Task ID.` and gets no
+  reply. Otherwise it waits, and the next claim in the Session joins it to the Task it starts:
+  `Assignment.joined` lists it, and it settles the same way.
+- **A refused message gets one answer and no Task.** When the thread's Objective takes no new work,
+  or the message mentions another Tag in a thread that belongs to one, the call returns no Task.
+  The Control Plane queues one reply to the thread that says why, and records the refusal with the
+  event. A redelivery of the event, or of the same message under another event ID, returns no Task
+  and queues nothing.
+- **Some errors are final.** `ALREADY_EXISTS`, a known event or message with different content, and
+  `INVALID_ARGUMENT`, a malformed event, can never succeed on a retry. The built-in Gateways
+  acknowledge such an event to the provider and log it. They leave any other error
+  unacknowledged, so the provider delivers the event again.
+
+Slack's acknowledgement message follows the run, not the message. Only a message that starts a
+run gets a "Got it" post at admission; a message that waits gets it when its run starts. A message
+that joins a run adds "Also reading your follow-up." to that run's acknowledgement.
+
 ## Owning an account's delivery
 
 One connector at a time delivers an account's replies. It holds the account with a lease:
@@ -97,6 +125,9 @@ One connector at a time delivers an account's replies. It holds the account with
 | `ClaimReply { operation_id, connector_lease_token }` | Leases the next due reply for the account. `reply` is empty when none is due. Repeating an `operation_id` returns the same claim |
 | `RenewReply { reply_id, lease_token }` | Extends a reply lease while a slow post is in flight |
 | `SettleReply { reply_id, lease_token, state, provider_receipt }` | Records the outcome: `REPLY_STATE_DELIVERED` with the surface's receipt, `REPLY_STATE_FAILED`, or `REPLY_STATE_UNCERTAIN` when the surface may have posted it |
+
+A reply answers one Task, named by `task_id`. A notice the Control Plane posts on its own, such as
+the answer to a refused message, has an empty `task_id`; deliver it the same way.
 
 Delivery is at least once. A connector that crashes after posting and before settling sees the
 reply again once its lease lapses. To post exactly once, record each claimed reply durably before
