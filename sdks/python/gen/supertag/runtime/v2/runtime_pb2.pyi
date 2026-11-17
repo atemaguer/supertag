@@ -77,6 +77,7 @@ class WorkSessionCloseReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED: _ClassVar[WorkSessionCloseReason]
     WORK_SESSION_CLOSE_REASON_UPGRADE: _ClassVar[WorkSessionCloseReason]
     WORK_SESSION_CLOSE_REASON_IDLE: _ClassVar[WorkSessionCloseReason]
+    WORK_SESSION_CLOSE_REASON_MERGED: _ClassVar[WorkSessionCloseReason]
 
 class TagMessageOrigin(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -291,6 +292,7 @@ class GithubEventAction(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     GITHUB_EVENT_ACTION_CREATED: _ClassVar[GithubEventAction]
     GITHUB_EVENT_ACTION_EDITED: _ClassVar[GithubEventAction]
     GITHUB_EVENT_ACTION_OPENED: _ClassVar[GithubEventAction]
+    GITHUB_EVENT_ACTION_MERGED: _ClassVar[GithubEventAction]
 
 class LinearEventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -362,6 +364,7 @@ WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_UPGRADE: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_IDLE: WorkSessionCloseReason
+WORK_SESSION_CLOSE_REASON_MERGED: WorkSessionCloseReason
 TAG_MESSAGE_ORIGIN_UNSPECIFIED: TagMessageOrigin
 TAG_MESSAGE_ORIGIN_DIRECT: TagMessageOrigin
 TAG_MESSAGE_ORIGIN_WORKSTREAM: TagMessageOrigin
@@ -492,6 +495,7 @@ GITHUB_EVENT_ACTION_UNSPECIFIED: GithubEventAction
 GITHUB_EVENT_ACTION_CREATED: GithubEventAction
 GITHUB_EVENT_ACTION_EDITED: GithubEventAction
 GITHUB_EVENT_ACTION_OPENED: GithubEventAction
+GITHUB_EVENT_ACTION_MERGED: GithubEventAction
 LINEAR_EVENT_KIND_UNSPECIFIED: LinearEventKind
 LINEAR_EVENT_KIND_ISSUE: LinearEventKind
 LINEAR_EVENT_KIND_ISSUE_COMMENT: LinearEventKind

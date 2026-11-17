@@ -441,6 +441,8 @@ const (
 	// Closed after 14 days without activity: no turn, continuation, or delivery change.
 	// Continuing it reopens it when the Tag is under its limit.
 	WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_IDLE WorkSessionCloseReason = 6
+	// The pull request its GitHub delivery opened was merged.
+	WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_MERGED WorkSessionCloseReason = 7
 )
 
 // Enum value maps for WorkSessionCloseReason.
@@ -453,6 +455,7 @@ var (
 		4: "WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED",
 		5: "WORK_SESSION_CLOSE_REASON_UPGRADE",
 		6: "WORK_SESSION_CLOSE_REASON_IDLE",
+		7: "WORK_SESSION_CLOSE_REASON_MERGED",
 	}
 	WorkSessionCloseReason_value = map[string]int32{
 		"WORK_SESSION_CLOSE_REASON_UNSPECIFIED":      0,
@@ -462,6 +465,7 @@ var (
 		"WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED": 4,
 		"WORK_SESSION_CLOSE_REASON_UPGRADE":          5,
 		"WORK_SESSION_CLOSE_REASON_IDLE":             6,
+		"WORK_SESSION_CLOSE_REASON_MERGED":           7,
 	}
 )
 
@@ -1980,6 +1984,9 @@ const (
 	GithubEventAction_GITHUB_EVENT_ACTION_CREATED     GithubEventAction = 1
 	GithubEventAction_GITHUB_EVENT_ACTION_EDITED      GithubEventAction = 2
 	GithubEventAction_GITHUB_EVENT_ACTION_OPENED      GithubEventAction = 3
+	// A pull request was merged. It carries no prompt and starts no Task: it closes the open Work
+	// Session whose GitHub delivery opened that pull request.
+	GithubEventAction_GITHUB_EVENT_ACTION_MERGED GithubEventAction = 4
 )
 
 // Enum value maps for GithubEventAction.
@@ -1989,12 +1996,14 @@ var (
 		1: "GITHUB_EVENT_ACTION_CREATED",
 		2: "GITHUB_EVENT_ACTION_EDITED",
 		3: "GITHUB_EVENT_ACTION_OPENED",
+		4: "GITHUB_EVENT_ACTION_MERGED",
 	}
 	GithubEventAction_value = map[string]int32{
 		"GITHUB_EVENT_ACTION_UNSPECIFIED": 0,
 		"GITHUB_EVENT_ACTION_CREATED":     1,
 		"GITHUB_EVENT_ACTION_EDITED":      2,
 		"GITHUB_EVENT_ACTION_OPENED":      3,
+		"GITHUB_EVENT_ACTION_MERGED":      4,
 	}
 )
 
@@ -22269,8 +22278,9 @@ func (x *AcceptGithubEventRequest) GetIsPullRequest() bool {
 }
 
 type AcceptGithubEventResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Task          *Task                  `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Absent for a merged pull request, which starts no Task.
+	Task          *Task `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -26040,7 +26050,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\rApprovalScope\x12\x1e\n" +
 	"\x1aAPPROVAL_SCOPE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13APPROVAL_SCOPE_ONCE\x10\x01\x12\x1c\n" +
-	"\x18APPROVAL_SCOPE_OBJECTIVE\x10\x02*\xb8\x02\n" +
+	"\x18APPROVAL_SCOPE_OBJECTIVE\x10\x02*\xde\x02\n" +
 	"\x16WorkSessionCloseReason\x12)\n" +
 	"%WORK_SESSION_CLOSE_REASON_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dWORK_SESSION_CLOSE_REASON_TAG\x10\x01\x12&\n" +
@@ -26048,7 +26058,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	")WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED\x10\x03\x12.\n" +
 	"*WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED\x10\x04\x12%\n" +
 	"!WORK_SESSION_CLOSE_REASON_UPGRADE\x10\x05\x12\"\n" +
-	"\x1eWORK_SESSION_CLOSE_REASON_IDLE\x10\x06*x\n" +
+	"\x1eWORK_SESSION_CLOSE_REASON_IDLE\x10\x06\x12$\n" +
+	" WORK_SESSION_CLOSE_REASON_MERGED\x10\a*x\n" +
 	"\x10TagMessageOrigin\x12\"\n" +
 	"\x1eTAG_MESSAGE_ORIGIN_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19TAG_MESSAGE_ORIGIN_DIRECT\x10\x01\x12!\n" +
@@ -26201,12 +26212,13 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x1dGITHUB_EVENT_KIND_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fGITHUB_EVENT_KIND_ISSUE_COMMENT\x10\x01\x12\x1b\n" +
 	"\x17GITHUB_EVENT_KIND_ISSUE\x10\x02\x12\"\n" +
-	"\x1eGITHUB_EVENT_KIND_PULL_REQUEST\x10\x03*\x99\x01\n" +
+	"\x1eGITHUB_EVENT_KIND_PULL_REQUEST\x10\x03*\xb9\x01\n" +
 	"\x11GithubEventAction\x12#\n" +
 	"\x1fGITHUB_EVENT_ACTION_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bGITHUB_EVENT_ACTION_CREATED\x10\x01\x12\x1e\n" +
 	"\x1aGITHUB_EVENT_ACTION_EDITED\x10\x02\x12\x1e\n" +
-	"\x1aGITHUB_EVENT_ACTION_OPENED\x10\x03*v\n" +
+	"\x1aGITHUB_EVENT_ACTION_OPENED\x10\x03\x12\x1e\n" +
+	"\x1aGITHUB_EVENT_ACTION_MERGED\x10\x04*v\n" +
 	"\x0fLinearEventKind\x12!\n" +
 	"\x1dLINEAR_EVENT_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17LINEAR_EVENT_KIND_ISSUE\x10\x01\x12#\n" +

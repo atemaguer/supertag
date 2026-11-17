@@ -288,6 +288,8 @@ struct Item {
     number: Option<u64>,
     body: Option<String>,
     pull_request: Option<serde_json::Value>,
+    #[serde(default)]
+    merged: bool,
 }
 
 fn normalize(
@@ -316,6 +318,35 @@ fn normalize(
             .eq_ignore_ascii_case(&config.repository)
     {
         return Err(StatusCode::FORBIDDEN);
+    }
+    // A merge is a fact about a pull request, not an instruction, so whoever merged it may be
+    // anyone with write access. It closes the Work Session that opened the pull request.
+    if event == "pull_request" && payload.action == "closed" {
+        let pr = payload.pull_request.ok_or(StatusCode::BAD_REQUEST)?;
+        if !pr.merged {
+            return Ok(None);
+        }
+        let number = pr
+            .number
+            .filter(|number| valid_id(*number))
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        let source_id = pr
+            .id
+            .filter(|id| valid_id(*id))
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        return Ok(Some(AcceptGithubEventRequest {
+            account_id: config.account_id.clone(),
+            delivery_id: delivery.into(),
+            repository_id: config.repository_id,
+            repository: config.repository.clone(),
+            number,
+            source_id,
+            kind: GithubEventKind::PullRequest.into(),
+            action: GithubEventAction::Merged.into(),
+            prompt: String::new(),
+            tag_id: config.tag_id.clone(),
+            is_pull_request: true,
+        }));
     }
     if !payload.sender.kind.eq_ignore_ascii_case("User")
         || !config.allowed_users.contains(&payload.sender.id)

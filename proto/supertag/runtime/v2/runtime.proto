@@ -525,6 +525,8 @@ enum WorkSessionCloseReason {
   // Closed after 14 days without activity: no turn, continuation, or delivery change.
   // Continuing it reopens it when the Tag is under its limit.
   WORK_SESSION_CLOSE_REASON_IDLE = 6;
+  // The pull request its GitHub delivery opened was merged.
+  WORK_SESSION_CLOSE_REASON_MERGED = 7;
 }
 
 // An operator or client closes a Work Session it may see. `delivery_pulled` records that its
@@ -2881,6 +2883,9 @@ enum GithubEventAction {
   GITHUB_EVENT_ACTION_CREATED = 1;
   GITHUB_EVENT_ACTION_EDITED = 2;
   GITHUB_EVENT_ACTION_OPENED = 3;
+  // A pull request was merged. It carries no prompt and starts no Task: it closes the open Work
+  // Session whose GitHub delivery opened that pull request.
+  GITHUB_EVENT_ACTION_MERGED = 4;
 }
 
 message AcceptGithubEventRequest {
@@ -2898,6 +2903,7 @@ message AcceptGithubEventRequest {
 }
 
 message AcceptGithubEventResponse {
+  // Absent for a merged pull request, which starts no Task.
   Task task = 1;
 }
 

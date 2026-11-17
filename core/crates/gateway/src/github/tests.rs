@@ -184,3 +184,48 @@ async fn account_namespace_and_journal_binding_cannot_overlap_slack() -> Result<
     );
     Ok(())
 }
+
+#[test]
+fn a_merged_pull_request_from_any_sender_becomes_a_promptless_merge_event() -> Result<()> {
+    let config = config(Path::new("unused"));
+    // Whoever merged it, even a user outside allowed_users or a bot, the merge is a fact.
+    let mut value = json!({"action":"closed","sender":{"id":99,"type":"Bot"},"repository":{"id":123,"full_name":"acme/project"},"pull_request":{"id":789,"number":8,"body":"no mention","merged":true}});
+    let input = normalize(
+        &config,
+        "delivery-merged",
+        "pull_request",
+        &serde_json::to_vec(&value)?,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(input.kind(), GithubEventKind::PullRequest);
+    assert_eq!(input.action(), GithubEventAction::Merged);
+    assert_eq!((input.number, input.source_id), (8, 789));
+    assert!(input.is_pull_request && input.prompt.is_empty());
+    // A pull request closed without merging is ignored.
+    value["pull_request"]["merged"] = json!(false);
+    assert!(
+        normalize(
+            &config,
+            "delivery-closed",
+            "pull_request",
+            &serde_json::to_vec(&value)?
+        )
+        .unwrap()
+        .is_none()
+    );
+    // Another repository's merge is still refused.
+    value["pull_request"]["merged"] = json!(true);
+    value["repository"]["id"] = json!(124);
+    assert_eq!(
+        normalize(
+            &config,
+            "delivery-other",
+            "pull_request",
+            &serde_json::to_vec(&value)?
+        )
+        .unwrap_err(),
+        StatusCode::FORBIDDEN
+    );
+    Ok(())
+}
