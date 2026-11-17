@@ -202,6 +202,122 @@ pub(crate) fn unsupported_runtime_actions(
 }
 
 /// What keeps the Task's own harness from claiming it, as `(requirement, summary)`.
+/// Why no eligible Worker Host takes a queued Task now, when none of them has a free slot for
+/// its harness: `harness` when none runs it, else `capacity`, naming each host's state and every
+/// uncertain Attempt that keeps a slot with the command that frees it.
+fn waiting_for_capacity(
+    harness: HarnessKind,
+    hosts: &[WorkerHostStatus],
+) -> Option<(String, String)> {
+    // A Task without a harness runs on any; its hosts' whole capacity counts.
+    let any = harness == HarnessKind::Unspecified;
+    let kind = if any {
+        String::new()
+    } else {
+        format!("{} ", harness_name(harness))
+    };
+    let total = |host: &WorkerHostStatus| HostHarnessCapacity {
+        harness_kind: host.harness_kind,
+        capacity: host.capacity,
+        available_slots: host.available_slots,
+        ..Default::default()
+    };
+    // A host that reports one harness may name it only in its own fields.
+    let serving: Vec<(&WorkerHostStatus, HostHarnessCapacity)> = hosts
+        .iter()
+        .filter_map(|host| {
+            if any {
+                return Some((host, total(host)));
+            }
+            let capacity = host
+                .harnesses
+                .iter()
+                .find(|capacity| capacity.harness_kind() == harness)
+                .cloned()
+                .or_else(|| {
+                    (host.harnesses.is_empty() && host.harness_kind() == harness)
+                        .then(|| total(host))
+                })?;
+            Some((host, capacity))
+        })
+        .collect();
+    if serving.is_empty() {
+        // A host that has not reported yet names no harness; that is not a mismatch.
+        let reported = hosts.iter().any(|host| {
+            host.harness_kind() != HarnessKind::Unspecified || !host.harnesses.is_empty()
+        });
+        return reported.then(|| {
+            (
+                "harness".to_owned(),
+                format!(
+                    "Waiting: no eligible Worker Host runs {}",
+                    harness_name(harness)
+                ),
+            )
+        });
+    }
+    if serving
+        .iter()
+        .any(|(host, capacity)| host.phase() == HostPhase::Ready && capacity.available_slots > 0)
+    {
+        return None;
+    }
+    let reasons: Vec<String> = serving
+        .iter()
+        .map(|(host, capacity)| {
+            let held: Vec<&HostUncertainAttempt> = host
+                .uncertain_attempts
+                .iter()
+                .filter(|attempt| any || attempt.harness_kind() == harness)
+                .collect();
+            let id = &host.host_id;
+            if let Some(first) = held.first() {
+                let slots = if capacity.capacity <= 1 {
+                    format!("Worker Host {id}'s only {kind}slot is")
+                } else {
+                    format!(
+                        "{} of Worker Host {id}'s {} {kind}slots are",
+                        held.len(),
+                        capacity.capacity
+                    )
+                };
+                let decision = if first.cancelled { "failed" } else { "retry" };
+                let confirm = if first.cleanup_observed {
+                    ""
+                } else {
+                    " --confirmed-stopped"
+                };
+                return format!(
+                    "{slots} held by an uncertain Task Attempt that may have executed. Once you confirm its execution stopped: supertag task resolve-attempt {} {} --decision {decision} --evidence TEXT{confirm}",
+                    first.task_id, first.attempt_id
+                );
+            }
+            match host.phase() {
+                HostPhase::Offline => format!("Worker Host {id} is offline"),
+                HostPhase::Draining => format!("Worker Host {id} is draining"),
+                HostPhase::Pending => format!("Worker Host {id} has not reported readiness"),
+                HostPhase::Suppressed
+                    if host.reason() == HostReadinessReason::RecoveryRequired =>
+                {
+                    format!(
+                        "Worker Host {id} needs an operator's recovery decision before it claims work"
+                    )
+                }
+                HostPhase::Suppressed => format!("Worker Host {id} is not claiming work"),
+                _ => format!(
+                    "Worker Host {id} is running {} of {} {kind}Attempts",
+                    capacity.capacity - capacity.available_slots.min(capacity.capacity),
+                    capacity.capacity
+                ),
+            }
+        })
+        .collect();
+    Some((
+        "capacity".to_owned(),
+        format!("Waiting: {}", reasons.join("; ")),
+    ))
+}
+
 fn unsupported_by_harness(task: &Task) -> Option<(String, String)> {
     let harness = task.harness_kind();
     if let Some(reason) = task
@@ -412,6 +528,7 @@ impl Store {
         let unsupported = unsupported_by_harness(&task);
         let mut hosts = Vec::with_capacity(ids.len());
         let mut carried = Vec::with_capacity(ids.len());
+        let mut eligible = Vec::new();
         for id in ids {
             let status = crate::store::host_status_in(&mut transaction, &id, now).await?;
             let labels: BTreeSet<String> = status.labels.iter().cloned().collect();
@@ -420,6 +537,9 @@ impl Store {
                 .filter(|label| !labels.contains(*label))
                 .cloned()
                 .collect();
+            if missing.is_empty() {
+                eligible.push(status.clone());
+            }
             hosts.push(HostPlacement {
                 host_id: id,
                 phase: status.phase,
@@ -439,7 +559,10 @@ impl Store {
         } else if let Some(unsupported) = unsupported {
             unsupported
         } else if missing.is_empty() {
-            (String::new(), String::new())
+            (task.state() == TaskState::Queued)
+                .then(|| waiting_for_capacity(task.harness_kind(), &eligible))
+                .flatten()
+                .unwrap_or_default()
         } else {
             (format!("labels:{}", missing.join(",")), summary(&missing))
         };

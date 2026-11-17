@@ -106,3 +106,40 @@ export function useTurnEvents(
 }
 
 const noEvents: readonly TaskEvent[] = [];
+
+/** A queued turn usually starts at once, so its wait is read only after this. */
+const WAIT_DELAY = 2_000;
+const WAIT_INTERVAL = 5_000;
+
+/**
+ * Why a queued turn waits, read after a moment and again while it stays queued, or undefined
+ * when it runs, nothing keeps it waiting, or the reason cannot be read.
+ */
+export function useTaskWait(
+  read: ControlPlane["taskWait"],
+  taskId: string,
+  queued: boolean,
+): string | undefined {
+  const [wait, setWait] = useState<string>();
+  useEffect(() => {
+    setWait(undefined);
+    if (!read || !queued) return;
+    let stopped = false;
+    let timer: number | undefined;
+    async function poll() {
+      try {
+        const reason = await read?.(taskId);
+        if (!stopped) setWait(reason ?? undefined);
+      } catch {
+        // The reason is presentation only; the message still shows as sent.
+      }
+      if (!stopped) timer = window.setTimeout(() => void poll(), WAIT_INTERVAL);
+    }
+    timer = window.setTimeout(() => void poll(), WAIT_DELAY);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, [read, taskId, queued]);
+  return queued ? wait : undefined;
+}

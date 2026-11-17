@@ -37,6 +37,7 @@ type runtimeClient struct {
 	artifacts     runtimev2connect.ArtifactCatalogClient
 	artifactFiles runtimev2connect.ArtifactTransfersClient
 	enrollments   runtimev2connect.EnrollmentsClient
+	placement     runtimev2connect.PlacementClient
 }
 
 // New connects to the public Control Plane over binary gRPC and HTTP/2, natively for an
@@ -132,6 +133,7 @@ func New(target Target, version string) (*Client, error) {
 		artifacts:     runtimev2connect.NewArtifactCatalogClient(httpClient, origin, options...),
 		artifactFiles: runtimev2connect.NewArtifactTransfersClient(httpClient, origin, options...),
 		enrollments:   runtimev2connect.NewEnrollmentsClient(httpClient, origin, options...),
+		placement:     runtimev2connect.NewPlacementClient(httpClient, origin, options...),
 	}
 	return c, nil
 }

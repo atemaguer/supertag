@@ -186,6 +186,9 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 			w.write(t.cache[i])
 			if i == 0 && e.kind == entryYou && id != "" && id == lastYou && len(queued) == 0 {
 				w.write(m.deliveryLine(turn) + "\n")
+				if line := waitLine(turn, width); line != "" {
+					w.write(line + "\n")
+				}
 			}
 		}
 		if t.draft != "" {

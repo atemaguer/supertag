@@ -977,6 +977,16 @@ button:disabled {
   --dot-gap: 5px;
   --dot-lift: -3px;
 }
+/* Why a queued turn has not started. It names a command to run, so it wraps and can be copied. */
+.task-wait {
+  max-width: var(--bubble-max);
+  margin: 5px 0 0;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 /* Under the operator's last message: Sending…, Sent, Seen, or Not delivered with a retry. */
 .delivery {
   display: flex;

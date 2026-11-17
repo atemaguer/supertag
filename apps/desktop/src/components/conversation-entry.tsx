@@ -1,7 +1,7 @@
 import { Check, Copy, ListTree } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ControlPlane, Message as TagMessage, TaskEvent } from "../control-plane";
-import { turnView, useTurnEvents } from "../lib/turn";
+import { turnView, useTaskWait, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import { ExternalLink } from "./external-link";
 import { ResultFiles } from "./result-files";
@@ -40,9 +40,10 @@ export function turnNotice(
 export function LiveConversationEntry(
   props: Omit<Parameters<typeof ConversationEntry>[0], "events"> & {
     readEvents: ControlPlane["events"];
+    readWait?: ControlPlane["taskWait"];
   },
 ) {
-  const { message } = props;
+  const { message, readWait, ...entry } = props;
   const { task, workSessionReportId, liveInput } = message;
   const joined = workSessionReportId === undefined && liveInput?.state === "accepted";
   const events = useTurnEvents(
@@ -50,12 +51,14 @@ export function LiveConversationEntry(
     joined ? {} : { ...message, taskId: task.taskId },
     RUNNING.has(task.state),
   );
-  return <ConversationEntry {...props} events={events} />;
+  const wait = useTaskWait(readWait, task.taskId, !joined && task.state === "queued");
+  return <ConversationEntry {...entry} message={message} events={events} wait={wait} />;
 }
 
 export function ConversationEntry({
   message,
   events = [],
+  wait,
   activeTask,
   delivery,
   divider,
@@ -65,6 +68,8 @@ export function ConversationEntry({
   message: TagMessage;
   /** The turn's recorded events, for the messages the Tag wrote and what it is doing. */
   events?: readonly TaskEvent[];
+  /** Why the queued turn has not started, such as a Worker Host slot an uncertain Attempt keeps. */
+  wait?: string;
   /** The delivery of the operator's message, shown when it is their last one. */
   delivery?: string;
   /** When a time divider precedes this exchange: its time in milliseconds since the epoch. */
@@ -147,6 +152,7 @@ export function ConversationEntry({
                   </span>
                 </span>
               </button>
+              {wait && <p className="task-wait">{wait}</p>}
             </div>
           )}
           {!joined && task.artifacts && task.artifacts.length > 0 && (

@@ -316,6 +316,7 @@ export function ConversationPane({
                     key={message.task.taskId}
                     message={message}
                     readEvents={controlPlane.events}
+                    readWait={controlPlane.taskWait}
                     activeTask={activeTask}
                     delivery={
                       message.task.taskId === lastSent ? deliveryStatus(message) : undefined

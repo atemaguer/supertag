@@ -22,7 +22,11 @@ a queued Task only to a host that:
 `supertag placement explain TASK_ID` reports which condition keeps a Task queued, and
 `supertag describe task TASK_ID` includes the same explanation as `waiting_for`. Its
 `requirement` is `worker-host`, `labels:NAMES`, or, when the Task's harness cannot run what the
-Task accepted, `execution-limits`, `runtime-actions`, or `context` (a required Skill).
+Task accepted, `execution-limits`, `runtime-actions`, or `context` (a required Skill). When the
+eligible hosts have no free slot for the Task's harness, it is `capacity`, and the summary names
+each host's state: busy, offline, draining, or a slot kept by an uncertain Task Attempt, with the
+`supertag task resolve-attempt` command that frees it. It is `harness` when no eligible host runs
+the Task's harness. The desktop app and the terminal UI show this summary under a waiting message.
 
 ## Placement by harness and model
 

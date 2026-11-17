@@ -370,6 +370,8 @@ type model struct {
 	// rail is the rail's layout; typing animates the typing indicator.
 	rail   *railLayout
 	typing *typing
+	// wait reads why the shown conversation's queued turn waits.
+	wait *waitPoll
 	// clock is the time the conversation shows; nil for the system clock.
 	clock func() time.Time
 
@@ -418,6 +420,7 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 		outbox:            &outbox{},
 		rail:              &railLayout{Width: defaultRailWidth},
 		typing:            &typing{},
+		wait:              &waitPoll{},
 		polling:           true,
 		status:            "connecting",
 	}
@@ -597,6 +600,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if tick := updated.animateTyping(); tick != nil {
 		cmd = tea.Batch(cmd, tick)
 	}
+	if poll := updated.pollWait(); poll != nil {
+		cmd = tea.Batch(cmd, poll)
+	}
 	return updated, cmd
 }
 
@@ -610,6 +616,13 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case typingTickMsg:
 		m.typingTick()
+		return m, nil
+
+	case waitTickMsg:
+		return m, m.readWait()
+
+	case taskWaitMsg:
+		m.waited(msg)
 		return m, nil
 
 	case tagOptionsMsg:

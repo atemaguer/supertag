@@ -23,6 +23,9 @@ type runtimeTurn struct {
 	needsFollow bool
 	// started says a Worker Host took the turn up.
 	started bool
+	// wait is why the turn has not started, such as an uncertain Task Attempt that keeps a
+	// Worker Host's only slot; empty when not known.
+	wait string
 	// after is the sequence of the latest message the Tag wrote that the turn shows.
 	after uint64
 	// order is the message's place in the conversation; zero when not yet known.

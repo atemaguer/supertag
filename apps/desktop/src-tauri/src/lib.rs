@@ -198,6 +198,15 @@ async fn list_task_events(
     state.events(&connection_id, task_id, after_sequence).await
 }
 
+#[tauri::command]
+async fn explain_task_wait(
+    state: State<'_, ControlPlaneState>,
+    connection_id: String,
+    task_id: String,
+) -> Result<Option<String>, String> {
+    state.task_wait(&connection_id, task_id).await
+}
+
 /// An entry the app cached for the current connection: `roster`, `outbox`, or `tag:` and a Tag.
 #[tauri::command]
 async fn read_cache<R: tauri::Runtime>(
@@ -306,6 +315,7 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             send_message,
             get_message,
             list_task_events,
+            explain_task_wait,
             read_cache,
             write_cache,
             mark_conversation_read,

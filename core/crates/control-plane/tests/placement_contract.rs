@@ -477,6 +477,53 @@ async fn ephemeral_contract(url: &str) {
     store.close().await;
 }
 
+/// A queued Task whose eligible hosts have no free slot says why: a busy host, or an uncertain
+/// Attempt that keeps the only slot, named with the command that frees it.
+async fn capacity_wait_contract(url: &str) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(url, &clock).await;
+    store.put_tag("builder", "Build", vec![]).await.unwrap();
+    let laptop_key = key(&store, "laptop", &["builder"], &[], false).await;
+    let laptop = join(&store, &laptop_key, "laptop").await;
+    report(&store, &laptop, 1, &[]).await;
+    let first = submit(&store, "builder", "first").await;
+    let ready = store.diagnose_task_placement(&first).await.unwrap();
+    assert_eq!(
+        (ready.requirement.as_str(), ready.summary.as_str()),
+        ("", "")
+    );
+    assert_eq!(start_running(&store, &laptop, "laptop-1").await, first);
+    let second = submit(&store, "builder", "second").await;
+    let busy = store.diagnose_task_placement(&second).await.unwrap();
+    assert_eq!(busy.requirement, "capacity");
+    assert_eq!(
+        busy.summary,
+        "Waiting: Worker Host laptop is running 1 of 1 Attempts"
+    );
+
+    // The lease lapses: the Attempt may have executed and keeps the only slot.
+    clock.store(NOW + 31_000, Ordering::SeqCst);
+    report(&store, &laptop, 2, &[]).await;
+    store.sweep_expired_attempts().await.unwrap();
+    assert_eq!(
+        store.get_task(&first).await.unwrap().state,
+        TaskState::Uncertain as i32
+    );
+    let attempt = store.get_task(&first).await.unwrap().attempt_id.unwrap();
+    let held = store.diagnose_task_placement(&second).await.unwrap();
+    assert_eq!(held.requirement, "capacity");
+    assert_eq!(
+        held.summary,
+        format!(
+            "Waiting: Worker Host laptop's only slot is held by an uncertain Task Attempt that may have executed. Once you confirm its execution stopped: supertag task resolve-attempt {first} {attempt} --decision retry --evidence TEXT --confirmed-stopped"
+        )
+    );
+    // Only queued Tasks wait.
+    let uncertain = store.diagnose_task_placement(&first).await.unwrap();
+    assert_eq!(uncertain.requirement, "");
+    store.close().await;
+}
+
 /// A removed ephemeral host's cancelled Attempt finishes its cleanup without running again, and
 /// nothing is written into the Task's reply text (TypeScript's typed `task.worker-host-removed`
 /// event has no Rust counterpart; see the capability ledger).
@@ -1066,6 +1113,12 @@ async fn sqlite_placement_contract() {
 }
 
 #[tokio::test]
+async fn sqlite_capacity_wait_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    capacity_wait_contract(&sqlite_url(&directory)).await;
+}
+
+#[tokio::test]
 async fn sqlite_ephemeral_host_contract() {
     let directory = tempfile::tempdir().unwrap();
     ephemeral_contract(&sqlite_url(&directory)).await;
@@ -1138,6 +1191,11 @@ where
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
 async fn postgres_placement_contract() {
     on_postgres(|url| async move { placement_contract(&url).await }).await;
+}
+
+#[tokio::test]
+async fn postgres_capacity_wait_contract() {
+    on_postgres(|url| async move { capacity_wait_contract(&url).await }).await;
 }
 
 #[tokio::test]

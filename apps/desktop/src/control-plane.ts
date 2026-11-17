@@ -103,6 +103,11 @@ export interface ControlPlane {
   markRead(tagId: string, order: number): Promise<Conversation>;
   /** All of a Task's events after a sequence, oldest first. */
   events(taskId: string, afterSequence: number): Promise<TaskEvent[]>;
+  /**
+   * Why a queued Task waits, such as an uncertain Task Attempt that keeps a Worker Host's only
+   * slot, or null when nothing keeps it from running or the caller may not read Worker Hosts.
+   */
+  taskWait?(taskId: string): Promise<string | null>;
   saveArtifact(artifactId: string, path: string): Promise<boolean>;
   /**
    * The Control Plane and principal this connection acts as. What is cached under one scope is
@@ -173,6 +178,7 @@ export function controlPlaneSession(connectionId: string, scope: string): Contro
     markRead: (tagId, order) => invoke("mark_conversation_read", { connectionId, tagId, order }),
     events: (taskId, afterSequence) =>
       invoke("list_task_events", { connectionId, taskId, afterSequence }),
+    taskWait: (taskId) => invoke("explain_task_wait", { connectionId, taskId }),
     saveArtifact: (artifactId, path) =>
       invoke("save_result_artifact", { connectionId, artifactId, path }),
     readCache: (key) => invoke("read_cache", { connectionId, key }),

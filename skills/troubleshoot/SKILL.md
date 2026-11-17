@@ -93,7 +93,9 @@ supertag metrics
 
 `placement explain` names why a queued Task waits: no host may run the Tag, the eligible hosts
 lack the Tag's `runsOn` labels or do not map its Workspace, none serves the harness or model, its
-harness cannot run the Task's actions or load its Skills, or the hosts are busy or draining. Fix
+harness cannot run the Task's actions or load its Skills, the hosts are busy or draining, or an
+uncertain Task Attempt keeps a host's only slot (it names the `supertag task resolve-attempt`
+command that frees it). Fix
 the binding (an Auth Key's `--tag`), the labels (`supertag placement runs-on`), or the host's
 harnesses, models, and `workspaces`.
 

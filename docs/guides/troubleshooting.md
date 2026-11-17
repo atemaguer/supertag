@@ -79,6 +79,7 @@ and serves its harness and model. `placement explain` names which is missing:
 | Hosts lack the required labels | `supertag placement runs-on TAG LABEL...`, or add the label to a host |
 | No host serves the harness or model | Add the harness or model to a host's `harnesses` or `models` |
 | Hosts are busy or draining | Wait, raise `concurrency`, or `supertag host resume HOST` |
+| An uncertain Task Attempt keeps a host's slot | Confirm it stopped, then run the `supertag task resolve-attempt` command it names |
 
 ## 6. Check the harness
 
@@ -113,9 +114,11 @@ secrets hidden. A reply whose delivery is uncertain waits for
 
 ## A Task Attempt is uncertain
 
-A Worker Host that was killed while running a **Task Attempt**, one execution of a Task, may not
-know whether the work finished. It shows in the inbox as `task-attention` and in
-`supertag metrics` under recovery. Check what the Task Attempt did, then record a decision:
+A Worker Host that was killed or lost its execution lease while running a **Task Attempt**, one
+execution of a Task, may not know whether the work finished. It shows in the inbox as
+`task-attention`, in `supertag metrics` under recovery, and in `supertag ps`. The Worker Host log
+names it, and the host's slot for its harness stays taken until you decide, so later messages to
+Tags on that host wait. Check what the Task Attempt did, then record a decision:
 
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \

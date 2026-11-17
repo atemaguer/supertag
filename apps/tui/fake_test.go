@@ -30,7 +30,10 @@ type fakeControlPlane struct {
 	rpc.UnimplementedTeamsHandler
 	rpc.UnimplementedWorkSessionsHandler
 	rpc.UnimplementedEnrollmentsHandler
+	rpc.UnimplementedPlacementHandler
 
+	// diagnose answers DiagnoseTask; nil refuses it as an operator-only call.
+	diagnose func(task string) *v2.TaskPlacementDiagnosis
 	// principal answers WhoAmI; empty refuses it, so the cache never learns whom it acts as.
 	principal string
 	// send answers SendMessage; nil refuses it. sends are its requests, in order.
@@ -91,6 +94,7 @@ func (f *fakeControlPlane) startWith(t testing.TB, wrap func(http.Handler) http.
 	mux.Handle(rpc.NewTeamsHandler(f))
 	mux.Handle(rpc.NewWorkSessionsHandler(f))
 	mux.Handle(rpc.NewEnrollmentsHandler(f))
+	mux.Handle(rpc.NewPlacementHandler(f))
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != rpc.ProtocolNegotiationNegotiateProcedure && r.Header.Get("Authorization") != "Bearer "+f.token {
 			f.mu.Lock()
@@ -462,4 +466,14 @@ func delivered(id, task, branch, base, head, ref, pr string) *views.Session {
 	}
 	return &views.Session{Id: id, Tag: "lead", Title: "Fix", LatestTaskId: task, LatestTaskStatus: views.TaskStatus_TASK_STATUS_COMPLETED,
 		Delivery: &views.SessionDelivery{TaskId: task, Delivery: delivery, Checkout: &views.TaskFiles{WorkerHostId: "laptop"}}}
+}
+
+func (f *fakeControlPlane) DiagnoseTask(_ context.Context, req *connect.Request[v2.DiagnoseTaskPlacementRequest]) (*connect.Response[v2.TaskPlacementDiagnosis], error) {
+	f.mu.Lock()
+	diagnose := f.diagnose
+	f.mu.Unlock()
+	if diagnose == nil {
+		return nil, connect.NewError(connect.CodePermissionDenied, nil)
+	}
+	return connect.NewResponse(diagnose(req.Msg.GetTaskId())), nil
 }
