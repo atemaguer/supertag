@@ -283,7 +283,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0083_one_conversation_per_tag.sql"),
                 include_str!("../migrations/sqlite/0084_schedules.sql"),
                 include_str!("../migrations/sqlite/0085_checkpoint_garbage.sql"),
-                include_str!("../migrations/sqlite/0087_work_session_limit.sql"),
+                include_str!("../migrations/sqlite/0086_work_session_limit.sql"),
             ]
         } else {
             [
@@ -374,7 +374,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0083_one_conversation_per_tag.sql"),
                 include_str!("../migrations/postgresql/0084_schedules.sql"),
                 include_str!("../migrations/postgresql/0085_checkpoint_garbage.sql"),
-                include_str!("../migrations/postgresql/0087_work_session_limit.sql"),
+                include_str!("../migrations/postgresql/0086_work_session_limit.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
