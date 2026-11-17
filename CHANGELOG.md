@@ -116,6 +116,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Codex Task no longer fails with "Codex did not answer initialize within 5s" on a busy
+  machine. The first exchange with the Codex app server, which also waits for the process to
+  start, now has 30 seconds; later exchanges keep 5.
+- Claude Code, Cursor, and OpenCode Tasks no longer fail with "Worker Host call failed:
+  [canceled] Timeout expired" while the Worker Host waits out a slow Control Plane. The harness
+  retries a call that the Worker Host's server timed out, as it already did for its own timeout.
+- `supertag sign-in` handles Ctrl-C, SIGTERM, and a closed terminal from the moment its probe
+  starts. A signal right after the probe started used to end the command without stopping the
+  probe or removing its temporary home, which holds the harness credentials.
 - Upgrading from 0.3.0 no longer strands the old services. `supertag up` restarts services that
   run another build of SuperTag with this CLI's executable, including under a per-user service
   unit, and prints `Restarted SuperTag: 0.3.0 (protocol 2) → …` and any database migration the
