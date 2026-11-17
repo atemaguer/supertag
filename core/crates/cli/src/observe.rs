@@ -98,7 +98,7 @@ pub async fn metrics(connection: Connection, args: MetricsArgs) -> Result<()> {
         .into_inner();
     match args.output {
         Output::Json => crate::terminal::print_json(&metrics_json(&snapshot))?,
-        Output::Text => out!("{}", metrics_text(&snapshot)),
+        Output::Text => out!("{}{}", metrics_text(&snapshot), admission_text(&snapshot)),
     }
     Ok(())
 }
@@ -185,7 +185,47 @@ fn metrics_json(snapshot: &MetricSnapshot) -> Value {
             "backlog": replies.backlog,
             "failed": replies.failed,
         },
+        "admission": snapshot.admission.as_ref().map(|admission| json!({
+            "since": Timestamp::from_millis(admission.since_ms).map(|at| at.to_string()),
+            "surfaces": admission.surfaces.iter().map(|surface| json!({
+                "surface": surface.surface,
+                "admitted": surface.admitted,
+                "failed": surface.failed,
+                "average_ms": surface.average_ms,
+                "maximum_ms": surface.maximum_ms,
+                "over_deadline": surface.over_deadline,
+            })).collect::<Vec<_>>(),
+        })),
     })
+}
+
+/// One line on how long this Control Plane process took to admit surface events.
+fn admission_text(snapshot: &MetricSnapshot) -> String {
+    let Some(admission) = &snapshot.admission else {
+        return String::new();
+    };
+    let since = Timestamp::from_millis(admission.since_ms)
+        .map_or_else(|| "it started".into(), |at| at.to_string());
+    if admission.surfaces.is_empty() {
+        return format!("Surface admission: no events since {since}\n");
+    }
+    let surfaces = admission
+        .surfaces
+        .iter()
+        .map(|surface| {
+            format!(
+                "{} {} admitted, {} failed, {} on average, {} at most, {} over 2s",
+                surface.surface,
+                surface.admitted,
+                surface.failed,
+                wait(surface.average_ms),
+                wait(surface.maximum_ms),
+                surface.over_deadline
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!("Surface admission since {since} (this Control Plane process): {surfaces}\n")
 }
 
 fn host_phase(phase: HostPhase) -> &'static str {
@@ -977,6 +1017,40 @@ mod tests {
         assert_eq!(
             text,
             "Tag\nAllowed actions: read, write\nCreated at: 1970-01-01T00:00:00.000Z\nName: Builder [2J\nTag ID: builder\nWorkspace:\n  Workspace ID: repo\n"
+        );
+    }
+
+    #[test]
+    fn admission_text_names_each_surface() {
+        use supertag_protocol::v2::{MetricAdmission, MetricSurfaceAdmission};
+        let mut snapshot = MetricSnapshot::default();
+        assert_eq!(admission_text(&snapshot), "");
+        snapshot.admission = Some(MetricAdmission {
+            since_ms: 0,
+            surfaces: vec![],
+        });
+        assert_eq!(
+            admission_text(&snapshot),
+            "Surface admission: no events since 1970-01-01T00:00:00.000Z\n"
+        );
+        snapshot.admission = Some(MetricAdmission {
+            since_ms: 0,
+            surfaces: vec![MetricSurfaceAdmission {
+                surface: "slack".into(),
+                admitted: 3,
+                failed: 1,
+                average_ms: 40,
+                maximum_ms: 2_500,
+                over_deadline: 1,
+            }],
+        });
+        assert_eq!(
+            admission_text(&snapshot),
+            "Surface admission since 1970-01-01T00:00:00.000Z (this Control Plane process): slack 3 admitted, 1 failed, 40ms on average, 2.5s at most, 1 over 2s\n"
+        );
+        assert_eq!(
+            metrics_json(&snapshot)["admission"]["surfaces"][0]["over_deadline"],
+            1
         );
     }
 

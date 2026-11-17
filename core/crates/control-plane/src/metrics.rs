@@ -135,6 +135,8 @@ impl Store {
             usage: Some(usage),
             mailbox: Some(mailbox),
             reply_delivery: Some(reply_delivery),
+            // The serving process adds its own admission counts.
+            admission: None,
         })
     }
 }
@@ -247,6 +249,8 @@ impl metrics_server::Metrics for ControlPlane {
         request: Request<GetMetricsRequest>,
     ) -> std::result::Result<Response<MetricSnapshot>, Status> {
         self.principal(&request, "operator:")?;
-        Ok(Response::new(self.store.metrics().await?))
+        let mut snapshot = self.store.metrics().await?;
+        snapshot.admission = Some(self.admissions.snapshot());
+        Ok(Response::new(snapshot))
     }
 }

@@ -26,6 +26,30 @@ message MetricSnapshot {
   MetricReplyDelivery reply_delivery = 7;
   // Task Attempts that may have executed and the operator decisions recorded for them.
   MetricRecovery recovery = 5400;
+  // How long this Control Plane process took to admit collaboration surface events.
+  MetricAdmission admission = 8;
+}
+
+// Surface event admissions this Control Plane process served, from the request arriving to the
+// response. Kept in memory: each replica counts only its own, from when it started.
+message MetricAdmission {
+  int64 since_ms = 1;
+  // Surfaces that have sent at least one event, by name.
+  repeated MetricSurfaceAdmission surfaces = 2;
+}
+
+message MetricSurfaceAdmission {
+  // slack, teams, lark, github, linear, or event for a generic connector.
+  string surface = 1;
+  // Calls answered without an error.
+  int64 admitted = 2;
+  // Calls answered with an error, such as a refusal the Gateway retries.
+  int64 failed = 3;
+  int64 average_ms = 4;
+  int64 maximum_ms = 5;
+  // Calls that took longer than 2 s, the Slack Socket Mode acknowledgement deadline and the
+  // shortest any Gateway allows.
+  int64 over_deadline = 6;
 }
 
 message MetricRecovery {

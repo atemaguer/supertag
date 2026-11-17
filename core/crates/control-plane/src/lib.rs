@@ -1,3 +1,4 @@
+mod admission_metrics;
 mod apply_sets;
 mod approvals;
 mod artifact_acquisitions;
@@ -87,6 +88,8 @@ pub struct ControlPlane {
     admin_operator: Arc<String>,
     /// When the maintenance pass last ran the sweeps that need not run every tick.
     slow_sweep: Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+    /// Surface event admissions this process served, for `GetMetrics`.
+    admissions: Arc<admission_metrics::Admissions>,
 }
 
 /// How often the maintenance pass runs the sweeps whose periods are days: checkpoint expiry and
@@ -116,6 +119,7 @@ impl ControlPlane {
             internal_token: Arc::new(internal_token),
             admin_operator: Arc::new(admin_operator),
             slow_sweep: Arc::default(),
+            admissions: Arc::default(),
         })
     }
 
@@ -789,73 +793,97 @@ impl connector_server::Connector for ControlPlane {
         &self,
         request: Request<AcceptEventRequest>,
     ) -> Result<Response<Task>, Status> {
-        let principal = self.connector(&request).await?;
-        Ok(Response::new(
-            self.store
-                .accept_event(&principal, &request.into_inner())
-                .await?,
-        ))
+        self.admissions
+            .time("event", async {
+                let principal = self.connector(&request).await?;
+                Ok::<_, Status>(Response::new(
+                    self.store
+                        .accept_event(&principal, request.get_ref())
+                        .await?,
+                ))
+            })
+            .await
     }
 
     async fn accept_slack_event(
         &self,
         request: Request<AcceptSlackEventRequest>,
     ) -> Result<Response<AcceptSlackEventResponse>, Status> {
-        let principal = self.connector(&request).await?;
-        let accepted = self
-            .store
-            .accept_slack_event(&principal, &request.into_inner())
-            .await?;
-        supertag_protocol::crash_point("control-plane.slack-admission", "after-commit");
-        Ok(Response::new(accepted))
+        self.admissions
+            .time("slack", async {
+                let principal = self.connector(&request).await?;
+                let accepted = self
+                    .store
+                    .accept_slack_event(&principal, request.get_ref())
+                    .await?;
+                supertag_protocol::crash_point("control-plane.slack-admission", "after-commit");
+                Ok::<_, Status>(Response::new(accepted))
+            })
+            .await
     }
 
     async fn accept_github_event(
         &self,
         request: Request<AcceptGithubEventRequest>,
     ) -> Result<Response<AcceptGithubEventResponse>, Status> {
-        let principal = self.connector(&request).await?;
-        Ok(Response::new(
-            self.store
-                .accept_github_event(&principal, &request.into_inner())
-                .await?,
-        ))
+        self.admissions
+            .time("github", async {
+                let principal = self.connector(&request).await?;
+                Ok::<_, Status>(Response::new(
+                    self.store
+                        .accept_github_event(&principal, request.get_ref())
+                        .await?,
+                ))
+            })
+            .await
     }
 
     async fn accept_linear_event(
         &self,
         request: Request<AcceptLinearEventRequest>,
     ) -> Result<Response<AcceptLinearEventResponse>, Status> {
-        let principal = self.connector(&request).await?;
-        Ok(Response::new(
-            self.store
-                .accept_linear_event(&principal, &request.into_inner())
-                .await?,
-        ))
+        self.admissions
+            .time("linear", async {
+                let principal = self.connector(&request).await?;
+                Ok::<_, Status>(Response::new(
+                    self.store
+                        .accept_linear_event(&principal, request.get_ref())
+                        .await?,
+                ))
+            })
+            .await
     }
 
     async fn accept_lark_event(
         &self,
         request: Request<AcceptLarkEventRequest>,
     ) -> Result<Response<AcceptLarkEventResponse>, Status> {
-        let principal = self.connector(&request).await?;
-        Ok(Response::new(
-            self.store
-                .accept_lark_event(&principal, &request.into_inner())
-                .await?,
-        ))
+        self.admissions
+            .time("lark", async {
+                let principal = self.connector(&request).await?;
+                Ok::<_, Status>(Response::new(
+                    self.store
+                        .accept_lark_event(&principal, request.get_ref())
+                        .await?,
+                ))
+            })
+            .await
     }
 
     async fn accept_microsoft_teams_activity(
         &self,
         request: Request<AcceptMicrosoftTeamsActivityRequest>,
     ) -> Result<Response<AcceptMicrosoftTeamsActivityResponse>, Status> {
-        let principal = self.connector(&request).await?;
-        Ok(Response::new(
-            self.store
-                .accept_microsoft_teams_activity(&principal, &request.into_inner())
-                .await?,
-        ))
+        self.admissions
+            .time("teams", async {
+                let principal = self.connector(&request).await?;
+                Ok::<_, Status>(Response::new(
+                    self.store
+                        .accept_microsoft_teams_activity(&principal, request.get_ref())
+                        .await?,
+                ))
+            })
+            .await
     }
 
     async fn get_microsoft_teams_reply_route(

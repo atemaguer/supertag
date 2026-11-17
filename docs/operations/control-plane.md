@@ -147,7 +147,10 @@ supertag get host --control-plane team
 `GET /healthz` returns `200 ok` and only says the process is listening. Readiness means at least
 one Worker Host is connected and ready; `verify deployment --require-ready` fails until then.
 `supertag metrics` reports queued and running Tasks, Worker Host capacity, recovery decisions, and
-backlogs.
+backlogs. It also reports how long the Control Plane process that answered took to admit each
+collaboration surface's events since it started: admitted and failed calls, average and longest
+time, and how many took over 2 seconds, the shortest acknowledgement deadline a Gateway has. Each
+replica counts only the events it served.
 
 ## Artifact storage
 

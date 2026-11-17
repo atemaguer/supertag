@@ -13,7 +13,7 @@ class GetMetricsRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class MetricSnapshot(_message.Message):
-    __slots__ = ("captured_at_ms", "resources", "tasks", "usage", "scheduling", "mailbox", "reply_delivery", "recovery")
+    __slots__ = ("captured_at_ms", "resources", "tasks", "usage", "scheduling", "mailbox", "reply_delivery", "recovery", "admission")
     CAPTURED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     RESOURCES_FIELD_NUMBER: _ClassVar[int]
     TASKS_FIELD_NUMBER: _ClassVar[int]
@@ -22,6 +22,7 @@ class MetricSnapshot(_message.Message):
     MAILBOX_FIELD_NUMBER: _ClassVar[int]
     REPLY_DELIVERY_FIELD_NUMBER: _ClassVar[int]
     RECOVERY_FIELD_NUMBER: _ClassVar[int]
+    ADMISSION_FIELD_NUMBER: _ClassVar[int]
     captured_at_ms: int
     resources: MetricResources
     tasks: MetricTaskCounts
@@ -30,7 +31,32 @@ class MetricSnapshot(_message.Message):
     mailbox: MetricBacklog
     reply_delivery: MetricReplyDelivery
     recovery: MetricRecovery
-    def __init__(self, captured_at_ms: _Optional[int] = ..., resources: _Optional[_Union[MetricResources, _Mapping]] = ..., tasks: _Optional[_Union[MetricTaskCounts, _Mapping]] = ..., usage: _Optional[_Union[MetricUsage, _Mapping]] = ..., scheduling: _Optional[_Union[MetricScheduling, _Mapping]] = ..., mailbox: _Optional[_Union[MetricBacklog, _Mapping]] = ..., reply_delivery: _Optional[_Union[MetricReplyDelivery, _Mapping]] = ..., recovery: _Optional[_Union[MetricRecovery, _Mapping]] = ...) -> None: ...
+    admission: MetricAdmission
+    def __init__(self, captured_at_ms: _Optional[int] = ..., resources: _Optional[_Union[MetricResources, _Mapping]] = ..., tasks: _Optional[_Union[MetricTaskCounts, _Mapping]] = ..., usage: _Optional[_Union[MetricUsage, _Mapping]] = ..., scheduling: _Optional[_Union[MetricScheduling, _Mapping]] = ..., mailbox: _Optional[_Union[MetricBacklog, _Mapping]] = ..., reply_delivery: _Optional[_Union[MetricReplyDelivery, _Mapping]] = ..., recovery: _Optional[_Union[MetricRecovery, _Mapping]] = ..., admission: _Optional[_Union[MetricAdmission, _Mapping]] = ...) -> None: ...
+
+class MetricAdmission(_message.Message):
+    __slots__ = ("since_ms", "surfaces")
+    SINCE_MS_FIELD_NUMBER: _ClassVar[int]
+    SURFACES_FIELD_NUMBER: _ClassVar[int]
+    since_ms: int
+    surfaces: _containers.RepeatedCompositeFieldContainer[MetricSurfaceAdmission]
+    def __init__(self, since_ms: _Optional[int] = ..., surfaces: _Optional[_Iterable[_Union[MetricSurfaceAdmission, _Mapping]]] = ...) -> None: ...
+
+class MetricSurfaceAdmission(_message.Message):
+    __slots__ = ("surface", "admitted", "failed", "average_ms", "maximum_ms", "over_deadline")
+    SURFACE_FIELD_NUMBER: _ClassVar[int]
+    ADMITTED_FIELD_NUMBER: _ClassVar[int]
+    FAILED_FIELD_NUMBER: _ClassVar[int]
+    AVERAGE_MS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_MS_FIELD_NUMBER: _ClassVar[int]
+    OVER_DEADLINE_FIELD_NUMBER: _ClassVar[int]
+    surface: str
+    admitted: int
+    failed: int
+    average_ms: int
+    maximum_ms: int
+    over_deadline: int
+    def __init__(self, surface: _Optional[str] = ..., admitted: _Optional[int] = ..., failed: _Optional[int] = ..., average_ms: _Optional[int] = ..., maximum_ms: _Optional[int] = ..., over_deadline: _Optional[int] = ...) -> None: ...
 
 class MetricRecovery(_message.Message):
     __slots__ = ("awaiting_decision", "cleanup_unconfirmed", "resolved_failed", "resolved_retried", "blocked_sessions", "unknown_live_inputs")

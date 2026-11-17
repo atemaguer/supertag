@@ -18,7 +18,10 @@ use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use supertag_protocol::{
     authenticated_request,
-    v2::{SubmitTaskRequest, operator_client::OperatorClient},
+    v2::{
+        AcceptSlackEventRequest, SubmitTaskRequest, connector_client::ConnectorClient,
+        operator_client::OperatorClient,
+    },
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -119,6 +122,11 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
             "blocked_sessions": 0,
             "unknown_live_inputs": 0,
         }),
+        "{empty}"
+    );
+    assert_eq!(
+        empty["admission"]["surfaces"],
+        serde_json::json!([]),
         "{empty}"
     );
 
@@ -262,6 +270,53 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
         text.contains(
             "Recovery: 0 Attempts await a decision, 0 cancelled Attempts await cleanup; 0 resolved as failed, 0 retried; 0 Sessions wait behind an unfinished Task; 0 live inputs have an unknown delivery"
         ),
+        "{text}"
+    );
+
+    // This Control Plane process times each surface admission it serves: one admitted Slack
+    // event, and one it refuses because it names a Tag that does not exist.
+    let mut connector = ConnectorClient::new(protocol::dial(public.clone()).await?);
+    for (event, tag) in [("EvADMITTED", "reviewer"), ("EvREFUSED", "missing")] {
+        let input = AcceptSlackEventRequest {
+            account_id: "slack-metrics".into(),
+            event_id: event.into(),
+            team_id: "TTEAM1".into(),
+            channel_id: "CCHANNEL1".into(),
+            message_ts: if tag == "reviewer" {
+                "1794470000.100000"
+            } else {
+                "1794470001.100000"
+            }
+            .into(),
+            thread_ts: if tag == "reviewer" {
+                "1794470000.100000"
+            } else {
+                "1794470001.100000"
+            }
+            .into(),
+            prompt: "Review this".into(),
+            mention_tag_id: Some(tag.into()),
+            actor_id: "UALICE1".into(),
+        };
+        let request = supertag_protocol::connector_request(input, &gateway_token, "slack-metrics")?;
+        let result = connector.accept_slack_event(request).await;
+        ensure!(result.is_ok() == (tag == "reviewer"), "{event}: {result:?}");
+    }
+    let admitted = metrics().await?;
+    let slack = &admitted["admission"]["surfaces"][0];
+    assert_eq!(slack["surface"], "slack", "{admitted}");
+    assert_eq!(slack["admitted"], 1, "{admitted}");
+    assert_eq!(slack["failed"], 1, "{admitted}");
+    assert_eq!(slack["over_deadline"], 0, "{admitted}");
+    ensure!(
+        admitted["admission"]["since"]
+            .as_str()
+            .is_some_and(|at| at.ends_with('Z')),
+        "{admitted}"
+    );
+    let text = output(operator(&["metrics"])).await?;
+    ensure!(
+        text.contains("(this Control Plane process): slack 1 admitted, 1 failed, "),
         "{text}"
     );
     Ok(())
