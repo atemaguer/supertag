@@ -47,7 +47,7 @@ Commands:
   version               Print this CLI's version and the version of the running local services
   config                Print the resolved supertag.yaml that supertag up runs
   control-plane         Run the Control Plane: the public API for operator clients, Worker Hosts, and Gateways, and the service that stores work and schedules execution
-  gateway               Run a Gateway: collaboration surface webhooks and connections, reply delivery, and operator notifications, as gateway:NAME, a client of the Control Plane. Or enroll, revoke, and rotate the credentials of Gateways
+  gateway               Run a Gateway: the endpoint clients and operators connect to, which forwards their calls to the Control Plane, and collaboration surface webhooks and connections, reply delivery, and operator notifications as gateway:NAME. Or enroll, revoke, and rotate the credentials of Gateways
   tui                   Open the terminal UI for a saved or explicitly configured Control Plane
   worker-host           Connect a Worker Host and run accepted Tasks through an adapter
   client                Revoke client devices and rotate their credentials
@@ -1935,7 +1935,7 @@ Options:
 ## `supertag gateway`
 
 ```text
-Run a Gateway: collaboration surface webhooks and connections, reply delivery, and operator notifications, as gateway:NAME, a client of the Control Plane. Or enroll, revoke, and rotate the credentials of Gateways
+Run a Gateway: the endpoint clients and operators connect to, which forwards their calls to the Control Plane, and collaboration surface webhooks and connections, reply delivery, and operator notifications as gateway:NAME. Or enroll, revoke, and rotate the credentials of Gateways
 
 Usage: supertag gateway [OPTIONS] --control-plane <CONTROL_PLANE>
        supertag gateway <COMMAND>
@@ -1949,7 +1949,7 @@ Commands:
 
 Options:
       --listen <LISTEN>
-          Address for the test notification. Port 0 picks a free port
+          Address clients connect to. Port 0 picks a free port. Outside loopback it requires TLS
           
           [default: 127.0.0.1:0]
 

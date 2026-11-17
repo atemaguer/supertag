@@ -63,20 +63,29 @@ uuid.workspace = true
 [dev-dependencies]
 axum = "0.8"
 base64 = "0.22"
+bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 hmac.workspace = true
+http = "1"
 http-body = "1"
 http-body-util = "0.1"
+prost-types = "0.14"
 reqwest.workspace = true
 sqlx.workspace = true
 supertag-shared-execution = { path = "../shared-execution" }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tokio-tungstenite = "0.28"
+tower-service = "0.3"
 url = "2"
 
 [[test]]
 name = "crash_durability"
 path = "tests/crash_durability.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "client_forwarding"
+path = "tests/client_forwarding.rs"
 required-features = ["test-fixtures"]
 
 [[test]]

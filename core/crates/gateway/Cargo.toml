@@ -14,6 +14,7 @@ anyhow.workspace = true
 async-stream = "0.3"
 axum = "0.8"
 base64 = "0.22"
+bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 hex = "0.4"
 futures-util = { version = "0.3", features = ["sink"] }
@@ -22,6 +23,8 @@ pulldown-cmark = { version = "0.13", default-features = false }
 pulldown-cmark-to-cmark = "22"
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 hmac = "0.12"
+http = "1"
+http-body-util = "0.1"
 libc.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "stream"] }
 ring = "0.17"
@@ -37,6 +40,8 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
 tonic.workspace = true
+tower-layer = "0.3"
+tower-service = "0.3"
 uuid.workspace = true
 
 [dev-dependencies]

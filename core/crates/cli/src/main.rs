@@ -392,14 +392,15 @@ enum Command {
         #[arg(long, value_name = "stderr|PATH")]
         audit_log: Option<String>,
     },
-    /// Run a Gateway: collaboration surface webhooks and connections, reply delivery, and
-    /// operator notifications, as gateway:NAME, a client of the Control Plane. Or enroll, revoke,
-    /// and rotate the credentials of Gateways.
+    /// Run a Gateway: the endpoint clients and operators connect to, which forwards their calls to
+    /// the Control Plane, and collaboration surface webhooks and connections, reply delivery, and
+    /// operator notifications as gateway:NAME. Or enroll, revoke, and rotate the credentials of
+    /// Gateways.
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Gateway {
         #[command(subcommand)]
         command: Option<enrollments::GatewayCommand>,
-        /// Address for the test notification. Port 0 picks a free port.
+        /// Address clients connect to. Port 0 picks a free port. Outside loopback it requires TLS.
         #[arg(long, default_value = "127.0.0.1:0")]
         listen: SocketAddr,
         /// Also accept gRPC carried in a WebSocket on this address, for hosts that only
@@ -1870,6 +1871,10 @@ struct GatewayConnectors {
 
 /// Runs a Gateway: surface ingress, delivery, and operator notifications, as a client of the
 /// Control Plane at `control_plane`. Its own listener serves only the test notification.
+/// Connections a Gateway keeps to the Control Plane for client calls, so one connection's
+/// concurrent stream limit cannot cap how many clients follow conversations at once.
+const CLIENT_CONNECTIONS: usize = 8;
+
 async fn gateway(
     listen: SocketAddr,
     websocket: Option<SocketAddr>,
@@ -1877,17 +1882,33 @@ async fn gateway(
     credential_directory: Option<PathBuf>,
     connectors: GatewayConnectors,
 ) -> Result<()> {
-    // Refuse every call from a peer that skipped protocol negotiation.
+    let control_plane_target = network::endpoint(control_plane).await?;
+    // Refuse an incompatible Control Plane before accepting any public traffic,
+    // and name the selected version on every call to it. Client calls use their own
+    // connections, so they never share this Gateway's credentialed calls' channel.
+    let mut channels = Vec::with_capacity(CLIENT_CONNECTIONS + 1);
+    for _ in 0..=CLIENT_CONNECTIONS {
+        let channel = control_plane_target.connect().await?;
+        channels.push(
+            connect(channel, ServiceRole::Gateway, ServiceRole::ControlPlane)
+                .await
+                .map_err(|error| error.at(control_plane_target.url()))?,
+        );
+    }
+    let channel = channels.pop().expect("a Control Plane channel");
+    let client_api = supertag_gateway::client_api::ClientApi::new(channels);
+    #[cfg(feature = "test-fixtures")]
+    let client_api = if std::env::var_os("SUPERTAG_TEST_GATEWAY_FORWARD_EVERY_CALL").is_some() {
+        client_api.forwarding_every_call()
+    } else {
+        client_api
+    };
+    // Refuse every call from a peer that skipped protocol negotiation, then forward client calls
+    // to the Control Plane, which authorizes each as its caller.
     let mut builder = network::server(listen, websocket)
         .await?
-        .layer(fence(ServiceRole::Gateway));
-    let control_plane_target = network::endpoint(control_plane).await?;
-    let channel = control_plane_target.connect().await?;
-    // Refuse an incompatible Control Plane before accepting any public traffic,
-    // and name the selected version on every call to it.
-    let channel = connect(channel, ServiceRole::Gateway, ServiceRole::ControlPlane)
-        .await
-        .map_err(|error| error.at(control_plane_target.url()))?;
+        .layer(fence(ServiceRole::Gateway))
+        .layer(client_api);
     let gateway_token = gateway_credential(&control_plane_target, credential_directory)?;
     let slack = match connectors.slack {
         Some((ingress, state_directory)) => {

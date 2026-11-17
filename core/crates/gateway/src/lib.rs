@@ -2,11 +2,16 @@
 //!
 //! A Gateway receives surface events (webhooks and outbound connections), normalizes them,
 //! renders and delivers replies, and sends operator notifications. It holds the surface
-//! credentials, from the environment or its credential vault, and is an ordinary client of the
-//! Control Plane: it calls the Connector, reply progress, and operator notification RPCs on the
-//! Control Plane's public endpoint. It serves no operator or Worker Host API; its only gRPC
-//! service is the operator's test notification.
+//! credentials, from the environment or its credential vault, and calls the Connector, reply
+//! progress, and operator notification RPCs on the Control Plane's public endpoint as
+//! `gateway:NAME`.
+//!
+//! A Gateway is also the endpoint clients connect to: the desktop app, the terminal UI, the CLI
+//! and the SDKs. It forwards their calls to the Control Plane, which authorizes each one as its
+//! caller ([`client_api`]). Its own gRPC service is the operator's test notification. It serves no
+//! Worker Host API: Worker Hosts connect to the Control Plane.
 
+pub mod client_api;
 mod delivery_journal;
 pub mod github;
 pub mod lark;
