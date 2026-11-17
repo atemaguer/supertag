@@ -31,6 +31,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- The README's multiplayer diagram shows personal and shared Tags coordinating work across local
+  machines, teammates' machines, and VMs.
 - The SuperTag protocol version is now 3, because conversations changed on the wire since 0.3.0.
   A CLI, terminal UI, desktop app, or Worker Host from this release refuses a 0.3.0 Control Plane
   (protocol 2) when it connects, and the error names both releases and which to upgrade, for
