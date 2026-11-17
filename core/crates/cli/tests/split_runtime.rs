@@ -49,7 +49,13 @@ use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
-const WAIT: Duration = Duration::from_secs(20);
+/// Bounds one test wait for a service to start or reach a state. Only the test waits this long;
+/// the product's own deadlines are unchanged. A loaded machine (parallel tests and builds, a
+/// shared PostgreSQL server) has stretched a debug service's startup past 20 seconds.
+const WAIT: Duration = Duration::from_secs(60);
+/// Bounds one test RPC. Generous because a loaded machine (parallel tests and builds) can stall
+/// a debug Control Plane for seconds; scenarios that need a short bound set their own.
+const RPC_DEADLINE: Duration = Duration::from_secs(15);
 
 struct Credentials {
     gateway: String,
@@ -90,7 +96,7 @@ impl Credentials {
 
     fn request<T>(&self, message: T) -> Result<Request<T>> {
         let mut request = authenticated_request(message, &self.operator, None)?;
-        request.set_timeout(Duration::from_secs(3));
+        request.set_timeout(RPC_DEADLINE);
         Ok(request)
     }
 }
@@ -318,8 +324,8 @@ impl Services {
 
     async fn client(&self) -> Result<OperatorClient<ProtocolChannel>> {
         let endpoint = Channel::from_shared(self.endpoint.clone())?
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(3));
+            .connect_timeout(RPC_DEADLINE)
+            .timeout(RPC_DEADLINE);
         Ok(OperatorClient::new(
             protocol::negotiated(endpoint.connect().await?).await?,
         ))
@@ -738,8 +744,8 @@ async fn local_up(
     let endpoint = supervisor.endpoint().await?;
     let channel = protocol::negotiated(
         Channel::from_shared(endpoint)?
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(3))
+            .connect_timeout(RPC_DEADLINE)
+            .timeout(RPC_DEADLINE)
             .connect()
             .await?,
     )
@@ -1571,6 +1577,47 @@ async fn read_mock_request(stream: &mut TcpStream) -> Result<MockSlackRequest> {
     })
 }
 
+/// Delivers a signed Events API body as Slack does: a `503` or no answer within Slack's
+/// three-second window is redelivered, up to three retries. The Gateway answers `503` when the
+/// Control Plane does not admit the event within its acknowledgement budget, which a loaded
+/// machine can exceed; admission is idempotent per event ID, so a redelivery is safe.
+async fn deliver_signed_slack_event(endpoint: &str, body: &str) -> Result<reqwest::StatusCode> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()?;
+    let mut retry = 0;
+    loop {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_secs()
+            .to_string();
+        let mut mac = Hmac::<Sha256>::new_from_slice(SLACK_SIGNING_SECRET.as_bytes())?;
+        mac.update(format!("v0:{timestamp}:{body}").as_bytes());
+        let signature = format!("v0={:x}", mac.finalize().into_bytes());
+        let mut request = client
+            .post(format!("{endpoint}/slack/events"))
+            .header("content-type", "application/json")
+            .header("x-slack-request-timestamp", timestamp)
+            .header("x-slack-signature", signature);
+        if retry > 0 {
+            request = request
+                .header("x-slack-retry-num", retry.to_string())
+                .header("x-slack-retry-reason", "http_error");
+        }
+        let outcome = request.body(body.to_owned()).send().await;
+        let redeliver = match &outcome {
+            Ok(response) => response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            Err(error) => error.is_timeout(),
+        };
+        if !redeliver || retry == 3 {
+            return Ok(outcome?.status());
+        }
+        retry += 1;
+        sleep(Duration::from_millis(500)).await;
+    }
+}
+
 async fn signed_slack_event(endpoint: &str, prompt: &str) -> Result<reqwest::StatusCode> {
     let body = serde_json::json!({
         "type": "event_callback", "team_id": SLACK_TEAM, "event_id": SLACK_EVENT,
@@ -1578,25 +1625,7 @@ async fn signed_slack_event(endpoint: &str, prompt: &str) -> Result<reqwest::Sta
             "text": prompt, "ts": "1794470000.123456", "thread_ts": SLACK_THREAD }
     })
     .to_string();
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs()
-        .to_string();
-    let mut mac = Hmac::<Sha256>::new_from_slice(SLACK_SIGNING_SECRET.as_bytes())?;
-    mac.update(format!("v0:{timestamp}:{body}").as_bytes());
-    let signature = format!("v0={:x}", mac.finalize().into_bytes());
-    Ok(reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(5))
-        .build()?
-        .post(format!("{endpoint}/slack/events"))
-        .header("content-type", "application/json")
-        .header("x-slack-request-timestamp", timestamp)
-        .header("x-slack-signature", signature)
-        .body(body)
-        .send()
-        .await?
-        .status())
+    deliver_signed_slack_event(endpoint, &body).await
 }
 
 async fn slack_gateway(
@@ -1643,7 +1672,7 @@ async fn slack_gateway_with(
 fn connector_request<T>(credentials: &Credentials, message: T) -> Result<Request<T>> {
     let mut request =
         supertag_protocol::connector_request(message, &credentials.gateway, SLACK_ACCOUNT)?;
-    request.set_timeout(Duration::from_secs(3));
+    request.set_timeout(RPC_DEADLINE);
     Ok(request)
 }
 
@@ -1992,25 +2021,7 @@ async fn signed_slack_mention(
             "text": prompt, "ts": ts }
     })
     .to_string();
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs()
-        .to_string();
-    let mut mac = Hmac::<Sha256>::new_from_slice(SLACK_SIGNING_SECRET.as_bytes())?;
-    mac.update(format!("v0:{timestamp}:{body}").as_bytes());
-    let signature = format!("v0={:x}", mac.finalize().into_bytes());
-    Ok(reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(5))
-        .build()?
-        .post(format!("{endpoint}/slack/events"))
-        .header("content-type", "application/json")
-        .header("x-slack-request-timestamp", timestamp)
-        .header("x-slack-signature", signature)
-        .body(body)
-        .send()
-        .await?
-        .status())
+    deliver_signed_slack_event(endpoint, &body).await
 }
 
 /// TypeScript parity: the acknowledgement, `progress.updated` replacement, and in-place final
@@ -2308,8 +2319,8 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     let endpoint = supervisor.endpoint().await?;
     let channel = protocol::negotiated(
         Channel::from_shared(endpoint)?
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(3))
+            .connect_timeout(RPC_DEADLINE)
+            .timeout(RPC_DEADLINE)
             .connect()
             .await?,
     )
@@ -2782,8 +2793,8 @@ async fn control_plane_partition_expires_execution_and_requires_audited_retry_be
     );
     let host_channel = protocol::negotiated(
         Channel::from_shared(public_endpoint.clone())?
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(3))
+            .connect_timeout(RPC_DEADLINE)
+            .timeout(RPC_DEADLINE)
             .connect()
             .await?,
     )
@@ -3244,7 +3255,20 @@ async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
         .await?,
         reqwest::StatusCode::OK
     );
-    mock.wait_for_requests(1).await?;
+    let logs = |services: &Services, step: &str| {
+        let gateway = services
+            .gateway
+            .as_ref()
+            .map(Process::logs)
+            .unwrap_or_default();
+        format!(
+            "{step}; Gateway log: {gateway}; Control Plane log: {}",
+            services.control_plane.logs()
+        )
+    };
+    mock.wait_for_requests(1)
+        .await
+        .with_context(|| logs(&services, "acknowledgement"))?;
     mock.responses.add_permits(1);
     let mut command = credentials.command();
     command
@@ -3263,11 +3287,16 @@ async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
     let mut host = Process::spawn(command, directory, "codex-host", false)?;
     if let Err(error) = mock.wait_for_requests(2).await {
         let log = std::fs::read_to_string(&host.log).unwrap_or_default();
-        return Err(error.context(format!("Codex Worker Host log: {log}")));
+        return Err(error.context(format!(
+            "Codex Worker Host log: {log}; {}",
+            logs(&services, "plan")
+        )));
     }
     mock.responses.add_permits(1);
     std::fs::write(&release, b"")?;
-    mock.wait_for_requests(3).await?;
+    mock.wait_for_requests(3)
+        .await
+        .with_context(|| logs(&services, "final result"))?;
     mock.responses.add_permits(1);
     host.successful_exit().await?;
     let requests: Vec<_> = mock

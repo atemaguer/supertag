@@ -810,27 +810,43 @@ async fn reply(endpoint: &str, sequence: u64, thread: u64, text: &str) -> Result
     let ts = format!("1794470000.{sequence:06}");
     let thread_ts = format!("1794470000.{thread:06}");
     let body = json!({"type":"event_callback","team_id":TEAM,"event_id":format!("Ev{sequence}"),"event":{"type":"app_mention","channel":CHANNEL,"user":"UALICE1","text":text,"ts":ts,"thread_ts":thread_ts}}).to_string();
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs()
-        .to_string();
-    let mut mac = Hmac::<Sha256>::new_from_slice(SIGNING.as_bytes())?;
-    mac.update(format!("v0:{timestamp}:{body}").as_bytes());
-    let status = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(5))
-        .build()?
-        .post(format!("{endpoint}/slack/events"))
-        .header("content-type", "application/json")
-        .header("x-slack-request-timestamp", timestamp)
-        .header(
-            "x-slack-signature",
-            format!("v0={:x}", mac.finalize().into_bytes()),
-        )
-        .body(body)
-        .send()
-        .await?
-        .status();
+        .build()?;
+    // As Slack does, redeliver after a 503 or no answer, up to three retries: the Gateway
+    // answers 503 when the Control Plane does not admit the event within its acknowledgement
+    // budget, which a loaded machine can exceed. Admission is idempotent per event ID.
+    let mut retry = 0;
+    let status = loop {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_secs()
+            .to_string();
+        let mut mac = Hmac::<Sha256>::new_from_slice(SIGNING.as_bytes())?;
+        mac.update(format!("v0:{timestamp}:{body}").as_bytes());
+        let mut request = client
+            .post(format!("{endpoint}/slack/events"))
+            .header("content-type", "application/json")
+            .header("x-slack-request-timestamp", timestamp)
+            .header(
+                "x-slack-signature",
+                format!("v0={:x}", mac.finalize().into_bytes()),
+            );
+        if retry > 0 {
+            request = request.header("x-slack-retry-num", retry.to_string());
+        }
+        let outcome = request.body(body.clone()).send().await;
+        let redeliver = match &outcome {
+            Ok(response) => response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            Err(error) => error.is_timeout(),
+        };
+        if !redeliver || retry == 3 {
+            break outcome?.status();
+        }
+        retry += 1;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
     ensure!(status.is_success(), "Slack event was refused: {status}");
     Ok(())
 }
