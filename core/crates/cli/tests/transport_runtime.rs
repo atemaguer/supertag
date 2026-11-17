@@ -2604,7 +2604,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
         )
         .await
         .map_err(|error| anyhow!("{error}"))?,
-        3
+        4
     );
     // With its certificate, a Gateway still authenticates with its own enrolled credential, and
     // learns who presented a credential to it from the Control Plane, never by asserting it.
@@ -2858,7 +2858,7 @@ async fn services_refuse_incompatible_protocol_peers_with_a_clear_error() -> Res
             negotiate(plane.clone(), role, ServiceRole::ControlPlane)
                 .await
                 .map_err(|error| anyhow!("{error}"))?,
-            3
+            4
         );
     }
     let old_host = negotiate_versions(
@@ -3013,7 +3013,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
     let stderr = String::from_utf8_lossy(&refused.stderr);
     ensure!(
         !refused.status.success()
-            && stderr.contains(&format!("This CLI speaks SuperTag protocol 4, but the Control Plane at http://{old_plane} runs SuperTag {VERSION} (protocol 2). Upgrade the Control Plane.")),
+            && stderr.contains(&format!("This CLI speaks SuperTag protocol 4, but the Gateway at http://{old_plane} runs SuperTag {VERSION} (protocol 2). Upgrade the Gateway.")),
         "unclear operator failure: {stderr}"
     );
     old_server.abort();
