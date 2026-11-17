@@ -2,7 +2,7 @@
 import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Gateway, Message, Tag } from "../gateway";
+import type { Gateway, Message, Schedule, Tag } from "../gateway";
 import { clearConversationCache } from "../lib/conversation-cache";
 import { clearOutbox } from "../lib/outbox";
 import { ConversationPane, type Draft } from "./conversation";
@@ -335,4 +335,53 @@ it("shows a turn's reply after the messages that joined it, in the order they we
     "Fixed the build and the tests.",
   ]);
   expect(host.querySelectorAll(".result-text")).toHaveLength(1);
+});
+
+it("shows the Tag's Schedules in its details panel, never in the conversation", async () => {
+  const schedule: Schedule = {
+    scheduleId: "weekly",
+    tagId: "lead",
+    note: "Summarise the week",
+    state: "active",
+    every: { cron: "0 9 * * 1", timeZone: "UTC" },
+    createdBy: "tag:lead",
+    fireCount: 0,
+    missedCount: 0,
+  };
+  const gateway: Gateway = {
+    tags: async () => [tag],
+    conversations: async () => [],
+    messages: async () => ({ conversationId: "c1", messages: [] }),
+    send: async () => {
+      throw new Error("not sent");
+    },
+    events: async () => [],
+    saveArtifact: async () => false,
+    markRead: async () => {
+      throw new Error("not listed");
+    },
+    schedules: async () => [schedule],
+    scope: "test",
+    readCache: async () => undefined,
+    writeCache: async () => {},
+  };
+  const render = (detailsOpen: boolean) =>
+    createElement(ConversationPane, {
+      gateway,
+      tag,
+      draft: { text: "" },
+      updateDraft: () => {},
+      onWriteChange: () => {},
+      details: detailsOpen,
+    });
+  act(() => root.render(render(false)));
+  await flush();
+  expect(host.querySelector(".schedules")).toBeNull();
+
+  act(() => root.render(render(true)));
+  await flush();
+  const details = host.querySelector("#tag-details");
+  expect(details?.querySelector("#tag-details-schedules")?.textContent).toBe("Schedules");
+  expect(details?.querySelector(".schedule-note")?.textContent).toBe("Summarise the week");
+  expect(host.querySelector(".conversation .schedules")).toBeNull();
 });

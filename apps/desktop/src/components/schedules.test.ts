@@ -95,8 +95,11 @@ it("lists the Tag's pending Schedules and pauses, resumes, and deletes them", as
   await act(async () => button("Delete")?.click());
   await flush();
   expect(changeSchedule).toHaveBeenLastCalledWith("weekly", "delete");
-  // With nothing left to fire, the list is gone.
-  expect(host.querySelector(".schedules")).toBeNull();
+  // With nothing left to fire, the section says so.
+  expect(host.querySelector(".schedule")).toBeNull();
+  expect(host.querySelector(".schedule-status")?.textContent).toBe(
+    "No Schedules will wake this Tag.",
+  );
 });
 
 it("rereads the list when the Watch reports a change to this Tag's Schedules", async () => {
@@ -106,13 +109,13 @@ it("rereads the list when the Watch reports a change to this Tag's Schedules", a
   act(() => root.render(createElement(ScheduleList, { gateway, watch: feed, tagId: "lead" })));
   feed.publish({ kind: "ready" });
   await flush();
-  expect(host.querySelector(".schedules")).toBeNull();
+  expect(host.querySelector(".schedule")).toBeNull();
 
   listed.push(weekly);
   const other: WatchUpdate = { kind: "schedule", tagId: "reviewer" };
   feed.publish(other);
   await flush();
-  expect(host.querySelector(".schedules")).toBeNull();
+  expect(host.querySelector(".schedule")).toBeNull();
 
   feed.publish({ kind: "schedule", tagId: "lead" });
   await flush();

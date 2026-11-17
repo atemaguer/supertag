@@ -14,12 +14,13 @@ interface ScheduleListProps {
 }
 
 /**
- * The Tag's Schedules that can still fire, with their next time. Each can be paused, resumed, or
- * deleted. Nothing shows while the Tag has none.
+ * The Schedules section of a Tag's details: those that can still fire, with their next time. Each
+ * can be paused, resumed, or deleted.
  */
 export function ScheduleList({ gateway, watch, tagId }: ScheduleListProps) {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<string>();
   const list = gateway.schedules;
 
@@ -31,6 +32,7 @@ export function ScheduleList({ gateway, watch, tagId }: ScheduleListProps) {
         if (signal.aborted) return true;
         setSchedules(listed.filter(pending));
         setError("");
+        setLoaded(true);
         return true;
       } catch (failure) {
         if (!signal.aborted) setError(String(failure));
@@ -64,51 +66,60 @@ export function ScheduleList({ gateway, watch, tagId }: ScheduleListProps) {
     }
   }
 
-  if (!list || (schedules.length === 0 && !error)) return null;
+  if (!list) return null;
+  const status =
+    error || (!loaded ? "Loading…" : schedules.length ? "" : "No Schedules will wake this Tag.");
   return (
-    <section className="schedules" aria-label="Schedules">
-      {schedules.map((schedule) => (
-        <div key={schedule.scheduleId} className="schedule" data-state={schedule.state}>
-          <div className="schedule-text">
-            <span className="schedule-note">{schedule.note || schedule.scheduleId}</span>
-            <span className="schedule-when">{scheduleLine(schedule)}</span>
+    <section className="details-section" aria-labelledby="tag-details-schedules">
+      <h3 id="tag-details-schedules">Schedules</h3>
+      <div className="schedules">
+        {schedules.map((schedule) => (
+          <div key={schedule.scheduleId} className="schedule" data-state={schedule.state}>
+            <div className="schedule-text">
+              <span className="schedule-note">{schedule.note || schedule.scheduleId}</span>
+              <span className="schedule-when">{scheduleLine(schedule)}</span>
+            </div>
+            {schedule.state === "paused" ? (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                title="Resume"
+                aria-label="Resume"
+                disabled={busy === schedule.scheduleId}
+                onClick={() => void change(schedule, "resume")}
+              >
+                <Play />
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                title="Pause"
+                aria-label="Pause"
+                disabled={busy === schedule.scheduleId}
+                onClick={() => void change(schedule, "pause")}
+              >
+                <Pause />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              title="Delete"
+              aria-label="Delete"
+              disabled={busy === schedule.scheduleId}
+              onClick={() => void change(schedule, "delete")}
+            >
+              <Trash2 />
+            </Button>
           </div>
-          {schedule.state === "paused" ? (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              title="Resume"
-              aria-label="Resume"
-              disabled={busy === schedule.scheduleId}
-              onClick={() => void change(schedule, "resume")}
-            >
-              <Play />
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              title="Pause"
-              aria-label="Pause"
-              disabled={busy === schedule.scheduleId}
-              onClick={() => void change(schedule, "pause")}
-            >
-              <Pause />
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            title="Delete"
-            aria-label="Delete"
-            disabled={busy === schedule.scheduleId}
-            onClick={() => void change(schedule, "delete")}
-          >
-            <Trash2 />
-          </Button>
-        </div>
-      ))}
-      {error && <p className="schedule-error">{error}</p>}
+        ))}
+      </div>
+      {status && (
+        <p className="schedule-status" role="status">
+          {status}
+        </p>
+      )}
     </section>
   );
 }

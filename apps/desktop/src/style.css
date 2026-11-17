@@ -1057,7 +1057,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin: 0 0 6px;
+  margin-top: 8px;
 }
 .schedule {
   display: flex;
@@ -1082,7 +1082,7 @@ button:disabled {
   color: var(--muted);
 }
 .schedule-when,
-.schedule-error {
+.schedule-status {
   color: var(--muted);
   font-size: 11px;
   margin: 0;

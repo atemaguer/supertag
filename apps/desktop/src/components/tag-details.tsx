@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Gateway, NetworkLog, NetworkRequest, Note, Tag, WatchUpdate } from "../gateway";
 import { describe } from "../lib/polling";
 import { useWatchRefresh, type WatchFeed } from "../lib/watch";
+import { ScheduleList } from "./schedules";
 import { relativeTime } from "./sidebar";
 import { Button } from "./ui/button";
 
@@ -56,6 +57,7 @@ export function TagDetails({
         </Button>
       </div>
       <NotesSection gateway={gateway} watch={watch} tag={tag} />
+      <ScheduleList gateway={gateway} watch={watch} tagId={tag.tagId} />
       <NetworkSection gateway={gateway} watch={watch} tag={tag} />
     </aside>
   );
