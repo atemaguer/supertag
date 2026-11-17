@@ -9,47 +9,47 @@ use serde::{Deserialize, Serialize};
 use supertag_transport::Target;
 
 use super::{
-    ControlPlaneState, Result, Session, Tag, bearer, device_name, endpoint,
-    local::{self, LOCAL, LocalControlPlane},
+    GatewayState, Result, Session, Tag, bearer, device_name, endpoint,
+    local::{self, LOCAL, LocalGateway},
 };
 
-const STORE_ERROR: &str = "Could not read or save your Control Plane connections.";
+const STORE_ERROR: &str = "Could not read or save your Gateway connections.";
 const MAX_STORE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ORIGIN_BYTES: usize = 2048;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ControlPlaneProfile {
+struct GatewayProfile {
     name: String,
     origin: String,
 }
 
 #[derive(Deserialize, Serialize)]
-struct SavedControlPlane {
-    profile: ControlPlaneProfile,
+struct SavedGateway {
+    profile: GatewayProfile,
     token: String,
 }
 
 #[derive(Default, Deserialize, Serialize)]
 struct Profiles {
     active: Option<String>,
-    control_planes: Vec<SavedControlPlane>,
+    gateways: Vec<SavedGateway>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ControlPlaneList {
-    profiles: Vec<ControlPlaneProfile>,
+pub struct GatewayList {
+    profiles: Vec<GatewayProfile>,
     active: Option<String>,
-    /// The local Control Plane, which is found rather than saved.
-    local: LocalControlPlane,
+    /// The local Gateway, which is found rather than saved.
+    local: LocalGateway,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ControlPlaneActivation {
-    control_planes: ControlPlaneList,
-    /// The saved origin connected to, or `local` for the local Control Plane.
+pub struct GatewayActivation {
+    gateways: GatewayList,
+    /// The saved origin connected to, or `local` for the local Gateway.
     origin: String,
     connection_id: String,
     tags: Vec<Tag>,
@@ -58,7 +58,7 @@ pub struct ControlPlaneActivation {
 }
 
 #[cfg(test)]
-impl ControlPlaneActivation {
+impl GatewayActivation {
     pub(super) fn connection_id(&self) -> &str {
         &self.connection_id
     }
@@ -68,12 +68,12 @@ impl ControlPlaneActivation {
     }
 }
 
-impl ControlPlaneState {
-    fn list(&self, value: Profiles) -> ControlPlaneList {
-        ControlPlaneList {
+impl GatewayState {
+    fn list(&self, value: Profiles) -> GatewayList {
+        GatewayList {
             active: value.active,
             profiles: value
-                .control_planes
+                .gateways
                 .into_iter()
                 .map(|entry| entry.profile)
                 .collect(),
@@ -143,7 +143,7 @@ fn lock_profiles(path: &Path) -> Result<File> {
     let file = options.open(&lock_path).map_err(|_| STORE_ERROR)?;
     validate_profile_file(&file).map_err(|_| STORE_ERROR)?;
     file.try_lock()
-        .map_err(|_| "Another SuperTag window is updating the saved Control Planes. Try again.")?;
+        .map_err(|_| "Another SuperTag window is updating the saved Gateways. Try again.")?;
     Ok(file)
 }
 
@@ -169,7 +169,7 @@ impl Profiles {
         let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|_| STORE_ERROR)?;
         let bytes = serde_json::to_vec(self).map_err(|_| STORE_ERROR)?;
         if bytes.len() as u64 > MAX_STORE_BYTES {
-            return Err("The saved Control Plane list is too large.".into());
+            return Err("The saved Gateway list is too large.".into());
         }
         staged.write_all(&bytes).map_err(|_| STORE_ERROR)?;
         staged.as_file().sync_all().map_err(|_| STORE_ERROR)?;
@@ -178,13 +178,13 @@ impl Profiles {
     }
 }
 
-/// The form a Control Plane is saved under: its origin, plus the path of a tunnel URL.
-fn control_plane_origin(address: &str) -> Result<(String, Target)> {
+/// The form a Gateway is saved under: its origin, plus the path of a tunnel URL.
+fn gateway_origin(address: &str) -> Result<(String, Target)> {
     if address.len() > MAX_ORIGIN_BYTES {
-        return Err("Enter a Control Plane URL of up to 2048 characters.".into());
+        return Err("Enter a Gateway URL of up to 2048 characters.".into());
     }
     let checked = endpoint(address)?;
-    let url = tauri::Url::parse(&checked.url()).map_err(|_| "Enter a valid Control Plane URL.")?;
+    let url = tauri::Url::parse(&checked.url()).map_err(|_| "Enter a valid Gateway URL.")?;
     let mut origin = url.origin().ascii_serialization();
     if matches!(url.scheme(), "ws" | "wss") && url.path() != "/" {
         origin.push_str(url.path());
@@ -193,25 +193,25 @@ fn control_plane_origin(address: &str) -> Result<(String, Target)> {
     Ok((origin, endpoint))
 }
 
-impl ControlPlaneState {
-    pub async fn saved_control_planes(&self, path: &Path) -> Result<ControlPlaneList> {
+impl GatewayState {
+    pub async fn saved_gateways(&self, path: &Path) -> Result<GatewayList> {
         let _guard = self.1.lock().await;
         Ok(self.list(Profiles::load(path)?))
     }
 
-    pub async fn save_control_plane(
+    pub async fn save_gateway(
         &self,
         path: &Path,
         address: String,
         name: String,
         token: String,
-    ) -> Result<ControlPlaneActivation> {
+    ) -> Result<GatewayActivation> {
         let _guard = self.1.lock().await;
-        let (origin, endpoint) = control_plane_origin(&address)?;
+        let (origin, endpoint) = gateway_origin(&address)?;
         let _file_lock = lock_profiles(path)?;
         let name = name.trim();
         if name.chars().count() > 80 || name.chars().any(char::is_control) {
-            return Err("Enter a Control Plane name of up to 80 characters.".into());
+            return Err("Enter a Gateway name of up to 80 characters.".into());
         }
         // A client Auth Key joins this device once; only the enrolled credential is saved.
         let token =
@@ -225,7 +225,7 @@ impl ControlPlaneState {
             };
         let mut profiles = Profiles::load(path)?;
         let stored = profiles
-            .control_planes
+            .gateways
             .iter_mut()
             .find(|entry| entry.profile.origin == origin);
         let name = if name.is_empty() {
@@ -244,8 +244,8 @@ impl ControlPlaneState {
                 .await
         } else {
             bearer(&token)?;
-            profiles.control_planes.push(SavedControlPlane {
-                profile: ControlPlaneProfile {
+            profiles.gateways.push(SavedGateway {
+                profile: GatewayProfile {
                     name,
                     origin: origin.clone(),
                 },
@@ -256,32 +256,28 @@ impl ControlPlaneState {
         }
     }
 
-    pub async fn select_control_plane(
-        &self,
-        path: &Path,
-        origin: String,
-    ) -> Result<ControlPlaneActivation> {
+    pub async fn select_gateway(&self, path: &Path, origin: String) -> Result<GatewayActivation> {
         let _guard = self.1.lock().await;
         let _file_lock = lock_profiles(path)?;
         let profiles = Profiles::load(path)?;
         let entry = profiles
-            .control_planes
+            .gateways
             .iter()
             .find(|entry| entry.profile.origin == origin)
-            .ok_or("That Control Plane is no longer saved.")?;
+            .ok_or("That Gateway is no longer saved.")?;
         let token = entry.token.clone();
-        let (canonical, endpoint) = control_plane_origin(&origin)?;
+        let (canonical, endpoint) = gateway_origin(&origin)?;
         if canonical != origin {
-            return Err("The saved Control Plane address is invalid.".into());
+            return Err("The saved Gateway address is invalid.".into());
         }
         self.activate(path, profiles, Some(origin), endpoint, &token)
             .await
     }
 
-    /// Connects to the local Control Plane with the operator token its state directory holds
-    /// now. Nothing about it is saved, and no saved Control Plane stays active, so the next
+    /// Connects to the local Gateway with the operator token its state directory holds
+    /// now. Nothing about it is saved, and no saved Gateway stays active, so the next
     /// launch opens the local one again.
-    pub async fn connect_local_control_plane(&self, path: &Path) -> Result<ControlPlaneActivation> {
+    pub async fn connect_local_gateway(&self, path: &Path) -> Result<GatewayActivation> {
         let _guard = self.1.lock().await;
         let local = local::discover(self.2.as_deref())?;
         let endpoint = endpoint(&local.url)?;
@@ -292,7 +288,7 @@ impl ControlPlaneState {
     }
 
     /// Connects and makes the connection current. A saved `origin` becomes the active saved
-    /// Control Plane; `None` is the local Control Plane, which leaves none active.
+    /// Gateway; `None` is the local Gateway, which leaves none active.
     async fn activate(
         &self,
         path: &Path,
@@ -300,11 +296,11 @@ impl ControlPlaneState {
         origin: Option<String>,
         endpoint: Target,
         token: &str,
-    ) -> Result<ControlPlaneActivation> {
+    ) -> Result<GatewayActivation> {
         let generation = self.0.read().await.generation;
-        // Cached conversations belong to this Control Plane and principal. The local Control
+        // Cached conversations belong to this Gateway and principal. The local Control
         // Plane is told apart by where it runs.
-        let control_plane = origin
+        let gateway = origin
             .clone()
             .unwrap_or_else(|| format!("{LOCAL} {}", endpoint.url()));
         let session = Arc::new(Session::connect(endpoint, token).await?);
@@ -321,11 +317,11 @@ impl ControlPlaneState {
         state.session = Some(session);
         state.origin = Some(origin.clone());
         state.cache_scope = Some(super::cache::CacheScope {
-            control_plane,
+            gateway,
             principal: principal.clone(),
         });
-        Ok(ControlPlaneActivation {
-            control_planes: self.list(profiles),
+        Ok(GatewayActivation {
+            gateways: self.list(profiles),
             origin,
             connection_id,
             tags,
@@ -333,18 +329,14 @@ impl ControlPlaneState {
         })
     }
 
-    pub async fn clear_control_plane(
-        &self,
-        path: &Path,
-        forget: Option<String>,
-    ) -> Result<ControlPlaneList> {
+    pub async fn clear_gateway(&self, path: &Path, forget: Option<String>) -> Result<GatewayList> {
         let _guard = self.1.lock().await;
         let _file_lock = lock_profiles(path)?;
         let mut profiles = Profiles::load(path)?;
         let mut state = self.0.write().await;
         if let Some(origin) = &forget {
             profiles
-                .control_planes
+                .gateways
                 .retain(|entry| entry.profile.origin != *origin);
         }
         if forget

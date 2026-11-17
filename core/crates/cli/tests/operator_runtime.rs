@@ -110,7 +110,7 @@ database_tests! {
     go_tui_lists_and_saves_completed_task_files;
     #[tokio::test]
     #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-    bare_launcher_saves_and_switches_control_plane_rosters;
+    bare_launcher_saves_and_switches_between_two_gateways;
     #[tokio::test]
     #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
     rust_launcher_and_go_tui_send_a_real_conversation;
@@ -440,7 +440,18 @@ async fn captured_artifact_round_trip(tui: Option<&Path>, database: String) -> R
             generation,
         )?)
         .await?;
-        tui_save_task_file(directory.path(), binary, &endpoint, &token, bytes).await?;
+        // The terminal UI connects to a Gateway in front of the Control Plane.
+        let mut gateway = command(&[
+            "gateway",
+            "--control-plane",
+            &endpoint,
+            "--listen",
+            "127.0.0.1:0",
+        ]);
+        gateway.env("SUPERTAG_GATEWAY_CREDENTIAL", &secret);
+        let (mut gateway, gateway_url) = service(gateway).await?;
+        tui_save_task_file(directory.path(), binary, &gateway_url, &token, bytes).await?;
+        gateway.kill().await?;
     }
     control.kill().await?;
     Ok(())
@@ -915,7 +926,138 @@ fn shell_path(path: &Path) -> Result<String> {
     Ok(format!("'{}'", value.replace('\'', "'\\''")))
 }
 
-async fn bare_launcher_saves_and_switches_control_plane_rosters(database: String) -> Result<()> {
+/// One deployment for the terminal UI: a Control Plane on its own database and the Gateway in
+/// front of it, each at an address a restart reuses.
+struct TuiStack {
+    private_token: String,
+    token: &'static str,
+    database: String,
+    control_plane: (Child, String),
+    gateway: (Child, String),
+}
+
+impl TuiStack {
+    async fn start(token: &'static str, database: String) -> Result<Self> {
+        let private_token =
+            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
+        let control_plane =
+            Self::control_plane(&private_token, token, &database, "127.0.0.1:0").await?;
+        let gateway = Self::gateway(&private_token, &control_plane.1, "127.0.0.1:0").await?;
+        Ok(Self {
+            private_token,
+            token,
+            database,
+            control_plane,
+            gateway,
+        })
+    }
+
+    async fn control_plane(
+        private_token: &str,
+        token: &str,
+        database: &str,
+        listen: &str,
+    ) -> Result<(Child, String)> {
+        let mut last = None;
+        for _ in 0..20 {
+            let mut control = control_plane(private_token, token, "operator:tui");
+            control
+                .args(["--listen", listen])
+                .env("SUPERTAG_DATABASE_URL", database);
+            match service(control).await {
+                Ok(started) => return Ok(started),
+                Err(error) => last = Some(error),
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        Err(last.expect("an attempt"))
+    }
+
+    async fn gateway(
+        private_token: &str,
+        control_plane: &str,
+        listen: &str,
+    ) -> Result<(Child, String)> {
+        let mut last = None;
+        for _ in 0..20 {
+            let mut gateway = command(&[
+                "gateway",
+                "--control-plane",
+                control_plane,
+                "--listen",
+                listen,
+            ]);
+            gateway.env("SUPERTAG_GATEWAY_CREDENTIAL", private_token);
+            match service(gateway).await {
+                Ok(started) => return Ok(started),
+                Err(error) => last = Some(error),
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        Err(last.expect("an attempt"))
+    }
+
+    /// Sets up the Tag and says `text` to it through the Gateway.
+    async fn converse(&self, tag: &str, text: &str) -> Result<()> {
+        let gateway = channel(&self.gateway.1).await?;
+        operator_client::OperatorClient::new(gateway.clone())
+            .put_tag(authenticated_request(
+                PutTagRequest {
+                    tag_id: tag.into(),
+                    ..Default::default()
+                },
+                self.token,
+                None,
+            )?)
+            .await?;
+        conversations_client::ConversationsClient::new(gateway)
+            .send_message(authenticated_request(
+                SendMessageRequest {
+                    tag_id: tag.into(),
+                    text: text.into(),
+                    operation_id: Uuid::new_v4().to_string(),
+                    ..Default::default()
+                },
+                self.token,
+                None,
+            )?)
+            .await?;
+        Ok(())
+    }
+
+    /// Stops both services and starts them again in place.
+    async fn restart(&mut self) -> Result<()> {
+        self.gateway.0.kill().await?;
+        self.control_plane.0.kill().await?;
+        let control_listen = self
+            .control_plane
+            .1
+            .trim_start_matches("http://")
+            .to_owned();
+        let gateway_listen = self.gateway.1.trim_start_matches("http://").to_owned();
+        self.control_plane = Self::control_plane(
+            &self.private_token,
+            self.token,
+            &self.database,
+            &control_listen,
+        )
+        .await?;
+        self.gateway =
+            Self::gateway(&self.private_token, &self.control_plane.1, &gateway_listen).await?;
+        Ok(())
+    }
+
+    async fn stop(mut self) -> Result<()> {
+        self.gateway.0.kill().await?;
+        self.control_plane.0.kill().await?;
+        Ok(())
+    }
+}
+
+/// The terminal UI adds two separately deployed Gateways, switches between them and back, and
+/// shows each one's own Tag and conversation; after one restarts in place, the terminal UI reaches
+/// it again.
+async fn bare_launcher_saves_and_switches_between_two_gateways(database: String) -> Result<()> {
     let Some(binary) = crate::prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
         return Ok(());
     };
@@ -932,40 +1074,20 @@ async fn bare_launcher_saves_and_switches_control_plane_rosters(database: String
         shell_path(Path::new(BINARY))?,
     );
 
-    let mut services = Vec::new();
-    let mut addresses = Vec::new();
-    for (tag, token) in [
-        ("first-tag", "first-fixture-token"),
-        ("second-tag", "second-fixture-token"),
-    ] {
-        let private_token =
-            supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
-        // The first roster's Control Plane uses the database under test; the second
-        // needs a database of its own.
-        let url = if tag == "first-tag" {
-            database.clone()
-        } else {
-            format!(
-                "sqlite://{}?mode=rwc",
-                directory.path().join(format!("{tag}.sqlite")).display()
-            )
-        };
-        let mut control = control_plane(&private_token, token, "operator:tui");
-        control.env("SUPERTAG_DATABASE_URL", url);
-        let (plane, address) = service(control).await?;
-        operator_client::OperatorClient::new(channel(&address).await?)
-            .put_tag(authenticated_request(
-                PutTagRequest {
-                    tag_id: tag.into(),
-                    ..Default::default()
-                },
-                token,
-                None,
-            )?)
-            .await?;
-        addresses.push((address, token));
-        services.push(plane);
-    }
+    // The first deployment uses the database under test; the second needs one of its own.
+    let mut first = TuiStack::start("first-fixture-token", database).await?;
+    first.converse("first-tag", "First Gateway plan").await?;
+    let second = TuiStack::start(
+        "second-fixture-token",
+        format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("second.sqlite").display()
+        ),
+    )
+    .await?;
+    second
+        .converse("second-tag", "Second Gateway notes")
+        .await?;
 
     tmux.run(&[
         "new-session",
@@ -985,16 +1107,21 @@ async fn bare_launcher_saves_and_switches_control_plane_rosters(database: String
         "on",
     ])
     .await?;
-    tmux.wait_for("Control Planes").await?;
-    for (index, (address, token)) in addresses.iter().enumerate() {
+    tmux.wait_for("Gateways").await?;
+    for (index, (stack, name)) in [(&first, "First"), (&second, "Second")]
+        .into_iter()
+        .enumerate()
+    {
         if index > 0 {
             tmux.run(&["send-keys", "-t", "runtime", "C-p"]).await?;
-            tmux.wait_for("Control Planes").await?;
+            tmux.wait_for("Gateways").await?;
         }
         tmux.run(&["send-keys", "-t", "runtime", "a"]).await?;
-        tmux.wait_for("Save a Control Plane").await?;
-        let name = if index == 0 { "First" } else { "Second" };
-        for (field, value) in [name, address.as_str(), token].into_iter().enumerate() {
+        tmux.wait_for("Save a Gateway").await?;
+        for (field, value) in [name, stack.gateway.1.as_str(), stack.token]
+            .into_iter()
+            .enumerate()
+        {
             if field > 0 {
                 tmux.run(&["send-keys", "-t", "runtime", "Tab"]).await?;
             }
@@ -1002,38 +1129,56 @@ async fn bare_launcher_saves_and_switches_control_plane_rosters(database: String
                 .await?;
         }
         let form = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
-        ensure!(!form.contains(token), "the operator token was visible");
+        ensure!(
+            !form.contains(stack.token),
+            "the operator token was visible"
+        );
         tmux.run(&["send-keys", "-t", "runtime", "C-s"]).await?;
-        let tag = if index == 0 {
-            "first-tag"
+        let (tag, text) = if index == 0 {
+            ("first-tag", "First Gateway plan")
         } else {
-            "second-tag"
+            ("second-tag", "Second Gateway notes")
         };
-        tmux.wait_for(&format!("Say something to {tag}.")).await?;
+        tmux.wait_for(tag).await?;
+        tmux.wait_for(text).await?;
     }
-    let second = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
+    let shown = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
     ensure!(
-        !second.contains("first-tag"),
-        "the previous Control Plane roster was visible"
+        !shown.contains("first-tag") && !shown.contains("First Gateway plan"),
+        "the first Gateway's roster or conversation was visible on the second:\n{shown}"
     );
 
+    // Back to the first: only its own Tag and conversation.
     tmux.run(&["send-keys", "-t", "runtime", "C-p"]).await?;
-    tmux.wait_for("Control Planes").await?;
+    tmux.wait_for("Gateways").await?;
     tmux.run(&["send-keys", "-t", "runtime", "Up", "Enter"])
         .await?;
-    tmux.wait_for("Say something to first-tag.").await?;
-    let first = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
+    tmux.wait_for("First Gateway plan").await?;
+    let shown = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
     ensure!(
-        !first.contains("second-tag"),
-        "the other Control Plane roster was visible"
+        !shown.contains("second-tag") && !shown.contains("Second Gateway notes"),
+        "the second Gateway's roster or conversation was visible on the first:\n{shown}"
     );
 
+    // The first deployment restarts in place; switching away and back reaches it again.
+    first.restart().await?;
+    tmux.run(&["send-keys", "-t", "runtime", "C-p"]).await?;
+    tmux.wait_for("Gateways").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Down", "Enter"])
+        .await?;
+    tmux.wait_for("Second Gateway notes").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "C-p"]).await?;
+    tmux.wait_for("Gateways").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Up", "Enter"])
+        .await?;
+    tmux.wait_for("First Gateway plan").await?;
+
+    // A relaunch opens the saved Gateway last used.
     tmux.run(&["respawn-pane", "-k", "-t", "runtime", &shell])
         .await?;
-    tmux.wait_for("Say something to first-tag.").await?;
-    for mut child in services {
-        child.kill().await?;
-    }
+    tmux.wait_for("First Gateway plan").await?;
+    first.stop().await?;
+    second.stop().await?;
     Ok(())
 }
 

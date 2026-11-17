@@ -123,7 +123,7 @@ func TestRuntimeHistoryOrdersTheReceiptAfterEarlierExternalTurns(t *testing.T) {
 	}
 	m = update(t, m, runtimePage(c.runtime.revision, local, remote, old))
 	if !slices.Equal(c.runtime.order, []string{"old", "remote", "local"}) {
-		t.Fatalf("history did not follow Control Plane order: %v", c.runtime.order)
+		t.Fatalf("history did not follow Gateway order: %v", c.runtime.order)
 	}
 	newer := ordered(runtimeHistoryMessage("new", "New request", "New reply"), 4)
 	m = update(t, m, runtimePage(c.runtime.revision, newer, local))
@@ -328,7 +328,7 @@ func TestRuntimeWorkHistoryRecoversReportAfterRootFollowEnds(t *testing.T) {
 }
 
 func TestRailShowsEachConversationFromItsSummaryAndShowingAReplyMarksItRead(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags("lead", "builder", "reviewer")}
+	fake := &fakeGateway{tags: tags("lead", "builder", "reviewer")}
 	fake.conversations = func() []*v2.Conversation {
 		return []*v2.Conversation{
 			{TagId: "lead", ConversationId: "c-lead", Preview: "Fixed it", PreviewFromTag: true, LatestOrder: 3, ReadOrder: 1, UnreadCount: 2},
@@ -361,7 +361,7 @@ func TestRailShowsEachConversationFromItsSummaryAndShowingAReplyMarksItRead(t *t
 	if marks := fake.readMarks(); len(marks) != 1 || marks[0].GetTagId() != "lead" || marks[0].GetOrder() != 3 {
 		t.Fatalf("marks after showing the latest reply = %v", marks)
 	}
-	// Until the Control Plane lists the conversation read, rereading it marks nothing again.
+	// Until the Gateway lists the conversation read, rereading it marks nothing again.
 	m = run(t, m, tea.Batch(m.reloadConversations(), m.reloadShownHistory()))
 	if marks := fake.readMarks(); len(marks) != 1 {
 		t.Fatalf("the same reply was marked read again: %v", marks)

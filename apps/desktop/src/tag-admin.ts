@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Tag } from "./control-plane";
+import type { Tag } from "./gateway";
 
 /** What a new Tag can run on: the harnesses and Workspaces the connected Worker Hosts offer. */
 export interface TagOptions {

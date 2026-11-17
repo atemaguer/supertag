@@ -66,8 +66,8 @@ the Tags in order, ⌘↑ and ⌘↓ the previous and next, and ⌘N creates a T
 
 To find a Tag, a message, or a setting, press ⌘K or the search button beside **+** at the top of
 the sidebar. The search lists your **Tags**, each with its latest message, and **Actions**: New
-Tag, Keyboard shortcuts, and the Control Plane settings, such as switching or adding a Control
-Plane and what this device notifies about. Typing filters both lists and also finds Tags by the
+Tag, Keyboard shortcuts, and the Gateway settings, such as switching or adding a **Gateway** (the
+service the app connects to) and what this device notifies about. Typing filters both lists and also finds Tags by the
 text of messages the app keeps on this device. The arrow keys move the selection, Enter opens
 it, ⌘1 to ⌘9 open a Tag directly, and Esc closes the search.
 
@@ -76,7 +76,7 @@ In the terminal UI:
 | Key | Action |
 | --- | --- |
 | Ctrl-K | Search Tags, their latest messages, and actions such as New Tag and Keyboard shortcuts. |
-| Ctrl-P | Switch Control Planes. **Local** is the one `supertag up` runs on this machine. |
+| Ctrl-P | Switch Gateways. **Local** is the one `supertag up` runs on this machine. |
 | Alt-1 to Alt-9 | Open the Tags in rail order. |
 | Alt-↑ and Alt-↓ | Open the previous and next Tag. |
 | Ctrl-B | Fold the rail into a column of Tag initials, or expand it. |
@@ -115,7 +115,7 @@ that conversation: the window is in the background, or another Tag's conversatio
 replies from one Tag make one notification, such as "lead: 3 new messages", and a question gets
 its own. Clicking a notification opens that Tag. The Dock badge shows how many replies you have
 not read. Choose **All messages**, **Questions only**, or **Off** under **Notifications** in the
-Control Plane menu; the choice is kept on this device. Your own messages, the Tag's activity, and
+Gateway menu; the choice is kept on this device. Your own messages, the Tag's activity, and
 checks that stayed quiet never notify.
 
 The terminal UI does the same through the terminal: a reply or question in a conversation that is

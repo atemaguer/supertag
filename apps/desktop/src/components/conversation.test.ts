@@ -2,7 +2,7 @@
 import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ControlPlane, Message, Tag } from "../control-plane";
+import type { Gateway, Message, Tag } from "../gateway";
 import { clearConversationCache } from "../lib/conversation-cache";
 import { clearOutbox } from "../lib/outbox";
 import { ConversationPane, type Draft } from "./conversation";
@@ -37,10 +37,10 @@ afterEach(() => {
   host.remove();
 });
 
-function Pane({ controlPlane }: { controlPlane: ControlPlane }) {
+function Pane({ gateway }: { gateway: Gateway }) {
   const [draft, setDraft] = useState<Draft>({ text: "" });
   return createElement(ConversationPane, {
-    controlPlane,
+    gateway,
     tag,
     draft,
     updateDraft: (update) => setDraft(update),
@@ -63,13 +63,13 @@ it("shows a sent message at once, keeps it with a retry when it fails, and retri
   };
   let accepted = false;
   const send = vi
-    .fn<ControlPlane["send"]>()
-    .mockRejectedValueOnce(new Error("The Control Plane is unavailable."))
+    .fn<Gateway["send"]>()
+    .mockRejectedValueOnce(new Error("The Gateway is unavailable."))
     .mockImplementationOnce(async () => {
       accepted = true;
       return sent;
     });
-  const controlPlane: ControlPlane = {
+  const gateway: Gateway = {
     tags: async () => [tag],
     conversations: async () => [],
     messages: async () => ({ conversationId: "c1", messages: accepted ? [sent] : [] }),
@@ -83,7 +83,7 @@ it("shows a sent message at once, keeps it with a retry when it fails, and retri
     readCache: async () => undefined,
     writeCache: async () => {},
   };
-  act(() => root.render(createElement(Pane, { controlPlane })));
+  act(() => root.render(createElement(Pane, { gateway })));
   await flush();
   act(() => type("Ship it"));
   await act(async () => {
@@ -102,14 +102,14 @@ it("shows a sent message at once, keeps it with a retry when it fails, and retri
   await act(async () => retry?.click());
   await flush();
   expect(send).toHaveBeenCalledTimes(2);
-  // The retry reuses the operation, so the Control Plane accepts the message at most once.
+  // The retry reuses the operation, so the Gateway accepts the message at most once.
   expect(send.mock.calls[1]).toEqual(["lead", "Ship it", operation]);
   expect(host.querySelector('[data-delivery="Not delivered"]')).toBeNull();
   expect(host.querySelector('[data-delivery="Sent"]')?.textContent).toBe("Sent");
 });
 
 it("moves a message that was not delivered back to the composer to edit", async () => {
-  const controlPlane: ControlPlane = {
+  const gateway: Gateway = {
     tags: async () => [tag],
     conversations: async () => [],
     messages: async () => ({ conversationId: "c1", messages: [] }),
@@ -125,7 +125,7 @@ it("moves a message that was not delivered back to the composer to edit", async 
     readCache: async () => undefined,
     writeCache: async () => {},
   };
-  act(() => root.render(createElement(Pane, { controlPlane })));
+  act(() => root.render(createElement(Pane, { gateway })));
   await flush();
   act(() => type("Draft text"));
   await act(async () => {
@@ -144,7 +144,7 @@ it("resizes the Task activity pane between its limits, remembers it, and resets 
     order: 1,
     task: { taskId: "t1", tagId: "lead", sessionId: "s", prompt: "Ship it", state: "succeeded" },
   };
-  const controlPlane: ControlPlane = {
+  const gateway: Gateway = {
     tags: async () => [tag],
     conversations: async () => [],
     messages: async () => ({ conversationId: "c1", messages: [done] }),
@@ -159,7 +159,7 @@ it("resizes the Task activity pane between its limits, remembers it, and resets 
     writeCache: async () => {},
   };
   const open = async () => {
-    act(() => root.render(createElement(Pane, { controlPlane })));
+    act(() => root.render(createElement(Pane, { gateway })));
     await flush();
     Object.defineProperty(host.querySelector(".work-area"), "clientWidth", { value: 1000 });
     act(() => (host.querySelector(".task-status") as HTMLButtonElement).click());
@@ -224,14 +224,14 @@ it("shows the Tag's messages and its result as the conversation's follow pushes 
     task: { taskId: "t1", tagId: "lead", sessionId: "c1", prompt: "Fix the build", state, result },
   });
   let push:
-    | ((update: Parameters<Parameters<NonNullable<ControlPlane["follow"]>>[1]>[0]) => void)
+    | ((update: Parameters<Parameters<NonNullable<Gateway["follow"]>>[1]>[0]) => void)
     | undefined;
   const stop = vi.fn(async () => {});
-  const messages = vi.fn<ControlPlane["messages"]>(async () => ({
+  const messages = vi.fn<Gateway["messages"]>(async () => ({
     conversationId: "c1",
     messages: [turn("queued")],
   }));
-  const controlPlane: ControlPlane = {
+  const gateway: Gateway = {
     tags: async () => [tag],
     conversations: async () => [],
     messages,
@@ -249,7 +249,7 @@ it("shows the Tag's messages and its result as the conversation's follow pushes 
     readCache: async () => undefined,
     writeCache: async () => {},
   };
-  act(() => root.render(createElement(Pane, { controlPlane })));
+  act(() => root.render(createElement(Pane, { gateway })));
   await flush();
   const reads = messages.mock.calls.length;
   const changed = (message: Message) =>
@@ -309,7 +309,7 @@ it("shows a turn's reply after the messages that joined it, in the order they we
   const joined = (taskId: string, order: number, prompt: string) =>
     turn(taskId, order, prompt, { liveInput: { taskId: "t1", state: "accepted" } });
   const page = [first, joined("t2", 2, "Also the tests"), joined("t3", 3, "Thanks")];
-  const controlPlane: ControlPlane = {
+  const gateway: Gateway = {
     tags: async () => [tag],
     conversations: async () => [],
     messages: async () => ({ conversationId: "c1", messages: [...page].reverse() }),
@@ -323,7 +323,7 @@ it("shows a turn's reply after the messages that joined it, in the order they we
     readCache: async () => undefined,
     writeCache: async () => {},
   };
-  act(() => root.render(createElement(Pane, { controlPlane })));
+  act(() => root.render(createElement(Pane, { gateway })));
   await flush();
   const shown = [...host.querySelectorAll(".prompt-text, .result-text")].map(
     (bubble) => bubble.textContent,

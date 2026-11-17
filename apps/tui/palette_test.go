@@ -15,9 +15,9 @@ import (
 
 var ctrlK = tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}
 
-// testApp starts an app on one fake Control Plane, or on two when other is set, and loads what
+// testApp starts an app on one fake Gateway, or on two when other is set, and loads what
 // the first shows.
-func testApp(t *testing.T, fake *fakeControlPlane, other *fakeControlPlane) *app {
+func testApp(t *testing.T, fake *fakeGateway, other *fakeGateway) *app {
 	t.Helper()
 	server := fake.start(t)
 	contexts := []client.Target{{Name: "laptop", URL: server.URL, Token: fake.token}}
@@ -83,7 +83,7 @@ func typeApp(t *testing.T, a *app, text string) {
 }
 
 func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
-	a := testApp(t, &fakeControlPlane{tags: tags("lead")}, nil)
+	a := testApp(t, &fakeGateway{tags: tags("lead")}, nil)
 	pressApp(t, a, ctrlK)
 	s := appScreen(a)
 	for _, want := range []string{"Search Tags, conversations, settings…", "Tags", "lead", "alt+1", "Actions", "New Tag", "ctrl+n", "Keyboard shortcuts", "every key the app answers to", "/goal · Create Objective", "owned by lead", "Open inbox", "0 waiting", "enter opens"} {
@@ -91,8 +91,8 @@ func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
 			t.Errorf("the palette lacks %q:\n%s", want, s)
 		}
 	}
-	if !strings.Contains(s, "Control Planes · add or switch") {
-		t.Errorf("one Control Plane must still offer adding another:\n%s", s)
+	if !strings.Contains(s, "Gateways · add or switch") {
+		t.Errorf("one Gateway must still offer adding another:\n%s", s)
 	}
 	if strings.Contains(s, "New conversation") || strings.Contains(s, "Switch conversation") {
 		t.Errorf("a Tag has one conversation, so the palette offers none to start or switch to:\n%s", s)
@@ -102,7 +102,7 @@ func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
 		t.Fatalf("esc must close the palette:\n%s", appScreen(a))
 	}
 
-	empty := testApp(t, &fakeControlPlane{}, nil)
+	empty := testApp(t, &fakeGateway{}, nil)
 	pressApp(t, empty, ctrlK)
 	if s := appScreen(empty); strings.Contains(s, "Create Objective") || len(empty.matchingTags()) > 0 || !strings.Contains(s, "Open inbox") {
 		t.Fatalf("without Tags neither a Tag nor /goal is offered:\n%s", s)
@@ -110,7 +110,7 @@ func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
 }
 
 func TestThePaletteSearchesTagsByNameAndPreviewAndOpensThem(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags("lead", "alpha", "beta")}
+	fake := &fakeGateway{tags: tags("lead", "alpha", "beta")}
 	fake.conversations = func() []*v2.Conversation {
 		now := time.Now().UnixMilli()
 		return []*v2.Conversation{
@@ -164,7 +164,7 @@ func TestThePaletteSearchesTagsByNameAndPreviewAndOpensThem(t *testing.T) {
 	pressApp(t, a, ctrlK)
 	typeApp(t, a, "keyboard")
 	pressApp(t, a, key(tea.KeyEnter))
-	if s := appScreen(a); !strings.Contains(s, "Keyboard shortcuts") || !strings.Contains(s, "Switch Control Planes") {
+	if s := appScreen(a); !strings.Contains(s, "Keyboard shortcuts") || !strings.Contains(s, "Switch Gateways") {
 		t.Fatalf("the keyboard shortcuts must show:\n%s", s)
 	}
 	pressApp(t, a, key(tea.KeyEscape))
@@ -178,7 +178,7 @@ func TestThePaletteSearchesTagsByNameAndPreviewAndOpensThem(t *testing.T) {
 }
 
 func TestSlashOpensThePaletteOnlyWhereItIsNotTyped(t *testing.T) {
-	a := testApp(t, &fakeControlPlane{tags: tags("lead")}, nil)
+	a := testApp(t, &fakeGateway{tags: tags("lead")}, nil)
 	typeApp(t, a, "see /tmp")
 	if a.palette != nil || a.inner.input.Value() != "see /tmp" {
 		t.Fatalf("a / in a message must be typed: palette=%v input=%q", a.palette != nil, a.inner.input.Value())
@@ -206,18 +206,18 @@ func TestSlashOpensThePaletteOnlyWhereItIsNotTyped(t *testing.T) {
 	}
 }
 
-func TestThePaletteSwitchesControlPlanes(t *testing.T) {
-	alpha := &fakeControlPlane{token: "alpha-token", tags: tags("builder")}
-	beta := &fakeControlPlane{token: "beta-token", tags: tags("reviewer")}
+func TestThePaletteSwitchesGateways(t *testing.T) {
+	alpha := &fakeGateway{token: "alpha-token", tags: tags("builder")}
+	beta := &fakeGateway{token: "beta-token", tags: tags("reviewer")}
 	a := testApp(t, alpha, beta)
 	pressApp(t, a, ctrlK)
-	typeApp(t, a, "control")
-	if s := appScreen(a); !strings.Contains(s, "Control Planes · add or switch  laptop · ") {
+	typeApp(t, a, "gateway")
+	if s := appScreen(a); !strings.Contains(s, "Gateways · add or switch  laptop · ") {
 		t.Fatalf("screen:\n%s", s)
 	}
 	pressApp(t, a, key(tea.KeyEnter))
-	if !a.choosing || a.palette != nil || !strings.Contains(appScreen(a), "Control Planes") {
-		t.Fatalf("Control Planes must open the list:\n%s", appScreen(a))
+	if !a.choosing || a.palette != nil || !strings.Contains(appScreen(a), "Gateways") {
+		t.Fatalf("Gateways must open the list:\n%s", appScreen(a))
 	}
 	pressApp(t, a, key(tea.KeyDown), key(tea.KeyEnter))
 	if a.current != 1 || !strings.Contains(appScreen(a), "reviewer") {

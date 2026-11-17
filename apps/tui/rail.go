@@ -34,7 +34,7 @@ type railLayout struct {
 	Width     int  `json:"width,omitempty"`
 }
 
-// preferencesFile keeps the rail's layout, for every Control Plane.
+// preferencesFile keeps the rail's layout, for every Gateway.
 func preferencesFile() (root, path string, ok bool) {
 	root, err := cacheDirectory()
 	if err != nil || root == "" {
@@ -108,7 +108,7 @@ func (m *model) resizeRail(delta int) tea.Cmd {
 }
 
 // sortTags lists the lead Tag first, then the others by their conversation's latest activity,
-// the latest first; Tags without one keep the Control Plane's order after them. The selected Tag
+// the latest first; Tags without one keep the Gateway's order after them. The selected Tag
 // stays selected.
 func (m *model) sortTags() {
 	current := m.selectedTag()

@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
-import type { ControlPlane, Conversation, Tag, WatchUpdate } from "../control-plane";
+import type { Conversation, Gateway, Tag, WatchUpdate } from "../gateway";
 import {
   cachedMessageTexts,
   cachedRoster,
@@ -21,7 +21,7 @@ import {
 } from "../lib/conversation-cache";
 import { nativeNotifier, silentNotifier, useDesktopNotifications } from "../lib/notifications";
 import { describe } from "../lib/polling";
-import { useControlPlaneWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
+import { useGatewayWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { harnessLabel, type TagAdmin } from "../tag-admin";
 import {
   CommandPalette,
@@ -52,7 +52,7 @@ interface ShellProps {
   switching?: boolean;
   /** What the sidebar shows about each Tag beyond its name, by Tag ID. */
   summaries?: Record<string, TagSummary>;
-  /** The Control Plane button, round in the rail and wide in the expanded sidebar. */
+  /** The Gateway button, round in the rail and wide in the expanded sidebar. */
   selector(mode: SidebarMode): ReactNode;
   error?: string;
   onSelectTag?(tagId: string): void;
@@ -60,7 +60,7 @@ interface ShellProps {
   onNewTag?(): void;
   /** Why this connection cannot create Tags. */
   newTagRefusal?: string;
-  /** The Control Plane and connection settings the command palette offers. */
+  /** The Gateway and connection settings the command palette offers. */
   actions?: readonly PaletteAction[];
   /** The text of each cached message of a Tag's conversation, newest first, for search. */
   messageTexts?(tagId: string): readonly string[];
@@ -222,16 +222,16 @@ export function EmptyWorkspace({
   onNewTag?(): void;
   switching?: boolean;
   onSettings?: SettingsAction;
-  /** Why the local Control Plane is unavailable, such as the command that starts it. */
+  /** Why the local Gateway is unavailable, such as the command that starts it. */
   localProblem?: string;
-  /** Connects to the local Control Plane while it runs. */
+  /** Connects to the local Gateway while it runs. */
   onLocal?(): void;
 }) {
   return (
     <div className="work-area">
       <div className="empty">
         {switching ? (
-          <p role="status">Connecting to Control Plane…</p>
+          <p role="status">Connecting to Gateway…</p>
         ) : connected ? (
           <>
             <h2>No Tags available</h2>
@@ -250,7 +250,7 @@ export function EmptyWorkspace({
           <>
             <img src={mascot} alt="" className="empty-mascot" />
             <h2>Your Tags, in one place</h2>
-            <p>Connect to a SuperTag Control Plane to work with your persistent coding agents.</p>
+            <p>Connect to a SuperTag Gateway to work with your persistent coding agents.</p>
             {localProblem && <p>{localProblem}</p>}
             {onLocal && (
               <Button className="primary" onClick={onLocal}>
@@ -262,7 +262,7 @@ export function EmptyWorkspace({
               className={onLocal ? "secondary" : "primary"}
               onClick={onSettings}
             >
-              Add Control Plane
+              Add Gateway
             </Button>
           </>
         )}
@@ -273,16 +273,16 @@ export function EmptyWorkspace({
 
 interface WorkspaceProps {
   connectionId?: string;
-  controlPlane: ControlPlane;
+  gateway: Gateway;
   initialTags: Tag[];
   selector(mode: SidebarMode): ReactNode;
-  /** Which Control Plane the drafts are kept for across restarts. */
+  /** Which Gateway the drafts are kept for across restarts. */
   draftScope: string;
   /** Creates Tags, when this connection may. */
   tagAdmin?: TagAdmin;
   /** Why this connection cannot create Tags. */
   newTagRefusal?: string;
-  /** The Control Plane and connection settings the command palette offers. */
+  /** The Gateway and connection settings the command palette offers. */
   actions?: readonly PaletteAction[];
   switching: boolean;
   connectionError: string;
@@ -291,7 +291,7 @@ interface WorkspaceProps {
 
 export function Workspace({
   connectionId,
-  controlPlane,
+  gateway,
   initialTags,
   selector,
   draftScope,
@@ -304,23 +304,23 @@ export function Workspace({
 }: WorkspaceProps) {
   const [tags, setTags] = useState(initialTags);
   const [creatingTag, setCreatingTag] = useState(false);
-  // The app opens on the Tag it showed last on this Control Plane.
+  // The app opens on the Tag it showed last on this Gateway.
   const [selectedTag, setSelectedTag] = useState(
-    () => cachedRoster(controlPlane)?.selectedTag ?? initialTags[0]?.tagId,
+    () => cachedRoster(gateway)?.selectedTag ?? initialTags[0]?.tagId,
   );
   const chosen = useRef(false);
   useEffect(() => {
-    void storedRoster(controlPlane).then((roster) => {
+    void storedRoster(gateway).then((roster) => {
       if (roster?.selectedTag && !chosen.current) setSelectedTag(roster.selectedTag);
     });
-  }, [controlPlane]);
+  }, [gateway]);
   const selectTag = useCallback(
     (tagId: string) => {
       chosen.current = true;
       setSelectedTag(tagId);
-      cacheRoster(controlPlane, { selectedTag: tagId });
+      cacheRoster(gateway, { selectedTag: tagId });
     },
-    [controlPlane],
+    [gateway],
   );
   const [drafts, updateDraft] = useDrafts(draftScope);
   // What the open conversation's own history says of it, the freshest for its row.
@@ -331,10 +331,10 @@ export function Workspace({
     [],
   );
   const [error, setError] = useState("");
-  const watch = useControlPlaneWatch(connectionId);
-  // Every conversation's row, from the cached list at once and then the Control Plane, kept
+  const watch = useGatewayWatch(connectionId);
+  // Every conversation's row, from the cached list at once and then the Gateway, kept
   // current through the watch.
-  const { conversations, fresh } = useConversationList(controlPlane, watch);
+  const { conversations, fresh } = useConversationList(gateway, watch);
   const tag = tags.find((entry) => entry.tagId === selectedTag) ?? tags[0];
   const tagName = useCallback(
     (tagId: string) => {
@@ -353,7 +353,7 @@ export function Workspace({
     notifier: connectionId ? nativeNotifier : silentNotifier,
   });
   useConversationPrefetch(
-    controlPlane,
+    gateway,
     tags.map(({ tagId }) => tagId),
     tag?.tagId,
     watch,
@@ -362,7 +362,7 @@ export function Workspace({
   const refreshTags = useCallback(
     async (signal: AbortSignal) => {
       try {
-        const result = await controlPlane.tags();
+        const result = await gateway.tags();
         if (!signal.aborted) {
           setTags(result);
           setError("");
@@ -372,13 +372,13 @@ export function Workspace({
         return false;
       }
     },
-    [controlPlane],
+    [gateway],
   );
   useWatchRefresh(refreshTags, rosterInterval, watch, rosterChanged);
-  // Search reads the conversations the app keeps cached, without asking the Control Plane.
+  // Search reads the conversations the app keeps cached, without asking the Gateway.
   const messageTexts = useCallback(
-    (tagId: string) => cachedMessageTexts(controlPlane, tagId),
-    [controlPlane],
+    (tagId: string) => cachedMessageTexts(gateway, tagId),
+    [gateway],
   );
 
   const shell = {
@@ -407,7 +407,7 @@ export function Workspace({
   const workspace = tag ? (
     <TagWorkspace
       key={tag.tagId}
-      controlPlane={controlPlane}
+      gateway={gateway}
       watch={watch}
       tag={tag}
       shell={shell}
@@ -445,7 +445,7 @@ const DRAFTS_KEY = "supertag.desktop.drafts.";
 
 /**
  * What the operator is writing to each Tag, kept across Tag switches. Unsent text is also kept
- * across restarts, per Control Plane; a message on its way is not.
+ * across restarts, per Gateway; a message on its way is not.
  */
 function useDrafts(scope: string) {
   const key = DRAFTS_KEY + scope;
@@ -484,7 +484,7 @@ function useDrafts(scope: string) {
 
 const rosterChanged = (update: WatchUpdate) => update.kind === "tag";
 
-/** What the sidebar shows for a conversation the Control Plane lists. */
+/** What the sidebar shows for a conversation the Gateway lists. */
 export function rowSummary(conversation: Conversation): TagSummary {
   const line = conversation.preview.split("\n")[0]?.trim();
   return {
@@ -496,7 +496,7 @@ export function rowSummary(conversation: Conversation): TagSummary {
 }
 
 function TagWorkspace({
-  controlPlane,
+  gateway,
   watch,
   tag,
   shell,
@@ -505,7 +505,7 @@ function TagWorkspace({
   onSummary,
   onWriteChange,
 }: {
-  controlPlane: ControlPlane;
+  gateway: Gateway;
   watch?: WatchFeed;
   tag: Tag;
   shell: Omit<ShellProps, "children">;
@@ -521,7 +521,7 @@ function TagWorkspace({
     <WorkspaceShell {...shell} tag={tag} detailsOpen={details} onTagDetails={toggleDetails}>
       <ConversationPane
         key={tagId}
-        controlPlane={controlPlane}
+        gateway={gateway}
         watch={watch}
         tag={tag}
         draft={draft}

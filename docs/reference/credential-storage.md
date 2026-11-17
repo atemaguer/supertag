@@ -67,12 +67,12 @@ the same file as the local Control Plane, `supertag up` enrolls the host once, t
 its own Worker Host credential from `hosts/SERVICE/enrollment.json`. A host of a shared Control
 Plane joins with an Auth Key instead. See [supertag.yaml and local state](supertag-yaml.md#credentials).
 
-`supertag connect` saves a remote Control Plane and its Operator Token or client device
-credential in the per-user stores the terminal UI and desktop app read:
-`supertag/tui-control-planes.json` and `ai.supertag.desktop/control-planes.json` in the user
+`supertag connect` saves a remote Gateway and its Operator Token or client device credential in
+the per-user stores the terminal UI and desktop app read:
+`supertag/tui-gateways.json` and `ai.supertag.desktop/gateways.json` in the user
 configuration directory (`~/Library/Application Support` on macOS, `~/.config` on Linux).
 Neither store ever holds the local operator token: the terminal UI and the desktop app read it
-from `credentials.json` each time they connect to the local Control Plane.
+from `credentials.json` each time they connect to the local Gateway.
 
 The desktop app also caches what it shows on launch, so it shows at once: the conversation list,
 the selected Tag, the latest messages of each conversation, and messages not yet sent. It keeps

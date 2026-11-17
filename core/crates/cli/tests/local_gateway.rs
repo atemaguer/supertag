@@ -1,5 +1,5 @@
-//! `supertag __local-control-plane`: the format the terminal UI's local discovery reads
-//! (`apps/tui/local_control_plane.go`).
+//! `supertag __local-gateway`: the format the terminal UI's local discovery reads
+//! (`apps/tui/local_gateway.go`).
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 fn discover(state: &Path) -> (bool, Value, String) {
     let output = reaped(Command::new(env!("CARGO_BIN_EXE_supertag")))
-        .arg("__local-control-plane")
+        .arg("__local-gateway")
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", state.parent().unwrap())
@@ -36,19 +36,19 @@ fn private_file(state: &Path, name: &str, contents: &str) {
 }
 
 #[test]
-fn prints_the_running_local_control_plane_with_its_current_token() {
+fn prints_the_running_local_gateway_with_its_current_token() {
     let root = tempfile::tempdir().unwrap();
     let state = root.path().join("state");
 
     let (ok, value, _) = discover(&state);
     assert!(ok);
-    assert_eq!(value["protocol"], "local-control-plane.v1");
+    assert_eq!(value["protocol"], "local-gateway.v1");
     assert_eq!(value["running"], false);
     assert!(value["message"].as_str().unwrap().contains("supertag up"));
     assert!(value.get("token").is_none());
 
     fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
-    private_file(&state, "endpoint", "http://127.0.0.1:7001\n");
+    private_file(&state, "gateway-endpoint", "http://127.0.0.1:7001\n");
     let enrolled = || supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator = "c".repeat(64);
     private_file(

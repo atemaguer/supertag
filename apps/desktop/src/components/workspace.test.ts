@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import type { Tag } from "../control-plane";
+import type { Tag } from "../gateway";
 import { WorkspaceShell } from "./workspace";
 
 const tags: Tag[] = [
@@ -43,7 +43,7 @@ it("lists each Tag in the sidebar and puts just the selected Tag in the pill", (
   expect(html).not.toContain('<header class="topbar"');
 });
 
-it("shows an empty sidebar and no Tag pill before a Control Plane connects", () => {
+it("shows an empty sidebar and no Tag pill before a Gateway connects", () => {
   const html = renderToStaticMarkup(
     createElement(
       WorkspaceShell,

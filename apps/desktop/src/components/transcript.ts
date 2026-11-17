@@ -1,4 +1,4 @@
-import type { Message, Tag } from "../control-plane";
+import type { Message, Tag } from "../gateway";
 import type { TagSummary } from "./sidebar";
 
 /** Tasks a Worker Host has not finished: the Tag is still working on them. */
@@ -6,7 +6,7 @@ export const RUNNING = new Set(["queued", "claimed", "running"]);
 
 /**
  * What the operator's last message shows under it, as a messaging app shows delivery: "Sent" once
- * the Control Plane accepted it, "Seen" once a Worker Host took it up (or the running Task it
+ * the Gateway accepted it, "Seen" once a Worker Host took it up (or the running Task it
  * joined accepted it), and otherwise why it did not arrive.
  */
 export function deliveryStatus(message: Message): string | undefined {

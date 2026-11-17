@@ -1,10 +1,6 @@
 import { Bell, Check, ChevronRight, Pencil, Plus, Server, Unplug } from "lucide-react";
 import type { RefObject } from "react";
-import {
-  type ControlPlaneProfile,
-  LOCAL_CONTROL_PLANE,
-  type LocalControlPlane,
-} from "../control-plane";
+import { type GatewayProfile, LOCAL_GATEWAY, type LocalGateway } from "../gateway";
 import { type NotificationLevel, useNotificationLevel } from "../lib/notifications";
 import type { PaletteAction } from "./command-palette";
 import { Button } from "./ui/button";
@@ -22,23 +18,23 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 
-interface ControlPlaneSelectorProps {
+interface GatewaySelectorProps {
   active?: string;
   /** Whom the active connection acts as; a client device shows it. */
   principal?: string;
-  profiles: ControlPlaneProfile[];
-  /** The local Control Plane: listed first while it runs, otherwise why it is unavailable. */
-  local?: LocalControlPlane;
+  profiles: GatewayProfile[];
+  /** The local Gateway: listed first while it runs, otherwise why it is unavailable. */
+  local?: LocalGateway;
   preview?: boolean;
-  /** A wide button naming the Control Plane, in the expanded sidebar, or a round one in the rail. */
+  /** A wide button naming the Gateway, in the expanded sidebar, or a round one in the rail. */
   wide: boolean;
   busy: boolean;
   switching: boolean;
   trigger: RefObject<HTMLButtonElement | null>;
   onSelect(origin: string): void;
-  onEdit(profile?: ControlPlaneProfile): void;
+  onEdit(profile?: GatewayProfile): void;
   onDisconnect(): void;
-  /** Opening the menu checks the local Control Plane again. */
+  /** Opening the menu checks the local Gateway again. */
   onOpen(): void;
 }
 
@@ -49,20 +45,20 @@ const NOTIFICATION_CHOICES: readonly [NotificationLevel, string][] = [
   ["off", "Off"],
 ];
 
-interface Choice extends ControlPlaneProfile {
+interface Choice extends GatewayProfile {
   /** The address shown under the name. */
   address: string;
 }
 
-/** The Control Planes to choose from: Local first while it runs, then each saved one. */
-function controlPlaneChoices(
+/** The Gateways to choose from: Local first while it runs, then each saved one. */
+function gatewayChoices(
   active: string | undefined,
-  profiles: ControlPlaneProfile[],
-  local: LocalControlPlane | undefined,
+  profiles: GatewayProfile[],
+  local: LocalGateway | undefined,
 ) {
   const localChoice: Choice | undefined =
-    active === LOCAL_CONTROL_PLANE || local?.origin
-      ? { name: "Local", origin: LOCAL_CONTROL_PLANE, address: local?.origin ?? "This machine" }
+    active === LOCAL_GATEWAY || local?.origin
+      ? { name: "Local", origin: LOCAL_GATEWAY, address: local?.origin ?? "This machine" }
       : undefined;
   const choices: Choice[] = [
     ...(localChoice ? [localChoice] : []),
@@ -72,10 +68,10 @@ function controlPlaneChoices(
 }
 
 /**
- * What the Control Plane menu offers, as command palette actions: switching to another Control
+ * What the Gateway menu offers, as command palette actions: switching to another Control
  * Plane, adding or editing one, what this device notifies about, and disconnecting.
  */
-export function controlPlaneActions({
+export function gatewayActions({
   active,
   profiles,
   local,
@@ -88,7 +84,7 @@ export function controlPlaneActions({
   onDisconnect,
   onNotifications,
 }: Pick<
-  ControlPlaneSelectorProps,
+  GatewaySelectorProps,
   | "active"
   | "profiles"
   | "local"
@@ -102,24 +98,24 @@ export function controlPlaneActions({
   notifications: NotificationLevel;
   onNotifications(level: NotificationLevel): void;
 }): PaletteAction[] {
-  const { choices } = controlPlaneChoices(active, profiles, local);
+  const { choices } = gatewayChoices(active, profiles, local);
   const selected = choices.find((choice) => choice.origin === active);
   const disabled = busy || switching;
   return [
     ...choices
       .filter((choice) => choice.origin !== active)
       .map((choice) => ({
-        id: `control-plane:${choice.origin}`,
+        id: `gateway:${choice.origin}`,
         label: `Switch to ${choice.name}`,
         caption: choice.address,
         icon: <Server aria-hidden />,
-        keywords: "control plane connect",
+        keywords: "gateway connect",
         disabled,
         run: () => onSelect(choice.origin),
       })),
     {
-      id: "add-control-plane",
-      label: "Add Control Plane",
+      id: "add-gateway",
+      label: "Add Gateway",
       caption: "an address and a token",
       icon: <Plus aria-hidden />,
       keywords: "connect",
@@ -127,8 +123,8 @@ export function controlPlaneActions({
       run: () => onEdit(),
     },
     ...profiles.map((profile) => ({
-      id: `edit-control-plane:${profile.origin}`,
-      label: `Edit Control Plane · ${profile.name}`,
+      id: `edit-gateway:${profile.origin}`,
+      label: `Edit Gateway · ${profile.name}`,
       caption: profile.origin,
       icon: <Pencil aria-hidden />,
       disabled,
@@ -149,7 +145,7 @@ export function controlPlaneActions({
             label: "Disconnect",
             caption: selected?.name ?? "Preview workspace",
             icon: <Unplug aria-hidden />,
-            keywords: "control plane",
+            keywords: "gateway",
             disabled,
             run: onDisconnect,
           },
@@ -158,7 +154,7 @@ export function controlPlaneActions({
   ];
 }
 
-export function ControlPlaneSelector({
+export function GatewaySelector({
   active,
   principal,
   profiles,
@@ -172,15 +168,15 @@ export function ControlPlaneSelector({
   onEdit,
   onDisconnect,
   onOpen,
-}: ControlPlaneSelectorProps) {
-  const { localChoice, choices } = controlPlaneChoices(active, profiles, local);
+}: GatewaySelectorProps) {
+  const { localChoice, choices } = gatewayChoices(active, profiles, local);
   const selected = choices.find((choice) => choice.origin === active);
   const [notifications, setNotifications] = useNotificationLevel();
   const connected = Boolean(selected || preview);
   const client = selected && principal?.startsWith("client:") ? principal : undefined;
   const name = switching
     ? "Connecting…"
-    : (selected?.name ?? (preview ? "Preview workspace" : "Select Control Plane"));
+    : (selected?.name ?? (preview ? "Preview workspace" : "Select Gateway"));
 
   return (
     <DropdownMenu
@@ -194,10 +190,10 @@ export function ControlPlaneSelector({
           ref={trigger}
           className={wide ? "connection wide" : "connection"}
           data-connected={connected}
-          aria-label={connected ? "Switch Control Plane" : "Select Control Plane"}
+          aria-label={connected ? "Switch Gateway" : "Select Gateway"}
           aria-description={
             selected
-              ? `Current Control Plane is ${selected.name}${client ? `, connected as ${client}` : ""}`
+              ? `Current Gateway is ${selected.name}${client ? `, connected as ${client}` : ""}`
               : undefined
           }
           title={client ? `${name} · ${selected?.address} · connected as ${client}` : name}
@@ -214,27 +210,27 @@ export function ControlPlaneSelector({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        className="control-plane-menu"
+        className="gateway-menu"
         side={wide ? "top" : "right"}
         align={wide ? "start" : "end"}
         sideOffset={wide ? 8 : 24}
       >
-        <div className="control-plane-current">
+        <div className="gateway-current">
           <span>{name}</span>
           {selected && selected.name !== selected.address && <small>{selected.address}</small>}
           {client && <small>Connected as {client}</small>}
         </div>
-        <DropdownMenuSeparator className="control-plane-separator" />
+        <DropdownMenuSeparator className="gateway-separator" />
         {!localChoice && local?.problem && (
           <>
-            <DropdownMenuItem className="control-plane-choice" disabled>
-              <span className="control-plane-indicator" aria-hidden />
-              <span className="control-plane-choice-text">
+            <DropdownMenuItem className="gateway-choice" disabled>
+              <span className="gateway-indicator" aria-hidden />
+              <span className="gateway-choice-text">
                 <span>Local · not running</span>
                 <small>{local.problem}</small>
               </span>
             </DropdownMenuItem>
-            <DropdownMenuSeparator className="control-plane-separator" />
+            <DropdownMenuSeparator className="gateway-separator" />
           </>
         )}
         {choices.length > 0 && (
@@ -242,39 +238,39 @@ export function ControlPlaneSelector({
             <DropdownMenuRadioGroup value={active ?? ""} onValueChange={onSelect}>
               {choices.map((choice) => (
                 <DropdownMenuRadioItem
-                  className="control-plane-choice"
+                  className="gateway-choice"
                   key={choice.origin}
                   value={choice.origin}
                   textValue={choice.name}
                 >
-                  <span className="control-plane-indicator" aria-hidden>
+                  <span className="gateway-indicator" aria-hidden>
                     <DropdownMenuItemIndicator>
                       <Check size={14} />
                     </DropdownMenuItemIndicator>
                   </span>
-                  <span className="control-plane-choice-text">
+                  <span className="gateway-choice-text">
                     <span>{choice.name}</span>
                     {choice.name !== choice.address && <small>{choice.address}</small>}
                   </span>
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator className="control-plane-separator" />
+            <DropdownMenuSeparator className="gateway-separator" />
           </>
         )}
-        <DropdownMenuItem className="control-plane-action" onSelect={() => onEdit()}>
-          <Plus size={15} aria-hidden /> Add Control Plane
+        <DropdownMenuItem className="gateway-action" onSelect={() => onEdit()}>
+          <Plus size={15} aria-hidden /> Add Gateway
         </DropdownMenuItem>
         {profiles.length > 0 && (
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="control-plane-action">
-              <Pencil size={15} aria-hidden /> Edit Control Plane
-              <ChevronRight className="control-plane-edit-arrow" size={14} aria-hidden />
+            <DropdownMenuSubTrigger className="gateway-action">
+              <Pencil size={15} aria-hidden /> Edit Gateway
+              <ChevronRight className="gateway-edit-arrow" size={14} aria-hidden />
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="control-plane-edit-menu" sideOffset={6}>
+            <DropdownMenuSubContent className="gateway-edit-menu" sideOffset={6}>
               {profiles.map((profile) => (
                 <DropdownMenuItem
-                  className="control-plane-action"
+                  className="gateway-action"
                   key={profile.origin}
                   onSelect={() => onEdit(profile)}
                   title={profile.origin}
@@ -286,28 +282,28 @@ export function ControlPlaneSelector({
           </DropdownMenuSub>
         )}
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="control-plane-action">
+          <DropdownMenuSubTrigger className="gateway-action">
             <Bell size={15} aria-hidden /> Notifications
-            <ChevronRight className="control-plane-edit-arrow" size={14} aria-hidden />
+            <ChevronRight className="gateway-edit-arrow" size={14} aria-hidden />
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="control-plane-edit-menu" sideOffset={6}>
+          <DropdownMenuSubContent className="gateway-edit-menu" sideOffset={6}>
             <DropdownMenuRadioGroup
               value={notifications}
               onValueChange={(value) => setNotifications(value as NotificationLevel)}
             >
               {NOTIFICATION_CHOICES.map(([level, label]) => (
                 <DropdownMenuRadioItem
-                  className="control-plane-choice"
+                  className="gateway-choice"
                   key={level}
                   value={level}
                   textValue={label}
                 >
-                  <span className="control-plane-indicator" aria-hidden>
+                  <span className="gateway-indicator" aria-hidden>
                     <DropdownMenuItemIndicator>
                       <Check size={14} />
                     </DropdownMenuItemIndicator>
                   </span>
-                  <span className="control-plane-choice-text">
+                  <span className="gateway-choice-text">
                     <span>{label}</span>
                   </span>
                 </DropdownMenuRadioItem>
@@ -316,7 +312,7 @@ export function ControlPlaneSelector({
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         {connected && (
-          <DropdownMenuItem className="control-plane-action" onSelect={onDisconnect}>
+          <DropdownMenuItem className="gateway-action" onSelect={onDisconnect}>
             <Unplug size={15} aria-hidden /> Disconnect
           </DropdownMenuItem>
         )}

@@ -1,7 +1,7 @@
 //! The machine-wide local state `supertag up` keeps (`SUPERTAG_STATE_DIR`, else `~/.supertag`), and
-//! how a client on this machine finds the local Control Plane in it. The CLI, the desktop app's
-//! backend and, through `supertag __local-control-plane`, the terminal UI all discover the local
-//! Control Plane here, so the files' format has one reader.
+//! how a client on this machine finds the local Gateway (and, for supervision, the local Control
+//! Plane) in it. The CLI, the desktop app's backend and, through `supertag __local-gateway`, the
+//! terminal UI all discover the local services here, so the files' format has one reader.
 //!
 //! Only state owned by this user is read: the directory and every file must be private to the
 //! effective user, files are opened without following links, and endpoints must be loopback.
@@ -86,10 +86,10 @@ pub fn gateway(state_directory: &Path) -> Result<Option<LocalConnection>> {
     discover(state_directory, GATEWAY_ENDPOINT)
 }
 
-/// Why no local Control Plane is available from `state_directory`, as one sentence.
+/// Why no local Gateway is available from `state_directory`, as one sentence.
 pub fn not_running(state_directory: &Path) -> String {
     format!(
-        "No local Control Plane is running from {}. Start it with {START_COMMAND}.",
+        "No local Gateway is running from {}. Start it with {START_COMMAND}.",
         state_directory.display()
     )
 }

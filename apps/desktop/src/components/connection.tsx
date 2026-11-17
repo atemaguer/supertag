@@ -1,6 +1,6 @@
 import type { FormEvent, RefObject } from "react";
 import { useRef } from "react";
-import type { ControlPlaneProfile } from "../control-plane";
+import type { GatewayProfile } from "../gateway";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -13,7 +13,7 @@ import {
 import { Input } from "./ui/input";
 
 interface ConnectionDialogProps {
-  profile?: ControlPlaneProfile;
+  profile?: GatewayProfile;
   busy: boolean;
   error: string;
   opener: RefObject<HTMLButtonElement | null>;
@@ -37,7 +37,7 @@ export function ConnectionDialog({
     event.preventDefault();
     const field = token.current;
     const data = new FormData(event.currentTarget);
-    const address = profile?.origin ?? data.get("controlPlane");
+    const address = profile?.origin ?? data.get("gateway");
     const name = data.get("name");
     if (busy || !field || typeof address !== "string" || typeof name !== "string") return;
     const secret = field.value.trim();
@@ -63,27 +63,27 @@ export function ConnectionDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>{profile ? "Edit Control Plane" : "Add Control Plane"}</DialogTitle>
+          <DialogTitle>{profile ? "Edit Gateway" : "Add Gateway"}</DialogTitle>
           <DialogDescription>
             {profile
               ? "Update the name or credential for this connection."
-              : "Use the Control Plane URL and an operator token, or a client Auth Key (stak_…) that joins this device. Only the token or this device's own credential is saved. A Control Plane started on this machine with supertag up is listed as Local and needs no token."}
+              : "Use the Gateway URL and an operator token, or a client Auth Key (stak_…) that joins this device. Only the token or this device's own credential is saved. A Gateway started on this machine with supertag up is listed as Local and needs no token."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={save}>
-          <label htmlFor="control-plane-name">Name (optional)</label>
+          <label htmlFor="gateway-name">Name (optional)</label>
           <Input
-            id="control-plane-name"
+            id="gateway-name"
             name="name"
             defaultValue={profile?.name}
             placeholder="Engineering"
             maxLength={80}
             disabled={busy}
           />
-          <label htmlFor="control-plane-url">Control Plane URL</label>
+          <label htmlFor="gateway-url">Gateway URL</label>
           <Input
-            id="control-plane-url"
-            name="controlPlane"
+            id="gateway-url"
+            name="gateway"
             type="url"
             defaultValue={profile?.origin}
             placeholder="http://127.0.0.1:7001"
@@ -93,11 +93,11 @@ export function ConnectionDialog({
             readOnly={Boolean(profile)}
             disabled={busy}
           />
-          <label htmlFor="control-plane-token">
+          <label htmlFor="gateway-token">
             {profile ? "New operator token or Auth Key (optional)" : "Operator token or Auth Key"}
           </label>
           <Input
-            id="control-plane-token"
+            id="gateway-token"
             ref={token}
             type="password"
             autoComplete="off"
@@ -118,7 +118,7 @@ export function ConnectionDialog({
                 disabled={busy}
                 onClick={() => onForget(profile.origin)}
               >
-                Forget Control Plane
+                Forget Gateway
               </Button>
             )}
             <Button type="submit" className="primary" disabled={busy}>

@@ -7,7 +7,7 @@ export interface Tag {
   allowedActions: string[];
   revision: number;
   harnessKind: string;
-  /** Whether this is the Control Plane's lead Tag, the one `supertag init` creates. */
+  /** Whether this is the Gateway's lead Tag, the one `supertag init` creates. */
   lead?: boolean;
   /** How many Work Sessions the Tag may have open at once, and has open. */
   maxWorkSessions?: number;
@@ -27,7 +27,7 @@ export interface Task {
   state: string;
   result?: string;
   artifacts?: ResultArtifact[];
-  /** When the operator sent it, in milliseconds since the epoch, once the Control Plane says. */
+  /** When the operator sent it, in milliseconds since the epoch, once the Gateway says. */
   createdAtMs?: number;
   /** The turn finished quietly: no person was waiting and it found nothing to say. */
   quiet?: boolean;
@@ -37,7 +37,7 @@ export interface Message {
   task: Task;
   /** The message's place in its conversation. Later messages have larger orders. */
   order: number;
-  /** When its turn finished, if the Control Plane recorded it. */
+  /** When its turn finished, if the Gateway recorded it. */
   completedAtMs?: number;
   liveInput?: { taskId: string; state: string };
   workSessionReportId?: string;
@@ -104,7 +104,7 @@ export interface TaskEvent {
   text: string;
 }
 
-export interface ControlPlane {
+export interface Gateway {
   tags(): Promise<Tag[]>;
   /** The caller's conversation with each Tag it has talked to, the latest active first. */
   conversations(): Promise<Conversation[]>;
@@ -130,12 +130,12 @@ export interface ControlPlane {
   /** The Tag's newest Task Attempts with a network log, newest first. Operators only. */
   networkLogs?(tagId: string): Promise<NetworkLog[]>;
   /**
-   * The Control Plane and principal this connection acts as. What is cached under one scope is
+   * The Gateway and principal this connection acts as. What is cached under one scope is
    * never shown under another.
    */
   readonly scope: string;
   /**
-   * What the app last cached for this connection's Control Plane and principal under `key`:
+   * What the app last cached for this connection's Gateway and principal under `key`:
    * `roster`, `outbox`, or `tag:` and a Tag ID.
    */
   readCache(key: CacheKey): Promise<unknown>;
@@ -216,32 +216,32 @@ export interface NetworkLog {
   requests: NetworkRequest[];
 }
 
-export interface ControlPlaneProfile {
+export interface GatewayProfile {
   name: string;
   origin: string;
 }
 
-/** What the app calls the local Control Plane in place of a saved origin. */
-export const LOCAL_CONTROL_PLANE = "local";
+/** What the app calls the local Gateway in place of a saved origin. */
+export const LOCAL_GATEWAY = "local";
 
 /**
- * The Control Plane `supertag up` runs on this machine: its origin while it runs, otherwise why it
+ * The Gateway `supertag up` runs on this machine: its origin while it runs, otherwise why it
  * is unavailable. It connects with this machine's own credentials, which are never saved.
  */
-export interface LocalControlPlane {
+export interface LocalGateway {
   origin?: string;
   problem?: string;
 }
 
-export interface ControlPlaneList {
-  profiles: ControlPlaneProfile[];
+export interface GatewayList {
+  profiles: GatewayProfile[];
   active?: string | null;
-  local?: LocalControlPlane;
+  local?: LocalGateway;
 }
 
-export interface ControlPlaneActivation {
-  controlPlanes: ControlPlaneList;
-  /** The saved origin connected to, or `local` for the local Control Plane. */
+export interface GatewayActivation {
+  gateways: GatewayList;
+  /** The saved origin connected to, or `local` for the local Gateway. */
   origin: string;
   connectionId: string;
   tags: Tag[];
@@ -254,7 +254,7 @@ export function cacheScope(origin: string, principal: string) {
   return JSON.stringify([origin, principal]);
 }
 
-export function controlPlaneSession(connectionId: string, scope: string): ControlPlane {
+export function gatewaySession(connectionId: string, scope: string): Gateway {
   return {
     scope,
     tags: () => invoke("list_tags", { connectionId }),
@@ -284,20 +284,20 @@ export function controlPlaneSession(connectionId: string, scope: string): Contro
   };
 }
 
-export const nativeControlPlane = {
-  list: () => invoke<ControlPlaneList>("list_control_planes"),
-  save: (controlPlane: string, name: string, token: string) =>
-    invoke<ControlPlaneActivation>("save_control_plane", { controlPlane, name, token }),
-  select: (origin: string) => invoke<ControlPlaneActivation>("select_control_plane", { origin }),
-  connectLocal: () => invoke<ControlPlaneActivation>("connect_local_control_plane"),
-  clear: (forget?: string) => invoke<ControlPlaneList>("clear_control_plane", { forget }),
+export const nativeGateway = {
+  list: () => invoke<GatewayList>("list_gateways"),
+  save: (gateway: string, name: string, token: string) =>
+    invoke<GatewayActivation>("save_gateway", { gateway, name, token }),
+  select: (origin: string) => invoke<GatewayActivation>("select_gateway", { origin }),
+  connectLocal: () => invoke<GatewayActivation>("connect_local_gateway"),
+  clear: (forget?: string) => invoke<GatewayList>("clear_gateway", { forget }),
   async watch(connectionId: string, watchEpoch: number, receive: (update: WatchUpdate) => void) {
     const onUpdate = new Channel<WatchUpdate>(receive);
-    const watchId = await invoke<string>("start_control_plane_watch", {
+    const watchId = await invoke<string>("start_gateway_watch", {
       connectionId,
       watchEpoch,
       onUpdate,
     });
-    return () => invoke<void>("stop_control_plane_watch", { watchId });
+    return () => invoke<void>("stop_gateway_watch", { watchId });
   },
 };

@@ -42,10 +42,10 @@ func (c *Client) ListWorkerHostReadiness(ctx context.Context) ([]*views.WorkerHo
 		}
 		for _, host := range res.Msg.GetHosts() {
 			if host.GetHostId() == "" || host.GetCapacity() > math.MaxInt32 || host.GetAvailableSlots() > host.GetCapacity() || host.GetActiveAttempts() > math.MaxInt32 {
-				return nil, nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned invalid Worker Host capacity."}
+				return nil, nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned invalid Worker Host capacity."}
 			}
 			if _, exists := labels[host.GetHostId()]; exists {
-				return nil, nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane repeated a Worker Host."}
+				return nil, nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway repeated a Worker Host."}
 			}
 			phase, label := runtimeHostPhase(host.GetPhase())
 			view := &views.WorkerHost{
@@ -72,7 +72,7 @@ func (c *Client) ListWorkerHostReadiness(ctx context.Context) ([]*views.WorkerHo
 			return hosts, labels, nil
 		}
 		if seen[next] {
-			return nil, nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane Worker Host cursor did not advance."}
+			return nil, nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway Worker Host cursor did not advance."}
 		}
 		seen[next] = true
 		cursor = next

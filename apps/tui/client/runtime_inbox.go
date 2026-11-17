@@ -38,7 +38,7 @@ func (c *runtimeClient) listInbox(ctx context.Context) (Inbox, error) {
 			return inbox, nil
 		}
 		if next == cursor {
-			return Inbox{}, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane Inbox cursor did not advance."}
+			return Inbox{}, &APIError{Code: connect.CodeDataLoss, Message: "Gateway Inbox cursor did not advance."}
 		}
 		cursor = next
 	}
@@ -96,7 +96,7 @@ type ApprovalDetails struct {
 	Pending                     bool
 }
 
-// ReadApproval retrieves the full requested effect from a Runtime v2 Control Plane.
+// ReadApproval retrieves the full requested effect from a Runtime v2 Gateway.
 func (c *Client) ReadApproval(ctx context.Context, id string) (ApprovalDetails, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
@@ -109,7 +109,7 @@ func (c *Client) ReadApproval(ctx context.Context, id string) (ApprovalDetails, 
 	var arguments bytes.Buffer
 	if approval.GetApprovalId() != id || approval.GetAction() == "" ||
 		(pending && json.Indent(&arguments, []byte(approval.GetCanonicalArgumentsJson()), "", "  ") != nil) {
-		return ApprovalDetails{}, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned invalid approval details."}
+		return ApprovalDetails{}, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned invalid approval details."}
 	}
 	return ApprovalDetails{Action: approval.GetAction(), Resource: approval.GetResource(),
 		Arguments: arguments.String(), Pending: pending}, nil
@@ -137,7 +137,7 @@ func (c *runtimeClient) decideApproval(ctx context.Context, id, reason string, a
 		}
 		approval := response.Msg
 		if approval.GetApprovalId() != id || approval.GetState() != state || approval.GetScope() != request.GetScope() {
-			return nil, connect.NewError(connect.CodeDataLoss, errors.New("Control Plane returned an invalid approval receipt."))
+			return nil, connect.NewError(connect.CodeDataLoss, errors.New("Gateway returned an invalid approval receipt."))
 		}
 		return &views.Approval{
 			Id: id, ObjectiveId: approval.GetObjectiveId(), TaskId: approval.GetTaskId(),
@@ -180,7 +180,7 @@ func (c *runtimeClient) answerQuestion(ctx context.Context, key, text string) (*
 		}
 		task := response.Msg
 		if task.GetTaskId() == "" || task.GetTagId() == "" {
-			return nil, connect.NewError(connect.CodeDataLoss, errors.New("Control Plane returned an invalid answer receipt."))
+			return nil, connect.NewError(connect.CodeDataLoss, errors.New("Gateway returned an invalid answer receipt."))
 		}
 		return &views.MessageObjectiveResponse{TaskId: task.GetTaskId(), Tag: task.GetTagId()}, nil
 	})
@@ -199,7 +199,7 @@ func (c *Client) ReadObjectiveQuestion(ctx context.Context, key string) (string,
 		return "", apiError(err)
 	}
 	if response.Msg.GetTaskId() != id || response.Msg.GetText() == "" {
-		return "", &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned an invalid Inbox question."}
+		return "", &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned an invalid Inbox question."}
 	}
 	return response.Msg.GetText(), nil
 }

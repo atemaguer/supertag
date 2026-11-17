@@ -6,13 +6,13 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Conversation } from "../control-plane";
+import type { Conversation } from "../gateway";
 
 /**
  * Native notifications and the Dock badge, computed here from the conversation list the watch
  * keeps current. A notification says a Tag replied or asked a question in a conversation that is
  * not in view; the badge counts the unread replies. Turns that stayed quiet never count: the
- * Control Plane leaves them out of the list.
+ * Gateway leaves them out of the list.
  */
 
 /** Which notifications this device shows: every reply, only questions, or none. */
@@ -204,7 +204,7 @@ export const nativeNotifier: Notifier = {
 
 /**
  * Notifies this device of replies and questions in conversations not in view, and keeps the Dock
- * badge on the unread total. `conversations` is the list as the Control Plane last returned it;
+ * badge on the unread total. `conversations` is the list as the Gateway last returned it;
  * `fresh` is false until it has, so a cached list never notifies.
  */
 export function useDesktopNotifications({

@@ -35,7 +35,7 @@ func (c *runtimeClient) getObjectiveTask(ctx context.Context, tag, id string) (*
 		return nil, apiError(err)
 	}
 	if res.Msg.GetTaskId() != id || res.Msg.GetTagId() != tag {
-		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned a different Objective Task."}
+		return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different Objective Task."}
 	}
 	return &v2.ConversationMessage{Task: res.Msg}, nil
 }
@@ -132,7 +132,7 @@ func (f *Follower) followRuntime(ctx context.Context, tag, id string, shown *Sho
 			return err
 		}
 		if time.Since(lastOK) > f.ReconnectTimeout {
-			return fmt.Errorf("lost the Control Plane while following task/%s: %w", id, err)
+			return fmt.Errorf("lost the Gateway while following task/%s: %w", id, err)
 		}
 		pause(ctx, backoff)
 		backoff = min(backoff*2, time.Minute)

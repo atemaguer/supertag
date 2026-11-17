@@ -17,7 +17,7 @@ import (
 )
 
 // protocolHeader names, on every call, the protocol version this client negotiated with the
-// Control Plane. The Control Plane refuses a call without it.
+// Gateway. The Gateway refuses a call without it.
 const protocolHeader = "X-Supertag-Protocol"
 
 // protocolVersions are the SuperTag protocol versions this client speaks.
@@ -26,12 +26,12 @@ var protocolVersions = []uint32{3}
 // negotiationTimeout bounds one negotiation exchange.
 const negotiationTimeout = 5 * time.Second
 
-// protocolSession negotiates once with the Control Plane, before the first call that needs it, and
-// again after the Control Plane refuses the version it holds.
+// protocolSession negotiates once with the Gateway, before the first call that needs it, and
+// again after the Gateway refuses the version it holds.
 type protocolSession struct {
 	client runtimev2connect.ProtocolNegotiationClient
 	build  string
-	// endpoint names the Control Plane in a version mismatch.
+	// endpoint names the Gateway in a version mismatch.
 	endpoint string
 	mu       sync.Mutex
 	version  uint32
@@ -60,13 +60,13 @@ func (p *protocolSession) negotiated(ctx context.Context) (uint32, error) {
 			return 0, p.mismatch(parseRefusal(connectErr.Message()))
 		}
 		if connectErr.Code() == connect.CodeUnimplemented {
-			return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "incompatible SuperTag protocol: the Control Plane does not offer SuperTag protocol negotiation"}
+			return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "incompatible SuperTag protocol: the Gateway does not offer SuperTag protocol negotiation"}
 		}
-		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "the SuperTag Control Plane refused this operator client: " + connectErr.Message()}
+		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "the SuperTag Gateway refused this operator client: " + connectErr.Message()}
 	}
 	selected := res.Msg.GetProtocolVersion()
-	if res.Msg.GetRole() != v2.ServiceRole_SERVICE_ROLE_CONTROL_PLANE {
-		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "this operator client expected a SuperTag Control Plane but reached another service"}
+	if res.Msg.GetRole() != v2.ServiceRole_SERVICE_ROLE_GATEWAY {
+		return 0, &APIError{Code: connect.CodeFailedPrecondition, Message: "this operator client expected a SuperTag Gateway but reached another service"}
 	}
 	if !slices.Contains(protocolVersions, selected) || !slices.Contains(res.Msg.GetProtocolVersions(), selected) {
 		versions := res.Msg.GetProtocolVersions()
@@ -79,13 +79,13 @@ func (p *protocolSession) negotiated(ctx context.Context) (uint32, error) {
 	return selected, nil
 }
 
-// peerRelease is what a Control Plane said of its release while negotiating.
+// peerRelease is what a Gateway said of its release while negotiating.
 type peerRelease struct {
 	build    string
 	versions []uint32
 }
 
-// parseRefusal reads the Control Plane's release and versions out of its refusal. Every SuperTag
+// parseRefusal reads the Gateway's release and versions out of its refusal. Every SuperTag
 // release that negotiates refuses with "... (SuperTag BUILD) speaks protocol versions [V, ...] ...".
 func parseRefusal(message string) (*peerRelease, string) {
 	_, rest, ok := strings.Cut(message, "(SuperTag ")
@@ -137,14 +137,14 @@ func spoken(versions []uint32) string {
 	return "protocols " + strings.Join(items, ", ")
 }
 
-// mismatch reports a Control Plane that speaks no protocol version this client speaks, naming
-// both releases, where the Control Plane runs, and which side to upgrade.
+// mismatch reports a Gateway that speaks no protocol version this client speaks, naming
+// both releases, where the Gateway runs, and which side to upgrade.
 func (p *protocolSession) mismatch(peer *peerRelease, refusal string) error {
 	at := ""
 	if p.endpoint != "" {
 		at = " at " + p.endpoint
 	}
-	message := "This TUI speaks SuperTag " + spoken(protocolVersions) + ", but the Control Plane" + at
+	message := "This TUI speaks SuperTag " + spoken(protocolVersions) + ", but the Gateway" + at
 	switch {
 	case peer == nil:
 		refusal = strings.TrimRight(strings.Map(func(r rune) rune {
@@ -155,7 +155,7 @@ func (p *protocolSession) mismatch(peer *peerRelease, refusal string) error {
 		}, refusal), ". ")
 		message += " refused it: " + refusal + ". Run the same SuperTag release on both."
 	case slices.Max(peer.versions) < slices.Min(protocolVersions):
-		message += " runs SuperTag " + peer.build + " (" + spoken(peer.versions) + "). Upgrade the Control Plane."
+		message += " runs SuperTag " + peer.build + " (" + spoken(peer.versions) + "). Upgrade the Gateway."
 	case slices.Max(protocolVersions) < slices.Min(peer.versions):
 		message += " runs SuperTag " + peer.build + " (" + spoken(peer.versions) + "). Upgrade this TUI."
 	default:
@@ -164,14 +164,14 @@ func (p *protocolSession) mismatch(peer *peerRelease, refusal string) error {
 	return &APIError{Code: connect.CodeFailedPrecondition, Message: message, Mismatch: true}
 }
 
-// ProtocolMismatch reports whether err is a Control Plane from a release that speaks other
+// ProtocolMismatch reports whether err is a Gateway from a release that speaks other
 // protocol versions. Its message names both releases and the fix.
 func ProtocolMismatch(err error) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.Mismatch
 }
 
-// forget drops a version the Control Plane refused, so the next call negotiates again.
+// forget drops a version the Gateway refused, so the next call negotiates again.
 func (p *protocolSession) forget(err error) {
 	var connectErr *connect.Error
 	if errors.As(err, &connectErr) && connectErr.Code() == connect.CodeFailedPrecondition &&
@@ -217,7 +217,7 @@ func (negotiatedCalls) WrapStreamingHandler(next connect.StreamingHandlerFunc) c
 	return next
 }
 
-// forgettingStream renegotiates after the Control Plane refuses a stream's protocol version.
+// forgettingStream renegotiates after the Gateway refuses a stream's protocol version.
 type forgettingStream struct {
 	connect.StreamingClientConn
 	session *protocolSession

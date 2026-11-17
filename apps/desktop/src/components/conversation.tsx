@@ -9,13 +9,7 @@ import {
   useState,
 } from "react";
 import { type StickToBottomContext, useStickToBottomContext } from "use-stick-to-bottom";
-import type {
-  ControlPlane,
-  Tag,
-  Message as TagMessage,
-  TaskEvent,
-  WatchUpdate,
-} from "../control-plane";
+import type { Gateway, Tag, Message as TagMessage, TaskEvent, WatchUpdate } from "../gateway";
 import {
   cachedHistory,
   cacheHistory,
@@ -74,7 +68,7 @@ export interface Draft {
 }
 
 interface ConversationProps {
-  controlPlane: ControlPlane;
+  gateway: Gateway;
   watch?: WatchFeed;
   tag: Tag;
   draft: Draft;
@@ -88,7 +82,7 @@ interface ConversationProps {
 }
 
 export function ConversationPane({
-  controlPlane,
+  gateway,
   watch,
   tag,
   draft,
@@ -101,10 +95,10 @@ export function ConversationPane({
   const tagId = tag.tagId;
   // A conversation shown before renders at once from the cache, then revalidates.
   const [history, renderHistory] = useState<History>(
-    () => cachedHistory(controlPlane, tagId) ?? emptyHistory,
+    () => cachedHistory(gateway, tagId) ?? emptyHistory,
   );
   // The message sent that has not arrived yet, also after a restart.
-  const outgoing = useOutbox(controlPlane, tagId)[0];
+  const outgoing = useOutbox(gateway, tagId)[0];
   const currentHistory = useRef(history);
   const [error, setError] = useState("");
   const [paging, setPaging] = useState(false);
@@ -119,21 +113,21 @@ export function ConversationPane({
     (next: History) => {
       currentHistory.current = next;
       renderHistory(next);
-      cacheHistory(controlPlane, tagId, next);
+      cacheHistory(gateway, tagId, next);
       // The latest finished turn on screen has been read.
-      if (next.read && !document.hidden) markShown(controlPlane, tagId, next);
+      if (next.read && !document.hidden) markShown(gateway, tagId, next);
     },
-    [controlPlane, tagId],
+    [gateway, tagId],
   );
 
   useEffect(() => {
     active.current = true;
-    const close = openConversation(controlPlane, tagId);
+    const close = openConversation(gateway, tagId);
     // Messages a previous run could not send go out again.
-    void resumeOutbox(controlPlane);
-    // Not in memory: the disk cache shows it until the Control Plane answers.
+    void resumeOutbox(gateway);
+    // Not in memory: the disk cache shows it until the Gateway answers.
     if (!currentHistory.current.read)
-      void storedHistory(controlPlane, tagId).then((stored) => {
+      void storedHistory(gateway, tagId).then((stored) => {
         if (stored && active.current && !currentHistory.current.read) {
           currentHistory.current = stored;
           renderHistory(stored);
@@ -143,14 +137,14 @@ export function ConversationPane({
       active.current = false;
       close();
     };
-  }, [controlPlane, tagId]);
+  }, [gateway, tagId]);
 
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       const started = revision.current;
       try {
         // Only what changed since the copy shown, once there is one.
-        const page = await controlPlane.messages(refreshRequest(tagId, currentHistory.current));
+        const page = await gateway.messages(refreshRequest(tagId, currentHistory.current));
         if (signal.aborted || revision.current !== started) return;
         const previous = currentHistory.current;
         const next = latestHistory(previous, page);
@@ -166,12 +160,12 @@ export function ConversationPane({
         }
       }
     },
-    [controlPlane, tagId, setHistory],
+    [gateway, tagId, setHistory],
   );
   // The conversation's follow pushes each change as it happens. The Watch and a timer read the
   // history only while the follow is down.
   const follow = useConversationFollow(
-    controlPlane,
+    gateway,
     tagId,
     () => refreshRequest(tagId, currentHistory.current),
     (page) => {
@@ -217,7 +211,7 @@ export function ConversationPane({
     if (!expected.cursor || paging) return;
     setPaging(true);
     try {
-      const page = await controlPlane.messages({ tagId, cursor: expected.cursor });
+      const page = await gateway.messages({ tagId, cursor: expected.cursor });
       if (!active.current) return;
       const previous = currentHistory.current;
       const next = earlierHistory(previous, expected, page);
@@ -232,7 +226,7 @@ export function ConversationPane({
     }
   }
 
-  // The outbox keeps the message, across restarts, until the Control Plane has it. A retry
+  // The outbox keeps the message, across restarts, until the Gateway has it. A retry
   // reuses its operation, so it is sent at most once.
   async function deliver(sending: Promise<TagMessage | undefined>) {
     onWriteChange(1);
@@ -250,19 +244,19 @@ export function ConversationPane({
     }
   }
 
-  // The message leaves the composer at once and shows as sending until the Control Plane has it.
+  // The message leaves the composer at once and shows as sending until the Gateway has it.
   function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = draft.text.trim();
     if (!text || outgoing) return;
     updateDraft(() => ({ text: "" }));
-    void deliver(queue(controlPlane, tagId, text));
+    void deliver(queue(gateway, tagId, text));
     composer.current?.focus();
   }
 
   // A message that was not delivered goes back to the composer to change, if that is empty.
   function edit(failed: Outgoing) {
-    discard(controlPlane, failed.operationId);
+    discard(gateway, failed.operationId);
     updateDraft((current) => ({ text: current.text.trim() ? current.text : failed.text }));
     composer.current?.focus();
   }
@@ -350,7 +344,7 @@ export function ConversationPane({
                       message={message}
                       answers={answers}
                       replyLater={joined.replyLater.has(message.task.taskId)}
-                      readEvents={controlPlane.events}
+                      readEvents={gateway.events}
                       wait={follow.waits.get(turnId)}
                       writing={follow.texts.get(turnId)}
                       activeTask={activeTask}
@@ -359,14 +353,14 @@ export function ConversationPane({
                       }
                       divider={dividers.get(message.task.taskId)}
                       onActivity={viewActivity}
-                      onSaveArtifact={controlPlane.saveArtifact}
+                      onSaveArtifact={gateway.saveArtifact}
                     />
                   );
                 })}
                 {outgoing && (
                   <OutgoingMessage
                     outgoing={outgoing}
-                    onRetry={(failed) => void deliver(retry(controlPlane, failed.operationId))}
+                    onRetry={(failed) => void deliver(retry(gateway, failed.operationId))}
                     onEdit={edit}
                   />
                 )}
@@ -435,7 +429,7 @@ export function ConversationPane({
             {activeTask ? (
               <ActivityPane
                 key={activeTask}
-                controlPlane={controlPlane}
+                gateway={gateway}
                 taskId={activeTask}
                 latest={latestEvent(messages, activeTask)}
                 pushed={follow.connected}
@@ -446,7 +440,7 @@ export function ConversationPane({
               />
             ) : (
               <TagDetails
-                controlPlane={controlPlane}
+                gateway={gateway}
                 watch={watch}
                 tag={tag}
                 onClose={() => onCloseDetails?.()}
@@ -556,13 +550,13 @@ function latestEvent(messages: readonly TagMessage[], taskId: string) {
  * change to the turn (`latest`), and on a timer only while the follow is down.
  */
 function ActivityPane({
-  controlPlane,
+  gateway,
   taskId,
   latest,
   pushed,
   onClose,
 }: {
-  controlPlane: ControlPlane;
+  gateway: Gateway;
   taskId: string;
   latest?: number;
   pushed: boolean;
@@ -579,7 +573,7 @@ function ActivityPane({
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       try {
-        const page = await controlPlane.events(taskId, after.current);
+        const page = await gateway.events(taskId, after.current);
         if (signal.aborted) return;
         const next = page.filter((entry) => entry.sequence > after.current);
         const last = next.at(-1);
@@ -594,7 +588,7 @@ function ActivityPane({
         if (!signal.aborted) setLoading(false);
       }
     },
-    [controlPlane, taskId],
+    [gateway, taskId],
   );
   usePolling(refresh, pushed ? undefined : interval);
   // Reads again as the turn's latest event moves.

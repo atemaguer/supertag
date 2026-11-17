@@ -37,6 +37,7 @@ supertag-local-state = { path = "../../../core/crates/local-state" }
 tauri = { version = "2", features = ["test"] }
 supertag-control-plane = { path = "../../../core/crates/control-plane" }
 supertag-api = { path = "../../../core/crates/api" }
+supertag-gateway = { path = "../../../core/crates/gateway" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = "0.7"

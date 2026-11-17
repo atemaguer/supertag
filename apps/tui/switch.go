@@ -11,10 +11,10 @@ import (
 	"github.com/atemaguer/supertag/apps/tui/client"
 )
 
-// switchKey opens the list of Control Planes to switch to.
+// switchKey opens the list of Gateways to switch to.
 const switchKey = "ctrl+p"
 
-// connector builds the model for one Control Plane; ctx ends when the TUI switches away from it.
+// connector builds the model for one Gateway; ctx ends when the TUI switches away from it.
 type connector func(ctx context.Context, target client.Target) (model, error)
 
 // dial is the connector the binary uses: a client, a follower and a watcher with the default
@@ -33,9 +33,9 @@ func dial(version string) connector {
 	}
 }
 
-// app is the program's model: the model of the current Control Plane, and the Control Planes the
+// app is the program's model: the model of the current Gateway, and the Gateways the
 // CLI handed over to switch between. Switching ends every stream and call of the one left and
-// starts a fresh model for the next, so no state crosses from one Control Plane to another.
+// starts a fresh model for the next, so no state crosses from one Gateway to another.
 type app struct {
 	root           context.Context
 	cancel         context.CancelFunc
@@ -49,20 +49,20 @@ type app struct {
 	// dropped.
 	generation int
 
-	// choosing says the Control Plane list shows; choice is the row under its cursor, and
+	// choosing says the Gateway list shows; choice is the row under its cursor, and
 	// choiceErr why the last switch failed.
 	choosing  bool
 	choice    int
 	choiceErr string
 	// palette is the command palette while it shows.
-	palette            *palette
-	files              *taskFilesDialog
-	notes              *notesDialog
-	network            *networkDialog
-	controlPlaneStore  *controlPlaneStore
-	savedControlPlanes []client.Target
-	controlPlaneDialog *controlPlaneDialog
-	// local is the local Control Plane while it runs, listed first and never saved;
+	palette       *palette
+	files         *taskFilesDialog
+	notes         *notesDialog
+	network       *networkDialog
+	gatewayStore  *gatewayStore
+	savedGateways []client.Target
+	gatewayDialog *gatewayDialog
+	// local is the local Gateway while it runs, listed first and never saved;
 	// localProblem says why it is unavailable otherwise. discover looks for it again.
 	local        client.Target
 	localProblem string
@@ -102,7 +102,7 @@ func (a *app) start(i int) error {
 	a.closeTaskFiles()
 	a.closeNotes()
 	a.closeNetwork()
-	a.closeControlPlaneDialog()
+	a.closeGatewayDialog()
 	if a.cancel != nil {
 		a.inner.flush(true)
 		a.cancel()
@@ -125,7 +125,7 @@ func (a *app) stop() {
 	a.closeTaskFiles()
 	a.closeNotes()
 	a.closeNetwork()
-	a.closeControlPlaneDialog()
+	a.closeGatewayDialog()
 	if a.cancel != nil {
 		a.inner.flush(true)
 		a.cancel()
@@ -149,9 +149,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.forward(msg.msg)
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
-		if a.controlPlaneDialog != nil {
-			for i := range a.controlPlaneDialog.inputs {
-				a.controlPlaneDialog.inputs[i].SetWidth(max(a.width-6, 10))
+		if a.gatewayDialog != nil {
+			for i := range a.gatewayDialog.inputs {
+				a.gatewayDialog.inputs[i].SetWidth(max(a.width-6, 10))
 			}
 		}
 		if a.files != nil {
@@ -161,8 +161,8 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.palette.filter.SetWidth(max(a.width-6, 10))
 		}
 	case tea.KeyPressMsg:
-		if a.controlPlaneDialog != nil {
-			return a, a.controlPlaneKey(msg)
+		if a.gatewayDialog != nil {
+			return a, a.gatewayKey(msg)
 		}
 		if a.files != nil {
 			return a, a.taskFilesKey(msg)
@@ -191,13 +191,13 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.openPalette(msg.String() == "/")
 		}
 	default:
-		if a.controlPlaneDialog != nil {
+		if a.gatewayDialog != nil {
 			switch msg.(type) {
-			case controlPlaneCheckedMsg, enrolledMsg:
-				return a, a.controlPlaneMessage(msg)
+			case gatewayCheckedMsg, enrolledMsg:
+				return a, a.gatewayMessage(msg)
 			}
 			var cmd tea.Cmd
-			d := a.controlPlaneDialog
+			d := a.gatewayDialog
 			d.inputs[d.field], cmd = d.inputs[d.field].Update(msg)
 			if _, paste := msg.(tea.PasteMsg); paste {
 				return a, cmd
@@ -227,8 +227,8 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *app) forward(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case controlPlaneCheckedMsg, enrolledMsg:
-		return a.controlPlaneMessage(msg)
+	case gatewayCheckedMsg, enrolledMsg:
+		return a.gatewayMessage(msg)
 	case localDiscoveredMsg:
 		a.setLocal(msg.target, msg.problem)
 		return nil
@@ -245,7 +245,7 @@ func (a *app) forward(msg tea.Msg) tea.Cmd {
 	return tea.Batch(a.scope(cmd), watched)
 }
 
-// chooseKey moves through the Control Plane list and switches to the chosen one.
+// chooseKey moves through the Gateway list and switches to the chosen one.
 func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+c":
@@ -257,12 +257,12 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "down", "j":
 		a.choice = max(min(a.choice+1, len(a.contexts)-1), 0)
 	case "a":
-		return a.openControlPlaneDialog(false)
+		return a.openGatewayDialog(false)
 	case "s":
-		return a.openControlPlaneDialog(a.hasTarget)
+		return a.openGatewayDialog(a.hasTarget)
 	case "e":
 		if len(a.contexts) > 0 {
-			return a.editControlPlane(a.contexts[a.choice])
+			return a.editGateway(a.contexts[a.choice])
 		}
 	case "d":
 		if len(a.contexts) > 0 && a.isLocal(a.contexts[a.choice]) {
@@ -270,18 +270,18 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		if len(a.contexts) > 0 {
-			a.forgetControlPlane()
+			a.forgetGateway()
 		}
 	case "enter":
 		if len(a.contexts) == 0 {
-			return a.openControlPlaneDialog(false)
+			return a.openGatewayDialog(false)
 		}
 		if a.isLocal(a.contexts[a.choice]) {
 			return a.chooseLocal()
 		}
 		if a.choice == a.current {
 			a.choosing = false
-			a.rememberControlPlane()
+			a.rememberGateway()
 			return nil
 		}
 		if err := a.start(a.choice); err != nil {
@@ -289,8 +289,8 @@ func (a *app) chooseKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		a.choosing = false
-		a.rememberControlPlane()
-		a.refreshControlPlanes(a.contexts[a.current])
+		a.rememberGateway()
+		a.refreshGateways(a.contexts[a.current])
 		return a.scope(a.inner.Init())
 	}
 	return nil
@@ -341,7 +341,7 @@ func ownMessage(msg tea.Msg) bool {
 }
 
 func (a *app) View() tea.View {
-	if (!a.choosing && a.palette == nil && a.files == nil && a.notes == nil && a.network == nil && a.controlPlaneDialog == nil) || a.width == 0 {
+	if (!a.choosing && a.palette == nil && a.files == nil && a.notes == nil && a.network == nil && a.gatewayDialog == nil) || a.width == 0 {
 		if !a.hasTarget {
 			return tea.NewView("")
 		}
@@ -360,10 +360,10 @@ func (a *app) View() tea.View {
 	if a.network != nil {
 		shown = a.renderNetwork
 	}
-	if a.controlPlaneDialog != nil {
-		shown = a.renderControlPlaneDialog
+	if a.gatewayDialog != nil {
+		shown = a.renderGatewayDialog
 	}
-	status := "No Control Plane selected"
+	status := "No Gateway selected"
 	if a.hasTarget {
 		status = a.inner.renderStatus()
 	}
@@ -372,7 +372,7 @@ func (a *app) View() tea.View {
 	return v
 }
 
-// renderChoices lists the Control Planes, the current one marked, filling the screen above the
+// renderChoices lists the Gateways, the current one marked, filling the screen above the
 // status line.
 func (a *app) renderChoices() string {
 	height := max(a.height-1, 2)
@@ -382,7 +382,7 @@ func (a *app) renderChoices() string {
 		label := contextLabel(target)
 		if a.isLocal(target) {
 			label += "  [this machine]"
-		} else if a.isSavedControlPlane(target) {
+		} else if a.isSavedGateway(target) {
 			label += "  [saved]"
 		}
 		if i == a.current {
@@ -401,20 +401,20 @@ func (a *app) renderChoices() string {
 	if a.choiceErr != "" {
 		footer = append(footer, errorStyle.Render(truncate(strings.Join(strings.Fields(a.choiceErr), " "), width)))
 	}
-	help, title := "enter switches · a add · e edit · s save current · d forget · esc back", "Control Planes"
+	help, title := "enter switches · a add · e edit · s save current · d forget · esc back", "Gateways"
 	footer = append(footer, faint.Render(truncate(help, width)))
 	shown := max(height-2-len(footer), 1)
 	first := max(a.choice-shown+1, 0)
 	rows = rows[first:min(first+shown, len(rows))]
 	if len(a.contexts) == 0 {
-		rows = []string{"Add a Control Plane to see its Tags and conversations.", "Press a or enter to connect."}
+		rows = []string{"Add a Gateway to see its Tags and conversations.", "Press a or enter to connect."}
 	}
 	lines := append([]string{headerStyle.Render(truncate(title, width))}, rows...)
 	lines = append(append(lines, ""), footer...)
 	return lipgloss.NewStyle().Padding(0, 1).Height(height).MaxHeight(height).Render(strings.Join(lines, "\n"))
 }
 
-// contextLabel names a Control Plane in the list as the status bar does: its name and URL, or
+// contextLabel names a Gateway in the list as the status bar does: its name and URL, or
 // only its URL when it has no name.
 func contextLabel(target client.Target) string {
 	where := terminalText(target.URL)

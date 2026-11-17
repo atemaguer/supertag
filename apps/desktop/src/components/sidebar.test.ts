@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Tag } from "../control-plane";
+import type { Tag } from "../gateway";
 import {
   isSidebarShortcut,
   orderTags,
@@ -138,7 +138,7 @@ it("snaps to the rail when dragged past the threshold, and back out to the last 
   expect(shell().dataset.sidebar).toBe("rail");
   expect(shown()).toBe("84px");
   expect(localStorage.getItem("supertag.desktop.sidebar")).toBe("rail");
-  // The rail keeps every Tag and the Control Plane: nothing is hidden.
+  // The rail keeps every Tag and the Gateway: nothing is hidden.
   expect(rows()).toEqual(["finch", "moss"]);
   expect(host.querySelector(".sidebar .connection")?.textContent).toBe("rail");
 

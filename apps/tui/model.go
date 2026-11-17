@@ -74,7 +74,7 @@ const (
 	decisionConfirm
 	// decisionReason takes the reason for denying in the input.
 	decisionReason
-	// decisionSending waits for the Control Plane's answer.
+	// decisionSending waits for the Gateway's answer.
 	decisionSending
 )
 
@@ -277,7 +277,7 @@ type model struct {
 	selected int
 	focus    focus
 	// conversations are what is shown of the operator's conversation with each Tag, by Tag;
-	// summaries what the Control Plane last listed of them, by Tag.
+	// summaries what the Gateway last listed of them, by Tag.
 	conversations map[string]*conversation
 	summaries     map[string]*views.Conversation
 	// work is what was read of each work Session shown, by ID; expanded holds those whose lines
@@ -347,7 +347,7 @@ type model struct {
 	tagReload, convReload, objReload, inboxReload, overviewReload *reload
 
 	// notify is what a Tag's reply or question in a conversation not in front does
-	// (SUPERTAG_TUI_NOTIFY); notified is the conversation list last read from the Control Plane,
+	// (SUPERTAG_TUI_NOTIFY); notified is the conversation list last read from the Gateway,
 	// nil before the first; blurred says the terminal reported losing the focus.
 	notify   notifyLevel
 	notified map[string]*views.Conversation
@@ -369,7 +369,7 @@ type model struct {
 	hostsKnown      bool
 	hostReload      *reload
 
-	// switchable says the status bar offers switching to another Control Plane.
+	// switchable says the status bar offers switching to another Gateway.
 	switchable bool
 
 	// outbox holds the messages not yet accepted; cache is what the model keeps on disk.
@@ -498,7 +498,7 @@ func (m model) reloadAll() tea.Cmd {
 const followBatch = 64
 
 // waitForTask delivers the next event of a follow, with the events already waiting behind it. A
-// poll of the Control Plane emits a page of events at once, and each message redraws the whole
+// poll of the Gateway emits a page of events at once, and each message redraws the whole
 // conversation, so one message for the page keeps a streaming reply from holding up the keys.
 func waitForTask(tag, taskID string, events <-chan client.FollowEvent) tea.Cmd {
 	return func() tea.Msg {
@@ -1176,7 +1176,7 @@ func (m *model) submit() tea.Cmd {
 	switch m.pane {
 	case paneConversation:
 		tag := m.selectedTag()
-		// `/goal <outcome>` is a message like any other: the Control Plane creates its Objective.
+		// `/goal <outcome>` is a message like any other: the Gateway creates its Objective.
 		// `/goal` alone opens the form, to set a Team or budget too.
 		if outcome, goal := goalOutcome(text); goal && outcome == "" && tag != "" {
 			m.input.Reset()
@@ -1218,7 +1218,7 @@ func (m *model) submit() tea.Cmd {
 }
 
 // sendConversation sends text to the Tag's conversation. It shows at once, and waits in the
-// outbox until the Control Plane accepts it.
+// outbox until the Gateway accepts it.
 func (m *model) sendConversation(tag, text string) tea.Cmd {
 	delete(m.drafts, "conversation:"+tag)
 	m.cacheChanged(draftsKey)
@@ -1231,7 +1231,7 @@ func (m *model) sendConversation(tag, text string) tea.Cmd {
 }
 
 // sendGoal sends `/goal <outcome>` to the conversation on screen, whose Tag then owns the
-// Objective the Control Plane creates. Away from a conversation, it opens the form with the
+// Objective the Gateway creates. Away from a conversation, it opens the form with the
 // outcome filled in.
 func (m *model) sendGoal(outcome string) tea.Cmd {
 	tag := m.selectedTag()

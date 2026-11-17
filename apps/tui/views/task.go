@@ -1,5 +1,5 @@
 // Presentation types of the terminal UI. They began as the generated types of the removed
-// supertag.operator.v1 protos; the Control Plane's runtime.v2 replies are projected into them.
+// supertag.operator.v1 protos; the Gateway's runtime.v2 replies are projected into them.
 
 package views
 
@@ -297,9 +297,9 @@ type PullRequestDelivery struct {
 	Url string
 	// Whether it is a draft, ready, or closed.
 	State PullRequestState
-	// Why the Control Plane's last update to it failed. Empty when it did not.
+	// Why the Gateway's last update to it failed. Empty when it did not.
 	LastError string
-	// When the Control Plane retries that update. Unset when it does not retry.
+	// When the Gateway retries that update. Unset when it does not retry.
 	NextAttemptAt *timestamppb.Timestamp
 }
 

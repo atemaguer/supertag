@@ -1,4 +1,4 @@
-// Package client talks to a SuperTag Control Plane over its runtime.v2 gRPC services: a client
+// Package client talks to a SuperTag Gateway over its runtime.v2 gRPC services: a client
 // whose calls project the replies into the terminal UI's presentation types, a follower that
 // turns one message's Task events into the events the UI shows, and a watcher that keeps the UI's
 // view of Tags, conversations, Objectives, Teams and the inbox current.
@@ -17,7 +17,7 @@ import (
 	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
-// Target names the Control Plane to talk to and the token to talk to it with.
+// Target names the Gateway to talk to and the token to talk to it with.
 type Target struct {
 	URL            string `json:"url"`
 	Token          string `json:"token"`
@@ -28,11 +28,11 @@ type Target struct {
 	ClientKeyFile  string `json:"client_key_file,omitempty"`
 }
 
-// APIError is a request the Control Plane refused, with the sentence it gave.
+// APIError is a request the Gateway refused, with the sentence it gave.
 type APIError struct {
 	Code    connect.Code
 	Message string
-	// Mismatch marks a Control Plane that speaks no protocol version this client speaks.
+	// Mismatch marks a Gateway that speaks no protocol version this client speaks.
 	Mismatch bool
 }
 
@@ -48,7 +48,7 @@ const unaryTimeout = 30 * time.Second
 // second waits twice as long.
 var sendRetryPause = time.Second
 
-// Client calls one Control Plane.
+// Client calls one Gateway.
 type Client struct {
 	target  Target
 	origin  string
@@ -57,7 +57,7 @@ type Client struct {
 	runtime *runtimeClient
 }
 
-// Target is the Control Plane this client calls.
+// Target is the Gateway this client calls.
 func (c *Client) Target() Target { return c.target }
 
 // Close releases idle connections when the TUI leaves this target.
@@ -106,13 +106,13 @@ func (c *Client) ListTags(ctx context.Context) ([]*views.Tag, error) {
 
 // SendMessage sends text to the caller's conversation with the Tag. operationID names the
 // message: every attempt with the same ID, including one after a restart, delivers it at most
-// once. A failure that may not have reached the Control Plane is retried with it.
+// once. A failure that may not have reached the Gateway is retried with it.
 func (c *Client) SendMessage(ctx context.Context, tag, text, operationID string) (*views.Message, error) {
 	return c.runtime.sendMessage(ctx, tag, text, operationID)
 }
 
 // retrying makes an idempotent call, retrying it twice after a failure that may not have reached
-// the Control Plane, with a growing pause.
+// the Gateway, with a growing pause.
 func retrying[T any](ctx context.Context, call func(context.Context) (T, error)) (T, error) {
 	for attempt := 0; ; attempt++ {
 		callCtx, cancel := context.WithTimeout(ctx, unaryTimeout)
@@ -192,7 +192,7 @@ func idempotencyKey() (string, error) {
 	return "tui-" + hex.EncodeToString(b[:]), nil
 }
 
-// apiError turns a refused RPC into an APIError carrying the Control Plane's sentence. Other
+// apiError turns a refused RPC into an APIError carrying the Gateway's sentence. Other
 // errors, such as a cancelled context, pass through.
 func apiError(err error) error {
 	var connectErr *connect.Error
@@ -201,15 +201,15 @@ func apiError(err error) error {
 	}
 	message := connectErr.Message()
 	if connectErr.Code() == connect.CodeUnimplemented {
-		message = "Control Plane does not support this SuperTag operator API"
+		message = "Gateway does not support this SuperTag operator API"
 	}
 	if message == "" {
-		message = "Control Plane refused the call: " + connectErr.Code().String()
+		message = "Gateway refused the call: " + connectErr.Code().String()
 	}
 	return &APIError{Code: connectErr.Code(), Message: message}
 }
 
-// transient reports whether a failed call is worth retrying: the Control Plane could not be
+// transient reports whether a failed call is worth retrying: the Gateway could not be
 // reached, dropped the call, or failed rather than refused.
 func transient(err error) bool {
 	var apiErr *APIError

@@ -1,12 +1,12 @@
 //! A Tag's network log: the requests its Task Attempts' egress proxies allowed and refused, for
-//! the Tag details panel. Operators only; the Control Plane refuses everyone else.
+//! the Tag details panel. Operators only; the Gateway refuses everyone else.
 use serde::Serialize;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{self, network_logs_client::NetworkLogsClient},
 };
 
-use super::{ControlPlaneState, Result, rpc_error};
+use super::{GatewayState, Result, rpc_error};
 
 /// One request a Task Attempt's egress proxy decided.
 #[derive(Serialize, Debug, PartialEq)]
@@ -64,7 +64,7 @@ impl From<v2::TaskNetworkLog> for NetworkLog {
     }
 }
 
-impl ControlPlaneState {
+impl GatewayState {
     /// The Tag's newest Task Attempts with a network log, newest first.
     pub async fn network_logs(
         &self,

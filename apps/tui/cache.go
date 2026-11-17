@@ -16,9 +16,9 @@ import (
 )
 
 // The terminal UI keeps on disk what it shows on launch, so `supertag` shows the last Tag's
-// conversation before the Control Plane answers: the Tag list with each conversation's row, the
+// conversation before the Gateway answers: the Tag list with each conversation's row, the
 // selected Tag, the latest messages of each conversation shown, messages not yet sent, and unsent
-// drafts. Each Control Plane and principal has its own directory, named by digests. The files hold
+// drafts. Each Gateway and principal has its own directory, named by digests. The files hold
 // only what the terminal UI read or wrote, never a credential, and only this user can read them.
 
 // cacheSchema is what every entry records; an entry written with another schema is discarded.
@@ -27,11 +27,11 @@ const cacheSchema = 1
 // maxCacheEntryBytes is the most one entry may take.
 const maxCacheEntryBytes = 4 << 20
 
-// maxCacheEntries is how many entries each Control Plane and principal keep; the least recently
+// maxCacheEntries is how many entries each Gateway and principal keep; the least recently
 // written are removed first.
 const maxCacheEntries = 64
 
-// maxPrincipals is how many credentials each Control Plane remembers the principal of.
+// maxPrincipals is how many credentials each Gateway remembers the principal of.
 const maxPrincipals = 16
 
 // cacheTurns is how many of a conversation's latest messages its entry keeps.
@@ -63,7 +63,7 @@ func cacheDigest(parts ...string) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-// localCache is the cache of one Control Plane, by its origin.
+// localCache is the cache of one Gateway, by its origin.
 type localCache struct {
 	root   string
 	origin string
@@ -71,7 +71,7 @@ type localCache struct {
 	mu sync.Mutex
 }
 
-// openCache opens the cache of the Control Plane at origin; nil when there is no cache directory.
+// openCache opens the cache of the Gateway at origin; nil when there is no cache directory.
 func openCache(origin string) *localCache {
 	root, err := cacheDirectory()
 	if err != nil || root == "" {
@@ -80,20 +80,20 @@ func openCache(origin string) *localCache {
 	return &localCache{root: root, origin: origin}
 }
 
-func (c *localCache) controlPlaneDirectory() string {
+func (c *localCache) gatewayDirectory() string {
 	return filepath.Join(c.root, cacheDigest(c.origin))
 }
 
 // credentialDigest names a credential in the cache without keeping it: a one-way digest bound to
-// this cache and Control Plane, which cannot be presented to any Control Plane.
+// this cache and Gateway, which cannot be presented to any Gateway.
 func (c *localCache) credentialDigest(token string) string {
 	return cacheDigest("supertag-tui-cache-credential", c.origin, token)
 }
 
-// principal is whom the Control Plane last resolved this credential to, if it ever did.
+// principal is whom the Gateway last resolved this credential to, if it ever did.
 func (c *localCache) principal(token string) string {
 	var known map[string]string
-	if !c.readFile(filepath.Join(c.controlPlaneDirectory(), "principals.json"), &known) {
+	if !c.readFile(filepath.Join(c.gatewayDirectory(), "principals.json"), &known) {
 		return ""
 	}
 	return known[c.credentialDigest(token)]
@@ -103,7 +103,7 @@ func (c *localCache) principal(token string) string {
 func (c *localCache) rememberPrincipal(token, principal string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	path := filepath.Join(c.controlPlaneDirectory(), "principals.json")
+	path := filepath.Join(c.gatewayDirectory(), "principals.json")
 	var known map[string]string
 	if !c.readFile(path, &known) || len(known) >= maxPrincipals {
 		known = map[string]string{}
@@ -114,7 +114,7 @@ func (c *localCache) rememberPrincipal(token, principal string) {
 
 // entry is the file of key in the principal's directory.
 func (c *localCache) entry(principal, key string) string {
-	return filepath.Join(c.controlPlaneDirectory(), cacheDigest(principal), cacheDigest(key)+".json")
+	return filepath.Join(c.gatewayDirectory(), cacheDigest(principal), cacheDigest(key)+".json")
 }
 
 // read decodes the principal's entry under key into value; false when there is no valid one.
@@ -140,14 +140,14 @@ func (c *localCache) write(principal, key string, value any) error {
 	return nil
 }
 
-// forget removes everything cached for the Control Plane, for every principal.
+// forget removes everything cached for the Gateway, for every principal.
 func (c *localCache) forget() {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_ = os.RemoveAll(c.controlPlaneDirectory())
+	_ = os.RemoveAll(c.gatewayDirectory())
 }
 
 func (c *localCache) readFile(path string, value any) bool {
@@ -201,7 +201,7 @@ func writeCacheFile(root, path string, value any) error {
 		return err
 	}
 	if len(data) > maxCacheEntryBytes {
-		// Too large to keep; the conversation still loads from the Control Plane.
+		// Too large to keep; the conversation still loads from the Gateway.
 		_ = os.Remove(path)
 		return nil
 	}

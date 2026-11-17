@@ -36,7 +36,7 @@ func HarnessLabel(kind string) string {
 	return kind
 }
 
-// TagOptions are what a new Tag can run on: the harnesses and Workspaces the Control Plane's
+// TagOptions are what a new Tag can run on: the harnesses and Workspaces the Gateway's
 // Worker Hosts offer, each sorted.
 type TagOptions struct {
 	Harnesses  []string
@@ -48,7 +48,7 @@ type TagOptions struct {
 type NewTag struct {
 	ID, Name, Harness, Workspace string
 	// MaxWorkSessions is how many Work Sessions it may have open at once; zero keeps the
-	// Control Plane's default.
+	// Gateway's default.
 	MaxWorkSessions uint32
 }
 
@@ -76,7 +76,7 @@ func harnessName(kind v2.HarnessKind) string {
 	return strings.ToLower(strings.TrimPrefix(kind.String(), "HARNESS_KIND_"))
 }
 
-// ListTagOptions reads the harnesses and Workspaces of the Control Plane's current Worker Hosts.
+// ListTagOptions reads the harnesses and Workspaces of the Gateway's current Worker Hosts.
 // Only an operator may list them, as only an operator may create a Tag.
 func (c *Client) ListTagOptions(ctx context.Context) (TagOptions, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)

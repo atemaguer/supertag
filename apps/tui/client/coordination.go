@@ -30,7 +30,7 @@ func Closed(status views.ObjectiveStatus) bool {
 
 // NewObjective is what the operator declares when creating an Objective.
 type NewObjective struct {
-	// ID is the Objective's ID; empty, the Control Plane generates one.
+	// ID is the Objective's ID; empty, the Gateway generates one.
 	ID string
 	// Outcome is the statement of the result.
 	Outcome string
@@ -46,7 +46,7 @@ type NewObjective struct {
 
 // CreateObjective creates an Objective and starts it. Repeating it with the Objective's ID and the
 // same definition starts one that could not start before, and creates nothing new. It is not
-// retried: without an ID, a repeat of a call that reached the Control Plane would create a second
+// retried: without an ID, a repeat of a call that reached the Gateway would create a second
 // Objective.
 func (c *Client) CreateObjective(ctx context.Context, objective NewObjective) (*views.CreateObjectiveResponse, error) {
 	return c.runtime.createObjective(ctx, objective)

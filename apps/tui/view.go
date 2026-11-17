@@ -113,16 +113,16 @@ func (m model) renderConversation() string {
 	if tag == "" {
 		switch {
 		case !m.tagsChecked:
-			return faint.Render(wrap.Render("Checking for Tags on the Control Plane…"))
+			return faint.Render(wrap.Render("Checking for Tags on the Gateway…"))
 		case m.tagsErr != nil:
-			return wrap.Render("Could not check for Tags on this Control Plane.\n\n" + terminalText(m.tagsErr.Error()))
+			return wrap.Render("Could not check for Tags on this Gateway.\n\n" + terminalText(m.tagsErr.Error()))
 		default:
 			if m.tagAdminRefusal() == "" {
-				return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
+				return wrap.Render("No Tags are set up on this Gateway.\n\n" +
 					"Press ctrl+n to create one, or run supertag tag put --help for setup.")
 			}
-			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
-				"Run supertag tag put --help for setup. For a shared Control Plane, ask its operator to set up a Tag.")
+			return wrap.Render("No Tags are set up on this Gateway.\n\n" +
+				"Run supertag tag put --help for setup. For a shared Gateway, ask its operator to set up a Tag.")
 		}
 	}
 	name := terminalText(m.tagLabel(tag))
@@ -320,8 +320,8 @@ func railPreview(summary *views.Conversation) string {
 	return terminalText(text)
 }
 
-// renderStatus is the status line: the Control Plane, its Worker Hosts, how to open the command
-// palette and to switch to another Control Plane when there is one, and whether it is reachable.
+// renderStatus is the status line: the Gateway, its Worker Hosts, how to open the command
+// palette and to switch to another Gateway when there is one, and whether it is reachable.
 func (m model) renderStatus() string {
 	left := " " + contextLabel(m.client.Target()) + "  "
 	if client.IsClientCredential(m.client.Target().Token) {
@@ -338,7 +338,7 @@ func (m model) renderStatus() string {
 	}
 	left += "ctrl+k search  "
 	if m.switchable {
-		left += "ctrl+p Control Planes  "
+		left += "ctrl+p Gateways  "
 	}
 	state := okStyle.Render("connected")
 	if !m.connected {
@@ -440,7 +440,7 @@ func (m model) paneHint() string {
 		case m.decision == decisionConfirm:
 			return "enter approves this request once · esc cancels"
 		case m.decision == decisionSending:
-			return "Waiting for the Control Plane…"
+			return "Waiting for the Gateway…"
 		case m.inboxItem(m.item.GetOccurrence()) == nil:
 			return "This item is settled."
 		case m.approvalShown():

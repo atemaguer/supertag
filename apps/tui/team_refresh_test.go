@@ -45,11 +45,11 @@ func watched(t *testing.T, m model, update client.WatchUpdate) model {
 }
 
 // teamsShown starts a model with billing and open listed and billing shown.
-func teamsShown(t *testing.T) (*fakeControlPlane, *teamStore, model) {
+func teamsShown(t *testing.T) (*fakeGateway, *teamStore, model) {
 	t.Helper()
 	store := &teamStore{}
 	store.set(billingTeam(), openTeam())
-	fake := &fakeControlPlane{tags: tags("lead", "builder"), teamList: store.list}
+	fake := &fakeGateway{tags: tags("lead", "builder"), teamList: store.list}
 	m := testModel(t, fake)
 	m = run(t, m, tea.Batch(m.reloadTags(), m.reloadTeams()))
 	m = moveTo(t, m, "billing")
@@ -59,7 +59,7 @@ func teamsShown(t *testing.T) (*fakeControlPlane, *teamStore, model) {
 	return fake, store, m
 }
 
-func (f *fakeControlPlane) teamReadCounts() (list int, gets map[string]int) {
+func (f *fakeGateway) teamReadCounts() (list int, gets map[string]int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.teamListReads, copyCounts(f.teamGets)
@@ -198,7 +198,7 @@ func TestDeletionRejectsLateDetailsAndNameFallback(t *testing.T) {
 func TestTeamChangesReadOnlyWhatTheCallerMayRead(t *testing.T) {
 	fake, store, m := teamsShown(t)
 	_, gets := fake.teamReadCounts()
-	// The Control Plane lists only the Teams the caller may read; a change naming another Team,
+	// The Gateway lists only the Teams the caller may read; a change naming another Team,
 	// such as one sent before access narrowed, rereads the list but never reads that Team.
 	store.set(billingTeam(), openTeam())
 	m = watched(t, m, teamChange("team-secret"))

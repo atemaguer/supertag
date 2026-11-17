@@ -28,7 +28,7 @@ mod profiles;
 mod watch;
 pub use follow::FollowUpdate;
 pub use new_tag::{NewTag, TagOptions};
-pub use profiles::{ControlPlaneActivation, ControlPlaneList};
+pub use profiles::{GatewayActivation, GatewayList};
 pub use watch::WatchUpdate;
 
 type Result<T> = std::result::Result<T, String>;
@@ -36,15 +36,15 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_PAGES: usize = 100;
 /// The most events one `ListEvents` call returns.
 const EVENT_PAGE: u32 = 32;
-/// The most of a Control Plane's reason for refusing a request the app shows.
+/// The most of a Gateway's reason for refusing a request the app shows.
 const MAX_REASON_CHARS: usize = 300;
 
 /// The current connection, a lock that orders connection changes, and the local state directory
-/// a local Control Plane is found in, if one could be located.
+/// a local Gateway is found in, if one could be located.
 #[derive(Default)]
-pub struct ControlPlaneState(RwLock<Connection>, Mutex<()>, Option<PathBuf>);
+pub struct GatewayState(RwLock<Connection>, Mutex<()>, Option<PathBuf>);
 
-impl ControlPlaneState {
+impl GatewayState {
     pub fn new(local_state: Option<PathBuf>) -> Self {
         Self(RwLock::default(), Mutex::default(), local_state)
     }
@@ -85,22 +85,21 @@ impl Session {
     async fn connect(target: Target, token: &str) -> Result<Self> {
         let authorization = bearer(token)?;
         let channel = target.connect().await.map_err(|_| {
-            "Could not connect to the Control Plane. Check its address and TLS certificate."
-                .to_owned()
+            "Could not connect to the Gateway. Check its address and TLS certificate.".to_owned()
         })?;
-        // The Control Plane refuses every call that does not name a negotiated version.
-        let channel = connect(channel, ServiceRole::Client, ServiceRole::ControlPlane)
+        // The Gateway refuses every call that does not name a negotiated version.
+        let channel = connect(channel, ServiceRole::Client, ServiceRole::Gateway)
             .await
             .map_err(|error| match error {
                 NegotiationError::Unavailable(_) => {
-                    "Could not connect to the Control Plane. Check its address and TLS certificate."
+                    "Could not connect to the Gateway. Check its address and TLS certificate."
                         .to_owned()
                 }
                 NegotiationError::Incompatible(_) => {
-                    "This Control Plane runs an incompatible SuperTag release. Use the same release for the Control Plane and this app."
+                    "This Gateway runs an incompatible SuperTag release. Use the same release for the Gateway and this app."
                         .to_owned()
                 }
-                // Names both releases, where the Control Plane runs, and which to upgrade.
+                // Names both releases, where the Gateway runs, and which to upgrade.
                 mismatch @ NegotiationError::Mismatch(_) => {
                     mismatch.at(target.url()).speaking_as("This app").to_string()
                 }
@@ -137,7 +136,7 @@ impl Session {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    /// Whom the Control Plane resolves this session's credential to, such as `operator:local` or
+    /// Whom the Gateway resolves this session's credential to, such as `operator:local` or
     /// `client:alice-laptop`.
     async fn principal(&self) -> Result<String> {
         Ok(self
@@ -164,7 +163,7 @@ impl Session {
             .await
             .map_err(|status| match status.code() {
                 Code::PermissionDenied | Code::FailedPrecondition | Code::Unauthenticated => {
-                    "The Control Plane refused this Auth Key. Ask an operator for a new client Auth Key."
+                    "The Gateway refused this Auth Key. Ask an operator for a new client Auth Key."
                         .to_owned()
                 }
                 _ => rpc_error(status),
@@ -204,17 +203,14 @@ impl Session {
     }
 }
 
-impl ControlPlaneState {
+impl GatewayState {
     pub async fn disconnect(&self) {
         self.0.write().await.replace();
     }
 
     async fn session(&self, connection_id: &str) -> Result<Arc<Session>> {
         let state = self.0.read().await;
-        let session = state
-            .session
-            .clone()
-            .ok_or("Connect to a Control Plane first.")?;
+        let session = state.session.clone().ok_or("Connect to a Gateway first.")?;
         if state.generation.to_string() != connection_id {
             return Err("The connection changed. Refresh this view.".into());
         }
@@ -394,18 +390,17 @@ impl ControlPlaneState {
 /// `https://` and loopback `http://` URLs dial native gRPC. `wss://` and loopback `ws://` URLs
 /// carry the same connection through a WebSocket tunnel, which may have a path; the Control
 /// Plane's TLS still runs inside a `wss://` tunnel.
-fn endpoint(control_plane: &str) -> Result<Target> {
-    if control_plane.contains(['#', '\\']) {
-        return Err("Enter a valid Control Plane origin without a fragment.".into());
+fn endpoint(gateway: &str) -> Result<Target> {
+    if gateway.contains(['#', '\\']) {
+        return Err("Enter a valid Gateway origin without a fragment.".into());
     }
-    let control_plane = control_plane.trim();
-    let invalid = "The Control Plane URL must be an origin without credentials, path, or query, or a tunnel URL without credentials or query.";
-    let tunnel = tunneled_uri(control_plane).map_err(|_| invalid.to_owned())?;
-    let endpoint =
-        Endpoint::from_shared(tunnel.clone().unwrap_or_else(|| control_plane.to_owned()))
-            .map_err(|_| "Enter a valid Control Plane URL.".to_owned())?;
+    let gateway = gateway.trim();
+    let invalid = "The Gateway URL must be an origin without credentials, path, or query, or a tunnel URL without credentials or query.";
+    let tunnel = tunneled_uri(gateway).map_err(|_| invalid.to_owned())?;
+    let endpoint = Endpoint::from_shared(tunnel.clone().unwrap_or_else(|| gateway.to_owned()))
+        .map_err(|_| "Enter a valid Gateway URL.".to_owned())?;
     let uri = endpoint.uri();
-    let authority = uri.authority().ok_or("Enter a Control Plane host.")?;
+    let authority = uri.authority().ok_or("Enter a Gateway host.")?;
     if authority.as_str().contains('@')
         || uri.path() != "/" && !uri.path().is_empty()
         || uri.query().is_some()
@@ -424,29 +419,29 @@ fn endpoint(control_plane: &str) -> Result<Target> {
                 .is_ok_and(|ip| ip.is_loopback())
             {
                 return Err(
-                    "HTTP and WS require a loopback IP address. Use HTTPS or WSS for a remote Control Plane."
+                    "HTTP and WS require a loopback IP address. Use HTTPS or WSS for a remote Gateway."
                         .into(),
                 );
             }
             false
         }
-        _ => return Err("The Control Plane URL must use HTTP, HTTPS, WS, or WSS.".into()),
+        _ => return Err("The Gateway URL must use HTTP, HTTPS, WS, or WSS.".into()),
     };
     // A tunnel dial also covers the outer TLS and the WebSocket upgrade, and a platform proxy
-    // may hold the upgrade while it starts a Control Plane that scaled to zero.
+    // may hold the upgrade while it starts a Gateway that scaled to zero.
     let endpoint = endpoint
         .connect_timeout(Duration::from_secs(if tunnel.is_some() { 30 } else { 5 }))
         .timeout(TIMEOUT);
     let endpoint = if tls {
         endpoint
             .tls_config(ClientTlsConfig::new().with_native_roots())
-            .map_err(|_| "Could not configure Control Plane TLS.".to_owned())?
+            .map_err(|_| "Could not configure Gateway TLS.".to_owned())?
     } else {
         endpoint
     };
     match tunnel {
-        Some(_) => Target::tunnel(control_plane, endpoint, None)
-            .map_err(|_| "Could not configure the Control Plane tunnel.".into()),
+        Some(_) => Target::tunnel(gateway, endpoint, None)
+            .map_err(|_| "Could not configure the Gateway tunnel.".into()),
         None => Ok(Target::native(endpoint)),
     }
 }
@@ -502,7 +497,7 @@ fn bearer(token: &str) -> Result<MetadataValue<Ascii>> {
 fn rpc_error(status: Status) -> String {
     // Never surface an arbitrary upstream status message: it can contain request
     // data, backend details, or credentials echoed by an unexpected server. The
-    // Control Plane writes its InvalidArgument messages for the person who sent
+    // Gateway writes its InvalidArgument messages for the person who sent
     // the request, so that one is shown, bounded and stripped of control characters.
     if status.code() == Code::InvalidArgument {
         let reason: String = status
@@ -513,22 +508,22 @@ fn rpc_error(status: Status) -> String {
             .collect();
         let reason = reason.trim().trim_end_matches('.');
         return if reason.is_empty() {
-            "The Control Plane rejected this request. Check its values.".into()
+            "The Gateway rejected this request. Check its values.".into()
         } else {
-            format!("The Control Plane rejected this request: {reason}.")
+            format!("The Gateway rejected this request: {reason}.")
         };
     }
     match status.code() {
-        Code::Unauthenticated => "The Control Plane rejected the saved credential.",
+        Code::Unauthenticated => "The Gateway rejected the saved credential.",
         Code::PermissionDenied => "This connection cannot access that resource.",
         Code::NotFound => "The requested resource is no longer available.",
         Code::AlreadyExists => "This operation conflicts with an earlier request.",
         Code::FailedPrecondition => "This action is not available in the current state.",
-        Code::ResourceExhausted => "The Control Plane limit was reached. Try a smaller request.",
+        Code::ResourceExhausted => "The Gateway limit was reached. Try a smaller request.",
         Code::DeadlineExceeded | Code::Unavailable => {
-            "The Control Plane is unavailable. Retry with the same message operation."
+            "The Gateway is unavailable. Retry with the same message operation."
         }
-        _ => "The Control Plane request failed.",
+        _ => "The Gateway request failed.",
     }
     .into()
 }
@@ -542,7 +537,7 @@ pub struct Tag {
     pub allowed_actions: Vec<String>,
     pub revision: u64,
     pub harness_kind: String,
-    /// Whether this is the Control Plane's lead Tag, which the app shows first.
+    /// Whether this is the Gateway's lead Tag, which the app shows first.
     pub lead: bool,
     /// How many Work Sessions the Tag may have open at once, and has open now.
     pub max_work_sessions: u32,
@@ -592,7 +587,7 @@ pub struct Task {
     pub attempt_id: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<ResultArtifact>,
-    /// When the Control Plane accepted the message, for a conversation's Task.
+    /// When the Gateway accepted the message, for a conversation's Task.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<i64>,
     /// The turn finished quietly: its conversation does not show it.
@@ -758,7 +753,7 @@ impl TryFrom<v2::ConversationMessage> for Message {
         let mut task = Task::from(
             value
                 .task
-                .ok_or("The Control Plane returned an incomplete message.")?,
+                .ok_or("The Gateway returned an incomplete message.")?,
         );
         let live_input = if value.work_session_report_id.is_some() || value.schedule_id.is_some() {
             task.prompt = None;

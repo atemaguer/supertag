@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "../control-plane";
+import type { Message } from "../gateway";
 import {
   earlierHistory,
   emptyHistory,

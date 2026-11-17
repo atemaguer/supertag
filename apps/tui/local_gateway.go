@@ -14,23 +14,23 @@ import (
 	"github.com/atemaguer/supertag/apps/tui/client"
 )
 
-// The local Control Plane is the one `supertag up` runs from this user's state directory
+// The local Gateway is the one `supertag up` runs from this user's state directory
 // (SUPERTAG_STATE_DIR, else ~/.supertag). The terminal UI asks the supertag command installed
-// beside it, `supertag __local-control-plane`, rather than reading the state directory itself:
+// beside it, `supertag __local-gateway`, rather than reading the state directory itself:
 // the CLI's own code checks the files' ownership and permissions and the supervisor's lock, so
-// the format has one reader, and core/crates/cli/tests/local_control_plane.rs pins what it
+// the format has one reader, and core/crates/cli/tests/local_gateway.rs pins what it
 // prints. The token is read again at each connect because `supertag up` may replace it, and it
 // is never saved.
 
-// localName is what the Control Plane list calls the local Control Plane.
+// localName is what the Gateway list calls the local Gateway.
 const localName = "Local"
 
-// localProtocol is the format `supertag __local-control-plane` prints.
-const localProtocol = "local-control-plane.v1"
+// localProtocol is the format `supertag __local-gateway` prints.
+const localProtocol = "local-gateway.v1"
 
 const localDiscoveryTimeout = 5 * time.Second
 
-// localDiscovery finds the local Control Plane: its target when it runs, else why it is
+// localDiscovery finds the local Gateway: its target when it runs, else why it is
 // unavailable.
 type localDiscovery func() (client.Target, string)
 
@@ -42,7 +42,7 @@ type localReport struct {
 	Message  string `json:"message"`
 }
 
-// localDiscoveredMsg is a fresh look at the local Control Plane.
+// localDiscoveredMsg is a fresh look at the local Gateway.
 type localDiscoveredMsg struct {
 	target  client.Target
 	problem string
@@ -52,7 +52,7 @@ type localDiscoveredMsg struct {
 func discoverLocal() (client.Target, string) {
 	binary := supertagBinary()
 	if binary == "" {
-		return client.Target{}, "Install supertag beside supertag-tui to connect to a local Control Plane."
+		return client.Target{}, "Install supertag beside supertag-tui to connect to a local Gateway."
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), localDiscoveryTimeout)
 	defer cancel()
@@ -77,13 +77,13 @@ func supertagBinary() string {
 }
 
 func runLocalDiscovery(ctx context.Context, binary string) (client.Target, string) {
-	command := exec.CommandContext(ctx, binary, "__local-control-plane")
+	command := exec.CommandContext(ctx, binary, "__local-gateway")
 	var stdout, stderr limitedBuffer
 	stdout.limit, stderr.limit = 64<<10, 4<<10
 	command.Stdin, command.Stdout, command.Stderr = nil, &stdout, &stderr
 	if err := command.Run(); err != nil {
 		if ctx.Err() != nil {
-			return client.Target{}, "Could not check the local Control Plane: supertag did not answer in time."
+			return client.Target{}, "Could not check the local Gateway: supertag did not answer in time."
 		}
 		// The CLI's own sentence, such as a state directory with unsafe permissions. It never
 		// contains the token.
@@ -91,25 +91,25 @@ func runLocalDiscovery(ctx context.Context, binary string) (client.Target, strin
 		if reason == "" {
 			reason = "supertag could not check it"
 		}
-		return client.Target{}, "Could not check the local Control Plane: " + reason
+		return client.Target{}, "Could not check the local Gateway: " + reason
 	}
 	var report localReport
 	if json.Unmarshal(stdout.Bytes(), &report) != nil || report.Protocol != localProtocol {
-		return client.Target{}, "Could not check the local Control Plane: use the supertag release this terminal UI came with."
+		return client.Target{}, "Could not check the local Gateway: use the supertag release this terminal UI came with."
 	}
 	if !report.Running {
 		return client.Target{}, terminalText(firstLine(report.Message))
 	}
 	target := client.Target{Name: localName, URL: report.URL, Token: report.Token}
-	if validateSavedControlPlane(target) != nil {
-		return client.Target{}, "Could not check the local Control Plane: supertag reported an invalid connection."
+	if validateSavedGateway(target) != nil {
+		return client.Target{}, "Could not check the local Gateway: supertag reported an invalid connection."
 	}
 	return target, ""
 }
 
-// withLocal lists the local Control Plane first. A handed-over target for the same Control Plane
+// withLocal lists the local Gateway first. A handed-over target for the same Gateway
 // and token becomes the local entry, keeping its Workspace. current follows its target; with
-// none, the local Control Plane is current.
+// none, the local Gateway is current.
 func withLocal(targets []client.Target, current int, local client.Target) ([]client.Target, int, client.Target) {
 	if local.URL == "" {
 		return targets, current, local
@@ -117,7 +117,7 @@ func withLocal(targets []client.Target, current int, local client.Target) ([]cli
 	out := []client.Target{local}
 	next := 0
 	for i, target := range targets {
-		if controlPlaneOrigin(target.URL) == controlPlaneOrigin(local.URL) && target.Token == local.Token {
+		if gatewayOrigin(target.URL) == gatewayOrigin(local.URL) && target.Token == local.Token {
 			local.Workspace = target.Workspace
 			out[0] = local
 			continue
@@ -131,13 +131,13 @@ func withLocal(targets []client.Target, current int, local client.Target) ([]cli
 }
 
 // isLocal says whether target is the local entry, including one opened with a token that has
-// since changed or for a local Control Plane that has since stopped: its token is never shown,
+// since changed or for a local Gateway that has since stopped: its token is never shown,
 // edited or saved.
 func (a *app) isLocal(target client.Target) bool {
-	return target.Name == localName && target.URL != "" && !a.isSavedControlPlane(target)
+	return target.Name == localName && target.URL != "" && !a.isSavedGateway(target)
 }
 
-// lookForLocal checks the local Control Plane again in the background.
+// lookForLocal checks the local Gateway again in the background.
 func (a *app) lookForLocal() tea.Cmd {
 	if a.discover == nil {
 		return nil
@@ -182,7 +182,7 @@ func (a *app) setLocal(target client.Target, problem string) {
 			chosen = target
 		}
 	}
-	a.refreshControlPlanes(active)
+	a.refreshGateways(active)
 	for i, existing := range a.contexts {
 		if existing == chosen {
 			a.choice = i
@@ -191,7 +191,7 @@ func (a *app) setLocal(target client.Target, problem string) {
 	}
 }
 
-// chooseLocal connects to the local Control Plane with the token its state directory holds now.
+// chooseLocal connects to the local Gateway with the token its state directory holds now.
 func (a *app) chooseLocal() tea.Cmd {
 	if a.discover != nil {
 		a.setLocal(a.discover())
@@ -208,7 +208,7 @@ func (a *app) chooseLocal() tea.Cmd {
 	// The open connection already uses the current token.
 	if a.hasTarget && a.choice == a.current && a.inner.client != nil && a.inner.client.Target() == a.local {
 		a.choosing = false
-		a.rememberControlPlane()
+		a.rememberGateway()
 		return nil
 	}
 	if err := a.start(a.choice); err != nil {
@@ -216,8 +216,8 @@ func (a *app) chooseLocal() tea.Cmd {
 		return nil
 	}
 	a.choosing = false
-	a.rememberControlPlane()
-	a.refreshControlPlanes(a.contexts[a.current])
+	a.rememberGateway()
+	a.refreshGateways(a.contexts[a.current])
 	return a.scope(a.inner.Init())
 }
 

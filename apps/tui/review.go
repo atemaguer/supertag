@@ -98,7 +98,7 @@ func validRef(name string) bool {
 // gitDiff runs `git diff base...branch` in dir, the user's checkout. The branch is its recorded
 // head when the checkout has that commit, else the branch in the checkout or one of its remotes,
 // else the branch fetched from the checkout's remote. Branch and base names come from the
-// Control Plane, so only names git cannot read as options or revision syntax are passed, and
+// Gateway, so only names git cannot read as options or revision syntax are passed, and
 // the diff runs between the commits they resolve to.
 func gitDiff(ctx context.Context, git gitRunner, dir string, req diffRequest) diffResult {
 	run := func(timeout time.Duration, args ...string) (string, error) {

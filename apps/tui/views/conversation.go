@@ -1,5 +1,5 @@
 // Presentation types of the terminal UI. They began as the generated types of the removed
-// supertag.operator.v1 protos; the Control Plane's runtime.v2 replies are projected into them.
+// supertag.operator.v1 protos; the Gateway's runtime.v2 replies are projected into them.
 
 package views
 
@@ -212,7 +212,7 @@ type Conversation struct {
 	Working bool
 	// Set when the latest message is a work Session's report turn, which has no caller message.
 	LatestWorkSessionReportId string
-	// When the latest message was sent or answered; zero when the Control Plane did not say.
+	// When the latest message was sent or answered; zero when the Gateway did not say.
 	LastActivityAtMs int64
 	// The latest message's order.
 	LatestOrder uint64
@@ -926,7 +926,7 @@ func (x *Finish) GetMessage() *Message {
 	return nil
 }
 
-// The error that ended the turn: its Task failed, or the Control Plane could
+// The error that ended the turn: its Task failed, or the Gateway could
 // not tell whether a delivery into a running turn reached it.
 type TurnError struct {
 

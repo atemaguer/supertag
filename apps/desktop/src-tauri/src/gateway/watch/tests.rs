@@ -16,13 +16,13 @@ use tonic::{
 };
 
 use super::*;
-use crate::control_plane::bearer;
+use crate::gateway::bearer;
 
 const WAIT: Duration = Duration::from_secs(4);
 
 #[tokio::test]
 async fn watch_registration_fences_replacement_stop_and_disconnect() {
-    let state = ControlPlaneState::default();
+    let state = GatewayState::default();
     let session = Arc::new(Session {
         channel: supertag_protocol::negotiation::bind_current(
             Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),

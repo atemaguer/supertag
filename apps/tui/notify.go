@@ -51,7 +51,7 @@ type alert struct {
 // alertsFor says what changed between two reads of the conversation list that deserves a
 // notification: a Tag's new reply, or its new question, in a conversation not in front. The
 // first read (prior nil) only sets what is known. Your own messages, a turn still running, and
-// quiet turns never notify; the Control Plane leaves quiet turns out of the list.
+// quiet turns never notify; the Gateway leaves quiet turns out of the list.
 func alertsFor(prior map[string]*views.Conversation, next []*views.Conversation, shown string, focused bool, level notifyLevel) []alert {
 	if prior == nil || level == notifyOff {
 		return nil

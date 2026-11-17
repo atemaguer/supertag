@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 use supertag_protocol::v2;
 use tonic::Code;
 
-use super::{ControlPlaneState, MAX_PAGES, Result, Session, Tag, harness_name, rpc_error};
+use super::{GatewayState, MAX_PAGES, Result, Session, Tag, harness_name, rpc_error};
 
 /// The runtime actions `supertag init` gives its lead Tag through its Permission Set: edit files
 /// and run commands in its Workspace, and schedule its own follow-ups.
 const NEW_TAG_ACTIONS: [&str; 3] = ["commands:execute", "files:write", "schedule:create"];
 
-/// What a new Tag can run on: the harnesses and Workspaces the Control Plane's Worker Hosts offer.
+/// What a new Tag can run on: the harnesses and Workspaces the Gateway's Worker Hosts offer.
 #[derive(Serialize, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TagOptions {
@@ -28,7 +28,7 @@ pub struct NewTag {
     pub name: Option<String>,
     pub harness: String,
     pub workspace_id: Option<String>,
-    /// How many Work Sessions it may have open at once; the Control Plane's default when unset.
+    /// How many Work Sessions it may have open at once; the Gateway's default when unset.
     #[serde(default)]
     pub max_work_sessions: Option<u32>,
 }
@@ -108,8 +108,8 @@ impl Session {
     }
 }
 
-impl ControlPlaneState {
-    /// The harnesses and Workspaces of the Control Plane's current Worker Hosts. Only an operator
+impl GatewayState {
+    /// The harnesses and Workspaces of the Gateway's current Worker Hosts. Only an operator
     /// may list hosts, as only an operator may create a Tag.
     pub async fn tag_options(&self, connection_id: &str) -> Result<TagOptions> {
         let session = self.session(connection_id).await?;

@@ -1,6 +1,6 @@
 import { Check, Copy, ListTree } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ControlPlane, Message as TagMessage, TaskEvent } from "../control-plane";
+import type { Gateway, Message as TagMessage, TaskEvent } from "../gateway";
 import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import { ExternalLink } from "./external-link";
@@ -42,7 +42,7 @@ export function turnNotice(
  */
 export function LiveConversationEntry(
   props: Omit<Parameters<typeof ConversationEntry>[0], "events"> & {
-    readEvents: ControlPlane["events"];
+    readEvents: Gateway["events"];
   },
 ) {
   const { message, wait, answers, ...entry } = props;
@@ -95,7 +95,7 @@ export function ConversationEntry({
   divider?: number;
   activeTask?: string;
   onActivity(taskId: string, trigger: HTMLButtonElement): void;
-  onSaveArtifact: ControlPlane["saveArtifact"];
+  onSaveArtifact: Gateway["saveArtifact"];
 }) {
   const prompt = message.task.prompt;
   const own = fromOperator(message);

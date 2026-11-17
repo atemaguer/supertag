@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import type { ControlPlane, Tag } from "../control-plane";
+import type { Gateway, Tag } from "../gateway";
 import { Workspace } from "./workspace";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -19,7 +19,7 @@ const tags: Tag[] = ["lead", "moss"].map((tagId) => ({
   revision: 1,
   harnessKind: "codex",
 }));
-const controlPlane: ControlPlane = {
+const gateway: Gateway = {
   tags: async () => tags,
   conversations: async () => [],
   messages: async () => ({ conversationId: "", messages: [] }),
@@ -53,7 +53,7 @@ async function render() {
   await act(async () =>
     root.render(
       createElement(Workspace, {
-        controlPlane,
+        gateway,
         initialTags: tags,
         selector: () => null,
         draftScope: "https://cp.example",

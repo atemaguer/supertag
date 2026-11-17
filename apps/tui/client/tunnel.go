@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-// A `wss://` or `ws://` Control Plane URL carries the same gRPC connection inside a WebSocket, for
+// A `wss://` or `ws://` Gateway URL carries the same gRPC connection inside a WebSocket, for
 // platforms whose proxy forwards only HTTP/1.1. The tunnel is a byte pipe: SuperTag's own TLS,
 // with any client certificate, runs end to end inside it, so a proxy that terminates the outer
 // `wss://` TLS sees only ciphertext. This matches the Rust transport (core/crates/transport).
@@ -30,11 +30,11 @@ import (
 const tunnelMaxMessage = 256 * 1024
 
 // tunnelDialTimeout bounds opening a tunnel: the TCP connection, the outer TLS, the upgrade and,
-// for `wss://`, the Control Plane's TLS inside it. A platform proxy may hold the upgrade while it
+// for `wss://`, the Gateway's TLS inside it. A platform proxy may hold the upgrade while it
 // starts a service that scaled to zero.
 var tunnelDialTimeout = 30 * time.Second
 
-// tunnelPing is how often the client pings the Control Plane. A peer that sends nothing, not even a
+// tunnelPing is how often the client pings the Gateway. A peer that sends nothing, not even a
 // pong, for three intervals is gone.
 var tunnelPing = 20 * time.Second
 
@@ -70,7 +70,7 @@ func outerTLS(serverCA []byte) (*tls.Config, error) {
 		roots = x509.NewCertPool()
 	}
 	if len(serverCA) > 0 && !roots.AppendCertsFromPEM(serverCA) {
-		return nil, errors.New("Control Plane certificate authority contains no PEM certificates")
+		return nil, errors.New("Gateway certificate authority contains no PEM certificates")
 	}
 	return &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, NextProtos: []string{"http/1.1"}}, nil
 }
@@ -80,7 +80,7 @@ func outerTLS(serverCA []byte) (*tls.Config, error) {
 type tunnelDialer struct {
 	url   *url.URL
 	outer *tls.Config // nil for ws://
-	inner *tls.Config // the Control Plane's TLS inside a wss:// tunnel
+	inner *tls.Config // the Gateway's TLS inside a wss:// tunnel
 }
 
 // DialContext opens a ws:// tunnel for cleartext HTTP/2.
@@ -90,7 +90,7 @@ func (d tunnelDialer) DialContext(ctx context.Context, _, _ string) (net.Conn, e
 	return d.dial(ctx)
 }
 
-// DialTLSContext opens a wss:// tunnel and completes the Control Plane's TLS inside it, both within
+// DialTLSContext opens a wss:// tunnel and completes the Gateway's TLS inside it, both within
 // tunnelDialTimeout.
 func (d tunnelDialer) DialTLSContext(ctx context.Context, _, _ string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, tunnelDialTimeout)

@@ -23,7 +23,7 @@ const (
 	commandOpenTag commandID = iota
 	commandNewTag
 	commandKeyboardShortcuts
-	commandSwitchControlPlane
+	commandSwitchGateway
 	commandCreateObjective
 	commandTaskFiles
 	commandOpenInbox
@@ -92,7 +92,7 @@ func (a *app) paletteTags() []paletteCommand {
 	return out
 }
 
-// commands are the Actions section: New Tag, the keyboard shortcuts, the Control Planes, then
+// commands are the Actions section: New Tag, the keyboard shortcuts, the Gateways, then
 // those about a Tag only while one is selected, Task files, and the inbox.
 func (a *app) commands() []paletteCommand {
 	newTag := "a name, a harness and a Workspace"
@@ -103,11 +103,11 @@ func (a *app) commands() []paletteCommand {
 		{id: commandNewTag, title: "New Tag", about: newTag, key: newTagKey},
 		{id: commandKeyboardShortcuts, title: "Keyboard shortcuts", about: "every key the app answers to"},
 	}
-	about := "Add a Control Plane"
+	about := "Add a Gateway"
 	if a.hasTarget {
 		about = contextLabel(a.contexts[a.current])
 	}
-	out = append(out, paletteCommand{id: commandSwitchControlPlane, title: "Control Planes · add or switch", about: about, key: switchKey})
+	out = append(out, paletteCommand{id: commandSwitchGateway, title: "Gateways · add or switch", about: about, key: switchKey})
 
 	if tag := terminalText(a.inner.selectedTag()); tag != "" {
 		out = append(out, paletteCommand{id: commandCreateObjective, title: "/goal · Create Objective", about: "owned by " + tag})
@@ -245,7 +245,7 @@ func (a *app) run(c paletteCommand) tea.Cmd {
 	switch c.id {
 	case commandOpenTag:
 		cmd = a.inner.selectNthTag(c.tag)
-	case commandSwitchControlPlane:
+	case commandSwitchGateway:
 		a.choosing, a.choice, a.choiceErr = true, a.current, ""
 		return nil
 	case commandCreateObjective:
@@ -283,7 +283,7 @@ func (m *model) openInbox() tea.Cmd {
 // keyboardShortcuts are every key the terminal UI answers to, as Keyboard shortcuts lists them.
 var keyboardShortcuts = [][2]string{
 	{paletteKey, "Search Tags, conversations, settings"},
-	{switchKey, "Switch Control Planes"},
+	{switchKey, "Switch Gateways"},
 	{"alt+1…alt+9", "Open the nth Tag in the rail"},
 	{"alt+↑ alt+↓", "Open the previous or next Tag"},
 	{"ctrl+b", "Fold the rail, or expand it"},

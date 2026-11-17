@@ -32,7 +32,7 @@ func TestRuntimeV2ObjectiveFormKeepsTeamSelection(t *testing.T) {
 	}
 }
 
-// `/goal <outcome>` is a conversation message the Control Plane turns into an Objective; `/goal`
+// `/goal <outcome>` is a conversation message the Gateway turns into an Objective; `/goal`
 // alone opens the form, and the palette's inline /goal sends the same message.
 func TestGoalIsSentToTheConversation(t *testing.T) {
 	m, err := dial("test")(t.Context(), client.Target{URL: "http://127.0.0.1:1", Token: "test"})

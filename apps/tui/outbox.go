@@ -9,8 +9,8 @@ import (
 	"github.com/atemaguer/supertag/apps/tui/client"
 )
 
-// outgoing is a message sent here that the Control Plane has not accepted yet. It shows in its
-// conversation at once and stays, also on disk, until the Control Plane accepts it. Every attempt,
+// outgoing is a message sent here that the Gateway has not accepted yet. It shows in its
+// conversation at once and stays, also on disk, until the Gateway accepts it. Every attempt,
 // including one after a restart, sends it with its operation ID, so the Tag gets it at most once.
 type outgoing struct {
 	Tag         string `json:"tag"`

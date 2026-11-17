@@ -84,7 +84,7 @@ func (m model) teamCmd(id string) tea.Cmd {
 
 // teamChanged rereads what a Team change touches: the Teams list always, since the change may
 // add, rename or remove a row, and the Team's details only when the Team pane shows that Team.
-// The Control Plane sends the change only to a caller that may read
+// The Gateway sends the change only to a caller that may read
 // Teams, and the rereads go through the same reads, so nothing outside the caller's view is read.
 func (m model) teamChanged(change *views.WatchChange) tea.Cmd {
 	id := change.GetTeamId()

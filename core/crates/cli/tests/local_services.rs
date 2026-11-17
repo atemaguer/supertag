@@ -417,7 +417,7 @@ async fn operator_commands_default_to_the_local_control_plane(database: String) 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains(&format!(
-            "no local Control Plane is running from {}",
+            "no local Gateway is running from {}",
             elsewhere.join(".supertag").display()
         )) && stderr.contains("supertag up"),
         "{stderr}"
@@ -428,7 +428,7 @@ async fn operator_commands_default_to_the_local_control_plane(database: String) 
     )?;
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains(&format!(
-        "no local Control Plane is running from {}",
+        "no local Gateway is running from {}",
         elsewhere.display()
     )));
     // A selected Control Plane is never replaced by the local one.

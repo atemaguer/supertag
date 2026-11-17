@@ -39,7 +39,7 @@ func (c *Client) Notes(ctx context.Context, tag string) ([]Note, error) {
 	var out []Note
 	for _, memory := range res.Msg.GetMemories() {
 		if memory.GetTagId() != tag {
-			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Control Plane returned another Tag's note."}
+			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned another Tag's note."}
 		}
 		out = append(out, noteView(memory))
 	}

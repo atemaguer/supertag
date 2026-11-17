@@ -201,7 +201,7 @@ func (a *app) renderNotes() string {
 	}
 	switch {
 	case !d.read:
-		lines = append(lines, "Reading from the Control Plane…")
+		lines = append(lines, "Reading from the Gateway…")
 	case len(d.notes) == 0 && d.note == "":
 		lines = append(lines, terminalText(d.label)+" keeps no notes you can see yet. Tell it what to remember.")
 	}

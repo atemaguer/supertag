@@ -173,7 +173,7 @@ func (a *app) renderNetwork() string {
 	lines = append(lines, body[d.offset:min(d.offset+shown, len(body))]...)
 	switch {
 	case !d.read:
-		lines = append(lines, "Reading from the Control Plane…")
+		lines = append(lines, "Reading from the Gateway…")
 	case len(d.logs) == 0 && d.note == "":
 		lines = append(lines, "No network log yet. "+terminalText(d.label)+"'s Tasks get one when its Permission Sets limit web:fetch to hosts.")
 	}

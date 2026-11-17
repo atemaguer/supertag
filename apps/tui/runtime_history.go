@@ -69,7 +69,7 @@ func (h *runtimeHistory) latestOrder() uint64 {
 	return latest
 }
 
-// unsettled are the turns held that the Control Plane may still change, oldest first.
+// unsettled are the turns held that the Gateway may still change, oldest first.
 func (h *runtimeHistory) unsettled() []string {
 	var ids []string
 	for _, id := range h.order {
@@ -227,7 +227,7 @@ func (h *runtimeHistory) continues(msg historyMsg) bool {
 	return oldest <= h.latestOrder()+1
 }
 
-// runtimeSent takes the Control Plane's receipt for a queued message: the message leaves the
+// runtimeSent takes the Gateway's receipt for a queued message: the message leaves the
 // outbox and shows as its turn. A failed attempt stays in the outbox as not delivered.
 func (m *model) runtimeSent(msg sentMsg) tea.Cmd {
 	c := m.conversation(msg.tag)
@@ -433,7 +433,7 @@ func (m *model) runtimeFollowDone(msg followDoneMsg) tea.Cmd {
 }
 
 // markRead records that the operator read the shown conversation with tag up to its latest
-// finished turn, when the Control Plane counts a reply after what was read before.
+// finished turn, when the Gateway counts a reply after what was read before.
 func (m *model) markRead(tag string) tea.Cmd {
 	summary := m.summaries[tag]
 	if !m.showsConversation(tag) || summary.GetUnreadCount() == 0 {

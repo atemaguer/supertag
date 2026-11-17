@@ -1,6 +1,6 @@
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { useMemo, useState } from "react";
-import type { Tag } from "../control-plane";
+import type { Tag } from "../gateway";
 import { onMac, type TagSummary, tagShortcut } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import {

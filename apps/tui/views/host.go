@@ -1,5 +1,5 @@
 // Presentation types of the terminal UI. They began as the generated types of the removed
-// supertag.operator.v1 protos; the Control Plane's runtime.v2 replies are projected into them.
+// supertag.operator.v1 protos; the Gateway's runtime.v2 replies are projected into them.
 
 package views
 
@@ -99,7 +99,7 @@ func (x WorkerHostConnection) String() string {
 	return strconv.Itoa(int(x))
 }
 
-// One Worker Host, as the Control Plane last recorded it.
+// One Worker Host, as the Gateway last recorded it.
 type WorkerHost struct {
 
 	// `id` and `name` are both the host's ID. `resource_version` changes when
@@ -116,7 +116,7 @@ type WorkerHost struct {
 	// disconnects with no open Task Attempts.
 
 	// Where the host's Task Attempts kept their files, from the placements the
-	// Control Plane recorded. Set only by `ListWorkerHosts` and
+	// Gateway recorded. Set only by `ListWorkerHosts` and
 	// `GetWorkerHost`.
 
 	// The name of the Auth Key the host redeemed to join. Empty when an

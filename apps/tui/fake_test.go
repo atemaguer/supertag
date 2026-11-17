@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -19,10 +21,10 @@ import (
 	rpc "github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
 
-// fakeControlPlane serves the Control Plane's runtime.v2 operator services from the presentation
+// fakeGateway serves the Gateway's runtime.v2 operator services from the presentation
 // types a test declares: Tags, Worker Hosts, Teams and Workstream posts. Every other list it
 // answers empty, and its event stream only stays open.
-type fakeControlPlane struct {
+type fakeGateway struct {
 	rpc.UnimplementedOperatorHandler
 	rpc.UnimplementedConversationsHandler
 	rpc.UnimplementedObjectivesHandler
@@ -82,7 +84,7 @@ type fakeControlPlane struct {
 // fakeNetworkLogs serves the fake's network logs.
 type fakeNetworkLogs struct {
 	rpc.UnimplementedNetworkLogsHandler
-	f *fakeControlPlane
+	f *fakeGateway
 }
 
 func (n fakeNetworkLogs) List(_ context.Context, req *connect.Request[v2.ListNetworkLogsRequest]) (*connect.Response[v2.ListNetworkLogsResponse], error) {
@@ -98,7 +100,7 @@ func (n fakeNetworkLogs) List(_ context.Context, req *connect.Request[v2.ListNet
 // fakeMemories serves the fake's notes.
 type fakeMemories struct {
 	rpc.UnimplementedMemoriesHandler
-	f *fakeControlPlane
+	f *fakeGateway
 }
 
 func (m fakeMemories) List(_ context.Context, req *connect.Request[v2.ListMemoriesRequest]) (*connect.Response[v2.ListMemoriesResponse], error) {
@@ -128,13 +130,24 @@ func (m fakeMemories) Delete(_ context.Context, req *connect.Request[v2.GetMemor
 	return nil, connect.NewError(connect.CodeNotFound, errors.New("Memory was not found"))
 }
 
-func (f *fakeControlPlane) start(t testing.TB) *httptest.Server {
+func (f *fakeGateway) start(t testing.TB) *httptest.Server {
 	t.Helper()
 	return f.startWith(t, nil)
 }
 
 // startWith serves the fake behind wrap, such as one that adds a round trip to every call.
-func (f *fakeControlPlane) startWith(t testing.TB, wrap func(http.Handler) http.Handler) *httptest.Server {
+func (f *fakeGateway) startWith(t testing.TB, wrap func(http.Handler) http.Handler) *httptest.Server {
+	t.Helper()
+	return f.serve(t, wrap, "")
+}
+
+// startAt serves the fake again at address, as a Gateway restarted in place.
+func (f *fakeGateway) startAt(t testing.TB, address string) *httptest.Server {
+	t.Helper()
+	return f.serve(t, nil, address)
+}
+
+func (f *fakeGateway) serve(t testing.TB, wrap func(http.Handler) http.Handler, address string) *httptest.Server {
 	t.Helper()
 	if f.token == "" {
 		f.token = "secret"
@@ -169,6 +182,22 @@ func (f *fakeControlPlane) startWith(t testing.TB, wrap func(http.Handler) http.
 		handler = wrap(handler)
 	}
 	server := httptest.NewUnstartedServer(handler)
+	if address != "" {
+		// A restart: serve again where the previous server listened.
+		var listener net.Listener
+		var err error
+		for range 50 {
+			if listener, err = net.Listen("tcp", address); err == nil {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if err != nil {
+			t.Fatalf("listen again on %s: %v", address, err)
+		}
+		server.Listener.Close()
+		server.Listener = listener
+	}
 	server.EnableHTTP2 = true
 	server.Config.Protocols = new(http.Protocols)
 	server.Config.Protocols.SetUnencryptedHTTP2(true)
@@ -177,20 +206,20 @@ func (f *fakeControlPlane) startWith(t testing.TB, wrap func(http.Handler) http.
 	return server
 }
 
-func (f *fakeControlPlane) WhoAmI(context.Context, *connect.Request[v2.WhoAmIRequest]) (*connect.Response[v2.WhoAmIResponse], error) {
+func (f *fakeGateway) WhoAmI(context.Context, *connect.Request[v2.WhoAmIRequest]) (*connect.Response[v2.WhoAmIResponse], error) {
 	if f.principal == "" {
 		return nil, connect.NewError(connect.CodeUnimplemented, nil)
 	}
 	return connect.NewResponse(&v2.WhoAmIResponse{Principal: f.principal}), nil
 }
 
-func (f *fakeControlPlane) SendMessage(_ context.Context, req *connect.Request[v2.SendMessageRequest]) (*connect.Response[v2.ConversationMessage], error) {
+func (f *fakeGateway) SendMessage(_ context.Context, req *connect.Request[v2.SendMessageRequest]) (*connect.Response[v2.ConversationMessage], error) {
 	f.mu.Lock()
 	f.sends = append(f.sends, req.Msg)
 	send := f.send
 	f.mu.Unlock()
 	if send == nil {
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("the Control Plane is restarting"))
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("the Gateway is restarting"))
 	}
 	message, err := send(req.Msg)
 	if err != nil {
@@ -199,27 +228,27 @@ func (f *fakeControlPlane) SendMessage(_ context.Context, req *connect.Request[v
 	return connect.NewResponse(message), nil
 }
 
-func (f *fakeControlPlane) GetMessage(_ context.Context, req *connect.Request[v2.GetMessageRequest]) (*connect.Response[v2.ConversationMessage], error) {
+func (f *fakeGateway) GetMessage(_ context.Context, req *connect.Request[v2.GetMessageRequest]) (*connect.Response[v2.ConversationMessage], error) {
 	if f.message == nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no message %s", req.Msg.GetTaskId()))
 	}
 	return connect.NewResponse(f.message(req.Msg.GetTagId(), req.Msg.GetTaskId())), nil
 }
 
-func (f *fakeControlPlane) ListEvents(_ context.Context, req *connect.Request[v2.ListEventsRequest]) (*connect.Response[v2.ListEventsResponse], error) {
+func (f *fakeGateway) ListEvents(_ context.Context, req *connect.Request[v2.ListEventsRequest]) (*connect.Response[v2.ListEventsResponse], error) {
 	if f.events == nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no Task %s", req.Msg.GetTaskId()))
 	}
 	return connect.NewResponse(&v2.ListEventsResponse{Events: f.events(req.Msg.GetTaskId(), req.Msg.GetAfterSequence())}), nil
 }
 
-func (f *fakeControlPlane) sent() []*v2.SendMessageRequest {
+func (f *fakeGateway) sent() []*v2.SendMessageRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.sends)
 }
 
-func (f *fakeControlPlane) PutTag(_ context.Context, req *connect.Request[v2.PutTagRequest]) (*connect.Response[v2.Tag], error) {
+func (f *fakeGateway) PutTag(_ context.Context, req *connect.Request[v2.PutTagRequest]) (*connect.Response[v2.Tag], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.putTags = append(f.putTags, req.Msg)
@@ -229,13 +258,13 @@ func (f *fakeControlPlane) PutTag(_ context.Context, req *connect.Request[v2.Put
 	return connect.NewResponse(&v2.Tag{TagId: req.Msg.GetTagId(), Name: req.Msg.GetName(), HarnessKind: req.Msg.GetHarnessKind(), Revision: 1}), nil
 }
 
-func (f *fakeControlPlane) reads() int {
+func (f *fakeGateway) reads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.tagReads
 }
 
-func (f *fakeControlPlane) ListTags(context.Context, *connect.Request[v2.ListTagsRequest]) (*connect.Response[v2.ListTagsResponse], error) {
+func (f *fakeGateway) ListTags(context.Context, *connect.Request[v2.ListTagsRequest]) (*connect.Response[v2.ListTagsResponse], error) {
 	f.mu.Lock()
 	f.tagReads++
 	f.mu.Unlock()
@@ -252,7 +281,7 @@ func (f *fakeControlPlane) ListTags(context.Context, *connect.Request[v2.ListTag
 	return connect.NewResponse(res), nil
 }
 
-func (f *fakeControlPlane) ListHosts(context.Context, *connect.Request[v2.ListHostsRequest]) (*connect.Response[v2.ListHostsResponse], error) {
+func (f *fakeGateway) ListHosts(context.Context, *connect.Request[v2.ListHostsRequest]) (*connect.Response[v2.ListHostsResponse], error) {
 	f.mu.Lock()
 	f.hostReads++
 	f.mu.Unlock()
@@ -281,7 +310,7 @@ func (f *fakeControlPlane) ListHosts(context.Context, *connect.Request[v2.ListHo
 	return connect.NewResponse(res), nil
 }
 
-func (f *fakeControlPlane) ListConversations(context.Context, *connect.Request[v2.ListConversationsRequest]) (*connect.Response[v2.ListConversationsResponse], error) {
+func (f *fakeGateway) ListConversations(context.Context, *connect.Request[v2.ListConversationsRequest]) (*connect.Response[v2.ListConversationsResponse], error) {
 	res := &v2.ListConversationsResponse{}
 	if f.conversations != nil {
 		res.Conversations = f.conversations()
@@ -289,7 +318,7 @@ func (f *fakeControlPlane) ListConversations(context.Context, *connect.Request[v
 	return connect.NewResponse(res), nil
 }
 
-func (f *fakeControlPlane) ListMessages(_ context.Context, req *connect.Request[v2.ListMessagesRequest]) (*connect.Response[v2.ListMessagesResponse], error) {
+func (f *fakeGateway) ListMessages(_ context.Context, req *connect.Request[v2.ListMessagesRequest]) (*connect.Response[v2.ListMessagesResponse], error) {
 	if f.messages != nil {
 		if res := f.messages(req.Msg.GetTagId()); res != nil {
 			return connect.NewResponse(res), nil
@@ -298,37 +327,37 @@ func (f *fakeControlPlane) ListMessages(_ context.Context, req *connect.Request[
 	return connect.NewResponse(&v2.ListMessagesResponse{}), nil
 }
 
-func (f *fakeControlPlane) MarkConversationRead(_ context.Context, req *connect.Request[v2.MarkConversationReadRequest]) (*connect.Response[v2.Conversation], error) {
+func (f *fakeGateway) MarkConversationRead(_ context.Context, req *connect.Request[v2.MarkConversationReadRequest]) (*connect.Response[v2.Conversation], error) {
 	f.mu.Lock()
 	f.marks = append(f.marks, req.Msg)
 	f.mu.Unlock()
 	return connect.NewResponse(&v2.Conversation{TagId: req.Msg.GetTagId(), ReadOrder: req.Msg.GetOrder()}), nil
 }
 
-func (f *fakeControlPlane) readMarks() []*v2.MarkConversationReadRequest {
+func (f *fakeGateway) readMarks() []*v2.MarkConversationReadRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.marks)
 }
 
-func (f *fakeControlPlane) ListObjectives(context.Context, *connect.Request[v2.ListObjectivesRequest]) (*connect.Response[v2.ListObjectivesResponse], error) {
+func (f *fakeGateway) ListObjectives(context.Context, *connect.Request[v2.ListObjectivesRequest]) (*connect.Response[v2.ListObjectivesResponse], error) {
 	return connect.NewResponse(&v2.ListObjectivesResponse{}), nil
 }
 
-func (f *fakeControlPlane) ListItems(context.Context, *connect.Request[v2.ListInboxItemsRequest]) (*connect.Response[v2.ListInboxItemsResponse], error) {
+func (f *fakeGateway) ListItems(context.Context, *connect.Request[v2.ListInboxItemsRequest]) (*connect.Response[v2.ListInboxItemsResponse], error) {
 	return connect.NewResponse(&v2.ListInboxItemsResponse{}), nil
 }
 
-func (f *fakeControlPlane) List(context.Context, *connect.Request[v2.ListWorkSessionsRequest]) (*connect.Response[v2.ListWorkSessionsResponse], error) {
+func (f *fakeGateway) List(context.Context, *connect.Request[v2.ListWorkSessionsRequest]) (*connect.Response[v2.ListWorkSessionsResponse], error) {
 	return connect.NewResponse(&v2.ListWorkSessionsResponse{}), nil
 }
 
-func (f *fakeControlPlane) Watch(ctx context.Context, _ *connect.Request[v2.WatchRequest], _ *connect.ServerStream[v2.WatchEvent]) error {
+func (f *fakeGateway) Watch(ctx context.Context, _ *connect.Request[v2.WatchRequest], _ *connect.ServerStream[v2.WatchEvent]) error {
 	<-ctx.Done()
 	return nil
 }
 
-func (f *fakeControlPlane) team(name string) *views.Team {
+func (f *fakeGateway) team(name string) *views.Team {
 	if f.teamList == nil {
 		return nil
 	}
@@ -353,7 +382,7 @@ func runtimeTeamOf(team *views.Team) *v2.Team {
 	return out
 }
 
-func (f *fakeControlPlane) ListTeams(context.Context, *connect.Request[v2.ListTeamsRequest]) (*connect.Response[v2.ListTeamsResponse], error) {
+func (f *fakeGateway) ListTeams(context.Context, *connect.Request[v2.ListTeamsRequest]) (*connect.Response[v2.ListTeamsResponse], error) {
 	f.mu.Lock()
 	f.teamListReads++
 	f.mu.Unlock()
@@ -366,7 +395,7 @@ func (f *fakeControlPlane) ListTeams(context.Context, *connect.Request[v2.ListTe
 	return connect.NewResponse(res), nil
 }
 
-func (f *fakeControlPlane) GetTeam(_ context.Context, req *connect.Request[v2.GetTeamRequest]) (*connect.Response[v2.Team], error) {
+func (f *fakeGateway) GetTeam(_ context.Context, req *connect.Request[v2.GetTeamRequest]) (*connect.Response[v2.Team], error) {
 	f.mu.Lock()
 	f.teamGets[req.Msg.GetTeam()]++
 	f.mu.Unlock()
@@ -377,7 +406,7 @@ func (f *fakeControlPlane) GetTeam(_ context.Context, req *connect.Request[v2.Ge
 	return connect.NewResponse(runtimeTeamOf(team)), nil
 }
 
-func (f *fakeControlPlane) ListWorkstreamPosts(_ context.Context, req *connect.Request[v2.ListWorkstreamPostsRequest]) (*connect.Response[v2.ListWorkstreamPostsResponse], error) {
+func (f *fakeGateway) ListWorkstreamPosts(_ context.Context, req *connect.Request[v2.ListWorkstreamPostsRequest]) (*connect.Response[v2.ListWorkstreamPostsResponse], error) {
 	f.mu.Lock()
 	f.postReads[req.Msg.GetTeam()]++
 	f.mu.Unlock()
@@ -394,7 +423,7 @@ func (f *fakeControlPlane) ListWorkstreamPosts(_ context.Context, req *connect.R
 	return connect.NewResponse(res), nil
 }
 
-func (f *fakeControlPlane) count(counts map[string]int, key string) int {
+func (f *fakeGateway) count(counts map[string]int, key string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return counts[key]
@@ -525,7 +554,7 @@ func delivered(id, task, branch, base, head, ref, pr string) *views.Session {
 		Delivery: &views.SessionDelivery{TaskId: task, Delivery: delivery, Checkout: &views.TaskFiles{WorkerHostId: "laptop"}}}
 }
 
-func (f *fakeControlPlane) FollowConversation(ctx context.Context, req *connect.Request[v2.FollowConversationRequest], stream *connect.ServerStream[v2.FollowConversationResponse]) error {
+func (f *fakeGateway) FollowConversation(ctx context.Context, req *connect.Request[v2.FollowConversationRequest], stream *connect.ServerStream[v2.FollowConversationResponse]) error {
 	f.mu.Lock()
 	follow := f.follow
 	f.mu.Unlock()

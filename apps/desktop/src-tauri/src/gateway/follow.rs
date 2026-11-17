@@ -11,7 +11,7 @@ use tauri::ipc::Channel;
 use tokio::{sync::oneshot, time::timeout};
 use tonic::{Code, Status};
 
-use super::{ControlPlaneState, Message, Messages, ReadMessages, Result, Session};
+use super::{GatewayState, Message, Messages, ReadMessages, Result, Session};
 
 const FIRST_RETRY: Duration = Duration::from_secs(1);
 const MAX_RETRY: Duration = Duration::from_secs(30);
@@ -105,7 +105,7 @@ impl Cursor {
     }
 }
 
-impl ControlPlaneState {
+impl GatewayState {
     /// Follows the caller's conversation with `read.tag_id` from the copy `read` describes.
     pub async fn start_follow(
         &self,
@@ -154,7 +154,7 @@ async fn run(
             result = read(&session, &mut cursor, &updates, &mut live) => result,
         };
         let status = match outcome {
-            Ok(()) => Status::unavailable("Control Plane follow closed"),
+            Ok(()) => Status::unavailable("Gateway follow closed"),
             Err(Ended::Stream(status)) => status,
             Err(Ended::Channel) => return,
         };
@@ -212,9 +212,9 @@ async fn read(
         .into_inner();
     let send = |update| updates.send(update).map_err(|_| Ended::Channel);
     loop {
-        let next = timeout(IDLE, stream.message()).await.map_err(|_| {
-            Status::unavailable("Control Plane follow stopped sending heartbeats")
-        })??;
+        let next = timeout(IDLE, stream.message())
+            .await
+            .map_err(|_| Status::unavailable("Gateway follow stopped sending heartbeats"))??;
         let Some(response) = next else {
             return Ok(());
         };
@@ -232,7 +232,7 @@ async fn read(
                         .is_none_or(|task| task.tag_id != cursor.tag_id)
                 }) {
                     return Err(Status::data_loss(
-                        "Control Plane returned a message of another conversation",
+                        "Gateway returned a message of another conversation",
                     )
                     .into());
                 }

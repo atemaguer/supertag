@@ -1,5 +1,5 @@
 // Presentation types of the terminal UI. They began as the generated types of the removed
-// supertag.operator.v1 protos; the Control Plane's runtime.v2 replies are projected into them.
+// supertag.operator.v1 protos; the Gateway's runtime.v2 replies are projected into them.
 
 package views
 
@@ -213,7 +213,7 @@ const (
 	TaskExplanationKind_TASK_EXPLANATION_KIND_UNSPECIFIED TaskExplanationKind = 0
 	// The Objective is paused; the Task starts once it resumes.
 	TaskExplanationKind_TASK_EXPLANATION_KIND_OBJECTIVE_PAUSED TaskExplanationKind = 1
-	// The Control Plane does not execute Objectives now.
+	// The Gateway does not execute Objectives now.
 	TaskExplanationKind_TASK_EXPLANATION_KIND_CONTROLLER TaskExplanationKind = 2
 	// No connected Worker can meet the Task's requirements.
 	TaskExplanationKind_TASK_EXPLANATION_KIND_WORKER_REQUIREMENTS TaskExplanationKind = 3
@@ -613,11 +613,11 @@ func (x *LimitSummary) GetText() string {
 // The operator's view of one Objective. See `DescribeObjective`.
 type ObjectiveOverview struct {
 
-	// When the Control Plane read the records.
+	// When the Gateway read the records.
 
 	// The Objective.
 	Objective *Objective
-	// Whether the Control Plane can execute Objectives now: `ready`,
+	// Whether the Gateway can execute Objectives now: `ready`,
 	// `awaiting-coordination` until it knows the address Tasks coordinate
 	// through, or `awaiting-worklet` until its Worklet service is attached.
 
@@ -854,7 +854,7 @@ type ObjectiveAttention struct {
 	Message string
 	// What to do about it, usually naming a `supertag` command.
 	NextAction string
-	// When it was observed. Unset when the Control Plane recorded no time.
+	// When it was observed. Unset when the Gateway recorded no time.
 
 }
 

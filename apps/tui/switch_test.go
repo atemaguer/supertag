@@ -70,7 +70,7 @@ func host(id string, phase views.WorkerHostPhase) *views.WorkerHost {
 }
 
 func TestTheStatusBarSummarizesTheWorkerHosts(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags("alpha"), hostList: func() []*views.WorkerHost {
+	fake := &fakeGateway{tags: tags("alpha"), hostList: func() []*views.WorkerHost {
 		return []*views.WorkerHost{
 			host("laptop", views.WorkerHostPhase_WORKER_HOST_PHASE_READY),
 			host("ci", views.WorkerHostPhase_WORKER_HOST_PHASE_READY),
@@ -100,12 +100,12 @@ func TestTheStatusBarSummarizesTheWorkerHosts(t *testing.T) {
 		t.Fatalf("a refused read must hide the summary:\n%s", screen(m))
 	}
 	if !m.connected {
-		t.Fatalf("a refused Worker Host read must not mark the Control Plane unreachable: %q", m.status)
+		t.Fatalf("a refused Worker Host read must not mark the Gateway unreachable: %q", m.status)
 	}
 }
 
 func TestTheHostTickRereadsTheWorkerHosts(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags("alpha")}
+	fake := &fakeGateway{tags: tags("alpha")}
 	m := testModel(t, fake)
 	next, cmd := m.Update(hostTickMsg{})
 	m = next.(model)
@@ -121,12 +121,12 @@ func TestTheHostTickRereadsTheWorkerHosts(t *testing.T) {
 	}
 }
 
-func TestSwitchingControlPlanesStartsAFreshModel(t *testing.T) {
+func TestSwitchingGatewaysStartsAFreshModel(t *testing.T) {
 	tagRefresh, hostRefresh = time.Millisecond, time.Millisecond
-	alpha := &fakeControlPlane{token: "alpha-token", tags: tags("builder"), hostList: func() []*views.WorkerHost {
+	alpha := &fakeGateway{token: "alpha-token", tags: tags("builder"), hostList: func() []*views.WorkerHost {
 		return []*views.WorkerHost{host("laptop", views.WorkerHostPhase_WORKER_HOST_PHASE_READY)}
 	}}
-	beta := &fakeControlPlane{token: "beta-token", tags: tags("reviewer", "planner")}
+	beta := &fakeGateway{token: "beta-token", tags: tags("reviewer", "planner")}
 	alphaServer, betaServer := alpha.start(t), beta.start(t)
 	contexts := []client.Target{
 		{Name: "laptop", URL: alphaServer.URL, Token: "alpha-token"},
@@ -143,15 +143,15 @@ func TestSwitchingControlPlanesStartsAFreshModel(t *testing.T) {
 	a.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
 	runApp(t, a, a.Init())
 	if s := appScreen(a); !strings.Contains(s, "laptop · "+alphaServer.URL) || !strings.Contains(s, "builder") ||
-		!strings.Contains(s, "Worker Hosts: 1 ready") || !strings.Contains(s, "ctrl+p Control Planes") {
+		!strings.Contains(s, "Worker Hosts: 1 ready") || !strings.Contains(s, "ctrl+p Gateways") {
 		t.Fatalf("screen:\n%s", s)
 	}
 	stale := a.scope(a.inner.tagsCmd())
 
 	a.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
-	if s := appScreen(a); !a.choosing || !strings.Contains(s, "Control Planes") || !strings.Contains(s, "laptop · "+alphaServer.URL+"  (current)") ||
+	if s := appScreen(a); !a.choosing || !strings.Contains(s, "Gateways") || !strings.Contains(s, "laptop · "+alphaServer.URL+"  (current)") ||
 		!strings.Contains(s, "team · "+betaServer.URL) {
-		t.Fatalf("the Control Plane list must show both, the current one marked:\n%s", s)
+		t.Fatalf("the Gateway list must show both, the current one marked:\n%s", s)
 	}
 	a.Update(key(tea.KeyDown))
 	_, cmd := a.Update(key(tea.KeyEnter))
@@ -159,7 +159,7 @@ func TestSwitchingControlPlanesStartsAFreshModel(t *testing.T) {
 		t.Fatalf("enter must switch: choosing=%v current=%d", a.choosing, a.current)
 	}
 	if started[0].Err() == nil {
-		t.Fatal("switching must end the streams and calls of the Control Plane left")
+		t.Fatal("switching must end the streams and calls of the Gateway left")
 	}
 	runApp(t, a, cmd)
 	s := appScreen(a)
@@ -173,7 +173,7 @@ func TestSwitchingControlPlanesStartsAFreshModel(t *testing.T) {
 
 	runApp(t, a, stale)
 	if s := appScreen(a); strings.Contains(s, "builder") {
-		t.Fatalf("a reply to the Control Plane left must be dropped:\n%s", s)
+		t.Fatalf("a reply to the Gateway left must be dropped:\n%s", s)
 	}
 	alpha.mu.Lock()
 	beta.mu.Lock()
@@ -181,7 +181,7 @@ func TestSwitchingControlPlanesStartsAFreshModel(t *testing.T) {
 	beta.mu.Unlock()
 	alpha.mu.Unlock()
 	if badAuth != 0 {
-		t.Fatalf("%d requests reached a Control Plane with another's token", badAuth)
+		t.Fatalf("%d requests reached a Gateway with another's token", badAuth)
 	}
 
 	a.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
@@ -191,8 +191,8 @@ func TestSwitchingControlPlanesStartsAFreshModel(t *testing.T) {
 	}
 }
 
-func TestOneControlPlaneStillOpensTheListToAddAnother(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags("builder")}
+func TestOneGatewayStillOpensTheListToAddAnother(t *testing.T) {
+	fake := &fakeGateway{tags: tags("builder")}
 	server := fake.start(t)
 	var started []context.Context
 	a, err := newApp(context.Background(), testConnector(&started), []client.Target{{URL: server.URL, Token: "secret"}}, 0)
@@ -203,12 +203,12 @@ func TestOneControlPlaneStillOpensTheListToAddAnother(t *testing.T) {
 	a.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	a.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if !a.choosing || !strings.Contains(appScreen(a), "a add") {
-		t.Fatalf("one Control Plane must still offer adding another:\n%s", appScreen(a))
+		t.Fatalf("one Gateway must still offer adding another:\n%s", appScreen(a))
 	}
 }
 
-func TestAFailedSwitchKeepsTheCurrentControlPlane(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags("builder")}
+func TestAFailedSwitchKeepsTheCurrentGateway(t *testing.T) {
+	fake := &fakeGateway{tags: tags("builder")}
 	server := fake.start(t)
 	var started []context.Context
 	contexts := []client.Target{{Name: "laptop", URL: server.URL, Token: "secret"}, {Name: "broken", URL: "ftp://nowhere", Token: "t"}}
@@ -221,7 +221,7 @@ func TestAFailedSwitchKeepsTheCurrentControlPlane(t *testing.T) {
 	a.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	a.Update(key(tea.KeyDown))
 	a.Update(key(tea.KeyEnter))
-	if !a.choosing || a.current != 0 || started[0].Err() != nil || !strings.Contains(appScreen(a), "Control Plane URL must use http, https, ws or wss") {
+	if !a.choosing || a.current != 0 || started[0].Err() != nil || !strings.Contains(appScreen(a), "Gateway URL must use http, https, ws or wss") {
 		t.Fatalf("choosing=%v current=%d screen:\n%s", a.choosing, a.current, appScreen(a))
 	}
 }

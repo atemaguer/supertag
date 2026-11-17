@@ -232,8 +232,8 @@ pub fn connection(state_directory: &Path) -> Result<(String, String)> {
 
 /// Read the local Gateway's endpoint and the operator credential.
 pub fn gateway_connection(state_directory: &Path) -> Result<(String, String)> {
-    let local =
-        supertag_local_state::gateway(state_directory)?.context("no local Gateway is running")?;
+    let local = supertag_local_state::gateway(state_directory)?
+        .context("local SuperTag services are not running")?;
     Ok((local.url, local.token))
 }
 

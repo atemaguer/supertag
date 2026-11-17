@@ -14,33 +14,33 @@ fn only_origin_or_tunnel_urls_and_loopback_plaintext_are_accepted() {
     for value in [
         "http://127.0.0.1:4545",
         "http://[::1]:4545/",
-        "https://control_plane.example.com",
+        "https://gateway.example.com",
         "https://127.0.0.1:4545",
         "ws://127.0.0.1:4545",
         "ws://[::1]:4545/supertag",
-        "wss://control_plane.example.com",
-        "wss://control_plane.example.com:8443/supertag",
+        "wss://gateway.example.com",
+        "wss://gateway.example.com:8443/supertag",
     ] {
         assert!(endpoint(value).is_ok(), "{value}");
     }
     for value in [
         "http://localhost:4545",
-        "http://control_plane.example.com",
+        "http://gateway.example.com",
         "http://192.168.0.1",
         "http://127.0.0.1:0",
         "file:///tmp/socket",
-        "https://token@control_plane.example.com",
-        "https://control_plane.example.com/path",
-        "https://control_plane.example.com/?token=secret",
-        "https://control_plane.example.com/#secret",
+        "https://token@gateway.example.com",
+        "https://gateway.example.com/path",
+        "https://gateway.example.com/?token=secret",
+        "https://gateway.example.com/#secret",
         "http://127.0.0.1\\@example.com",
         "127.0.0.1:4545",
         "ws://localhost:4545",
-        "ws://control_plane.example.com",
-        "wss://token@control_plane.example.com",
-        "wss://control_plane.example.com/?token=secret",
-        "wss://control_plane.example.com/#secret",
-        "wss://control_plane.example.com:0",
+        "ws://gateway.example.com",
+        "wss://token@gateway.example.com",
+        "wss://gateway.example.com/?token=secret",
+        "wss://gateway.example.com/#secret",
+        "wss://gateway.example.com:0",
     ] {
         assert!(endpoint(value).is_err(), "{value}");
     }
@@ -64,31 +64,31 @@ fn upstream_diagnostics_are_not_exposed() {
 }
 
 #[test]
-fn an_invalid_request_shows_the_control_planes_reason() {
+fn an_invalid_request_shows_the_gateways_reason() {
     assert_eq!(
         rpc_error(Status::invalid_argument(
             "tag_id must be 1 to 64 lowercase letters, digits, or hyphens.\u{1b}[2J"
         )),
-        "The Control Plane rejected this request: tag_id must be 1 to 64 lowercase letters, digits, or hyphens.[2J."
+        "The Gateway rejected this request: tag_id must be 1 to 64 lowercase letters, digits, or hyphens.[2J."
     );
     assert_eq!(
         rpc_error(Status::invalid_argument("")),
-        "The Control Plane rejected this request. Check its values."
+        "The Gateway rejected this request. Check its values."
     );
     assert!(rpc_error(Status::invalid_argument("x".repeat(5_000))).len() < 400);
 }
 
-/// A SuperTag 0.3.0 Control Plane speaks only protocol 2. The app refuses it when it connects,
-/// naming both releases, where the Control Plane runs, and which to upgrade.
+/// A SuperTag 0.3.0 Gateway speaks only protocol 2. The app refuses it when it connects,
+/// naming both releases, where the Gateway runs, and which to upgrade.
 #[tokio::test]
-async fn a_control_plane_from_an_older_protocol_is_refused_on_connect_with_the_fix() {
+async fn a_gateway_from_an_older_protocol_is_refused_on_connect_with_the_fix() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(
         Server::builder()
             .add_service(
                 supertag_protocol::negotiation::Negotiator::new(
-                    v2::ServiceRole::ControlPlane,
+                    v2::ServiceRole::Gateway,
                     &[v2::ServiceRole::Client],
                 )
                 .with_versions(&[2])
@@ -103,7 +103,7 @@ async fn a_control_plane_from_an_older_protocol_is_refused_on_connect_with_the_f
     assert_eq!(
         refused,
         format!(
-            "This app speaks SuperTag protocol 3, but the Control Plane at {address} runs SuperTag {} (protocol 2). Upgrade the Control Plane.",
+            "This app speaks SuperTag protocol 3, but the Gateway at {address} runs SuperTag {} (protocol 2). Upgrade the Gateway.",
             supertag_protocol::negotiation::build_version()
         )
     );
@@ -256,10 +256,10 @@ fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
     assert_eq!(json["working"], true);
 }
 
-/// A Control Plane's API tier in front of its state owner. With `tunnel`, the API tier also
-/// accepts WebSocket tunnels, as with `--websocket-listen`, and the returned URL is a `ws://`
-/// tunnel URL with a path.
-pub(super) async fn control_plane_fixture(
+/// A Control Plane (its state owner and API tier) and, in front of it, a Gateway whose client API
+/// forwards to it, as `supertag up` runs them. With `tunnel`, the Gateway also accepts WebSocket
+/// tunnels, as with `--websocket-listen`, and the returned URL is a `ws://` tunnel URL with a path.
+pub(super) async fn gateway_fixture(
     database: &std::path::Path,
     tag_id: &str,
     token: &str,
@@ -269,105 +269,205 @@ pub(super) async fn control_plane_fixture(
     tokio::task::JoinHandle<std::result::Result<(), tonic::transport::Error>>,
     tokio::task::JoinHandle<std::result::Result<(), tonic::transport::Error>>,
 ) {
-    let cp = ControlPlane::open(
-        &format!("sqlite://{}?mode=rwc", database.display()),
-        "private-test-token".into(),
-        "operator:desktop-test".into(),
-    )
-    .await
-    .unwrap();
-    let cp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let cp_address = cp_listener.local_addr().unwrap();
-    let cp_task = tokio::spawn(
-        Server::builder()
-            .add_service(OperatorServer::new(cp.clone()))
-            .add_service(cp.credential_directory_service())
-            .add_service(cp.enrollments_service())
-            .add_service(ConversationsServer::new(cp))
-            .serve_with_incoming(TcpListenerStream::new(cp_listener)),
-    );
-    let channel = Endpoint::from_shared(format!("http://{cp_address}"))
-        .unwrap()
-        .connect()
+    let stack = Stack::start(database, token, None).await;
+    stack.put_tag(tag_id).await;
+    let url = if tunnel {
+        stack.tunnel_url.clone()
+    } else {
+        stack.url.clone()
+    };
+    (url, stack.gateway_task, stack.control_plane_task)
+}
+
+/// One disposable deployment: a Control Plane on its own database, and its Gateway.
+pub(super) struct Stack {
+    /// The Gateway's native URL, which clients use.
+    pub(super) url: String,
+    pub(super) tunnel_url: String,
+    /// The Control Plane's API tier, for operator setup that does not go through the Gateway.
+    control_plane_url: String,
+    token: String,
+    pub(super) gateway_task:
+        tokio::task::JoinHandle<std::result::Result<(), tonic::transport::Error>>,
+    pub(super) control_plane_task:
+        tokio::task::JoinHandle<std::result::Result<(), tonic::transport::Error>>,
+}
+
+impl Stack {
+    /// Starts the stack; `gateway` reuses the Gateway's earlier address, as a restart does.
+    pub(super) async fn start(
+        database: &std::path::Path,
+        token: &str,
+        gateway: Option<std::net::SocketAddr>,
+    ) -> Self {
+        let cp = ControlPlane::open(
+            &format!("sqlite://{}?mode=rwc", database.display()),
+            "private-test-token".into(),
+            "operator:desktop-test".into(),
+        )
         .await
         .unwrap();
-    let control_plane = Api::new(
-        supertag_protocol::negotiation::bind_current(channel),
-        "private-test-token".into(),
-        token.into(),
-        "operator:desktop-test".into(),
-    )
-    .unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = format!("http://{}", listener.local_addr().unwrap());
-    let websocket = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let tunnel_url = format!("ws://{}/supertag", websocket.local_addr().unwrap());
-    let control_plane_task = tokio::spawn(
-        Server::builder()
-            .layer(supertag_protocol::negotiation::fence(
-                v2::ServiceRole::ControlPlane,
-            ))
-            .layer(control_plane.authorize())
-            .add_service(control_plane.negotiation_service())
-            .add_service(control_plane.operator_service())
-            .add_service(control_plane.enrollments_service())
-            .add_service(
-                control_plane.conversations_service(tokio_util::sync::CancellationToken::new()),
-            )
-            .serve_with_incoming(supertag_transport::incoming(listener, Some(websocket))),
-    );
-    let mut operator = OperatorClient::new(
-        supertag_protocol::negotiation::connect(
-            Endpoint::from_shared(address.clone())
+        let owner_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let owner_address = owner_listener.local_addr().unwrap();
+        let owner_task = tokio::spawn(
+            Server::builder()
+                .add_service(OperatorServer::new(cp.clone()))
+                .add_service(cp.credential_directory_service())
+                .add_service(cp.enrollments_service())
+                .add_service(ConversationsServer::new(cp.clone()))
+                .add_service(cp.operator_events_service(tokio_util::sync::CancellationToken::new()))
+                .serve_with_incoming(TcpListenerStream::new(owner_listener)),
+        );
+        let channel = Endpoint::from_shared(format!("http://{owner_address}"))
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
+        let api = Api::new(
+            supertag_protocol::negotiation::bind_current(channel),
+            "private-test-token".into(),
+            token.into(),
+            "operator:desktop-test".into(),
+        )
+        .unwrap();
+        let api_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let control_plane_url = format!("http://{}", api_listener.local_addr().unwrap());
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let api_task = tokio::spawn(
+            Server::builder()
+                .layer(supertag_protocol::negotiation::fence(
+                    v2::ServiceRole::ControlPlane,
+                ))
+                .layer(api.authorize())
+                .add_service(api.negotiation_service())
+                .add_service(api.operator_service())
+                .add_service(api.enrollments_service())
+                .add_service(api.conversations_service(shutdown.clone()))
+                .add_service(api.operator_events_service(shutdown))
+                .serve_with_incoming(TcpListenerStream::new(api_listener)),
+        );
+        let control_plane_task = tokio::spawn(async move {
+            let (owner, api) = tokio::join!(owner_task, api_task);
+            owner.unwrap().and(api.unwrap())
+        });
+
+        // The Gateway negotiates with the Control Plane as a Gateway and forwards client calls.
+        let upstream = supertag_protocol::negotiation::connect(
+            Endpoint::from_shared(control_plane_url.clone())
                 .unwrap()
                 .connect()
                 .await
                 .unwrap(),
-            v2::ServiceRole::Client,
+            v2::ServiceRole::Gateway,
             v2::ServiceRole::ControlPlane,
         )
         .await
-        .unwrap(),
-    );
-    operator
-        .put_tag(
-            authenticated_request(
-                v2::PutTagRequest {
-                    tag_id: tag_id.into(),
-                    instructions: "Help with engineering".into(),
-                    allowed_actions: vec!["files:read".into()],
-                    harness_kind: v2::HarnessKind::Codex as i32,
-                    lead: Some(true),
-                    ..Default::default()
-                },
-                token,
-                None,
-            )
-            .unwrap(),
-        )
-        .await
         .unwrap();
+        let client_api = supertag_gateway::client_api::ClientApi::new(vec![upstream]);
+        let listener = bind_again(gateway.unwrap_or(([127, 0, 0, 1], 0).into())).await;
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let websocket = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let tunnel_url = format!("ws://{}/supertag", websocket.local_addr().unwrap());
+        let gateway_task = tokio::spawn(
+            Server::builder()
+                .layer(supertag_protocol::negotiation::fence(
+                    v2::ServiceRole::Gateway,
+                ))
+                .layer(client_api)
+                .add_service(
+                    supertag_protocol::negotiation::Negotiator::new(
+                        v2::ServiceRole::Gateway,
+                        &[v2::ServiceRole::Client],
+                    )
+                    .service(),
+                )
+                .serve_with_incoming(supertag_transport::incoming(listener, Some(websocket))),
+        );
+        Self {
+            url,
+            tunnel_url,
+            control_plane_url,
+            token: token.into(),
+            gateway_task,
+            control_plane_task,
+        }
+    }
 
-    let url = if tunnel { tunnel_url } else { address };
-    (url, control_plane_task, cp_task)
+    /// The Gateway's address, to start it again in the same place.
+    pub(super) fn address(&self) -> std::net::SocketAddr {
+        self.url.trim_start_matches("http://").parse().unwrap()
+    }
+
+    pub(super) async fn put_tag(&self, tag_id: &str) {
+        let mut operator = OperatorClient::new(
+            supertag_protocol::negotiation::connect(
+                Endpoint::from_shared(self.control_plane_url.clone())
+                    .unwrap()
+                    .connect()
+                    .await
+                    .unwrap(),
+                v2::ServiceRole::Client,
+                v2::ServiceRole::ControlPlane,
+            )
+            .await
+            .unwrap(),
+        );
+        operator
+            .put_tag(
+                authenticated_request(
+                    v2::PutTagRequest {
+                        tag_id: tag_id.into(),
+                        instructions: "Help with engineering".into(),
+                        allowed_actions: vec!["files:read".into()],
+                        harness_kind: v2::HarnessKind::Codex as i32,
+                        lead: Some(true),
+                        ..Default::default()
+                    },
+                    &self.token,
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Stops both services, as a machine restart would.
+    pub(super) async fn stop(self) {
+        self.gateway_task.abort();
+        self.control_plane_task.abort();
+        let _ = self.gateway_task.await;
+        let _ = self.control_plane_task.await;
+    }
+}
+
+/// Binds `address`, retrying briefly while a just-stopped listener releases it.
+async fn bind_again(address: std::net::SocketAddr) -> TcpListener {
+    for _ in 0..50 {
+        if let Ok(listener) = TcpListener::bind(address).await {
+            return listener;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    TcpListener::bind(address).await.unwrap()
 }
 
 #[tokio::test]
-async fn native_client_uses_authenticated_control_plane_and_durable_message_operations() {
+async fn native_client_uses_authenticated_gateway_and_durable_message_operations() {
     let directory = tempfile::tempdir().unwrap();
-    let (address, control_plane_task, cp_task) = control_plane_fixture(
+    let (address, gateway_task, cp_task) = gateway_fixture(
         &directory.path().join("state.sqlite"),
         "engineer",
         "operator-test-token",
         false,
     )
     .await;
-    let client = ControlPlaneState::default();
-    let profiles = directory.path().join("control-planes.json");
+    let client = GatewayState::default();
+    let profiles = directory.path().join("gateways.json");
     assert!(client.tags("0").await.is_err());
     assert_eq!(
         client
-            .save_control_plane(
+            .save_gateway(
                 &profiles,
                 address.clone(),
                 "Engineering".into(),
@@ -375,11 +475,11 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
             )
             .await
             .unwrap_err(),
-        "The Control Plane rejected the saved credential."
+        "The Gateway rejected the saved credential."
     );
     assert!(!profiles.exists());
     let first_connection = client
-        .save_control_plane(
+        .save_gateway(
             &profiles,
             address.clone(),
             "Engineering".into(),
@@ -484,7 +584,7 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
     assert!(client.current(&previous, ()).await.is_err());
     assert!(client.tags(id).await.is_err());
     let replacement = client
-        .select_control_plane(&profiles, address.clone())
+        .select_gateway(&profiles, address.clone())
         .await
         .unwrap();
     let replacement_id = replacement.connection_id();
@@ -493,7 +593,7 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
     assert!(client.tags(id).await.is_err());
     assert!(
         client
-            .save_control_plane(
+            .save_gateway(
                 &profiles,
                 address,
                 "Engineering".into(),
@@ -506,24 +606,24 @@ async fn native_client_uses_authenticated_control_plane_and_durable_message_oper
         client.tags(replacement_id).await.unwrap()[0].tag_id,
         "engineer"
     );
-    control_plane_task.abort();
+    gateway_task.abort();
     cp_task.abort();
 }
 
 #[tokio::test]
-/// The second Control Plane is saved and reached through a `ws://` tunnel URL, which keeps its
+/// The second Gateway is saved and reached through a `ws://` tunnel URL, which keeps its
 /// path.
-async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
+async fn saved_gateways_switch_rosters_and_scope_late_ipc_requests() {
     let directory = tempfile::tempdir().unwrap();
-    let store = directory.path().join("control-planes.json");
-    let (first, first_control_plane, first_plane) = control_plane_fixture(
+    let store = directory.path().join("gateways.json");
+    let (first, first_gateway, first_plane) = gateway_fixture(
         &directory.path().join("first.sqlite"),
         "first-tag",
         "first-operator",
         false,
     )
     .await;
-    let (second, second_control_plane, second_plane) = control_plane_fixture(
+    let (second, second_gateway, second_plane) = gateway_fixture(
         &directory.path().join("second.sqlite"),
         "second-tag",
         "second-operator",
@@ -531,9 +631,9 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
     )
     .await;
 
-    let state = ControlPlaneState::default();
+    let state = GatewayState::default();
     let a = state
-        .save_control_plane(
+        .save_gateway(
             &store,
             format!("{first}/"),
             "First".into(),
@@ -542,7 +642,7 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
         .await
         .unwrap();
     let b = state
-        .save_control_plane(
+        .save_gateway(
             &store,
             second.clone(),
             "Second".into(),
@@ -574,7 +674,7 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
             .is_empty()
     );
 
-    let snapshot = serde_json::to_value(state.saved_control_planes(&store).await.unwrap()).unwrap();
+    let snapshot = serde_json::to_value(state.saved_gateways(&store).await.unwrap()).unwrap();
     assert_eq!(snapshot["active"], second);
     assert_eq!(
         snapshot["profiles"][0],
@@ -584,17 +684,14 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
         snapshot["profiles"][1],
         serde_json::json!({"origin": second, "name": "Second"})
     );
-    let resumed = ControlPlaneState::default();
-    let a = resumed
-        .select_control_plane(&store, first.clone())
-        .await
-        .unwrap();
+    let resumed = GatewayState::default();
+    let a = resumed.select_gateway(&store, first.clone()).await.unwrap();
     assert_eq!(
         resumed.tags(a.connection_id()).await.unwrap()[0].tag_id,
         "first-tag"
     );
     let edited = resumed
-        .save_control_plane(&store, first.clone(), "Renamed".into(), String::new())
+        .save_gateway(&store, first.clone(), "Renamed".into(), String::new())
         .await
         .unwrap();
     assert_eq!(
@@ -602,15 +699,15 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
         "first-tag"
     );
     let forgotten = resumed
-        .clear_control_plane(&store, Some(second.clone()))
+        .clear_gateway(&store, Some(second.clone()))
         .await
         .unwrap();
     assert_eq!(serde_json::to_value(forgotten).unwrap()["active"], first);
-    assert!(resumed.select_control_plane(&store, second).await.is_err());
-    resumed.clear_control_plane(&store, None).await.unwrap();
+    assert!(resumed.select_gateway(&store, second).await.is_err());
+    resumed.clear_gateway(&store, None).await.unwrap();
     assert!(resumed.tags(edited.connection_id()).await.is_err());
     assert!(
-        serde_json::to_value(resumed.saved_control_planes(&store).await.unwrap()).unwrap()["active"]
+        serde_json::to_value(resumed.saved_gateways(&store).await.unwrap()).unwrap()["active"]
             .is_null()
     );
 
@@ -621,14 +718,9 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
         assert_eq!(mode & 0o777, 0o600);
         let alias = directory.path().join("alias");
         std::os::unix::fs::symlink(&store, &alias).unwrap();
-        assert!(resumed.saved_control_planes(&alias).await.is_err());
+        assert!(resumed.saved_gateways(&alias).await.is_err());
     }
-    for server in [
-        first_control_plane,
-        first_plane,
-        second_control_plane,
-        second_plane,
-    ] {
+    for server in [first_gateway, first_plane, second_gateway, second_plane] {
         server.abort();
     }
 }
@@ -639,8 +731,8 @@ async fn saved_control_planes_switch_rosters_and_scope_late_ipc_requests() {
 async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
     use sha2::{Digest, Sha256};
     let directory = tempfile::tempdir().unwrap();
-    let store = directory.path().join("control-planes.json");
-    let (address, control_plane, plane) = control_plane_fixture(
+    let store = directory.path().join("gateways.json");
+    let (address, gateway, plane) = gateway_fixture(
         &directory.path().join("state.sqlite"),
         "allowed-tag",
         "join-operator",
@@ -655,7 +747,7 @@ async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
                 .await
                 .unwrap(),
             v2::ServiceRole::Client,
-            v2::ServiceRole::ControlPlane,
+            v2::ServiceRole::Gateway,
         )
         .await
         .unwrap(),
@@ -695,9 +787,9 @@ async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
         .await
         .unwrap();
 
-    let state = ControlPlaneState::default();
+    let state = GatewayState::default();
     let joined = state
-        .save_control_plane(&store, address.clone(), "Work".into(), key.clone())
+        .save_gateway(&store, address.clone(), "Work".into(), key.clone())
         .await
         .unwrap();
     assert_eq!(joined.principal(), format!("client:{}", device_name()));
@@ -728,10 +820,10 @@ async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
     assert!(!saved.contains(&key), "the Auth Key was saved");
     assert!(saved.contains(supertag_protocol::CREDENTIAL_SECRET_PREFIX));
     // The one-time key admits no second device.
-    let second = ControlPlaneState::default();
+    let second = GatewayState::default();
     assert!(
         second
-            .save_control_plane(
+            .save_gateway(
                 &directory.path().join("other.json"),
                 address,
                 "Again".into(),
@@ -740,7 +832,7 @@ async fn an_auth_key_enrolls_this_device_and_only_its_credential_is_saved() {
             .await
             .is_err()
     );
-    control_plane.abort();
+    gateway.abort();
     plane.abort();
 }
 
@@ -821,7 +913,7 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
             .add_service(ArtifactTransfersServer::new(Transfers))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
-    let client = ControlPlaneState::default();
+    let client = GatewayState::default();
     client.0.write().await.session = Some(Arc::new(Session {
         channel: supertag_protocol::negotiation::bind_current(
             endpoint(&address).unwrap().connect().await.unwrap(),
@@ -885,16 +977,16 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
     server.abort();
 }
 
-/// The local Control Plane connects with the operator token in its state directory, read at each
+/// The local Gateway connects with the operator token in its state directory, read at each
 /// connect, and nothing about it is saved.
 #[cfg(unix)]
 #[tokio::test]
-async fn the_local_control_plane_connects_with_its_current_token_and_is_never_saved() {
+async fn the_local_gateway_connects_with_its_current_token_and_is_never_saved() {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     let directory = tempfile::tempdir().unwrap();
-    let store = directory.path().join("control-planes.json");
+    let store = directory.path().join("gateways.json");
     let operator = "e".repeat(64);
-    let (address, control_plane, plane) = control_plane_fixture(
+    let (address, gateway, plane) = gateway_fixture(
         &directory.path().join("state.sqlite"),
         "local-tag",
         &operator,
@@ -902,8 +994,8 @@ async fn the_local_control_plane_connects_with_its_current_token_and_is_never_sa
     )
     .await;
     let state_directory = directory.path().join("supertag");
-    let state = ControlPlaneState::new(Some(state_directory.clone()));
-    let listed = serde_json::to_value(state.saved_control_planes(&store).await.unwrap()).unwrap();
+    let state = GatewayState::new(Some(state_directory.clone()));
+    let listed = serde_json::to_value(state.saved_gateways(&store).await.unwrap()).unwrap();
     assert!(listed["local"]["origin"].is_null());
     assert!(
         listed["local"]["problem"]
@@ -931,14 +1023,14 @@ async fn the_local_control_plane_connects_with_its_current_token_and_is_never_sa
         })
         .to_string()
     };
-    private("endpoint", format!("{address}\n"));
+    private("gateway-endpoint", format!("{address}\n"));
     private("credentials.json", credentials(&operator));
     // Stands in for the supervisor `supertag up` runs, which holds this lock.
     let lock =
         supertag_local_state::open_private_file(&state_directory.join(".lock"), true).unwrap();
     lock.try_lock().unwrap();
 
-    let local = state.connect_local_control_plane(&store).await.unwrap();
+    let local = state.connect_local_gateway(&store).await.unwrap();
     assert_eq!(local.principal(), "operator:desktop-test");
     assert_eq!(
         state.tags(local.connection_id()).await.unwrap()[0].tag_id,
@@ -946,38 +1038,38 @@ async fn the_local_control_plane_connects_with_its_current_token_and_is_never_sa
     );
     let activation = serde_json::to_value(&local).unwrap();
     assert_eq!(activation["origin"], "local");
-    assert!(activation["controlPlanes"]["active"].is_null());
-    assert_eq!(activation["controlPlanes"]["local"]["origin"], address);
+    assert!(activation["gateways"]["active"].is_null());
+    assert_eq!(activation["gateways"]["local"]["origin"], address);
     let saved = std::fs::read_to_string(&store).unwrap();
     assert!(!saved.contains(&operator), "the local token was saved");
 
     // A replaced token is read at the next connect.
     private("credentials.json", credentials(&"f".repeat(64)));
-    assert!(state.connect_local_control_plane(&store).await.is_err());
+    assert!(state.connect_local_gateway(&store).await.is_err());
     private("credentials.json", credentials(&operator));
-    state.connect_local_control_plane(&store).await.unwrap();
+    state.connect_local_gateway(&store).await.unwrap();
 
     drop(lock);
-    let stopped = state.connect_local_control_plane(&store).await.unwrap_err();
+    let stopped = state.connect_local_gateway(&store).await.unwrap_err();
     assert!(stopped.contains("supertag up"), "{stopped}");
-    control_plane.abort();
+    gateway.abort();
     plane.abort();
 }
 
 #[tokio::test]
 async fn an_operator_creates_a_tag_once_with_the_lead_tag_defaults() {
     let directory = tempfile::tempdir().unwrap();
-    let (address, control_plane_task, cp_task) = control_plane_fixture(
+    let (address, gateway_task, cp_task) = gateway_fixture(
         &directory.path().join("state.sqlite"),
         "engineer",
         "operator-test-token",
         false,
     )
     .await;
-    let client = ControlPlaneState::default();
+    let client = GatewayState::default();
     let connection = client
-        .save_control_plane(
-            &directory.path().join("control-planes.json"),
+        .save_gateway(
+            &directory.path().join("gateways.json"),
             address,
             "Engineering".into(),
             "operator-test-token".into(),
@@ -1015,7 +1107,7 @@ async fn an_operator_creates_a_tag_once_with_the_lead_tag_defaults() {
             .collect::<Vec<_>>(),
         ["engineer", "reviewer"]
     );
-    control_plane_task.abort();
+    gateway_task.abort();
     cp_task.abort();
 }
 
@@ -1024,17 +1116,17 @@ async fn a_conversation_follow_pushes_sent_messages_through_the_api_tier() {
     use tauri::ipc::{Channel, InvokeResponseBody};
 
     let directory = tempfile::tempdir().unwrap();
-    let (address, control_plane_task, cp_task) = control_plane_fixture(
+    let (address, gateway_task, cp_task) = gateway_fixture(
         &directory.path().join("state.sqlite"),
         "engineer",
         "operator-test-token",
         false,
     )
     .await;
-    let client = ControlPlaneState::default();
+    let client = GatewayState::default();
     let connection = client
-        .save_control_plane(
-            &directory.path().join("control-planes.json"),
+        .save_gateway(
+            &directory.path().join("gateways.json"),
             address,
             "Engineering".into(),
             "operator-test-token".into(),
@@ -1090,7 +1182,7 @@ async fn a_conversation_follow_pushes_sent_messages_through_the_api_tier() {
         "queued"
     );
     client.stop_follow(&follow).await;
-    control_plane_task.abort();
+    gateway_task.abort();
     cp_task.abort();
 }
 
@@ -1117,4 +1209,261 @@ fn scheduled_turns_name_their_schedule_and_carry_no_operator_message() {
     assert!(json["task"].get("prompt").is_none());
     assert!(json.get("liveInput").is_none());
     assert_eq!(json["task"]["result"], "CI is green.");
+}
+
+/// Watch updates the app received on one subscription, as JSON.
+fn watch_updates() -> (
+    tauri::ipc::Channel<super::watch::WatchUpdate>,
+    tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+) {
+    let (send, receive) = tokio::sync::mpsc::unbounded_channel();
+    let channel = tauri::ipc::Channel::new(move |body| {
+        let tauri::ipc::InvokeResponseBody::Json(value) = body else {
+            panic!("expected JSON IPC")
+        };
+        let _ = send.send(serde_json::from_str(&value).unwrap());
+        Ok(())
+    });
+    (channel, receive)
+}
+
+/// The next Watch update about a conversation, skipping readiness and resyncs.
+async fn next_conversation_update(
+    updates: &mut tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    loop {
+        let update = tokio::time::timeout(std::time::Duration::from_secs(5), updates.recv())
+            .await
+            .ok()??;
+        if update["kind"] == "conversation" {
+            return Some(update);
+        }
+    }
+}
+
+#[tokio::test]
+/// The app keeps two separately deployed Gateways (each with its own Control Plane, database,
+/// port, and operator token), switches between them, and sees each one's own Tags and
+/// conversations. No cached entry, credential, or Watch stream crosses from one to the other, and
+/// after both deployments restart the app reconnects to each.
+async fn the_app_switches_between_two_gateways_without_leaking_state_and_reconnects_after_restarts()
+{
+    let directory = tempfile::tempdir().unwrap();
+    let store = directory.path().join("gateways.json");
+    let cache = directory.path().join("cache");
+    let alpha_database = directory.path().join("alpha.sqlite");
+    let beta_database = directory.path().join("beta.sqlite");
+    let alpha = Stack::start(&alpha_database, "alpha-operator", None).await;
+    alpha.put_tag("alpha-tag").await;
+    let beta = Stack::start(&beta_database, "beta-operator", None).await;
+    beta.put_tag("beta-tag").await;
+    let (alpha_url, beta_url) = (alpha.url.clone(), beta.url.clone());
+    assert_ne!(alpha_url, beta_url);
+
+    let state = GatewayState::default();
+    let a = state
+        .save_gateway(
+            &store,
+            alpha_url.clone(),
+            "Alpha".into(),
+            "alpha-operator".into(),
+        )
+        .await
+        .unwrap();
+    let tags = state.tags(a.connection_id()).await.unwrap();
+    assert_eq!(
+        tags.iter()
+            .map(|tag| tag.tag_id.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha-tag"]
+    );
+    state
+        .send(
+            a.connection_id(),
+            "alpha-tag".into(),
+            "Only Alpha hears this".into(),
+            "alpha-operation".into(),
+        )
+        .await
+        .unwrap();
+    state
+        .cache(
+            a.connection_id(),
+            cache.clone(),
+            "roster".into(),
+            serde_json::json!(["alpha-tag"]),
+        )
+        .await
+        .unwrap();
+    let (alpha_updates, mut alpha_received) = watch_updates();
+    state
+        .start_watch(a.connection_id(), 1, alpha_updates)
+        .await
+        .unwrap();
+
+    // Adding the second Gateway switches to it.
+    let b = state
+        .save_gateway(
+            &store,
+            beta_url.clone(),
+            "Beta".into(),
+            "beta-operator".into(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(a.connection_id(), b.connection_id());
+    let tags = state.tags(b.connection_id()).await.unwrap();
+    assert_eq!(
+        tags.iter()
+            .map(|tag| tag.tag_id.as_str())
+            .collect::<Vec<_>>(),
+        ["beta-tag"]
+    );
+    // Beta has no conversation: Alpha's message stayed on Alpha.
+    assert!(
+        state
+            .conversations(b.connection_id())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // Nothing Alpha cached is visible on Beta.
+    assert!(
+        state
+            .cached(b.connection_id(), cache.clone(), "roster".into())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // A late request on Alpha's connection is refused instead of reaching Beta.
+    assert_eq!(
+        state
+            .send(
+                a.connection_id(),
+                "beta-tag".into(),
+                "stale".into(),
+                "stale-operation".into()
+            )
+            .await
+            .unwrap_err(),
+        "The connection changed. Refresh this view."
+    );
+    assert!(state.tags(a.connection_id()).await.is_err());
+    // Switching ended Alpha's Watch: a change on Alpha no longer reaches the app.
+    while alpha_received.try_recv().is_ok() {}
+    let (beta_updates, mut beta_received) = watch_updates();
+    state
+        .start_watch(b.connection_id(), 2, beta_updates)
+        .await
+        .unwrap();
+    // The Watch reports changes after it is established.
+    loop {
+        let update = tokio::time::timeout(std::time::Duration::from_secs(5), beta_received.recv())
+            .await
+            .expect("Beta's Watch became ready")
+            .unwrap();
+        if update["kind"] == "ready" {
+            break;
+        }
+    }
+    state
+        .send(
+            b.connection_id(),
+            "beta-tag".into(),
+            "Only Beta hears this".into(),
+            "beta-operation".into(),
+        )
+        .await
+        .unwrap();
+    let update = next_conversation_update(&mut beta_received)
+        .await
+        .expect("Beta's Watch reports Beta's conversation");
+    assert_eq!(update["tagId"], "beta-tag");
+    assert!(
+        next_conversation_update(&mut alpha_received)
+            .await
+            .is_none(),
+        "Alpha's Watch outlived the switch"
+    );
+    let conversations = state.conversations(b.connection_id()).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&conversations).unwrap()[0]["tagId"],
+        "beta-tag"
+    );
+    state
+        .cache(
+            b.connection_id(),
+            cache.clone(),
+            "roster".into(),
+            serde_json::json!(["beta-tag"]),
+        )
+        .await
+        .unwrap();
+
+    // Switching back shows Alpha's own Tags, conversation, and cache, and nothing of Beta's.
+    let a = state
+        .select_gateway(&store, alpha_url.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        state.tags(a.connection_id()).await.unwrap()[0].tag_id,
+        "alpha-tag"
+    );
+    let conversations =
+        serde_json::to_value(state.conversations(a.connection_id()).await.unwrap()).unwrap();
+    assert_eq!(conversations.as_array().unwrap().len(), 1);
+    assert_eq!(conversations[0]["tagId"], "alpha-tag");
+    assert_eq!(
+        state
+            .cached(a.connection_id(), cache.clone(), "roster".into())
+            .await
+            .unwrap(),
+        Some(serde_json::json!(["alpha-tag"]))
+    );
+    // Each saved Gateway keeps only its own credential.
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&store).unwrap()).unwrap();
+    for entry in saved["gateways"].as_array().unwrap() {
+        let origin = entry["profile"]["origin"].as_str().unwrap();
+        let token = entry["token"].as_str().unwrap();
+        assert_eq!(
+            token,
+            if origin == alpha_url {
+                "alpha-operator"
+            } else {
+                "beta-operator"
+            },
+            "{origin}"
+        );
+    }
+
+    // Both deployments restart on their own databases and at the same Gateway addresses; a fresh
+    // app (as after a relaunch) reconnects to each and finds what it left there.
+    let (alpha_address, beta_address) = (alpha.address(), beta.address());
+    alpha.stop().await;
+    beta.stop().await;
+    let alpha = Stack::start(&alpha_database, "alpha-operator", Some(alpha_address)).await;
+    let beta = Stack::start(&beta_database, "beta-operator", Some(beta_address)).await;
+    let relaunched = GatewayState::default();
+    for (url, tag) in [(&beta_url, "beta-tag"), (&alpha_url, "alpha-tag")] {
+        let activation = relaunched
+            .select_gateway(&store, url.clone())
+            .await
+            .unwrap();
+        let id = activation.connection_id();
+        assert_eq!(relaunched.tags(id).await.unwrap()[0].tag_id, tag);
+        let conversations =
+            serde_json::to_value(relaunched.conversations(id).await.unwrap()).unwrap();
+        assert_eq!(conversations.as_array().unwrap().len(), 1, "{url}");
+        assert_eq!(conversations[0]["tagId"], tag);
+        assert_eq!(
+            relaunched
+                .cached(id, cache.clone(), "roster".into())
+                .await
+                .unwrap(),
+            Some(serde_json::json!([tag]))
+        );
+    }
+    alpha.stop().await;
+    beta.stop().await;
 }

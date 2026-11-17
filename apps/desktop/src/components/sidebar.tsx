@@ -1,7 +1,7 @@
 import { Plus, Search, Star } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
-import type { Tag } from "../control-plane";
+import type { Tag } from "../gateway";
 import { clamp, KEY_STEP, ResizeHandle, useStoredWidth } from "./resize";
 import { TagAvatar } from "./tag-avatar";
 import { Button } from "./ui/button";

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WatchUpdate } from "../control-plane";
+import type { WatchUpdate } from "../gateway";
 import { attachWatch, watchFeed, watchReader } from "./watch";
 
 const visible = () => true;
@@ -8,7 +8,7 @@ const planning = { kind: "conversation", tagId: "lead" } as const;
 
 afterEach(() => vi.useRealTimers());
 
-describe("Control Plane Watch lifecycle", () => {
+describe("Gateway Watch lifecycle", () => {
   it("stops a late registration and ignores its queued frames", async () => {
     let receive: ((update: WatchUpdate) => void) | undefined;
     let registered: ((stop: () => Promise<void>) => void) | undefined;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Tag } from "../control-plane";
+import type { Tag } from "../gateway";
 import { describe } from "../lib/polling";
 import { HARNESSES, harnessLabel, type TagAdmin, type TagOptions, tagIdFor } from "../tag-admin";
 import { Button } from "./ui/button";

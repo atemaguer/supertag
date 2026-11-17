@@ -7,7 +7,7 @@ use supertag_protocol::{
     v2::{self, memories_client::MemoriesClient},
 };
 
-use super::{ControlPlaneState, Result, rpc_error};
+use super::{GatewayState, Result, rpc_error};
 
 /// One note, as the Tag details panel shows it.
 #[derive(Serialize, Debug, PartialEq)]
@@ -41,7 +41,7 @@ impl From<v2::Memory> for Note {
     }
 }
 
-impl ControlPlaneState {
+impl GatewayState {
     /// The Tag's notes the caller sees, newest first.
     pub async fn notes(&self, connection_id: &str, tag_id: String) -> Result<Vec<Note>> {
         let session = self.session(connection_id).await?;

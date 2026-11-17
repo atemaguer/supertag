@@ -12,8 +12,8 @@ Plane URL and an operator credential over file descriptor 3 and sets `SUPERTAG_T
 The TUI reads descriptor 3 only when that variable is set, so a plain launch with no handover never touches a descriptor it does not own. The handover
 identifies the protocol as `runtime.v2` and can include a trusted server certificate authority and
 client certificate and key paths. The TUI uses the generated runtime v2 Go bindings over gRPC and
-HTTP/2. A `wss://` Control Plane URL carries the same connection through a WebSocket tunnel, as the
-CLI does, with the Control Plane's TLS and any client certificate inside it; the server
+HTTP/2. A `wss://` Gateway URL carries the same connection through a WebSocket tunnel, as the
+CLI does, with the Gateway's TLS and any client certificate inside it; the server
 certificate authority also checks the tunnel's outer certificate. Cleartext `http://` and `ws://`
 connections require a loopback IP address.
 
@@ -24,7 +24,7 @@ history page carries what its turn showed, every message the Tag wrote and its l
 so a finished turn reads nothing more. Rereading a conversation asks only for what changed since
 the copy on screen: the messages after its latest and the turns it holds unfinished. While a turn
 is followed, `Conversations.FollowConversation` pushes each change of its conversation as the
-Control Plane records it: a new state, each message the Tag writes, the text of the message it
+Gateway records it: a new state, each message the Tag writes, the text of the message it
 is writing now, as it is written, its latest activity, the result, and why a queued turn still
 waits for a Worker Host. One stream per Tag serves every followed turn of that conversation, and
 it reopens from what it holds after a drop. While it is down, or for an Objective's Task, the
@@ -42,51 +42,51 @@ The command palette's **Notes** lists the selected Tag's notes you may see, with
 when a turn last used it, and `x` deletes the selected one. Watch keeps the list current.
 
 The TUI also keeps a cache on disk, so `supertag` shows the last Tag's conversation before any
-call to the Control Plane: the Tag list with each conversation's row, the selected Tag, the latest
+call to the Gateway: the Tag list with each conversation's row, the selected Tag, the latest
 50 messages of each conversation shown, with their rendering at the terminal's width, messages not
 yet sent, and unsent drafts. It lives in `supertag/tui/` in the user cache directory, with an
-owner-only directory per Control Plane and principal and an owner-only file per entry, each
+owner-only directory per Gateway and principal and an owner-only file per entry, each
 written in one step as `{"schemaVersion": 1, "value": ...}`; an entry in another schema is
 discarded. The principal is the one `Enrollments.WhoAmI` named the last time this credential
-connected, found by a one-way digest of the credential, so a message sent while the Control Plane
+connected, found by a one-way digest of the credential, so a message sent while the Gateway
 is unreachable is still kept. Each launch asks again: nothing is written before a principal is
-known, and when the Control Plane names another one, what the cache showed is dropped. The cache never holds a credential. Forgetting a saved Control Plane deletes its cache.
+known, and when the Gateway names another one, what the cache showed is dropped. The cache never holds a credential. Forgetting a saved Gateway deletes its cache.
 `docs/reference/credential-storage.md` describes it beside the desktop app's.
 
-Ctrl-P opens **Control Planes**, including when only one connection exists. Press `a` to add a
-Control Plane, enter a name, its URL, and an operator token in the masked field, then press Ctrl-S
+Ctrl-P opens **Gateways**, including when only one connection exists. Press `a` to add a
+Gateway, enter a name, its URL, and an operator token in the masked field, then press Ctrl-S
 to verify access and save it. Optional certificate fields support private TLS authorities and
 client identities. `s` saves the current launch connection; `e` edits a selected saved
-connection's credential without moving it to a different Control Plane URL. Enter switches, and
-`d` forgets the selected saved connection. Switching cancels the previous Control Plane's
-requests and subscriptions and loads only the selected Control Plane's Tags and conversations.
+connection's credential without moving it to a different Gateway URL. Enter switches, and
+`d` forgets the selected saved connection. Switching cancels the previous Gateway's
+requests and subscriptions and loads only the selected Gateway's Tags and conversations.
 
-Saved connections use a private native file, `supertag/tui-control-planes.json` under the operating
+Saved connections use a private native file, `supertag/tui-gateways.json` under the operating
 system's user configuration directory, with owner-only permissions. It is separate from the
 local service credentials and the desktop app's store. A launch handover keeps its selected
-Control Plane and credentials; saved connections add to the chooser. Without a launch handover,
-`supertag-tui` reopens the last selected saved Control Plane, else the local Control Plane while
+Gateway and credentials; saved connections add to the chooser. Without a launch handover,
+`supertag-tui` reopens the last selected saved Gateway, else the local Gateway while
 it runs, else the first saved one, or shows the empty chooser for adding the first one. The token
 never appears in command arguments or the terminal display.
 
-### The local Control Plane
+### The local Gateway
 
-While `supertag up` runs a Control Plane from this user's state directory (`SUPERTAG_STATE_DIR`,
-else `~/.supertag`), the Control Planes list shows it first as **Local**, marked
+While `supertag up` runs a Gateway from this user's state directory (`SUPERTAG_STATE_DIR`,
+else `~/.supertag`), the Gateways list shows it first as **Local**, marked
 `[this machine]`, and it connects with no token to enter. `supertag-tui` asks the `supertag`
 command installed beside it (else the one on `PATH`) with the internal
-`supertag __local-control-plane`, so the CLI's own code checks the state directory: it must be
+`supertag __local-gateway`, so the CLI's own code checks the state directory: it must be
 private to this user, the supervisor must hold its lock, and the endpoint must be a loopback
 address. The command prints one JSON object to a pipe and refuses a terminal:
-`{"protocol": "local-control-plane.v1", "running": true, "state_directory": ..., "url": ...,
+`{"protocol": "local-gateway.v1", "running": true, "state_directory": ..., "url": ...,
 "token": ...}`, or `"running": false` with a `message` naming the command that starts it.
-`core/crates/cli/tests/local_control_plane.rs` pins that format.
+`core/crates/cli/tests/local_gateway.rs` pins that format.
 
 The local operator token is read again each time you choose Local and is never saved, because
 `supertag up` may replace it; Local cannot be edited, saved, or forgotten. Choosing Local leaves
-no saved Control Plane selected, so the next launch opens Local again. Ctrl-P checks again, so a
-Local Control Plane started after launch appears; when none runs, the list says so and how to
-start one (`supertag up`), and the saved Control Planes stay available.
+no saved Gateway selected, so the next launch opens Local again. Ctrl-P checks again, so a
+Local Gateway started after launch appears; when none runs, the list says so and how to
+start one (`supertag up`), and the saved Gateways stay available.
 
 Open Objectives show their status, owner, deadline, and available spend information. Send
 `/goal <outcome>` in a Tag's conversation to create an Objective or press `m` in an Objective to
@@ -98,9 +98,9 @@ sandboxes that run Tasks, are ready, busy, draining, or offline.
 
 ## Using the terminal UI
 
-The status bar shows which Control Plane it talks to, its Worker Hosts by phase
+The status bar shows which Gateway it talks to, its Worker Hosts by phase
 (such as `Worker Hosts: 2 ready, 1 unreachable`; revoked hosts are left out), and whether it is
-reachable. The conversation opens after the Control Plane returns a Tag. An empty Tag list
+reachable. The conversation opens after the Gateway returns a Tag. An empty Tag list
 shows setup instructions. The rail on the left has four sections:
 
 - **Tags**, the lead Tag first with a star, then the others by their conversation's latest
@@ -130,11 +130,11 @@ work Sessions, is one key away. Consecutive messages from you or the Tag form on
 group under one name, and a time divider (`Today 10:16 PM`, `Yesterday 9:02 AM`) starts the
 history and marks each pause of more than fifteen minutes. Each message the Tag writes while it
 works, starting with its sentence of intent, is its own message, and its result follows, rendered
-as markdown. Under your last message the TUI shows `Sending…` until the Control Plane accepts it,
+as markdown. Under your last message the TUI shows `Sending…` until the Gateway accepts it,
 then `Sent`, and `Seen` once a Worker Host took its turn up. While its turn runs, an animated
 `···` stays as the turn's last line, after its intent and any messages it writes, until the
 result arrives. A sent message
-shows at once and waits in an outbox, kept on disk, until the Control Plane accepts it; the next
+shows at once and waits in an outbox, kept on disk, until the Gateway accepts it; the next
 launch sends what is left again with the same operation ID, so the Tag gets it at most once. One
 that was not delivered says `! Not delivered`: Ctrl-R sends it again, and Ctrl-X takes it back
 into the input to edit. Scrolled up, the title counts the Tag's messages that arrived since, and
@@ -167,7 +167,7 @@ goes back to the conversation, and from a diff back to Work Sessions. A work Ses
 stays in the conversation as the Tag's message.
 
 The diff is `git diff BASE...BRANCH`, computed in the directory you started `supertag` in: the
-Control Plane keeps no repository contents. That directory must be a git checkout of the
+Gateway keeps no repository contents. That directory must be a git checkout of the
 Workspace. The TUI diffs the head commit the Worker recorded, or the branch itself when the
 Worker recorded none. When the checkout lacks it, the TUI fetches the branch from the checkout's
 `origin` remote, or its first remote. Git runs
@@ -175,13 +175,13 @@ without a terminal, so a fetch that needs credentials fails instead of prompting
 cannot be computed, the pane says why and shows the pull request's address. The diff scrolls with
 up, down, page up and page down; esc goes back.
 
-Ctrl-P lists the Control Planes you can switch to: Local while `supertag up` runs one on this
+Ctrl-P lists the Gateways you can switch to: Local while `supertag up` runs one on this
 machine, the one the CLI handed over, and each one saved in the terminal UI or with
-`supertag connect`. Enter switches to the one under the cursor, and esc goes back. Adding a Control Plane takes an
+`supertag connect`. Enter switches to the one under the cursor, and esc goes back. Adding a Gateway takes an
 operator token, or a client Auth Key (`stak_…`) from an operator. An Auth Key joins this device as
 `client:HOSTNAME` once; only the device's own credential is saved. A client device sees its own
 conversations and Objectives within the Tags its key allows, and no Worker Host status. Switching ends every stream and call
-to the Control Plane you leave and reads everything anew from the next; unsent input stays behind.
+to the Gateway you leave and reads everything anew from the next; unsent input stays behind.
 
 Ctrl-K, or `/` on an empty input line or where the pane has none, opens the command palette, the
 same search as the desktop app's: its field reads "Search Tags, conversations, settings…". The
@@ -192,7 +192,7 @@ caption. Up and down move through both sections, enter opens the Tag or runs the
 Alt-9 open a Tag at once, and Esc or Ctrl-K closes the palette.
 
 From a Tag's conversation, type `/goal <outcome>` and press enter. It goes to the conversation
-like any other message, and the Control Plane creates an Objective that the Tag owns, answers with
+like any other message, and the Gateway creates an Objective that the Tag owns, answers with
 its ID, and starts the owner's first turn. Type `/goal` on its own to open the form instead.
 The Objective works in the Workspace configured on its owner Tag.
 
@@ -200,7 +200,7 @@ The palette's actions:
 
 - **New Tag** opens the form to create a Tag, as Ctrl-N does.
 - **Keyboard shortcuts** lists every key the terminal UI answers to; Esc goes back to the palette.
-- **Control Planes · add or switch** opens the Ctrl-P list.
+- **Gateways · add or switch** opens the Ctrl-P list.
 - **`/goal` · Create Objective** opens a form for an Objective owned by the selected Tag: its outcome, the
   Team its owner may hand work to (empty, it works alone), and a budget such as `300 USD` or
   `$12.50` (empty, no budget). Up and down move between the fields; enter moves to the next and,
@@ -216,7 +216,7 @@ and enter opens the row. Esc quits when there is nothing to go back from, and Ct
 Every text from the server, an agent or a diff is filtered for the terminal, so an escape sequence
 shows as text.
 
-It talks to the Control Plane through the generated runtime v2 Go client in
+It talks to the Gateway through the generated runtime v2 Go client in
 `sdks/go`. `Conversations` sends messages, lists your conversations with their previews and
 unread replies, reads their history and what changed in it, follows it as it changes, and marks
 them read. `Operator.ListEvents` reads a running turn's new events while its conversation's
@@ -227,7 +227,7 @@ requests. `WorkSessions` reads a work Session's delivery and activity. `Teams` l
 Teams and the shown Team's Workstream. `OperatorEvents.Watch` keeps the rail, the Objective view,
 the Team view and expanded work Sessions current. While that stream is down, the TUI rereads what
 it shows every five seconds. `Operator.ListHosts` feeds the status bar, reread every 15 seconds;
-when the Control Plane refuses it, the status bar leaves the Worker Hosts out. `Operator.ListTags`
+when the Gateway refuses it, the status bar leaves the Worker Hosts out. `Operator.ListTags`
 lists the Tags. The replies are projected into the TUI's own presentation types in `views/`. See
 `contributing/tui-design.md`.
 
@@ -240,15 +240,15 @@ Run the tests with `go test ./...`. `typing_bench_test.go` guards typing latency
 the last Tag's conversation, without a cache and with one. The ignored tests in `core/crates/cli/tests/operator_runtime.rs`
 drive a built binary end to end under tmux when `SUPERTAG_RUST_TEST_TUI` names it.
 
-The CLI resolves the Control Plane as every other command does (`--control-plane`,
-`--state-directory`, `SUPERTAG_CONTROL_PLANE_URL`, or this machine's local services), starts the
+The CLI resolves the Gateway as every other command does (`--gateway`,
+`--state-directory`, `SUPERTAG_GATEWAY_URL`, or this machine's local services), starts the
 binary with a socket as file descriptor 3, sets `SUPERTAG_TUI_HANDOVER=3`, and writes one JSON
 object to it:
 `{"protocol": "runtime.v2", "current": 0, "contexts": [{"url": ..., "token": ..., "workspace": ...,
 "server_ca_file": ..., "client_cert_file": ..., "client_key_file": ...}]}`. The TUI refuses a
-handover that names another protocol or none. A handed-over local Control Plane becomes the Local
+handover that names another protocol or none. A handed-over local Gateway becomes the Local
 entry. The CLI also passes the state directory it resolved as `SUPERTAG_STATE_DIR`, so Local is
 found in the same place. With nothing selected and no local services running, the CLI starts the
-binary without a handover, and it opens on the saved Control Planes.
+binary without a handover, and it opens on the saved Gateways.
 A saved connection whose credential cannot be read is left out. The binary takes no token from its
 arguments or environment; the saved-connection flow is described above.

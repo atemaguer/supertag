@@ -6,7 +6,7 @@ use tauri::ipc::Channel;
 use tokio::{sync::oneshot, time::timeout};
 use tonic::{Code, Status};
 
-use super::{ControlPlaneState, Result, Session};
+use super::{GatewayState, Result, Session};
 
 const FIRST_RETRY: Duration = Duration::from_secs(1);
 const MAX_RETRY: Duration = Duration::from_secs(30);
@@ -36,7 +36,7 @@ pub enum WatchUpdate {
     },
 }
 
-impl ControlPlaneState {
+impl GatewayState {
     pub async fn start_watch(
         &self,
         connection_id: &str,
@@ -109,7 +109,7 @@ async fn run(
             result = read(&session, &updates, &mut token, &mut live, idle) => result,
         };
         let status = match outcome {
-            Ok(()) => Status::unavailable("Control Plane Watch closed"),
+            Ok(()) => Status::unavailable("Gateway Watch closed"),
             Err(AttemptError::Stream(status)) => status,
             Err(AttemptError::Channel) => return,
         };
@@ -167,14 +167,12 @@ async fn read(
     loop {
         let next = timeout(idle, stream.message())
             .await
-            .map_err(|_| Status::unavailable("Control Plane Watch stopped sending heartbeats"))??;
+            .map_err(|_| Status::unavailable("Gateway Watch stopped sending heartbeats"))??;
         let Some(frame) = next else {
             return Ok(());
         };
         let Some(update) = frame.update else {
-            return Err(
-                Status::data_loss("Control Plane Watch returned an incomplete frame").into(),
-            );
+            return Err(Status::data_loss("Gateway Watch returned an incomplete frame").into());
         };
         let notice = match update {
             watch_event::Update::Heartbeat(_) => None,

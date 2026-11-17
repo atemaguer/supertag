@@ -1,5 +1,5 @@
 // Presentation types of the terminal UI. They began as the generated types of the removed
-// supertag.operator.v1 protos; the Control Plane's runtime.v2 replies are projected into them.
+// supertag.operator.v1 protos; the Gateway's runtime.v2 replies are projected into them.
 
 package views
 
@@ -82,7 +82,7 @@ type Task struct {
 	// The named Workspace and the Task's branch, recorded when it was
 	// accepted. Unset for a Task without a named Workspace.
 	Workspace *TaskWorkspace
-	// How the Task ended, as the Control Plane recorded it: a JSON object such
+	// How the Task ended, as the Gateway recorded it: a JSON object such
 	// as `{"status": "completed"}` with the reason for a failure or
 	// cancellation. Unset while it is open.
 	Outcome *structpb.Struct

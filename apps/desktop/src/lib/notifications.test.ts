@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Conversation, Message } from "../control-plane";
+import type { Conversation, Message } from "../gateway";
 import { latestHistory } from "./history";
 import {
   type Alert,

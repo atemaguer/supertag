@@ -66,7 +66,7 @@ func typingModel(tb testing.TB, turns int) model {
 	return m
 }
 
-// streamPage is how many events the follower reads from the Control Plane per poll.
+// streamPage is how many events the follower reads from the Gateway per poll.
 const streamPage = 32
 
 var benchKey = tea.KeyPressMsg{Code: 'a', Text: "a"}
@@ -98,7 +98,7 @@ func BenchmarkTypingKeystroke(b *testing.B) {
 }
 
 // BenchmarkStreamingPage is what one page of streamed reply text costs the program: the events a
-// poll of the Control Plane emits at once, delivered as the follow delivers them, each message
+// poll of the Gateway emits at once, delivered as the follow delivers them, each message
 // with its frame. A key typed while they arrive waits behind them.
 func BenchmarkStreamingPage(b *testing.B) {
 	for _, turns := range []int{50, 300} {

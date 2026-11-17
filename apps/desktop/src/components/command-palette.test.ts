@@ -2,9 +2,9 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Tag } from "../control-plane";
+import type { Tag } from "../gateway";
 import { keyboardShortcuts, type PaletteAction, searchPalette, snippet } from "./command-palette";
-import { controlPlaneActions } from "./control-plane-selector";
+import { gatewayActions } from "./gateway-selector";
 import { WorkspaceShell } from "./workspace";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,10 +46,8 @@ afterEach(() => {
 function render(props: Partial<Parameters<typeof WorkspaceShell>[0]> = {}) {
   const onSelectTag = vi.fn();
   const onNewTag = vi.fn();
-  const addControlPlane = vi.fn();
-  const actions: PaletteAction[] = [
-    { id: "add-control-plane", label: "Add Control Plane", run: addControlPlane },
-  ];
+  const addGateway = vi.fn();
+  const actions: PaletteAction[] = [{ id: "add-gateway", label: "Add Gateway", run: addGateway }];
   act(() =>
     root.render(
       createElement(
@@ -70,7 +68,7 @@ function render(props: Partial<Parameters<typeof WorkspaceShell>[0]> = {}) {
       ),
     ),
   );
-  return { onSelectTag, onNewTag, addControlPlane };
+  return { onSelectTag, onNewTag, addGateway };
 }
 
 const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
@@ -109,7 +107,7 @@ it("opens with Ctrl+K, listing the Tags in sidebar order and then the actions", 
   expect(finch?.querySelector(".avatar")).not.toBeNull();
   expect(finch?.querySelector(".palette-caption")?.textContent).toBe("The lockfile is current.");
   expect(finch?.querySelector("[data-slot=command-shortcut]")?.textContent).toBe("Ctrl+2");
-  expect(labels("Actions")).toEqual(["New Tag", "Keyboard shortcuts", "Add Control Plane"]);
+  expect(labels("Actions")).toEqual(["New Tag", "Keyboard shortcuts", "Add Gateway"]);
   expect(selected()).toBe("Lead");
 });
 
@@ -127,9 +125,9 @@ it("filters both sections as you type, matching cached message text", () => {
     "Please check the staging deploy before Friday's release",
   );
 
-  type("control plane");
+  type("gateway");
   expect(section("Tags")).toBeUndefined();
-  expect(labels("Actions")).toEqual(["Add Control Plane"]);
+  expect(labels("Actions")).toEqual(["Add Gateway"]);
 
   type("nothing like this");
   expect(dialog()?.textContent).toContain("No results");
@@ -170,8 +168,8 @@ it("closes with Esc and with Ctrl+K, forgetting the search", () => {
   expect(dialog()).toBeNull();
 });
 
-it("runs actions: New Tag, the keyboard shortcuts, and the Control Plane settings", () => {
-  const { onNewTag, addControlPlane } = render();
+it("runs actions: New Tag, the keyboard shortcuts, and the Gateway settings", () => {
+  const { onNewTag, addGateway } = render();
   press("k", { ctrlKey: true });
   type("new tag");
   press("Enter", {}, input());
@@ -179,9 +177,9 @@ it("runs actions: New Tag, the keyboard shortcuts, and the Control Plane setting
   expect(dialog()).toBeNull();
 
   press("k", { ctrlKey: true });
-  type("add control");
+  type("add gateway");
   press("Enter", {}, input());
-  expect(addControlPlane).toHaveBeenCalledOnce();
+  expect(addGateway).toHaveBeenCalledOnce();
 
   press("k", { ctrlKey: true });
   type("keyboard");
@@ -205,11 +203,11 @@ it("offers actions without Tags while disconnected", () => {
   render({ tags: [], summaries: {}, connected: false });
   act(() => (document.querySelector('.sidebar [aria-label="Search"]') as HTMLElement).click());
   expect(section("Tags")).toBeUndefined();
-  expect(labels("Actions")).toEqual(["New Tag", "Keyboard shortcuts", "Add Control Plane"]);
+  expect(labels("Actions")).toEqual(["New Tag", "Keyboard shortcuts", "Add Gateway"]);
 });
 
 it("searches names, IDs, previews and messages, needing every word", () => {
-  const actions = [{ id: "a", label: "Add Control Plane", keywords: "connect", run() {} }];
+  const actions = [{ id: "a", label: "Add Gateway", keywords: "connect", run() {} }];
   const texts = (tagId: string) => messages[tagId] ?? [];
   const found = (query: string) => searchPalette(query, tags, summaries, actions, texts);
   expect(found("").tags.map((entry) => entry.tag.tagId)).toEqual(["finch", "lead", "moss"]);
@@ -223,10 +221,10 @@ it("searches names, IDs, previews and messages, needing every word", () => {
   );
 });
 
-it("offers the Control Plane menu's choices as actions", () => {
+it("offers the Gateway menu's choices as actions", () => {
   const onSelect = vi.fn();
   const onNotifications = vi.fn();
-  const actions = controlPlaneActions({
+  const actions = gatewayActions({
     active: "https://team.example",
     profiles: [
       { name: "Team", origin: "https://team.example" },
@@ -244,9 +242,9 @@ it("offers the Control Plane menu's choices as actions", () => {
   expect(actions.map((action) => action.label)).toEqual([
     "Switch to Local",
     "Switch to Lab",
-    "Add Control Plane",
-    "Edit Control Plane · Team",
-    "Edit Control Plane · Lab",
+    "Add Gateway",
+    "Edit Gateway · Team",
+    "Edit Gateway · Lab",
     "Notifications · All messages",
     "Notifications · Questions only",
     "Notifications · Off",

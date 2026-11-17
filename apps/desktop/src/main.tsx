@@ -2,20 +2,20 @@ import "@fontsource-variable/geist";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConnectionDialog } from "./components/connection";
-import { ControlPlaneSelector, controlPlaneActions } from "./components/control-plane-selector";
+import { GatewaySelector, gatewayActions } from "./components/gateway-selector";
 import type { SidebarMode } from "./components/sidebar";
 import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
 import {
-  type ControlPlane,
-  type ControlPlaneActivation,
-  type ControlPlaneList,
-  type ControlPlaneProfile,
   cacheScope,
-  controlPlaneSession,
-  LOCAL_CONTROL_PLANE,
-  nativeControlPlane,
+  type Gateway,
+  type GatewayActivation,
+  type GatewayList,
+  type GatewayProfile,
+  gatewaySession,
+  LOCAL_GATEWAY,
+  nativeGateway,
   type Tag,
-} from "./control-plane";
+} from "./gateway";
 import { useNotificationLevel } from "./lib/notifications";
 import { describe } from "./lib/polling";
 import { type TagAdmin, tagAdminRefusal, tagAdminSession } from "./tag-admin";
@@ -23,7 +23,7 @@ import "./shadcn.css";
 import "./style.css";
 
 interface Connection {
-  controlPlane: ControlPlane;
+  gateway: Gateway;
   tags: Tag[];
   preview: boolean;
   id?: string;
@@ -35,8 +35,8 @@ interface Connection {
 
 function App({ initialConnection }: { initialConnection?: Connection }) {
   const [connection, setConnection] = useState(initialConnection);
-  const [controlPlanes, setControlPlanes] = useState<ControlPlaneList>({ profiles: [] });
-  const [editor, setEditor] = useState<{ profile?: ControlPlaneProfile }>();
+  const [gateways, setGateways] = useState<GatewayList>({ profiles: [] });
+  const [editor, setEditor] = useState<{ profile?: GatewayProfile }>();
   const [error, setError] = useState("");
   const [switching, setSwitching] = useState(!initialConnection);
   const [writing, setWriting] = useState(false);
@@ -47,10 +47,10 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const [notifications, setNotifications] = useNotificationLevel();
 
   const activate = useCallback(
-    ({ controlPlanes, origin, connectionId, tags, principal }: ControlPlaneActivation) => {
-      setControlPlanes(controlPlanes);
+    ({ gateways, origin, connectionId, tags, principal }: GatewayActivation) => {
+      setGateways(gateways);
       setConnection({
-        controlPlane: controlPlaneSession(connectionId, cacheScope(origin, principal)),
+        gateway: gatewaySession(connectionId, cacheScope(origin, principal)),
         tags,
         preview: false,
         id: connectionId,
@@ -67,14 +67,14 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     let live = true;
     async function restore() {
       try {
-        const saved = await nativeControlPlane.list();
+        const saved = await nativeGateway.list();
         if (!live) return;
-        setControlPlanes(saved);
-        // The last saved Control Plane used wins; with none, the local one when it runs.
+        setGateways(saved);
+        // The last saved Gateway used wins; with none, the local one when it runs.
         const next = saved.active
-          ? await nativeControlPlane.select(saved.active)
+          ? await nativeGateway.select(saved.active)
           : saved.local?.origin
-            ? await nativeControlPlane.connectLocal()
+            ? await nativeGateway.connectLocal()
             : undefined;
         if (live && next) activate(next);
       } catch (error) {
@@ -112,7 +112,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     }
   }
 
-  function open(profile?: ControlPlaneProfile, button = trigger.current) {
+  function open(profile?: GatewayProfile, button = trigger.current) {
     if (pendingSwitch.current || pendingWrites.current > 0) return;
     opener.current = button;
     setError("");
@@ -123,10 +123,10 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     return change(async () => {
       if (connection?.preview && !forget) {
         setConnection(undefined);
-        setControlPlanes(await nativeControlPlane.list());
+        setGateways(await nativeGateway.list());
         return;
       }
-      setControlPlanes(await nativeControlPlane.clear(forget));
+      setGateways(await nativeGateway.clear(forget));
       if (!forget || forget === connection?.origin) setConnection(undefined);
       setEditor(undefined);
     });
@@ -134,8 +134,8 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
 
   const menu = {
     active: connection?.origin,
-    profiles: controlPlanes.profiles,
-    local: controlPlanes.local,
+    profiles: gateways.profiles,
+    local: gateways.local,
     preview: connection?.preview,
     busy: writing,
     switching,
@@ -143,32 +143,32 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
       if (origin === connection?.origin) return;
       void change(async () =>
         activate(
-          await (origin === LOCAL_CONTROL_PLANE
-            ? nativeControlPlane.connectLocal()
-            : nativeControlPlane.select(origin)),
+          await (origin === LOCAL_GATEWAY
+            ? nativeGateway.connectLocal()
+            : nativeGateway.select(origin)),
         ),
       );
     },
-    onEdit: (profile?: ControlPlaneProfile) => open(profile),
+    onEdit: (profile?: GatewayProfile) => open(profile),
     onDisconnect: () => void clear(),
   };
-  // The command palette offers what the Control Plane menu does.
-  const actions = controlPlaneActions({
+  // The command palette offers what the Gateway menu does.
+  const actions = gatewayActions({
     ...menu,
     notifications,
     onNotifications: setNotifications,
   });
 
   const selector = (mode: SidebarMode) => (
-    <ControlPlaneSelector
+    <GatewaySelector
       {...menu}
       wide={mode === "expanded"}
       principal={connection?.principal}
       trigger={trigger}
       onOpen={() => {
         if (pendingSwitch.current || connection?.preview) return;
-        // A local Control Plane started or stopped since the list was read shows as it is now.
-        nativeControlPlane.list().then(setControlPlanes, () => {});
+        // A local Gateway started or stopped since the list was read shows as it is now.
+        nativeGateway.list().then(setGateways, () => {});
       }}
     />
   );
@@ -179,7 +179,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
         <Workspace
           key={connection.id ?? "preview"}
           connectionId={connection.id}
-          controlPlane={connection.controlPlane}
+          gateway={connection.gateway}
           initialTags={connection.tags}
           selector={selector}
           draftScope={connection.origin ?? "preview"}
@@ -202,10 +202,10 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           <EmptyWorkspace
             switching={switching}
             onSettings={(event) => open(undefined, event.currentTarget)}
-            localProblem={controlPlanes.local?.problem}
+            localProblem={gateways.local?.problem}
             onLocal={
-              controlPlanes.local?.origin
-                ? () => void change(async () => activate(await nativeControlPlane.connectLocal()))
+              gateways.local?.origin
+                ? () => void change(async () => activate(await nativeGateway.connectLocal()))
                 : undefined
             }
           />
@@ -223,7 +223,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           }}
           onSave={(address, name, token) =>
             void change(async () => {
-              activate(await nativeControlPlane.save(address, name, token));
+              activate(await nativeGateway.save(address, name, token));
               setEditor(undefined);
             })
           }
@@ -243,12 +243,12 @@ async function start() {
   if (!target) throw new Error("Desktop root is missing");
   let initialConnection: Connection | undefined;
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("preview")) {
-    const { previewControlPlane, previewTagAdmin, withoutLead } = await import("./preview");
-    // `?preview&nolead` shows a Control Plane without a lead Tag.
+    const { previewGateway, previewTagAdmin, withoutLead } = await import("./preview");
+    // `?preview&nolead` shows a Gateway without a lead Tag.
     if (new URLSearchParams(location.search).has("nolead")) withoutLead();
     initialConnection = {
-      controlPlane: previewControlPlane,
-      tags: await previewControlPlane.tags(),
+      gateway: previewGateway,
+      tags: await previewGateway.tags(),
       preview: true,
       tagAdmin: previewTagAdmin,
     };

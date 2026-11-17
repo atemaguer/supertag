@@ -129,7 +129,7 @@ func TestTheNextLaunchShowsTheLastConversationBeforeAnyCall(t *testing.T) {
 		t.Fatalf("the cache holds %d turns, want %d", len(c.runtime.order), cacheTurns)
 	}
 
-	// Another credential to the same Control Plane shows nothing it has not been told it may see.
+	// Another credential to the same Gateway shows nothing it has not been told it may see.
 	other, err := newApp(t.Context(), dial("test"), []client.Target{{URL: url, Token: "another", Name: "remote"}}, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -172,14 +172,14 @@ func TestACacheEntryOfAnotherSchemaIsDiscarded(t *testing.T) {
 	}
 	cache.forget()
 	if _, err := os.Stat(filepath.Join(root, cacheDigest("http://127.0.0.1:9"))); !os.IsNotExist(err) {
-		t.Fatalf("forgetting left the Control Plane's cache: %v", err)
+		t.Fatalf("forgetting left the Gateway's cache: %v", err)
 	}
 }
 
-// outboxPlane is a Control Plane whose SendMessage refuses until accept is set.
-func outboxPlane(t *testing.T) (*fakeControlPlane, string) {
+// outboxPlane is a Gateway whose SendMessage refuses until accept is set.
+func outboxPlane(t *testing.T) (*fakeGateway, string) {
 	t.Helper()
-	fake := &fakeControlPlane{tags: tags("lead"), principal: "operator:local"}
+	fake := &fakeGateway{tags: tags("lead"), principal: "operator:local"}
 	fake.messages = func(string) *v2.ListMessagesResponse {
 		return &v2.ListMessagesResponse{ConversationId: "conversation-lead"}
 	}
@@ -352,7 +352,7 @@ func TestJumpToLatestCountsWhatArrivedWhileScrolledUp(t *testing.T) {
 func TestDraftsAreKeptPerTagAcrossLaunches(t *testing.T) {
 	privateCache(t)
 	tagRefresh = time.Hour
-	fake := &fakeControlPlane{tags: tags("lead", "builder"), principal: "operator:local"}
+	fake := &fakeGateway{tags: tags("lead", "builder"), principal: "operator:local"}
 	url := fake.start(t).URL
 	launch := func() *app {
 		a, err := newApp(t.Context(), dial("test"), []client.Target{{URL: url, Token: "secret"}}, 0)
@@ -391,7 +391,7 @@ func TestTheRailPinsTheLeadAndSortsByActivityFoldsAndResizes(t *testing.T) {
 	root := privateCache(t)
 	list := tagList("alpha", "beta", "lead", "gamma")
 	list[2].Spec = &views.TagSpec{Lead: true}
-	fake := &fakeControlPlane{tags: func() ([]*views.Tag, error) { return list, nil }}
+	fake := &fakeGateway{tags: func() ([]*views.Tag, error) { return list, nil }}
 	fake.conversations = func() []*v2.Conversation {
 		now := time.Now().UnixMilli()
 		return []*v2.Conversation{{TagId: "gamma", LastActivityAtMs: now}, {TagId: "alpha", LastActivityAtMs: now - 60_000, UnreadCount: 2}}
@@ -431,7 +431,7 @@ func TestTheRailPinsTheLeadAndSortsByActivityFoldsAndResizes(t *testing.T) {
 }
 
 func TestNewTagCreatesATagWithTheLeadTagsDefaults(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags("lead"), hostStatus: []*v2.WorkerHostStatus{
+	fake := &fakeGateway{tags: tags("lead"), hostStatus: []*v2.WorkerHostStatus{
 		{HostId: "laptop", HarnessKind: v2.HarnessKind_HARNESS_KIND_CODEX, WorkspaceIds: []string{"supertag"},
 			Harnesses: []*v2.HostHarnessCapacity{{HarnessKind: v2.HarnessKind_HARNESS_KIND_CLAUDE_CODE}}},
 		{HostId: "gone", HarnessKind: v2.HarnessKind_HARNESS_KIND_CURSOR, RevokedAtMs: new(int64)},

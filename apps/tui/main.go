@@ -1,5 +1,5 @@
 // Command supertag-tui is SuperTag's terminal UI. Plain `supertag` in a terminal starts it. When
-// `supertag` resolved a Control Plane, it hands it over on file descriptor 3 and sets SUPERTAG_TUI_HANDOVER=3.
+// `supertag` resolved a Gateway, it hands it over on file descriptor 3 and sets SUPERTAG_TUI_HANDOVER=3.
 package main
 
 import (
@@ -36,8 +36,8 @@ func main() {
 		targetFile = os.NewFile(3, "supertag-target")
 	}
 	os.Unsetenv(handoverVariable)
-	store, storeErr := defaultControlPlaneStore()
-	var profiles controlPlaneProfiles
+	store, storeErr := defaultGatewayStore()
+	var profiles gatewayProfiles
 	if storeErr == nil {
 		profiles, storeErr = store.load()
 	}
@@ -56,15 +56,15 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	launchContexts := append([]client.Target(nil), h.Contexts...)
-	h.Contexts = mergeControlPlanes(h.Contexts, profiles.ControlPlanes)
+	h.Contexts = mergeGateways(h.Contexts, profiles.Gateways)
 	a, err := newApp(ctx, dial(version), h.Contexts, h.Current)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer a.stop()
-	a.controlPlaneStore = store
-	a.savedControlPlanes = profiles.ControlPlanes
+	a.gatewayStore = store
+	a.savedGateways = profiles.Gateways
 	// Only a real handover is a launch-specific connection. Saved-only startup
 	// must not retain a forgotten connection after switching away.
 	a.launchContexts = launchContexts
@@ -76,8 +76,8 @@ func main() {
 	}
 	a.local, a.localProblem, a.discover = local, localProblem, discoverLocal
 	if storeErr != nil {
-		a.inner.notice = note{text: "Saved Control Planes could not be read safely. This launch connection is still available.", err: true}
-		a.choiceErr = "Saved Control Planes could not be read safely. Check the private profile file and its permissions."
+		a.inner.notice = note{text: "Saved Gateways could not be read safely. This launch connection is still available.", err: true}
+		a.choiceErr = "Saved Gateways could not be read safely. Check the private profile file and its permissions."
 	}
 	if _, err := tea.NewProgram(a).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -85,7 +85,7 @@ func main() {
 	}
 }
 
-// handover is what `supertag` writes to descriptor 3: every Control Plane the CLI resolved, and
+// handover is what `supertag` writes to descriptor 3: every Gateway the CLI resolved, and
 // the index of the one it selected.
 type handover struct {
 	Contexts []client.Target `json:"contexts"`
@@ -124,7 +124,7 @@ func readHandover(f *os.File) (handover, error) {
 	}
 	for _, target := range h.Contexts {
 		if target.URL == "" || target.Token == "" {
-			return h, errors.New("every Control Plane needs a url and a token")
+			return h, errors.New("every Gateway needs a url and a token")
 		}
 	}
 	return h, nil

@@ -14,7 +14,7 @@ import (
 // The palette's Network shows each Task Attempt's requests, allowed or refused, and rereads when
 // one of the Tag's Tasks changes.
 func TestNetworkShowsTheTagsNetworkLog(t *testing.T) {
-	fake := &fakeControlPlane{tags: tags("lead")}
+	fake := &fakeGateway{tags: tags("lead")}
 	a := testApp(t, fake, nil)
 	pressApp(t, a, ctrlK)
 	typeApp(t, a, "Network")
@@ -53,7 +53,7 @@ func TestNetworkShowsTheTagsNetworkLog(t *testing.T) {
 }
 
 func TestNetworkTellsAClientOnlyOperatorsSeeIt(t *testing.T) {
-	a := testApp(t, &fakeControlPlane{tags: tags("lead"), networkRefusal: true}, nil)
+	a := testApp(t, &fakeGateway{tags: tags("lead"), networkRefusal: true}, nil)
 	runApp(t, a, a.openNetwork())
 	if s := appScreen(a); !strings.Contains(s, "Only operators can see the network log.") {
 		t.Fatalf("refused log:\n%s", s)

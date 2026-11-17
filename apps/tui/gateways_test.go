@@ -22,12 +22,12 @@ import (
 	rpc "github.com/atemaguer/supertag/sdks/go/runtimev2/runtimev2connect"
 )
 
-func profileStore(t *testing.T) *controlPlaneStore {
+func profileStore(t *testing.T) *gatewayStore {
 	t.Helper()
-	return &controlPlaneStore{filepath.Join(t.TempDir(), "private", "tui-control-planes.json")}
+	return &gatewayStore{filepath.Join(t.TempDir(), "private", "tui-gateways.json")}
 }
 
-func TestSavedControlPlanesReopenRotateAndPreserveLaunchCredentials(t *testing.T) {
+func TestSavedGatewaysReopenRotateAndPreserveLaunchCredentials(t *testing.T) {
 	store := profileStore(t)
 	first := client.Target{Name: "first", URL: "https://first.example", Token: "first-token"}
 	second := client.Target{Name: "second", URL: "https://second.example", Token: "second-token", ServerCAFile: "/trusted/ca.pem", ClientCertFile: "/trusted/client.pem", ClientKeyFile: "/trusted/client.key"}
@@ -41,7 +41,7 @@ func TestSavedControlPlanesReopenRotateAndPreserveLaunchCredentials(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(profiles.ControlPlanes) != 2 || profiles.ControlPlanes[1] != second {
+	if len(profiles.Gateways) != 2 || profiles.Gateways[1] != second {
 		t.Fatal("stored independent credentials or TLS paths changed")
 	}
 	if err = store.selectTarget(first); err != nil {
@@ -53,7 +53,7 @@ func TestSavedControlPlanesReopenRotateAndPreserveLaunchCredentials(t *testing.T
 	}
 	h, _, err := startupTargets(nil, profiles, client.Target{})
 	if err != nil || h.Contexts[h.Current] != first {
-		t.Fatal("saved-only startup did not reopen the selected Control Plane")
+		t.Fatal("saved-only startup did not reopen the selected Gateway")
 	}
 	rotated := first
 	rotated.Token = "replacement-token"
@@ -61,7 +61,7 @@ func TestSavedControlPlanesReopenRotateAndPreserveLaunchCredentials(t *testing.T
 		t.Fatal(err)
 	}
 	profiles, err = store.load()
-	if err != nil || len(profiles.ControlPlanes) != 2 || profiles.ControlPlanes[0] != rotated {
+	if err != nil || len(profiles.Gateways) != 2 || profiles.Gateways[0] != rotated {
 		t.Fatal("credential rotation did not replace exactly one saved profile")
 	}
 	foreign := rotated
@@ -69,7 +69,7 @@ func TestSavedControlPlanesReopenRotateAndPreserveLaunchCredentials(t *testing.T
 	if _, err = store.save(foreign); err == nil {
 		t.Fatal("a saved name must not move its credential to another origin")
 	}
-	merged := mergeControlPlanes([]client.Target{first}, profiles.ControlPlanes)
+	merged := mergeGateways([]client.Target{first}, profiles.Gateways)
 	if merged[0] != first || len(merged) != 3 {
 		t.Fatal("saved credentials overrode an explicit launch target")
 	}
@@ -96,12 +96,12 @@ func TestSavedControlPlanesReopenRotateAndPreserveLaunchCredentials(t *testing.T
 		t.Fatal(err)
 	}
 	profiles, err = store.load()
-	if err != nil || len(profiles.ControlPlanes) != 1 || profiles.ControlPlanes[0] != second {
-		t.Fatal("forget removed another Control Plane")
+	if err != nil || len(profiles.Gateways) != 1 || profiles.Gateways[0] != second {
+		t.Fatal("forget removed another Gateway")
 	}
 }
 
-func TestSavedControlPlaneStorageRejectsUnsafeFilesAndHasNoSmallProfileCap(t *testing.T) {
+func TestSavedGatewayStorageRejectsUnsafeFilesAndHasNoSmallProfileCap(t *testing.T) {
 	store := profileStore(t)
 	for i := 0; i < 40; i++ {
 		if _, err := store.save(client.Target{Name: fmt.Sprintf("gateway-%d", i), URL: fmt.Sprintf("https://gateway-%d.example", i), Token: "credential"}); err != nil {
@@ -109,8 +109,8 @@ func TestSavedControlPlaneStorageRejectsUnsafeFilesAndHasNoSmallProfileCap(t *te
 		}
 	}
 	profiles, err := store.load()
-	if err != nil || len(profiles.ControlPlanes) != 40 {
-		t.Fatal("all configured Control Planes should be retained")
+	if err != nil || len(profiles.Gateways) != 40 {
+		t.Fatal("all configured Gateways should be retained")
 	}
 	if err = os.Chmod(store.path, 0644); err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestSavedControlPlaneStorageRejectsUnsafeFilesAndHasNoSmallProfileCap(t *te
 	if _, err = store.load(); err == nil {
 		t.Fatal("followed a credential symlink")
 	}
-	if _, err = store.save(profiles.ControlPlanes[0]); err == nil {
+	if _, err = store.save(profiles.Gateways[0]); err == nil {
 		t.Fatal("overwrote a credential symlink")
 	}
 	if err = os.Remove(store.path); err != nil {
@@ -145,7 +145,7 @@ func TestSavedControlPlaneStorageRejectsUnsafeFilesAndHasNoSmallProfileCap(t *te
 	}
 }
 
-func controlPlaneFixture(t *testing.T, name, token string) (client.Target, *atomic.Int32) {
+func gatewayFixture(t *testing.T, name, token string) (client.Target, *atomic.Int32) {
 	t.Helper()
 	bad := new(atomic.Int32)
 	mux := http.NewServeMux()
@@ -174,7 +174,7 @@ func controlPlaneFixture(t *testing.T, name, token string) (client.Target, *atom
 
 // A pasted client Auth Key enrolls this device once and only the enrolled credential is saved;
 // the device then sees no Worker Host status.
-func TestAddingAControlPlaneWithAnAuthKeyEnrollsThisDeviceAndSavesOnlyItsCredential(t *testing.T) {
+func TestAddingAGatewayWithAnAuthKeyEnrollsThisDeviceAndSavesOnlyItsCredential(t *testing.T) {
 	key := "stak_" + strings.Repeat("ab", 32)
 	var credential atomic.Value
 	var enrolledName atomic.Value
@@ -206,21 +206,21 @@ func TestAddingAControlPlaneWithAnAuthKeyEnrollsThisDeviceAndSavesOnlyItsCredent
 	server.Start()
 	defer server.Close()
 
-	a := controlPlaneTestApp(t, nil)
-	fillControlPlane(a, client.Target{Name: "work", URL: server.URL, Token: key})
-	_, verify := a.Update(a.checkControlPlane()())
-	if a.controlPlaneDialog == nil || !strings.Contains(a.controlPlaneDialog.note, "Connected as client:"+client.DeviceName()) {
+	a := gatewayTestApp(t, nil)
+	fillGateway(a, client.Target{Name: "work", URL: server.URL, Token: key})
+	_, verify := a.Update(a.checkGateway()())
+	if a.gatewayDialog == nil || !strings.Contains(a.gatewayDialog.note, "Connected as client:"+client.DeviceName()) {
 		t.Fatal("the dialog did not say which client this device joined as")
 	}
-	if a.controlPlaneDialog.inputs[2].Value() == key || verify == nil {
+	if a.gatewayDialog.inputs[2].Value() == key || verify == nil {
 		t.Fatal("the Auth Key stayed in the credential field")
 	}
 	a.Update(verify())
-	profiles, err := a.controlPlaneStore.load()
-	if err != nil || len(profiles.ControlPlanes) != 1 {
+	profiles, err := a.gatewayStore.load()
+	if err != nil || len(profiles.Gateways) != 1 {
 		t.Fatal("the enrolled connection was not saved")
 	}
-	if saved := profiles.ControlPlanes[0].Token; saved == key || !client.IsClientCredential(saved) {
+	if saved := profiles.Gateways[0].Token; saved == key || !client.IsClientCredential(saved) {
 		t.Fatal("only the enrolled client credential may be saved")
 	}
 	if !a.hasTarget || a.inner.reloadHosts() != nil {
@@ -228,7 +228,7 @@ func TestAddingAControlPlaneWithAnAuthKeyEnrollsThisDeviceAndSavesOnlyItsCredent
 	}
 }
 
-func controlPlaneTestApp(t *testing.T, targets []client.Target) *app {
+func gatewayTestApp(t *testing.T, targets []client.Target) *app {
 	t.Helper()
 	connector := func(ctx context.Context, target client.Target) (model, error) {
 		c, err := client.New(target, "test")
@@ -241,61 +241,61 @@ func controlPlaneTestApp(t *testing.T, targets []client.Target) *app {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.controlPlaneStore = profileStore(t)
+	a.gatewayStore = profileStore(t)
 	t.Cleanup(a.stop)
 	a.Update(tea.WindowSizeMsg{Width: 120, Height: 26})
 	return a
 }
 
-func fillControlPlane(a *app, target client.Target) {
-	a.openControlPlaneDialog(false)
+func fillGateway(a *app, target client.Target) {
+	a.openGatewayDialog(false)
 	for i, value := range []string{target.Name, target.URL, target.Token, target.ServerCAFile, target.ClientCertFile, target.ClientKeyFile} {
-		a.controlPlaneDialog.inputs[i].SetValue(value)
+		a.gatewayDialog.inputs[i].SetValue(value)
 	}
 }
 
-func TestRuntimeControlPlaneAddSwitchAndForgetKeepRostersAndCredentialsIsolated(t *testing.T) {
-	alpha, badAlpha := controlPlaneFixture(t, "alpha-only", "alpha-token")
-	beta, badBeta := controlPlaneFixture(t, "beta-only", "beta-token")
-	a := controlPlaneTestApp(t, []client.Target{alpha})
+func TestRuntimeGatewayAddSwitchAndForgetKeepRostersAndCredentialsIsolated(t *testing.T) {
+	alpha, badAlpha := gatewayFixture(t, "alpha-only", "alpha-token")
+	beta, badBeta := gatewayFixture(t, "beta-only", "beta-token")
+	a := gatewayTestApp(t, []client.Target{alpha})
 	runApp(t, a, a.scope(a.inner.tagsCmd()))
 	oldContext := a.inner.ctx
 	stale := a.scope(a.inner.tagsCmd())()
 	a.inner.input.SetValue("unsent on alpha")
 	a.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
-	if !a.choosing || !strings.Contains(appScreen(a), "Control Planes") {
-		t.Fatal("a single Control Plane must offer the manager")
+	if !a.choosing || !strings.Contains(appScreen(a), "Gateways") {
+		t.Fatal("a single Gateway must offer the manager")
 	}
-	fillControlPlane(a, beta)
+	fillGateway(a, beta)
 	if strings.Contains(appScreen(a), beta.Token) {
 		t.Fatal("token field leaked into the screen")
 	}
-	cmd := a.checkControlPlane()
+	cmd := a.checkGateway()
 	if cmd == nil {
 		t.Fatal("valid profile must verify")
 	}
 	_, _ = a.Update(cmd()) // Validation is real HTTP/2; load only the roster below.
-	if a.controlPlaneDialog != nil || a.contexts[a.current] != beta || oldContext.Err() == nil {
+	if a.gatewayDialog != nil || a.contexts[a.current] != beta || oldContext.Err() == nil {
 		t.Fatal("saving must switch and cancel old calls")
 	}
 	runApp(t, a, a.scope(a.inner.tagsCmd()))
 	if !strings.Contains(appScreen(a), "beta-only") || strings.Contains(appScreen(a), "alpha-only") || a.inner.input.Value() != "" {
-		t.Fatal("old roster or draft survived a Control Plane switch")
+		t.Fatal("old roster or draft survived a Gateway switch")
 	}
 	a.Update(stale)
 	if a.inner.tags[0].GetMetadata().GetId() != "beta-only" {
-		t.Fatal("stale roster replaced the current Control Plane")
+		t.Fatal("stale roster replaced the current Gateway")
 	}
 	if badAlpha.Load() != 0 || badBeta.Load() != 0 {
-		t.Fatal("credentials crossed Control Plane origins")
+		t.Fatal("credentials crossed Gateway origins")
 	}
-	profiles, err := a.controlPlaneStore.load()
+	profiles, err := a.gatewayStore.load()
 	if err != nil || profiles.Active != beta.Name {
-		t.Fatal("active Control Plane was not persisted")
+		t.Fatal("active Gateway was not persisted")
 	}
 	a.choosing = true
 	a.choice = a.current
-	a.forgetControlPlane()
+	a.forgetGateway()
 	if !a.hasTarget || a.contexts[a.current] != beta {
 		t.Fatal("forget must not abruptly close the active connection")
 	}
@@ -306,56 +306,56 @@ func TestRuntimeControlPlaneAddSwitchAndForgetKeepRostersAndCredentialsIsolated(
 	}
 }
 
-func TestEmptyControlPlaneStartupCanAddAndCancelDoesNotSave(t *testing.T) {
-	h, _, err := startupTargets(nil, controlPlaneProfiles{Version: 1}, client.Target{})
+func TestEmptyGatewayStartupCanAddAndCancelDoesNotSave(t *testing.T) {
+	h, _, err := startupTargets(nil, gatewayProfiles{Version: 1}, client.Target{})
 	if err != nil || len(h.Contexts) != 0 || h.Protocol != "runtime.v2" {
 		t.Fatal("first launch must open an empty chooser")
 	}
-	a := controlPlaneTestApp(t, nil)
-	if !strings.Contains(appScreen(a), "Add a Control Plane") {
+	a := gatewayTestApp(t, nil)
+	if !strings.Contains(appScreen(a), "Add a Gateway") {
 		t.Fatal("empty startup needs an add action")
 	}
-	target, _ := controlPlaneFixture(t, "first", "token-secret")
-	fillControlPlane(a, target)
-	checked := a.checkControlPlane()()
-	a.controlPlaneKey(key(tea.KeyEscape))
+	target, _ := gatewayFixture(t, "first", "token-secret")
+	fillGateway(a, target)
+	checked := a.checkGateway()()
+	a.gatewayKey(key(tea.KeyEscape))
 	a.Update(checked)
-	profiles, err := a.controlPlaneStore.load()
-	if err != nil || len(profiles.ControlPlanes) != 0 {
+	profiles, err := a.gatewayStore.load()
+	if err != nil || len(profiles.Gateways) != 0 {
 		t.Fatal("cancelled validation saved a credential")
 	}
-	fillControlPlane(a, target)
-	a.Update(a.checkControlPlane()())
+	fillGateway(a, target)
+	a.Update(a.checkGateway()())
 	if !a.hasTarget || a.contexts[a.current] != target {
-		t.Fatal("first verified Control Plane did not become active")
+		t.Fatal("first verified Gateway did not become active")
 	}
-	a.editControlPlane(target)
-	a.controlPlaneDialog.inputs[1].SetValue("https://another.example")
-	if a.checkControlPlane() != nil || !strings.Contains(a.controlPlaneDialog.note, "different Control Plane") {
+	a.editGateway(target)
+	a.gatewayDialog.inputs[1].SetValue("https://another.example")
+	if a.checkGateway() != nil || !strings.Contains(a.gatewayDialog.note, "different Gateway") {
 		t.Fatal("editing URL must not send a prefilled token to a new origin")
 	}
-	a.closeControlPlaneDialog()
+	a.closeGatewayDialog()
 }
 
-func TestControlPlaneRefusalDoesNotSaveOrEchoCredential(t *testing.T) {
-	target, _ := controlPlaneFixture(t, "secured", "correct")
-	a := controlPlaneTestApp(t, nil)
+func TestGatewayRefusalDoesNotSaveOrEchoCredential(t *testing.T) {
+	target, _ := gatewayFixture(t, "secured", "correct")
+	a := gatewayTestApp(t, nil)
 	target.Token = "wrong-private-token"
-	fillControlPlane(a, target)
-	a.Update(a.checkControlPlane()())
-	if a.hasTarget || a.controlPlaneDialog == nil || a.controlPlaneDialog.busy {
+	fillGateway(a, target)
+	a.Update(a.checkGateway()())
+	if a.hasTarget || a.gatewayDialog == nil || a.gatewayDialog.busy {
 		t.Fatal("refused credentials should leave the form open")
 	}
 	if strings.Contains(appScreen(a), target.Token) {
 		t.Fatal("provider error exposed a credential")
 	}
-	profiles, err := a.controlPlaneStore.load()
-	if err != nil || len(profiles.ControlPlanes) != 0 {
+	profiles, err := a.gatewayStore.load()
+	if err != nil || len(profiles.Gateways) != 0 {
 		t.Fatal("failed authentication was saved")
 	}
 }
 
-func TestControlPlaneSwitchCancelsInflightRuntimeRequest(t *testing.T) {
+func TestGatewaySwitchCancelsInflightRuntimeRequest(t *testing.T) {
 	started, stopped := make(chan struct{}), make(chan struct{})
 	mux := http.NewServeMux()
 	handleNegotiation(mux)
@@ -370,15 +370,15 @@ func TestControlPlaneSwitchCancelsInflightRuntimeRequest(t *testing.T) {
 	server.Config.Protocols.SetUnencryptedHTTP2(true)
 	server.Start()
 	defer server.Close()
-	other, _ := controlPlaneFixture(t, "other", "other-token")
-	a := controlPlaneTestApp(t, []client.Target{{Name: "blocked", URL: server.URL, Token: "blocked-token"}, other})
+	other, _ := gatewayFixture(t, "other", "other-token")
+	a := gatewayTestApp(t, []client.Target{{Name: "blocked", URL: server.URL, Token: "blocked-token"}, other})
 	cmd := a.scope(a.inner.tagsCmd())
 	result := make(chan tea.Msg, 1)
 	go func() { result <- cmd() }()
 	select {
 	case <-started:
 	case <-time.After(3 * time.Second):
-		t.Fatal("request did not reach Control Plane")
+		t.Fatal("request did not reach Gateway")
 	}
 	if err := a.start(1); err != nil {
 		t.Fatal(err)
@@ -386,7 +386,7 @@ func TestControlPlaneSwitchCancelsInflightRuntimeRequest(t *testing.T) {
 	select {
 	case <-stopped:
 	case <-time.After(3 * time.Second):
-		t.Fatal("switch did not cancel in-flight Control Plane RPC")
+		t.Fatal("switch did not cancel in-flight Gateway RPC")
 	}
 	select {
 	case msg := <-result:
@@ -395,18 +395,18 @@ func TestControlPlaneSwitchCancelsInflightRuntimeRequest(t *testing.T) {
 		t.Fatal("cancelled command did not return")
 	}
 	if a.inner.tagsErr != nil {
-		t.Fatal("old Control Plane cancellation poisoned the new model")
+		t.Fatal("old Gateway cancellation poisoned the new model")
 	}
 }
 
-func TestSavedControlPlanesAcceptWebSocketTunnelURLs(t *testing.T) {
+func TestSavedGatewaysAcceptWebSocketTunnelURLs(t *testing.T) {
 	for _, url := range []string{"wss://cp.example", "wss://cp.example:8443/supertag", "ws://127.0.0.1:7001/tunnel", "ws://[::1]:7001"} {
-		if err := validateSavedControlPlane(client.Target{Name: "tunnel", URL: url, Token: "credential"}); err != nil {
+		if err := validateSavedGateway(client.Target{Name: "tunnel", URL: url, Token: "credential"}); err != nil {
 			t.Errorf("%s: %v", url, err)
 		}
 	}
 	tls := client.Target{Name: "tunnel", URL: "wss://cp.example/supertag", Token: "credential", ServerCAFile: "/ca.pem", ClientCertFile: "/c.pem", ClientKeyFile: "/c.key"}
-	if err := validateSavedControlPlane(tls); err != nil {
+	if err := validateSavedGateway(tls); err != nil {
 		t.Errorf("wss with TLS files: %v", err)
 	}
 	for _, target := range []client.Target{
@@ -422,7 +422,7 @@ func TestSavedControlPlanesAcceptWebSocketTunnelURLs(t *testing.T) {
 		{Name: "tunnel", URL: "wss://cp.example/a/%2E%2e/supertag", Token: "credential"},
 		{Name: "tunnel", URL: `wss://cp.example/a\supertag`, Token: "credential"},
 	} {
-		if validateSavedControlPlane(target) == nil {
+		if validateSavedGateway(target) == nil {
 			t.Errorf("accepted %s", target.URL)
 		}
 	}
@@ -432,8 +432,8 @@ func TestSavedControlPlanesAcceptWebSocketTunnelURLs(t *testing.T) {
 		"ws://127.0.0.1:80/tunnel/":      "ws://127.0.0.1/tunnel/",
 		"https://Cp.Example:443/":        "https://cp.example",
 	} {
-		if got := controlPlaneOrigin(raw); got != want {
-			t.Errorf("controlPlaneOrigin(%q) = %q, want %q", raw, got, want)
+		if got := gatewayOrigin(raw); got != want {
+			t.Errorf("gatewayOrigin(%q) = %q, want %q", raw, got, want)
 		}
 	}
 }

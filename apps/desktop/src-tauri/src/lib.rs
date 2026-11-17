@@ -1,19 +1,19 @@
-mod control_plane;
+mod gateway;
 
 use std::path::PathBuf;
 
-use control_plane::{
-    ControlPlaneActivation, ControlPlaneList, ControlPlaneState, Conversation, Event, FollowUpdate,
-    Message, Messages, NewTag, ReadMessages, Tag, TagOptions, WatchUpdate,
+use gateway::{
+    Conversation, Event, FollowUpdate, GatewayActivation, GatewayList, GatewayState, Message,
+    Messages, NewTag, ReadMessages, Tag, TagOptions, WatchUpdate,
 };
 use tauri::{Manager, State, ipc::Channel, webview::PageLoadEvent};
 use tauri_plugin_dialog::DialogExt;
 
-fn control_plane_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+fn gateway_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
-        .map(|directory| directory.join("control-planes.json"))
-        .map_err(|_| "Could not locate your saved Control Plane connections.".into())
+        .map(|directory| directory.join("gateways.json"))
+        .map_err(|_| "Could not locate your saved Gateway connections.".into())
 }
 
 /// Where the app caches what it shows on launch, in its data directory.
@@ -36,67 +36,61 @@ fn local_state_directory() -> Option<PathBuf> {
 }
 
 #[tauri::command]
-async fn list_control_planes<R: tauri::Runtime>(
+async fn list_gateways<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, ControlPlaneState>,
-) -> Result<ControlPlaneList, String> {
-    state
-        .saved_control_planes(&control_plane_store(&app)?)
-        .await
+    state: State<'_, GatewayState>,
+) -> Result<GatewayList, String> {
+    state.saved_gateways(&gateway_store(&app)?).await
 }
 
 #[tauri::command]
-async fn save_control_plane<R: tauri::Runtime>(
+async fn save_gateway<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, ControlPlaneState>,
-    control_plane: String,
+    state: State<'_, GatewayState>,
+    gateway: String,
     name: String,
     token: String,
-) -> Result<ControlPlaneActivation, String> {
+) -> Result<GatewayActivation, String> {
     state
-        .save_control_plane(&control_plane_store(&app)?, control_plane, name, token)
+        .save_gateway(&gateway_store(&app)?, gateway, name, token)
         .await
 }
 
 #[tauri::command]
-async fn connect_local_control_plane<R: tauri::Runtime>(
+async fn connect_local_gateway<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, ControlPlaneState>,
-) -> Result<ControlPlaneActivation, String> {
-    state
-        .connect_local_control_plane(&control_plane_store(&app)?)
-        .await
+    state: State<'_, GatewayState>,
+) -> Result<GatewayActivation, String> {
+    state.connect_local_gateway(&gateway_store(&app)?).await
 }
 
 #[tauri::command]
-async fn select_control_plane<R: tauri::Runtime>(
+async fn select_gateway<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     origin: String,
-) -> Result<ControlPlaneActivation, String> {
-    state
-        .select_control_plane(&control_plane_store(&app)?, origin)
-        .await
+) -> Result<GatewayActivation, String> {
+    state.select_gateway(&gateway_store(&app)?, origin).await
 }
 
 #[tauri::command]
-async fn clear_control_plane<R: tauri::Runtime>(
+async fn clear_gateway<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     forget: Option<String>,
-) -> Result<ControlPlaneList, String> {
+) -> Result<GatewayList, String> {
     let list = state
-        .clear_control_plane(&control_plane_store(&app)?, forget.clone())
+        .clear_gateway(&gateway_store(&app)?, forget.clone())
         .await?;
     if let (Some(origin), Ok(root)) = (forget, local_cache(&app)) {
-        control_plane::cache::forget(&root, &origin);
+        gateway::cache::forget(&root, &origin);
     }
     Ok(list)
 }
 
 #[tauri::command]
-async fn start_control_plane_watch(
-    state: State<'_, ControlPlaneState>,
+async fn start_gateway_watch(
+    state: State<'_, GatewayState>,
     connection_id: String,
     watch_epoch: u64,
     on_update: Channel<WatchUpdate>,
@@ -107,8 +101,8 @@ async fn start_control_plane_watch(
 }
 
 #[tauri::command]
-async fn stop_control_plane_watch(
-    state: State<'_, ControlPlaneState>,
+async fn stop_gateway_watch(
+    state: State<'_, GatewayState>,
     watch_id: String,
 ) -> Result<(), String> {
     state.stop_watch(&watch_id).await;
@@ -117,7 +111,7 @@ async fn stop_control_plane_watch(
 
 #[tauri::command]
 async fn list_tags(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
 ) -> Result<Vec<Tag>, String> {
     state.tags(&connection_id).await
@@ -125,34 +119,34 @@ async fn list_tags(
 
 #[tauri::command]
 async fn list_notes(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     tag_id: String,
-) -> Result<Vec<control_plane::memories::Note>, String> {
+) -> Result<Vec<gateway::memories::Note>, String> {
     state.notes(&connection_id, tag_id).await
 }
 
 #[tauri::command]
 async fn list_network_logs(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     tag_id: String,
-) -> Result<Vec<control_plane::network::NetworkLog>, String> {
+) -> Result<Vec<gateway::network::NetworkLog>, String> {
     state.network_logs(&connection_id, tag_id).await
 }
 
 #[tauri::command]
 async fn delete_note(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     memory_id: String,
-) -> Result<control_plane::memories::Note, String> {
+) -> Result<gateway::memories::Note, String> {
     state.delete_note(&connection_id, memory_id).await
 }
 
 #[tauri::command]
 async fn list_tag_options(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
 ) -> Result<TagOptions, String> {
     state.tag_options(&connection_id).await
@@ -160,7 +154,7 @@ async fn list_tag_options(
 
 #[tauri::command]
 async fn create_tag(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     tag: NewTag,
 ) -> Result<Tag, String> {
@@ -169,7 +163,7 @@ async fn create_tag(
 
 #[tauri::command]
 async fn list_conversations(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
 ) -> Result<Vec<Conversation>, String> {
     state.conversations(&connection_id).await
@@ -177,7 +171,7 @@ async fn list_conversations(
 
 #[tauri::command]
 async fn list_messages(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     read: ReadMessages,
 ) -> Result<Messages, String> {
@@ -186,7 +180,7 @@ async fn list_messages(
 
 #[tauri::command]
 async fn mark_conversation_read(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     tag_id: String,
     order: u64,
@@ -196,7 +190,7 @@ async fn mark_conversation_read(
 
 #[tauri::command]
 async fn send_message(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     tag_id: String,
     text: String,
@@ -207,7 +201,7 @@ async fn send_message(
 
 #[tauri::command]
 async fn get_message(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     tag_id: String,
     task_id: String,
@@ -217,7 +211,7 @@ async fn get_message(
 
 #[tauri::command]
 async fn list_task_events(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     task_id: String,
     after_sequence: u64,
@@ -229,7 +223,7 @@ async fn list_task_events(
 /// until `stop_conversation_follow`.
 #[tauri::command]
 async fn start_conversation_follow(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     read: ReadMessages,
     on_update: Channel<FollowUpdate>,
@@ -239,7 +233,7 @@ async fn start_conversation_follow(
 
 #[tauri::command]
 async fn stop_conversation_follow(
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     follow_id: String,
 ) -> Result<(), String> {
     state.stop_follow(&follow_id).await;
@@ -250,7 +244,7 @@ async fn stop_conversation_follow(
 #[tauri::command]
 async fn read_cache<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     key: String,
 ) -> Result<Option<serde_json::Value>, String> {
@@ -260,7 +254,7 @@ async fn read_cache<R: tauri::Runtime>(
 #[tauri::command]
 async fn write_cache<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     key: String,
     value: serde_json::Value,
@@ -273,7 +267,7 @@ async fn write_cache<R: tauri::Runtime>(
 #[tauri::command]
 async fn save_result_artifact<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, ControlPlaneState>,
+    state: State<'_, GatewayState>,
     connection_id: String,
     artifact_id: String,
     path: String,
@@ -306,7 +300,7 @@ async fn save_result_artifact<R: tauri::Runtime>(
 
 fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
-        .manage(ControlPlaneState::new(local_state_directory()))
+        .manage(GatewayState::new(local_state_directory()))
         .plugin(tauri_plugin_dialog::init())
         // A Tag's reply or question while its conversation is not in view; see notifications.ts.
         .plugin(tauri_plugin_notification::init())
@@ -316,7 +310,7 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             if webview.label() == "main" && payload.event() == PageLoadEvent::Started {
                 let app = webview.app_handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    app.state::<ControlPlaneState>().disconnect().await;
+                    app.state::<GatewayState>().disconnect().await;
                 });
             }
         })
@@ -324,7 +318,7 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 let app = window.app_handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    app.state::<ControlPlaneState>().disconnect().await;
+                    app.state::<GatewayState>().disconnect().await;
                 });
             }
         })
@@ -341,13 +335,13 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
-            list_control_planes,
-            save_control_plane,
-            connect_local_control_plane,
-            select_control_plane,
-            clear_control_plane,
-            start_control_plane_watch,
-            stop_control_plane_watch,
+            list_gateways,
+            save_gateway,
+            connect_local_gateway,
+            select_gateway,
+            clear_gateway,
+            start_gateway_watch,
+            stop_gateway_watch,
             list_tags,
             list_notes,
             delete_note,
@@ -392,7 +386,7 @@ mod tests {
         assert_eq!(
             capability["permissions"],
             json!([
-                "control-plane-client",
+                "gateway-client",
                 "core:window:allow-start-dragging",
                 "core:window:allow-internal-toggle-maximize",
                 "core:window:allow-set-badge-count",
@@ -411,7 +405,7 @@ mod tests {
     }
 
     /// Tauri refuses a registered command the window's permission does not allow, so every
-    /// handler must be listed in permissions/control-plane.toml and nothing else may be.
+    /// handler must be listed in permissions/gateway.toml and nothing else may be.
     #[test]
     fn the_main_window_may_call_exactly_the_registered_commands() {
         let source = include_str!("lib.rs");
@@ -425,7 +419,7 @@ mod tests {
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .collect();
-        let permission = include_str!("../permissions/control-plane.toml");
+        let permission = include_str!("../permissions/gateway.toml");
         let allowed = permission
             .split("commands.allow = [")
             .nth(1)
@@ -438,7 +432,7 @@ mod tests {
             .collect();
         registered.sort_unstable();
         allowed.sort_unstable();
-        assert!(registered.contains(&"connect_local_control_plane"));
+        assert!(registered.contains(&"connect_local_gateway"));
         assert_eq!(registered, allowed);
     }
 
@@ -467,14 +461,14 @@ mod tests {
         let local = tauri::test::get_ipc_response(&main, request("tauri://localhost"));
         assert_eq!(
             local.unwrap_err(),
-            Value::String("Connect to a Control Plane first.".into())
+            Value::String("Connect to a Gateway first.".into())
         );
         let remote = tauri::test::get_ipc_response(&main, request("https://untrusted.example"));
         assert!(remote.unwrap_err().to_string().contains("not allowed"));
         let other = tauri::test::get_ipc_response(&secondary, request("tauri://localhost"));
         assert!(other.unwrap_err().to_string().contains("not allowed"));
         let watch = |url: &str| tauri::webview::InvokeRequest {
-            cmd: "start_control_plane_watch".into(),
+            cmd: "start_gateway_watch".into(),
             body: tauri::ipc::InvokeBody::Json(json!({
                 "connectionId": "1", "watchEpoch": 1, "onUpdate": "__CHANNEL__:7"
             })),
@@ -499,7 +493,7 @@ mod tests {
         let local = tauri::test::get_ipc_response(&main, save("tauri://localhost"));
         assert_eq!(
             local.unwrap_err(),
-            Value::String("Connect to a Control Plane first.".into())
+            Value::String("Connect to a Gateway first.".into())
         );
         let remote = tauri::test::get_ipc_response(&main, save("https://untrusted.example"));
         assert!(remote.unwrap_err().to_string().contains("not allowed"));

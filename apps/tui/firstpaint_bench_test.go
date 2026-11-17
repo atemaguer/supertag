@@ -15,19 +15,19 @@ import (
 	v2 "github.com/atemaguer/supertag/sdks/go/runtimev2"
 )
 
-// firstPaintLatency is each call's round trip to the benchmark's Control Plane: a Control Plane on
+// firstPaintLatency is each call's round trip to the benchmark's Gateway: a Gateway on
 // another machine, not this one.
 const firstPaintLatency = 30 * time.Millisecond
 
-// firstPaintPlane is a Control Plane with 12 Tags whose lead has 50 finished turns, each answered
+// firstPaintPlane is a Gateway with 12 Tags whose lead has 50 finished turns, each answered
 // in markdown, and the given round trip for every call.
-func firstPaintPlane(tb testing.TB, latency time.Duration) (*fakeControlPlane, string) {
+func firstPaintPlane(tb testing.TB, latency time.Duration) (*fakeGateway, string) {
 	tb.Helper()
 	names := []string{"lead"}
 	for i := range 11 {
 		names = append(names, fmt.Sprintf("tag-%02d", i))
 	}
-	fake := &fakeControlPlane{tags: tags(names...), principal: "operator:bench"}
+	fake := &fakeGateway{tags: tags(names...), principal: "operator:bench"}
 	fake.messages = func(tag string) *v2.ListMessagesResponse {
 		if tag != "lead" {
 			return &v2.ListMessagesResponse{}
@@ -119,7 +119,7 @@ func launchUntil(tb testing.TB, url string, confirmed bool) time.Duration {
 }
 
 // BenchmarkFirstConversation is how long `supertag` takes from starting the terminal UI to showing
-// the last Tag's conversation, with a 30 ms round trip to the Control Plane: on a first launch,
+// the last Tag's conversation, with a 30 ms round trip to the Gateway: on a first launch,
 // and on a launch after one that showed it.
 func BenchmarkFirstConversation(b *testing.B) {
 	_, url := firstPaintPlane(b, firstPaintLatency)

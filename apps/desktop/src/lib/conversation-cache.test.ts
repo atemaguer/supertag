@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type {
   CacheKey,
-  ControlPlane,
   Conversation,
+  Gateway,
   Message,
   MessagePage,
   ReadMessages,
-} from "../control-plane";
+} from "../gateway";
 import {
   cachedHistory,
   cachedRoster,
@@ -46,13 +46,13 @@ function summary(readOrder = 0): Conversation {
   };
 }
 
-function controlPlane(scope: string, pages: MessagePage[] = []) {
+function gateway(scope: string, pages: MessagePage[] = []) {
   const disk = new Map<CacheKey, unknown>();
   const messages = vi.fn(
     async (_read: ReadMessages) => pages.shift() ?? { conversationId: "c1", messages: [] },
   );
   const markRead = vi.fn(async (_tagId: string, order: number) => summary(order));
-  const plane: ControlPlane = {
+  const plane: Gateway = {
     scope,
     tags: async () => [],
     conversations: async () => [summary()],
@@ -72,12 +72,12 @@ function controlPlane(scope: string, pages: MessagePage[] = []) {
 beforeEach(() => clearConversationCache());
 afterEach(() => vi.useRealTimers());
 
-it("shows a cached conversation only to the Control Plane and principal that read it", async () => {
-  const alice = controlPlane(JSON.stringify(["https://one.example.com", "operator:alice"]), [
+it("shows a cached conversation only to the Gateway and principal that read it", async () => {
+  const alice = gateway(JSON.stringify(["https://one.example.com", "operator:alice"]), [
     { conversationId: "c1", messages: [message("t2", 2), message("t1", 1)] },
   ]);
-  const bob = controlPlane(JSON.stringify(["https://one.example.com", "client:bob"]));
-  const elsewhere = controlPlane(JSON.stringify(["https://two.example.com", "operator:alice"]));
+  const bob = gateway(JSON.stringify(["https://one.example.com", "client:bob"]));
+  const elsewhere = gateway(JSON.stringify(["https://two.example.com", "operator:alice"]));
   const read = await warmConversation(alice.plane, "lead");
   expect(read?.messages.map(({ task }) => task.taskId)).toEqual(["t1", "t2"]);
   const cached = cachedHistory(alice.plane, "lead");
@@ -89,12 +89,12 @@ it("shows a cached conversation only to the Control Plane and principal that rea
 
 it("writes the conversation's versioned tail once a burst settles and reads it back", async () => {
   vi.useFakeTimers();
-  const { plane, disk } = controlPlane("scope");
+  const { plane, disk } = gateway("scope");
   const messages = Array.from({ length: TAIL + 2 }, (_, index) => message(`t${index}`, index + 1));
   const history = { messages, conversationId: "c1", loading: false, read: true };
   cacheHistory(plane, "lead", { ...history, messages: [] });
   cacheHistory(plane, "lead", history);
-  // A history not yet read from the Control Plane is never cached.
+  // A history not yet read from the Gateway is never cached.
   cacheHistory(plane, "other", { ...history, read: false });
   expect(disk.size).toBe(0);
   await vi.runAllTimersAsync();
@@ -109,7 +109,7 @@ it("writes the conversation's versioned tail once a burst settles and reads it b
 });
 
 it("discards a disk entry of another schema or another Tag", async () => {
-  const { plane, disk } = controlPlane("scope");
+  const { plane, disk } = gateway("scope");
   disk.set("tag:lead", {
     schemaVersion: SCHEMA_VERSION + 1,
     value: { conversationId: "c1", messages: [] },
@@ -128,7 +128,7 @@ it("discards a disk entry of another schema or another Tag", async () => {
 });
 
 it("revalidates only what changed and leaves an open conversation to its view", async () => {
-  const { plane, messages } = controlPlane("scope", [
+  const { plane, messages } = gateway("scope", [
     { conversationId: "c1", messages: [message("t1", 1, "running")] },
     { conversationId: "c1", incremental: true, messages: [message("t2", 2), message("t1", 1)] },
   ]);
@@ -155,7 +155,7 @@ it("revalidates only what changed and leaves an open conversation to its view", 
 });
 
 it("rereads cached conversations the watch reports", async () => {
-  const { plane, messages } = controlPlane("scope", [
+  const { plane, messages } = gateway("scope", [
     { conversationId: "c1", messages: [message("t1", 1)] },
     { conversationId: "c1", incremental: true, messages: [message("t2", 2)] },
   ]);
@@ -171,7 +171,7 @@ it("rereads cached conversations the watch reports", async () => {
 
 it("keeps the roster and selection per scope, and marks the latest finished turn read once", async () => {
   vi.useFakeTimers();
-  const { plane, disk, markRead } = controlPlane("scope");
+  const { plane, disk, markRead } = gateway("scope");
   cacheRoster(plane, { conversations: [summary()] });
   cacheRoster(plane, { selectedTag: "lead" });
   await vi.runAllTimersAsync();

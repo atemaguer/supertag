@@ -35,13 +35,13 @@ func (c *runtimeClient) getWorkSessionAtReport(ctx context.Context, id, reportTa
 	}
 	work := res.Msg
 	if work.GetWorkSessionId() != id || work.GetLatestTaskId() == "" || work.GetTagId() == "" || work.GetStarterTaskId() == "" || work.GetParentSessionId() == "" || work.GetParentTagId() == "" {
-		return nil, workSessionDataLoss("Control Plane returned a different or incomplete Work Session.")
+		return nil, workSessionDataLoss("Gateway returned a different or incomplete Work Session.")
 	}
 	if reportTask != "" && work.GetReportTaskId() != reportTask {
-		return nil, workSessionDataLoss("Control Plane returned a different historical Work Session report.")
+		return nil, workSessionDataLoss("Gateway returned a different historical Work Session report.")
 	}
 	if !workQuestionMatches(work) {
-		return nil, workSessionDataLoss("Control Plane returned a question outside this child Task.")
+		return nil, workSessionDataLoss("Gateway returned a question outside this child Task.")
 	}
 	return work, nil
 }
@@ -61,7 +61,7 @@ func (c *runtimeClient) messageWorkSessions(ctx context.Context, message *v2.Con
 			return nil, err
 		}
 		if work.GetReportTaskId() != task.GetTaskId() || work.GetParentTagId() != task.GetTagId() || work.GetParentSessionId() != task.GetSessionId() {
-			return nil, workSessionDataLoss("Control Plane returned a Work Session outside this report's scope.")
+			return nil, workSessionDataLoss("Gateway returned a Work Session outside this report's scope.")
 		}
 		return []*v2.WorkSession{work}, nil
 	}
@@ -82,7 +82,7 @@ func (c *runtimeClient) messageWorkSessions(ctx context.Context, message *v2.Con
 			Limit: runtimeWorkSessionsPerTask, Cursor: cursor,
 		}))
 		if err != nil {
-			// Only an absent service is compatible with an older Control Plane. Scope,
+			// Only an absent service is compatible with an older Gateway. Scope,
 			// authentication and transport failures must never mean "no children".
 			if cursor == "" && connect.CodeOf(err) == connect.CodeUnimplemented {
 				return nil, nil
@@ -91,24 +91,24 @@ func (c *runtimeClient) messageWorkSessions(ctx context.Context, message *v2.Con
 		}
 		for _, work := range res.Msg.GetWorkSessions() {
 			if work.GetWorkSessionId() == "" || ids[work.GetWorkSessionId()] || work.GetLatestTaskId() == "" || work.GetTagId() == "" || work.GetParentTagId() != task.GetTagId() || work.GetParentSessionId() != task.GetSessionId() || work.GetStarterTaskId() != task.GetTaskId() || !workQuestionMatches(work) {
-				return nil, workSessionDataLoss("Control Plane returned a Work Session outside this message's scope.")
+				return nil, workSessionDataLoss("Gateway returned a Work Session outside this message's scope.")
 			}
 			ids[work.GetWorkSessionId()] = true
 			result = append(result, work)
 		}
 		if len(result) > runtimeWorkSessionsPerTask {
-			return nil, workSessionDataLoss("Control Plane exceeded the Work Session limit for this Task.")
+			return nil, workSessionDataLoss("Gateway exceeded the Work Session limit for this Task.")
 		}
 		cursor = res.Msg.GetNextCursor()
 		if cursor == "" {
 			return result, nil
 		}
 		if seen[cursor] {
-			return nil, workSessionDataLoss("Control Plane Work Session cursor did not advance.")
+			return nil, workSessionDataLoss("Gateway Work Session cursor did not advance.")
 		}
 		seen[cursor] = true
 	}
-	return nil, workSessionDataLoss("Control Plane exceeded the Work Session page limit.")
+	return nil, workSessionDataLoss("Gateway exceeded the Work Session page limit.")
 }
 
 func runtimeWork(work *v2.WorkSession) *views.WorkSession {
@@ -147,7 +147,7 @@ func (c *runtimeClient) projectWork(ctx context.Context, work *v2.WorkSession, r
 		report = message.GetTask()
 	}
 	if report.GetTaskId() != work.GetReportTaskId() || report.GetTagId() != work.GetParentTagId() || report.GetSessionId() != work.GetParentSessionId() {
-		return nil, workSessionDataLoss("Control Plane returned a different Work Session report Task.")
+		return nil, workSessionDataLoss("Gateway returned a different Work Session report Task.")
 	}
 	out.Report = runtimeReply(report)
 	if out.Report != nil {
@@ -240,7 +240,7 @@ func (c *runtimeClient) getWorkSessionDetail(ctx context.Context, id string) (*v
 	}
 	task := message.GetTask()
 	if task.GetSessionId() != id {
-		return nil, workSessionDataLoss("Control Plane returned a Task outside this Work Session.")
+		return nil, workSessionDataLoss("Gateway returned a Task outside this Work Session.")
 	}
 	status := views.TaskStatus_TASK_STATUS_RUNNING
 	switch task.GetState() {
@@ -298,7 +298,7 @@ func (c *runtimeClient) taskActivity(ctx context.Context, task string, after int
 				continue
 			}
 			if event.GetSequence() > uint64(^uint64(0)>>1) {
-				return nil, after, workSessionDataLoss("Control Plane event sequence exceeds the presentation limit.")
+				return nil, after, workSessionDataLoss("Gateway event sequence exceeds the presentation limit.")
 			}
 			after = int64(event.GetSequence())
 			if line := eventLine(event); line != "" {

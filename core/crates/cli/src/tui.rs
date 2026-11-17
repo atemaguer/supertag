@@ -13,20 +13,20 @@ use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 use crate::{Connection, ROOT_GATEWAY, resolve_target};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// The format `supertag __local-control-plane` prints; the terminal UI checks it.
-const LOCAL_PROTOCOL: &str = "local-control-plane.v1";
+/// The format `supertag __local-gateway` prints; the terminal UI checks it.
+const LOCAL_PROTOCOL: &str = "local-gateway.v1";
 
-/// Prints the local Control Plane the terminal UI offers as Local, with the operator token read
-/// from the state directory now, so a token `supertag up` replaced is never stale. Only a pipe
-/// receives it: the token is never shown in a terminal.
-pub fn print_local_control_plane() -> Result<()> {
+/// Prints the local Gateway the terminal UI offers as Local, with the operator token read from the
+/// state directory now, so a token `supertag up` replaced is never stale. Only a pipe receives it:
+/// the token is never shown in a terminal.
+pub fn print_local_gateway() -> Result<()> {
     ensure!(
         // terminal-safe: only checks whether output is a terminal.
         !std::io::stdout().is_terminal(),
         "this command is for the terminal UI; it prints the local operator token"
     );
     let directory = supertag_local_state::state_directory(None)?;
-    let value = match supertag_local_state::control_plane(&directory)? {
+    let value = match supertag_local_state::gateway(&directory)? {
         Some(local) => json!({
             "protocol": LOCAL_PROTOCOL, "running": true,
             "state_directory": directory, "url": local.url, "token": local.token,

@@ -1,5 +1,5 @@
-//! What the app keeps on disk to show at once on launch, before the Control Plane answers: the
-//! Tag list, recent conversations, and messages not yet sent. Each Control Plane and principal
+//! What the app keeps on disk to show at once on launch, before the Gateway answers: the
+//! Tag list, recent conversations, and messages not yet sent. Each Gateway and principal
 //! has its own directory, named by digests, under the app's data directory. The files hold only
 //! what the app read or wrote, never a credential, and only this user can read them.
 
@@ -11,11 +11,11 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
-use super::{ControlPlaneState, Result};
+use super::{GatewayState, Result};
 
 /// The most one entry may take.
 const MAX_ENTRY_BYTES: u64 = 4 * 1024 * 1024;
-/// How many entries each Control Plane and principal keep; the least recently written are
+/// How many entries each Gateway and principal keep; the least recently written are
 /// removed first.
 const MAX_ENTRIES: usize = 64;
 const CACHE_ERROR: &str = "Could not use the conversation cache.";
@@ -29,21 +29,21 @@ fn digest(parts: &[&str]) -> String {
     format!("{:x}", hash.finalize())
 }
 
-/// Where a Control Plane's cached conversations are, for every principal.
-fn control_plane_directory(root: &Path, control_plane: &str) -> PathBuf {
-    root.join(digest(&[control_plane]))
+/// Where a Gateway's cached conversations are, for every principal.
+fn gateway_directory(root: &Path, gateway: &str) -> PathBuf {
+    root.join(digest(&[gateway]))
 }
 
-/// What a connection's cache entries are scoped to: the Control Plane, and whom it acts as.
+/// What a connection's cache entries are scoped to: the Gateway, and whom it acts as.
 #[derive(Clone, Debug)]
 pub(super) struct CacheScope {
-    pub(super) control_plane: String,
+    pub(super) gateway: String,
     pub(super) principal: String,
 }
 
 impl CacheScope {
     fn entry(&self, root: &Path, key: &str) -> PathBuf {
-        control_plane_directory(root, &self.control_plane)
+        gateway_directory(root, &self.gateway)
             .join(digest(&[&self.principal]))
             .join(format!("{}.json", digest(&[key])))
     }
@@ -118,7 +118,7 @@ fn read_entry(path: &Path) -> Option<serde_json::Value> {
 fn write_entry(path: &Path, value: &serde_json::Value) -> Result<()> {
     let bytes = serde_json::to_vec(value).map_err(|_| CACHE_ERROR)?;
     if bytes.len() as u64 > MAX_ENTRY_BYTES {
-        // Too large to keep; the conversation still loads from the Control Plane.
+        // Too large to keep; the conversation still loads from the Gateway.
         let _ = fs::remove_file(path);
         return Ok(());
     }
@@ -157,13 +157,13 @@ fn prune(directory: &Path) {
     }
 }
 
-/// Removes everything cached for a Control Plane, for every principal.
-pub fn forget(root: &Path, control_plane: &str) {
-    let _ = fs::remove_dir_all(control_plane_directory(root, control_plane));
+/// Removes everything cached for a Gateway, for every principal.
+pub fn forget(root: &Path, gateway: &str) {
+    let _ = fs::remove_dir_all(gateway_directory(root, gateway));
 }
 
-impl ControlPlaneState {
-    /// The entry last cached under `key` for the current connection's Control Plane and
+impl GatewayState {
+    /// The entry last cached under `key` for the current connection's Gateway and
     /// principal, if there is one.
     pub async fn cached(
         &self,
@@ -179,7 +179,7 @@ impl ControlPlaneState {
             .map_err(|_| CACHE_ERROR.into())
     }
 
-    /// Replaces the entry under `key` for the current connection's Control Plane and principal.
+    /// Replaces the entry under `key` for the current connection's Gateway and principal.
     pub async fn cache(
         &self,
         connection_id: &str,
@@ -203,7 +203,7 @@ impl ControlPlaneState {
         state
             .cache_scope
             .clone()
-            .ok_or_else(|| "Connect to a Control Plane first.".into())
+            .ok_or_else(|| "Connect to a Gateway first.".into())
     }
 }
 
@@ -215,7 +215,7 @@ mod tests {
     fn entries_are_scoped_private_bounded_and_forgotten() {
         let root = tempfile::tempdir().unwrap();
         let alice = CacheScope {
-            control_plane: "https://one.example.com".into(),
+            gateway: "https://one.example.com".into(),
             principal: "operator:alice".into(),
         };
         let bob = CacheScope {
@@ -223,7 +223,7 @@ mod tests {
             ..alice.clone()
         };
         let other = CacheScope {
-            control_plane: "https://two.example.com".into(),
+            gateway: "https://two.example.com".into(),
             ..alice.clone()
         };
         let value = serde_json::json!({ "messages": [{ "task": { "taskId": "one" } }] });
@@ -266,7 +266,7 @@ mod tests {
         write_entry(&latest, &large).unwrap();
         assert!(read_entry(&latest).is_none());
 
-        forget(root.path(), &alice.control_plane);
-        assert!(!control_plane_directory(root.path(), &alice.control_plane).exists());
+        forget(root.path(), &alice.gateway);
+        assert!(!gateway_directory(root.path(), &alice.gateway).exists());
     }
 }

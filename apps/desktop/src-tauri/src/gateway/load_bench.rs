@@ -1,5 +1,5 @@
 //! Measures how long opening a long conversation takes through the desktop's native client,
-//! directly and through a proxy that adds network latency like a remote Control Plane's.
+//! directly and through a proxy that adds network latency like a remote Gateway's.
 //!
 //! `cargo test --release --lib load_bench -- --ignored --nocapture`. `SUPERTAG_BENCH_TURNS`,
 //! `SUPERTAG_BENCH_EVENTS` and `SUPERTAG_BENCH_RTT_MS` change the conversation and the latency.
@@ -179,7 +179,7 @@ async fn seed(database: &std::path::Path, turns: u64, events: u64) {
 
 /// What the desktop does to open a conversation: read its newest page, which carries each turn's
 /// events, and read all of a turn's events only where the page left some out.
-async fn open(client: &Arc<ControlPlaneState>, id: &str) -> (Duration, usize, usize) {
+async fn open(client: &Arc<GatewayState>, id: &str) -> (Duration, usize, usize) {
     let started = Instant::now();
     let page = client
         .messages(
@@ -223,9 +223,8 @@ async fn conversation_open_latency() {
     let rtt = Duration::from_millis(env("SUPERTAG_BENCH_RTT_MS", 80));
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("state.sqlite");
-    let (address, control_plane_task, cp_task) =
-        super::tests::control_plane_fixture(&database, "engineer", "operator-test-token", false)
-            .await;
+    let (address, gateway_task, cp_task) =
+        super::tests::gateway_fixture(&database, "engineer", "operator-test-token", false).await;
     seed(&database, turns, events).await;
 
     // Server time per RPC, without the network.
@@ -253,10 +252,10 @@ async fn conversation_open_latency() {
 
     let remote = delay_proxy(address.trim_start_matches("http://").to_owned(), rtt / 2).await;
     for (label, origin) in [("local", address.clone()), ("remote", remote)] {
-        let client = Arc::new(ControlPlaneState::default());
+        let client = Arc::new(GatewayState::default());
         let profiles = directory.path().join(format!("{label}.json"));
         let activation = client
-            .save_control_plane(
+            .save_gateway(
                 &profiles,
                 origin,
                 label.into(),
@@ -281,6 +280,6 @@ async fn conversation_open_latency() {
             shape.1,
         );
     }
-    control_plane_task.abort();
+    gateway_task.abort();
     cp_task.abort();
 }

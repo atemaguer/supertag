@@ -25,7 +25,7 @@ import (
 
 func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 	t.Helper()
-	server, target := testControlPlane(t, handler, secure)
+	server, target := testGateway(t, handler, secure)
 	target.URL = server.URL
 	c, err := New(target, "test-version")
 	if err != nil {
@@ -35,9 +35,9 @@ func testRuntime(t *testing.T, handler http.Handler, secure bool) *Client {
 	return c
 }
 
-// testControlPlane serves handler as a Control Plane speaking binary gRPC over HTTP/2, with TLS when
+// testGateway serves handler as a Gateway speaking binary gRPC over HTTP/2, with TLS when
 // secure, and returns the target that trusts it, without a URL.
-func testControlPlane(t *testing.T, handler http.Handler, secure bool) (*httptest.Server, Target) {
+func testGateway(t *testing.T, handler http.Handler, secure bool) (*httptest.Server, Target) {
 	t.Helper()
 	negotiation := testNegotiation(t, []uint32{3})
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +77,7 @@ func testControlPlane(t *testing.T, handler http.Handler, secure bool) (*httptes
 	return server, target
 }
 
-// testNegotiation answers ProtocolNegotiation.Negotiate as a Control Plane speaking versions.
+// testNegotiation answers ProtocolNegotiation.Negotiate as a Gateway speaking versions.
 func testNegotiation(t *testing.T, versions []uint32) http.Handler {
 	mux := http.NewServeMux()
 	testRPC(mux, rpc.ProtocolNegotiationNegotiateProcedure, func(_ context.Context, req *v2.NegotiateProtocolRequest) (*v2.NegotiateProtocolResponse, error) {
@@ -86,16 +86,16 @@ func testNegotiation(t *testing.T, versions []uint32) http.Handler {
 		}
 		for _, version := range versions {
 			if slices.Contains(req.GetProtocolVersions(), version) {
-				return &v2.NegotiateProtocolResponse{Role: v2.ServiceRole_SERVICE_ROLE_CONTROL_PLANE, ProtocolVersion: version, ProtocolVersions: versions, BuildVersion: "0.1.0"}, nil
+				return &v2.NegotiateProtocolResponse{Role: v2.ServiceRole_SERVICE_ROLE_GATEWAY, ProtocolVersion: version, ProtocolVersions: versions, BuildVersion: "0.1.0"}, nil
 			}
 		}
-		// The refusal a SuperTag 0.3.0 Control Plane sends, word for word.
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("incompatible SuperTag protocol: this Control Plane (SuperTag 0.3.0) speaks protocol versions [2], but the connecting operator client (SuperTag test-version) offered [3]; run the same SuperTag release on both services"))
+		// The refusal a SuperTag 0.3.0 Gateway sends, word for word.
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("incompatible SuperTag protocol: this Gateway (SuperTag 0.3.0) speaks protocol versions [2], but the connecting operator client (SuperTag test-version) offered [3]; run the same SuperTag release on both services"))
 	})
 	return mux
 }
 
-func TestRuntimeV2RefusesAControlPlaneFromAnotherProtocolEpoch(t *testing.T) {
+func TestRuntimeV2RefusesAGatewayFromAnotherProtocolEpoch(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == rpc.ProtocolNegotiationNegotiateProcedure {
@@ -117,11 +117,11 @@ func TestRuntimeV2RefusesAControlPlaneFromAnotherProtocolEpoch(t *testing.T) {
 	_, err = c.ListTags(t.Context())
 	var refused *APIError
 	if !errors.As(err, &refused) || refused.Code != connect.CodeFailedPrecondition || !ProtocolMismatch(err) ||
-		refused.Message != "This TUI speaks SuperTag protocol 3, but the Control Plane at "+server.URL+" runs SuperTag 0.3.0 (protocol 2). Upgrade the Control Plane." {
-		t.Fatalf("ListTags against an old Control Plane = %v", err)
+		refused.Message != "This TUI speaks SuperTag protocol 3, but the Gateway at "+server.URL+" runs SuperTag 0.3.0 (protocol 2). Upgrade the Gateway." {
+		t.Fatalf("ListTags against an old Gateway = %v", err)
 	}
 	if calls.Load() != 0 {
-		t.Fatalf("an operator call reached a Control Plane that refused negotiation")
+		t.Fatalf("an operator call reached a Gateway that refused negotiation")
 	}
 }
 
@@ -481,7 +481,7 @@ func TestRuntimeV2CancelsInFlightFollow(t *testing.T) {
 	select {
 	case <-called:
 	case <-ctx.Done():
-		t.Fatal("the Control Plane never received the follow")
+		t.Fatal("the Gateway never received the follow")
 	}
 	cancel()
 	expect(t, collect(t, follow))
@@ -528,7 +528,7 @@ func TestRuntimeV2RefusesRedirect(t *testing.T) {
 	})
 	c := testRuntime(t, mux, false)
 	if _, err := c.ListTags(context.Background()); err == nil || redirected.Load() {
-		t.Fatal("Control Plane redirect must fail without a second request")
+		t.Fatal("Gateway redirect must fail without a second request")
 	}
 }
 

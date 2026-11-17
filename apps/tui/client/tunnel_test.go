@@ -210,11 +210,11 @@ func largeTagsHandler(name string) http.Handler {
 	return mux
 }
 
-// A wss:// Control Plane URL reaches the Control Plane's TLS inside a WebSocket whose outer TLS an edge
+// A wss:// Gateway URL reaches the Gateway's TLS inside a WebSocket whose outer TLS an edge
 // terminates. Both directions carry more than one WebSocket message's worth of bytes.
 func TestRuntimeV2CrossesAWSSTunnelWithInnerTLS(t *testing.T) {
 	name := strings.Repeat("n", 300*1024)
-	server, target := testControlPlane(t, largeTagsHandler(name), true)
+	server, target := testGateway(t, largeTagsHandler(name), true)
 	edge := startTestEdge(t, server.Listener.Addr().String(), &tls.Config{Certificates: server.TLS.Certificates})
 	target.URL = edge.url("wss", "/supertag")
 	c, err := New(target, "test-version")
@@ -248,7 +248,7 @@ func TestRuntimeV2CrossesAWSSTunnelWithInnerTLS(t *testing.T) {
 
 // A loopback ws:// URL carries cleartext HTTP/2 through the tunnel.
 func TestRuntimeV2CrossesALoopbackWSTunnel(t *testing.T) {
-	server, target := testControlPlane(t, largeTagsHandler("lead"), false)
+	server, target := testGateway(t, largeTagsHandler("lead"), false)
 	edge := startTestEdge(t, server.Listener.Addr().String(), nil)
 	target.URL = edge.url("ws", "")
 	c, err := New(target, "test-version")
@@ -267,10 +267,10 @@ func TestRuntimeV2CrossesALoopbackWSTunnel(t *testing.T) {
 	}
 }
 
-// A wss:// target never falls back to cleartext: a tunnel to a Control Plane without TLS fails.
+// A wss:// target never falls back to cleartext: a tunnel to a Gateway without TLS fails.
 func TestRuntimeV2WSSTunnelRequiresInnerTLS(t *testing.T) {
-	cleartext, _ := testControlPlane(t, largeTagsHandler("lead"), false)
-	secure, target := testControlPlane(t, largeTagsHandler("lead"), true)
+	cleartext, _ := testGateway(t, largeTagsHandler("lead"), false)
+	secure, target := testGateway(t, largeTagsHandler("lead"), true)
 	edge := startTestEdge(t, cleartext.Listener.Addr().String(), &tls.Config{Certificates: secure.TLS.Certificates})
 	target.URL = edge.url("wss", "")
 	c, err := New(target, "test-version")
@@ -281,14 +281,14 @@ func TestRuntimeV2WSSTunnelRequiresInnerTLS(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := c.ListTags(ctx); err == nil {
-		t.Fatal("a wss:// tunnel reached a Control Plane without inner TLS")
+		t.Fatal("a wss:// tunnel reached a Gateway without inner TLS")
 	}
 }
 
 // The edge's certificate is checked before the upgrade: one that does not name the URL's host
 // fails the dial, and no upgrade request reaches the edge.
 func TestRuntimeV2WSSTunnelChecksTheEdgeCertificate(t *testing.T) {
-	server, target := testControlPlane(t, largeTagsHandler("lead"), true)
+	server, target := testGateway(t, largeTagsHandler("lead"), true)
 	edge := startTestEdge(t, server.Listener.Addr().String(), &tls.Config{Certificates: server.TLS.Certificates})
 	_, port, _ := net.SplitHostPort(edge.listener.Addr().String())
 	// The test certificate names 127.0.0.1 and example.com, not localhost.
@@ -515,7 +515,7 @@ func TestTunnelDialTimeoutCoversTheInnerTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { listener.Close() })
-	// The edge completes the upgrade, then never answers the Control Plane's TLS inside it.
+	// The edge completes the upgrade, then never answers the Gateway's TLS inside it.
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -539,7 +539,7 @@ func TestTunnelDialTimeoutCoversTheInnerTLS(t *testing.T) {
 	dialer := tunnelDialer{url: u, inner: &tls.Config{ServerName: "gateway.example", NextProtos: []string{"h2"}}}
 	started := time.Now()
 	if _, err := dialer.DialTLSContext(t.Context(), "tcp", ""); err == nil {
-		t.Fatal("a tunnel without the Control Plane's TLS opened")
+		t.Fatal("a tunnel without the Gateway's TLS opened")
 	}
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("the inner TLS outlived the tunnel dial timeout: %v", elapsed)

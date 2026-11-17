@@ -1,4 +1,4 @@
-import type { ControlPlane, Conversation, Message, Note, Tag, TaskEvent } from "./control-plane";
+import type { Conversation, Gateway, Message, Note, Tag, TaskEvent } from "./gateway";
 import type { TagAdmin } from "./tag-admin";
 
 const tags: Tag[] = [
@@ -102,7 +102,7 @@ let notes: Note[] = [
   },
 ];
 
-export const previewControlPlane: ControlPlane = {
+export const previewGateway: Gateway = {
   async notes(tagId) {
     return notes.filter((note) => note.tagId === tagId);
   },
@@ -139,7 +139,7 @@ export const previewControlPlane: ControlPlane = {
     return {
       conversationId: `preview/${tagId}`,
       messages: [...conversationFor(tagId)].reverse().map((message) => {
-        // As the Control Plane does: each message the Tag wrote, and its latest activity.
+        // As the Gateway does: each message the Tag wrote, and its latest activity.
         const events = previewEvents(message.task.taskId);
         return { ...message, events: [events[0], events.at(-1)].filter((e) => e !== undefined) };
       }),
@@ -158,7 +158,7 @@ export const previewControlPlane: ControlPlane = {
         sessionId: `preview/${tagId}`,
         prompt: text,
         state: "succeeded",
-        result: "This is a local preview. Connect a Control Plane to run Tasks with your Tags.",
+        result: "This is a local preview. Connect a Gateway to run Tasks with your Tags.",
         createdAtMs: Date.now(),
       },
     };
@@ -166,7 +166,7 @@ export const previewControlPlane: ControlPlane = {
     return message;
   },
   async markRead(tagId) {
-    const conversation = (await previewControlPlane.conversations()).find(
+    const conversation = (await previewGateway.conversations()).find(
       (entry) => entry.tagId === tagId,
     );
     if (!conversation) throw new Error("No conversation with that Tag yet.");

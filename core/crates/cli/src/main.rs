@@ -619,9 +619,9 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
     },
     #[command(name = "__codex-adapter", hide = true)]
     CodexAdapter(CodexAdapterArgs),
-    /// The local Control Plane and its current operator token, as JSON for the terminal UI.
-    #[command(name = "__local-control-plane", hide = true)]
-    LocalControlPlane,
+    /// The local Gateway and its current operator token, as JSON for the terminal UI.
+    #[command(name = "__local-gateway", hide = true)]
+    LocalGateway,
     #[command(name = "__adapter-guardian", hide = true)]
     AdapterGuardian {
         #[arg(long)]
@@ -849,7 +849,7 @@ fn dispatch(cli: Cli) -> Result<()> {
                     | Command::Test { .. }
                     | Command::CodexAdapter(_)
                     | Command::AdapterGuardian { .. }
-                    | Command::LocalControlPlane
+                    | Command::LocalGateway
             ),
             "--gateway before the command applies only to operator commands"
         );
@@ -860,7 +860,7 @@ fn dispatch(cli: Cli) -> Result<()> {
             adapter,
             adapter_args,
         } => supertag_worker_host::guard_adapter(&adapter, &adapter_args),
-        Command::LocalControlPlane => tui::print_local_control_plane(),
+        Command::LocalGateway => tui::print_local_gateway(),
         Command::CodexAdapter(args) => tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
@@ -1373,7 +1373,7 @@ async fn run(command: Command) -> Result<()> {
             client_key_file,
         } => {
             connect_control_plane(
-                profiles::NewControlPlane {
+                profiles::NewGateway {
                     name,
                     url,
                     token: String::new(),
@@ -1387,7 +1387,7 @@ async fn run(command: Command) -> Result<()> {
             .await?;
         }
         Command::AdapterGuardian { .. } => unreachable!("guardian runs outside Tokio"),
-        Command::LocalControlPlane => unreachable!("local discovery runs outside Tokio"),
+        Command::LocalGateway => unreachable!("local discovery runs outside Tokio"),
         Command::CodexAdapter(_) => unreachable!("Codex adapter uses a dedicated runtime"),
         Command::Tag {
             connection,
@@ -2703,11 +2703,11 @@ pub(crate) fn environment_gateway() -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-/// The local Control Plane that `supertag up` runs from `directory`.
+/// The local Gateway that `supertag up` runs from `directory`.
 fn local_target(directory: &Path) -> Result<OperatorTarget> {
-    let (url, token) = local::connection(directory).with_context(|| {
+    let (url, token) = local::gateway_connection(directory).with_context(|| {
         format!(
-            "no local Control Plane is running from {}; start one with supertag up, or pass --gateway",
+            "no local Gateway is running from {}; start one with supertag up, or pass --gateway",
             directory.display()
         )
     })?;
@@ -2762,7 +2762,7 @@ fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
 /// Control Plane and saved; a client Auth Key enrolls this device and only the enrolled credential
 /// is saved.
 async fn connect_control_plane(
-    mut saved: profiles::NewControlPlane,
+    mut saved: profiles::NewGateway,
     client_name: Option<String>,
     replace: bool,
 ) -> Result<()> {

@@ -75,7 +75,7 @@ func (f *tagForm) workspaces() []string {
 }
 
 // tagAdminRefusal says why this connection cannot create Tags, or "" when it may try: a client
-// device, or a principal the Control Plane named that is not an operator.
+// device, or a principal the Gateway named that is not an operator.
 func (m model) tagAdminRefusal() string {
 	if m.cache != nil && m.cache.principal != "" {
 		return client.TagAdminRefusal(m.cache.principal)

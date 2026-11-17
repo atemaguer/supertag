@@ -12,13 +12,13 @@ use supertag_protocol::{
 };
 use tokio::{fs, io::AsyncWriteExt, time::timeout};
 
-use super::{ControlPlaneState, Result, rpc_error};
+use super::{GatewayState, Result, rpc_error};
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(65);
 const INVALID_DOWNLOAD: &str = "The downloaded file did not match its receipt.";
 const SAVE_ERROR: &str = "Could not write the selected file.";
 
-impl ControlPlaneState {
+impl GatewayState {
     pub(crate) async fn save_artifact<F>(
         &self,
         connection_id: &str,
@@ -88,7 +88,7 @@ impl ControlPlaneState {
             Ok::<(), String>(())
         })
         .await
-        .map_err(|_| "The Control Plane file download timed out.".to_owned())??;
+        .map_err(|_| "The Gateway file download timed out.".to_owned())??;
         writer.flush().await.map_err(|_| SAVE_ERROR)?;
         writer.sync_all().await.map_err(|_| SAVE_ERROR)?;
         drop(writer);

@@ -490,9 +490,9 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     };
     let store = if cfg!(target_os = "macos") {
         home.path()
-            .join("Library/Application Support/supertag/tui-control-planes.json")
+            .join("Library/Application Support/supertag/tui-gateways.json")
     } else {
-        home.path().join(".config/supertag/tui-control-planes.json")
+        home.path().join(".config/supertag/tui-gateways.json")
     };
 
     let (saved, stderr) = connect("not-the-token", "prod", &services.public, false).await?;
@@ -518,12 +518,9 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
     assert_eq!(profiles["version"], 1);
     assert_eq!(profiles["active"], "prod");
-    assert_eq!(profiles["control_planes"][0]["name"], "prod");
-    assert_eq!(
-        profiles["control_planes"][0]["url"],
-        services.public.as_str()
-    );
-    assert_eq!(profiles["control_planes"][0]["token"], token.as_str());
+    assert_eq!(profiles["gateways"][0]["name"], "prod");
+    assert_eq!(profiles["gateways"][0]["url"], services.public.as_str());
+    assert_eq!(profiles["gateways"][0]["token"], token.as_str());
 
     // A later command names the saved Control Plane and needs no token in its environment.
     let mut listed = binary(&["get", "tags", "--gateway", "prod"]);
@@ -539,12 +536,12 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     ensure!(!saved && stderr.contains("--replace"), "{stderr}");
     // Replacing a connection keeps the Workspace the terminal UI chose for it.
     let mut profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    profiles["control_planes"][0]["workspace"] = "project".into();
+    profiles["gateways"][0]["workspace"] = "project".into();
     std::fs::write(&store, serde_json::to_vec(&profiles)?)?;
     let (saved, stderr) = connect(&token, "prod", &services.public, true).await?;
     ensure!(saved, "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    assert_eq!(profiles["control_planes"][0]["workspace"], "project");
+    assert_eq!(profiles["gateways"][0]["workspace"], "project");
     // A URL that cannot be saved is refused before the token is sent anywhere.
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;
@@ -569,7 +566,7 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     let (saved, stderr) = connect(&token, "prod", "http://127.0.0.2:1", true).await?;
     ensure!(!saved && stderr.contains("could not reach"), "{stderr}");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    assert_eq!(profiles["control_planes"].as_array().map(Vec::len), Some(1));
+    assert_eq!(profiles["gateways"].as_array().map(Vec::len), Some(1));
 
     // In a terminal the token is read from a masked prompt: the terminal never shows it.
     let (terminal, input) = pseudo_terminal()?;
@@ -614,8 +611,8 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
         "the terminal echoed the token"
     );
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    assert_eq!(profiles["control_planes"][1]["name"], "typed");
-    assert_eq!(profiles["control_planes"][1]["token"], token.as_str());
+    assert_eq!(profiles["gateways"][1]["name"], "typed");
+    assert_eq!(profiles["gateways"][1]["token"], token.as_str());
 
     // A client Auth Key joins this device as client:NAME; only the enrolled credential is saved,
     // and the device reaches only the Tags its key allows.
@@ -650,9 +647,9 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     let joined: Value = serde_json::from_slice(&joined.stdout)?;
     assert_eq!(joined["connected_as"], "client:alice-laptop");
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    let saved = profiles["control_planes"]
+    let saved = profiles["gateways"]
         .as_array()
-        .context("control_planes")?
+        .context("gateways")?
         .iter()
         .find(|entry| entry["name"] == "work")
         .context("work")?["token"]

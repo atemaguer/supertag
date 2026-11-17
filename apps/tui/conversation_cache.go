@@ -11,7 +11,7 @@ import (
 	"github.com/atemaguer/supertag/apps/tui/views"
 )
 
-// The cache's entries for one Control Plane and principal.
+// The cache's entries for one Gateway and principal.
 const (
 	rosterKey   = "roster"
 	selectedKey = "selected"
@@ -26,15 +26,15 @@ func conversationKey(tag string) string { return "tag:" + tag }
 // streaming reply, writes once.
 const cacheDelay = 500 * time.Millisecond
 
-// modelCache is what a model keeps on disk, for the Control Plane it talks to and the principal its
+// modelCache is what a model keeps on disk, for the Gateway it talks to and the principal its
 // credential acts as. A model's copies share it.
 type modelCache struct {
 	disk  *localCache
 	token string
 	// principal is whom the credential acts as: remembered from an earlier launch, then confirmed
-	// with the Control Plane. Nothing is written until it is known.
+	// with the Gateway. Nothing is written until it is known.
 	principal string
-	// confirmed says the principal is known, from the Control Plane or an earlier launch.
+	// confirmed says the principal is known, from the Gateway or an earlier launch.
 	confirmed bool
 	// dirty are the entries changed since they were last written; flushing says a write waits.
 	dirty    map[string]bool
@@ -44,7 +44,7 @@ type modelCache struct {
 type (
 	// cacheFlushMsg writes the changed entries.
 	cacheFlushMsg struct{}
-	// principalMsg is whom the Control Plane resolved the credential to.
+	// principalMsg is whom the Gateway resolved the credential to.
 	principalMsg struct {
 		principal string
 		err       error
@@ -104,7 +104,7 @@ type cachedRoster struct {
 func newModelCache(disk *localCache, token string) *modelCache {
 	cache := &modelCache{disk: disk, token: token, dirty: map[string]bool{}}
 	if disk != nil {
-		// A principal the Control Plane named for this credential before is trusted until it
+		// A principal the Gateway named for this credential before is trusted until it
 		// says otherwise, so what changes while it cannot be reached, such as a message waiting
 		// in the outbox, is kept.
 		cache.principal = disk.principal(token)
@@ -267,7 +267,7 @@ func fromMilli(ms int64) time.Time {
 }
 
 // hydrate shows what the cache holds for the remembered principal: the Tag list and rows, the
-// selected Tag and its conversation, messages not yet sent, and drafts. The Control Plane's
+// selected Tag and its conversation, messages not yet sent, and drafts. The Gateway's
 // answers then replace it.
 func (m *model) hydrate() {
 	c := m.cache
@@ -368,7 +368,7 @@ func (m *model) cachedConversation(tag string) {
 	conv.loaded = true
 }
 
-// whoAmI asks the Control Plane whom the credential acts as, to name the cache's entries.
+// whoAmI asks the Gateway whom the credential acts as, to name the cache's entries.
 func (m model) whoAmI() tea.Cmd {
 	if m.cache == nil || m.cache.disk == nil {
 		return nil
@@ -380,7 +380,7 @@ func (m model) whoAmI() tea.Cmd {
 	}
 }
 
-// confirmPrincipal starts writing the cache once the Control Plane says whom the credential acts
+// confirmPrincipal starts writing the cache once the Gateway says whom the credential acts
 // as. When that is not whom an earlier launch remembered, what was shown from that principal's
 // cache is dropped and read anew.
 func (m *model) confirmPrincipal(msg principalMsg) tea.Cmd {
@@ -406,7 +406,7 @@ func (m *model) confirmPrincipal(msg principalMsg) tea.Cmd {
 	return cmd
 }
 
-// cacheOrigin names a Control Plane in the cache: its URL without a trailing slash.
+// cacheOrigin names a Gateway in the cache: its URL without a trailing slash.
 func cacheOrigin(target client.Target) string {
 	return strings.TrimRight(strings.TrimSpace(target.URL), "/")
 }

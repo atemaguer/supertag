@@ -1,5 +1,5 @@
 // Presentation types of the terminal UI. They began as the generated types of the removed
-// supertag.operator.v1 protos; the Control Plane's runtime.v2 replies are projected into them.
+// supertag.operator.v1 protos; the Gateway's runtime.v2 replies are projected into them.
 
 package views
 
@@ -10,7 +10,7 @@ import (
 // Identifies and versions a resource.
 type Metadata struct {
 
-	// The stable ID the Control Plane assigned.
+	// The stable ID the Gateway assigned.
 	Id string
 	// The unique name within the resource's kind.
 	Name string

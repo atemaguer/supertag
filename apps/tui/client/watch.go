@@ -103,10 +103,10 @@ func (w *Watcher) watch(ctx context.Context, token *string, send func(WatchUpdat
 }
 
 // errStreamEnded is a stream that closed before its end event.
-var errStreamEnded = errors.New("the Control Plane closed the stream early")
+var errStreamEnded = errors.New("the Gateway closed the stream early")
 
 // errIdle is a stream that went quiet for longer than heartbeats allow.
-var errIdle = errors.New("the Control Plane stopped sending events")
+var errIdle = errors.New("the Gateway stopped sending events")
 
 func watchStream[T any](
 	ctx context.Context, idleTimeout time.Duration, token *string, send func(WatchUpdate) bool,

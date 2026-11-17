@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ControlPlane, FollowUpdate, MessagePage, ReadMessages } from "../control-plane";
+import type { FollowUpdate, Gateway, MessagePage, ReadMessages } from "../gateway";
 
 /** Why each queued turn still waits for a Worker Host, by Task ID. */
 export type Waits = ReadonlyMap<string, string>;
@@ -38,7 +38,7 @@ export function nextTexts(texts: Texts, update: FollowUpdate): Texts {
  * and the texts what running turns are writing.
  */
 export function useConversationFollow(
-  controlPlane: ControlPlane,
+  gateway: Gateway,
   tagId: string,
   request: () => ReadMessages,
   apply: (page: MessagePage) => void,
@@ -51,7 +51,7 @@ export function useConversationFollow(
   latest.current = { request, apply };
   // biome-ignore lint/correctness/useExhaustiveDependencies: another Tag is another conversation to follow.
   useEffect(() => {
-    const follow = controlPlane.follow;
+    const follow = gateway.follow;
     if (!follow) return;
     let closed = false;
     setWaits(none);
@@ -80,6 +80,6 @@ export function useConversationFollow(
       // Cleanup can race the IPC registration; stop the follow once it exists.
       void stopping.then((stop) => stop()).catch(() => {});
     };
-  }, [controlPlane, tagId]);
+  }, [gateway, tagId]);
   return { live, connected, waits, texts };
 }

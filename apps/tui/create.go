@@ -36,7 +36,7 @@ type objectiveForm struct {
 	field   int
 	sending bool
 	note    note
-	// request is what was last sent; created is the Control Plane's answer once the Objective
+	// request is what was last sent; created is the Gateway's answer once the Objective
 	// exists.
 	// request.ID is generated once per logical submission and reused while the content is
 	// unchanged, so a retry after a lost answer reaches the same Objective instead of a second one.
@@ -262,7 +262,7 @@ func (m model) renderObjectiveForm() string {
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
 }
 
-// createdLines say what the Control Plane created and whether it started, with each warning.
+// createdLines say what the Gateway created and whether it started, with each warning.
 // Every field from the server is filtered for the terminal.
 func createdLines(owner string, created *views.CreateObjectiveResponse) string {
 	id := terminalText(created.GetObjective().GetId())
@@ -287,7 +287,7 @@ func createdLines(owner string, created *views.CreateObjectiveResponse) string {
 func (m model) formHint() string {
 	switch {
 	case m.form.sending:
-		return "Waiting for the Control Plane…"
+		return "Waiting for the Gateway…"
 	case m.form.created != nil && m.form.created.GetNotStarted() != "":
 		return "enter shows the Objective · r starts it · esc back"
 	case m.form.created != nil:

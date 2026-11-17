@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ControlPlane, NetworkLog, Note, Tag } from "../control-plane";
+import type { Gateway, NetworkLog, Note, Tag } from "../gateway";
 import { watchFeed } from "../lib/watch";
 import { networkRequestLine, networkTotals, noteCaption, TagDetails } from "./tag-details";
 
@@ -60,10 +60,10 @@ it("lists the Tag's notes, deletes one, and rereads when the watch says they cha
     held = held.filter((entry) => entry.memoryId !== memoryId);
     return deleted;
   });
-  const controlPlane = { notes, deleteNote } as unknown as ControlPlane;
+  const gateway = { notes, deleteNote } as unknown as Gateway;
   const feed = watchFeed();
   const onClose = vi.fn();
-  act(() => root.render(createElement(TagDetails, { controlPlane, watch: feed, tag, onClose })));
+  act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose })));
   await settle();
   expect(notes).toHaveBeenCalledWith("lead");
   // The panel is the Tag's: its name heads it, and Notes is one section of it.
@@ -94,8 +94,8 @@ it("lists the Tag's notes, deletes one, and rereads when the watch says they cha
 });
 
 it("says when the Tag keeps no notes you can see", async () => {
-  const controlPlane = { notes: async () => [] } as unknown as ControlPlane;
-  act(() => root.render(createElement(TagDetails, { controlPlane, tag, onClose() {} })));
+  const gateway = { notes: async () => [] } as unknown as Gateway;
+  act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
   await settle();
   expect(host.textContent).toContain("Lead keeps no notes you can see yet");
   expect(host.querySelector('[aria-label^="Delete note"]')).toBeNull();
@@ -143,11 +143,9 @@ it("words each network request and an Attempt's totals", () => {
 it("shows the Tag's network log as its own section and rereads when a turn ends", async () => {
   let held: NetworkLog[] = [];
   const networkLogs = vi.fn(async () => held);
-  const controlPlane = { notes: async () => [], networkLogs } as unknown as ControlPlane;
+  const gateway = { notes: async () => [], networkLogs } as unknown as Gateway;
   const feed = watchFeed();
-  act(() =>
-    root.render(createElement(TagDetails, { controlPlane, watch: feed, tag, onClose() {} })),
-  );
+  act(() => root.render(createElement(TagDetails, { gateway, watch: feed, tag, onClose() {} })));
   await settle();
   expect(networkLogs).toHaveBeenCalledWith("lead");
   const headings = [...host.querySelectorAll("section.details-section h3")].map(
@@ -167,13 +165,13 @@ it("shows the Tag's network log as its own section and rereads when a turn ends"
 });
 
 it("tells a person who is not an operator that only operators see the network log", async () => {
-  const controlPlane = {
+  const gateway = {
     notes: async () => [],
     networkLogs: async () => {
       throw new Error("permission denied: the call needs an operator");
     },
-  } as unknown as ControlPlane;
-  act(() => root.render(createElement(TagDetails, { controlPlane, tag, onClose() {} })));
+  } as unknown as Gateway;
+  act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));
   await settle();
   expect(host.textContent).toContain("Only operators can see the network log.");
 });

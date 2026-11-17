@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ControlPlane, TaskEvent } from "../control-plane";
+import type { Gateway, TaskEvent } from "../gateway";
 
 /** What a turn shows from its recorded events, beside its prompt and result. */
 export interface TurnView {
@@ -63,7 +63,7 @@ export function mergeEvents(
  * change to the message, so only a turn whose message left earlier events out reads them, once.
  */
 export function useTurnEvents(
-  events: ControlPlane["events"] | undefined,
+  events: Gateway["events"] | undefined,
   turn: { taskId?: string; events?: readonly TaskEvent[]; eventsTruncated?: boolean },
 ): readonly TaskEvent[] {
   const { taskId, eventsTruncated } = turn;

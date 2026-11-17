@@ -330,13 +330,13 @@ async fn exercise(database_url: &str) -> Result<()> {
 
     // Saved Control Planes: the terminal UI and desktop stores are read by name,
     // before or after the command, with no operator token in the environment.
-    let tui_store = config_directory(&home).join("supertag/tui-control-planes.json");
-    let desktop_store = config_directory(&home).join("ai.supertag.desktop/control-planes.json");
+    let tui_store = config_directory(&home).join("supertag/tui-gateways.json");
+    let desktop_store = config_directory(&home).join("ai.supertag.desktop/gateways.json");
     write_private(
         &tui_store,
-        &json!({"version":1,"active":"local","control_planes":[{"url":public,"token":operator,"name":"local"}]}),
+        &json!({"version":1,"active":"local","gateways":[{"url":public,"token":operator,"name":"local"}]}),
     )?;
-    let desktop = json!({"active":public,"controlPlanes":[{"profile":{"name":"desk","origin":public},"token":operator}]});
+    let desktop = json!({"active":public,"gateways":[{"profile":{"name":"desk","origin":public},"token":operator}]});
     write_private(&desktop_store, &desktop)?;
     for args in [
         vec!["--gateway", "local", "get", "tag", "builder"],
@@ -353,7 +353,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     )
     .await?;
     ensure!(
-        !success && stderr.contains("no saved Control Plane is named"),
+        !success && stderr.contains("no saved Gateway is named"),
         "{stderr}"
     );
     let (success, _, stderr) = run(
@@ -377,7 +377,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     // The same name for two different connections is refused, not guessed.
     write_private(
         &desktop_store,
-        &json!({"controlPlanes":[{"profile":{"name":"local","origin":public},"token":"other-token"}]}),
+        &json!({"gateways":[{"profile":{"name":"local","origin":public},"token":"other-token"}]}),
     )?;
     let (success, _, stderr) = run(
         &home,
@@ -1229,7 +1229,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     )
     .await?;
     ensure!(
-        !success && stderr.contains("saved Control Plane directory"),
+        !success && stderr.contains("saved Gateway directory"),
         "{stderr}"
     );
     std::fs::set_permissions(tui_directory, std::fs::Permissions::from_mode(0o700))?;
@@ -1240,7 +1240,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let (success, _, stderr) =
         run(&home, &["--gateway", "desk", "get", "tag", "builder"], None).await?;
     ensure!(
-        !success && stderr.contains("saved Control Plane directory"),
+        !success && stderr.contains("saved Gateway directory"),
         "{stderr}"
     );
     std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o700))?;
@@ -1260,7 +1260,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let path = |path: &Path| path.to_str().map(str::to_owned).context("TLS path");
     write_private(
         &tui_store,
-        &json!({"version":1,"active":"local","control_planes":[
+        &json!({"version":1,"active":"local","gateways":[
             {"url":public,"token":operator,"name":"local"},
             {"url":secure_url,"token":operator,"name":"secure",
              "server_ca_file":path(&tls.ca)?,"client_cert_file":path(&tls.client_cert)?,

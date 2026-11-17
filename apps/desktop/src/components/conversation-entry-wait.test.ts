@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
-import type { Message } from "../control-plane";
+import type { Message } from "../gateway";
 import { nextWaits } from "../lib/follow";
 import { LiveConversationEntry } from "./conversation-entry";
 

@@ -268,7 +268,7 @@ func running(turn *runtimeTurn) bool {
 	return turn.started && !turn.settled && !turn.joined
 }
 
-// deliveryLine says how far the operator's last message got: Sent once the Control Plane
+// deliveryLine says how far the operator's last message got: Sent once the Gateway
 // accepted it, Seen once a Worker Host took its turn up or a running turn took it in.
 func (m model) deliveryLine(turn *runtimeTurn) string {
 	if turn != nil && (turn.started || turn.settled || turn.joined) {
@@ -277,7 +277,7 @@ func (m model) deliveryLine(turn *runtimeTurn) string {
 	return faint.Render("Sent")
 }
 
-// queuedLine says what became of a message the Control Plane has not accepted: it is sending,
+// queuedLine says what became of a message the Gateway has not accepted: it is sending,
 // or it was not delivered, with the keys that send it again or take it back to edit.
 func (m model) queuedLine(entry *outgoing, width int) string {
 	if entry.sending || entry.Error == "" {

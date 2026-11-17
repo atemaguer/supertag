@@ -52,7 +52,7 @@ func DeviceName() string {
 	}, host)
 }
 
-// Caller is who the Control Plane resolved a credential to.
+// Caller is who the Gateway resolved a credential to.
 type Caller struct {
 	// Principal is such as operator:local, operator:token:laptop or client:alice-laptop.
 	Principal string
@@ -60,7 +60,7 @@ type Caller struct {
 	Admin     bool
 }
 
-// WhoAmI asks the Control Plane whose credential this client presents.
+// WhoAmI asks the Gateway whose credential this client presents.
 func (c *Client) WhoAmI(ctx context.Context) (Caller, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()

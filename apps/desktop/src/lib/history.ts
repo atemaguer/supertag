@@ -1,4 +1,4 @@
-import type { Message, MessagePage, ReadMessages } from "../control-plane";
+import type { Message, MessagePage, ReadMessages } from "../gateway";
 
 /**
  * The part of a conversation the app holds, oldest first. A read that starts from it asks only
@@ -11,7 +11,7 @@ export interface History {
   /** The conversation the messages came from. A page from another one replaces them. */
   conversationId?: string;
   loading: boolean;
-  /** The messages came from the Control Plane, at least once. */
+  /** The messages came from the Gateway, at least once. */
   read: boolean;
 }
 
@@ -22,7 +22,7 @@ export const TAIL = 50;
 
 const FINISHED = new Set(["succeeded", "failed", "cancelled"]);
 
-/** A message the Control Plane will still change: its turn has not finished. */
+/** A message the Gateway will still change: its turn has not finished. */
 export function unsettled(message: Message) {
   return !FINISHED.has(message.task.state);
 }
@@ -97,7 +97,7 @@ export function earlierHistory(before: History, expected: History, page: Message
   };
 }
 
-/** Adds the Control Plane's receipt for a message sent here, unless the history holds it. */
+/** Adds the Gateway's receipt for a message sent here, unless the history holds it. */
 export function receivedMessage(before: History, message: Message): History {
   if (before.messages.some(({ task }) => task.taskId === message.task.taskId)) return before;
   return { ...before, messages: ordered(before.messages, [message]), loading: false };
@@ -113,7 +113,7 @@ export function tail(history: History): History {
 
 /**
  * Each Task once, the latest copy winning, ordered by the conversation. A turn that finished
- * quietly leaves: the Control Plane sends it only to a copy that held it running.
+ * quietly leaves: the Gateway sends it only to a copy that held it running.
  */
 function ordered(earlier: readonly Message[], later: readonly Message[]): Message[] {
   const byTask = new Map<string, Message>();

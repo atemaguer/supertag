@@ -90,7 +90,7 @@ func TestTheStatusLineCountsUnreadAndQuietTurnsLeave(t *testing.T) {
 	if got := unreadTotal(summaries, "lead"); got != 1 {
 		t.Fatalf("without the one in front = %d", got)
 	}
-	m := testModel(t, &fakeControlPlane{tags: tags("lead", "moss")})
+	m := testModel(t, &fakeGateway{tags: tags("lead", "moss")})
 	m.summaries = summaries
 	if !strings.Contains(screen(m), "3 unread") {
 		t.Fatalf("status line:\n%s", screen(m))

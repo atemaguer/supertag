@@ -1,13 +1,6 @@
 import { Lock, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  ControlPlane,
-  NetworkLog,
-  NetworkRequest,
-  Note,
-  Tag,
-  WatchUpdate,
-} from "../control-plane";
+import type { Gateway, NetworkLog, NetworkRequest, Note, Tag, WatchUpdate } from "../gateway";
 import { describe } from "../lib/polling";
 import { useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { relativeTime } from "./sidebar";
@@ -32,12 +25,12 @@ export function noteCaption(note: Note, now = Date.now()): string {
  * only.
  */
 export function TagDetails({
-  controlPlane,
+  gateway,
   watch,
   tag,
   onClose,
 }: {
-  controlPlane: ControlPlane;
+  gateway: Gateway;
   watch?: WatchFeed;
   tag: Tag;
   onClose(): void;
@@ -62,8 +55,8 @@ export function TagDetails({
           <X size={16} aria-hidden />
         </Button>
       </div>
-      <NotesSection controlPlane={controlPlane} watch={watch} tag={tag} />
-      <NetworkSection controlPlane={controlPlane} watch={watch} tag={tag} />
+      <NotesSection gateway={gateway} watch={watch} tag={tag} />
+      <NetworkSection gateway={gateway} watch={watch} tag={tag} />
     </aside>
   );
 }
@@ -73,11 +66,11 @@ export function TagDetails({
  * here; they tell the Tag.
  */
 export function NotesSection({
-  controlPlane,
+  gateway,
   watch,
   tag,
 }: {
-  controlPlane: ControlPlane;
+  gateway: Gateway;
   watch?: WatchFeed;
   tag: Tag;
 }) {
@@ -87,12 +80,12 @@ export function NotesSection({
   const tagId = tag.tagId;
   const read = useCallback(
     async (signal: AbortSignal) => {
-      if (!controlPlane.notes) {
+      if (!gateway.notes) {
         setNotes([]);
         return;
       }
       try {
-        const next = await controlPlane.notes(tagId);
+        const next = await gateway.notes(tagId);
         if (signal.aborted) return;
         setNotes(next);
         setError("");
@@ -101,7 +94,7 @@ export function NotesSection({
         return false;
       }
     },
-    [controlPlane, tagId],
+    [gateway, tagId],
   );
   const affected = useCallback(
     (update: WatchUpdate) => update.kind === "memory" && update.tagId === tagId,
@@ -110,10 +103,10 @@ export function NotesSection({
   const refresh = useWatchRefresh(read, NOTES_INTERVAL, watch, affected);
 
   async function remove(note: Note) {
-    if (!controlPlane.deleteNote || deleting) return;
+    if (!gateway.deleteNote || deleting) return;
     setDeleting(note.memoryId);
     try {
-      await controlPlane.deleteNote(note.memoryId);
+      await gateway.deleteNote(note.memoryId);
       setNotes((prior) => prior?.filter(({ memoryId }) => memoryId !== note.memoryId));
       setError("");
       refresh();
@@ -152,7 +145,7 @@ export function NotesSection({
                 {note.private && <Lock size={11} aria-hidden />}
                 {noteCaption(note)}
               </small>
-              {controlPlane.deleteNote && (
+              {gateway.deleteNote && (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -198,11 +191,11 @@ export function networkTotals(log: NetworkLog): string {
  * Only operators may read it.
  */
 export function NetworkSection({
-  controlPlane,
+  gateway,
   watch,
   tag,
 }: {
-  controlPlane: ControlPlane;
+  gateway: Gateway;
   watch?: WatchFeed;
   tag: Tag;
 }) {
@@ -211,12 +204,12 @@ export function NetworkSection({
   const tagId = tag.tagId;
   const read = useCallback(
     async (signal: AbortSignal) => {
-      if (!controlPlane.networkLogs) {
+      if (!gateway.networkLogs) {
         setLogs([]);
         return;
       }
       try {
-        const next = await controlPlane.networkLogs(tagId);
+        const next = await gateway.networkLogs(tagId);
         if (signal.aborted) return;
         setLogs(next);
         setError("");
@@ -231,7 +224,7 @@ export function NetworkSection({
         return false;
       }
     },
-    [controlPlane, tagId],
+    [gateway, tagId],
   );
   // A conversation change is the sign that one of the Tag's turns ended.
   const affected = useCallback(

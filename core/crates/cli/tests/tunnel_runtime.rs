@@ -2153,12 +2153,12 @@ async fn operator_clients_verify_save_and_hand_over_a_wss_control_plane(
     let saved = save_tunnel_control_plane(&deployment, &home, &public).await?;
     assert_eq!(saved["name"], "tunnel");
     let store = if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/supertag/tui-control-planes.json")
+        home.join("Library/Application Support/supertag/tui-gateways.json")
     } else {
-        home.join(".config/supertag/tui-control-planes.json")
+        home.join(".config/supertag/tui-gateways.json")
     };
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
-    assert_eq!(profiles["control_planes"][0]["url"], public.as_str());
+    assert_eq!(profiles["gateways"][0]["url"], public.as_str());
     let mut tags = binary(&["get", "tags", "--gateway", "tunnel"]);
     tags.env("HOME", &home);
     let output = run(tags).await?;

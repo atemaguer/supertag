@@ -57,7 +57,7 @@ func (m model) hostsCmd() tea.Cmd {
 }
 
 // hostsRead keeps what was read of the Worker Hosts. A failed read hides the summary rather than
-// keep one that may be stale; the status bar already says when the Control Plane is unreachable.
+// keep one that may be stale; the status bar already says when the Gateway is unreachable.
 func (m *model) hostsRead(msg hostsMsg) tea.Cmd {
 	var again tea.Cmd
 	if m.hostReload.done() {

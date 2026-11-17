@@ -1,5 +1,5 @@
 // Presentation types of the terminal UI. They began as the generated types of the removed
-// supertag.operator.v1 protos; the Control Plane's runtime.v2 replies are projected into them.
+// supertag.operator.v1 protos; the Gateway's runtime.v2 replies are projected into them.
 
 package views
 
@@ -107,7 +107,7 @@ type Resource struct {
 	// The resource's manifest, set only when the request asks for it: the
 	// document `ApplyManifests` takes, with `apiVersion`, `kind`,
 	// `metadata.name` and the declarable `spec` fields. It leaves out what the
-	// Control Plane sets, such as IDs and timestamps, and an Objective's
+	// Gateway sets, such as IDs and timestamps, and an Objective's
 	// fields at their defaults. A Surface Account's has its secret references,
 	// never a value.
 
@@ -242,7 +242,7 @@ type Tag struct {
 	Metadata *Metadata
 	// What is declared.
 	Spec *TagSpec
-	// What the Control Plane observes.
+	// What the Gateway observes.
 	Status *TagStatus
 }
 
@@ -271,7 +271,7 @@ func (x *Tag) GetStatus() *TagStatus {
 // merges each list entry by entry: a Role name, a Worker Host ID, a label, a
 // location by provider and scope ID, and a sender Tag.
 type TagSpec struct {
-	// Whether this is the Control Plane's lead Tag, the one `supertag init` creates.
+	// Whether this is the Gateway's lead Tag, the one `supertag init` creates.
 	Lead bool
 	// How many Work Sessions it may have open at once, and has open now.
 	MaxWorkSessions, OpenWorkSessions uint32
@@ -292,7 +292,7 @@ func (x *TagSpec) WorkSessionCount() string {
 	return fmt.Sprintf("%d of %d Work Sessions open", x.OpenWorkSessions, x.MaxWorkSessions)
 }
 
-// What the Control Plane observes of a Tag.
+// What the Gateway observes of a Tag.
 type TagStatus struct {
 
 	// Its phase.
@@ -315,7 +315,7 @@ type Role struct {
 	Metadata *Metadata
 	// What is declared.
 	Spec *RoleSpec
-	// What the Control Plane observes.
+	// What the Gateway observes.
 	Status *RoleStatus
 }
 
@@ -345,7 +345,7 @@ func (x *Role) GetStatus() *RoleStatus {
 type RoleSpec struct {
 }
 
-// What the Control Plane observes of a Role.
+// What the Gateway observes of a Role.
 type RoleStatus struct {
 
 	// Its phase.
@@ -397,7 +397,7 @@ type Workspace struct {
 	Metadata *Metadata
 	// What is declared.
 	Spec *WorkspaceSpec
-	// What the Control Plane observes.
+	// What the Gateway observes.
 	Status *WorkspaceStatus
 }
 
@@ -464,7 +464,7 @@ func (x *WorkspaceSpec) GetDelivery() WorkspaceDeliveryMode {
 	return WorkspaceDeliveryMode_WORKSPACE_DELIVERY_MODE_UNSPECIFIED
 }
 
-// What the Control Plane observes of a Workspace.
+// What the Gateway observes of a Workspace.
 type WorkspaceStatus struct {
 }
 

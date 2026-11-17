@@ -602,7 +602,7 @@ button:disabled {
 .shell[data-sidebar="expanded"] .sidebar-divider {
   width: calc(100% - 28px);
 }
-.control-plane-menu {
+.gateway-menu {
   z-index: 40;
   width: 260px;
   max-height: var(--radix-dropdown-menu-content-available-height);
@@ -612,25 +612,25 @@ button:disabled {
   background: var(--panel);
   font-size: 12px;
 }
-.control-plane-current {
+.gateway-current {
   display: grid;
   gap: 2px;
   padding: 7px 8px 5px;
   min-width: 0;
 }
-.control-plane-current > * {
+.gateway-current > * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.control-plane-current span {
+.gateway-current span {
   font-weight: 620;
 }
-.control-plane-current small {
+.gateway-current small {
   color: var(--muted);
   font-size: 11px;
 }
-.control-plane-edit-menu {
+.gateway-edit-menu {
   z-index: 40;
   min-width: 155px;
   max-width: 225px;
@@ -641,8 +641,8 @@ button:disabled {
   background: var(--panel);
   font-size: 12px;
 }
-.control-plane-choice,
-.control-plane-action {
+.gateway-choice,
+.gateway-action {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -652,39 +652,39 @@ button:disabled {
   outline: none;
   cursor: default;
 }
-.control-plane-choice[data-highlighted],
-.control-plane-action[data-highlighted],
-.control-plane-action[data-state="open"] {
+.gateway-choice[data-highlighted],
+.gateway-action[data-highlighted],
+.gateway-action[data-state="open"] {
   background: var(--hover);
   color: var(--text);
 }
-.control-plane-choice-text {
+.gateway-choice-text {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
-.control-plane-choice-text > *,
-.control-plane-action .row-title {
+.gateway-choice-text > *,
+.gateway-action .row-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.control-plane-choice small {
+.gateway-choice small {
   color: var(--muted);
   font-size: 11px;
 }
-.control-plane-indicator {
+.gateway-indicator {
   display: grid;
   place-items: center;
   flex: 0 0 15px;
   color: var(--mint);
 }
-.control-plane-separator {
+.gateway-separator {
   height: 1px;
   margin: 4px 1px;
   background: var(--line);
 }
-.control-plane-edit-arrow {
+.gateway-edit-arrow {
   margin-left: auto;
 }
 .workspace-body {

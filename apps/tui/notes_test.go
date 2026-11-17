@@ -17,7 +17,7 @@ import (
 func TestNotesListsTheTagsNotesAndDeletesOne(t *testing.T) {
 	alice := "operator:alice"
 	seen := time.Now().Add(-time.Hour).UnixMilli()
-	fake := &fakeControlPlane{tags: tags("lead"), memories: []*v2.Memory{
+	fake := &fakeGateway{tags: tags("lead"), memories: []*v2.Memory{
 		{MemoryId: "mem_1", TagId: "lead", Text: "Alice prefers squash merges.", Audience: &alice, CreatedAtMs: 1, UpdatedAtMs: 1, LastSeenAtMs: &seen},
 		{MemoryId: "mem_2", TagId: "lead", Text: "Release checklist: docs/release.md", CreatedAtMs: 1, UpdatedAtMs: 1},
 		{MemoryId: "mem_other", TagId: "other", Text: "Not this Tag's"},
@@ -68,7 +68,7 @@ func TestNotesListsTheTagsNotesAndDeletesOne(t *testing.T) {
 }
 
 func TestNotesSayWhenTheTagKeepsNone(t *testing.T) {
-	a := testApp(t, &fakeControlPlane{tags: tags("lead")}, nil)
+	a := testApp(t, &fakeGateway{tags: tags("lead")}, nil)
 	runApp(t, a, a.openNotes())
 	if s := appScreen(a); !strings.Contains(s, "lead keeps no notes you can see yet") {
 		t.Fatalf("empty notes:\n%s", s)

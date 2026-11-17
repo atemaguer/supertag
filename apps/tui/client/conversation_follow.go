@@ -25,7 +25,7 @@ type conversationStream struct {
 
 	mu   sync.Mutex
 	live bool
-	// ended says the Control Plane cannot push this conversation, so follows read on a timer.
+	// ended says the Gateway cannot push this conversation, so follows read on a timer.
 	ended    bool
 	messages map[string]pushedMessage
 	waits    map[string]string
