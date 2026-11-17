@@ -1,14 +1,18 @@
 import { lstat, mkdir, mkdtemp, realpath, unlink, writeFile } from "node:fs/promises";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { ExecutionCleanupError } from "@supertag/worker-sdk";
 import {
   type AdapterBootstrap,
   type AttemptHistoryEntry,
+  FileScopeRules,
+  fileScopeOf,
+  fileScopeRefusal,
   type HarnessCompleteRequest,
   type HarnessRun,
   harnessClient,
   receipt,
   redact,
+  resolveOutsideDirectories,
   spawnOwnedProcess,
   type Task,
   TaskEventKind,
@@ -21,6 +25,7 @@ import {
   type OpenCodeCopy,
   type OpenCodeMcpTool,
   type OpenCodeRunRequest,
+  type OpenCodeScope,
   openCodeConfigurationEnvironment,
   readProviderApiKey,
   runOpenCode,
@@ -88,6 +93,8 @@ export function taskModel(run: HarnessRun, configuration: AdapterOptions) {
     throw new SafeOpenCodeFailure(
       "OpenCode commands require the Worker Host's explicit unsandboxed opt-in. Native execution did not start.",
     );
+  const refusal = fileScopeRefusal(task, "opencode");
+  if (refusal) throw new SafeOpenCodeFailure(`${refusal}. Native execution did not start.`);
   const limits = task.executionLimits;
   if (
     limits?.maxReportedTokens !== undefined ||
@@ -227,10 +234,35 @@ export async function nativeRequest(
   const workspace = await realpath(workspacePath);
   if (!(await lstat(workspace)).isDirectory()) throw new Error("OpenCode Workspace is missing");
   const copies = await workspaceCopies(task);
-  if (!(await verifyWorkspaceLinks(workspace, signal)))
+  const fileScope = fileScopeOf(task);
+  const rules = new FileScopeRules(fileScope);
+  if (!(await verifyWorkspaceLinks(workspace, signal, rules)))
     throw new SafeOpenCodeFailure(
       "OpenCode Workspace contains an unsafe symbolic link. Native execution did not start.",
     );
+  let scope: OpenCodeScope | undefined;
+  if (fileScope) {
+    try {
+      const outside = await resolveOutsideDirectories(fileScope, workspace, [scratch]);
+      const output = environment["SUPERTAG_OUTPUT_DIR"];
+      const outputDirectory =
+        output && isAbsolute(output) ? relative(workspace, await realpath(output)) : undefined;
+      scope = {
+        ...(outputDirectory && !outputDirectory.startsWith("..") && !isAbsolute(outputDirectory)
+          ? { outputDirectory: outputDirectory.split(sep).join("/") }
+          : {}),
+        write: fileScope.write,
+        readOnly: fileScope.readOnly,
+        hidden: fileScope.hidden,
+        outsideWrite: outside.write,
+        outsideRead: outside.read,
+      };
+    } catch (error) {
+      throw new SafeOpenCodeFailure(
+        `${error instanceof Error ? error.message : "Path scope directories are invalid"}. Native execution did not start.`,
+      );
+    }
+  }
   const executable = configuration.executable ?? "opencode";
   if (
     (await hasExecutableProjectConfig(workspace, scratch)) &&
@@ -321,6 +353,7 @@ export async function nativeRequest(
             true,
             copies,
             workspace,
+            scope,
           ),
         },
       };

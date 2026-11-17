@@ -6,6 +6,7 @@ import {
   type AdapterBootstrap,
   type AttemptHistoryEntry,
   COORDINATION_SERVER,
+  fileScopeRefusal,
   harnessClient,
   type ObjectiveSignal,
   receipt,
@@ -158,6 +159,13 @@ export async function runAdapter(
       task.allowedActions,
       run.remoteWorkspace || (configuration.allowUnsandboxedCommands ?? false),
     );
+    // Remote and shared tools apply the path scope where they run. Cursor's local tools cannot.
+    const scopeRefusal = fileScopeRefusal(
+      task,
+      shared ? "cursor-shared" : run.remoteWorkspace ? "cursor-remote" : "cursor-local",
+    );
+    if (scopeRefusal)
+      throw new CursorProtocolError(`${scopeRefusal}. Native execution did not start.`);
     const limits = task.executionLimits;
     if (
       run.resolvedSkills.length ||

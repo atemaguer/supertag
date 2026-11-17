@@ -169,6 +169,134 @@ it("never lets OpenCode edit Git metadata the host later runs git in", () => {
   expect(openCodePermissions(["files:read"]).edit).toBe("deny");
 });
 
+const noScope = { write: [], readOnly: [], hidden: [], outsideWrite: [], outsideRead: [] };
+
+/** OpenCode 1.15.12's rule evaluation: `*` and `?` cross `/`, and the last matching rule wins. */
+function decide(rule: unknown, path: string): string {
+  if (typeof rule === "string") return rule;
+  let decision = "ask";
+  for (const [pattern, action] of Object.entries(rule as Record<string, string>)) {
+    const expression = new RegExp(
+      `^${pattern
+        .replace(/[.+^${}()|[\]\\]/gu, "\\$&")
+        .replaceAll("*", ".*")
+        .replaceAll("?", ".")}$`,
+      "su",
+    );
+    if (expression.test(path)) decision = action;
+  }
+  return decision;
+}
+
+it("translates a path scope into OpenCode's ordered permission patterns", () => {
+  const permissions = openCodePermissions(
+    ["files:read", "files:write"],
+    [{ destination: "/mnt/out", readWrite: true }],
+    "/work",
+    {
+      ...noScope,
+      write: ["src/", "package.json"],
+      readOnly: ["src/generated/"],
+      hidden: ["**/.env", "secrets/"],
+      outsideWrite: ["/cache/pip"],
+      outsideRead: ["/opt/data"],
+    },
+  );
+  for (const [path, decision] of [
+    ["src/a.ts", "allow"],
+    ["src/deep/b.ts", "allow"],
+    ["package.json", "allow"],
+    ["README.md", "deny"],
+    ["src/generated/x.ts", "deny"],
+    // OpenCode matches case-sensitively. Names of up to six letters get every spelling; longer
+    // ones get the written, lower-case, and upper-case spellings, and delivery checks the rest.
+    ["src/GENERATED/x.ts", "deny"],
+    ["src/.Env", "deny"],
+    ["src/.env", "deny"],
+    ["src/.git/config", "deny"],
+    ["../mnt/out/report.md", "allow"],
+    ["../cache/pip/wheel", "allow"],
+    ["/cache/pip/wheel", "allow"],
+    ["../opt/data/rows.csv", "deny"],
+  ] as const)
+    expect(decide(permissions["edit"], path), `edit ${path}`).toBe(decision);
+  for (const [path, decision] of [
+    ["README.md", "allow"],
+    [".env", "deny"],
+    [".ENV", "deny"],
+    ["apps/web/.env", "deny"],
+    [".env/inner", "deny"],
+    ["config.env", "allow"],
+    ["secrets/key", "deny"],
+    ["SECRETS/key", "deny"],
+  ] as const)
+    expect(decide(permissions["read"], path), `read ${path}`).toBe(decision);
+  // The explicit allow follows OpenCode's built-in `*.env` ask rule, so it no longer asks.
+  expect(Object.entries(permissions["read"] as object)[0]).toEqual(["*", "allow"]);
+  // grep is asked with its regular expression, never a path, so hiding denies it.
+  expect(permissions["grep"]).toBe("deny");
+  expect(permissions["glob"]).toBe("allow");
+  expect(permissions["external_directory"]).toEqual({
+    "*": "deny",
+    "/mnt/out/*": "allow",
+    "/cache/pip/*": "allow",
+    "/opt/data/*": "allow",
+  });
+  // A scope without hidden entries keeps grep and a plain read rule.
+  const writes = openCodePermissions(["files:read", "files:write"], [], "/work", {
+    ...noScope,
+    write: ["src/"],
+  });
+  expect(writes["grep"]).toBe("allow");
+  expect(writes["read"]).toBe("allow");
+});
+
+it("keeps the Task output directory editable under narrowed write paths", () => {
+  const output = `outputs/${"a".repeat(64)}`;
+  const permissions = openCodePermissions(["files:read", "files:write"], [], "/work", {
+    ...noScope,
+    write: ["src/"],
+    hidden: ["**/.env"],
+    outputDirectory: output,
+  });
+  for (const [path, decision] of [
+    [`${output}/report.md`, "allow"],
+    [`${output}/nested/data.csv`, "allow"],
+    [`${output}/.env`, "deny"],
+    ["README.md", "deny"],
+    ["src/a.ts", "allow"],
+  ] as const)
+    expect(decide(permissions["edit"], path), path).toBe(decision);
+});
+
+it("refuses scopes OpenCode cannot apply and links that reach past them", async () => {
+  const hidden = ownedRun();
+  if (!hidden.task) throw new Error("Missing fixture Task");
+  hidden.task.policySnapshot = create(rustHarness.TaskPolicySnapshotSchema, {
+    execution: { models: ["openai/test"] },
+    runtimeAuthority: { files: { hidden: ["**/.env"] } },
+  });
+  expect(() => taskModel(hidden, configuration)).toThrow(
+    /cannot keep commands from reading hidden paths \(\*\*\/\.env\)/u,
+  );
+  hidden.task.allowedActions = ["files:read", "files:write"];
+  expect(taskModel(hidden, configuration).model).toBe("openai/test");
+
+  const { workspace } = await sandbox();
+  await mkdir(join(workspace, "src"));
+  await writeFile(join(workspace, ".env"), "KEY=secret");
+  await writeFile(join(workspace, "README.md"), "docs");
+  const rules = new rustHarness.FileScopeRules({ write: ["src/"], hidden: ["**/.env"] });
+  await symlink("../src", join(workspace, "src", "self"));
+  await expect(verifyWorkspaceLinks(workspace, undefined, rules)).resolves.toBe(true);
+  await symlink("../.env", join(workspace, "src", "env"));
+  await expect(verifyWorkspaceLinks(workspace, undefined, rules)).resolves.toBe(false);
+  await rm(join(workspace, "src", "env"));
+  await symlink("../README.md", join(workspace, "src", "readme"));
+  await expect(verifyWorkspaceLinks(workspace, undefined, rules)).resolves.toBe(false);
+  await expect(verifyWorkspaceLinks(workspace)).resolves.toBe(true);
+});
+
 it("refuses unsafe auth sources and selected OAuth before producing a native request", async () => {
   const { root, environment } = await sandbox();
   const authFile = join(root, "host-auth.json");

@@ -1,3 +1,15 @@
+export {
+  describeDenial,
+  type FileScopeDenial,
+  type FileScopeLike,
+  FileScopeRules,
+  fileScopeEmpty,
+  fileScopeOf,
+  fileScopeRefusal,
+  type OutsideDirectories,
+  resolveOutsideDirectories,
+  type ScopedHarness,
+} from "../file-scope.js";
 export { spawnOwnedProcess } from "../process-supervision.js";
 export { createWorkspaceToolBridge, workspaceToolDefinitions } from "../split-execution-bridge.js";
 export { harnessClient, readBootstrap, receipt, workerHostFailure } from "./client.js";

@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { describeDenial, FileScopeRules } from "./file-scope.js";
 import type { ExecutionEnvironment, ProcessHandle, ProcessSpec } from "./index.js";
 
 export type SplitExecutionToolName = "read" | "write" | "edit" | "glob" | "grep" | "ls" | "command";
@@ -21,6 +22,11 @@ export interface SplitExecutionBridgeOptions {
   /** Worker-managed Task output directory, writable with files:write. */
   outputDirectory?: string;
   permissions: { filesWrite: boolean; commandsExecute: boolean };
+  /**
+   * The Task's path scope over the Workspace root, applied after symlinks resolve. Workspace
+   * copies, staged inputs, and the output directory keep their own access.
+   */
+  fileScope?: { write: readonly string[]; readOnly: readonly string[]; hidden: readonly string[] };
   commandEnvironment?: Record<string, string>;
   limits?: { maxOutputBytes?: number; commandTimeoutMs?: number; maxReadBytes?: number };
 }
@@ -256,6 +262,16 @@ export function createWorkspaceToolBridge(
       writable: false,
     })),
   ].sort((left, right) => right.path.length - left.path.length);
+  const scope = new FileScopeRules(options.fileScope);
+  /** Whether `path` is in the Workspace itself, outside every longer root such as a copy. */
+  const workspaceRelative = (path: string): string | undefined => {
+    const selected = roots.find(({ path: allowed }) => contained(allowed, path));
+    return selected?.path === root ? posix.relative(root, path) : undefined;
+  };
+  const visible = (path: string) => {
+    const relativePath = workspaceRelative(path);
+    return relativePath === undefined || !scope.hidden(relativePath);
+  };
   const maxOutput = options.limits?.maxOutputBytes ?? DEFAULT_OUTPUT;
   const maxRead = options.limits?.maxReadBytes ?? DEFAULT_READ;
   const maxTimeout = options.limits?.commandTimeoutMs ?? DEFAULT_TIMEOUT;
@@ -402,6 +418,15 @@ export function createWorkspaceToolBridge(
         gitMetadata(posix.relative(physicalRoot, physicalPath)))
     )
       throw new Error(`Execution path is Git metadata: ${inputPath}`);
+    if (selected.path === root && !scope.empty) {
+      for (const relativePath of [
+        posix.relative(selected.path, candidate),
+        posix.relative(physicalRoot, physicalPath),
+      ]) {
+        const denial = write ? scope.writeDenial(relativePath) : scope.readDenial(relativePath);
+        if (denial) throw new Error(`Execution path is ${describeDenial(denial)}: ${inputPath}`);
+      }
+    }
     if (write) {
       for (const readonlyRoot of roots.filter((allowed) => !allowed.writable)) {
         const resolvedReadOnlyRoot = await realPath(readonlyRoot.path, signal);
@@ -523,8 +548,46 @@ export function createWorkspaceToolBridge(
     }
     if (name === "glob" || name === "grep" || name === "ls") {
       const path = await resolvePath(field(input, "path", false) ?? ".", signal);
-      if (name === "ls")
-        return checked({ command: "ls", args: ["-la", "--", path], cwd: root }, signal);
+      if (name === "ls") {
+        const listing = await checked(
+          { command: "ls", args: ["-la", "--", path], cwd: root },
+          signal,
+        );
+        if (
+          listing.isError ||
+          !scope.hiddenEntries.length ||
+          !scope.mayContainHidden(posix.relative(root, path))
+        )
+          return listing;
+        // Leave out the rows of hidden entries directly inside the listed directory.
+        const children = await run(
+          {
+            command: "find",
+            args: [path, "-mindepth", "1", "-maxdepth", "1", "-print0"],
+            cwd: root,
+          },
+          signal,
+        );
+        if (children.exitCode !== 0) throw new Error("Cannot list the directory's entries");
+        const hiddenNames = children.stdout
+          .split("\0")
+          .filter((child) => child && !visible(child))
+          .map((child) => posix.basename(child));
+        return {
+          text:
+            listing.text
+              .split("\n")
+              .filter(
+                (row) =>
+                  !hiddenNames.some(
+                    (hiddenName) =>
+                      row.endsWith(` ${hiddenName}`) || row.includes(` ${hiddenName} -> `),
+                  ),
+              )
+              .join("\n") || "(no output)",
+          isError: false,
+        };
+      }
       if (name === "glob") {
         const pattern = globMatcher(field(input, "pattern") as string);
         const searchRoot =
@@ -537,7 +600,10 @@ export function createWorkspaceToolBridge(
         const truncated = result.text.includes("[truncated]");
         const lines = result.text
           .split("\n")
-          .filter((file) => contained(path, file) && pattern(posix.relative(searchRoot, file)));
+          .filter(
+            (file) =>
+              contained(path, file) && visible(file) && pattern(posix.relative(searchRoot, file)),
+          );
         return {
           text:
             bounded(
@@ -554,16 +620,49 @@ export function createWorkspaceToolBridge(
       const mode = input["output_mode"];
       if (mode !== undefined && !["content", "files_with_matches", "count"].includes(String(mode)))
         throw new Error("Invalid output_mode");
+      const filtered = !scope.empty && scope.mayContainHidden(posix.relative(root, path));
       const args = [
         "-r",
         mode === "files_with_matches" ? "-l" : mode === "count" ? "-c" : "-n",
+        // Under a path scope, name each file and end its name with a NUL byte, so results from
+        // hidden files can be left out whatever their names contain.
+        ...(filtered ? ["-H", "--null"] : []),
         ...(input["glob"] === undefined ? [] : [`--include=${field(input, "glob")}`]),
         "--",
         pattern,
         path,
       ];
-      const result = await checked({ command: "grep", args, cwd: root }, signal, [0, 1]);
-      if (result.isError) return result;
+      let result: SplitExecutionToolResult;
+      if (filtered) {
+        const raw = await run({ command: "grep", args, cwd: root }, signal);
+        if (raw.exitCode === null || ![0, 1].includes(raw.exitCode))
+          return {
+            text: bounded(
+              `Execution failed (exit ${raw.exitCode ?? raw.signal ?? "unknown"}): ${raw.stderr}`,
+              maxOutput,
+            ),
+            isError: true,
+          };
+        const rows =
+          mode === "files_with_matches"
+            ? raw.stdout
+                .split(/[\0\n]/u)
+                .filter((file) => file && contained(root, file) && visible(file))
+            : raw.stdout.split("\n").flatMap((line) => {
+                let end = line.indexOf("\0");
+                // BSD grep ignores --null with -c and prints `file:count`.
+                if (end < 0 && mode === "count" && /:\d+$/u.test(line)) end = line.lastIndexOf(":");
+                if (end < 0) return [];
+                const file = line.slice(0, end);
+                return contained(root, file) && visible(file)
+                  ? [`${file}:${line.slice(end + 1)}`]
+                  : [];
+              });
+        result = { text: bounded(rows.join("\n") || "(no output)", maxOutput), isError: false };
+      } else {
+        result = await checked({ command: "grep", args, cwd: root }, signal, [0, 1]);
+        if (result.isError) return result;
+      }
       const offset = integer(input["offset"], 0, 1_000_000);
       const limit = integer(input["head_limit"], 2_000, 10_000, 1);
       return {

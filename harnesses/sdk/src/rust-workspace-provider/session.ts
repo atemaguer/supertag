@@ -20,6 +20,30 @@ const TRANSFER_TIMEOUT_MS = 120_000;
 /** A devcontainer image build before allocation, or its setup commands after staging. */
 export const BUILD_TIMEOUT_MS = 20 * 60_000;
 
+/** The Workspace part of a Task's path scope, which the file tools apply. */
+export interface WorkspaceFileScope {
+  readonly write: readonly string[];
+  readonly readOnly: readonly string[];
+  readonly hidden: readonly string[];
+}
+
+function validFileScope(scope: WorkspaceFileScope): boolean {
+  return [scope.write, scope.readOnly, scope.hidden].every(
+    (entries) =>
+      Array.isArray(entries) &&
+      entries.length <= 16_384 &&
+      entries.every(
+        (entry) =>
+          typeof entry === "string" &&
+          entry.length > 0 &&
+          Buffer.byteLength(entry) <= 1024 &&
+          !/\p{Cc}/u.test(entry) &&
+          !entry.startsWith("/") &&
+          !entry.split("/").includes(".."),
+      ),
+  );
+}
+
 export interface SandboxOwner {
   readonly hostId: string;
   readonly hostGeneration: bigint;
@@ -325,6 +349,7 @@ export function createSandboxWorkspaceSession(
   let sandboxId: string | undefined;
   let root: string | undefined;
   let allowedActions: readonly string[] = [];
+  let fileScope: WorkspaceFileScope | undefined;
   let setupCommands: readonly string[] = [];
   /** A preparation sandbox, which Snapshot records; never a Task sandbox. */
   let preparing = false;
@@ -442,6 +467,7 @@ export function createSandboxWorkspaceSession(
         ...(copies?.readOnly() ?? []).map((path) => `checkout/${path}`),
       ],
       allowedActions,
+      ...(fileScope ? { fileScope } : {}),
     });
   }
 
@@ -479,6 +505,7 @@ export function createSandboxWorkspaceSession(
         owner: SandboxOwner;
         timeoutMs: number;
         allowedActions: readonly string[];
+        fileScope?: WorkspaceFileScope;
         environment?: SandboxEnvironment;
         preparedArtifact?: string;
         prepare?: boolean;
@@ -496,6 +523,8 @@ export function createSandboxWorkspaceSession(
         throw workspaceError("devcontainer environment is invalid");
       if (preparedArtifact !== undefined && !validPreparedArtifact(preparedArtifact))
         throw workspaceError("prepared artifact is invalid");
+      if (request.fileScope !== undefined && !validFileScope(request.fileScope))
+        throw workspaceError("path scope is invalid");
       // A preparation sandbox holds trusted content only and exposes no file tools.
       if (request.prepare && request.allowedActions.length > 0)
         throw workspaceError("preparation sandbox takes no file actions");
@@ -508,6 +537,7 @@ export function createSandboxWorkspaceSession(
       allocationStarted = true;
       owner = { ...request.owner };
       allowedActions = [...request.allowedActions];
+      fileScope = request.fileScope;
       // A Task sandbox from a prepared artifact runs no setup: the artifact holds its result.
       setupCommands =
         preparedArtifact !== undefined && !request.prepare

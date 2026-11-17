@@ -77,11 +77,22 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           throw new ConnectError("Workspace owner is required", Code.InvalidArgument);
         const { owner, timeoutMs, allowedActions, environment, preparedArtifact, prepare } =
           request;
+        const fileScope = request.fileScope;
         return session.allocate(
           {
             owner,
             timeoutMs,
             allowedActions,
+            ...(fileScope &&
+            (fileScope.write.length || fileScope.readOnly.length || fileScope.hidden.length)
+              ? {
+                  fileScope: {
+                    write: fileScope.write,
+                    readOnly: fileScope.readOnly,
+                    hidden: fileScope.hidden,
+                  },
+                }
+              : {}),
             ...(preparedArtifact === undefined ? {} : { preparedArtifact }),
             prepare,
             ...(environment === undefined

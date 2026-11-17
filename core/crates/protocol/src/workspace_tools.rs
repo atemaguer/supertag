@@ -3,18 +3,22 @@ use tonic::Status;
 
 use crate::{
     MAX_MESSAGE_BYTES,
-    v2::{HarnessWorkspaceRequest, WorkspaceGrepMode, harness_workspace_request::Operation},
+    v2::{
+        FileScope, HarnessWorkspaceRequest, WorkspaceGrepMode, harness_workspace_request::Operation,
+    },
 };
 
 pub const MAX_WORKSPACE_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_PATH_BYTES: usize = 4096;
 const MAX_TIMEOUT_MS: u32 = 120_000;
 
-/// Validate the caller's operation before it reaches the sandbox provider.
-/// The provider still confines physical paths to the prepared Workspace.
+/// Validate the caller's operation before it reaches the sandbox provider, including the
+/// Task's path scope on the paths as named. The provider still confines physical paths to the
+/// prepared Workspace, and applies the scope again after resolving symlinks.
 pub fn validate_workspace_operation(
     request: &HarnessWorkspaceRequest,
     actions: &[String],
+    scope: Option<&FileScope>,
 ) -> Result<(), Status> {
     if request.encoded_len() > MAX_MESSAGE_BYTES {
         return Err(Status::resource_exhausted(
@@ -65,7 +69,41 @@ pub fn validate_workspace_operation(
             "invalid workspace operation input",
         ));
     }
+    if let Some(scope) = scope.filter(|scope| !crate::file_scope::is_empty(scope)) {
+        let rules = crate::file_scope::Rules::from(scope);
+        let (path, denial) = match operation {
+            Operation::Read(input) => (input.path.as_str(), rules.read_denial(&input.path)),
+            Operation::Write(input) => (input.path.as_str(), rules.write_denial(&input.path)),
+            Operation::Edit(input) => (input.path.as_str(), rules.write_denial(&input.path)),
+            Operation::List(input) => search_denial(&rules, input.path.as_deref()),
+            Operation::Glob(input) => search_denial(&rules, input.path.as_deref()),
+            Operation::Grep(input) => search_denial(&rules, input.path.as_deref()),
+            Operation::Command(_) => {
+                return if rules.is_empty() {
+                    Ok(())
+                } else {
+                    Err(Status::permission_denied(
+                        "workspace commands cannot be kept inside the Task's path scope",
+                    ))
+                };
+            }
+        };
+        if let Some(denial) = denial {
+            return Err(Status::permission_denied(format!(
+                "{path} is {}",
+                denial.describe()
+            )));
+        }
+    }
     Ok(())
+}
+
+fn search_denial<'a>(
+    rules: &crate::file_scope::Rules,
+    path: Option<&'a str>,
+) -> (&'a str, Option<crate::file_scope::Denial>) {
+    let path = path.unwrap_or(".");
+    (path, rules.read_denial(path))
 }
 
 fn positive(value: Option<u32>) -> bool {
@@ -96,6 +134,14 @@ mod tests {
     use tonic::Code;
 
     fn validate(operation: Operation, actions: &[&str]) -> Result<(), Status> {
+        scoped(operation, actions, None)
+    }
+
+    fn scoped(
+        operation: Operation,
+        actions: &[&str],
+        scope: Option<&FileScope>,
+    ) -> Result<(), Status> {
         validate_workspace_operation(
             &HarnessWorkspaceRequest {
                 operation: Some(operation),
@@ -104,7 +150,97 @@ mod tests {
                 .iter()
                 .map(|action| (*action).to_owned())
                 .collect::<Vec<_>>(),
+            scope,
         )
+    }
+
+    #[test]
+    fn applies_the_path_scope_to_named_paths() {
+        use crate::v2::{WorkspaceEdit, WorkspaceGlob, WorkspaceGrep};
+        let scope = FileScope {
+            write: vec!["src/".into()],
+            read_only: vec!["src/generated/".into()],
+            hidden: vec!["**/.env".into(), "secrets/".into()],
+            ..Default::default()
+        };
+        let all = ["files:read", "files:write", "commands:execute"];
+        let check = |operation: Operation| scoped(operation, &all, Some(&scope));
+        let read = |path: &str| {
+            Operation::Read(WorkspaceRead {
+                path: path.into(),
+                offset: None,
+                limit: None,
+            })
+        };
+        let write = |path: &str| {
+            Operation::Write(WorkspaceWrite {
+                path: path.into(),
+                content: "x".into(),
+            })
+        };
+        assert!(check(read("README.md")).is_ok());
+        assert!(check(write("src/lib.rs")).is_ok());
+        assert!(check(write("./src/lib.rs")).is_ok());
+        for denied in [
+            read(".env"),
+            read("apps/web/.ENV"),
+            read("secrets/key"),
+            write("README.md"),
+            write("src/generated/x.rs"),
+            write(".env"),
+            Operation::Edit(WorkspaceEdit {
+                path: "src/Generated/a.rs".into(),
+                old_text: "a".into(),
+                new_text: "b".into(),
+                replace_all: false,
+            }),
+            Operation::List(WorkspaceList {
+                path: Some("secrets".into()),
+            }),
+            Operation::Glob(WorkspaceGlob {
+                pattern: "*".into(),
+                path: Some("secrets/inner".into()),
+            }),
+            Operation::Grep(WorkspaceGrep {
+                pattern: "KEY".into(),
+                path: Some(".env".into()),
+                ..Default::default()
+            }),
+            Operation::Command(WorkspaceCommand {
+                command: "cat .env".into(),
+                timeout_ms: None,
+            }),
+        ] {
+            let error = check(denied.clone()).unwrap_err();
+            assert_eq!(error.code(), Code::PermissionDenied, "{denied:?}");
+        }
+        assert!(
+            check(write("README.md"))
+                .unwrap_err()
+                .message()
+                .contains("outside the paths the Task may write")
+        );
+        // A search over the Workspace passes here; the provider filters hidden results.
+        assert!(
+            check(Operation::Grep(WorkspaceGrep {
+                pattern: "KEY".into(),
+                path: None,
+                ..Default::default()
+            }))
+            .is_ok()
+        );
+        // An empty scope restricts nothing, commands included.
+        assert!(
+            scoped(
+                Operation::Command(WorkspaceCommand {
+                    command: "pwd".into(),
+                    timeout_ms: None,
+                }),
+                &all,
+                Some(&FileScope::default()),
+            )
+            .is_ok()
+        );
     }
 
     #[test]

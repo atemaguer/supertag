@@ -19,6 +19,7 @@ import {
   ExecutionLimitEnforcement,
   type ExecutionLimits,
   ExecutionLimitsSchema,
+  FileScopeRules,
   Harness,
   type HarnessAskQuestionRequest,
   type HarnessAskWorkSessionQuestionRequest,
@@ -47,7 +48,7 @@ import {
   TaskState,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it } from "vitest";
-import { mountRoots, permissionHook } from "./src/rust-adapter/adapter.js";
+import { mountRoots, nativeDenyRules, permissionHook } from "./src/rust-adapter/adapter.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const native = join(here, "fixtures/rust-native-claude.mjs");
@@ -689,6 +690,26 @@ it("refuses commands without the host's unsandboxed opt-in and failed session mi
   expect(mirror.completions[0]?.checkpoint).toBeUndefined();
 }, 30000);
 
+it("refuses before starting when commands could read paths the scope hides", async () => {
+  const refused = await invoke({
+    prompt: "run-command",
+    actions: ["files:read", "commands:execute"],
+    allowUnsandboxedCommands: true,
+    policySnapshot: create(TaskPolicySnapshotSchema, {
+      version: 1,
+      runtimeAuthority: {
+        actions: ["files:read", "commands:execute"],
+        files: { hidden: ["**/.env"] },
+      },
+    }),
+  });
+  expect(refused.completions[0]?.succeeded).toBe(false);
+  expect(refused.completions[0]?.result).toBe(
+    "Claude Code cannot keep commands from reading hidden paths (**/.env); run the Tag on Codex, or remove commands:execute from its Permission Sets. Native execution did not start.",
+  );
+  await expect(readFile(join(refused.workspace, "command-output.txt"))).rejects.toThrow();
+}, 30000);
+
 it("runs admitted commands unsandboxed only with the host's explicit opt-in", async () => {
   const run = await invoke({
     prompt: "run-command",
@@ -845,6 +866,150 @@ it("reads staged Workspace copies and writes only read-write ones", async () => 
       hookSpecificOutput: { permissionDecision: decision },
     });
   }
+});
+
+it("applies a path scope to every file tool, after symlinks resolve", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "supertag-claude-scope-")));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const workspace = join(directory, "workspace");
+  const cache = join(directory, "cache");
+  const other = join(directory, "other");
+  for (const path of [join(workspace, "src/generated"), join(workspace, "apps/web"), cache, other])
+    await mkdir(path, { recursive: true });
+  await writeFile(join(workspace, ".env"), "KEY=secret\n");
+  await writeFile(join(workspace, "apps/web/.env"), "KEY=secret\n");
+  await symlink(join(workspace, ".env"), join(workspace, "src/env-link"));
+  await symlink(join(workspace, "missing"), join(workspace, "src/dangling"));
+  await symlink(join(workspace, "README.md"), join(workspace, "src/readme-link"));
+  const hook = permissionHook(
+    ["Read", "Write", "Edit", "Glob", "Grep"],
+    workspace,
+    new AbortController().signal,
+    new Set(),
+    [],
+    new Map(),
+    { read: [], write: [] },
+    {
+      rules: new FileScopeRules({
+        write: ["src/"],
+        readOnly: ["src/generated/"],
+        hidden: ["**/.env", "secrets/"],
+      }),
+      outside: { write: [cache], read: [] },
+    },
+  );
+  const call = (tool: string, input: Record<string, unknown>) =>
+    hook(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "session",
+        cwd: workspace,
+        transcript_path: "",
+        tool_name: tool,
+        tool_input: input,
+        tool_use_id: "tool",
+      },
+      "tool",
+      { signal: new AbortController().signal },
+    );
+  for (const [tool, input, decision] of [
+    ["Edit", { file_path: join(workspace, "src/x.ts") }, "allow"],
+    ["Write", { file_path: join(workspace, "src/new/y.ts") }, "allow"],
+    ["Write", { file_path: join(workspace, "README.md") }, "deny"],
+    ["Write", { file_path: "src/../README.md" }, "deny"],
+    ["Write", { file_path: join(workspace, "src/readme-link") }, "deny"],
+    ["Edit", { file_path: join(workspace, "src/generated/api.ts") }, "deny"],
+    ["Edit", { file_path: join(workspace, "src/GENERATED/api.ts") }, "deny"],
+    ["Write", { file_path: join(workspace, "src/.env") }, "deny"],
+    ["Write", { file_path: join(cache, "wheel") }, "allow"],
+    ["Read", { file_path: join(cache, "wheel") }, "allow"],
+    ["Write", { file_path: join(other, "x") }, "deny"],
+    ["Read", { file_path: join(workspace, "README.md") }, "allow"],
+    ["Read", { file_path: join(workspace, ".env") }, "deny"],
+    ["Read", { file_path: join(workspace, ".ENV") }, "deny"],
+    ["Read", { file_path: "src/../.env" }, "deny"],
+    ["Read", { file_path: join(workspace, "apps/web/.env") }, "deny"],
+    ["Read", { file_path: join(workspace, "src/env-link") }, "deny"],
+    ["Read", { file_path: join(workspace, "src/dangling") }, "deny"],
+    ["Read", { file_path: join(workspace, "secrets/key") }, "deny"],
+    ["Grep", { pattern: "KEY", path: join(workspace, "secrets") }, "deny"],
+    ["Glob", { pattern: "*", path: join(workspace, "secrets") }, "deny"],
+    ["Glob", { pattern: `${workspace}/**/.env` }, "deny"],
+    // Claude Code turns the native Read() denies below into ripgrep exclusions for searches.
+    ["Grep", { pattern: "KEY", path: workspace }, "allow"],
+    ["Glob", { pattern: "**/*.ts" }, "allow"],
+  ] as const) {
+    expect(await call(tool, input), `${tool} ${JSON.stringify(input)}`).toMatchObject({
+      hookSpecificOutput: { permissionDecision: decision },
+    });
+  }
+  expect(await call("Read", { file_path: join(workspace, ".env") })).toMatchObject({
+    hookSpecificOutput: { permissionDecisionReason: "The path is hidden by the Task's path scope" },
+  });
+});
+
+it("keeps the Task output directory writable under narrowed write paths", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "supertag-claude-output-")));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const workspace = join(directory, "workspace");
+  const output = join(workspace, "outputs", "a".repeat(64));
+  await mkdir(output, { recursive: true });
+  const hook = permissionHook(
+    ["Read", "Write"],
+    workspace,
+    new AbortController().signal,
+    new Set(),
+    [],
+    new Map(),
+    { read: [], write: [] },
+    {
+      rules: new FileScopeRules({ write: ["src/"], hidden: ["**/.env"] }),
+      outside: { write: [], read: [] },
+      output,
+    },
+  );
+  for (const [path, decision] of [
+    [join(output, "report.md"), "allow"],
+    [join(output, "nested/data.csv"), "allow"],
+    [join(output, ".env"), "deny"],
+    [join(workspace, "README.md"), "deny"],
+    [join(workspace, "src/a.ts"), "allow"],
+  ] as const) {
+    const result = await hook(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "session",
+        cwd: workspace,
+        transcript_path: "",
+        tool_name: "Write",
+        tool_input: { file_path: path },
+        tool_use_id: "tool",
+      },
+      "tool",
+      { signal: new AbortController().signal },
+    );
+    expect(result, path).toMatchObject({ hookSpecificOutput: { permissionDecision: decision } });
+  }
+});
+
+it("restates the path scope as native Claude Code deny rules", () => {
+  expect(
+    nativeDenyRules("/w", {
+      write: ["src/"],
+      readOnly: ["src/generated/"],
+      hidden: ["**/.env"],
+      outsideWrite: [],
+      outsideRead: [],
+    }),
+  ).toEqual([
+    "Read(//w/**/.env)",
+    "Edit(//w/**/.env)",
+    "Read(//w/**/.env/**)",
+    "Edit(//w/**/.env/**)",
+    "Edit(//w/src/generated)",
+    "Edit(//w/src/generated/**)",
+  ]);
+  expect(nativeDenyRules("/w", undefined)).toEqual([]);
 });
 
 it("settles live input only after the real SDK writes it to the native prompt stream", async () => {

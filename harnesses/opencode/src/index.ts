@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
-import { relative } from "node:path";
+import { isAbsolute, relative } from "node:path";
 import {
   describeToolCall,
   type ExecutionEnvironment,
@@ -46,49 +46,166 @@ export interface OpenCodeCopy {
  */
 const GIT_NAMES = [".git", ".gIt", ".giT", ".gIT", ".Git", ".GiT", ".GIt", ".GIT"];
 
+/**
+ * A Task's path scope for OpenCode: Workspace entries (`write`, `readOnly`, `hidden`) as the
+ * Control Plane composed them, and the outside directories the adapter already expanded and
+ * canonicalized.
+ */
+export interface OpenCodeScope {
+  readonly write: readonly string[];
+  readonly readOnly: readonly string[];
+  readonly hidden: readonly string[];
+  readonly outsideWrite: readonly string[];
+  readonly outsideRead: readonly string[];
+  /** The Task Attempt's output directory, worktree-relative; writable under any scope. */
+  readonly outputDirectory?: string | undefined;
+}
+
+/** Every case spelling of one segment, when there are at most 64; otherwise three common ones. */
+function segmentSpellings(value: string): string[] {
+  const letters = [...value].filter((character) => /[a-z]/iu.test(character)).length;
+  if (letters > 6) return [...new Set([value, value.toLowerCase(), value.toUpperCase()])];
+  let variants = [""];
+  for (const character of value) {
+    const options = /[a-z]/iu.test(character)
+      ? [character.toLowerCase(), character.toUpperCase()]
+      : [character];
+    variants = variants.flatMap((prefix) => options.map((option) => `${prefix}${option}`));
+  }
+  return [...new Set(variants)];
+}
+
+/**
+ * Case spellings of a path, segment by segment, for a case-insensitive filesystem: at most 256
+ * per path, beyond which only the written, lower-case, and upper-case spellings remain.
+ */
+function caseVariants(value: string): string[] {
+  let variants = [""];
+  for (const [index, segment] of value.split("/").entries()) {
+    const options = segmentSpellings(segment);
+    if (variants.length * options.length > 256)
+      return [...new Set([value, value.toLowerCase(), value.toUpperCase()])];
+    variants = variants.flatMap((prefix) =>
+      options.map((option) => (index ? `${prefix}/${option}` : option)),
+    );
+  }
+  return [...new Set(variants)];
+}
+
+/**
+ * OpenCode patterns for one SuperTag entry: the path itself and its subtree. OpenCode's `*`
+ * crosses `/`, so a SuperTag `*` translates to a broader match, which only widens a denial. A
+ * `**` segment matches zero or more segments, so each one expands to both forms.
+ */
+export function openCodePatterns(entry: string, fold: boolean): string[] {
+  let forms = [""];
+  const parts = entry.replace(/\/+$/u, "").split("/");
+  parts.forEach((part, index) => {
+    const last = index === parts.length - 1;
+    if (part === "**")
+      forms = forms.flatMap((form) =>
+        last ? [form.replace(/\/$/u, ""), `${form}*`] : [form, `${form}*/`],
+      );
+    else forms = forms.map((form) => `${form}${part}${last ? "" : "/"}`);
+  });
+  forms = forms.map((form) => form.replace(/\/$/u, "")).filter(Boolean);
+  const spelled = fold ? forms.flatMap(caseVariants) : forms;
+  return [...new Set(spelled.flatMap((form) => (form === "*" ? ["*"] : [form, `${form}/*`])))];
+}
+
 export function openCodePermissions(
   actions: readonly string[],
   copies: readonly OpenCodeCopy[] = [],
   worktree?: string,
+  scope?: OpenCodeScope,
 ): Record<string, OpenCodeRule> {
   const allow = (action: string): OpenCodeAction => (actions.includes(action) ? "allow" : "deny");
   const readOnly = copies.filter(({ readWrite }) => !readWrite);
+  if (scope && worktree === undefined) throw new Error("OpenCode path scopes need the worktree");
+  // OpenCode asks `edit` with the path relative to the worktree; outside it that starts `..`.
+  const outside = (directory: string) =>
+    worktree === undefined
+      ? [`${directory}/*`]
+      : [`${relative(worktree, directory)}/*`, `${directory}/*`];
+  const rules = (patterns: readonly string[], action: OpenCodeAction) =>
+    patterns.map((pattern) => [pattern, action] as const);
+  const scopedWrite = scope !== undefined && scope.write.length > 0;
   // SuperTag runs `git` in the worktree and copies outside any sandbox, so their Git metadata is
-  // never editable.
+  // never editable. The last matching rule wins, so denials follow the allows.
   const edit: OpenCodeRule =
     allow("files:write") === "allow"
-      ? {
-          "*": "allow",
-          ...Object.fromEntries(
-            GIT_NAMES.flatMap((name) =>
-              [name, `${name}/*`, `*/${name}`, `*/${name}/*`].map((pattern) => [pattern, "deny"]),
-            ),
+      ? Object.fromEntries([
+          ["*", scopedWrite ? "deny" : "allow"],
+          ...(scopedWrite
+            ? [
+                ...rules(
+                  scope.write.flatMap((entry) => openCodePatterns(entry, false)),
+                  "allow",
+                ),
+                ...rules(
+                  copies
+                    .filter(({ readWrite }) => readWrite)
+                    .flatMap(({ destination }) => outside(destination)),
+                  "allow",
+                ),
+                ...rules(
+                  scope.outputDirectory === undefined
+                    ? []
+                    : openCodePatterns(scope.outputDirectory, false),
+                  "allow",
+                ),
+              ]
+            : []),
+          ...rules(scope?.outsideWrite.flatMap(outside) ?? [], "allow"),
+          ...rules(scope?.outsideRead.flatMap(outside) ?? [], "deny"),
+          ...rules(scope?.readOnly.flatMap((entry) => openCodePatterns(entry, true)) ?? [], "deny"),
+          ...rules(scope?.hidden.flatMap((entry) => openCodePatterns(entry, true)) ?? [], "deny"),
+          ...GIT_NAMES.flatMap((name) =>
+            rules([name, `${name}/*`, `*/${name}`, `*/${name}/*`], "deny"),
           ),
           ...(worktree === undefined
-            ? {}
-            : Object.fromEntries(
-                readOnly.flatMap(({ destination }) => [
-                  [`${relative(worktree, destination)}/*`, "deny"],
-                  [`${destination}/*`, "deny"],
-                ]),
-              )),
-        }
+            ? []
+            : readOnly.flatMap(({ destination }) => [
+                [`${relative(worktree, destination)}/*`, "deny"] as const,
+                [`${destination}/*`, "deny"] as const,
+              ])),
+        ])
       : "deny";
+  const hidden = scope?.hidden.flatMap((entry) => openCodePatterns(entry, true)) ?? [];
+  // A file:read grant always restates "*": "allow", which also overrides OpenCode's built-in
+  // `*.env` ask rule, and then hides the scope's entries.
+  const read: OpenCodeRule =
+    allow("files:read") === "allow" && hidden.length
+      ? Object.fromEntries([["*", "allow"], ...rules(hidden, "deny")])
+      : allow("files:read");
+  const external = [
+    ...copies.map(({ destination }) => destination),
+    ...(scope?.outsideWrite ?? []),
+    ...(scope?.outsideRead ?? []),
+  ];
+  for (const directory of external)
+    if (!isAbsolute(directory) || /[*?\p{Cc}]/u.test(directory))
+      throw new Error("OpenCode cannot confine an outside directory");
   return {
     "*": "deny",
-    read: allow("files:read"),
+    read,
+    // OpenCode asks `glob` with the glob and `grep` with the regular expression, never a path,
+    // and filters neither's results by `read` rules. Glob lists only names, as an operating
+    // system sandbox's directory listing does; grep would return a hidden file's content, so a
+    // scope that hides entries denies it.
     glob: allow("files:read"),
-    grep: allow("files:read"),
+    grep: hidden.length ? "deny" : allow("files:read"),
     edit,
     bash: allow("commands:execute"),
     webfetch: allow("web:fetch"),
     websearch: allow("web:search"),
     task: "deny",
-    // Only the Worker Host's copies are reachable outside the worktree.
-    external_directory: copies.length
+    // Only the Worker Host's copies and the scope's directories are reachable outside the
+    // worktree.
+    external_directory: external.length
       ? {
           "*": "deny",
-          ...Object.fromEntries(copies.map(({ destination }) => [`${destination}/*`, "allow"])),
+          ...Object.fromEntries(external.map((directory) => [`${directory}/*`, "allow"])),
         }
       : "deny",
     question: "deny",
@@ -113,8 +230,9 @@ export function openCodeConfigurationEnvironment(
   disableAuxiliaryProcesses = false,
   copies: readonly OpenCodeCopy[] = [],
   worktree?: string,
+  scope?: OpenCodeScope,
 ): Readonly<Record<string, string>> {
-  const admittedPermission = openCodePermissions(actions, copies, worktree);
+  const admittedPermission = openCodePermissions(actions, copies, worktree, scope);
   const permission: Record<string, unknown> = {
     ...admittedPermission,
     task: { "*": "deny", general: "allow", explore: "allow" },

@@ -36,6 +36,12 @@ export interface WorkspaceOperationsOptions {
   readonly workspaceRoot: string;
   readonly readOnlyRoots?: readonly string[];
   readonly allowedActions: readonly string[];
+  /** The Task's path scope over the checkout, applied after symlinks resolve. */
+  readonly fileScope?: {
+    readonly write: readonly string[];
+    readonly readOnly: readonly string[];
+    readonly hidden: readonly string[];
+  };
   readonly limits?: {
     readonly maxOutputBytes?: number;
     readonly maxReadBytes?: number;
@@ -297,6 +303,7 @@ export function createWorkspaceOperations(options: WorkspaceOperationsOptions) {
         },
         workspaceRoot,
         ...(options.readOnlyRoots ? { readOnlyRoots: options.readOnlyRoots } : {}),
+        ...(options.fileScope ? { fileScope: options.fileScope } : {}),
         permissions,
         limits,
       });

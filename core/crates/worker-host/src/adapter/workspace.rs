@@ -144,7 +144,11 @@ impl HarnessWorkspace for Bridge {
             .ok_or_else(|| Status::failed_precondition("execution has no remote workspace"))?;
         let input = request.into_inner();
         let accepted = self.assignment.task.as_ref().expect("validated assignment");
-        validate_workspace_operation(&input, &accepted.allowed_actions)?;
+        validate_workspace_operation(
+            &input,
+            &accepted.allowed_actions,
+            supertag_protocol::file_scope::of_task(accepted),
+        )?;
         let (mut deadline, closed) = self.inputs.authority();
         let tool_deadline = Instant::now() + TOOL_TIMEOUT;
         let operation = async {

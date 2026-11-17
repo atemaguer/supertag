@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { lstatSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   type HookCallback,
   type Options,
@@ -12,12 +12,19 @@ import {
 import { ExecutionCleanupError } from "@supertag/worker-sdk";
 import {
   type AdapterBootstrap,
+  describeDenial,
   ExecutionLimitEnforcement,
   type ExecutionLimits,
+  type FileScopeLike,
+  FileScopeRules,
+  fileScopeOf,
+  fileScopeRefusal,
   harnessClient,
   LiveInputReceipt,
+  type OutsideDirectories,
   receipt,
   redact,
+  resolveOutsideDirectories,
   TaskEventKind,
   TaskState,
   TURN_GUIDANCE,
@@ -180,6 +187,101 @@ export function mountRoots(
   };
 }
 
+/** A Task's path scope, ready for the file-tool hook. */
+export interface HookScope {
+  readonly rules: FileScopeRules;
+  readonly outside: OutsideDirectories;
+  /** The Task Attempt's output directory, which stays writable under any scope. */
+  readonly output?: string | undefined;
+}
+
+export const NO_SCOPE: HookScope = {
+  rules: new FileScopeRules(),
+  outside: { write: [], read: [] },
+};
+
+/**
+ * The real path of `path`: its deepest existing ancestor resolved through symlinks, followed by
+ * the rest. `undefined` when a dangling symlink or an unreadable entry is on the way.
+ */
+async function resolvedTarget(target: string): Promise<string | undefined> {
+  let existing = target;
+  let suffix = "";
+  for (;;) {
+    try {
+      return join(await realpath(existing), suffix);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || existing === dirname(existing))
+        return undefined;
+      try {
+        if ((await lstat(existing)).isSymbolicLink()) return undefined;
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== "ENOENT") return undefined;
+      }
+      suffix = suffix ? join(basename(existing), suffix) : basename(existing);
+      existing = dirname(existing);
+    }
+  }
+}
+
+/** `path` relative to `root`, `/`-separated, or `undefined` when it lies outside. */
+function insideRoot(root: string, path: string): string | undefined {
+  const part = relative(root, path);
+  if (part === ".." || part.startsWith("../") || isAbsolute(part)) return undefined;
+  return part.split(sep).join("/");
+}
+
+/**
+ * Why the path scope refuses this file-tool call, or `undefined`. Both the path as written and
+ * the path after symlinks resolve must pass, so neither a link nor `..` reaches a hidden or
+ * read-only entry.
+ */
+async function scopeDenial(
+  cwd: string,
+  path: string,
+  write: boolean,
+  rules: FileScopeRules,
+  output?: string,
+): Promise<string | undefined> {
+  if (rules.empty) return undefined;
+  const lexical = resolve(cwd, path);
+  const real = await resolvedTarget(lexical);
+  if (real === undefined) return "a dangling or unreadable link";
+  const root = await realpath(cwd);
+  // The output directory is a system grant: writable whatever the write paths, unless hidden.
+  const intoOutput =
+    write &&
+    output !== undefined &&
+    insideRoot(output, lexical) !== undefined &&
+    insideRoot(output, real) !== undefined;
+  for (const candidate of [insideRoot(cwd, lexical), insideRoot(root, real)]) {
+    if (candidate === undefined) continue;
+    const denial =
+      write && !intoOutput ? rules.writeDenial(candidate) : rules.readDenial(candidate);
+    if (denial) return describeDenial(denial);
+  }
+  return undefined;
+}
+
+/**
+ * Native Claude Code deny rules for the scope, as defense in depth beside the hook. Claude Code
+ * 2.1.280 turns `Read()` denies into ripgrep exclusions for Grep and Glob, so a search over a
+ * directory holding a hidden file leaves that file out.
+ */
+export function nativeDenyRules(cwd: string, scope: FileScopeLike | undefined): string[] {
+  if (!scope) return [];
+  const absolute = (entry: string) => {
+    const body = entry.replace(/\/+$/u, "");
+    return [`/${cwd}/${body}`, `/${cwd}/${body}/**`];
+  };
+  return [
+    ...scope.hidden.flatMap((entry) =>
+      absolute(entry).flatMap((path) => [`Read(${path})`, `Edit(${path})`]),
+    ),
+    ...scope.readOnly.flatMap((entry) => absolute(entry).map((path) => `Edit(${path})`)),
+  ];
+}
+
 export function permissionHook(
   tools: readonly string[],
   cwd: string,
@@ -188,6 +290,7 @@ export function permissionHook(
   skillRoots: readonly string[] = [],
   mcpToolServers: ReadonlyMap<string, string> = new Map(),
   mounts: MountRoots = { read: [], write: [] },
+  scope: HookScope = NO_SCOPE,
 ): HookCallback {
   return async (hook) => {
     if (hook.hook_event_name !== "PreToolUse") return {};
@@ -213,6 +316,7 @@ export function permissionHook(
         hook.mcp_server?.source === "sdk" &&
         hook.mcp_server.name === server;
     }
+    let reason: string | undefined;
     if (allowed && ["Read", "Write", "Edit", "Glob", "Grep"].includes(hook.tool_name)) {
       const input = hook.tool_input as Record<string, unknown>;
       const path = ["Read", "Write", "Edit"].includes(hook.tool_name)
@@ -222,10 +326,27 @@ export function permissionHook(
       allowed = await withinRoots(
         cwd,
         path,
-        writes ? [cwd, ...mounts.write] : [cwd, ...skillRoots, ...mounts.read, ...mounts.write],
+        writes
+          ? [cwd, ...mounts.write, ...scope.outside.write]
+          : [
+              cwd,
+              ...skillRoots,
+              ...mounts.read,
+              ...mounts.write,
+              ...scope.outside.read,
+              ...scope.outside.write,
+            ],
       );
       if (allowed && writes)
-        allowed = !(await insideGitMetadata(cwd, path as string, [cwd, ...mounts.write]));
+        allowed = !(await insideGitMetadata(cwd, path as string, [
+          cwd,
+          ...mounts.write,
+          ...scope.outside.write,
+        ]));
+      if (allowed) {
+        reason = await scopeDenial(cwd, path as string, writes, scope.rules, scope.output);
+        allowed = reason === undefined;
+      }
       if (allowed && ["Glob", "Grep"].includes(hook.tool_name)) {
         const pattern = input[hook.tool_name === "Glob" ? "pattern" : "glob"];
         if (
@@ -241,7 +362,9 @@ export function permissionHook(
         permissionDecision: allowed ? "allow" : "deny",
         permissionDecisionReason: allowed
           ? "Accepted Task permission"
-          : "Outside the accepted Task permissions or allowed paths",
+          : reason
+            ? `The path is ${reason}`
+            : "Outside the accepted Task permissions or allowed paths",
       },
     };
   };
@@ -349,6 +472,9 @@ export async function runAdapter(
       task.allowedActions,
       configuration.allowUnsandboxedCommands ?? false,
     );
+    const refusal = fileScopeRefusal(task, "claude-code");
+    if (refusal) throw new SafeAdapterFailure(`${refusal}. Native execution did not start.`);
+    const fileScope = fileScopeOf(task);
     const model = task.attemptExecution
       ? task.attemptExecution.selection?.model
       : (task.policySnapshot?.execution?.models[0] ?? configuration.model);
@@ -378,6 +504,23 @@ export async function runAdapter(
     if (names.size > 0) tools.push("Skill");
     const allowedTools = [...tools, ...coordination.tools, ...mcp.toolServers.keys()];
     const mounts = mountRoots(task.workspace?.mounts);
+    phase = "path scope preparation";
+    let outside: OutsideDirectories;
+    try {
+      outside = await resolveOutsideDirectories(fileScope, cwd, [
+        env["CLAUDE_CONFIG_DIR"] ?? "",
+        ...(env["HOME"] && env["HOME"] !== environment["HOME"] ? [env["HOME"]] : []),
+      ]);
+    } catch (error) {
+      throw new SafeAdapterFailure(
+        `${error instanceof Error ? error.message : "Path scope directories are invalid"}. Native execution did not start.`,
+      );
+    }
+    const scope: HookScope = {
+      rules: new FileScopeRules(fileScope),
+      outside,
+      output: env["SUPERTAG_OUTPUT_DIR"],
+    };
     phase = "checkpoint validation";
     const restored = restoreCheckpoint(run.checkpoint, task, cwd);
     nativeSessionId = restored?.nativeSessionId;
@@ -416,7 +559,7 @@ export async function runAdapter(
       cwd,
       tools,
       allowedTools,
-      additionalDirectories: [...mounts.read, ...mounts.write],
+      additionalDirectories: [...mounts.read, ...mounts.write, ...outside.read, ...outside.write],
       disallowedTools: [
         "Agent",
         "Task",
@@ -434,6 +577,7 @@ export async function runAdapter(
         syncClaudeAiSkills: false,
         syncClaudeAiPlugins: false,
         disableSkillShellExecution: true,
+        ...(fileScope ? { permissions: { deny: nativeDenyRules(cwd, fileScope) } } : {}),
       },
       systemPrompt: [task.instructions, TURN_GUIDANCE, tagPortfolio(run)]
         .filter(Boolean)
@@ -455,6 +599,7 @@ export async function runAdapter(
                 roots,
                 mcp.toolServers,
                 mounts,
+                scope,
               ),
             ],
           },
