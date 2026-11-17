@@ -33,7 +33,10 @@ use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
-const WAIT: Duration = Duration::from_secs(30);
+/// Bounds one test wait for a service, a command, or a Task. Only the test waits this long; the
+/// product's own deadlines are unchanged. Parallel cases on a loaded machine have stretched a
+/// service's startup past 30 seconds.
+const WAIT: Duration = Duration::from_secs(90);
 
 struct Credentials {
     gateway: String,
@@ -583,18 +586,27 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
             "SELECT task_id FROM supertag_v2_objective_notices WHERE objective_id='release' AND notice_key LIKE 'overlap:%'",
         )
     };
-    let notice = match timeout(WAIT, async {
+    // The fixture writes workspace.txt, then artifact.bin. A scan between the two writes shares
+    // only workspace.txt, so the overlap may be told as one notice or as two, one per newly shared
+    // file. Either way each shared file is told exactly once.
+    let overlaps = || {
+        sqlx::query_scalar::<_, String>(
+            "SELECT path FROM supertag_v2_attempt_overlaps WHERE objective_id='release' ORDER BY path",
+        )
+    };
+    let waited = timeout(WAIT, async {
         loop {
-            let ids = notices().fetch_all(&mut db).await?;
-            if let Some(id) = ids.first() {
-                return Ok::<_, anyhow::Error>(id.clone());
+            if overlaps().fetch_all(&mut db).await? == ["artifact.bin", "workspace.txt"]
+                && !notices().fetch_all(&mut db).await?.is_empty()
+            {
+                return Ok::<_, anyhow::Error>(());
             }
             sleep(Duration::from_millis(50)).await;
         }
     })
-    .await
-    {
-        Ok(notice) => notice?,
+    .await;
+    match waited {
+        Ok(waited) => waited?,
         Err(_) => {
             let mut logs = String::new();
             for mut host in hosts {
@@ -604,31 +616,49 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
             }
             anyhow::bail!("the Objective was not told about the overlap: {logs}");
         }
-    };
+    }
+    let told = notices().fetch_all(&mut db).await?;
     // Later scans of the same paths add nothing.
     sleep(Duration::from_millis(800)).await;
-    assert_eq!(
-        notices().fetch_all(&mut db).await?,
-        std::slice::from_ref(&notice)
-    );
-    let task = json(cli(&["get", "task", &notice])).await?;
-    assert_eq!(task["tag_id"], "owner");
-    assert_eq!(task["session_id"], session.as_str());
-    let prompt: String =
-        sqlx::query_scalar("SELECT prompt FROM supertag_v2_tasks WHERE task_id=$1")
-            .bind(&notice)
-            .fetch_one(&mut db)
-            .await?;
-    let (first, second) = if prompt.find(&children[0]) < prompt.find(&children[1]) {
-        (&children[0], &children[1])
-    } else {
-        (&children[1], &children[0])
-    };
-    assert_eq!(
-        prompt,
+    assert_eq!(notices().fetch_all(&mut db).await?, told);
+    let mut prompts = Vec::new();
+    for notice in &told {
+        let task = json(cli(&["get", "task", notice])).await?;
+        assert_eq!(task["tag_id"], "owner");
+        assert_eq!(task["session_id"], session.as_str());
+        let prompt: String =
+            sqlx::query_scalar("SELECT prompt FROM supertag_v2_tasks WHERE task_id=$1")
+                .bind(notice)
+                .fetch_one(&mut db)
+                .await?;
+        prompts.push(prompt);
+    }
+    // Each notice names the reporting Task first, so the order can differ between notices.
+    let told_as = |files: &str, first: &str, second: &str| {
         format!(
-            "Tasks {first} and {second} of this Objective are both changing artifact.bin, workspace.txt in Workspace project. Coordinate them before their changes conflict: continue one work Session with what the other changes, or let one finish first."
+            "Tasks {first} and {second} of this Objective are both changing {files} in Workspace project. Coordinate them before their changes conflict: continue one work Session with what the other changes, or let one finish first."
         )
+    };
+    let files_told = |prompt: &String| {
+        [
+            "artifact.bin, workspace.txt",
+            "workspace.txt",
+            "artifact.bin",
+        ]
+        .into_iter()
+        .find(|files| {
+            *prompt == told_as(files, &children[0], &children[1])
+                || *prompt == told_as(files, &children[1], &children[0])
+        })
+    };
+    let mut files: Vec<&str> = prompts
+        .iter()
+        .map(|prompt| files_told(prompt).with_context(|| format!("unexpected notice: {prompt}")))
+        .collect::<Result<_>>()?;
+    files.sort();
+    ensure!(
+        files == ["artifact.bin, workspace.txt"] || files == ["artifact.bin", "workspace.txt"],
+        "each shared file must be told exactly once: {prompts:?}"
     );
     std::fs::write(&release, "")?;
     for host in hosts {

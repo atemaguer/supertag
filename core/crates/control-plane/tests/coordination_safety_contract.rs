@@ -606,8 +606,69 @@ async fn effects(url: &str) {
     store.close().await;
 }
 
+/// Two Attempts' scans of the same files run at once, repeatedly. Each shared path is recorded and
+/// told to the Objective once, whichever scan sees it first: a scan that sees the other Attempt's
+/// earlier report tells only the paths shared so far, and a later scan tells only the rest.
+async fn concurrent_overlap(url: &str) {
+    let store = Store::open(url).await.unwrap();
+    sqlx::any::install_default_drivers();
+    let pool = sqlx::AnyPool::connect(url).await.unwrap();
+    tag(&store, "owner").await;
+    objective(&store, "release", "owner").await;
+    let parent = run(&store, "parent").await;
+    for index in 1..=2 {
+        store
+            .start_work_session(
+                &parent.0,
+                &StartWorkSessionRequest {
+                    attempt: Some(parent.1.clone()),
+                    operation_id: format!("work-{index}"),
+                    title: format!("Change {index}"),
+                    instruction: "Edit the notes".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let a = run(&store, "child-a").await;
+    let b = run(&store, "child-b").await;
+    let paths: [&[&str]; 3] = [
+        &["notes.md"],
+        &["notes.md", "changelog.md"],
+        &["notes.md", "changelog.md", "readme.md"],
+    ];
+    for scan in paths.iter().chain(paths.iter()) {
+        let (left, right) = tokio::join!(
+            report(&store, &a, scan, false),
+            report(&store, &b, scan, false)
+        );
+        left.unwrap();
+        right.unwrap();
+    }
+    let recorded: Vec<String> = sqlx::query_scalar(
+        "SELECT path FROM supertag_v2_attempt_overlaps WHERE objective_id='release' ORDER BY path",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(recorded, ["changelog.md", "notes.md", "readme.md"]);
+    let told = notices(&pool).await;
+    assert!(!told.is_empty());
+    for path in ["notes.md", "changelog.md", "readme.md"] {
+        let mentions = told.iter().filter(|prompt| prompt.contains(path)).count();
+        assert_eq!(mentions, 1, "{path} told {mentions} times: {told:?}");
+    }
+    pool.close().await;
+    store.close().await;
+}
+
 async fn contract(url: String) {
     overlap(&url).await;
+}
+
+async fn concurrent_contract(url: String) {
+    concurrent_overlap(&url).await;
 }
 
 async fn effect_contract(url: String) {
@@ -662,6 +723,17 @@ async fn sqlite_overlap_warning_contract() {
 #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
 async fn postgres_overlap_warning_contract() {
     postgres(contract).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_concurrent_overlap_scans_tell_each_path_once() {
+    sqlite("concurrent-overlap", concurrent_contract).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_concurrent_overlap_scans_tell_each_path_once() {
+    postgres(concurrent_contract).await;
 }
 
 #[tokio::test]
