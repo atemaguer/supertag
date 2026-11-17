@@ -1,0 +1,142 @@
+[
+  {
+    "id": "ci-green-again",
+    "check": "Check CI on main and tell me if anything is failing.",
+    "previous": "CI on main is green: 412 tests passed in the last run.",
+    "current": "CI on main is green: 412 tests passed in the last run, the same as yesterday.",
+    "changed": false
+  },
+  {
+    "id": "ci-turned-red",
+    "check": "Check CI on main and tell me if anything is failing.",
+    "previous": "CI on main is green: 412 tests passed in the last run.",
+    "current": "CI on main is red: test_checkout_totals failed with AssertionError: expected 1299, got 1300.",
+    "changed": true
+  },
+  {
+    "id": "pr-no-new-reviews",
+    "check": "Look at PR 412 and tell me about new review comments.",
+    "previous": "PR 412 has two approvals and no open review comments.",
+    "current": "PR 412 has two approvals and no open review comments. No activity since yesterday.",
+    "changed": false
+  },
+  {
+    "id": "pr-changes-requested",
+    "check": "Look at PR 412 and tell me about new review comments.",
+    "previous": "PR 412 has two approvals and no open review comments.",
+    "current": "PR 412: maria requested changes: \"The migration drops the index before the backfill finishes; reorder these steps.\"",
+    "changed": true
+  },
+  {
+    "id": "deploy-steady",
+    "check": "Check the production deploy status and error rate.",
+    "previous": "Production runs release 0.3.0; error rate 0.02%.",
+    "current": "Production runs release 0.3.0; error rate 0.02%.",
+    "changed": false
+  },
+  {
+    "id": "deploy-error-spike",
+    "check": "Check the production deploy status and error rate.",
+    "previous": "Production runs release 0.3.0; error rate 0.02%.",
+    "current": "Production runs release 0.3.1, deployed 40 minutes ago; error rate 4.7%, mostly 502s from /api/checkout.",
+    "changed": true
+  },
+  {
+    "id": "advisories-none",
+    "check": "Check our dependencies for new security advisories.",
+    "previous": "No open advisories for our dependencies.",
+    "current": "No open advisories for our dependencies.",
+    "changed": false
+  },
+  {
+    "id": "advisory-critical",
+    "check": "Check our dependencies for new security advisories.",
+    "previous": "No open advisories for our dependencies.",
+    "current": "New critical advisory GHSA-7x2q-9f3c-rq4m for tokio-tungstenite 0.24: remote denial of service. We depend on 0.24.0.",
+    "changed": true
+  },
+  {
+    "id": "triage-empty",
+    "check": "Look at new issues labeled bug and tell me which need a person.",
+    "previous": "No untriaged bugs.",
+    "current": "No new issues labeled bug since the last check.",
+    "changed": false
+  },
+  {
+    "id": "triage-new-bug",
+    "check": "Look at new issues labeled bug and tell me which need a person.",
+    "previous": "No untriaged bugs.",
+    "current": "Issue 1873, opened 2 hours ago: \"Desktop app loses drafts after an update\", 6 thumbs-up, no assignee.",
+    "changed": true
+  },
+  {
+    "id": "flaky-same",
+    "check": "Check the flaky test report and tell me if a test got worse.",
+    "previous": "Flaky: test_upload_retries failed 2 of 50 runs this week.",
+    "current": "Flaky: test_upload_retries failed 2 of 50 runs this week.",
+    "changed": false
+  },
+  {
+    "id": "flaky-worse",
+    "check": "Check the flaky test report and tell me if a test got worse.",
+    "previous": "Flaky: test_upload_retries failed 2 of 50 runs this week.",
+    "current": "Flaky: test_upload_retries failed 19 of 50 runs this week; it now also times out on Linux.",
+    "changed": true
+  },
+  {
+    "id": "disk-normal",
+    "check": "Check disk usage on the build host and warn me before it fills up.",
+    "previous": "Build host disk: 41% used.",
+    "current": "Build host disk: 42% used.",
+    "changed": false
+  },
+  {
+    "id": "disk-nearly-full",
+    "check": "Check disk usage on the build host and warn me before it fills up.",
+    "previous": "Build host disk: 41% used.",
+    "current": "Build host disk: 94% used; the target/ directory grew by 180 GB overnight.",
+    "changed": true
+  },
+  {
+    "id": "alerts-quiet",
+    "check": "Check the on-call alert channel and tell me about anything unresolved.",
+    "previous": "No open alerts.",
+    "current": "No open alerts. One alert fired at 03:10 and resolved itself at 03:12.",
+    "changed": false
+  },
+  {
+    "id": "alerts-paging",
+    "check": "Check the on-call alert channel and tell me about anything unresolved.",
+    "previous": "No open alerts.",
+    "current": "Open alert since 07:55: database replica lag above 30 s, acknowledged by nobody.",
+    "changed": true
+  },
+  {
+    "id": "release-notes-done",
+    "check": "Check whether the release notes for 0.3.1 are complete.",
+    "previous": "Release notes for 0.3.1 are complete and reviewed.",
+    "current": "Release notes for 0.3.1 are complete and reviewed.",
+    "changed": false
+  },
+  {
+    "id": "release-notes-gap",
+    "check": "Check whether the release notes for 0.3.1 are complete.",
+    "previous": "Release notes for 0.3.1 are complete and reviewed.",
+    "current": "Three changes merged since the notes were reviewed have no entry, including the removed desktop notification destination.",
+    "changed": true
+  },
+  {
+    "id": "queue-steady",
+    "check": "Check the job queue depth and tell me if work is piling up.",
+    "previous": "Job queue: 12 waiting, oldest 40 s.",
+    "current": "Job queue: 9 waiting, oldest 35 s.",
+    "changed": false
+  },
+  {
+    "id": "queue-backed-up",
+    "check": "Check the job queue depth and tell me if work is piling up.",
+    "previous": "Job queue: 12 waiting, oldest 40 s.",
+    "current": "Job queue: 2,340 waiting, oldest 47 minutes; no worker has claimed a job since 08:12.",
+    "changed": true
+  }
+]
