@@ -14,8 +14,8 @@ use supertag_protocol::{
     v2::{
         AdapterBootstrap, CreateAttemptScheduleRequest, HarnessAskQuestionRequest,
         HarnessAskWorkSessionQuestionRequest, HarnessAttachRequest, HarnessCompleteRequest,
-        HarnessContinueWorkSessionRequest, HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessPublishTextRequest,
-        HarnessSendTagMessageRequest, HarnessSettleLiveInputRequest,
+        HarnessContinueWorkSessionRequest, HarnessPostWorkstreamRequest, HarnessPublishRequest,
+        HarnessPublishTextRequest, HarnessSendTagMessageRequest, HarnessSettleLiveInputRequest,
         HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest, LiveInput, LiveInputReceipt,
         LiveInputState, ObjectiveSignal, TagMessageOrigin, TaskEventKind,
         harness_client::HarnessClient, harness_mailbox_client::HarnessMailboxClient,
