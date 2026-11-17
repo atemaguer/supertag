@@ -821,6 +821,28 @@ impl Repository {
         .await
     }
 
+    /// A delivery's bundle: only what the Attempt added to `start`, the commit every reader of
+    /// the delivery already holds or gets a complete bundle in place of. Its prerequisite is
+    /// `start`; a delivery that changed nothing (`head == start`) carries the start commit itself
+    /// against its parents, since Git writes no empty bundle, and a root start commit is bundled
+    /// whole.
+    pub(crate) async fn delivery_bundle(
+        &self,
+        start: &str,
+        head: &str,
+        id: &str,
+        file: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let exclusions = if head == start {
+            parents_in(self, start, &[], cancel).await?
+        } else {
+            vec![start.to_owned()]
+        };
+        self.bundle_excluding(head, id, file, &exclusions, cancel)
+            .await
+    }
+
     pub(crate) async fn bundle(
         &self,
         head: &str,

@@ -480,10 +480,20 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     assert!(!output(overwrite).await?.status.success());
     assert_eq!(std::fs::read(&patch)?, patch_bytes);
 
-    // Verify the exported commit independently in an empty repository.
+    // Verify the exported commit independently in a clone holding only the base: the bundle
+    // carries what the Task added to its start commit, the base.
     let review = directory.join("review");
-    std::fs::create_dir(&review)?;
-    git(&review, &["init", "--quiet"]).await?;
+    git(
+        directory,
+        &[
+            "clone",
+            "--quiet",
+            "--no-local",
+            source.to_str().context("source path")?,
+            review.to_str().context("review path")?,
+        ],
+    )
+    .await?;
     git(
         &review,
         &[

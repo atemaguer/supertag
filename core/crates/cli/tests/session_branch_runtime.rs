@@ -256,6 +256,35 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     );
     // One Tag has this Session, so the Tag is optional.
     assert_eq!(json(fetch("feature", &[])).await?["result"], "current");
+    // The second delivery's bundle carries only what it added to the first. A clone that has
+    // only the base lacks that start commit, so it imports a complete bundle the holding host
+    // builds on demand.
+    let second_bundle = &second["workspace_delivery"]["bundle"];
+    ensure!(
+        second_bundle["byte_length"]
+            .as_u64()
+            .is_some_and(|bytes| bytes < 4_096),
+        "{second}"
+    );
+    let fresh = root.join("fresh-clone");
+    git(
+        root,
+        &[
+            "clone",
+            "--quiet",
+            "--no-local",
+            checkout.to_str().context("path")?,
+            fresh.to_str().context("path")?,
+        ],
+    )
+    .await?;
+    let mut fresh_fetch = credentials.operator(&["fetch", field(&second, "task_id")?], &public);
+    fresh_fetch.arg("--repository").arg(&fresh);
+    assert_eq!(json(fresh_fetch).await?["result"], "created");
+    assert_eq!(
+        branch_head(&fresh, &branch).await?,
+        Some(second_head.clone())
+    );
 
     // A person moves the branch: the next delivery no longer continues it, so it stays put.
     let tree = git(

@@ -431,7 +431,17 @@ async fn incremental_delivery_bundles_build_on_a_start_commit_the_host_holds() {
     .await;
     let (one_path, one_sha) = bundle("one.bundle", &one.head_commit, &[&one.start_commit]);
     let (two_path, two_sha) = bundle("two.bundle", &two.head_commit, &[&two.start_commit]);
-    assert!(fs::metadata(&two_path).unwrap().len() < fs::metadata(&two.bundle_path).unwrap().len());
+    let (complete_path, complete_sha) = bundle("two-complete.bundle", &two.head_commit, &[]);
+    assert!(fs::metadata(&two_path).unwrap().len() < fs::metadata(&complete_path).unwrap().len());
+    // The Worker Host's own delivery bundles are incremental too.
+    for delivery in [&one, &two] {
+        let bytes = fs::read(&delivery.bundle_path).unwrap();
+        let header = String::from_utf8_lossy(&bytes[..bytes.len().min(300)]).into_owned();
+        assert!(
+            header.contains(&format!("-{}", delivery.start_commit)),
+            "{header}"
+        );
+    }
 
     // A host holding the base imports the first, then the second on top of it.
     let second = (
@@ -487,8 +497,8 @@ async fn incremental_delivery_bundles_build_on_a_start_commit_the_host_holds() {
     third
         .0
         .import_bundle(
-            &two.bundle_path,
-            &two.bundle_sha256,
+            &complete_path,
+            &complete_sha,
             &two.head_commit,
             Some(&two.start_commit),
             &CancellationToken::new(),

@@ -631,7 +631,9 @@ impl Workspace {
         let patch_file = staging.path().join("changes.patch");
         write_synced(&patch_file, &patch)?;
         let bundle_file = staging.path().join("changes.bundle");
-        repository.bundle(&head, &id, &bundle_file, cancel).await?;
+        repository
+            .delivery_bundle(&checkout.start_commit, &head, &id, &bundle_file, cancel)
+            .await?;
         repository.sync()?;
         let bundle_sha256 = hash_file(&bundle_file)?;
         File::open(&bundle_file)?.sync_all()?;

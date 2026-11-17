@@ -115,16 +115,21 @@ harness sandbox, with a 10-minute limit, and receives no provider credentials.
 ### Delivery
 
 After the harness finishes, the host commits the Task's changes and verifies them. It records the
-result as a Git bundle, with the ref `refs/heads/supertag-deliveries/DELIVERY_ID`, and a patch. It
-keeps both in its artifact storage and registers only their digests; the Control Plane relays them
-from the host to whoever imports the delivery, including the next Task of the Session on another
-host. It never writes your repository. Your machine imports the delivery as the branch
+result as a Git bundle, with the ref `refs/heads/supertag-deliveries/DELIVERY_ID`, and a patch. The
+bundle carries only what the Task added to its start commit: the Session's previous delivery, or
+the Workspace base for its first Task. A reader that lacks that commit gets a complete bundle of
+the delivered commit instead, which the host builds when asked; Git checks it against the
+delivered commit, since it has no recorded digest. The host keeps the bundle and patch in its
+artifact storage and registers only their digests; the Control Plane relays them from the host to
+whoever imports the delivery, including the next Task of the Session on another host. It never
+writes your repository. Your machine imports the delivery as the branch
 `supertag/session/HASH`, one branch per Session that each later Task advances:
 
 - `supertag up` imports deliveries for every Workspace that a host of its own Control Plane maps
   in `supertag.yaml`, unless the Workspace sets `delivery: patch`.
 - `supertag fetch TASK_OR_SESSION_ID --repository PATH` imports one into any clone.
-- `supertag task download TASK_ID --kind patch|bundle --output FILE` saves the file.
+- `supertag task download TASK_ID --kind patch|bundle --output FILE` saves the file. The bundle
+  needs its start commit to import; `git bundle verify` names it.
 
 Each of these reads fails while the host that produced the delivery is offline, with an error
 naming that host.
