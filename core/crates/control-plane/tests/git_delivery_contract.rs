@@ -338,7 +338,7 @@ async fn catalog_contract(url: String) {
         .list_workspaces(OP, &ListWorkspacesRequest::default())
         .await
         .unwrap();
-    assert_eq!(listed.workspaces, [created.clone()]);
+    assert_eq!(listed.workspaces, std::slice::from_ref(&created));
     let credentials = store
         .list_workspace_credentials(OP, &ListWorkspaceCredentialsRequest::default())
         .await

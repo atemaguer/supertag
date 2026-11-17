@@ -23,6 +23,9 @@ use crate::{Access, GitDelivery, Session, git};
 const LS_REMOTE_LIMIT: usize = 4 * 1024 * 1024;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(90);
 const LIST_TIMEOUT: Duration = Duration::from_secs(30);
+/// How often a Session's source is read before its Tasks fail, and how long apart.
+const READ_ATTEMPTS: u32 = 6;
+const RETRY_DELAY: Duration = Duration::from_secs(10);
 
 /// A fetched source bundle and the private state that must outlive its download.
 pub struct FetchedSource {
@@ -254,8 +257,9 @@ impl GitDelivery {
             .then(|| workspace.remote.clone()))
     }
 
-    /// Pins each Session waiting for its source until `shutdown`. A source that cannot be read
-    /// three times in a row fails the Session's queued Tasks with the reason.
+    /// Pins each Session waiting for its source until `shutdown`. A source that still cannot be
+    /// read after [`READ_ATTEMPTS`] tries, [`RETRY_DELAY`] apart, fails the Session's queued Tasks
+    /// with the reason.
     pub async fn run_resolver(
         &self,
         channel: ProtocolChannel,
@@ -271,7 +275,8 @@ impl GitDelivery {
             request.set_timeout(Duration::from_secs(5));
             Ok(request)
         }
-        let mut failures: HashMap<String, u32> = HashMap::new();
+        // Each failing pin's failures so far and when to try it again.
+        let mut failures: HashMap<String, (u32, time::Instant)> = HashMap::new();
         let mut interval = time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
         loop {
@@ -300,6 +305,12 @@ impl GitDelivery {
                     let Some(selector) = pin.selector.clone() else {
                         continue;
                     };
+                    if failures
+                        .get(&pin.pin_id)
+                        .is_some_and(|(_, next)| *next > time::Instant::now())
+                    {
+                        continue;
+                    }
                     let cancel = shutdown.child_token();
                     let resolved = time::timeout(LIST_TIMEOUT, self.resolve(&selector, &cancel))
                         .await
@@ -316,9 +327,12 @@ impl GitDelivery {
                             }
                         }
                         Err(error) => {
-                            let count = failures.entry(pin.pin_id.clone()).or_default();
+                            let (count, next) = failures
+                                .entry(pin.pin_id.clone())
+                                .or_insert((0, time::Instant::now()));
                             *count += 1;
-                            if *count < 3 {
+                            *next = time::Instant::now() + RETRY_DELAY;
+                            if *count < READ_ATTEMPTS {
                                 continue;
                             }
                             failures.remove(&pin.pin_id);
