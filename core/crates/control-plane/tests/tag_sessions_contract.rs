@@ -81,6 +81,55 @@ async fn run(store: &Store, host: &HostAuthority, task: &Task, result: &str) {
     finish(store, host, &attempt, result).await;
 }
 
+/// Runs the Task, writing `events` (kind, text) during its turn.
+async fn run_with(
+    store: &Store,
+    host: &HostAuthority,
+    task: &Task,
+    events: &[(TaskEventKind, &str)],
+    result: &str,
+) {
+    let attempt = claim(store, host, &task.task_id).await;
+    for (index, (kind, text)) in events.iter().enumerate() {
+        store
+            .append_event(
+                host,
+                &AppendEventRequest {
+                    task_id: attempt.task_id.clone(),
+                    attempt_id: attempt.attempt_id.clone(),
+                    lease_token: attempt.lease_token.clone(),
+                    sequence: index as u64 + 1,
+                    text: (*text).into(),
+                    kind: *kind as i32,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    finish(store, host, &attempt, result).await;
+}
+
+async fn turn(
+    store: &Store,
+    host: &HostAuthority,
+    attempt: &InspectAttemptRequest,
+    task: &str,
+    limit: u32,
+    after: Option<u64>,
+) -> Result<ReadTagTurnResponse, StoreError> {
+    store
+        .read_tag_turn(
+            host,
+            &ReadTagTurnRequest {
+                attempt: Some(attempt.clone()),
+                task_id: task.into(),
+                limit,
+                after,
+            },
+        )
+        .await
+}
+
 async fn say(store: &Store, principal: &str, text: &str) -> Task {
     store
         .send_message(
@@ -236,10 +285,29 @@ async fn contract(url: &str) {
     .await;
     let alice_session = a1.session_id.clone();
     let b1 = say(&store, BOB, "Plan the Q3 hiring and the search team").await;
-    run(&store, &host, &b1, "Hiring plan: two engineers").await;
+    run_with(
+        &store,
+        &host,
+        &b1,
+        &[(TaskEventKind::Message, "Bob's private draft")],
+        "Hiring plan: two engineers",
+    )
+    .await;
     let bob_session = b1.session_id.clone();
     let s1 = submit(&store, "owner", "alice-adhoc", "Check the search index").await;
-    run(&store, &host, &s1, "Search index healthy").await;
+    let long = "x".repeat(5_000);
+    run_with(
+        &store,
+        &host,
+        &s1,
+        &[
+            (TaskEventKind::Message, "Checking the index now."),
+            (TaskEventKind::Activity, "Ran `index status` (exit 0)"),
+            (TaskEventKind::Message, &long),
+        ],
+        "Search index healthy",
+    )
+    .await;
     let s2 = submit(&store, "owner", "alice-adhoc", "Rebuild the index").await;
     run(&store, &host, &s2, "Rebuilt").await;
     let docs = store
@@ -332,6 +400,57 @@ async fn contract(url: &str) {
         .await
         .unwrap();
     assert!(oldest.entries.is_empty() && oldest.next_before.is_none());
+
+    // read_turn pages a visible turn's events, with read_session's visibility.
+    let events = turn(&store, &host, &a2, &s1.task_id, 2, None)
+        .await
+        .unwrap();
+    assert_eq!(events.session_id, "alice-adhoc");
+    assert_eq!(events.state(), TaskState::Succeeded);
+    assert_eq!(
+        events
+            .events
+            .iter()
+            .map(|event| (event.kind(), event.text.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (TaskEventKind::Message, "Checking the index now."),
+            (TaskEventKind::Activity, "Ran `index status` (exit 0)"),
+        ]
+    );
+    assert_eq!(events.next_after, Some(2));
+    let rest = turn(&store, &host, &a2, &s1.task_id, 0, events.next_after)
+        .await
+        .unwrap();
+    assert_eq!(rest.events.len(), 1);
+    assert_eq!(
+        rest.events[0].text,
+        format!("{}\n[truncated]", "x".repeat(4_000))
+    );
+    assert!(rest.next_after.is_none());
+    assert!(matches!(
+        turn(&store, &host, &a2, &b1.task_id, 0, None).await,
+        Err(StoreError::NotFound(_))
+    ));
+    assert!(matches!(
+        turn(&store, &host, &a2, &other.task_id, 0, None).await,
+        Err(StoreError::NotFound(_))
+    ));
+    assert!(
+        matches!(
+            turn(&store, &host, &a2, &a2.task_id, 0, None).await,
+            Err(StoreError::NotFound(_))
+        ),
+        "a running turn is not finished"
+    );
+    assert!(matches!(
+        turn(&store, &host, &a2, &s1.task_id, 101, None).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    let own_turn = turn(&store, &host, &a2, &a1.task_id, 0, None)
+        .await
+        .unwrap();
+    assert!(own_turn.events.is_empty() && own_turn.next_after.is_none());
     assert_eq!(objectives(&store, &host, &a2).await, ["docs"]);
     let view = read_objective(&store, &host, &a2, Some("docs"))
         .await
@@ -373,6 +492,10 @@ async fn contract(url: &str) {
                 }
             )
             .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    assert!(matches!(
+        turn(&store, &host, &child, &s1.task_id, 0, None).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     finish(&store, &host, &child, "Notes compared").await;

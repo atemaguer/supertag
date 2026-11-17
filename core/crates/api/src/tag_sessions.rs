@@ -57,6 +57,20 @@ impl attempt_tag_sessions_server::AttemptTagSessions for Api {
         .await
     }
 
+    async fn read_turn(
+        &self,
+        request: Request<ReadTagTurnRequest>,
+    ) -> Result<Response<ReadTagTurnResponse>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            attempt_tag_sessions_client::AttemptTagSessionsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .read_turn(request)
+                .await
+        })
+        .await
+    }
+
     async fn list_objectives(
         &self,
         request: Request<ListTagObjectivesRequest>,

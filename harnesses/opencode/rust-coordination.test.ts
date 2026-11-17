@@ -9,9 +9,12 @@ import {
   ListTagSessionsResponseSchema,
   ObjectiveSignal,
   ReadTagSessionResponseSchema,
+  ReadTagTurnResponseSchema,
   ScheduleState,
   SearchTagSessionsResponseSchema,
   TagSessionAudience,
+  TaskEventKind,
+  TaskState,
   tagPortfolio,
   WorkSessionQuestionSchema,
   withObjectiveReport,
@@ -331,6 +334,16 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
       ],
     }),
   );
+  const readTurn = vi.spyOn(bridge.tagSessions, "readTurn").mockImplementation(async () =>
+    create(ReadTagTurnResponseSchema, {
+      sessionId: "conversation/earlier",
+      state: TaskState.SUCCEEDED,
+      events: [
+        { sequence: 3n, kind: TaskEventKind.ACTIVITY, text: `Ran the release check ${grpcToken}` },
+      ],
+      nextAfter: 3n,
+    }),
+  );
   const readSession = vi.spyOn(bridge.tagSessions, "readSession").mockImplementation(async () =>
     create(ReadTagSessionResponseSchema, {
       entries: [{ taskId: "earlier", state: 3, request: "Draft", result: "Drafted" }],
@@ -371,6 +384,7 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
       "list_sessions",
       "search_sessions",
       "read_session",
+      "read_turn",
       "list_objectives",
       "read_objective",
     ]);
@@ -403,6 +417,19 @@ it("reads the Tag's Sessions and Objectives, refuses an unasked Objective, and c
     expect(page).toContain('\\"nextBefore\\":4');
     expect(readSession).toHaveBeenCalledWith(
       { sessionId: "conversation/earlier", limit: 0, before: 9n },
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
+    const turn = JSON.stringify(
+      await client.callTool({
+        name: "read_turn",
+        arguments: { taskId: "earlier", after: 2 },
+      }),
+    );
+    expect(turn).toContain("Ran the release check [REDACTED]");
+    expect(turn).toContain('\\"kind\\":\\"activity\\"');
+    expect(turn).toContain('\\"nextAfter\\":3');
+    expect(readTurn).toHaveBeenCalledWith(
+      { taskId: "earlier", limit: 0, after: 2n },
       expect.objectContaining({ timeoutMs: 5000 }),
     );
     expect(

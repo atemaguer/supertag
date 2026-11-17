@@ -22,6 +22,7 @@ import {
   ObjectiveSignal,
   ObjectiveStatus,
   TagMessageOrigin,
+  TaskEventKind,
   TaskState,
   type WorkSession,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
@@ -134,6 +135,11 @@ const schemas = {
     limit: sessionLimit,
     before: z.number().int().positive().safe().optional(),
   }),
+  read_turn: z.strictObject({
+    taskId: tagId,
+    limit: z.number().int().min(1).max(100).optional(),
+    after: z.number().int().nonnegative().safe().optional(),
+  }),
   list_objectives: z.strictObject({ limit: sessionLimit, offset }),
   read_objective: z.strictObject({ objectiveId: tagId.optional() }),
   schedule: z
@@ -191,6 +197,12 @@ const taskStatus: Record<number, string> = {
   [TaskState.FAILED]: "failed",
   [TaskState.CANCELLED]: "cancelled",
 };
+const eventKind: Record<number, string> = {
+  [TaskEventKind.MESSAGE]: "message",
+  [TaskEventKind.ACTIVITY]: "activity",
+  [TaskEventKind.PROGRESS]: "progress",
+};
+
 const at = (ms: bigint | undefined) =>
   ms === undefined || ms === 0n ? undefined : new Date(Number(ms)).toISOString();
 const childQuestionSchema = z.strictObject({ text: nonblankText(2000) });
@@ -1244,6 +1256,41 @@ export function registerCoordinationTools(
           });
         } catch (error) {
           return refusal(error, "The Session could not be read.");
+        }
+      },
+    );
+    tools.push("read_turn");
+    server.registerTool(
+      "read_turn",
+      {
+        description: `Read what happened during one finished turn of a Session you may see, this one included: the messages the Tag wrote, its activity (commands, edits), and its progress, in order. Pass a taskId from read_session, search_sessions or the recap, and nextAfter as after for the next page. ${history}`,
+        inputSchema: schemas.read_turn,
+        _meta: meta,
+      },
+      async ({ taskId, limit, after }, tool) => {
+        try {
+          const page = await call(tool.signal, (config) =>
+            tagSessions.readTurn(
+              {
+                taskId,
+                limit: limit ?? 0,
+                ...(after === undefined ? {} : { after: BigInt(after) }),
+              },
+              config,
+            ),
+          );
+          return untrusted({
+            sessionId: safeText(page.sessionId),
+            status: taskStatus[page.state] ?? "unknown",
+            events: page.events.map((event) => ({
+              sequence: Number(event.sequence),
+              kind: eventKind[event.kind] ?? "message",
+              text: safeText(event.text),
+            })),
+            ...(page.nextAfter === undefined ? {} : { nextAfter: Number(page.nextAfter) }),
+          });
+        } catch (error) {
+          return refusal(error, "The turn could not be read.");
         }
       },
     );

@@ -5,8 +5,8 @@ use supertag_protocol::{
     v2::{
         ListTagObjectivesRequest, ListTagObjectivesResponse, ListTagSessionsRequest,
         ListTagSessionsResponse, ReadTagObjectiveRequest, ReadTagSessionRequest,
-        ReadTagSessionResponse, SearchTagSessionsRequest, SearchTagSessionsResponse,
-        TagObjectiveView,
+        ReadTagSessionResponse, ReadTagTurnRequest, ReadTagTurnResponse, SearchTagSessionsRequest,
+        SearchTagSessionsResponse, TagObjectiveView,
         harness_tag_sessions_server::{HarnessTagSessions, HarnessTagSessionsServer},
     },
 };
@@ -75,6 +75,21 @@ impl HarnessTagSessions for Bridge {
         self.retry(input, |request| {
             let mut client = self.coordination.tag_sessions.clone();
             async move { client.read_session(request).await }
+        })
+        .await
+    }
+
+    async fn read_turn(
+        &self,
+        request: Request<ReadTagTurnRequest>,
+    ) -> Result<Response<ReadTagTurnResponse>, Status> {
+        self.authenticate(&request)?;
+        self.readable().await?;
+        let mut input = request.into_inner();
+        input.attempt = Some(self.attempt());
+        self.retry(input, |request| {
+            let mut client = self.coordination.tag_sessions.clone();
+            async move { client.read_turn(request).await }
         })
         .await
     }
