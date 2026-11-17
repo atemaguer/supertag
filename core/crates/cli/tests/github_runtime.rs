@@ -467,6 +467,7 @@ async fn put_tag(public: &str, credentials: &Credentials) -> Result<()> {
             allowed_actions: vec!["files:read".into()],
             workspace: None,
             harness_kind: 0,
+            memory: None,
         })?)
         .await?;
     Ok(())

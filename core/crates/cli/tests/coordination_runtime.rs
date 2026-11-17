@@ -240,6 +240,8 @@ database_tests! {
     a_tag_schedules_a_follow_up_that_the_sweep_fires;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     work_session_limits_show_and_an_operator_closes_one;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    a_tag_keeps_a_note_that_people_read_and_delete;
 }
 
 /// A Tag's `max_work_sessions` is set with `tag put`, Tag and Work Session reads count its open
@@ -1096,5 +1098,113 @@ async fn slack_message_selects_only_an_authorized_github_workspace(database: Str
     slack
         .wait_for("I ran into a problem while working on this: Tag builder is no longer allowed to use the GitHub Workspace project this Session selected")
         .await?;
+    services.stop().await
+}
+
+/// A built-in harness's `remember` call reaches the Control Plane through the Worker Host and
+/// takes effect when its turn succeeds. People list, read, and delete the note; a Tag without
+/// memory has no `remember`.
+async fn a_tag_keeps_a_note_that_people_read_and_delete(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let credentials = Credentials::new();
+    let services = Services::start(&credentials, &database, |_| {}).await?;
+    let cli = |args: &[&str]| services.cli(&credentials, args);
+    let tag = json(cli(&[
+        "tag",
+        "put",
+        "lead",
+        "--instructions",
+        "Release engineering",
+        "--allow",
+        "files:read",
+    ]))
+    .await?;
+    ensure!(tag["memory"] == true, "{tag}");
+    let submitted = json(cli(&[
+        "task",
+        "submit",
+        "--tag",
+        "lead",
+        "--session",
+        "ops",
+        "I prefer squash merges",
+    ]))
+    .await?;
+    success(credentials.worker(
+        &public(&services),
+        &root.join("first"),
+        None,
+        &["--remember=Atem prefers squash merges."],
+    ))
+    .await?;
+    let first = json(cli(&["get", "task", field(&submitted, "task_id")?])).await?;
+    ensure!(first["state"] == "TASK_STATE_SUCCEEDED", "{first}");
+    let listed = json(cli(&["get", "memories", "--tag", "lead"])).await?;
+    let notes = listed["memories"].as_array().context("memories")?;
+    ensure!(notes.len() == 1, "{listed}");
+    let id = field(&notes[0], "memory_id")?.to_owned();
+    ensure!(
+        notes[0]["text"] == "Atem prefers squash merges."
+            && notes[0]["state"] == "MEMORY_STATE_ACTIVE"
+            && notes[0]["created_by"] == "tag:lead"
+            && field(&first, "result")?.contains(&id),
+        "{listed}"
+    );
+    let described = success(cli(&["describe", "memory", &id])).await?;
+    ensure!(
+        String::from_utf8_lossy(&described.stdout).contains("Atem prefers squash merges."),
+        "{}",
+        String::from_utf8_lossy(&described.stdout)
+    );
+    let dry_run = success(cli(&["delete", "memory", &id, "--dry-run"])).await?;
+    ensure!(
+        String::from_utf8_lossy(&dry_run.stdout).trim() == format!("delete Memory/{id}"),
+        "{}",
+        String::from_utf8_lossy(&dry_run.stdout)
+    );
+    json(cli(&["delete", "memory", &id])).await?;
+    let listed = json(cli(&["get", "memories"])).await?;
+    ensure!(listed["memories"] == json!([]), "{listed}");
+
+    // Without memory, a turn has no remember tool and keeps nothing.
+    let tag = json(cli(&[
+        "tag",
+        "put",
+        "lead",
+        "--instructions",
+        "Release engineering",
+        "--allow",
+        "files:read",
+        "--memory",
+        "false",
+    ]))
+    .await?;
+    ensure!(tag["memory"] == false, "{tag}");
+    let submitted = json(cli(&[
+        "task",
+        "submit",
+        "--tag",
+        "lead",
+        "--session",
+        "ops",
+        "Remember this too",
+    ]))
+    .await?;
+    success(credentials.worker(
+        &public(&services),
+        &root.join("second"),
+        None,
+        &["--remember=Never kept."],
+    ))
+    .await?;
+    let second = json(cli(&["get", "task", field(&submitted, "task_id")?])).await?;
+    ensure!(
+        second["state"] == "TASK_STATE_SUCCEEDED"
+            && !field(&second, "result")?.contains("Remembered"),
+        "{second}"
+    );
+    let listed = json(cli(&["get", "memories"])).await?;
+    ensure!(listed["memories"] == json!([]), "{listed}");
     services.stop().await
 }

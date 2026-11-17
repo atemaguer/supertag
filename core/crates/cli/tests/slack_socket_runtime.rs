@@ -570,6 +570,7 @@ async fn put_builder(credentials: &Credentials, control_plane: &str) -> Result<(
             allowed_actions: vec!["files:read".into()],
             workspace: None,
             harness_kind: 0,
+            memory: None,
         })?)
         .await?;
     Ok(())

@@ -573,6 +573,7 @@ impl<'a> System<'a> {
                     instructions: INSTRUCTIONS.into(),
                     execution: None,
                     allowed_actions: vec!["files:read".into()],
+                    memory: None,
                 })?)
                 .await?;
             Ok(())

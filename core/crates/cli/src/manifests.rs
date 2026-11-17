@@ -128,6 +128,8 @@ struct TagSpec {
     lead: Option<bool>,
     /// How many Work Sessions the Tag may have open at once. Omitted keeps the current value.
     max_work_sessions: Option<u32>,
+    /// Whether the Tag keeps memory: notes and a daily review. Omitted keeps the current value.
+    memory: Option<bool>,
 }
 
 #[derive(Deserialize)]

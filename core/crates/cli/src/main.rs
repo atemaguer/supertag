@@ -22,6 +22,7 @@ mod local_config;
 mod mailbox;
 mod manifests;
 mod mcp;
+mod memories;
 mod network;
 mod node_bridges;
 mod notifications;
@@ -1806,6 +1807,8 @@ async fn state_owner(
         .add_service(plane.attempt_tag_sessions_service())
         .add_service(plane.schedules_service())
         .add_service(plane.attempt_schedules_service())
+        .add_service(plane.memories_service())
+        .add_service(plane.attempt_memory_service())
         .add_service(plane.attempt_mcp_effects_service())
         .add_service(plane.attempt_changed_paths_service())
         .add_service(plane.attempt_effects_service())
@@ -2839,6 +2842,8 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "lead": tag.lead,
         "max_work_sessions": tag.max_work_sessions,
         "open_work_sessions": tag.open_work_sessions,
+        "memory": tag.memory,
+        "memory_reviewed_at_ms": tag.memory_reviewed_at_ms,
         "revision": tag.revision,
         "instructions": tag.instructions,
         "allowed_actions": tag.allowed_actions,

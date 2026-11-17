@@ -19,9 +19,9 @@ use supertag_protocol::{MAX_MESSAGE_BYTES, negotiation::ProtocolChannel};
 use crate::observe::{Output, describe_text};
 use crate::{
     Connection, artifact_publications, artifacts, auth_keys, connect_operator, enrollments,
-    github_publications, github_workspaces, host_status, inbox, inputs, mailbox, objectives,
-    operator_access, policy, replies, request, schedules, surface_policy, tags, tasks, teams,
-    volumes, work_sessions, workspace_mounts,
+    github_publications, github_workspaces, host_status, inbox, inputs, mailbox, memories,
+    objectives, operator_access, policy, replies, request, schedules, surface_policy, tags, tasks,
+    teams, volumes, work_sessions, workspace_mounts,
 };
 
 /// A resource kind. The singular is the canonical name; the plural is accepted too.
@@ -93,6 +93,8 @@ pub enum Kind {
     InboxItem,
     #[value(alias = "schedules")]
     Schedule,
+    #[value(alias = "memories")]
+    Memory,
 }
 
 /// One row of the resource kind table. Outside `describe`'s title, the command tree carries these
@@ -292,6 +294,7 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "Schedule",
         LIST_DELETE,
     ),
+    kind(Kind::Memory, "memory", "memories", "Memory", LIST_DELETE),
 ];
 
 pub(crate) fn spec(kind: Kind) -> &'static KindSpec {
@@ -560,6 +563,15 @@ pub enum GetCommand {
         #[command(flatten)]
         list: schedules::ListArgs,
     },
+    /// Read one of a Tag's notes, or list the notes Tags keep: what each Tag wrote with its
+    /// remember tool, shared or private to one person's conversation.
+    #[command(visible_alias = "memories")]
+    Memory {
+        /// Note ID. Omit to list.
+        id: Option<String>,
+        #[command(flatten)]
+        list: memories::ListArgs,
+    },
 }
 
 /// `supertag delete KIND ID`.
@@ -620,6 +632,14 @@ pub enum DeleteCommand {
         id: String,
         #[command(flatten)]
         args: schedules::DeleteArgs,
+    },
+    /// Delete one of a Tag's notes. To change a note, tell the Tag.
+    #[command(visible_alias = "memories")]
+    Memory {
+        /// Note ID.
+        id: String,
+        #[command(flatten)]
+        args: memories::DeleteArgs,
     },
 }
 
@@ -770,6 +790,10 @@ pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
         GetCommand::Schedule { id: None, list } => {
             return print(schedules::list(connection, list)).await;
         }
+        GetCommand::Memory { id: Some(id), .. } => (Kind::Memory, id),
+        GetCommand::Memory { id: None, list } => {
+            return print(memories::list(connection, list)).await;
+        }
     };
     let (channel, token) = connect_operator(connection).await?;
     print(fetch(channel, &token, kind, id)).await
@@ -815,6 +839,7 @@ async fn fetch(channel: ProtocolChannel, token: &str, kind: Kind, id: String) ->
         Kind::Approval => inbox::fetch_approval(channel, token, id).await,
         Kind::Question => inbox::fetch_question(channel, token, id).await,
         Kind::Schedule => schedules::fetch(channel, token, id).await,
+        Kind::Memory => memories::fetch(channel, token, id).await,
         Kind::RoleAssignment
         | Kind::MailboxGrant
         | Kind::Message
@@ -868,6 +893,7 @@ pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()
             (format!("SurfaceLocation/{id}"), args.dry_run)
         }
         DeleteCommand::Schedule { id, args } => (format!("Schedule/{id}"), args.dry_run),
+        DeleteCommand::Memory { id, args } => (format!("Memory/{id}"), args.dry_run),
     };
     let deleted = async {
         match command {
@@ -886,6 +912,7 @@ pub async fn delete(connection: Connection, command: DeleteCommand) -> Result<()
                 surface_policy::delete_location(connection, id, args).await
             }
             DeleteCommand::Schedule { id, args } => schedules::delete(connection, id, args).await,
+            DeleteCommand::Memory { id, args } => memories::delete(connection, id, args).await,
         }
     };
     if dry_run {

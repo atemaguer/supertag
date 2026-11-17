@@ -96,6 +96,10 @@ pub struct PutArgs {
     /// to 64. Omit to keep it as it is; a new Tag gets 8.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=64))]
     max_work_sessions: Option<u32>,
+    /// Keep memory: notes the Tag writes and a daily review of its work. With false, the Tag
+    /// keeps no notes and does not review. Omit to keep it as it is; a new Tag keeps memory.
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    memory: Option<bool>,
 }
 
 // Options for `supertag get tags`: active Tags, and optionally retired identities.
@@ -149,6 +153,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 shared_execution_environment,
                 lead,
                 max_work_sessions,
+                memory,
             } = *args;
             let mounts = workspace_mounts
                 .as_deref()
@@ -196,6 +201,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                         expected_revision: None,
                         lead,
                         max_work_sessions,
+                        memory,
                         execution: (!models.is_empty()
                             || !efforts.is_empty()
                             || shared_execution_environment.is_some())
@@ -216,6 +222,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 "revision": tag.revision,
                 "lead": tag.lead,
                 "max_work_sessions": tag.max_work_sessions,
+                "memory": tag.memory,
             })
         }
         TagCommand::Retire { tag_id, dry_run } => {

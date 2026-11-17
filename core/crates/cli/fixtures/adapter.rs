@@ -822,6 +822,36 @@ async fn main() -> Result<()> {
         }
         sleep(Duration::from_millis(work)).await;
     }
+    // `--remember=<text>` keeps a note, as a built-in harness's `remember` tool does, on a turn
+    // that may keep notes.
+    if let Some(text) =
+        std::env::args().find_map(|arg| arg.strip_prefix("--remember=").map(str::to_owned))
+        && run
+            .coordination
+            .as_ref()
+            .is_some_and(|scope| scope.may_remember)
+    {
+        let mut memory =
+            supertag_protocol::v2::harness_memory_client::HarnessMemoryClient::connect(
+                bootstrap.endpoint.clone(),
+            )
+            .await?;
+        let saved = memory
+            .remember(authenticated_request(
+                supertag_protocol::v2::AttemptRememberRequest {
+                    attempt: None,
+                    operation_id: "fixture-remember".into(),
+                    text,
+                    replaces: None,
+                },
+                &bootstrap.token,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        let note = saved.memory.context("saved note")?;
+        result.push_str(&format!("\nRemembered {}", note.memory_id));
+    }
     // `--schedule=<at>` asks to be woken that far ahead, as a built-in harness's `schedule`
     // tool does, on a turn that may schedule. The woken turn does not schedule again.
     if let Some(at) =

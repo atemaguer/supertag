@@ -781,6 +781,7 @@ impl<'a> Catalog<'a> {
             spec.execution.is_some(),
             spec.lead.is_some(),
             spec.max_work_sessions.is_some(),
+            spec.memory.is_some(),
         ];
         let mut value = PutTagRequest {
             tag_id: name.into(),
@@ -804,6 +805,7 @@ impl<'a> Catalog<'a> {
             expected_revision: Some(prior.as_ref().map_or(0, |tag| tag.revision)),
             lead: spec.lead,
             max_work_sessions: spec.max_work_sessions,
+            memory: spec.memory,
         };
         ensure!(
             value.instructions.len() <= 65_536,
@@ -1022,6 +1024,12 @@ impl<'a> Catalog<'a> {
                 old.map(|v| work_session_limit(v.max_work_sessions)),
                 work_session_limit(value.max_work_sessions.unwrap_or(8)),
             ),
+            // Keeping memory is the unset value, which no manager owns.
+            field(
+                "spec.memory",
+                old.map(|v| flag(!v.memory)),
+                flag(!value.memory.unwrap_or(true)),
+            ),
         ]
         .into_iter()
         .zip(declared)
@@ -1037,6 +1045,7 @@ impl<'a> Catalog<'a> {
                 && value
                     .max_work_sessions
                     .is_none_or(|max| max == old.max_work_sessions)
+                && value.memory.is_none_or(|memory| memory == old.memory)
         });
         Ok((!unchanged).then_some((prior.is_some(), Write::Tag(value))))
     }
