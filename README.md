@@ -90,11 +90,10 @@ Tags from their own terminal or connected tools, and private terminal conversati
 to each person. One person can ask `triage` about an error in Slack, and another can follow up on
 the same findings on GitHub.
 
-Your teammates' Tags coordinate with each other without involving you, much like the agents in
-[Cursor Projects' multiplayer](https://cursor.com/blog/projects-multiplayer). When your Tag needs
+Your teammates' Tags coordinate with each other without involving you. When your Tag needs
 something from a teammate's Tag, it messages that Tag directly. They work out the details between
 themselves and record what they agreed in their Team's shared Workstream. You hear about it when a
-decision is yours. The difference: the Tags can run on different coding agents and machines, so
+decision is yours. The Tags can run on different coding agents and machines, so
 a Tag on your laptop running Claude Code can work with one on a teammate's machine running Codex
 toward the same Objective.
 
