@@ -55,7 +55,7 @@ impl Store {
     }
 
     /// Drops the checkpoints nothing will resume: those of Sessions idle for [`IDLE_MS`] or of
-    /// Objectives terminal for as long, and rows no Session points at. Their files follow
+    /// Objectives ended for [`ENDED_OBJECTIVE_MS`], and rows no Session points at. Their files follow
     /// through [`Store::take_checkpoint_garbage`].
     pub async fn sweep_checkpoints(&self) -> Result<()> {
         let now = self.execution_now_ms();
@@ -70,7 +70,7 @@ impl Store {
              JOIN supertag_v2_objectives o ON (o.owner_tag_id=s.tag_id AND o.session_id=s.session_id)
                 OR EXISTS (SELECT 1 FROM supertag_v2_objective_sessions os
                            WHERE os.objective_id=o.objective_id AND os.tag_id=s.tag_id AND os.session_id=s.session_id)
-             WHERE o.status IN ($2,$3) AND o.updated_at_ms<$1 AND {IDLE_SESSION}
+             WHERE o.status IN ($2,$3) AND o.updated_at_ms<$7 AND {IDLE_SESSION}
              LIMIT $4"
         ))
         .bind(now - IDLE_MS)
@@ -79,6 +79,7 @@ impl Store {
         .bind(SWEEP_BATCH)
         .bind(TaskState::Claimed as i64)
         .bind(TaskState::Running as i64)
+        .bind(now - ENDED_OBJECTIVE_MS)
         .fetch_all(&mut *tx)
         .await?;
         for row in expired {
@@ -241,9 +242,11 @@ pub(crate) async fn finish_in(
     prune_session_in(tx, &task.tag_id, &task.session_id, keep, now).await
 }
 
-/// A Session resumes a checkpoint for at most this long after its last finished turn, and an
-/// ended Objective's Sessions keep theirs as long.
+/// A Session resumes a checkpoint for at most this long after its last finished turn.
 pub const IDLE_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+/// An ended Objective's Sessions keep their checkpoints this long: work that likely never
+/// resumes goes well before the idle limit.
+pub const ENDED_OBJECTIVE_MS: i64 = 3 * 24 * 60 * 60 * 1000;
 const SWEEP_BATCH: i64 = 200;
 /// A checkpoint row still in use: the reservation or commit of its Task's running Attempt.
 /// A Session no Attempt is about to resume or running in now.

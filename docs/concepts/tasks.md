@@ -88,7 +88,7 @@ from the recap:
 - the Session has been idle for 14 days;
 - the native state is larger than 8 MiB, or the harness could not keep it at all;
 - the Tag now runs on another harness;
-- the Session's Objective ended 14 days ago;
+- the Session's Objective ended 3 days ago;
 - on Codex, the Tag's tools changed, so the fresh session registers today's tools.
 
 So a conversation never grows too large to continue, and a Tag can change harness or model

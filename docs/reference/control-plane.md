@@ -56,7 +56,7 @@ turn without a checkpoint starts from a recap of them (see
 | A checkpoint over 8 MiB is never kept or resumed | Half the 16 MiB transfer limit, leaving room for one more long turn |
 | A checkpoint of another harness is not resumed | The Tag now runs on another harness |
 | An idle Session's checkpoint is dropped | 14 days after the Session's last finished turn |
-| An ended Objective's checkpoints are dropped | 14 days after the Objective completes or is cancelled |
+| An ended Objective's checkpoints are dropped | 3 days after the Objective completes or is cancelled, before its Sessions would go idle |
 | A failed or cancelled Task Attempt's checkpoint is dropped | At the next maintenance pass |
 
 A dropped checkpoint's file leaves the checkpoint directory within about a minute, once no

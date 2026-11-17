@@ -535,7 +535,8 @@ async fn hygiene_contract(url: &str) {
     let garbage = store.take_checkpoint_garbage(100).await.unwrap();
     assert!(garbage.contains(&idle.sha256) && garbage.contains(&swept.sha256));
 
-    // An Objective's Sessions lose their checkpoints 14 days after it ends.
+    // An Objective's Sessions lose their checkpoints 3 days after it ends, long before an
+    // ordinary Session finished at the same time goes idle.
     let objective = store
         .create_objective(
             OPERATOR,
@@ -564,14 +565,25 @@ async fn hygiene_contract(url: &str) {
             .contains(&ended.sha256),
         "a just-ended Objective keeps its checkpoint"
     );
-    clock.store(BASE + 30 * DAY, Ordering::SeqCst);
+    let ordinary = reference("ordinary transcript");
+    promoted(&store, &host, "ordinary", &ordinary).await;
+    clock.store(BASE + 17 * DAY, Ordering::SeqCst);
     store.sweep_checkpoints().await.unwrap();
     assert!(
-        store
+        !store
             .take_checkpoint_garbage(100)
             .await
             .unwrap()
-            .contains(&ended.sha256)
+            .contains(&ended.sha256),
+        "two days after it ended, the Objective keeps its checkpoint"
+    );
+    clock.store(BASE + 19 * DAY, Ordering::SeqCst);
+    store.sweep_checkpoints().await.unwrap();
+    let garbage = store.take_checkpoint_garbage(100).await.unwrap();
+    assert!(garbage.contains(&ended.sha256));
+    assert!(
+        !garbage.contains(&ordinary.sha256),
+        "an ordinary Session four days idle keeps its checkpoint"
     );
     store.close().await;
 }

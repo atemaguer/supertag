@@ -92,7 +92,7 @@ within the pre-1.0 compatibility policy described in
 
 - A long conversation no longer fails when its native session grows past the 16 MiB checkpoint
   limit. A Session keeps only its newest checkpoint. SuperTag drops it when it is over 8 MiB, for
-  another harness, idle for 14 days, or its Objective ended 14 days ago, and on Codex when the
+  another harness, idle for 14 days, or its Objective ended 3 days ago, and on Codex when the
   Tag's tools changed. The next turn then starts a fresh native session from a recap of the
   Session's last ten turns, with the messages the Tag wrote in them, on every harness. A dropped
   checkpoint's file leaves the checkpoint directory. `AttemptHistoryEntry` carries `messages`.
