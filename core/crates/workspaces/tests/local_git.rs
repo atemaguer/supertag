@@ -1043,3 +1043,66 @@ async fn delivery_refuses_changes_outside_the_path_scope() {
             .is_ok()
     );
 }
+
+#[tokio::test]
+async fn a_checkout_holds_only_the_session_history_since_its_base() {
+    // The source has history before the base and another branch the Session never touches.
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "--quiet", "--initial-branch=main"]);
+    fs::write(source.join("old.txt"), "old secret history\n").unwrap();
+    git(&source, &["add", "-A"]);
+    git(&source, &["commit", "--quiet", "-m", "Old commit"]);
+    let old = git(&source, &["rev-parse", "HEAD"]);
+    git(&source, &["rm", "--quiet", "old.txt"]);
+    fs::write(source.join("README.md"), "base\n").unwrap();
+    git(&source, &["add", "-A"]);
+    git(&source, &["commit", "--quiet", "-m", "Base commit"]);
+    let base = git(&source, &["rev-parse", "HEAD"]);
+    git(&source, &["checkout", "--quiet", "-b", "other"]);
+    fs::write(source.join("other.txt"), "another Session's work\n").unwrap();
+    git(&source, &["add", "-A"]);
+    git(&source, &["commit", "--quiet", "-m", "Other branch"]);
+    let other = git(&source, &["rev-parse", "HEAD"]);
+    git(&source, &["checkout", "--quiet", "main"]);
+    let workspace = Workspace::open(WorkspaceConfig {
+        state_dir: root.path().join("state"),
+        source: source.clone(),
+        base_commit: base.clone(),
+    })
+    .unwrap();
+    let first = prepare(&workspace, "first", "first-attempt", None).await;
+    fs::write(first.path.join("README.md"), "continued\n").unwrap();
+    let delivery = workspace
+        .finalize(&first, complete(), &CancellationToken::new())
+        .await
+        .unwrap();
+    let next = prepare(
+        &workspace,
+        "next",
+        "next-attempt",
+        Some(delivery.head_commit.clone()),
+    )
+    .await;
+    // The Session's history since its base reads as usual, and the checkout is clean.
+    let log = git(&next.path, &["log", "--format=%s"]);
+    assert_eq!(log.lines().count(), 2, "{log}");
+    assert!(log.contains("Base commit"), "{log}");
+    assert_eq!(git(&next.path, &["status", "--porcelain"]), "");
+    assert_eq!(
+        git(&next.path, &["rev-parse", "HEAD"]),
+        delivery.head_commit
+    );
+    // Older history and other branches are not in the checkout's repository.
+    for missing in [&old, &other] {
+        let held = Command::new("/usr/bin/git")
+            .current_dir(&next.path)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .args(["cat-file", "-e", missing])
+            .status()
+            .unwrap();
+        assert!(!held.success(), "{missing} is readable from the checkout");
+    }
+}

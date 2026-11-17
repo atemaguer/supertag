@@ -459,7 +459,13 @@ impl Workspace {
             ),
         };
         repository
-            .checkout(&checkout.path, &start, &entries, cancel)
+            .checkout(
+                &checkout.path,
+                &self.inner.config.base_commit,
+                &start,
+                &entries,
+                cancel,
+            )
             .await?;
         preparation.setup_outputs = match held {
             None => Vec::new(),
@@ -801,7 +807,9 @@ impl Workspace {
         let repository = self.repository(cancel).await?;
         let base = &self.inner.config.base_commit;
         let entries = repository.tree(base, cancel).await?;
-        repository.checkout(&path, base, &entries, cancel).await?;
+        repository
+            .checkout(&path, base, base, &entries, cancel)
+            .await?;
         paths::sync_tree_off_runtime(path.clone()).await?;
         Ok(path)
     }

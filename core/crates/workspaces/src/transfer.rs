@@ -199,7 +199,12 @@ impl Workspace {
             materialize(staging.path(), &tree, cancel)?;
             self.repository(cancel)
                 .await?
-                .checkout_metadata(staging.path(), &checkout.start_commit, cancel)
+                .checkout_metadata(
+                    staging.path(),
+                    &checkout.base_commit,
+                    &checkout.start_commit,
+                    cancel,
+                )
                 .await?;
             paths::sync_tree_off_runtime(staging.path().to_owned()).await?;
             verify_tree(staging.path(), &tree, cancel)?;

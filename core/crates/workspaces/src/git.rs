@@ -265,6 +265,7 @@ impl Repository {
     pub(crate) async fn checkout(
         &self,
         directory: &Path,
+        base: &str,
         start: &str,
         entries: &BTreeMap<String, TreeEntry>,
         cancel: &CancellationToken,
@@ -275,7 +276,9 @@ impl Repository {
                 .await?;
             paths::validate_link(&entry.path, &target)?;
         }
-        let checkout = self.checkout_metadata(directory, start, cancel).await?;
+        let checkout = self
+            .checkout_metadata(directory, base, start, cancel)
+            .await?;
         checkout
             .command(&["checkout-index", "--all", "--force"], &[], &[], cancel)
             .await?;
@@ -307,12 +310,19 @@ impl Repository {
 
     /// Recreate minimal, trusted Git metadata without reading checkout metadata
     /// or modifying its file tree. Used when installing a remote tree snapshot.
+    ///
+    /// The checkout's `.git` holds only the Session's commits since `base`, `base` itself, and
+    /// the complete tree of each, as a shallow repository cut at `base`. Nothing older, and
+    /// nothing of another Session or Tag in this host's repository, is copied into it.
     pub(crate) async fn checkout_metadata(
         &self,
         directory: &Path,
+        base: &str,
         start: &str,
         cancel: &CancellationToken,
     ) -> Result<Self> {
+        validate_oid(base)?;
+        validate_oid(start)?;
         paths::create_private_root(directory)?;
         let git_dir = directory.join(".git");
         initialize(&git_dir, self.oid_length, false)?;
@@ -322,13 +332,44 @@ impl Repository {
             oid_length: self.oid_length,
             bare: false,
         };
-        let pack = self
+        let not_base = format!("^{base}");
+        let since = self
+            .command(&["rev-list", start, &not_base], &[], &[], cancel)
+            .await?;
+        let mut commits = BTreeSet::from([base.to_owned()]);
+        commits.extend(std::str::from_utf8(&since)?.lines().map(str::to_owned));
+        let list: String = commits.iter().map(|commit| format!("{commit}\n")).collect();
+        // Every commit with a parent the checkout does not hold is a shallow boundary.
+        let parents = self
             .command(
-                &["pack-objects", "--stdout", "--revs"],
-                format!("{start}\n").as_bytes(),
+                &["rev-list", "--parents", "--no-walk", "--stdin"],
+                list.as_bytes(),
                 &[],
                 cancel,
             )
+            .await?;
+        let mut shallow = String::new();
+        for line in std::str::from_utf8(&parents)?.lines() {
+            let mut oids = line.split(' ');
+            let Some(commit) = oids.next() else { continue };
+            if oids.any(|parent| !commits.contains(parent)) {
+                shallow.push_str(commit);
+                shallow.push('\n');
+            }
+        }
+        if !shallow.is_empty() {
+            crate::write_synced(&checkout.git_dir.join("shallow"), shallow.as_bytes())?;
+        }
+        let objects = self
+            .command(
+                &["rev-list", "--objects", "--no-walk", "--stdin"],
+                list.as_bytes(),
+                &[],
+                cancel,
+            )
+            .await?;
+        let pack = self
+            .command(&["pack-objects", "--stdout"], &objects, &[], cancel)
             .await?;
         checkout
             .command(&["index-pack", "--stdin", "--strict"], &pack, &[], cancel)
