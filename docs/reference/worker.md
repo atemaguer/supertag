@@ -126,7 +126,7 @@ writes your repository. Your machine imports the delivery as the branch
 `supertag/session/HASH`, one branch per Session that each later Task advances:
 
 - `supertag up` imports deliveries for every Workspace that a host of its own Control Plane maps
-  in `supertag.yaml`, unless the Workspace sets `delivery: patch`.
+  in `supertag.yaml`, unless the Workspace sets `land: patch`.
 - `supertag fetch TASK_OR_SESSION_ID --repository PATH` imports one into any clone.
 - `supertag task download TASK_ID --kind patch|bundle --output FILE` saves the file. The bundle
   needs its start commit to import; `git bundle verify` names it.
@@ -137,8 +137,8 @@ retries until that host connects, and says it is waiting for that Worker Host wh
 turn's reason shows. `supertag placement explain` and `supertag describe task` report the
 requirement `workspace-holder`. Start that host, or cancel the Task.
 
-A Task with no commits delivers nothing. For GitHub Workspaces, `github-publication` commands
-follow and stop publication of verified results.
+A Task with no commits delivers nothing. A remote Workspace's changes land on its git server;
+`supertag get landings` follows them. See [Landing](resource-model.md#landing).
 
 ### Workspace Volumes
 

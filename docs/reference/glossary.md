@@ -54,6 +54,9 @@ whole system rather than another first-class resource.
 
 ## Security and knowledge
 
+- <a id="workspace-credential"></a>**Workspace Credential** — an SSH key, HTTPS token, or git credential helper that git delivery
+  uses to read and push a remote Workspace. Its secret stays in the Control Plane machine's
+  credential vault. See [Workspace Credentials](resource-model.md#workspace-credentials).
 - <a id="skill"></a>**Skill** — a reusable package of instructions and supporting files.
 - <a id="context-set"></a>**Context Set** — reusable knowledge, Skills, or captured [artifact](#artifact) selections that may be added to a Task. See
   [Context and permissions](../concepts/context-and-permissions.md).
@@ -119,7 +122,8 @@ whole system rather than another first-class resource.
   (`s3://`). It never holds a secret. See [Volumes](resource-model.md#volumes).
 - <a id="workspace"></a>**Workspace** — a named repository that a Tag's Tasks work in. Each Task Attempt gets its own
   pinned checkout on a Worker Host, and its commits come back as a `supertag/session/...` branch.
-  See [Work in a repository with Workspaces](../guides/workspaces.md).
+  A remote Workspace keeps the repository on any git server. See
+  [Work in a repository with Workspaces](../guides/workspaces.md).
 - <a id="harness"></a>**harness** — the agent system a Task runs on, such as Codex, Claude Code, Cursor, OpenCode, or
   OpenAI Agents. See [Worker Hosts and harnesses](../concepts/workers.md).
 - <a id="harness-adapter"></a>**harness adapter** — the process a Worker Host starts for each Task Attempt to drive a
@@ -138,3 +142,8 @@ whole system rather than another first-class resource.
 - <a id="connection-generation"></a>**Task Attempt generation** — an increasing number that fences a Task Attempt's lease.
   SuperTag rejects reports from a host that lost the lease. See
   [Leases and unknown outcomes](scheduling-and-recovery.md#leases-and-unknown-outcomes).
+- <a id="git-delivery"></a>**git delivery** — the part of the Control Plane that talks to remote Workspaces' git servers: it
+  reads each Session's source and pushes verified changes, fast-forward only. See
+  [Landing](resource-model.md#landing).
+- <a id="landing"></a>**Landing** — where git delivery put one Session's changes: its `supertag/session/...` branch, or a
+  merge into the Workspace's target branch. See [Landing](resource-model.md#landing).

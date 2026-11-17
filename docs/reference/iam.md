@@ -75,11 +75,6 @@ spec:
   approvers:
     - operator:release-oncall
   permissions:
-    - target: surface
-      surfaceAccountId: SURFACE_ACCOUNT_ID
-      scope: repository:123456
-      reference: acme/api
-      action: pull-requests:create
     - target: mcp
       action: "github/merge_pull_request"
       resource: "repository:acme/api"
@@ -120,7 +115,6 @@ approvers, and a gated runtime action whose approvers name none is not admitted.
 | Action | Check |
 | --- | --- |
 | MCP server tool (`target: mcp`), including collaboration surface tools | The Worker Host's policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
-| Opening a Workspace pull request (`pull-requests:create`) | The Worker Host asks the Control Plane before pushing the Task branch; see [Workspaces](../guides/workspaces.md#use-a-github-repository) |
 | Posting to a Workstream or sending a Mailbox message (`workstream:post`, `mailbox:send`) | The harness's coordination tool asks the Control Plane before each post or message |
 | Other runtime actions, such as shell commands and file writes | Not checked per call; only through Task admission. A Task never receives one of these that requires approval |
 
@@ -138,19 +132,16 @@ A decision chooses its scope:
 | Scope | Effect |
 | --- | --- |
 | `once` | Allows one call with the same Task, action, and arguments digest. For a work Session, any Task of that work Session matches, so the retry in its next Task runs |
-| `objective` | Allows the same Tag's later requests for the same action and resource in the Objective, optionally until a time. Not available for a GitHub publication, which is bound to one destination and commit |
+| `objective` | Allows the same Tag's later requests for the same action and resource in the Objective, optionally until a time |
 
 An Objective-scope approval also covers later Tasks in that Objective. See [Approval requests](coordination.md#approval-requests) for the
 lifecycle.
 
 ## Current action vocabulary
 
-A `target: surface` permission names a Surface Account and a scope. Its actions cover GitHub
-Workspaces:
-
-| Collaboration surface | Actions |
-| --- | --- |
-| GitHub Workspace source and delivery | `contents:read`, `pull-requests:create` |
+A remote Workspace needs no Permission Set: binding a Tag to it lets the Tag's Tasks read it, and
+the Workspace's `land` setting, which an operator declares, decides where changes go. See
+[Landing](resource-model.md#landing).
 
 Tools on Slack, GitHub, Linear, Microsoft Teams, and Lark are MCP server tools, granted with
 `target: mcp`; see [Tool resolution and adaptation](#tool-resolution-and-adaptation).
@@ -280,8 +271,6 @@ using the preset server names and the official tool names. For example,
 `channel:C0123456789`. The policy proxy checks each call's arguments and any required approval.
 The Linear, Teams, and Lark presets map `team:ID`, `team:ID/channel:ID`, and `chat:ID` the same
 way. See [MCP tools](../surfaces/worker-tools.md) for the full mappings.
-
-GitHub Workspace source and pull-request delivery use separate Workspace permissions.
 
 ### Harness-native tools
 

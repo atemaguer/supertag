@@ -36,7 +36,7 @@ supertag logs -f studio
 A host in the same file as its Control Plane joins on its own and may run every Tag. Keys:
 `harnesses` (up to five of `codex`, `claude-code`, `cursor`, `opencode`, `openai-agents`), or
 `adapter` and `adapter-args` for your own; `models` per harness, default first; `workspaces`, each
-a path or `{ path, delivery: branch|patch, setup: COMMAND }`; `concurrency` 1 to 16 per harness;
+a path or `{ path, land: local|patch|{merge: BRANCH, push: REMOTE}, setup: COMMAND }`; `concurrency` 1 to 16 per harness;
 `attempt-timeout-seconds`; `skills`; `labels`; `allow-unsandboxed-commands` for `claude-code`,
 `cursor`, or `opencode`; `restart: unless-stopped`. Claude Code, Cursor, and OpenCode run commands
 without a sandbox, so their Tasks that may run commands (`commands:execute`) run only on a host

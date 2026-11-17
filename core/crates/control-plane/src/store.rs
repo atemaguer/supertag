@@ -1202,12 +1202,13 @@ impl Store {
                 .bind(now).bind(&input.attempt_id)
                 .execute(&mut *transaction).await?;
         }
-        let task = task_in(&mut transaction, &input.task_id).await?;
+        let mut task = task_in(&mut transaction, &input.task_id).await?;
         if state == TaskState::Claimed as i64 {
             crate::objectives::objective_started_in(&mut transaction, &task).await?;
             crate::memories::started_in(&mut transaction, &task, now).await?;
             supertag_protocol::crash_point("control-plane.start", "before-commit");
         }
+        crate::workspace_landings::with_author_in(&mut transaction, &mut task).await?;
         transaction.commit().await?;
         Ok(task)
     }

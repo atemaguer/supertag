@@ -282,7 +282,7 @@ supertag get tag
 | `execution: {model, effort}` on Tags and Roles | `execution: {models: [...], efforts: [...]}` |
 | Tag `workerHosts` | Removed. Give the hosts a label with the host service's `labels` in `supertag.yaml`, or the Auth Key's labels for a remote host, and name it in the Tag's `runsOn`. Local Worker Hosts may run every Tag |
 | Tag `locations` | Removed. Bind each location with a `SurfaceLocation` document or `supertag surface-location`, after its account is connected |
-| Every `Workspace` | Removed. A local repository is a host's `workspaces` entry in `supertag.yaml`; move `delivery` and `setup` there. Recreate a GitHub `source` with `supertag workspace put --account ACCOUNT --repository-id ID --repository OWNER/REPO NAME` |
+| Every `Workspace` | Removed. A local repository is a host's `workspaces` entry in `supertag.yaml`; move `delivery` (now `land`) and `setup` there. Recreate a remote `source` with `supertag workspace put NAME --remote URL` and a Workspace Credential |
 | `Workspace` `ref` | The Tag's `workspace: {id: NAME, ref: BRANCH}`, which starts each new Session from the branch's current commit. Pin one commit with `workspace: {id: NAME, baseCommit: SHA}` instead |
 | `Workspace` `skills` | Removed. Skills come from the host's `skills` catalog in `supertag.yaml` |
 | `SurfaceAccount` | Removed. Connect the account again with `supertag setup surface PROVIDER` (step 6) |
@@ -381,7 +381,7 @@ The translated dogfood `supertag.yaml` passed `supertag config` after `config` d
 `claude-code` from two `allow-unsandboxed-commands` lists. Rust has since accepted that consent
 for Claude Code and host `labels`, so `config` now keeps both. So did a file with `x-` keys inside
 services, an `x-` service entry, and `credentials: vault://...`. The translated dogfood
-manifests, plus a GitHub Workspace, a Tag with `locations`, a Volume with `credential`, and a
+manifests, plus a remote Workspace, a Tag with `locations`, a Volume with `credential`, and a
 Permission Set with `approval: required`, applied cleanly to a fresh Rust Control Plane. A
 second `supertag diff` reported no changes. A translated Objective and surface grant passed
 `supertag diff`.

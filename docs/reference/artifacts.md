@@ -334,10 +334,10 @@ them to the reader without writing them to disk. It checks their size and digest
 catalog, and fails the read when they differ.
 
 Two reads write the bytes down briefly on the Control Plane. Reading an S3 Volume copy stages the
-file in an unnamed temporary file, which disappears when the read ends or the process stops. A
-GitHub publication writes the delivery's bundle and the repository made from it into its private
-`--github-workspace-directory` until the publication ends; a Control Plane that stopped during one
-removes what it left when it starts again.
+file in an unnamed temporary file, which disappears when the read ends or the process stops. Git
+delivery writes a delivery's bundle and the repository made from it into its private
+`--git-delivery-directory` while it lands them on a remote Workspace; a Control Plane that stopped
+during one removes what it left when it starts again.
 
 When the holding Worker Host is not connected and no Volume copy is readable, the read fails. The
 error names that Worker Host, for example:

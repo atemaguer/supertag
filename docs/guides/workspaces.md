@@ -16,16 +16,16 @@ Tag lead ── Workspace app (base commit 4f2c…) ── Task ── Worker Ho
 your repository  <──  branch supertag/session/HASH  <── delivery
 ```
 
-1. A Worker Host maps the Workspace to a source: a local Git repository, or a GitHub repository
-   the Control Plane holds.
-2. A Tag is bound to the Workspace, or a message selects one.
+1. A Worker Host maps the Workspace to a source: a local Git repository, or a **remote
+   Workspace**, a repository on any git server that the Control Plane reads and relays.
+2. A Tag is bound to the Workspace.
 3. Each Task Attempt gets a separate checkout at the pinned commit. Later Tasks of the same
    Session continue on the Session's own branch, on top of the earlier ones.
 4. After the harness finishes, the host commits the changes, verifies them, and delivers a Git
    bundle and a patch. It never writes your repository.
-5. Your machine imports the delivery as the branch `supertag/session/HASH`, one branch per
-   Session. `HASH` is a SHA-256 digest of the Tag and Session IDs, and the Session's report names
-   the branch.
+5. The delivery **lands**: your machine imports it as the branch `supertag/session/HASH`, one
+   branch per Session, or SuperTag pushes it to the Workspace's git server. `HASH` is a SHA-256
+   digest of the Tag and Session IDs, and the Session's report names the branch.
 
 ## Before you start
 
@@ -45,7 +45,7 @@ services:
     harnesses: [codex]
     workspaces:
       app: ~/code/app
-      api: { path: ~/code/api, delivery: patch, setup: npm ci }
+      api: { path: ~/code/api, land: patch, setup: npm ci }
 ```
 
 A host without `supertag.yaml` uses `--workspace-id app --workspace-source /srv/app`, repeated for
@@ -87,8 +87,8 @@ supertag tag put builder --workspace-id app --workspace-ref main
 ```
 
 Or in the manifest: `workspace: { id: app, ref: main }`. A Tag sets `baseCommit` or `ref`, not
-both, and only a Workspace with a local checkout can follow a branch; a GitHub Workspace is
-refused. `ref` is a short branch name such as `main` or `release/2.1`, not `refs/heads/main`, a
+both, and only a Workspace with a local checkout can follow a branch; a remote Workspace names
+its branch itself. `ref` is a short branch name such as `main` or `release/2.1`, not `refs/heads/main`, a
 tag, or a remote-tracking branch.
 
 The Worker Host that starts a Session's first Task looks the branch up in its own checkout of the
@@ -109,7 +109,7 @@ credentials. A failed setup fails the Task Attempt with the command's output.
 
 ## 3. See the branches appear
 
-With `delivery: branch`, the default, `supertag up` imports each delivered Task into the mapped
+With `land: local`, the default, `supertag up` imports each delivered Task into the mapped
 repository:
 
 ```sh
@@ -118,7 +118,7 @@ git -C ~/code/app diff main...supertag/session/HASH
 ```
 
 Your checkout stays on its own branch; SuperTag never switches it or changes its files. To import
-a delivery into another clone, or for a Workspace with `delivery: patch`:
+a delivery into another clone, or for a Workspace with `land: patch`:
 
 ```sh
 supertag fetch TASK_ID --repository ~/code/app-review
@@ -137,33 +137,111 @@ conversation, and the next Task starts from the earlier commits, even on another
 independent work in a new Session with `supertag task submit --session NAME`; it gets its own
 branch.
 
-## Use a GitHub repository
+### Push or merge from your machine
 
-A GitHub Workspace keeps its source on the Control Plane, so hosts need no local clone and no
-GitHub credentials:
+`land` can also push Session branches to one of the repository's own remotes, or merge finished
+Sessions into a branch of yours. `supertag up` does it with your machine's git configuration:
 
-```sh
-supertag workspace put api --account github --repository-id 123456789 --repository acme/api \
-  --ref main --pull-request-base main
+```yaml
+workspaces:
+  app: { path: ~/code/app, land: { push: origin } }                # push each Session branch
+  docs: { path: ~/code/docs, land: { merge: agents } }             # merge into local agents
+  notes: { path: ~/code/notes, land: { merge: agents, push: origin } }
 ```
 
-`--account` is a Surface Account from `supertag setup surface github`. A moving `--ref` is pinned
-once per Session; `--commit` pins one commit for every Session. Worker Hosts serve it with
-`--workspace-from-control-plane`. With `--pull-request-base`, verified results are published as a
-draft pull request into that branch. `supertag get github-publication` lists publications, and
-`supertag github-publication cancel ID --reason TEXT` stops further writes.
+A Session merges once its work is reported done: its Tag or an operator closes its
+[Work Session](../reference/coordination.md#open-work-sessions), or its Objective closes. SuperTag
+records a merge commit authored by the Tag, never rebases, and never force-pushes. It refuses to
+move a branch you have checked out, so merge into a branch you are not working on. A conflict is
+never resolved for you: the Session gets a follow-up Task that starts with the merge in its
+checkout and the conflicting files marked, and it merges again once that Task succeeds.
 
-The Control Plane keeps no copy of a result, so publishing reads it from the Worker Host that ran
-the Task. When that host is not connected, the publication goes back to Queued with the reason
-`the Worker Host holding the Workspace bundle is not connected`. It retries a minute later, or
-sooner once that host reports Ready again. Merging the pull request closes the
-[work Session](../reference/coordination.md#open-work-sessions) that opened it.
+## Use a repository on a git server
 
-## Start from Slack or GitHub
+A **remote Workspace** keeps its repository on a git server: GitHub, GitLab, Gitea or Forgejo,
+Bitbucket, any server you reach over SSH or HTTPS, or a bare repository on the Control Plane's
+machine. The Control Plane reads it and relays each Session's source to Worker Hosts, so hosts need
+no clone and no credentials. **Git delivery**, the part of the Control Plane that talks to the
+server, pushes each Session's changes back.
 
-A message from a collaboration surface can select a GitHub Workspace that the Tag's Permission
-Sets allow, and later turns of the thread keep it. A mention on a GitHub issue or pull request
-selects that repository's Workspace.
+1. Store a **Workspace Credential**: what git delivery presents to the server. Run this on the
+   machine that runs the Control Plane, because the secret stays in that machine's credential vault
+   and the Control Plane's database keeps only its name and a non-secret identifier:
+
+   ```sh
+   supertag workspace credential add handbook-rw --ssh-key ~/.ssh/handbook_deploy
+   supertag workspace credential add gitlab --https-token --username supertag
+   supertag workspace credential add internal --credential-helper '!/usr/local/bin/mint-token'
+   ```
+
+   `--https-token` reads the token from `SUPERTAG_WORKSPACE_TOKEN` or a hidden prompt.
+   `--ssh-key` takes a key without a passphrase; add `--known-hosts FILE` to pin the server's host
+   key, or SuperTag trusts the first key it sees and remembers it. `--credential-helper` names a
+   git [credential helper](https://git-scm.com/docs/gitcredentials), which may mint short-lived
+   tokens.
+
+2. Declare the Workspace: its remote, the branch Sessions start from, its credentials, and where
+   changes land:
+
+   ```sh
+   supertag workspace put handbook --remote ssh://git@git.acme.internal/handbook.git      --ref main --credential handbook-rw --land merge --target drafts
+   ```
+
+   Or as a manifest:
+
+   ```yaml
+   apiVersion: supertag/v1
+   kind: Workspace
+   metadata: { name: handbook }
+   spec:
+     remote: ssh://git@git.acme.internal/handbook.git
+     ref: main
+     credentials: { read: handbook-ro, push: handbook-rw }   # or credential: NAME for both
+     land: { merge: drafts }                                   # or land: branch
+   ```
+
+3. Check the whole path. It reads the branch and checks pushing without changing anything:
+
+   ```sh
+   supertag workspace check handbook
+   ```
+
+   Each step reports a status and what it found, and never claims more than the server proves:
+
+   ```json
+   {"workspace_id": "handbook", "steps": [
+     {"step": "read", "status": "ok", "detail": "SSH key handbook-rw; main is at 4f2c0d1e9b8a"},
+     {"step": "push", "status": "ok", "detail": "SSH key handbook-rw"},
+     {"step": "scope", "status": "warning", "detail": "broad: the credential can push any branch; protect your default branch on the server. ..."},
+     {"step": "land", "status": "ok", "detail": "finished Sessions merge into drafts"},
+     {"step": "review", "status": "not_applicable", "detail": "plain git remote: branch and merge only"},
+     {"step": "ci", "status": "unknown", "detail": "not a forge SuperTag can inspect"}]}
+   ```
+
+4. Serve it on Worker Hosts with `--workspace-id handbook --workspace-from-control-plane`, and bind
+   a Tag with `--workspace-id handbook` and no base commit or branch.
+
+Each new Session starts from the commit `ref` names when the Session begins, and keeps that commit.
+Without `ref`, it follows the server's default branch.
+
+| `land` | What happens |
+| --- | --- |
+| omitted | Changes stay with SuperTag; import them with `supertag fetch` |
+| `branch` | Each delivered Task updates the Session's branch `supertag/session/HASH` on the server |
+| `merge` | The Session's branch is pushed, and once its work is reported done it is merged into the target branch with a merge commit, which is pushed |
+
+Git delivery pushes only `supertag/session/...` branches and the Workspace's merge target, and
+only fast-forward. A branch someone changed outside SuperTag is never overwritten: its landing is
+held with the reason. Merge commits name the Tag as their author with a SuperTag no-reply address,
+and the person who asked as a co-author. A merge conflict gives the Session a follow-up Task, as
+for a local Workspace. Validating the content is your server's job: run CI on `supertag/**` and
+on the merge target, and protect your default branch.
+
+`supertag get landings --session-id SESSION` shows where each Session's changes went: `queued`,
+`landed` with the commit, `conflict` with the follow-up Task, or `held` with the reason. A Task
+succeeds whether or not its changes landed. The Control Plane keeps no copy of a result, so
+landing reads it from the Worker Host that ran the Task; while that host is away, the landing
+waits and retries once the host reports Ready again.
 
 ## Attach data outside the repository
 
@@ -248,6 +326,8 @@ harness stays on the host. A repository's `.devcontainer` settings choose the sa
 | Your checkout | Untouched. Deliveries arrive only as `supertag/session/...` branches |
 | Task checkouts | The Worker Host's state directory, one per Task Attempt |
 | Deliveries | Bundles and patches, kept on the Worker Host that ran the Task and relayed by the Control Plane to `fetch` and `task download` |
+| Landed changes | A remote Workspace's server, on `supertag/session/...` branches and the merge target |
+| Workspace Credentials | The credential vault of the machine that runs the Control Plane; never on a Worker Host or in a harness |
 | Captured artifacts | The Worker Host that captured them; see [Artifacts](../reference/artifacts.md) |
 
 ## Current limits
@@ -258,6 +338,10 @@ harness stays on the host. A repository's `.devcontainer` settings choose the sa
   Attempt fails when the repository's Git configuration changes while it runs.
 - Workspace Volumes arrive as copies only; a Tag with copies may not run commands or fetch from
   the web.
+- Git LFS is refused with a clear error: keep large files in a Volume.
+- `merge` lands only a Work Session, when its work is reported done; a conversation's own Session
+  never merges, so use `branch` for it.
+- A remote Workspace lands branches and merges; it does not open pull requests yet.
 
 ## Next
 

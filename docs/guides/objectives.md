@@ -176,7 +176,7 @@ Rules:
   grant additional collaboration surface access.
 - The Objective's work runs in the Workspace of the owner's turn, and Sessions it starts,
   including those of other Tags, work there too. See
-  [Work in a repository with Workspaces](workspaces.md#start-from-slack-or-github).
+  [Work in a repository with Workspaces](workspaces.md).
 - In the home thread, `@SuperTag approve`, `@SuperTag pause`, and `@SuperTag resume` act on the
   Objective. A chat message saying "approved" approves nothing, and an action approval goes
   through `supertag approval approve`.

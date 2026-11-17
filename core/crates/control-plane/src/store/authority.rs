@@ -87,7 +87,9 @@ impl Store {
                 mark_uncertain(&mut transaction, &input.task_id).await?;
             }
         }
-        let task = task_in(&mut transaction, &input.task_id).await?;
+        let mut task = task_in(&mut transaction, &input.task_id).await?;
+        // The Worker Host commits the Task's work as the Tag, with the requester as co-author.
+        crate::workspace_landings::with_author_in(&mut transaction, &mut task).await?;
         transaction.commit().await?;
         Ok(AttemptAuthority {
             task: Some(task),

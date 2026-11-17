@@ -80,7 +80,6 @@ Use a Permission Set for collaboration surface resource/actions such as:
 
 - `slack/slack_read_channel` on a Slack channel;
 - `messages:read` in a Lark/Feishu chat;
-- `contents:read` on a GitHub repository;
 - `issues:read` in a Linear team;
 - `messages:read` in a Teams channel.
 

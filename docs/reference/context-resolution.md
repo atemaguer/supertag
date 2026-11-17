@@ -115,14 +115,8 @@ Plane stores other types, but no Worker Host resolves them.
 ## Operational targets are not context
 
 A repository needed for one Task is an operational target, not a Context Item. At admission, the
-Control Plane captures an immutable Workspace selection from the Tag's binding, the origin, or the
-request. Ambiguous and unavailable requests are recorded rather than guessed. For a GitHub
-Workspace:
-
-1. a GitHub-origin Task selects its repository;
-2. a message on another collaboration surface may select a GitHub Workspace the Tag's Permission
-   Sets allow;
-3. later turns of the thread keep that selection.
+Control Plane copies the Workspace from the Tag's binding into the Task. For a remote Workspace,
+the Session's first Task pins the commit its branch names, and later turns of the Session keep it.
 
 The Worker Host checks out the pinned commit and records provenance without recording a credential
 or cache path. See [Work in a repository with Workspaces](../guides/workspaces.md).

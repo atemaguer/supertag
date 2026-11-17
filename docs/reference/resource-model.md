@@ -48,8 +48,12 @@ and [execution environments](glossary.md#execution-environment).
   whose data Tasks receive as copies, or an artifact Volume that holds artifact copies; see
   [Volumes](#volumes).
 - **Workspace** — a named repository that a Tag's Tasks work in. A Worker Host maps a local
-  repository to it by name, or the Control Plane holds a GitHub repository for it; see
+  repository to it by name, or a remote Workspace names a repository on any git server; see
   [Workspaces](#workspaces).
+- **Workspace Credential** — what git delivery presents to a remote Workspace's git server: an
+  SSH key, an HTTPS token, or a git credential helper. The Control Plane stores its name, kind, and
+  a non-secret identifier; the secret stays in the credential vault of the machine that runs the
+  Control Plane. See [Workspace Credentials](#workspace-credentials).
 - **Surface Account** — an enrolled external workspace or account; credentials remain in the
   credential vault. `supertag setup surface` enrolls one interactively, and a SurfaceAccount
   manifest declares one; see [Declared Surface Accounts](#declared-surface-accounts).
@@ -90,6 +94,7 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
   each shared or private to one person's conversation. People list and delete notes; they never
   write them. See [Memory](coordination.md#memory).
 - **Task Attempt** records one execution or retry of a Task on a Worker Host.
+- **Landing** records where git delivery put one Session's changes; see [Landing](#landing).
 - An **approval request** records one ask for a decision on a gated action, with its scope and
   decider. It is operational state listed with `supertag get approval`, not an applied resource.
   See [Approval requests](coordination.md#approval-requests).
@@ -312,7 +317,7 @@ self-reported: a host can claim any label. Labels therefore decide placement onl
 access, and a Tag's bindings stay the only way to let a host run its Tasks.
 
 A Task in a named Workspace runs only on a bound host that serves it and so carries
-`workspace:NAME`: a host that maps the local Workspace, or, for a GitHub Workspace, a host started
+`workspace:NAME`: a host that maps the local Workspace, or, for a remote Workspace, a host started
 with `--workspace-from-control-plane`. The host must also carry the Tag's `runsOn` labels. When no
 bound host carries the required labels, the Task waits. Its
 scheduling record names the requirement, such as `labels:macos,gpu`, and `supertag describe task`
@@ -388,29 +393,36 @@ whatever harness and model their Worker Hosts offer, starting at low effort.
 ## Workspaces
 
 A **Workspace** is a named repository that a Tag's Tasks work in. Each Task Attempt gets its own
-checkout of the Workspace at an exact commit, and its changes come back as a branch, a patch, or a
-GitHub pull request. A Workspace has one of two sources:
+checkout of the Workspace at an exact commit, and its changes come back as a branch or a patch,
+or land on a git server. A Workspace has one of two sources:
 
 - **A local Git repository** that a Worker Host maps by name: a host service's `workspaces` in
   `supertag.yaml`, or `--workspace-id ID --workspace-source PATH` on `supertag worker-host`.
   Several hosts may map the same name to their own clones. The Control Plane stores no record of
   it.
-- **A GitHub repository** that the Control Plane holds, declared as a `Workspace` resource. Hosts
-  that serve it with `--workspace-from-control-plane` need no clone and no GitHub credentials.
+- **A remote Workspace**: a repository on any git server, declared as a `Workspace` resource.
+  The Control Plane reads it with its read Workspace Credential and relays each Session's source to
+  the hosts that serve it with `--workspace-from-control-plane`, so hosts need no clone and no
+  credentials.
 
 ```yaml
 apiVersion: supertag/v1
 kind: Workspace
 metadata:
-  name: api            # 1-63 lowercase letters, digits, hyphens, or underscores
+  name: handbook       # 1-80 letters, digits, '.', '-', or '_', starting with a letter or digit
 spec:
-  github:
-    accountId: github          # a GitHub Surface Account
-    repositoryId: 123456789
-    repository: acme/api
-    revision: main             # a moving ref, pinned once per Session; or commitSha for one commit
-  pullRequestBase: main        # optional: publish verified results as a draft pull request
+  remote: ssh://git@git.acme.internal/handbook.git   # https://, ssh://, user@host:path, or file://
+  ref: main                     # optional: the branch new Sessions start from; default branch if omitted
+  credential: handbook-rw       # or credentials: { read: NAME, push: NAME }; omit for none
+  land: { merge: drafts }       # optional: branch, or { merge: TARGET }
 ```
+
+| Field | Rules |
+| --- | --- |
+| `remote` | `https://` or `ssh://` URL, scp-style `user@host:path`, `file:///absolute/path` for a bare repository on the Control Plane's machine, or `http://` to a loopback address. Never a password, token, or `ext::` helper |
+| `ref` | A branch name. Each new Session pins the commit it names once; every Task of the Session starts there |
+| `credential`, `credentials` | Names of [Workspace Credentials](#workspace-credentials) that must exist. `read` reads the source; `push` lands changes |
+| `land` | `branch` updates the Session's branch `supertag/session/HASH` on every delivered Task. `{merge: TARGET}` also merges a finished Session into `TARGET`, a branch outside `supertag/`. Omit it to keep changes with SuperTag |
 
 A Tag names its Workspace in `spec.workspace`:
 
@@ -429,10 +441,48 @@ base commit, and later Tasks of a Session continue on the Session's branch,
 that starts a Session's first Task records the commit the branch names in its checkout, and the
 whole Session works from that commit. See
 [Follow a branch instead of a commit](../guides/workspaces.md#follow-a-branch-instead-of-a-commit).
-A GitHub Workspace omits both. `mcp` selects servers from the `.mcp.json` at the base commit. The Tag's Tasks run only on
-hosts that serve the Workspace. A message from a collaboration surface can select a GitHub
-Workspace that the Tag's Permission Sets allow. An Objective has no Workspace of its own: its
-turns work in the Workspaces of the Tags that run them.
+A remote Workspace omits both. `mcp` selects servers from the `.mcp.json` at the base commit. The Tag's Tasks run only on
+hosts that serve the Workspace. An Objective has no Workspace of its own: its turns work in the
+Workspaces of the Tags that run them.
+
+A local Workspace's `land` lives in its host service's `workspaces` entry in `supertag.yaml`; see
+[supertag.yaml](supertag-yaml.md).
+
+### Workspace Credentials
+
+A Workspace Credential is created on the machine that runs the Control Plane with
+`supertag workspace credential add NAME`, and one of:
+
+| Kind | Flag | Identifier the Control Plane stores |
+| --- | --- | --- |
+| SSH key | `--ssh-key PATH`, optionally `--known-hosts PATH` | The key's SHA256 fingerprint |
+| HTTPS token | `--https-token` (from `SUPERTAG_WORKSPACE_TOKEN` or a hidden prompt), `--username` | The user name |
+| Credential helper | `--credential-helper HELPER` | The helper's program name |
+
+The secret goes to the credential vault the Control Plane reads (`SUPERTAG_CREDENTIAL_VAULT`,
+in `SUPERTAG_STATE_DIR` by default) under `workspace-credential/NAME`, never to the database, a
+Worker Host, or a harness. An SSH key without `--known-hosts` trusts the server's first host key
+and remembers it. `supertag workspace credential remove NAME` refuses while a Workspace names it.
+
+### Landing
+
+Git delivery lands a delivered Task's verified commits on a remote Workspace's server, after the
+Task finished: the harness never pushes. It pushes only `supertag/session/...` branches and the
+Workspace's merge target, fast-forward only, whatever the credential could do. A Landing's state:
+
+| State | Meaning |
+| --- | --- |
+| `queued` | Waiting for git delivery, or for the Worker Host that holds the delivery to reconnect |
+| `claimed` | Git delivery is pushing |
+| `landed` | The branch or target names `landed_commit` |
+| `conflict` | The Session's changes conflict with the target in `conflicts`; nothing was merged, and `follow_up_task_id` merges `target_commit` into the Session |
+| `held` | Refused until someone acts, such as a branch changed outside SuperTag, a missing credential, or Git LFS |
+| `superseded` | A newer delivery of the same Session replaced it before it landed |
+
+`merge` lands a Work Session when its Tag or an operator closes it or its Objective closes, and
+again when a merge follow-up Task succeeds. Merge commits are authored by the Tag's name with a
+SuperTag no-reply address, with the requester as a `Co-authored-by` trailer. Content checks are the
+server's job: SuperTag runs no tests or hooks before landing.
 
 Volumes attach copies of data outside the checkout with `supertag tag put --workspace-mounts`. See
 [Work in a repository with Workspaces](../guides/workspaces.md) and

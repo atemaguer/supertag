@@ -151,7 +151,7 @@ echoing secret values.
 | `harnesses` | required, unless `adapter` | Up to five of `codex`, `claude-code`, `cursor`, `opencode`, and `openai-agents` |
 | `adapter`, `adapter-args` | none | An executable that speaks the harness protocol, in place of `harnesses`. See [Write a harness adapter](../guides/harness-adapters.md) |
 | `models` | none | Models per harness: one model, or a list whose first is the default. See [Host models](#host-models) |
-| `workspaces` | none | Up to 128 Workspace names, each to a repository path or `{ path, delivery, setup }`. See [Workspaces](#workspaces) |
+| `workspaces` | none | Up to 128 Workspace names, each to a repository path or `{ path, land, setup }`. See [Workspaces](#workspaces) |
 | `skills` | none | Local Skill directory or JSON catalog file selected by Context Sets. Relative paths resolve from this file |
 | `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
@@ -244,16 +244,28 @@ github=GITHUB_TOKEN` and reads the value from `SUPERTAG_NETWORK_CREDENTIAL_GITHU
 ```yaml
     workspaces:
       app: ~/code/app
-      api: { path: ~/code/api, delivery: patch, setup: npm ci }
+      api: { path: ~/code/api, land: patch, setup: npm ci }
+      docs: { path: ~/code/docs, land: { merge: agents, push: origin } }
 ```
 
 Each Task Attempt runs in its own checkout of the repository, pinned to an exact commit. `setup`
 runs in each new checkout before the harness starts, on the host and outside any harness sandbox,
-with a 10-minute limit. With `delivery: branch`, the default, `supertag up` imports each delivered
-Task into the repository as the branch `supertag/session/HASH`. It does so only for a host of
-the file's own Control Plane; on a host of a shared Control Plane, import a delivery with
-`supertag fetch ID`. With `delivery: patch`, the repository is left alone, and the patch and
-bundle stay downloadable with `supertag task download`.
+with a 10-minute limit. `land` says where a Session's changes go. `supertag up` lands them only
+for a host of the file's own Control Plane; on a host of a shared Control Plane, import a delivery
+with `supertag fetch ID`.
+
+| `land` | What `supertag up` does |
+| --- | --- |
+| `local` (default) | Imports each delivered Task into the repository as the branch `supertag/session/HASH` |
+| `patch` | Leaves the repository alone; the patch and bundle stay downloadable with `supertag task download` |
+| `{ push: REMOTE }` | Imports, then pushes each Session branch to `REMOTE`, one of the repository's git remotes |
+| `{ merge: BRANCH }` | Imports, then merges a Session into the local branch `BRANCH` once its work is reported done |
+| `{ merge: BRANCH, push: REMOTE }` | Merges as above, then pushes the Session branch and `BRANCH` to `REMOTE` |
+
+It uses the machine's own git configuration and credentials. Branches move only forward: nothing is
+force-pushed, and a branch that is checked out is never moved. A merge conflict gives the Session
+a follow-up Task that resolves it. See
+[Push or merge from your machine](../guides/workspaces.md#push-or-merge-from-your-machine).
 
 ## Secrets
 
