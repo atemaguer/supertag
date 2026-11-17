@@ -124,6 +124,24 @@ async fn list_tags(
 }
 
 #[tauri::command]
+async fn list_notes(
+    state: State<'_, ControlPlaneState>,
+    connection_id: String,
+    tag_id: String,
+) -> Result<Vec<control_plane::memories::Note>, String> {
+    state.notes(&connection_id, tag_id).await
+}
+
+#[tauri::command]
+async fn delete_note(
+    state: State<'_, ControlPlaneState>,
+    connection_id: String,
+    memory_id: String,
+) -> Result<control_plane::memories::Note, String> {
+    state.delete_note(&connection_id, memory_id).await
+}
+
+#[tauri::command]
 async fn list_tag_options(
     state: State<'_, ControlPlaneState>,
     connection_id: String,
@@ -322,6 +340,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             start_control_plane_watch,
             stop_control_plane_watch,
             list_tags,
+            list_notes,
+            delete_note,
             list_tag_options,
             create_tag,
             list_conversations,

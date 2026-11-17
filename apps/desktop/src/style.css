@@ -1260,6 +1260,58 @@ button:disabled {
 .activity-status:empty {
   display: none;
 }
+button.identity-pill {
+  cursor: pointer;
+  font: inherit;
+}
+button.identity-pill:hover,
+button.identity-pill[aria-expanded="true"] {
+  border-color: var(--muted);
+}
+.details-section {
+  margin-top: 16px;
+}
+.details-section h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tag-details-intro {
+  margin: 8px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.notes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.note {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--background);
+}
+.note-text {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.note-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
 .workspace-dialog {
   width: min(440px, calc(100vw - 30px));
   padding: 23px;

@@ -64,6 +64,9 @@ interface ShellProps {
   actions?: readonly PaletteAction[];
   /** The text of each cached message of a Tag's conversation, newest first, for search. */
   messageTexts?(tagId: string): readonly string[];
+  /** Shows or hides the Tag details panel, from the Tag's name at the top. */
+  onTagDetails?(): void;
+  detailsOpen?: boolean;
   children?: ReactNode;
 }
 
@@ -88,6 +91,8 @@ export function WorkspaceShell({
   newTagRefusal,
   actions = noActions,
   messageTexts,
+  onTagDetails,
+  detailsOpen,
   children,
 }: ShellProps) {
   useSidebarShortcut();
@@ -148,12 +153,25 @@ export function WorkspaceShell({
       {separator}
       <main className="main" aria-label="Conversation" aria-busy={switching}>
         <header className="topstrip" data-tauri-drag-region>
-          {tag && (
-            <div className="identity-pill">
-              <TagAvatar tagId={tag.tagId} />
-              <span className="tag-name">{tag.name ?? tag.tagId}</span>
-            </div>
-          )}
+          {tag &&
+            (onTagDetails ? (
+              <button
+                type="button"
+                className="identity-pill"
+                aria-expanded={Boolean(detailsOpen)}
+                aria-controls="tag-details"
+                title={detailsOpen ? "Hide Tag details" : "Show Tag details and notes"}
+                onClick={onTagDetails}
+              >
+                <TagAvatar tagId={tag.tagId} />
+                <span className="tag-name">{tag.name ?? tag.tagId}</span>
+              </button>
+            ) : (
+              <div className="identity-pill">
+                <TagAvatar tagId={tag.tagId} />
+                <span className="tag-name">{tag.name ?? tag.tagId}</span>
+              </div>
+            ))}
           {provider && <span className="harness">{provider}</span>}
         </header>
         {error && (
@@ -485,8 +503,14 @@ function TagWorkspace({
   onWriteChange(delta: 1 | -1): void;
 }) {
   const tagId = tag.tagId;
+  const [details, setDetails] = useState(false);
   return (
-    <WorkspaceShell {...shell} tag={tag}>
+    <WorkspaceShell
+      {...shell}
+      tag={tag}
+      detailsOpen={details}
+      onTagDetails={() => setDetails((open) => !open)}
+    >
       <ConversationPane
         key={tagId}
         controlPlane={controlPlane}
@@ -496,6 +520,8 @@ function TagWorkspace({
         updateDraft={updateDraft}
         onSummary={(summary) => onSummary(tagId, summary)}
         onWriteChange={onWriteChange}
+        details={details}
+        onCloseDetails={() => setDetails(false)}
       />
     </WorkspaceShell>
   );

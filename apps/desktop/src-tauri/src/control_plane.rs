@@ -21,6 +21,7 @@ mod artifacts;
 pub mod cache;
 mod follow;
 mod local;
+pub mod memories;
 mod new_tag;
 mod profiles;
 mod watch;

@@ -78,6 +78,7 @@ impl operator_events_server::OperatorEvents for WatchScript {
                 WatchKind::Tag as i32,
                 WatchKind::ConversationMessage as i32,
                 WatchKind::Task as i32,
+                WatchKind::Memory as i32,
             ]
         );
         self.tokens.send(request.resume_token.clone()).unwrap();
@@ -181,6 +182,21 @@ impl operator_events_server::OperatorEvents for WatchScript {
                 ))
                 .await
                 .unwrap();
+                // A note change names its Tag; one without a Tag is ignored.
+                for (token, tag) in [("note", "engineer"), ("tagless-note", "")] {
+                    send.send(frame(
+                        token,
+                        watch_event::Update::Change(WatchChange {
+                            kind: WatchKind::Memory as i32,
+                            id: "mem_1".into(),
+                            tag_id: tag.into(),
+                            reason: WatchReason::Deleted as i32,
+                            ..Default::default()
+                        }),
+                    ))
+                    .await
+                    .unwrap();
+                }
                 let stopped = self.stopped.clone();
                 tokio::spawn(async move {
                     send.closed().await;
@@ -234,6 +250,7 @@ async fn watch_resumes_and_stops_the_real_stream_without_a_unary_deadline() {
         json!({"kind":"resync"}),
         json!({"kind":"conversation","tagId":"engineer"}),
         json!({"kind":"conversation","tagId":"engineer"}),
+        json!({"kind":"memory","tagId":"engineer"}),
     ] {
         assert_eq!(timeout(WAIT, receive.recv()).await.unwrap(), Some(expected));
     }

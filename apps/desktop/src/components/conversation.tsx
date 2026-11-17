@@ -50,6 +50,7 @@ import { Bubble, LiveConversationEntry } from "./conversation-entry";
 import { clamp, ResizeHandle, useStoredWidth } from "./resize";
 import type { TagSummary } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
+import { TagDetails } from "./tag-details";
 import {
   conversationSummary,
   deliveryStatus,
@@ -81,6 +82,9 @@ interface ConversationProps {
   onWriteChange(delta: 1 | -1): void;
   /** Reports what the sidebar shows for this conversation as its history changes. */
   onSummary?(summary: TagSummary): void;
+  /** The Tag details panel, with its notes, shows beside the conversation. */
+  details?: boolean;
+  onCloseDetails?(): void;
 }
 
 export function ConversationPane({
@@ -91,6 +95,8 @@ export function ConversationPane({
   updateDraft,
   onWriteChange,
   onSummary,
+  details,
+  onCloseDetails,
 }: ConversationProps) {
   const tagId = tag.tagId;
   // A conversation shown before renders at once from the cache, then revalidates.
@@ -408,7 +414,7 @@ export function ConversationPane({
             </div>
           </form>
         </div>
-        {activeTask && (
+        {(activeTask || details) && (
           <div className="activity-frame" style={{ width: activityShown }}>
             <ResizeHandle
               label="Resize Task activity"
@@ -426,17 +432,26 @@ export function ConversationPane({
               }}
               onDoubleClick={() => setActivityWidth(ACTIVITY_WIDTH.initial)}
             />
-            <ActivityPane
-              key={activeTask}
-              controlPlane={controlPlane}
-              taskId={activeTask}
-              latest={latestEvent(messages, activeTask)}
-              pushed={follow.connected}
-              onClose={() => {
-                setActiveTask(undefined);
-                activityTrigger.current?.focus();
-              }}
-            />
+            {activeTask ? (
+              <ActivityPane
+                key={activeTask}
+                controlPlane={controlPlane}
+                taskId={activeTask}
+                latest={latestEvent(messages, activeTask)}
+                pushed={follow.connected}
+                onClose={() => {
+                  setActiveTask(undefined);
+                  activityTrigger.current?.focus();
+                }}
+              />
+            ) : (
+              <TagDetails
+                controlPlane={controlPlane}
+                watch={watch}
+                tag={tag}
+                onClose={() => onCloseDetails?.()}
+              />
+            )}
           </div>
         )}
       </div>

@@ -123,6 +123,10 @@ export interface ControlPlane {
     receive: (update: FollowUpdate) => void,
   ): Promise<() => Promise<void>>;
   saveArtifact(artifactId: string, path: string): Promise<boolean>;
+  /** The Tag's notes the caller sees, newest first. */
+  notes?(tagId: string): Promise<Note[]>;
+  /** Deletes a note at once; the Tag no longer sees it from its next turn. */
+  deleteNote?(memoryId: string): Promise<Note>;
   /**
    * The Control Plane and principal this connection acts as. What is cached under one scope is
    * never shown under another.
@@ -165,7 +169,23 @@ export type FollowUpdate =
 export type WatchUpdate =
   | { kind: "ready" | "resync" | "lost" | "tag" }
   /** The caller's conversation with the Tag changed, or was marked read. */
-  | { kind: "conversation"; tagId: string };
+  | { kind: "conversation"; tagId: string }
+  /** One of the Tag's notes the caller sees was kept, rewritten, or deleted. */
+  | { kind: "memory"; tagId: string };
+
+/** One of a Tag's notes: something it keeps of what it cannot look up again. */
+export interface Note {
+  memoryId: string;
+  tagId: string;
+  text: string;
+  /** Private to the person whose conversation wrote it; otherwise every turn sees it. */
+  private: boolean;
+  createdBy: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  /** When a turn last had it in its context. */
+  lastSeenAtMs?: number;
+}
 
 export interface ControlPlaneProfile {
   name: string;
@@ -227,6 +247,8 @@ export function controlPlaneSession(connectionId: string, scope: string): Contro
     },
     saveArtifact: (artifactId, path) =>
       invoke("save_result_artifact", { connectionId, artifactId, path }),
+    notes: (tagId) => invoke("list_notes", { connectionId, tagId }),
+    deleteNote: (memoryId) => invoke("delete_note", { connectionId, memoryId }),
     readCache: (key) => invoke("read_cache", { connectionId, key }),
     writeCache: (key, value) => invoke("write_cache", { connectionId, key, value }),
   };
