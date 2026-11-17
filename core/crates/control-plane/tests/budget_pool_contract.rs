@@ -473,9 +473,92 @@ async fn objective(url: &str) {
     );
     s.close().await;
 }
+/// A currency budget on a Tag whose harness cannot enforce a cost limit adds none to its turns,
+/// so a Codex lane claims them; reported (estimated) spend still refuses turns once spent.
+async fn unenforced_cost(url: &str) {
+    let s = Store::open(url).await.unwrap().with_execution_clock(|| NOW);
+    s.put_tag_spec(PutTagRequest {
+        tag_id: "codex-owner".into(),
+        instructions: "Budgeted fixture".into(),
+        harness_kind: HarnessKind::Codex.into(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let h = support::register_host(&s, "codex-budget").await;
+    let o = s
+        .create_objective(
+            OP,
+            &CreateObjectiveRequest {
+                operation_id: "codex-goal".into(),
+                objective_id: "codex-pool".into(),
+                owner_tag_id: "codex-owner".into(),
+                outcome: "Budgeted fixture".into(),
+                ongoing: true,
+                budget_limit_minor: Some(1000),
+                budget_currency: Some("USD".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(task(&s, &o.starting_task_id).await.execution_limits, None);
+    let claim = s
+        .claim_task_for_host(&h, "codex-claim", &[], HarnessKind::Codex)
+        .await
+        .unwrap()
+        .expect("a Codex lane claims a turn under a currency budget");
+    let task_row = claim.task.unwrap();
+    assert_eq!(task_row.task_id, o.starting_task_id);
+    let a = InspectAttemptRequest {
+        task_id: task_row.task_id,
+        attempt_id: claim.attempt_id,
+        lease_token: claim.lease_token,
+    };
+    s.start_task(
+        &h,
+        &StartTaskRequest {
+            task_id: a.task_id.clone(),
+            attempt_id: a.attempt_id.clone(),
+            lease_token: a.lease_token.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    s.report_attempt_usage(
+        &h,
+        &ReportAttemptUsageRequest {
+            attempt: Some(a.clone()),
+            sequence: 1,
+            native_usage: None,
+            amount_minor: Some(1200),
+            currency: Some("USD".into()),
+            estimated: true,
+        },
+    )
+    .await
+    .unwrap();
+    finish(&s, &h, &a).await;
+    assert!(matches!(
+        s.submit_task(
+            OP,
+            &SubmitTaskRequest {
+                tag_id: "codex-owner".into(),
+                session_id: o.session_id,
+                operation_id: "after-spend".into(),
+                prompt: "New work".into(),
+                ..Default::default()
+            }
+        )
+        .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    s.close().await;
+}
 async fn contract(url: &str) {
     Box::pin(ordinary(url)).await;
     Box::pin(objective(url)).await;
+    Box::pin(unenforced_cost(url)).await;
 }
 #[tokio::test]
 async fn sqlite_budget_pools() {

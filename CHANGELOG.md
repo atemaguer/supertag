@@ -95,6 +95,10 @@ within the pre-1.0 compatibility policy described in
   `supertag version` say when the services run another build. An older release started against a
   database a newer one migrated now names both schema versions instead of `unsupported Rust
   database schema`.
+- An Objective with a currency budget runs on Codex, Cursor, and OpenCode Tags. Each turn used to
+  carry the remaining budget as a cost limit those harnesses cannot enforce, so placement refused
+  it and the turn stayed queued. Such turns now run without the limit; their reported cost still
+  counts, and no new turn starts once the budget is spent.
 - Security: a Codex Task with `files:write` or `commands:execute` could write the Workspace's
   `.git`, a directory or a linked worktree's `.git` file, when the Workspace sat under `/tmp` or
   `$TMPDIR`. Claude Code's and OpenCode's file tools could write `.git` in any Workspace.

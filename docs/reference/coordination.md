@@ -338,11 +338,12 @@ reported token and cost limits, shared with the work Sessions it starts or conti
 
 ### Monetary budgets
 
-A budget with a currency caps provider-reported cost across the whole Objective. Each turn
-carries a reported cost limit, and only Claude Code enforces one, in USD. Under a currency budget,
-turns of a Codex, Cursor, or OpenCode Tag stay queued, and `supertag placement explain` names the
-limit; use a budget without a currency for those Tags. See
-[execution limits](worker.md#execution-limits).
+A budget with a currency caps provider-reported cost across the whole Objective. A turn whose
+harness enforces a reported cost limit, Claude Code in USD, runs with what is left as its limit.
+Other turns run without one: their cost still counts once reported, and no new turn starts once
+the pool is spent, but a running turn can spend past what was left. Codex and Cursor report
+estimated USD cost; OpenCode reports none, so its turns count as unknown and never move the
+total. See [execution limits](worker.md#execution-limits).
 
 | Reported spend | Effect |
 | --- | --- |

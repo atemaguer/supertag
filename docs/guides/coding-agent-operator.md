@@ -139,8 +139,8 @@ The date is illustrative; use the timestamp agreed with the user. The quoted com
 passes the statement as one argument without evaluating its contents as shell code. The trap
 removes the private file even if creation fails.
 1000 minor units in USD means
-USD 10. A currency budget needs a harness that enforces a reported cost limit, such as Claude Code;
-see [Define and complete an Objective](objectives.md#write-an-objective-a-tag-can-finish).
+USD 10. Only Claude Code stops a turn at the budget; with other harnesses the budget stops the next
+turn, and OpenCode reports no cost; see [Define and complete an Objective](objectives.md#write-an-objective-a-tag-can-finish).
 Creation queues the lead's first turn. Record the Objective ID and its `session_id`.
 
 ### 2. Check progress and answer questions

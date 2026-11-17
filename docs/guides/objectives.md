@@ -50,8 +50,9 @@ Limits behave the same way for every Objective:
 
 - A budget with a currency caps provider-reported spend across the whole Objective. You get one
   warning at 80%. When the pool is spent, the Objective becomes `limited` and no new turn starts.
-  Each turn runs with what is left as a reported cost limit, so its harness must enforce one:
-  Claude Code enforces a USD limit, and Codex, Cursor, and OpenCode enforce none.
+  A Claude Code turn runs with what is left as a USD limit. Codex, Cursor, and OpenCode enforce no
+  cost limit, so their turns run without one and a running turn can spend past the budget. Codex
+  and Cursor report estimated USD cost; OpenCode reports none, so a budget never stops it.
 - A deadline warns you and the owner 24 hours before, 1 hour before, and when a quarter of the
   time remains. At the deadline, nothing new starts.
 

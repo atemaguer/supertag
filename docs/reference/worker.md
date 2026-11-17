@@ -72,9 +72,9 @@ already-running daemon, such as a tmux server or `ssh localhost`, also escapes s
 ## Execution limits
 
 A Task may require limits. A Task whose Tag's harness cannot enforce a requested limit is refused
-when it is submitted. Cursor, OpenCode, and OpenAI Agents enforce none. A limit an Objective
-budget adds that the harness cannot enforce keeps the Task queued, and `supertag placement explain`
-names it.
+when it is submitted. Cursor, OpenCode, and OpenAI Agents enforce none. A Task of a Tag with no
+fixed harness waits for a lane whose harness enforces its limits, and `supertag placement explain`
+names them.
 
 | Limit | Set with | Enforced by |
 | --- | --- | --- |
@@ -82,8 +82,9 @@ names it.
 | Reported cost | `--max-reported-cost-minor` with `--reported-cost-currency` | Claude Code: the provider's own budget, in USD only |
 | Native agents and work Sessions | `--max-native-agents` | Codex, for a limit of 0 only |
 
-An Objective with a budget caps each of its turns at what its budget has left. Reported tokens
-are not a billing cap. See [Budgets and allocation](coordination.md#budgets-and-allocation).
+An Objective with a budget caps each of its turns at what its budget has left when the turn's
+harness enforces that limit; otherwise the turn runs without it, and the budget stops only new
+turns. Reported tokens are not a billing cap. See [Budgets and allocation](coordination.md#budgets-and-allocation).
 
 ## Built-in harnesses
 

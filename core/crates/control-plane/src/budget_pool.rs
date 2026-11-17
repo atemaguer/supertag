@@ -225,11 +225,18 @@ async fn draw_in(
     allocate(pool,&spent,&base.cloned().unwrap_or_default(),owed).map(optional).ok_or_else(||StoreError::FailedPrecondition("this turn and its Work Sessions have too little of their reported limits left for new work".into()))
 }
 
+/// Records a Task's drawn limits. A reported token or cost limit its harness cannot enforce is
+/// dropped rather than stranding the Task in the queue: the pool's reported spend still refuses
+/// the next draw once too little is left, so such a turn may overrun its pool but no turn starts
+/// after the pool is spent. A limit a Task requests itself was already checked at admission.
 pub(crate) async fn set_in(
     tx: &mut Transaction<'_, Any>,
     task: &mut Task,
     value: Option<ExecutionLimits>,
 ) -> Result<()> {
+    let value = value
+        .map(|limits| crate::placement::enforceable_reported_limits(task.harness_kind(), limits))
+        .and_then(optional);
     sqlx::query("UPDATE supertag_v2_tasks SET execution_limits=$1 WHERE task_id=$2")
         .bind(encoded(value.as_ref()))
         .bind(&task.task_id)

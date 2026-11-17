@@ -165,6 +165,31 @@ pub(crate) fn unsupported_execution_limits(
     })
 }
 
+/// Drops the reported token and cost limits `harness` cannot enforce, keeping the rest.
+pub(crate) fn enforceable_reported_limits(
+    harness: HarnessKind,
+    mut limits: ExecutionLimits,
+) -> ExecutionLimits {
+    let unenforced = |only: ExecutionLimits| unsupported_execution_limits(harness, &only).is_some();
+    if limits.max_reported_tokens.is_some()
+        && unenforced(ExecutionLimits {
+            max_reported_tokens: limits.max_reported_tokens,
+            ..Default::default()
+        })
+    {
+        limits.max_reported_tokens = None;
+    }
+    if limits.max_reported_cost.is_some()
+        && unenforced(ExecutionLimits {
+            max_reported_cost: limits.max_reported_cost.clone(),
+            ..Default::default()
+        })
+    {
+        limits.max_reported_cost = None;
+    }
+    limits
+}
+
 /// Runtime actions the Cursor bridge exposes through its scoped tools.
 const CURSOR_ACTIONS: &[&str] = &[
     "files:read",
@@ -677,6 +702,49 @@ mod tests {
 
     fn labels(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn drawn_limits_keep_only_what_the_harness_enforces() {
+        let cost = |currency: &str| ReportedCostLimit {
+            currency: currency.into(),
+            amount_minor: 1000,
+        };
+        let drawn = |currency: &str| ExecutionLimits {
+            max_reported_tokens: Some(5000),
+            max_reported_cost: Some(cost(currency)),
+            max_native_agents: Some(0),
+        };
+        let kept = |harness, currency: &str| enforceable_reported_limits(harness, drawn(currency));
+        let codex = kept(HarnessKind::Codex, "USD");
+        assert_eq!(
+            (codex.max_reported_tokens, codex.max_reported_cost),
+            (Some(5000), None)
+        );
+        let claude = kept(HarnessKind::ClaudeCode, "USD");
+        assert_eq!(
+            (claude.max_reported_tokens, claude.max_reported_cost),
+            (None, Some(cost("USD")))
+        );
+        let claude_eur = kept(HarnessKind::ClaudeCode, "EUR");
+        assert_eq!(
+            (claude_eur.max_reported_tokens, claude_eur.max_reported_cost),
+            (None, None)
+        );
+        for harness in [
+            HarnessKind::Cursor,
+            HarnessKind::Opencode,
+            HarnessKind::OpenaiAgents,
+        ] {
+            let limits = kept(harness, "USD");
+            assert_eq!(
+                (limits.max_reported_tokens, limits.max_reported_cost),
+                (None, None)
+            );
+            // Native agent limits are never drawn from a pool, so they are left for admission.
+            assert_eq!(limits.max_native_agents, Some(0));
+        }
+        assert_eq!(kept(HarnessKind::Unspecified, "EUR"), drawn("EUR"));
     }
 
     #[test]

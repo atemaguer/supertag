@@ -202,7 +202,9 @@ When less than a twentieth of the limit is left, in tokens or in cost, SuperTag 
 `continue_session` draws from the turn that continues the work Session, not the one that started
 it. The Task that continues a work Session after an approval decision draws from the same pool as
 the Task that waited; with too little left, the work Session stops, and the conversation hears
-why. A Task without reported limits passes none on. Report turns sit outside the pool and run
+why. A Task without reported limits passes none on. A work Task whose harness cannot enforce
+one of the pool's limits, such as a Codex Tag under a cost limit, runs without it; what it reports
+still counts against the pool. Report turns sit outside the pool and run
 under the starting Task's full limits, so a result reaches the person even when the pool is spent.
 
 ### One budget pool per Objective

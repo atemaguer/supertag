@@ -52,9 +52,9 @@ the owner Tag's Workspace, so bind the owner to one when the work needs reposito
 Allow for implementation, independent review, and fixing findings. Set monetary limits with
 both `--budget-minor` and `--currency`: `30000` with `USD` means $300. Without a currency,
 no spend counts against the budget. A monetary budget tracks
-provider-reported spend; it is not a quote for completing the outcome. Each turn runs with the remaining
-budget as a reported cost limit, so the owner and its Team need a harness that enforces one, such
-as Claude Code with `USD`.
+provider-reported spend; it is not a quote for completing the outcome. A Claude Code turn runs
+with the remaining budget as a `USD` limit. Other harnesses enforce no cost limit, so the budget
+stops only their next turn, and OpenCode reports no cost for it to count.
 
 Use `--deadline` with an RFC 3339 timestamp and an explicit time zone, such as
 `2027-03-31T17:00:00Z`. Choose a future date that leaves time for review. Writing a date or dollar
