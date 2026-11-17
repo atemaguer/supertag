@@ -47,6 +47,9 @@ type TagOptions struct {
 // Workspace its Sessions start in.
 type NewTag struct {
 	ID, Name, Harness, Workspace string
+	// MaxWorkSessions is how many Work Sessions it may have open at once; zero keeps the
+	// Control Plane's default.
+	MaxWorkSessions uint32
 }
 
 var notTagID = regexp.MustCompile(`[^a-z0-9]+`)
@@ -132,6 +135,10 @@ func putTagRequest(tag NewTag) (*v2.PutTagRequest, error) {
 	if tag.Workspace != "" {
 		request.Workspace = &v2.WorkspaceSpec{WorkspaceId: tag.Workspace}
 	}
+	if tag.MaxWorkSessions > 0 {
+		limit := tag.MaxWorkSessions
+		request.MaxWorkSessions = &limit
+	}
 	return request, nil
 }
 
@@ -158,5 +165,6 @@ func (c *Client) CreateTag(ctx context.Context, tag NewTag) (*views.Tag, error) 
 		name = res.Msg.GetTagId()
 	}
 	return &views.Tag{Metadata: &views.Metadata{Id: res.Msg.GetTagId(), Name: name},
-		Spec: &views.TagSpec{Lead: res.Msg.GetLead()}, Status: &views.TagStatus{Phase: views.TagPhase_TAG_PHASE_ACTIVE}}, nil
+		Spec: &views.TagSpec{Lead: res.Msg.GetLead(), MaxWorkSessions: res.Msg.GetMaxWorkSessions(),
+			OpenWorkSessions: res.Msg.GetOpenWorkSessions()}, Status: &views.TagStatus{Phase: views.TagPhase_TAG_PHASE_ACTIVE}}, nil
 }

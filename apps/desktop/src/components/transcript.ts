@@ -1,4 +1,4 @@
-import type { Message } from "../control-plane";
+import type { Message, Tag } from "../control-plane";
 import type { TagSummary } from "./sidebar";
 
 /** Tasks a Worker Host has not finished: the Tag is still working on them. */
@@ -86,4 +86,10 @@ export function conversationSummary(messages: readonly Message[]): TagSummary {
     ...(last.task.createdAtMs !== undefined ? { lastActivityMs: last.task.createdAtMs } : {}),
     ...(RUNNING.has(last.task.state) ? { working: true } : {}),
   };
+}
+
+/** "3 of 8 Work Sessions open", once the Tag says how many it may have. */
+export function workSessionCount(tag: Pick<Tag, "maxWorkSessions" | "openWorkSessions">) {
+  if (!tag.maxWorkSessions) return undefined;
+  return `${tag.openWorkSessions ?? 0} of ${tag.maxWorkSessions} Work Sessions open`;
 }

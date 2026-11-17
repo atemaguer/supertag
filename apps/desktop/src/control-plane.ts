@@ -9,6 +9,9 @@ export interface Tag {
   harnessKind: string;
   /** Whether this is the Control Plane's lead Tag, the one `supertag init` creates. */
   lead?: boolean;
+  /** How many Work Sessions the Tag may have open at once, and has open. */
+  maxWorkSessions?: number;
+  openWorkSessions?: number;
 }
 
 export interface ResultArtifact {

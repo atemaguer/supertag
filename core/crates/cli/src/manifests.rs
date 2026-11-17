@@ -126,6 +126,8 @@ struct TagSpec {
     runs_on: Option<Vec<String>>,
     /// Whether this is the Control Plane's lead Tag. Omitted keeps the current value.
     lead: Option<bool>,
+    /// How many Work Sessions the Tag may have open at once. Omitted keeps the current value.
+    max_work_sessions: Option<u32>,
 }
 
 #[derive(Deserialize)]

@@ -542,6 +542,9 @@ pub struct Tag {
     pub harness_kind: String,
     /// Whether this is the Control Plane's lead Tag, which the app shows first.
     pub lead: bool,
+    /// How many Work Sessions the Tag may have open at once, and has open now.
+    pub max_work_sessions: u32,
+    pub open_work_sessions: u32,
 }
 
 /// A harness as the app names it, such as `codex` or `claude_code`.
@@ -566,6 +569,8 @@ impl From<v2::Tag> for Tag {
             revision: tag.revision,
             harness_kind,
             lead: tag.lead,
+            max_work_sessions: tag.max_work_sessions,
+            open_work_sessions: tag.open_work_sessions,
         }
     }
 }

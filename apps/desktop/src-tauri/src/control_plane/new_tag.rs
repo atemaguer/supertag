@@ -28,6 +28,9 @@ pub struct NewTag {
     pub name: Option<String>,
     pub harness: String,
     pub workspace_id: Option<String>,
+    /// How many Work Sessions it may have open at once; the Control Plane's default when unset.
+    #[serde(default)]
+    pub max_work_sessions: Option<u32>,
 }
 
 impl NewTag {
@@ -54,6 +57,7 @@ impl NewTag {
                     workspace_id,
                     ..Default::default()
                 }),
+            max_work_sessions: self.max_work_sessions,
             // Zero creates a new Tag and never replaces an existing one.
             expected_revision: Some(0),
             ..Default::default()
@@ -142,9 +146,11 @@ mod tests {
             name: Some(" Reviewer ".into()),
             harness: "claude_code".into(),
             workspace_id: Some("supertag".into()),
+            max_work_sessions: Some(3),
         }
         .request()
         .unwrap();
+        assert_eq!(request.max_work_sessions, Some(3));
         assert_eq!(request.tag_id, "reviewer");
         assert_eq!(request.name.as_deref(), Some("Reviewer"));
         assert_eq!(request.harness_kind, v2::HarnessKind::ClaudeCode as i32);
@@ -160,6 +166,7 @@ mod tests {
             name: Some("lead".into()),
             harness: "codex".into(),
             workspace_id: Some(String::new()),
+            max_work_sessions: None,
         }
         .request()
         .unwrap();
@@ -173,6 +180,7 @@ mod tests {
                     name: None,
                     harness: harness.into(),
                     workspace_id: None,
+                    max_work_sessions: None,
                 }
                 .request()
                 .is_err()

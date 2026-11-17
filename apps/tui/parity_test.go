@@ -460,6 +460,12 @@ func TestNewTagCreatesATagWithTheLeadTagsDefaults(t *testing.T) {
 	m = update(t, m, key(tea.KeyEnter))
 	m = update(t, m, key(tea.KeyRight))
 	m = update(t, m, key(tea.KeyEnter))
+	m = update(t, m, key(tea.KeyEnter))
+	// The Work Sessions field starts at 8; left lowers it.
+	if got := screen(m); !strings.Contains(got, "Work Sessions open at once") {
+		t.Fatalf("the form shows:\n%s", got)
+	}
+	m = update(t, m, key(tea.KeyLeft))
 	next, cmd := m.Update(key(tea.KeyEnter))
 	m = run(t, next.(model), cmd)
 	if len(fake.putTags) != 1 {
@@ -468,7 +474,8 @@ func TestNewTagCreatesATagWithTheLeadTagsDefaults(t *testing.T) {
 	req := fake.putTags[0]
 	if req.GetTagId() != "release-reviewer" || req.GetName() != "Release Reviewer" || req.GetHarnessKind() != v2.HarnessKind_HARNESS_KIND_CODEX ||
 		req.GetWorkspace().GetWorkspaceId() != "supertag" || req.ExpectedRevision == nil || req.GetExpectedRevision() != 0 ||
-		strings.Join(req.GetAllowedActions(), ",") != "commands:execute,files:write,schedule:create" {
+		strings.Join(req.GetAllowedActions(), ",") != "commands:execute,files:write,schedule:create" ||
+		req.GetMaxWorkSessions() != 7 {
 		t.Fatalf("PutTag = %v", req)
 	}
 	if m.pane != paneConversation || m.selectedTag() != "release-reviewer" {
@@ -531,5 +538,14 @@ func TestALaunchFromTheCacheTakesKeysAtOnce(t *testing.T) {
 	a.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if a.inner.input.Value() != "h" {
 		t.Fatalf("the input took %q", a.inner.input.Value())
+	}
+}
+
+func TestWorkPaneShowsTheTagsOpenWorkSessions(t *testing.T) {
+	m := runtimeModel(t)
+	m.tags[m.selected].Spec = &views.TagSpec{MaxWorkSessions: 8, OpenWorkSessions: 3}
+	m.pane = paneWork
+	if got := ansi.Strip(m.renderWorkPane()); !strings.Contains(got, "3 of 8 Work Sessions open") {
+		t.Fatalf("work pane:\n%s", got)
 	}
 }

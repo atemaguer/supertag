@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -19,6 +20,7 @@ const (
 	tagFieldName = iota
 	tagFieldHarness
 	tagFieldWorkspace
+	tagFieldWorkSessions
 	tagFields
 )
 
@@ -33,8 +35,10 @@ type tagForm struct {
 	options *client.TagOptions
 	// harness and workspace are the chosen indexes into harnesses() and workspaces().
 	harness, workspace int
-	sending            bool
-	note               note
+	// workSessions is how many Work Sessions the Tag may have open at once, 1 to 64.
+	workSessions int
+	sending      bool
+	note         note
 }
 
 type (
@@ -96,7 +100,7 @@ func (m *model) openTagForm() tea.Cmd {
 	name.Placeholder = "Reviewer"
 	name.CharLimit = 63
 	name.SetWidth(m.paneWidth() - 3)
-	f := &tagForm{name: name}
+	f := &tagForm{name: name, workSessions: 8}
 	m.tagForm, m.pane, m.focus = f, paneNewTag, focusInput
 	m.viewport.GotoTop()
 	m.refresh()
@@ -181,6 +185,8 @@ func (m model) tagFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 			step(&f.harness, len(f.harnesses()), delta)
 		case tagFieldWorkspace:
 			step(&f.workspace, len(f.workspaces()), delta)
+		case tagFieldWorkSessions:
+			f.workSessions = min(max(f.workSessions+delta, 1), 64)
 		default:
 			var cmd tea.Cmd
 			f.name, cmd = f.name.Update(msg)
@@ -211,7 +217,7 @@ func (m *model) createTag() tea.Cmd {
 		return m.syncInput()
 	}
 	tag := client.NewTag{ID: id, Name: strings.TrimSpace(f.name.Value()), Harness: f.harnesses()[f.harness],
-		Workspace: f.workspaces()[f.workspace]}
+		Workspace: f.workspaces()[f.workspace], MaxWorkSessions: uint32(f.workSessions)}
 	f.sending, f.note = true, note{text: "Creating…"}
 	m.refresh()
 	c, ctx := m.client, m.ctx
@@ -295,6 +301,9 @@ func (m model) renderTagForm() string {
 	if f.options != nil && len(f.options.Workspaces) == 0 {
 		lines = append(lines, faint.Render(wrap.Render("No Worker Host offers a Workspace.")))
 	}
+	lines = append(lines, "", label(tagFieldWorkSessions, "Work Sessions open at once"),
+		choice(tagFieldWorkSessions, strconv.Itoa(f.workSessions)),
+		faint.Render(wrap.Render("Longer work the Tag may have open across all its conversations.")))
 	if f.note.text != "" {
 		style := faint
 		if f.note.err {

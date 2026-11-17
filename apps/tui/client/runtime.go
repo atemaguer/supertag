@@ -184,8 +184,9 @@ func (c *runtimeClient) listTags(ctx context.Context) ([]*views.Tag, error) {
 			}
 			tags = append(tags, &views.Tag{
 				Metadata: &views.Metadata{Id: tag.GetTagId(), Name: name},
-				Spec:     &views.TagSpec{Lead: tag.GetLead()},
-				Status:   &views.TagStatus{Phase: views.TagPhase_TAG_PHASE_ACTIVE},
+				Spec: &views.TagSpec{Lead: tag.GetLead(), MaxWorkSessions: tag.GetMaxWorkSessions(),
+					OpenWorkSessions: tag.GetOpenWorkSessions()},
+				Status: &views.TagStatus{Phase: views.TagPhase_TAG_PHASE_ACTIVE},
 			})
 		}
 		cursor = res.Msg.GetNextCursor()

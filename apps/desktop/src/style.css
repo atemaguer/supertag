@@ -1074,6 +1074,11 @@ button:disabled {
   gap: 8px;
   padding-left: 4px;
 }
+.work-session-count {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0 0 4px 4px;
+}
 .report-label {
   color: var(--muted);
   font-size: 11px;

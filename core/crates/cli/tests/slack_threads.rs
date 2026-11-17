@@ -510,6 +510,7 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
                 name: None,
                 expected_revision: None,
                 lead: None,
+                max_work_sessions: None,
                 execution: None,
                 approval_rules: vec![],
                 tag_id: tag.into(),

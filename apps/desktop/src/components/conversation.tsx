@@ -54,6 +54,7 @@ import {
   deliveryStatus,
   lastOperatorMessage,
   timeDividers,
+  workSessionCount,
 } from "./transcript";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -356,6 +357,10 @@ export function ConversationPane({
               </ConversationContent>
               <JumpToLatest messages={messages.length} />
             </Conversation>
+          )}
+          {workSessionCount(tag) && (
+            // How much room the Tag has to start longer work, across all its conversations.
+            <p className="work-session-count">{workSessionCount(tag)}</p>
           )}
           <form className="composer" onSubmit={send}>
             <div className="composer-box">

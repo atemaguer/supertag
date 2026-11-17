@@ -217,6 +217,8 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     let imported = json(fetch(first_id, &[])).await?;
     assert_eq!(imported["result"], "created");
     assert_eq!(imported["branch"], branch.as_str());
+    // Only pulling a Work Session's delivery closes a Work Session.
+    assert_eq!(imported["work_session_closed"], false);
     assert_eq!(imported["session_id"], "feature");
     assert_eq!(
         branch_head(&operator_repository, &branch).await?,

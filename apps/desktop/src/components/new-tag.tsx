@@ -56,6 +56,7 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
   const [name, setName] = useState("");
   const [harness, setHarness] = useState("");
   const [workspace, setWorkspace] = useState("");
+  const [maxWorkSessions, setMaxWorkSessions] = useState(8);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -97,6 +98,7 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
           name: name.trim(),
           harness,
           workspaceId: workspace || undefined,
+          maxWorkSessions,
         }),
       );
     } catch (error) {
@@ -164,6 +166,21 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
           </select>
         </>
       )}
+      <label htmlFor="tag-work-sessions">Work Sessions open at once</label>
+      <Input
+        id="tag-work-sessions"
+        name="maxWorkSessions"
+        type="number"
+        min={1}
+        max={64}
+        required
+        value={maxWorkSessions}
+        aria-describedby="tag-work-sessions-hint"
+        onChange={(event) => setMaxWorkSessions(Number(event.target.value))}
+      />
+      <small id="tag-work-sessions-hint" className="field-hint">
+        Longer work the Tag may have open across all its conversations.
+      </small>
       {error && (
         <p className="field-error" role="alert">
           {error}

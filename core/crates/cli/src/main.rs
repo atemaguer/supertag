@@ -686,6 +686,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(flatten)]
         args: delivery_branches::FetchArgs,
     },
+    /// Close a Work Session so it no longer counts toward its Tag's limit.
+    Session {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: work_sessions::SessionCommand,
+    },
     /// Wake a Tag later in your conversation with it, or pause and resume a Schedule.
     Schedule {
         #[command(flatten)]
@@ -1406,6 +1413,10 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => schedules::run(connection, command).await?,
+        Command::Session {
+            connection,
+            command,
+        } => work_sessions::run(connection, command).await?,
         Command::Objective {
             connection,
             command,
@@ -2826,6 +2837,8 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "tag_id": tag.tag_id,
         "name": tag.name,
         "lead": tag.lead,
+        "max_work_sessions": tag.max_work_sessions,
+        "open_work_sessions": tag.open_work_sessions,
         "revision": tag.revision,
         "instructions": tag.instructions,
         "allowed_actions": tag.allowed_actions,

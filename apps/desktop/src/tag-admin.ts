@@ -13,6 +13,8 @@ export interface NewTag {
   name?: string;
   harness: string;
   workspaceId?: string;
+  /** How many Work Sessions it may have open at once, 1 to 64. */
+  maxWorkSessions?: number;
 }
 
 /** Creating Tags, which only an operator may do. */

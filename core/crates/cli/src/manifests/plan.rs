@@ -780,6 +780,7 @@ impl<'a> Catalog<'a> {
             spec.workspace.is_some(),
             spec.execution.is_some(),
             spec.lead.is_some(),
+            spec.max_work_sessions.is_some(),
         ];
         let mut value = PutTagRequest {
             tag_id: name.into(),
@@ -802,6 +803,7 @@ impl<'a> Catalog<'a> {
             execution: prior.as_ref().and_then(|prior| prior.execution.clone()),
             expected_revision: Some(prior.as_ref().map_or(0, |tag| tag.revision)),
             lead: spec.lead,
+            max_work_sessions: spec.max_work_sessions,
         };
         ensure!(
             value.instructions.len() <= 65_536,
@@ -1014,6 +1016,12 @@ impl<'a> Catalog<'a> {
                 old.map(|v| flag(v.lead)),
                 flag(value.lead.unwrap_or_default()),
             ),
+            // The default, 8, is the unset value, which no manager owns.
+            field(
+                "spec.maxWorkSessions",
+                old.map(|v| work_session_limit(v.max_work_sessions)),
+                work_session_limit(value.max_work_sessions.unwrap_or(8)),
+            ),
         ]
         .into_iter()
         .zip(declared)
@@ -1026,6 +1034,9 @@ impl<'a> Catalog<'a> {
                 && old.harness_kind == value.harness_kind
                 && old.execution == value.execution
                 && value.lead.is_none_or(|lead| lead == old.lead)
+                && value
+                    .max_work_sessions
+                    .is_none_or(|max| max == old.max_work_sessions)
         });
         Ok((!unchanged).then_some((prior.is_some(), Write::Tag(value))))
     }
@@ -1582,6 +1593,15 @@ fn messages<M: prost::Message>(values: &[M]) -> Vec<u8> {
 
 fn message<M: prost::Message>(value: &Option<M>) -> Vec<u8> {
     value.as_ref().map(M::encode_to_vec).unwrap_or_default()
+}
+
+/// A Tag's `maxWorkSessions`; the default, 8, is unset.
+fn work_session_limit(value: u32) -> Vec<u8> {
+    if value == 8 {
+        Vec::new()
+    } else {
+        value.to_le_bytes().to_vec()
+    }
 }
 
 fn flag(value: bool) -> Vec<u8> {

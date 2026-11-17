@@ -1,11 +1,11 @@
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        GetWorkSessionRequest, ListWorkSessionsRequest, WorkSession,
+        CloseWorkSessionRequest, GetWorkSessionRequest, ListWorkSessionsRequest, WorkSession,
         work_sessions_client::WorkSessionsClient,
     },
 };
@@ -30,6 +30,43 @@ pub struct ListArgs {
     /// Continue from the cursor the previous page returned.
     #[arg(long, default_value = "", conflicts_with = "id")]
     cursor: String,
+}
+
+#[derive(Subcommand)]
+pub enum SessionCommand {
+    /// Close a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
+    /// Work Session cannot be continued.
+    Close {
+        /// Work Session ID.
+        work_session_id: String,
+    },
+}
+
+pub async fn run(connection: Connection, command: SessionCommand) -> Result<()> {
+    let SessionCommand::Close { work_session_id } = command;
+    let (channel, token) = connect_operator(connection).await?;
+    let closed = close(channel, &token, work_session_id, false).await?;
+    crate::terminal::print_json(&view(&closed))?;
+    Ok(())
+}
+
+/// Closes a Work Session; `delivery_pulled` records that its delivery was pulled.
+pub(crate) async fn close(
+    channel: ProtocolChannel,
+    token: &str,
+    work_session_id: String,
+    delivery_pulled: bool,
+) -> Result<WorkSession> {
+    Ok(client(channel)
+        .close(request(
+            CloseWorkSessionRequest {
+                work_session_id,
+                delivery_pulled,
+            },
+            token,
+        )?)
+        .await?
+        .into_inner())
 }
 
 fn client(channel: ProtocolChannel) -> WorkSessionsClient<ProtocolChannel> {
@@ -78,6 +115,8 @@ pub(crate) async fn list(connection: Connection, args: ListArgs) -> Result<Value
     Ok(json!({
         "work_sessions": page.work_sessions.iter().map(view).collect::<Vec<_>>(),
         "next_cursor": page.next_cursor,
+        "open_work_sessions": page.open_work_sessions,
+        "max_work_sessions": page.max_work_sessions,
     }))
 }
 
@@ -94,6 +133,8 @@ pub(crate) fn view(session: &WorkSession) -> Value {
         "report_task_id": session.report_task_id,
         "report_task_state": session.report_task_state().as_str_name(),
         "objective_id": session.objective_id,
+        "closed_at_ms": session.closed_at_ms,
+        "close_reason": session.closed_at_ms.map(|_| session.close_reason().as_str_name()),
         "question": session.question.as_ref().map(|question| json!({
             "text": question.text,
             "task_id": question.task_id,

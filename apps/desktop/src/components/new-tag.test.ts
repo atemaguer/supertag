@@ -64,6 +64,7 @@ it("creates a Tag from a name, an offered harness, and the only Workspace", asyn
   act(() => type(field<HTMLInputElement>("#tag-name"), "Release Bot"));
   expect(field("#tag-id").textContent).toContain("ID: release-bot");
   act(() => choose(harness, "opencode"));
+  act(() => type(field<HTMLInputElement>("#tag-work-sessions"), "3"));
   await act(async () => {
     field<HTMLFormElement>(".workspace-dialog form").requestSubmit();
   });
@@ -72,6 +73,7 @@ it("creates a Tag from a name, an offered harness, and the only Workspace", asyn
     name: "Release Bot",
     harness: "opencode",
     workspaceId: "supertag",
+    maxWorkSessions: 3,
   });
   expect(onCreated).toHaveBeenCalledWith(created);
   expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -100,6 +102,7 @@ it("offers every harness when no Worker Host is connected, and shows a refusal",
     name: "lead",
     harness: "claude_code",
     workspaceId: undefined,
+    maxWorkSessions: 8,
   });
   expect(field('[role="alert"]').textContent).toBe("A Tag with that ID or name already exists.");
   expect(onCreated).not.toHaveBeenCalled();

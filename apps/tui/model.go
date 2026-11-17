@@ -524,6 +524,14 @@ func waitForWatch(updates <-chan client.WatchUpdate) tea.Cmd {
 	}
 }
 
+// shownTag is the selected Tag, or nil.
+func (m model) shownTag() *views.Tag {
+	if m.selected < 0 || m.selected >= len(m.tags) {
+		return nil
+	}
+	return m.tags[m.selected]
+}
+
 func (m model) selectedTag() string {
 	if m.selected < 0 || m.selected >= len(m.tags) {
 		return ""

@@ -58,7 +58,18 @@ pub async fn fetch(connection: Connection, args: FetchArgs) -> Result<()> {
     let accepted = resolve(&channel, &token, &args.id, args.tag.as_deref()).await?;
     let repository = args.repository;
     let (branch, imported) = import(&channel, &token, &accepted, &repository).await?;
+    // Pulling a Work Session's delivery accepts it: the Work Session closes and stops counting
+    // toward its Tag's open Work Sessions.
+    let closed = if accepted.session_id.starts_with("work/") {
+        crate::work_sessions::close(channel.clone(), &token, accepted.session_id.clone(), true)
+            .await?
+            .closed_at_ms
+            .is_some()
+    } else {
+        false
+    };
     crate::terminal::print_json(&json!({
+        "work_session_closed": closed,
         "task_id": accepted.task_id,
         "tag_id": accepted.tag_id,
         "session_id": accepted.session_id,

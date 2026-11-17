@@ -238,6 +238,95 @@ database_tests! {
     an_owner_report_finishes_its_objective_through_the_worker_host;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     a_tag_schedules_a_follow_up_that_the_sweep_fires;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    work_session_limits_show_and_an_operator_closes_one;
+}
+
+/// A Tag's `max_work_sessions` is set with `tag put`, Tag and Work Session reads count its open
+/// Work Sessions, and `session close` closes one so it stops counting.
+async fn work_session_limits_show_and_an_operator_closes_one(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let credentials = Credentials::new();
+    let services = Services::start(&credentials, &database, |_| {}).await?;
+    let cli = |args: &[&str]| services.cli(&credentials, args);
+    let tag = json(cli(&[
+        "tag",
+        "put",
+        "lead",
+        "--instructions",
+        "Plan and delegate",
+        "--allow",
+        "files:read",
+        "--max-work-sessions",
+        "3",
+    ]))
+    .await?;
+    ensure!(tag["max_work_sessions"] == 3, "{tag}");
+    let refused = output(cli(&[
+        "tag",
+        "put",
+        "lead",
+        "--instructions",
+        "Plan and delegate",
+        "--max-work-sessions",
+        "65",
+    ]))
+    .await?;
+    ensure!(!refused.status.success(), "65 is above the limit");
+    json(cli(&[
+        "task",
+        "submit",
+        "--tag",
+        "lead",
+        "--session",
+        "plan",
+        "Split the work",
+    ]))
+    .await?;
+    success(credentials.worker(
+        &public(&services),
+        &root.join("host"),
+        None,
+        &["--start-work-session"],
+    ))
+    .await?;
+    let listed = json(cli(&[
+        "get",
+        "sessions",
+        "--parent-tag",
+        "lead",
+        "--parent-session",
+        "plan",
+    ]))
+    .await?;
+    ensure!(
+        listed["open_work_sessions"] == 1 && listed["max_work_sessions"] == 3,
+        "{listed}"
+    );
+    let id = field(&listed["work_sessions"][0], "work_session_id")?.to_owned();
+    let read = json(cli(&["get", "tag", "lead"])).await?;
+    ensure!(
+        read["max_work_sessions"] == 3 && read["open_work_sessions"] == 1,
+        "{read}"
+    );
+    let closed = json(cli(&["session", "close", &id])).await?;
+    ensure!(
+        closed["close_reason"] == "WORK_SESSION_CLOSE_REASON_OPERATOR"
+            && closed["closed_at_ms"].is_i64(),
+        "{closed}"
+    );
+    let listed = json(cli(&[
+        "get",
+        "sessions",
+        "--parent-tag",
+        "lead",
+        "--parent-session",
+        "plan",
+    ]))
+    .await?;
+    ensure!(listed["open_work_sessions"] == 0, "{listed}");
+    services.stop().await
 }
 
 /// A built-in harness's `schedule` call reaches the Control Plane through the Worker Host and

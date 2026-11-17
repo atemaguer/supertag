@@ -4,6 +4,7 @@
 package views
 
 import (
+	"fmt"
 	"strconv"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -272,6 +273,8 @@ func (x *Tag) GetStatus() *TagStatus {
 type TagSpec struct {
 	// Whether this is the Control Plane's lead Tag, the one `supertag init` creates.
 	Lead bool
+	// How many Work Sessions it may have open at once, and has open now.
+	MaxWorkSessions, OpenWorkSessions uint32
 }
 
 func (x *TagSpec) GetLead() bool {
@@ -279,6 +282,14 @@ func (x *TagSpec) GetLead() bool {
 		return x.Lead
 	}
 	return false
+}
+
+// WorkSessionCount is "3 of 8 Work Sessions open", or empty before the Tag says its limit.
+func (x *TagSpec) WorkSessionCount() string {
+	if x == nil || x.MaxWorkSessions == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d of %d Work Sessions open", x.OpenWorkSessions, x.MaxWorkSessions)
 }
 
 // What the Control Plane observes of a Tag.

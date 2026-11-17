@@ -90,8 +90,15 @@ func (m model) renderWorkPane() string {
 		return ""
 	}
 	targets := m.targets(c)
+	// How much room the Tag has to start more, across all its conversations.
+	count := ""
+	if tag := m.shownTag(); tag != nil {
+		if text := tag.GetSpec().WorkSessionCount(); text != "" {
+			count = faint.Render(wrap.Render(text)) + "\n"
+		}
+	}
 	if len(targets) == 0 {
-		return faint.Render(wrap.Render("This conversation has started no work Sessions."))
+		return count + faint.Render(wrap.Render("This conversation has started no work Sessions."))
 	}
 	titles := map[string]string{}
 	for _, e := range shownEntries(c) {
@@ -100,7 +107,8 @@ func (m model) renderWorkPane() string {
 		}
 	}
 	var out strings.Builder
-	lines := 0
+	out.WriteString(count)
+	lines := strings.Count(count, "\n")
 	for _, t := range targets {
 		chosen := c.selected != nil && *c.selected == t
 		if chosen {

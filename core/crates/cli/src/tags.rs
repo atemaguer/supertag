@@ -92,6 +92,10 @@ pub struct PutArgs {
     /// it as it is. At most one Tag is the lead.
     #[arg(long, num_args = 0..=1, default_missing_value = "true")]
     lead: Option<bool>,
+    /// How many Work Sessions the Tag may have open at once, across all its conversations, from 1
+    /// to 64. Omit to keep it as it is; a new Tag gets 8.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=64))]
+    max_work_sessions: Option<u32>,
 }
 
 // Options for `supertag get tags`: active Tags, and optionally retired identities.
@@ -144,6 +148,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 efforts,
                 shared_execution_environment,
                 lead,
+                max_work_sessions,
             } = *args;
             let mounts = workspace_mounts
                 .as_deref()
@@ -190,6 +195,7 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                         approval_rules,
                         expected_revision: None,
                         lead,
+                        max_work_sessions,
                         execution: (!models.is_empty()
                             || !efforts.is_empty()
                             || shared_execution_environment.is_some())
@@ -204,7 +210,13 @@ pub async fn run(connection: Connection, command: TagCommand) -> Result<()> {
                 )?)
                 .await?
                 .into_inner();
-            json!({ "tag_id": tag.tag_id, "name": tag.name, "revision": tag.revision, "lead": tag.lead })
+            json!({
+                "tag_id": tag.tag_id,
+                "name": tag.name,
+                "revision": tag.revision,
+                "lead": tag.lead,
+                "max_work_sessions": tag.max_work_sessions,
+            })
         }
         TagCommand::Retire { tag_id, dry_run } => {
             let response = operator
