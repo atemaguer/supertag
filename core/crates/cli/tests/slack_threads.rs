@@ -484,6 +484,118 @@ database_tests! {
     slack_thread_starts_and_steers_an_objective;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     three_quick_messages_get_one_acknowledgement_and_one_reply;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    a_schedule_set_in_a_slack_thread_replies_in_that_thread;
+}
+
+/// A Tag that schedules a follow-up from a Slack thread answers in that thread when it wakes:
+/// the woken turn copies the thread's reply route.
+async fn a_schedule_set_in_a_slack_thread_replies_in_that_thread(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let credentials = Credentials::new();
+    let mock = MockSlack::start().await?;
+    let database = Database { url: database };
+    // The Control Plane's clock moves forward by what this file holds.
+    let offset = directory.path().join("clock-offset");
+    std::fs::write(&offset, "0")?;
+    let mut command = credentials.command(&["control-plane"]);
+    command
+        .env("SUPERTAG_DATABASE_URL", &database.url)
+        .env("SUPERTAG_TEST_CLOCK_OFFSET_FILE", &offset);
+    let mut cp = Process::spawn(command, directory.path(), "cp")?;
+    let private = cp.endpoints(1).await?.remove(0);
+    let (mut serving, public, http) = gateway(
+        &credentials,
+        &private,
+        directory.path(),
+        "gateway",
+        "builder",
+        &mock,
+    )
+    .await?;
+    OperatorClient::new(protocol::dial(public.clone()).await?)
+        .put_tag(credentials.operator(PutTagRequest {
+            tag_id: "builder".into(),
+            instructions: "Original Tag".into(),
+            allowed_actions: vec!["files:read".into(), "schedule:create".into()],
+            ..Default::default()
+        })?)
+        .await?;
+    let mention = payload("EvSCHEDULE1", THREAD, true, "check CI again in two hours");
+    assert_eq!(signed(&http, &mention).await?, reqwest::StatusCode::OK);
+    let mut connector = ConnectorClient::new(protocol::dial(private.clone()).await?);
+    let first = receipt(&mut connector, &credentials, &mention).await?;
+    let host = |name: &str| {
+        let mut command = credentials.command(&[
+            "worker-host",
+            "--control-plane",
+            &public,
+            "--adapter",
+            ADAPTER,
+            "--adapter-arg=--schedule=2h",
+            "--once",
+            "--state-directory",
+        ]);
+        command.arg(directory.path().join(name));
+        command
+    };
+    Process::spawn(host("host"), directory.path(), "host")?
+        .success()
+        .await?;
+    let mut operator = OperatorClient::new(protocol::dial(public.clone()).await?);
+    let done = operator
+        .get_task(credentials.operator(GetTaskRequest {
+            task_id: first.task_id.clone(),
+        })?)
+        .await?
+        .into_inner();
+    assert_eq!(done.state(), TaskState::Succeeded);
+    assert!(
+        done.result().contains("Scheduled sch_"),
+        "{:?}",
+        done.result
+    );
+    delivered_final(&mock, 1).await?;
+
+    // Two hours later the sweep queues the Tag's next turn in the thread's Session.
+    std::fs::write(&offset, (2 * 3_600_000 + 60_000).to_string())?;
+    let mut connection = database::connect(&database.url).await?;
+    let deadline = Instant::now() + WAIT;
+    let woken: String = loop {
+        let fired: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT last_task_id FROM supertag_v2_schedules WHERE tag_id='builder' AND fire_count=1",
+        )
+        .fetch_optional(&mut connection)
+        .await?;
+        if let Some(Some(task)) = fired {
+            break task;
+        }
+        ensure!(Instant::now() < deadline, "the Schedule did not fire");
+        sleep(Duration::from_millis(100)).await;
+    };
+    Process::spawn(host("woken"), directory.path(), "woken")?
+        .success()
+        .await?;
+    let woken = operator
+        .get_task(credentials.operator(GetTaskRequest { task_id: woken })?)
+        .await?
+        .into_inner();
+    assert_eq!(woken.state(), TaskState::Succeeded);
+    assert_eq!(woken.session_id, first.session_id);
+    let reply = delivered_final(&mock, 2).await?;
+    serving.stop().await?;
+    cp.stop().await?;
+    let requests = mock.requests.lock().await;
+    let (path, body) = &requests[reply];
+    assert_eq!(path, "/chat.postMessage");
+    assert_eq!(body["thread_ts"], THREAD);
+    assert!(
+        body["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Scheduled wake-up.")),
+        "{body}"
+    );
+    Ok(())
 }
 
 /// Three quick messages in a thread: the first is acknowledged, the claim joins the other two
