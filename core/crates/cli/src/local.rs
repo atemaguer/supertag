@@ -248,7 +248,7 @@ struct Extras<'a> {
 struct Children {
     logs: Logs,
     control_plane: Option<Service>,
-    /// The local Gateway runs only when it has surfaces to connect or notifications to send.
+    /// The local Gateway: the endpoint clients connect to, and any configured surfaces.
     gateway: Option<Service>,
     gateway_address: Option<String>,
     worker_host: Option<Service>,
@@ -324,8 +324,8 @@ impl Children {
         })
     }
 
-    /// Starts the Control Plane on `listen`, then a Gateway when one is needed, and returns the
-    /// Control Plane's endpoint.
+    /// Starts the Control Plane on `listen`, then the Gateway that clients connect to, and returns
+    /// the Control Plane's endpoint.
     async fn start_base(
         &mut self,
         executable: &Path,
@@ -401,7 +401,6 @@ impl Children {
             .envs(self.proxy.iter().cloned())
             .args(["--control-plane", &endpoint, "--listen", "127.0.0.1:0"])
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &credentials.gateway);
-        let mut needed = !self.notify.0.is_empty();
         for destination in &self.notify.0 {
             gateway.arg("--notify").arg(destination);
         }
@@ -431,7 +430,6 @@ impl Children {
                 connected = true;
             }
             if connected {
-                needed = true;
                 gateway
                     .env("SUPERTAG_STATE_DIR", directory)
                     .envs(environment.selected(CREDENTIAL_VAULT_ENVIRONMENT));
@@ -449,19 +447,17 @@ impl Children {
                 }
             }
         }
-        if needed {
-            let address = start_child(
-                &mut self.gateway,
-                &mut gateway,
-                "Gateway",
-                &self.logs,
-                lifecycle::GATEWAY,
-            )
-            .await?;
-            let gateway_endpoint = format!("http://{}", loopback_address(&address)?);
-            write_private(directory, GATEWAY_ENDPOINT, gateway_endpoint.as_bytes())?;
-            self.gateway_address = Some(gateway_endpoint);
-        }
+        let address = start_child(
+            &mut self.gateway,
+            &mut gateway,
+            "Gateway",
+            &self.logs,
+            lifecycle::GATEWAY,
+        )
+        .await?;
+        let gateway_endpoint = format!("http://{}", loopback_address(&address)?);
+        write_private(directory, GATEWAY_ENDPOINT, gateway_endpoint.as_bytes())?;
+        self.gateway_address = Some(gateway_endpoint);
         Ok(endpoint)
     }
 

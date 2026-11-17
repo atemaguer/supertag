@@ -1109,9 +1109,9 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint(
     )
     .await?;
     drop(client);
-    // The Control Plane and the Worker Host; without a surface or notify destination, no Gateway.
+    // The Control Plane, the Gateway clients connect to, and the Worker Host.
     let children = direct_children(supervisor.child.id())?;
-    assert_eq!(children.len(), 2);
+    assert_eq!(children.len(), 3);
     let mut cleanup = DescendantCleanup(children);
     assert_eq!(supervisor.crash()?.signal(), Some(libc::SIGKILL));
     cleanup.wait_and_disarm().await?;
@@ -1174,7 +1174,7 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint(
         })?)
         .await?;
     let children = direct_children(restarted.child.id())?;
-    assert_eq!(children.len(), 2);
+    assert_eq!(children.len(), 3);
     restarted.terminate()?;
     restarted.successful_exit().await?;
     for pid in children {
@@ -1428,8 +1428,8 @@ async fn local_up_runs_work_and_reaps_its_services(database: String) -> Result<(
     let children = direct_children(supervisor.child.id())?;
     assert_eq!(
         children.len(),
-        2,
-        "local startup without surfaces must supervise the Control Plane and the Worker Host, and no Gateway"
+        3,
+        "local startup without surfaces must supervise the Control Plane, the Gateway, and the Worker Host"
     );
     supervisor.terminate()?;
     supervisor.successful_exit().await?;

@@ -287,9 +287,9 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state(
     let writer = host(&mut operator, &credential, "writer").await?;
     assert!(reader.generation > 0 && writer.generation > 0);
     run_work(&mut operator, &credential, "first").await?;
-    // The Control Plane and the two hosts; without a surface or notify destination, no Gateway.
+    // The Control Plane, the Gateway clients connect to, and the two hosts.
     let owned = children(supervisor.child.id())?;
-    assert_eq!(owned.len(), 3);
+    assert_eq!(owned.len(), 4);
     let reader_pid = owned
         .iter()
         .find(|(_, command)| command.contains("/hosts/reader"))
@@ -960,8 +960,12 @@ async fn env_file_credentials_reach_only_the_services_and_harnesses_that_need_th
         assert_eq!(roles["control-plane"]["PGPASSWORD"], password);
         assert_eq!(roles["control-plane"]["SUPERTAG_DATABASE_URL"], database);
     }
-    // Without a surface or notify destination, `up` runs no Gateway.
-    assert!(!roles.contains_key("gateway"), "{:?}", roles.keys());
+    // Even without a surface or notify destination, `up` runs the Gateway clients connect to,
+    // with its own enrolled credential and nothing of the Control Plane's or the hosts'.
+    assert_eq!(
+        names(&roles["gateway"]),
+        expected(&["SUPERTAG_GATEWAY_CREDENTIAL"])
+    );
     // The Codex Host gets only Codex credentials: the shell's value wins, env_file fills the gap.
     // Each lane presents its Host credential; the guardian never passes it to a harness.
     let codex = &roles["codex-host"];

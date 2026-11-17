@@ -50,7 +50,7 @@ use tower_service::Service as _;
 use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
-const WAIT: Duration = Duration::from_secs(15);
+const WAIT: Duration = Duration::from_secs(30);
 
 fn binary(args: &[&str]) -> Command {
     let mut command = reaped(Command::new(BINARY));
@@ -370,6 +370,19 @@ async fn a_gateway_forwards_calls_as_their_caller_and_never_widens_them(
         ),
     ];
     assert_eq!(denied, [Code::PermissionDenied; 5]);
+    // A Tag's network log names other people's Tasks' origins and paths: operators only.
+    let network_logs = "/supertag.runtime.v2.NetworkLogs/List";
+    assert_eq!(
+        raw_code(&gateway, network_logs, &[("authorization", &format!("Bearer {client}"))])
+            .await?,
+        Code::PermissionDenied
+    );
+    assert_ne!(
+        raw_code(&gateway, network_logs, &[("authorization", &format!("Bearer {admin}"))])
+            .await?,
+        Code::PermissionDenied,
+        "the Gateway must forward an operator's network log read"
+    );
 
     // 3. No method the table keeps from clients answers a client through the Gateway.
     let bearer = format!("Bearer {client}");

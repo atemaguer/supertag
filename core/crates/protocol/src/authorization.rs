@@ -346,6 +346,7 @@ mod tests {
             "Enrollments/Enroll",
             "Enrollments/WhoAmI",
             "Operator/PutTag",
+            "NetworkLogs/List",
             "OperatorAccess/CreateOperatorToken",
             "Conversations/FollowConversation",
             "ArtifactTransfers/DownloadFile",
