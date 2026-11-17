@@ -1217,10 +1217,10 @@ async fn run(command: Command) -> Result<()> {
             );
             if remote_provider.is_some() {
                 ensure!(
-                    harness == HarnessKind::Cursor
+                    matches!(harness, HarnessKind::Cursor | HarnessKind::ClaudeCode)
                         && !workspaces.is_empty()
                         && !execution_profile.allow_unsandboxed_commands,
-                    "remote Workspace placement requires Cursor and a named Workspace without unsandboxed commands"
+                    "remote Workspace placement requires Cursor or Claude Code and a named Workspace without unsandboxed commands"
                 );
                 execution_profile.remote_file_workspace = true;
                 execution_profile.declared_task_outputs = true;

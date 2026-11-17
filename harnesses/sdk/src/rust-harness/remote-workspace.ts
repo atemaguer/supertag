@@ -1,9 +1,6 @@
-import {
-  type harnessClient,
-  WorkspaceGrepMode,
-  workspaceToolDefinitions,
-} from "@supertag/worker-sdk/internal/rust-harness";
-import type { CursorSplitExecutor } from "../index.js";
+import { type SplitExecutionBridge, workspaceToolDefinitions } from "../split-execution-bridge.js";
+import type { harnessClient } from "./client.js";
+import { WorkspaceGrepMode } from "./gen/supertag/runtime/v2/runtime_pb.js";
 
 type WorkspaceClient = ReturnType<typeof harnessClient>["workspace"];
 type WorkspaceRequest = Parameters<WorkspaceClient["execute"]>[0];
@@ -103,11 +100,16 @@ function workspaceRequest(name: string, input: unknown): WorkspaceRequest {
   }
 }
 
+/**
+ * Workspace tools whose calls go to the Worker Host's Harness.Workspace, which forwards them to
+ * the Task's sandbox: the split-execution tool surface every remote harness shares. Calls never
+ * fall back to the harness's host; an unreachable sandbox is a tool error.
+ */
 export function createRemoteWorkspaceExecutor(
   actions: readonly string[],
   bridge: Pick<ReturnType<typeof harnessClient>, "workspace" | "options">,
   supportedTools?: ReadonlySet<string>,
-): CursorSplitExecutor {
+): SplitExecutionBridge {
   const filesWrite = actions.includes("files:write");
   const filesRead = actions.includes("files:read");
   const tools = workspaceToolDefinitions.filter(({ name }) => {

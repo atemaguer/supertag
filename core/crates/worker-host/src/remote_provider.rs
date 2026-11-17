@@ -1665,7 +1665,8 @@ mod tests {
                 .allocate(
                     &owner(),
                     Duration::from_secs(60),
-                    (&["commands:execute".into()], None),
+                    // Commands run in the sandbox; actions it cannot carry are refused.
+                    (&["web:fetch".into()], None),
                     (None, &Start::Fresh),
                     &CancellationToken::new()
                 )

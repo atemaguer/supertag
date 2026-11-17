@@ -37,6 +37,8 @@ import {
   type HarnessStartWorkSessionRequest,
   type HarnessUsageRequest,
   HarnessWorkSessions,
+  HarnessWorkspace,
+  type HarnessWorkspaceRequest,
   HarnessWorkstreams,
   LiveInputReceipt,
   NetworkRules,
@@ -102,6 +104,7 @@ async function invoke({
   allowUnsandboxedCommands = false,
   history = [],
   hostRefusal,
+  remoteWorkspace = false,
 }: {
   prompt?: string;
   checkpoint?: SessionCheckpoint;
@@ -131,7 +134,9 @@ async function invoke({
   history?: AttemptHistoryEntry[];
   /** Fail the limit confirmation as a Worker Host that refuses the call would. */
   hostRefusal?: string;
+  remoteWorkspace?: boolean;
 } = {}) {
+  const workspaceCalls: HarnessWorkspaceRequest[] = [];
   const directory = await mkdtemp(join(tmpdir(), "supertag-rust-claude-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const workspace = join(directory, "checkout");
@@ -215,6 +220,7 @@ async function invoke({
                 : {}),
               ...(checkpoint ? { checkpoint } : {}),
               history,
+              remoteWorkspace,
             };
           },
           takeLiveInput() {
@@ -244,6 +250,13 @@ async function invoke({
             if (lostComplete && completions.length === 1)
               throw new ConnectError("reply lost", Code.Unavailable);
             return {};
+          },
+        });
+        router.service(HarnessWorkspace, {
+          execute(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            workspaceCalls.push(request);
+            return { text: "sandbox ran it", isError: false };
           },
         });
         router.service(HarnessQuestions, {
@@ -548,6 +561,7 @@ async function invoke({
     workSessionStarts,
     workSessionContinuations,
     workSessionQuestions,
+    workspaceCalls,
   };
 }
 
@@ -781,6 +795,47 @@ it("runs admitted commands unsandboxed only with the host's explicit opt-in", as
   // The opt-in admits Bash for commands:execute only; without that action Bash stays denied.
   const denied = await invoke({ allowUnsandboxedCommands: true });
   expect(denied.completions[0]?.result).toContain("unadmitted tools denied");
+}, 30000);
+
+it("runs commands in a remote Workspace through its sandbox, with no built-in tool and no opt-in", async () => {
+  const run = await invoke({
+    prompt: "remote-command",
+    actions: ["files:read", "files:write", "commands:execute"],
+    remoteWorkspace: true,
+  });
+  expect(run.completions[0]?.succeeded, run.completions[0]?.result).toBe(true);
+  expect(JSON.parse(run.completions[0]?.result ?? "{}")).toEqual({
+    listed: ["read", "write", "edit", "glob", "grep", "ls", "command"],
+    text: "sandbox ran it",
+    isError: false,
+  });
+  expect(run.workspaceCalls).toHaveLength(1);
+  expect(run.workspaceCalls[0]?.operation).toMatchObject({
+    case: "command",
+    value: { command: "echo ran > command-output.txt" },
+  });
+  // Nothing ran on this host.
+  await expect(readFile(join(run.workspace, "command-output.txt"))).rejects.toThrow();
+}, 30000);
+
+it("keeps a remote Workspace's commands from reading hidden paths", async () => {
+  const refused = await invoke({
+    prompt: "remote-command",
+    actions: ["files:read", "files:write", "commands:execute"],
+    remoteWorkspace: true,
+    policySnapshot: create(TaskPolicySnapshotSchema, {
+      version: 1,
+      runtimeAuthority: {
+        actions: ["files:read", "files:write", "commands:execute"],
+        files: { hidden: ["**/.env"] },
+      },
+    }),
+  });
+  expect(refused.completions[0]?.succeeded).toBe(false);
+  expect(refused.completions[0]?.result).toContain(
+    "remote Workspace sandbox can read hidden paths",
+  );
+  expect(refused.workspaceCalls).toHaveLength(0);
 }, 30000);
 
 it("confirms detached native descendant cleanup before reporting a cancelled execution", async () => {

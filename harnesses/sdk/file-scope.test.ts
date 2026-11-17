@@ -80,6 +80,18 @@ it("refuses scopes a harness cannot apply before it starts", () => {
   expect(
     fileScopeRefusal(task(["files:read"], { outsideRead: ["/opt/data"] }), "cursor-remote"),
   ).toContain("additionalDirectories");
+  // Remote sandboxes hold the whole checkout: commands could read hidden paths there.
+  for (const harness of ["cursor-remote", "claude-code-remote"] as const) {
+    expect(fileScopeRefusal(task(["files:write", "commands:execute"], hidden), harness)).toContain(
+      "remote Workspace sandbox",
+    );
+    expect(
+      fileScopeRefusal(task(["files:write", "commands:execute"], { write: ["src/"] }), harness),
+    ).toBeUndefined();
+  }
+  expect(
+    fileScopeRefusal(task(["files:read"], { outsideRead: ["/opt/data"] }), "claude-code-remote"),
+  ).toContain("additionalDirectories");
   expect(
     fileScopeRefusal(task(["files:write", "commands:execute"], hidden), "cursor-shared"),
   ).toContain("shared execution");

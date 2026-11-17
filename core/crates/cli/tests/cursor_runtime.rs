@@ -715,7 +715,10 @@ async fn cursor_remote_workspace_runs_commands_in_the_sandbox_without_the_unsand
         &fixture,
     )
     .await?;
-    let task = match runtime.assert_success(&task.task_id, "remote-command").await {
+    let task = match runtime
+        .assert_success(&task.task_id, "remote-command")
+        .await
+    {
         Ok(task) => task,
         Err(error) => anyhow::bail!(
             "{error:#}; fixture: {:?}; provider: {:?}",

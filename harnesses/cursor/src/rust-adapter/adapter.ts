@@ -5,6 +5,7 @@ import { ExecutionCleanupError } from "@supertag/worker-sdk";
 import {
   type AdapterBootstrap,
   COORDINATION_SERVER,
+  createRemoteWorkspaceExecutor,
   fileScopeRefusal,
   harnessClient,
   type ObjectiveSignal,
@@ -32,7 +33,6 @@ import {
   restorePortableCursorSessionState,
 } from "../portable-session-state.js";
 import { createCheckpoint, restoreCheckpoint } from "./checkpoint.js";
-import { createRemoteWorkspaceExecutor } from "./remote-workspace.js";
 import { createWorkspace, validateActions } from "./workspace.js";
 
 export interface CursorAdapterOptions {

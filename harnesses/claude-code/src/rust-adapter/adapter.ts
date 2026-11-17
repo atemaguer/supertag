@@ -58,6 +58,7 @@ import {
 } from "./coordination.js";
 import { CREDENTIAL_KEYS, nativeEnvironment } from "./environment.js";
 import { taskMcpTools } from "./mcp.js";
+import { REMOTE_WORKSPACE_SERVER, remoteWorkspaceTools } from "./remote.js";
 import { selectSkills, stageSkills } from "./skills.js";
 
 const ACTIONS: Readonly<Record<string, readonly string[]>> = {
@@ -540,11 +541,17 @@ export async function runAdapter(
         "Claude could not verify a required Context Item or delivered Skill. Native execution did not start.",
       );
     }
-    const tools = admittedTools(
+    // In a remote Workspace (E2B or Modal), Claude Code keeps no built-in file or command tool:
+    // its Workspace tools run in the sandbox, so commands need no unsandboxed opt-in.
+    const remote = run.remoteWorkspace;
+    const admitted = admittedTools(
       task.allowedActions,
-      configuration.allowUnsandboxedCommands ?? false,
+      remote || (configuration.allowUnsandboxedCommands ?? false),
     );
-    const refusal = fileScopeRefusal(task, "claude-code");
+    const tools = remote
+      ? admitted.filter((name) => name === "WebFetch" || name === "WebSearch")
+      : admitted;
+    const refusal = fileScopeRefusal(task, remote ? "claude-code-remote" : "claude-code");
     if (refusal) throw new SafeAdapterFailure(`${refusal}. Native execution did not start.`);
     const fileScope = fileScopeOf(task);
     const networkScope = networkScopeOf(task);
@@ -572,6 +579,9 @@ export async function runAdapter(
       hasPendingExternalApprovals: mcp.hasPendingApprovals,
     });
     const { env, cwd } = await nativeEnvironment(environment, task.outputPolicy?.directory);
+    const workspace = remote
+      ? remoteWorkspaceTools(harness, task.allowedActions, controller.signal)
+      : undefined;
     phase = "Skill preparation";
     const { plugins, names, roots } = await stageSkills(
       selected,
@@ -579,7 +589,16 @@ export async function runAdapter(
       controller.signal,
     );
     if (names.size > 0) tools.push("Skill");
-    const allowedTools = [...tools, ...coordination.tools, ...mcp.toolServers.keys()];
+    const allowedTools = [
+      ...tools,
+      ...(workspace?.tools ?? []),
+      ...coordination.tools,
+      ...mcp.toolServers.keys(),
+    ];
+    const toolServers = new Map([
+      ...mcp.toolServers,
+      ...(workspace?.tools ?? []).map((name) => [name, REMOTE_WORKSPACE_SERVER] as const),
+    ]);
     const mounts = mountRoots(task.workspace?.mounts);
     phase = "path scope preparation";
     let outside: OutsideDirectories;
@@ -662,7 +681,7 @@ export async function runAdapter(
       skills: [...names],
       plugins,
       strictMcpConfig: true,
-      mcpServers: { ...coordination.servers, ...mcp.servers },
+      mcpServers: { ...coordination.servers, ...mcp.servers, ...(workspace?.servers ?? {}) },
       settings: {
         syncClaudeAiSkills: false,
         syncClaudeAiPlugins: false,
@@ -674,7 +693,14 @@ export async function runAdapter(
         ...(fileScope ? { permissions: { deny: nativeDenyRules(cwd, fileScope) } } : {}),
         ...(sandbox ? { sandbox } : {}),
       },
-      systemPrompt: [task.instructions, TURN_GUIDANCE, tagPortfolio(run)]
+      systemPrompt: [
+        task.instructions,
+        TURN_GUIDANCE,
+        tagPortfolio(run),
+        remote
+          ? "The Task workspace is in a sandbox. Use the mcp__workspace tools, with paths relative to the workspace, for every file and command."
+          : "",
+      ]
         .filter(Boolean)
         .join("\n\n"),
       env,
@@ -692,7 +718,7 @@ export async function runAdapter(
                 controller.signal,
                 names,
                 roots,
-                mcp.toolServers,
+                toolServers,
                 mounts,
                 scope,
               ),

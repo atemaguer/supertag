@@ -851,6 +851,28 @@ async function turn(message) {
       throw new Error("Work Session capability was not required");
   }
   if (prompt === "inspect-skill-package") result = await inspectSkillPackage();
+  if (prompt === "remote-command") {
+    // In a remote Workspace, Claude Code keeps no built-in tool: every file and command tool is
+    // the in-process workspace server, whose calls go to the sandbox.
+    const offered = (arg("--tools") ?? "").split(",").filter(Boolean);
+    if (offered.some((tool) => !["WebFetch", "WebSearch"].includes(tool)))
+      throw new Error(`Built-in tools were offered: ${offered}`);
+    if (await hook("Bash", { command: "echo host" })) throw new Error("Bash was admitted");
+    const metadata = { mcp_server: { name: "workspace", source: "sdk" } };
+    const input = { command: "echo ran > command-output.txt" };
+    if (!(await hook("mcp__workspace__command", input, metadata)))
+      throw new Error("Admitted workspace command was denied");
+    if (
+      await hook("mcp__workspace__command", input, { mcp_server: { name: "other", source: "sdk" } })
+    )
+      throw new Error("A workspace tool from another server was admitted");
+    const listed = (await sdkMcp("tools/list", {}, "workspace")).result.tools.map(
+      ({ name }) => name,
+    );
+    const called = (await sdkMcp("tools/call", { name: "command", arguments: input }, "workspace"))
+      .result;
+    result = JSON.stringify({ listed, text: called.content[0].text, isError: called.isError });
+  }
   if (prompt === "run-command") {
     // Claude Code's Bash runs as the host user; the fixture runs the admitted command the same way.
     const command = "echo ran > command-output.txt";

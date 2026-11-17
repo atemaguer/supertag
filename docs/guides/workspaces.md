@@ -237,9 +237,9 @@ The host reads `.mcp.json` from the Task's base commit, not from a Task's change
 
 ## Run in E2B or Modal sandboxes
 
-A host can keep Cursor Tasks' checkouts in an E2B or Modal sandbox while the harness stays on the
-host. A repository's `.devcontainer` settings choose the sandbox's image and setup. See
-[Run Cursor in a sandbox](workers.md#run-cursor-in-a-sandbox).
+A host can keep Cursor and Claude Code Tasks' checkouts in an E2B or Modal sandbox while the
+harness stays on the host. A repository's `.devcontainer` settings choose the sandbox's image and setup. See
+[Run a harness in a sandbox](workers.md#run-a-harness-in-a-sandbox).
 
 ## Where files live
 

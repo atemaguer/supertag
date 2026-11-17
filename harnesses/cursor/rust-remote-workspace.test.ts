@@ -3,11 +3,11 @@ import { join } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import {
+  createRemoteWorkspaceExecutor,
   HarnessWorkspaceResultSchema,
   WorkspaceGrepMode,
 } from "@supertag/worker-sdk/internal/rust-harness";
 import { describe, expect, it, vi } from "vitest";
-import { createRemoteWorkspaceExecutor } from "./src/rust-adapter/remote-workspace.js";
 
 describe("Cursor remote workspace tools", () => {
   function bridge() {

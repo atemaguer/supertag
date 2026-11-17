@@ -70,9 +70,10 @@ sandbox. Claude Code, OpenCode, and Cursor run commands in a local checkout only
 opts in with `allow-unsandboxed-commands`, because those commands run as the host's user without
 an operating-system sandbox.
 
-Cursor Tasks can also keep a Workspace's files in an E2B or Modal sandbox, without commands, or
-keep their files and run commands in a shared execution environment that several Sessions use.
-Either way, the harness and its credentials stay on the host. See [Run Cursor in a sandbox](../guides/workers.md#run-cursor-in-a-sandbox).
+Cursor and Claude Code Tasks can also keep a Workspace in an E2B or Modal sandbox, where their
+file tools and commands run, and Cursor Tasks can use a shared execution environment that several
+Sessions use.
+Either way, the harness and its credentials stay on the host. See [Run a harness in a sandbox](../guides/workers.md#run-a-harness-in-a-sandbox).
 
 ## What a Worker Host keeps
 

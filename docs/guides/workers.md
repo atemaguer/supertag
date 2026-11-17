@@ -194,16 +194,17 @@ needs `--harness-entrypoint` pointing at a built adapter.
 its arguments; in `supertag.yaml`, use `adapter` and `adapter-args` instead of `harnesses`. See
 [Write a harness adapter](harness-adapters.md).
 
-## Run Cursor in a sandbox
+## Run a harness in a sandbox
 
-Cursor Tasks can keep their Workspace in a sandbox while the harness, and its credentials, stay
-on the host:
+Cursor and Claude Code Tasks can keep their Workspace in a sandbox while the harness, and its
+credentials, stay on the host. Every file and command tool runs in the sandbox, and the harness
+has no built-in tool that could run on the host:
 
 | Option | Runs the Workspace in |
 | --- | --- |
 | `--e2b-workspace-provider` | An E2B sandbox per Task Attempt |
 | `--modal-workspace-provider` | A Modal sandbox per Task Attempt, with `SUPERTAG_MODAL_WORKSPACE_APP` and optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` |
-| `--shared-execution-endpoint` | A long-lived shared execution environment, served by `supertag-shared-execution`, that several Cursor Sessions share |
+| `--shared-execution-endpoint` | A long-lived shared execution environment, served by `supertag-shared-execution`, that several Cursor Sessions share (Cursor only) |
 
 A Task that may run commands (`commands:execute`) runs them in its sandbox, so such a host needs
 no `allow-unsandboxed-commands` (and cannot take it). The sandbox has no network access. Each

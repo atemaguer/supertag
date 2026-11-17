@@ -322,7 +322,8 @@ provides MCP server sentry`.
 
 A Task granted `commands:execute` also skips an **unsandboxed harness**: one that runs commands
 as the host's user, without an operating-system sandbox: Claude Code, Cursor, or OpenCode on a
-local host (Cursor with an E2B or Modal Workspace runs commands in its sandbox instead). It
+local host (Cursor or Claude Code with an E2B or Modal Workspace runs commands in its sandbox
+instead). It
 runs on one only when the host service lists it in `allow-unsandboxed-commands`. Otherwise it runs
 on another Worker Host, such as one serving Codex, or waits. See
 [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).

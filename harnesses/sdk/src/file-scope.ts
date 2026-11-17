@@ -178,6 +178,7 @@ export function fileScopeOf(task: TaskLike): FileScopeLike | undefined {
 /** A harness adapter and, for Cursor, where its tools run. */
 export type ScopedHarness =
   | "claude-code"
+  | "claude-code-remote"
   | "opencode"
   | "cursor-local"
   | "cursor-remote"
@@ -185,6 +186,7 @@ export type ScopedHarness =
 
 const HARNESS_NAMES: Record<ScopedHarness, string> = {
   "claude-code": "Claude Code",
+  "claude-code-remote": "Claude Code",
   opencode: "OpenCode",
   "cursor-local": "Cursor",
   "cursor-remote": "Cursor",
@@ -207,6 +209,14 @@ export function fileScopeRefusal(task: TaskLike, harness: ScopedHarness): string
   const name = HARNESS_NAMES[harness];
   const commands = task.allowedActions.includes("commands:execute");
   const restrictedWrite = scope.write.length > 0 || scope.readOnly.length > 0;
+  if (harness.endsWith("-remote")) {
+    // Every tool runs in the sandbox, which holds the whole checkout and nothing outside it.
+    if (scope.outsideWrite.length || scope.outsideRead.length)
+      return `${name}'s tools in a remote Workspace reach only the Workspace, so it cannot grant additionalDirectories; run the Tag on a local Worker Host`;
+    if (commands && scope.hidden.length)
+      return `commands in a remote Workspace sandbox can read hidden paths (${listed(scope.hidden)}); remove commands:execute or the hidden paths from the Tag's Permission Sets, or run the Tag on Codex`;
+    return undefined;
+  }
   if (harness.startsWith("cursor-")) {
     if (scope.outsideWrite.length || scope.outsideRead.length)
       return "Cursor's tools reach only the Workspace, so it cannot grant additionalDirectories; run the Tag on Codex, Claude Code, or OpenCode";

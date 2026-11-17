@@ -144,7 +144,7 @@ client. Sandboxed SDK runs reject inline MCP server tools because they cannot as
 
 A Worker Host run with `--e2b-workspace-provider` or `--modal-workspace-provider` runs Cursor's
 SDK on the host and keeps the Workspace in a sandbox; see
-[Run Cursor in a sandbox](../guides/workers.md#run-cursor-in-a-sandbox). Its API key and native Session state stay there; provider keys never enter
+[Run a harness in a sandbox](../guides/workers.md#run-a-harness-in-a-sandbox). Its API key and native Session state stay there; provider keys never enter
 the sandbox's files, environment variables, or processes. Install your project's command
 dependencies in the sandbox image. It needs `python3` and POSIX shell tools, with no Cursor
 executable.

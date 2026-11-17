@@ -146,7 +146,10 @@ pub(super) fn resolve_attempt(
     ) {
         return None;
     }
-    if profile.remote_file_workspace && (harness != HarnessKind::Cursor || task.workspace.is_none())
+    // Cursor and Claude Code run every Workspace tool in a remote sandbox through split execution.
+    if profile.remote_file_workspace
+        && (!matches!(harness, HarnessKind::Cursor | HarnessKind::ClaudeCode)
+            || task.workspace.is_none())
     {
         return None;
     }
@@ -248,7 +251,7 @@ mod tests {
     use supertag_protocol::v2::WorkspaceSpec;
 
     #[test]
-    fn remote_file_host_reserves_cursor_repository_work_with_sandboxed_commands() {
+    fn remote_file_host_reserves_split_harness_repository_work_with_sandboxed_commands() {
         let profile = HarnessExecutionProfile {
             remote_file_workspace: true,
             ..Default::default()
@@ -273,6 +276,13 @@ mod tests {
                 .unwrap()
                 .remote_file_workspace
         );
+        // Claude Code splits the same way; other harnesses never take a remote Workspace.
+        assert!(
+            resolve_attempt(&task, HarnessKind::ClaudeCode, &profile)
+                .unwrap()
+                .remote_file_workspace
+        );
+        assert!(resolve_attempt(&task, HarnessKind::Opencode, &profile).is_none());
         // A local lane still needs the opt-in.
         assert_eq!(
             lane_requirement(&task, HarnessKind::Cursor, &Default::default())

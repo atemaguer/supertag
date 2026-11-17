@@ -32,8 +32,8 @@ files, including the TLS key: they share one trust boundary.
 The function supervises the service: if the Control Plane, or the Gateway beside it, exits, the
 container exits too and Modal starts a replacement.
 
-Modal can also run Cursor Tasks' Workspaces for a Worker Host; that is independent of where the
-Control Plane runs. See [Run Cursor in a sandbox](workers.md#run-cursor-in-a-sandbox).
+Modal can also run Cursor and Claude Code Tasks' Workspaces for a Worker Host; that is independent of where the
+Control Plane runs. See [Run a harness in a sandbox](workers.md#run-a-harness-in-a-sandbox).
 
 ## Before you start
 

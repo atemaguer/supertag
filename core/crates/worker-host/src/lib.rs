@@ -297,8 +297,10 @@ pub async fn run(
     ensure!(
         options.execution_profile.remote_file_workspace == options.remote_provider.is_some()
             && (options.remote_provider.is_none()
-                || (options.harness == HarnessKind::Cursor
-                    && !options.workspaces.is_empty()
+                || (matches!(
+                    options.harness,
+                    HarnessKind::Cursor | HarnessKind::ClaudeCode
+                ) && !options.workspaces.is_empty()
                     && !options.execution_profile.allow_unsandboxed_commands)),
         "invalid Worker Host remote Workspace profile"
     );

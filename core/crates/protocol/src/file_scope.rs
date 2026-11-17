@@ -658,6 +658,13 @@ pub fn reason(
     let scope = of_task(task)?;
     // A remote sandbox holds the whole checkout, hidden paths included, and its commands can
     // read any of it.
+    if profile.remote_file_workspace
+        && (!scope.outside_write.is_empty() || !scope.outside_read.is_empty())
+    {
+        return Some(
+            "tools in a remote Workspace sandbox reach only the Workspace, so they cannot grant additionalDirectories; run the Tag on a local Worker Host".to_owned(),
+        );
+    }
     if profile.remote_file_workspace && has(task, "commands:execute") && !scope.hidden.is_empty() {
         return Some(format!(
             "commands in a remote Workspace sandbox can read hidden paths ({}); remove commands:execute or the hidden paths from the Tag's Permission Sets, or run the Tag on Codex",
@@ -1151,14 +1158,42 @@ mod tests {
         ));
         // Remote commands run in a sandbox holding the whole checkout: hidden paths are refused,
         // and a write restriction is checked at delivery.
-        let remote_hidden = reason(&task(&commands, hidden.clone(), true), HarnessKind::Cursor, &remote)
-            .unwrap();
-        assert!(remote_hidden.contains("remote Workspace sandbox"), "{remote_hidden}");
+        let remote_hidden = reason(
+            &task(&commands, hidden.clone(), true),
+            HarnessKind::Cursor,
+            &remote,
+        )
+        .unwrap();
+        assert!(
+            remote_hidden.contains("remote Workspace sandbox"),
+            "{remote_hidden}"
+        );
         assert!(supports(
             &task(&commands, writes.clone(), true),
             HarnessKind::Cursor,
             &remote
         ));
+        // Claude Code in a remote sandbox: no outside directories, no hidden paths with commands.
+        assert!(supports(
+            &task(&commands, writes.clone(), true),
+            HarnessKind::ClaudeCode,
+            &remote
+        ));
+        assert!(!supports(
+            &task(&commands, hidden.clone(), true),
+            HarnessKind::ClaudeCode,
+            &remote
+        ));
+        let outside_remote = reason(
+            &task(&tools, outside.clone(), true),
+            HarnessKind::ClaudeCode,
+            &remote,
+        )
+        .unwrap();
+        assert!(
+            outside_remote.contains("additionalDirectories"),
+            "{outside_remote}"
+        );
         assert!(!supports(
             &task(&tools, writes.clone(), true),
             HarnessKind::OpenaiAgents,
