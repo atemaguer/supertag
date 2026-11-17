@@ -5,13 +5,11 @@
   SuperTag
 </h1>
 
-**Persistent AI actors for engineering work.**
+**Persistent, proactive, multiplayer AI actors for engineering work.**
 
-Open infrastructure to build and run your own platform of persistent, proactive coding agents.
+**Define outcomes, not tasks.** Give a Tag an engineering outcome or an enduring responsibility. It carries the work across sessions, acts on its responsibilities without being asked, and works alongside your teammates and their Tags, on Claude Code, Codex, Cursor, or OpenCode and on machines you choose.
 
-**Tags** are persistent AI actors with their own identities, responsibilities, and work history. Give a Tag an engineering goal or an ongoing responsibility. It carries the work across sessions, coordinates tools like Claude Code and Codex, and picks up the work when new reports arrive.
-
-[Run your first Tag](#run-your-first-tag) · [See it work](#see-it-work) · [Build on SuperTag](#build-on-supertag) · [Documentation](docs/README.md)
+[Define outcomes](#define-outcomes-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [Run your first Tag](#run-your-first-tag) · [Documentation](docs/README.md)
 
 <p>
   <img src="assets/images/supertag-meet-the-tags.png" alt="Meet the Tags — nine SuperTag mascots with round and elongated builds, colorful jackets, hats, and glasses" width="900" height="360">
@@ -19,49 +17,18 @@ Open infrastructure to build and run your own platform of persistent, proactive 
 
 </div>
 
-## Engineering agents need more than a session
+## Define outcomes, not tasks
 
-A coding agent can investigate a bug, write a fix, and run tests. When the work spans several
-sessions, someone still has to carry the goal forward, coordinate the pieces, and decide what
-happens next. And when another report arrives next week, someone has to pick it up again.
+A coding agent takes one task per session. It can investigate a bug, write a fix, and run tests.
+When the work is bigger than one session, you become its project manager: you split the work,
+start each session, carry context between them, and decide what happens next.
 
-With SuperTag, you give that responsibility to a Tag. The same Tag can investigate today’s issue,
-review the results tomorrow, and take up the next report when it arrives. Its identity,
-responsibilities, permissions, and work history stay with it when the next piece of work runs
-on another model or machine.
-
-## See it work
-
-Say you want to keep a service’s dependencies up to date. Give a `maintenance` Tag an ongoing
-responsibility:
-
-> Investigate new dependency reports. Prepare a branch for fixes and include the test results.
-> Ask me before a major version upgrade. Leave merging to me.
-
-When your scanner sends a report to SuperTag, `maintenance` can start a separate work session to
-investigate the affected package and prepare a fix. It reviews the result and brings you the branch,
-the tests, and any decision it needs from you.
-
-Once that work is done, `maintenance` waits. When another report comes in, the same Tag picks it up
-under the same responsibility. You can return to `maintenance` to ask about earlier work or change
-how it handles future reports.
-
-That’s what proactive means in SuperTag. A Tag can act when it receives a message, report, or another
-configured event. You choose which tools send those events and what the Tag can do in response.
-
-[Set up an ongoing responsibility](docs/guides/ongoing-responsibilities.md)
-
-## How Tags work together
-
-**Give work an owner.** An **Objective** records an outcome, the evidence you’ll use to decide
-when it’s done, and any constraints, budget, or deadline you set. The owning Tag decides what work
-to start and reviews what comes back. A **Session** is one thread of work, such as investigating
-a dependency or preparing its update. [Write an Objective](docs/guides/write-an-objective.md)
-
-**Give each Tag its own job and permissions.** A **Team** is a group of Tags that can hand work to
-each other. You could let `maintenance` coordinate an update, give a builder permission to edit the
-repository, and give a reviewer read-only access. You steer the owning Tag. It brings back
-findings and decisions that need your approval. [How you direct work](docs/concepts/interaction-model.md)
+With SuperTag, you hand that job to a Tag. An **Objective** records an outcome, the evidence
+you'll use to decide when it's done, and any constraints, budget, or deadline you set. The owning
+Tag decides what work to start, hands pieces to the other Tags on its **Team**, reviews what comes
+back, and brings you findings, branches, and the decisions that need your approval. You steer the
+owning Tag; you don't manage its sessions. A **Session** is one thread of work, such as
+investigating a dependency or preparing its update.
 
 To move 12 services to short-lived credentials, give `lead` the rollout Objective. It coordinates
 Tags that update trust policy and service code, review tests and telemetry, and rehearse the
@@ -69,11 +36,67 @@ cutover. You approve production cutovers and decide when to retire the shared ke
 
 ![The lead Tag owns the migration and delegates to identity, migration, verification, and rollout Tags. A person approves production cutovers and retirement of shared keys.](assets/images/supertag-team-migration.png)
 
+Give each Tag its own job and permissions. You could let `lead` coordinate, give a builder
+permission to edit the repository, and give a reviewer read-only access.
+
+[Write an Objective](docs/guides/write-an-objective.md) · [How you direct work](docs/concepts/interaction-model.md)
+
+## What makes a Tag different
+
+### Persistent
+
+A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work
+history. Its work runs as sessions of your coding agents, and the Tag is what persists across
+them. The same Tag can investigate today's issue, review the results tomorrow, and answer
+questions about both next week, even when the next session runs on another coding agent or
+machine. It can recall its earlier Sessions and Objectives on its own.
+
 <a name="next-add-your-teams-chat"></a>
 
-**Reach the same Tag from the tools you use.** Talk to it in the terminal or connect a work tool
-and add its channel, repository, or team to the Tag’s locations. Each conversation has its own
-thread, and the same Tag keeps the responsibilities you assigned it. [Connect a work tool](docs/surfaces/README.md)
+Reach the same Tag from the tools you use. Talk to it in the terminal, or add a Slack channel,
+GitHub repository, or Linear team to its locations. Each conversation has its own thread, and the
+same Tag keeps the responsibilities you assigned it. [Connect a work tool](docs/surfaces/README.md)
+
+### Proactive
+
+Give a Tag an enduring responsibility, and it works to fulfill it without waiting to be asked.
+Say `triage` is responsible for new production errors:
+
+> Investigate each new or regressed error. Reproduce it, find the change that caused it, and
+> prepare a fix with a failing test. Ask me before anything that touches production. Leave
+> merging to me.
+
+When Sentry reports a new error, `triage` takes it up under that responsibility. It decides
+whether the error matters, starts work to reproduce and fix it, and brings you the branch, the
+test, and any decision that's yours. When nothing needs doing, it rests until the next report,
+message, or result. Run it on an always-on host, and it keeps the responsibility while your
+laptop is off.
+
+| A Tag responsible for | Wakes on | Does | Leaves to you |
+| --- | --- | --- | --- |
+| Watching a service | A PagerDuty, Datadog, or health-check alert | Builds a timeline from logs, recent deploys, and the error spike, and prepares a revert branch | Rolling back or escalating |
+| Keeping main green | A failed CI run on main | Finds the breaking commit, tells a flaky test from a real failure, and prepares a fix or revert | Merging and quarantining tests |
+| Keeping dependencies safe | A Dependabot or Snyk advisory | Checks whether the project is affected and prepares the upgrade with test results | Major upgrades and merging |
+| Triaging bug reports | A new Linear or GitHub issue | Reproduces it, links duplicates, and asks the reporter for missing details | Priority |
+
+You choose which events reach a Tag and what it may do in response. Forward alerts and reports
+to its responsibility through the Control Plane API, or mention it in Slack, GitHub, or Linear.
+[Set up an ongoing responsibility](docs/guides/ongoing-responsibilities.md)
+
+### Multiplayer
+
+Self-host one shared Control Plane, and your team works with Tags together. Each teammate directs
+Tags from their own terminal or connected tools, and private terminal conversations stay private
+to each person. One person can ask `triage` about an error in Slack, and another can follow up on
+the same findings on GitHub.
+
+Tags work together across machines and coding agents. A Tag on your laptop running Claude Code and
+a Tag on a teammate's machine running Codex can work toward the same Objective, message each
+other, and post to their Team's shared Workstream. Each reports back to the Objective's owner.
+
+![Slack, GitHub, and Linear connect to one hosted Control Plane. Its Worker Hosts include laptops running Claude Code and Codex, and a CI runner or cloud machine.](assets/images/supertag-shared-control-plane.png)
+
+[How multiplayer works](docs/concepts/multiplayer.md) · [Self-host SuperTag](docs/guides/self-hosting.md)
 
 <a name="get-started"></a>
 
@@ -113,29 +136,16 @@ for a revision.
 
 ## From one laptop to your whole team
 
-### Single-player on your laptop
-
-Run SuperTag from your terminal with the repository and coding agents you already use.
 `supertag init` starts a local **Control Plane**, the service that stores your Tags and schedules
-their work. It also connects your computer as a **Worker Host**, a machine or sandbox that runs
-the work. You can give an Objective to one Tag and have it coordinate other Tags on the same
-machine.
+their work, and connects your computer as a **Worker Host**, a machine or sandbox that runs the
+work. When your team joins, deploy the Control Plane where everyone can reach it.
 
-### Multiplayer with your team
+Connect teammates' laptops, servers, CI runners, or supported sandboxes as Worker Hosts. You can
+choose a different coding agent and model for each Tag. Keep a Tag with an enduring
+responsibility, such as `triage`, on an always-on host so it can act while everyone's laptop is
+off.
 
-Self-host one shared Control Plane so teammates can direct the same Tags from their own terminals
-or connected tools. One person can ask `maintenance` to investigate an issue in Slack, and another
-can ask the same Tag about the shared findings on GitHub. Private terminal conversations stay
-private to each person.
-
-![Slack, GitHub, and Linear connect to one hosted Control Plane. Its Worker Hosts include laptops running Claude Code and Codex, and a CI runner or cloud machine.](assets/images/supertag-shared-control-plane.png)
-
-Connect teammates’ laptops, servers, CI runners, or supported sandboxes as Worker Hosts. You can
-choose a different coding agent and model for each Tag. Tags on different machines can work on the
-same Objective and report back to its owner. You can also keep a shared Tag, such as
-`maintenance`, on an always-on host so it can pick up reports when everyone’s laptop is off.
-
-[Self-host SuperTag](docs/guides/self-hosting.md) · [Connect a Worker Host](docs/guides/workers.md) · [How multiplayer works](docs/concepts/multiplayer.md) · [See how the parts fit together](docs/concepts/how-it-works.md)
+[Self-host SuperTag](docs/guides/self-hosting.md) · [Connect a Worker Host](docs/guides/workers.md) · [See how the parts fit together](docs/concepts/how-it-works.md)
 
 ## Works with
 
@@ -152,7 +162,7 @@ same Objective and report back to its owner. You can also keep a shared Tag, suc
 | **Hosted AI teammates** · [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | Hand off work to agents that stay available and can pick it up again later. | **Run proactive agents on your own infrastructure.** Set up persistent Tags and choose each one’s coding agent, model, tools, and where the work runs. |
 | **Coding agents** · [Claude Code](https://code.claude.com/docs/en/overview), [OpenCode](https://opencode.ai/docs/), [Codex](https://learn.chatgpt.com/docs/codex/cli) | Investigate, edit, and test code. | **Give the work a persistent owner.** Keep using your coding agents for execution. A Tag keeps its goal, permissions, and history across sessions, even when the next session uses a different coding agent. |
 | **Parallel agent workspaces** · [Paradev (formerly Superset)](https://docs.paradev.com/recipes/parallel-workstreams), [Conductor](https://www.conductor.build/docs/concepts/parallel-agents) ([winding down](https://www.conductor.build/announcement)) | Run coding sessions in separate Git worktrees and review their changes in one place. | **Hand off coordination to a Tag.** Give it an outcome and a way to verify it. It can start sessions, review how their results fit together, and bring you branches and decisions. |
-| **Agent projects** · [Claude Code Projects](https://code.claude.com/docs/en/claude-projects), [Cursor Projects](https://cursor.com/docs/agent/projects), [GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | Coordinate multiple agent sessions around an ongoing goal. | **Build a team you can reuse across projects.** The same lead, builder, and reviewer Tags keep their responsibilities and permissions across goals. Each can use a different coding agent and run on a different machine. |
+| **Agent projects** · [Cursor Projects](https://cursor.com/docs/agent/projects), [Claude Code Projects](https://code.claude.com/docs/en/claude-projects), [GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | Coordinate agent sessions around an ongoing goal. Cursor Projects lets teammates work in one Project alongside their agents. | **Work together across coding agents and machines.** Each teammate's Tags can run on a different coding agent and machine, toward one shared outcome. The same Tags keep their responsibilities and permissions across goals, and SuperTag records who requested each piece of work and what it was allowed to do. |
 | **Self-hosted agent runtimes** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | Run agents with their own tools and history, and coordinate work between them. | **Know who owns the work and what they were allowed to do.** Each outcome has an owning Tag. SuperTag records who requested each piece of work, which permissions applied, and what came back. |
 
 [See how SuperTag fits with other agent systems](docs/concepts/supertag-and-other-agent-systems.md).

@@ -2,7 +2,7 @@
 
 **TypeScript SDK for SuperTag.**
 
-SuperTag runs persistent AI actors for engineering work. A **Tag** is a persistent AI actor with a
+SuperTag runs persistent, proactive, multiplayer AI actors for engineering work. A **Tag** is a persistent AI actor with a
 stable identity, responsibilities, permissions, and work history; it runs its work on the coding
 agents you already use. The `supertag` CLI, the Control Plane, the Gateway, and Worker Hosts are
 native programs; see the

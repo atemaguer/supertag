@@ -1,11 +1,14 @@
 # SuperTag documentation
 
-SuperTag gives engineering work a persistent owner. A **Tag** is a persistent AI actor with a
-stable identity, responsibilities, permissions, and work history. It exists independently of the
+SuperTag runs persistent, proactive, multiplayer AI actors for engineering work: you define
+outcomes, not tasks. A **Tag** is a persistent AI actor with a stable identity, responsibilities,
+permissions, and work history. It exists independently of the
 model or harness executing its work. Talk to it in your terminal, in Slack, or on a GitHub issue.
 It runs work on your coding agents, asks when a decision is yours, and returns a git branch to
 review. For bigger work, give it an **Objective** with a result to verify, a budget, and a
-deadline. The Tag plans the work and hands pieces to other Tags on its Team.
+deadline. The Tag plans the work and hands pieces to other Tags on its Team. Give it an enduring
+responsibility, and it acts on new reports and alerts without being asked. Your teammates direct
+Tags on the same Control Plane, and Tags on different machines and coding agents work together.
 
 A **Team** is a flat list of member Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different Objectives but share one Control Plane, its rules, and
