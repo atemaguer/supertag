@@ -1342,6 +1342,7 @@ mod tests {
         // Linux runners may not permit Codex's sandbox at all; macOS always does.
         let probe = sandboxed(&executable, &root, &clone, &policy, "true").await;
         if cfg!(not(target_os = "macos")) && probe.as_ref().map_or(true, |r| r["exitCode"] != 0) {
+            // terminal-safe: test-only skip notice on standard error.
             eprintln!("skipping: Codex cannot start its sandbox here: {probe:?}");
             return Ok(());
         }
