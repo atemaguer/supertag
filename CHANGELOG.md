@@ -11,6 +11,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Merging a pull request that a work Session delivered closes that Session (`closed: pull request
+  merged`). A pull request closed without merging leaves it open for a revision.
+- A pull request publication queued because its Worker Host was offline retries as soon as that
+  host is back, instead of waiting for the next minute's retry.
 - `supertag placement explain` names each Worker Host's own reason a Task can't run there: `harness`, `file-scope` or `unsandboxed-commands`.
 - A Tag speaks when it has something to say. A turn no person is waiting on (a Schedule's
   wake-up, an Objective's notice, a memory review, or an inbox turn) may end with a new
