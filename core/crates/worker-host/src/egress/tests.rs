@@ -236,3 +236,106 @@ fn public_addresses_exclude_local_private_and_reserved_ranges() {
         assert!(public(address), "{address}");
     }
 }
+
+/// Claude Code's sandbox with the network settings its adapter gives a Task with a network
+/// scope, run through Anthropic's sandbox runtime (the library inside Claude Code) and this proxy:
+/// the allowed origin passes, another origin is refused by the proxy, and a direct connection
+/// fails. Credential-free; Linux needs bubblewrap, socat, and ripgrep.
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_NODE and the sandbox runtime from pnpm install"]
+async fn claude_codes_sandbox_sends_commands_only_to_the_egress_proxy() {
+    let Some(node) = super::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE").unwrap() else {
+        return;
+    };
+    // A lane that requires the sandbox must also report it to placement.
+    if super::prerequisites::required("claude-sandbox").unwrap() {
+        assert!(
+            claude_sandbox_available(),
+            "a Claude Code lane here would report no sandbox"
+        );
+    }
+    let runtime = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "../../../harnesses/claude-code/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js",
+    );
+    if !runtime.is_file() {
+        super::prerequisites::missing::<()>(
+            "claude-sandbox",
+            "run pnpm install for the sandbox runtime",
+        )
+        .unwrap();
+        return;
+    }
+    let (address, root) = origin_server().await;
+    let origin = origin_of(address);
+    let mut config = Config::new(
+        NetworkScope {
+            any_origin: false,
+            rules: vec![rule(std::slice::from_ref(&origin), &["GET"], "")],
+        },
+        vec![],
+    );
+    config.require_password = false;
+    config.resolve.insert(HOST.to_owned(), address);
+    config.allow_private = true;
+    config.extra_roots.push(root);
+    let proxy = EgressProxy::start(config).await.unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let files = write_sandbox_files(&proxy, directory.path()).unwrap();
+    let port = proxy.address().port();
+    let settings = directory.path().join("srt.json");
+    std::fs::write(
+        &settings,
+        serde_json::json!({
+            "network": {
+                "allowedDomains": [HOST],
+                "deniedDomains": [],
+                "httpProxyPort": port,
+                "socksProxyPort": port,
+            },
+            "filesystem": { "denyRead": [], "allowWrite": [directory.path()], "denyWrite": [] },
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let script = format!(
+        "curl -sS -m 15 {origin}/ok; echo; \
+         echo denied=$(curl -sS -m 15 -o /dev/null -w '%{{http_connect}}' https://example.org/ 2>/dev/null); \
+         curl -sS -m 10 --noproxy '*' -o /dev/null https://example.org/ 2>/dev/null; echo direct=$?"
+    );
+    let output = tokio::process::Command::new(node)
+        .arg(&runtime)
+        .arg("--settings")
+        .arg(&settings)
+        .args(["--", "sh", "-c", &script])
+        .current_dir(directory.path())
+        .env("CURL_CA_BUNDLE", &files.ca_bundle)
+        .env("SSL_CERT_FILE", &files.ca_bundle)
+        .output()
+        .await
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !stdout.contains("GET /ok") && !cfg!(target_os = "macos") {
+        // terminal-safe: test-only skip notice on standard error.
+        super::prerequisites::missing::<()>(
+            "claude-sandbox",
+            &format!("Claude Code's sandbox runtime cannot start here: {stderr}"),
+        )
+        .unwrap();
+        return;
+    }
+    assert!(stdout.contains("GET /ok"), "{stdout} {stderr}");
+    assert!(stdout.contains("denied=403"), "{stdout} {stderr}");
+    assert!(!stdout.contains("direct=0"), "{stdout} {stderr}");
+    let log = proxy.stop().await;
+    let decided: Vec<(&str, bool)> = log
+        .requests
+        .iter()
+        .map(|record| (record.origin.as_str(), record.allowed))
+        .collect();
+    assert_eq!(
+        decided,
+        [(origin.as_str(), true), ("https://example.org", false)],
+        "{log:?}"
+    );
+}

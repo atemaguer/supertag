@@ -1268,5 +1268,25 @@ pub mod fixture {
     }
 }
 
+/// Whether Claude Code's own sandbox can run here: always on macOS (Seatbelt); on Linux it needs
+/// bubblewrap and socat on `PATH`. A Claude Code lane reports it so placement can send it Tasks
+/// whose commands must stay inside a network scope; the adapter still fails closed if the
+/// sandbox does not start.
+pub fn claude_sandbox_available() -> bool {
+    match std::env::consts::OS {
+        "macos" => true,
+        "linux" => ["bwrap", "socat"].iter().all(|tool| {
+            std::env::var_os("PATH").is_some_and(|path| {
+                std::env::split_paths(&path).any(|directory| directory.join(tool).is_file())
+            })
+        }),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+#[path = "../../../test-support/prerequisites.rs"]
+mod prerequisites;
+
 #[cfg(test)]
 mod tests;
