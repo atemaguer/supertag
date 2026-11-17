@@ -11,6 +11,11 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- See and delete what a Tag remembers: the desktop app lists a Tag's notes in its details panel,
+  opened from the Tag's name, and the terminal UI under Notes in the command palette. Each note
+  records when a turn last had it in its context (`last_seen_at` in `supertag describe memory`),
+  and `supertag watch memory` follows note changes. The daily memory review now runs read-only,
+  keeping only `files:read` of the Tag's actions.
 - Search opens a command palette (the search button beside +, or ⌘K) that finds Tags by name,
   latest message or cached message text, and runs actions such as New Tag, Control Plane
   switching and notification levels. It replaces the sidebar's search box. The terminal UI's

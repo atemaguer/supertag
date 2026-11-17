@@ -173,7 +173,8 @@ returns every event of a turn, including the activity a conversation page leaves
 ## Watch for changes
 
 `OperatorEvents.Watch` streams change notices for Tags, Tasks, conversation messages and read
-marks, Objectives, Teams, and Workstream posts. Each notice carries a resume token; reconnect with the last one to
+marks, Objectives, Teams, Workstream posts, and a Tag's notes (`WATCH_KIND_MEMORY`: a note kept,
+rewritten, or deleted; a private note reaches only its person). Each notice carries a resume token; reconnect with the last one to
 continue without a gap. A notice says what changed, not its new contents: read the resource.
 
 ## Stability

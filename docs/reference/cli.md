@@ -4526,7 +4526,7 @@ Stream change notices, reconnecting from the last resume token
 Usage: supertag watch [OPTIONS] [KIND]...
 
 Arguments:
-  [KIND]...  Only these kinds of change; omit for every kind. `watch objective ID` follows one Objective's progress as a timeline until it closes. `watch inbox-item` prints each item waiting on a person once, as it appears [possible values: tag, task, conversation-message, objective, team, workstream-post, inbox-item]
+  [KIND]...  Only these kinds of change; omit for every kind. `watch objective ID` follows one Objective's progress as a timeline until it closes. `watch inbox-item` prints each item waiting on a person once, as it appears [possible values: tag, task, conversation-message, objective, team, workstream-post, inbox-item, memory]
 
 Options:
       --control-plane <URL|NAME>

@@ -636,7 +636,9 @@ forget(memoryId: "mem_9a2b…")
 gets a review turn in its reserved Session `memory:TAG`. The turn lists the shared Sessions with
 work since the last review. The Tag rereads them with `read_session` and `read_turn`, then
 merges, replaces, adds, and forgets notes. The review has only the Session reads, the memory
-tools, and `stay_quiet`: it cannot message anyone, start work, or schedule. It ends with
+tools, and `stay_quiet`: it cannot message anyone, start work, or schedule. It runs read-only in
+the Tag's Workspace: of the Tag's actions it keeps only `files:read`, so it cannot change files or
+run commands, whatever the Tag may do in other turns. It ends with
 `stay_quiet`, so it posts nothing and raises nothing unread. A review is never queued while another
 is still queued or running. `supertag describe tag` shows when the Tag last reviewed.
 
@@ -644,9 +646,14 @@ A Tag with `memory: false` (`supertag tag put TAG --memory false`, or `spec.memo
 manifest) keeps no notes, has neither tool, and never reviews. Retiring a Tag deletes its notes.
 
 People read notes with `supertag get memories [--tag TAG]` and `supertag describe memory ID`, and
-delete one with `supertag delete memory ID`. They never write a note: they tell the Tag ("remember
-that I prefer squash merges", "forget that"). An operator sees shared notes and those of clients'
-conversations; a client sees shared notes and its own.
+delete one with `supertag delete memory ID`. The desktop app shows a Tag's notes in its details
+panel, opened from the Tag's name above the conversation, and the terminal UI under **Notes** in
+the command palette; both delete a note too. They never write a note: they tell the Tag
+("remember that I prefer squash merges", "forget that"). An operator sees shared notes and those
+of clients' conversations; a client sees shared notes and its own. Each note records when a turn
+last had it in its context (`last_seen_at` in `describe memory`), so a note no turn has used for
+a long time is easy to spot. `supertag watch memory` follows notes as they are kept, rewritten,
+and deleted.
 
 ### Quiet results
 
