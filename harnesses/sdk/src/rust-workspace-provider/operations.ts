@@ -160,21 +160,17 @@ sys.exit(status if status >= 0 else 128 - status)`;
 
 // Stops a recorded command's process group. The record is in the sandbox, so its value is only
 // trusted to be a group other than the sandbox's init.
-const STOP_COMMAND = `import os, signal, sys, time
+// It never waits: the marker stops a command that has not recorded its group yet, because the
+// wrapper checks for it right after recording.
+const STOP_COMMAND = `import os, signal, sys
 record = sys.argv[1]
 os.makedirs(os.path.dirname(record), mode=0o700, exist_ok=True)
 open(record + ".stop", "a").close()
-deadline = time.monotonic() + 5
-while True:
-    try:
-        with open(record) as recorded:
-            group = int(recorded.read(32))
-        break
-    except (OSError, ValueError):
-        # Not started yet (the marker stops it), or already finished.
-        if time.monotonic() > deadline:
-            sys.exit(0)
-        time.sleep(0.05)
+try:
+    with open(record) as recorded:
+        group = int(recorded.read(32))
+except (OSError, ValueError):
+    sys.exit(0)
 if group > 1:
     try:
         os.killpg(group, signal.SIGKILL)
@@ -393,9 +389,10 @@ export function createWorkspaceOperations(options: WorkspaceOperationsOptions) {
         ...(caller ? [caller] : []),
       ]);
       /**
-       * Starts a command without the caller's signal: cancelling through the provider would stop
-       * the process, and on Modal the whole sandbox. A cancel instead stops the command's group
-       * with a fresh process in the sandbox, and the wrapper's deadline stops it otherwise.
+       * Starts a command with no signal: stopping a process through the provider stops it, and on
+       * Modal the whole sandbox. A cancel instead stops the command's group with a fresh process
+       * in the sandbox, and the wrapper's deadline stops it otherwise. Only the provider-level
+       * timeout, well after that deadline, may still stop it through the provider.
        */
       async function spawnCommand(spec: ProcessSpec, signal?: AbortSignal): Promise<ProcessHandle> {
         signal?.throwIfAborted();
@@ -409,37 +406,43 @@ export function createWorkspaceOperations(options: WorkspaceOperationsOptions) {
             deadlineMs,
             record,
           }),
-          lifetime.signal,
         );
+        let settled = false;
         let stopping: Promise<void> | undefined;
         const stop = () =>
           (stopping ??= (async () => {
-            const killer = await environment.spawn(
-              {
-                command: "/usr/bin/env",
-                args: [
-                  "-i",
-                  "PATH=/usr/local/bin:/usr/bin:/bin",
-                  "python3",
-                  "-I",
-                  "-S",
-                  "-c",
-                  STOP_COMMAND,
-                  record,
-                ],
-                cwd: sandboxRoot,
-                environment: {},
-                replaceEnvironment: true,
-                timeoutMs: 10_000,
-              },
-              lifetime.signal,
-            );
+            if (settled) return;
+            // No signal and no provider timeout: the stopper ends on its own, and nothing may
+            // stop it, or the sandbox with it, through the provider.
+            const killer = await environment.spawn({
+              command: "/usr/bin/env",
+              args: [
+                "-i",
+                "PATH=/usr/local/bin:/usr/bin:/bin",
+                "python3",
+                "-I",
+                "-S",
+                "-c",
+                STOP_COMMAND,
+                record,
+              ],
+              cwd: sandboxRoot,
+              environment: {},
+              replaceEnvironment: true,
+            });
             await killer.wait();
           })().catch(() => undefined));
-        signal?.addEventListener("abort", () => void stop(), { once: true });
+        // Every RPC's signal aborts when the call ends, so the listener goes with the command.
+        const abort = () => void stop();
+        signal?.addEventListener("abort", abort, { once: true });
+        const waiting = process.wait().finally(() => {
+          settled = true;
+          signal?.removeEventListener("abort", abort);
+        });
+        void waiting.catch(() => undefined);
         return {
           ...(process.pid === undefined ? {} : { pid: process.pid }),
-          wait: () => process.wait(),
+          wait: () => waiting,
           kill: () => void stop(),
         };
       }

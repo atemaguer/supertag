@@ -208,6 +208,22 @@ it("cancels an active foreground command and fences later calls after disposal",
   // The cancel stopped the command's group with a second sandbox process, never the provider.
   expect(specs).toHaveLength(2);
   expect(specs[1]?.args?.join(" ")).toContain("killpg");
+  // Nothing may stop the stopper through the provider.
+  expect(specs[1]?.timeoutMs).toBeUndefined();
+});
+
+it("never stops a finished command, or spawns anything, when its call's signal ends later", async () => {
+  const { operations, specs } = await fixture();
+  const tools = operations();
+  const call = new AbortController();
+  await expect(
+    tools.execute({ kind: "command", command: "printf done" }, call.signal),
+  ).resolves.toEqual({ text: "done", isError: false });
+  // An RPC's signal aborts when the call ends; that must not start a stopper, which the
+  // provider could later terminate, and on Modal the sandbox with it.
+  call.abort(new Error("call ended"));
+  await tools.dispose();
+  expect(specs).toHaveLength(1);
 });
 
 it("stops a command at its deadline inside the sandbox, with its process group", async () => {
