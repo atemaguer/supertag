@@ -589,15 +589,26 @@ pub async fn run(
                     // is not held.
                     claim.wait_ms = 0;
                 }
-                let mut claim_request = request(claim, &token)?;
+                let mut claim_request = request(claim.clone(), &token)?;
                 claim_request.set_timeout(CLAIM_WAIT + Duration::from_secs(3));
                 let sent = Instant::now();
+                let retired = async {
+                    match &retire {
+                        Some(retire) => retire.cancelled().await,
+                        None => std::future::pending().await,
+                    }
+                };
                 // Shutdown ends a held claim; the journaled Claim replays with the same operation
-                // on the next start, so an assignment made meanwhile is not lost. A retiring lane
-                // lets its claim answer, at most a few seconds later.
+                // on the next start, so an assignment made meanwhile is not lost. Retirement ends
+                // it too, and asks again at once with the same operation: an assignment made
+                // meanwhile comes back and runs, and otherwise the lane leaves.
                 let response = tokio::select! {
                     response = host.claim_task(claim_request) => response,
                     _ = shutdown.cancelled() => continue,
+                    _ = retired => {
+                        claim.wait_ms = 0;
+                        host.claim_task(request(claim, &token)?).await
+                    }
                 };
                 let assignment = match response {
                     Ok(response) => response.into_inner().assignment,

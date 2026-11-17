@@ -302,20 +302,46 @@ impl Journal {
         self.directory.join("attempt.json")
     }
 
+    /// A claim sent and not yet answered is kept apart from the Attempt record: a lane waiting
+    /// for work holds one, and it names no Attempt, whose reservation would expire on its lease.
+    fn claim_path(&self) -> PathBuf {
+        self.directory.join("claim.json")
+    }
+
     pub(crate) fn load(&self) -> Result<Option<Entry>> {
-        match fs::read(self.entry_path()) {
-            Ok(bytes) => Ok(Some(
-                serde_json::from_slice(&bytes).context("read host journal")?,
-            )),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error.into()),
+        for path in [self.entry_path(), self.claim_path()] {
+            match fs::read(path) {
+                Ok(bytes) => {
+                    return Ok(Some(
+                        serde_json::from_slice(&bytes).context("read host journal")?,
+                    ));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
         }
+        Ok(None)
     }
 
     pub(crate) fn save(&self, entry: &Entry) -> Result<()> {
+        if matches!(entry, Entry::Claim { .. }) {
+            return self.write(&self.claim_path(), |file| {
+                Ok(serde_json::to_writer(file, entry)?)
+            });
+        }
         self.write(&self.entry_path(), |file| {
             Ok(serde_json::to_writer(file, entry)?)
-        })
+        })?;
+        // The Attempt record now holds what the claim led to.
+        self.remove_claim()
+    }
+
+    fn remove_claim(&self) -> Result<()> {
+        match fs::remove_file(self.claim_path()) {
+            Ok(()) => self.sync_directory(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
 
     fn remote_sandbox_path(&self) -> PathBuf {
@@ -606,7 +632,12 @@ impl Journal {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
-        fs::remove_file(self.entry_path())?;
+        match fs::remove_file(self.entry_path()) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        self.remove_claim()?;
         match fs::remove_file(self.directory.join("checkpoint.bin")) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
