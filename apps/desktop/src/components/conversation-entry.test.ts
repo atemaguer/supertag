@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import type { Message } from "../control-plane";
-import { ConversationEntry } from "./conversation-entry";
+import { ConversationEntry, turnNotice } from "./conversation-entry";
 
 const task: Message["task"] = {
   taskId: "report-task",
@@ -33,7 +33,7 @@ it("renders a Work Session report as Tag output with activity and no operator bu
   expect(html).toContain('aria-expanded="true"');
   expect(html).not.toContain("user-turn");
   expect(html).not.toContain(task.prompt);
-  expect(html).not.toContain("Joined active Task");
+  expect(html).not.toContain("Joined the running Task");
 });
 
 it("keeps the operator prompt and joined Task activity on ordinary messages", () => {
@@ -51,7 +51,7 @@ it("keeps the operator prompt and joined Task activity on ordinary messages", ()
   );
   expect(html).toContain("user-turn");
   expect(html).toContain("Check the update.");
-  expect(html).toContain("Joined active Task");
+  expect(html).toContain("Joined the running Task");
   expect(html).toContain('aria-expanded="true"');
   expect(html).not.toContain("Work Session report");
   expect(html).not.toContain(task.result);
@@ -162,7 +162,10 @@ it("gives each message its own bubble with a copy action, and no avatar or name 
   expect(html.match(/class="[^"]*\bbubble prompt-text\b/g)).toHaveLength(1);
   expect(html.match(/aria-label="Copy message"/g)).toHaveLength(4);
   expect(html).not.toContain('class="avatar');
-  expect(html).toContain("Completed · View Task activity");
+  // A turn that succeeded says nothing under its reply; its last bubble's actions open the activity.
+  expect(html).not.toContain("task-status");
+  expect(html).not.toContain("Completed");
+  expect(html.match(/aria-label="View Task activity"/g)).toHaveLength(1);
 });
 
 it("gives only the last bubble of each group a tail, and shows the operator's delivery", () => {
@@ -222,5 +225,29 @@ it("shows the Tag typing for the whole running turn, last, with its activity as 
   // Finished: no dots, and the status returns as the way into the activity.
   const done = render({ message: { order: 1, task } });
   expect(done).not.toContain("typing-bubble");
-  expect(done).toContain("Completed · View Task activity");
+  expect(done).not.toContain("task-status");
+  expect(done).toContain('aria-label="View Task activity"');
+});
+
+it("says how a turn ended only when it did not simply succeed", () => {
+  const render = (state: string, liveInput?: { taskId: string; state: string }) =>
+    renderToStaticMarkup(
+      createElement(ConversationEntry, {
+        message: { order: 1, task: { ...task, state, result: undefined }, liveInput },
+        onActivity: () => {},
+        onSaveArtifact: async () => false,
+      }),
+    );
+  expect(render("failed")).toMatch(/data-tone="error"[^>]*>.*Failed/);
+  expect(render("cancelled")).toMatch(/data-tone="warning"[^>]*>.*Cancelled/);
+  expect(render("uncertain")).toContain("Interrupted: needs attention");
+  expect(render("cancelled", { taskId: "x", state: "withdrawn" })).toContain(
+    "Not delivered to the running Task",
+  );
+  expect(render("succeeded", { taskId: "x", state: "unknown" })).toMatch(
+    /data-tone="warning"[^>]*>.*Delivery uncertain/,
+  );
+  expect(turnNotice("succeeded")).toBeUndefined();
+  // A succeeded turn with nothing to show still offers its activity.
+  expect(render("succeeded")).toContain("View activity");
 });

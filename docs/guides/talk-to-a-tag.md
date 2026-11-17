@@ -53,7 +53,8 @@ title, and End jumps to them.
 
 In the desktop app, the `···` stays at the end of the Tag's reply for as long as it works, after
 its first sentence and any later messages, with its current step under it; select it to see the
-Task's activity. Once the answer arrives, the reply shows its status instead.
+Task's activity. Once the answer arrives, the reply's actions on hover open the activity, and a
+line under the reply appears only when the turn failed, was cancelled, or needs attention.
 
 In the desktop app, drag the sidebar's edge to resize it, or past its narrowest to fold it into a
 rail of avatars; ⌘B does the same. The Task activity pane resizes from its edge too. ⌘1 to ⌘9 open

@@ -1057,6 +1057,8 @@ button:disabled {
   background: rgb(0 0 0 / 24%);
 }
 .bubble-actions {
+  display: flex;
+  gap: 2px;
   flex-shrink: 0;
   opacity: 0;
   transition: opacity 120ms;
@@ -1115,6 +1117,19 @@ button:disabled {
 }
 .task-status[data-state="failed"] .status-dot,
 .task-status[data-state="uncertain"] .status-dot {
+  background: #ffb7a9;
+}
+/* A settled turn's notice: a warning or an error stands out from the muted text. */
+.task-status[data-tone="warning"] {
+  color: #efd4a0;
+}
+.task-status[data-tone="warning"] .status-dot {
+  background: #efd4a0;
+}
+.task-status[data-tone="error"] {
+  color: #ffb7a9;
+}
+.task-status[data-tone="error"] .status-dot {
   background: #ffb7a9;
 }
 .result-files {
