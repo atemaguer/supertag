@@ -20,10 +20,10 @@ delivered branch, ask for a small edit and wait for the Tag's work Session to re
 
 While the Tag works, the conversation shows what it is doing. Before longer work, the Tag first
 writes one short sentence saying what it is about to do, which appears as its own message as
-soon as the Tag writes it. A dim status line under the turn shows its current step, such as a
-command it runs or a file it edits, and its answer follows as the last message. The first
-message arrives once the Tag's harness has started and written its first sentence, which takes a
-few seconds.
+soon as the Tag writes it. An animated `···` stays under the Tag's latest message until its
+answer arrives, with a dim caption for its current step, such as a command it runs or a file it
+edits. The first message arrives once the Tag's harness has started and written its first
+sentence, which takes a few seconds.
 
 If there is no local setup or the Control Plane has no Tags, SuperTag shows how to get started
 with `supertag init`. For a shared Control Plane, ask its operator to set up a Tag. An operator can
@@ -44,8 +44,8 @@ The terminal UI and the desktop app read like a messaging app. The lead Tag sits
 the rail with a star, and the other Tags follow by their latest activity. Your messages and the
 Tag's are grouped by sender, and a time divider marks a pause of more than fifteen minutes.
 Under your last message they show **Sent** once the Control Plane has it and **Seen** once a
-Worker Host has taken it up, and until the Tag writes its first line, an animated `···` shows
-that it is working. A message that is not delivered stays in the conversation with
+Worker Host has taken it up, and the animated `···` stays at the end of the Tag's reply until
+its answer arrives. A message that is not delivered stays in the conversation with
 **Retry**, which sends it at most once, and **Edit**. What you have not sent stays with each Tag
 until you come back, even after a restart, and a message not yet accepted is sent again the next
 time you open the app. When you scroll up, the terminal UI counts the Tag's new messages in its

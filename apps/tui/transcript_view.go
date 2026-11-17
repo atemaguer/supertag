@@ -11,8 +11,8 @@ import (
 // The conversation borrows a messaging app's conventions, adapted to a terminal: consecutive
 // messages from one sender form a group under one name, a time divider marks the start of the
 // history and each pause of more than dividerGap, the operator's last message says whether it
-// was delivered and seen, and an animated "···" shows that the Tag is working until its first
-// line arrives.
+// was delivered and seen, and an animated "···" stays at the tail of a running turn until its
+// result arrives, with what the Tag is doing now as a dim caption beside it.
 
 // dividerGap is the pause between two messages that a time divider marks.
 const dividerGap = 15 * time.Minute
@@ -165,7 +165,6 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 		if t.cacheWidth != width {
 			t.cache, t.cacheWidth = nil, width
 		}
-		fromTag := false
 		for i, e := range t.entries {
 			at := index
 			index++
@@ -173,7 +172,6 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 			w.from(s)
 			if s == senderTag {
 				written++
-				fromTag = true
 			}
 			anchor := e.kind == entryWork && working[e.session] == at
 			if i >= len(t.cache) {
@@ -207,11 +205,13 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 			w.from(senderTag)
 			w.write(faint.Render(wrap.Render(t.draft)) + "\n")
 		}
-		if t.status != "" {
-			w.write(faint.Render(wrap.Render("· "+t.status)) + "\n")
-		} else if turn != nil && id == c.runtime.order[len(c.runtime.order)-1] && typingShown(turn, fromTag) {
+		switch {
+		case turn != nil && running(turn):
+			// The indicator stays the turn's last line until its result arrives.
 			w.from(senderTag)
-			w.write(faint.Render(typingFrames[m.typing.frame%len(typingFrames)]) + "\n")
+			w.write(m.typingLine(t.status, width) + "\n")
+		case t.status != "":
+			w.write(faint.Render(wrap.Render("· "+t.status)) + "\n")
 		}
 	}
 	for _, id := range c.runtime.order {
@@ -237,10 +237,19 @@ func (m model) renderTranscript(c *conversation, tag, name string, width int) st
 	return strings.TrimRight(w.out.String(), "\n")
 }
 
-// typingShown says the turn shows the typing indicator: a Worker Host took it up, and the Tag
-// has written nothing and says nothing of what it does yet.
-func typingShown(turn *runtimeTurn, fromTag bool) bool {
-	return turn.started && !turn.settled && !turn.joined && !fromTag && turn.status == "" && turn.draft == ""
+// running says the turn shows the typing indicator: a Worker Host took it up, and its result has
+// not arrived.
+func running(turn *runtimeTurn) bool {
+	return turn.started && !turn.settled && !turn.joined
+}
+
+// typingLine is the typing indicator, with what the Tag is doing now as a dim caption beside it.
+func (m model) typingLine(activity string, width int) string {
+	line := typingFrames[m.typing.frame%len(typingFrames)]
+	if activity != "" {
+		line += "  " + truncate(activity, max(width-lipgloss.Width(line)-2, 1))
+	}
+	return faint.Render(line)
 }
 
 // deliveryLine says how far the operator's last message got: Sent once the Control Plane
@@ -268,19 +277,15 @@ func (m model) showsTyping() bool {
 		return false
 	}
 	c := m.shown()
-	if c == nil || len(c.runtime.order) == 0 {
+	if c == nil {
 		return false
 	}
-	turn := c.runtime.turns[c.runtime.order[len(c.runtime.order)-1]]
-	if turn == nil {
-		return false
-	}
-	for _, e := range turn.entries {
-		if entrySender(e.kind) == senderTag {
-			return false
+	for i := len(c.runtime.order) - 1; i >= 0; i-- {
+		if turn := c.runtime.turns[c.runtime.order[i]]; turn != nil && running(turn) {
+			return true
 		}
 	}
-	return typingShown(turn, false)
+	return false
 }
 
 // animateTyping is the command that moves the typing indicator, while it shows and is not

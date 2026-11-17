@@ -298,7 +298,7 @@ func TestTheConversationGroupsSendersAndMarksPauses(t *testing.T) {
 	}
 }
 
-func TestTheTypingIndicatorGivesWayToTheTagsFirstLine(t *testing.T) {
+func TestTheTypingIndicatorStaysAtTheTailUntilTheResult(t *testing.T) {
 	m := runtimeModel(t)
 	running := ordered(runtimeHistoryMessage("running", "Fix the build", ""), 1)
 	running.Status, running.Reply, running.Started = views.ReplyStatus_REPLY_STATUS_WAITING, nil, true
@@ -313,9 +313,22 @@ func TestTheTypingIndicatorGivesWayToTheTagsFirstLine(t *testing.T) {
 	if after := ansi.Strip(m.renderConversation()); after == before {
 		t.Fatal("the typing indicator does not move")
 	}
+	tail := func() string {
+		lines := strings.Split(strings.TrimRight(ansi.Strip(m.renderConversation()), "\n"), "\n")
+		return lines[len(lines)-1]
+	}
+	// The intent and the activity leave the indicator last, with the activity as its caption and
+	// no separate status line.
+	m = update(t, m, followMsg{tag: "lead", taskID: "running", event: client.FollowEvent{Kind: client.EventMessage, Text: "I'll fix the build.", Sequence: 1}})
 	m = update(t, m, followMsg{tag: "lead", taskID: "running", event: client.FollowEvent{Kind: client.EventStatus, Text: "running: go test ./..."}})
-	if m.showsTyping() || !strings.Contains(ansi.Strip(m.renderConversation()), "· running: go test ./...") {
-		t.Fatal("the activity line does not replace the typing indicator")
+	got := ansi.Strip(m.renderConversation())
+	if !m.showsTyping() || !strings.Contains(tail(), "running: go test ./...") || strings.Contains(got, "· running:") ||
+		strings.Index(got, "I'll fix the build.") > strings.Index(got, "running: go test") {
+		t.Fatalf("the indicator is not the running turn's last line with its caption:\n%s", got)
+	}
+	m = update(t, m, followMsg{tag: "lead", taskID: "running", event: client.FollowEvent{Kind: client.EventReply, Reply: finalReply("Fixed.")}})
+	if m.showsTyping() || strings.Contains(ansi.Strip(m.renderConversation()), "go test") || !strings.Contains(tail(), "Fixed.") {
+		t.Fatalf("the result does not end the turn:\n%s", ansi.Strip(m.renderConversation()))
 	}
 }
 
