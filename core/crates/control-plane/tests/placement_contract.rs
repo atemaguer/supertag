@@ -1194,6 +1194,7 @@ async fn postgres_placement_contract() {
 }
 
 #[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
 async fn postgres_capacity_wait_contract() {
     on_postgres(|url| async move { capacity_wait_contract(&url).await }).await;
 }
