@@ -120,6 +120,8 @@ fn rejects_scope_mismatch_stale_or_future_events_and_ignores_nonusers() -> Resul
     for (pointer, value) in [
         ("/actor/type", json!("application")),
         ("/actor/id", json!(TEAM)),
+        // A workspace member who is not on allowed-users is never admitted.
+        ("/actor/id", json!("66666666-6666-4666-8666-666666666666")),
         ("/data/description", json!("unmentioned")),
         ("/data/description", json!("@supertag-other")),
         ("/action", json!("remove")),

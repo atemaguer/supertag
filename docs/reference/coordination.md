@@ -627,7 +627,10 @@ forget(memoryId: "mem_9a2b…")
   of them. At the limit, `remember` is refused with the oldest notes named, so the Tag can forget
   or merge them (`remember` with `replaces`). One turn writes or forgets at most 10 notes.
 - **Who may write.** Root turns of a Tag that keeps memory. A Work Session's own turn, and a turn
-  a GitHub or Linear event started, get no `remember` or `forget`.
+  a GitHub or Linear event started, get no `remember` or `forget`: an issue or pull request may
+  hold text someone outside wrote. Otherwise, asking the Tag for work and teaching it are the
+  same trust. Anyone on a surface location's `allowed-users` may do both; the Gateway drops
+  everyone else's messages before the Control Plane sees them.
 
 **The daily review.** Once a day, after at least ten finished turns since the last one, the Tag
 gets a review turn in its reserved Session `memory:TAG`. The turn lists the shared Sessions with
