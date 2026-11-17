@@ -1,5 +1,5 @@
 from supertag.runtime.v2 import policy_pb2 as _policy_pb2
-from supertag.runtime.v2 import github_workspaces_pb2 as _github_workspaces_pb2
+from supertag.runtime.v2 import workspaces_pb2 as _workspaces_pb2
 from supertag.runtime.v2 import mcp_pb2 as _mcp_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
@@ -78,7 +78,6 @@ class WorkSessionCloseReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED: _ClassVar[WorkSessionCloseReason]
     WORK_SESSION_CLOSE_REASON_UPGRADE: _ClassVar[WorkSessionCloseReason]
     WORK_SESSION_CLOSE_REASON_IDLE: _ClassVar[WorkSessionCloseReason]
-    WORK_SESSION_CLOSE_REASON_MERGED: _ClassVar[WorkSessionCloseReason]
 
 class TagMessageOrigin(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -367,7 +366,6 @@ WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_UPGRADE: WorkSessionCloseReason
 WORK_SESSION_CLOSE_REASON_IDLE: WorkSessionCloseReason
-WORK_SESSION_CLOSE_REASON_MERGED: WorkSessionCloseReason
 TAG_MESSAGE_ORIGIN_UNSPECIFIED: TagMessageOrigin
 TAG_MESSAGE_ORIGIN_DIRECT: TagMessageOrigin
 TAG_MESSAGE_ORIGIN_WORKSTREAM: TagMessageOrigin
@@ -2441,7 +2439,7 @@ class ExecutionLimits(_message.Message):
     def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "quiet", "workspace_selection", "applied_execution_limits", "workspace_mount_writes", "execution_report", "network_logs", "waiting_for_holder")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts", "quiet", "applied_execution_limits", "workspace_mount_writes", "execution_report", "network_logs", "waiting_for_holder")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -2464,7 +2462,6 @@ class Task(_message.Message):
     OUTPUT_POLICY_FIELD_NUMBER: _ClassVar[int]
     INPUT_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     QUIET_FIELD_NUMBER: _ClassVar[int]
-    WORKSPACE_SELECTION_FIELD_NUMBER: _ClassVar[int]
     APPLIED_EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_MOUNT_WRITES_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_REPORT_FIELD_NUMBER: _ClassVar[int]
@@ -2492,13 +2489,12 @@ class Task(_message.Message):
     output_policy: TaskOutputPolicy
     input_artifacts: _containers.RepeatedCompositeFieldContainer[AcceptedTaskArtifactInput]
     quiet: bool
-    workspace_selection: str
     applied_execution_limits: AppliedExecutionLimits
     workspace_mount_writes: _containers.RepeatedCompositeFieldContainer[AttemptWorkspaceMountWrites]
     execution_report: TaskExecutionReport
     network_logs: _containers.RepeatedCompositeFieldContainer[AttemptNetworkLog]
     waiting_for_holder: str
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., quiet: _Optional[bool] = ..., workspace_selection: _Optional[str] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ..., execution_report: _Optional[_Union[TaskExecutionReport, _Mapping]] = ..., network_logs: _Optional[_Iterable[_Union[AttemptNetworkLog, _Mapping]]] = ..., waiting_for_holder: _Optional[str] = ...) -> None: ...
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ..., quiet: _Optional[bool] = ..., applied_execution_limits: _Optional[_Union[AppliedExecutionLimits, _Mapping]] = ..., workspace_mount_writes: _Optional[_Iterable[_Union[AttemptWorkspaceMountWrites, _Mapping]]] = ..., execution_report: _Optional[_Union[TaskExecutionReport, _Mapping]] = ..., network_logs: _Optional[_Iterable[_Union[AttemptNetworkLog, _Mapping]]] = ..., waiting_for_holder: _Optional[str] = ...) -> None: ...
 
 class ReportWaitingForHolderRequest(_message.Message):
     __slots__ = ("attempt", "waiting")
@@ -3341,20 +3337,28 @@ class CheckpointDownload(_message.Message):
     def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
 
 class WorkspaceSpec(_message.Message):
-    __slots__ = ("workspace_id", "base_commit", "github_source", "mounts", "mcp_servers", "base_ref")
+    __slots__ = ("workspace_id", "base_commit", "remote", "mounts", "mcp_servers", "base_ref", "merge_commit", "author_name", "author_email", "co_author")
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
-    GITHUB_SOURCE_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_FIELD_NUMBER: _ClassVar[int]
     MOUNTS_FIELD_NUMBER: _ClassVar[int]
     MCP_SERVERS_FIELD_NUMBER: _ClassVar[int]
     BASE_REF_FIELD_NUMBER: _ClassVar[int]
+    MERGE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    AUTHOR_NAME_FIELD_NUMBER: _ClassVar[int]
+    AUTHOR_EMAIL_FIELD_NUMBER: _ClassVar[int]
+    CO_AUTHOR_FIELD_NUMBER: _ClassVar[int]
     workspace_id: str
     base_commit: str
-    github_source: _github_workspaces_pb2.GithubWorkspace
+    remote: _workspaces_pb2.Workspace
     mounts: _containers.RepeatedCompositeFieldContainer[WorkspaceCopyMount]
     mcp_servers: _containers.RepeatedScalarFieldContainer[str]
     base_ref: str
-    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., github_source: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., mounts: _Optional[_Iterable[_Union[WorkspaceCopyMount, _Mapping]]] = ..., mcp_servers: _Optional[_Iterable[str]] = ..., base_ref: _Optional[str] = ...) -> None: ...
+    merge_commit: str
+    author_name: str
+    author_email: str
+    co_author: str
+    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., remote: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., mounts: _Optional[_Iterable[_Union[WorkspaceCopyMount, _Mapping]]] = ..., mcp_servers: _Optional[_Iterable[str]] = ..., base_ref: _Optional[str] = ..., merge_commit: _Optional[str] = ..., author_name: _Optional[str] = ..., author_email: _Optional[str] = ..., co_author: _Optional[str] = ...) -> None: ...
 
 class WorkspaceCopyMount(_message.Message):
     __slots__ = ("volume_id", "destination", "max_bytes", "volume", "read_write")
@@ -3432,13 +3436,23 @@ class AttemptWorkspaceMountWrites(_message.Message):
     writes: _containers.RepeatedCompositeFieldContainer[WorkspaceMountWrite]
     def __init__(self, attempt_id: _Optional[str] = ..., writes: _Optional[_Iterable[_Union[WorkspaceMountWrite, _Mapping]]] = ...) -> None: ...
 
-class GithubWorkspaceBundle(_message.Message):
-    __slots__ = ("workspace", "bundle")
+class WorkspaceSourceBundle(_message.Message):
+    __slots__ = ("workspace", "bundle", "commit")
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     BUNDLE_FIELD_NUMBER: _ClassVar[int]
-    workspace: _github_workspaces_pb2.GithubWorkspace
+    COMMIT_FIELD_NUMBER: _ClassVar[int]
+    workspace: _workspaces_pb2.Workspace
     bundle: BlobReference
-    def __init__(self, workspace: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
+    commit: str
+    def __init__(self, workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ..., commit: _Optional[str] = ...) -> None: ...
+
+class DownloadWorkspaceSourceRequest(_message.Message):
+    __slots__ = ("attempt", "merge")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    MERGE_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    merge: bool
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., merge: _Optional[bool] = ...) -> None: ...
 
 class VerifyWorkspaceOutputRemoteRequest(_message.Message):
     __slots__ = ("attempt", "commit")
@@ -3454,13 +3468,13 @@ class VerifyWorkspaceOutputRemoteResponse(_message.Message):
     remote: str
     def __init__(self, remote: _Optional[str] = ...) -> None: ...
 
-class GithubWorkspaceDownload(_message.Message):
+class WorkspaceSourceDownload(_message.Message):
     __slots__ = ("reference", "chunk")
     REFERENCE_FIELD_NUMBER: _ClassVar[int]
     CHUNK_FIELD_NUMBER: _ClassVar[int]
-    reference: GithubWorkspaceBundle
+    reference: WorkspaceSourceBundle
     chunk: bytes
-    def __init__(self, reference: _Optional[_Union[GithubWorkspaceBundle, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
+    def __init__(self, reference: _Optional[_Union[WorkspaceSourceBundle, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
 
 class BlobReference(_message.Message):
     __slots__ = ("sha256", "byte_length")
