@@ -4,6 +4,15 @@ import { join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
+// A Workspace copy's repository may have been written by a harness: run none of its code.
+const safe = [
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "core.untrackedCache=false",
+];
 
 /**
  * Decides which entries of a local directory a Task copy includes, by path relative to it.
@@ -23,13 +32,13 @@ export async function localResourceFilter(root: string): Promise<LocalResourceFi
   let listed: string;
   try {
     const top = (
-      await run("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" })
+      await run("git", [...safe, "-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" })
     ).stdout.trim();
     if (relative(await realpath(top), await realpath(root)) !== "") return undefined;
     listed = (
       await run(
         "git",
-        ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        [...safe, "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
         {
           encoding: "utf8",
           maxBuffer: 256 * 1024 * 1024,

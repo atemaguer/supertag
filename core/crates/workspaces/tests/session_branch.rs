@@ -400,7 +400,7 @@ async fn a_checked_out_session_branch_is_not_moved() {
 }
 
 #[tokio::test]
-async fn repository_hooks_do_not_run_during_an_import() {
+async fn repository_hooks_and_fsmonitor_do_not_run_during_an_import() {
     let mut fixture = Fixture::new();
     let hooks = fixture.root.path().join("hooks");
     fs::create_dir(&hooks).unwrap();
@@ -418,13 +418,28 @@ async fn repository_hooks_do_not_run_during_an_import() {
         &fixture.operator,
         &["config", "core.hooksPath", hooks.to_str().unwrap()],
     );
+    // A Workspace harness that could write this repository could also set an fsmonitor.
+    let monitor = hooks.join("fsmonitor");
+    fs::write(
+        &monitor,
+        format!("#!/bin/sh\necho fsmonitor >> '{}'\n", marker.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&monitor, fs::Permissions::from_mode(0o755)).unwrap();
+    git(
+        &fixture.operator,
+        &["config", "core.fsmonitor", monitor.to_str().unwrap()],
+    );
     let base = fixture.base.clone();
     let (delivery, bundle) = fixture.deliver(&base, "a.txt");
     assert_eq!(
         run(&fixture, &delivery, &bundle).await.unwrap(),
         Imported::Created
     );
-    assert!(!marker.exists(), "a repository hook ran during the import");
+    assert!(
+        !marker.exists(),
+        "a repository hook or fsmonitor ran during the import"
+    );
 }
 
 /// The packs and object counts in the operator's repository.

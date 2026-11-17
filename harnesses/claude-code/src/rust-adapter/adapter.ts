@@ -130,6 +130,39 @@ async function withinRoots(cwd: string, path: unknown, roots: readonly string[])
   }
 }
 
+/**
+ * Whether `path` names Git metadata (any `.git` entry) inside one of `roots`. SuperTag runs `git`
+ * in these directories outside any sandbox, so a file tool must never change their metadata.
+ */
+async function insideGitMetadata(
+  cwd: string,
+  path: string,
+  roots: readonly string[],
+): Promise<boolean> {
+  const target = resolve(cwd, path);
+  let existing = target;
+  for (;;) {
+    try {
+      existing = await realpath(existing);
+      break;
+    } catch {
+      if (existing === dirname(existing)) break;
+      existing = dirname(existing);
+    }
+  }
+  return [target, existing].some((value) =>
+    roots.some((root) => {
+      const part = relative(root, value);
+      return (
+        part !== ".." &&
+        !part.startsWith("../") &&
+        !isAbsolute(part) &&
+        part.split(/[\\/]/).includes(".git")
+      );
+    }),
+  );
+}
+
 /** Workspace copies the Worker Host staged: readable, and writable when read-write. */
 export interface MountRoots {
   readonly read: readonly string[];
@@ -190,6 +223,8 @@ export function permissionHook(
         path,
         writes ? [cwd, ...mounts.write] : [cwd, ...skillRoots, ...mounts.read, ...mounts.write],
       );
+      if (allowed && writes)
+        allowed = !(await insideGitMetadata(cwd, path as string, [cwd, ...mounts.write]));
       if (allowed && ["Glob", "Grep"].includes(hook.tool_name)) {
         const pattern = input[hook.tool_name === "Glob" ? "pattern" : "glob"];
         if (

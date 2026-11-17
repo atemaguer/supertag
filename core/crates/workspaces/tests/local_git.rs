@@ -261,12 +261,17 @@ async fn source_and_harness_git_configuration_cannot_execute_during_capture() {
     let marks = fixture._root.path().join("marks");
     fs::create_dir(&marks).unwrap();
     let marker = marks.join("executed");
+    // A script, not `sh -c '...; ...'`: Git configuration treats an unquoted `;` as a comment.
+    let run = marks.join("payload");
+    fs::write(
+        &run,
+        format!("#!/bin/sh\ntouch {}\ncat\n", marker.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&run, fs::Permissions::from_mode(0o755)).unwrap();
+    let run = run.display();
     let evil = format!(
-        "[core]\n\tfsmonitor = sh -c 'touch {}'\n[filter \"evil\"]\n\tclean = sh -c 'touch {}; cat'\n\tsmudge = sh -c 'touch {}; cat'\n[diff]\n\texternal = sh -c 'touch {}'\n",
-        marker.display(),
-        marker.display(),
-        marker.display(),
-        marker.display()
+        "[core]\n\tfsmonitor = {run}\n[filter \"evil\"]\n\tclean = {run}\n\tsmudge = {run}\n[diff]\n\texternal = {run}\n"
     );
     let config = fixture.source.join(".git/config");
     let initial = fs::read(&config).unwrap();
@@ -300,6 +305,124 @@ async fn source_and_harness_git_configuration_cannot_execute_during_capture() {
     assert!(result.committed);
     assert!(!marker.exists());
     assert_eq!(fs::read(config).unwrap(), poisoned);
+}
+
+/// Whether SuperTag's reads of a checkout's changes succeed; neither may run repository code.
+async fn read_changes(case: &str, checkout: &Checkout, marker: &Path) -> (bool, bool) {
+    let cancel = CancellationToken::new();
+    let changed =
+        supertag_workspaces::changed_paths(checkout, supertag_protocol_path, 500, &cancel).await;
+    let outputs = supertag_workspaces::git_output_files(
+        checkout,
+        &["README.md".into()],
+        |_| true,
+        1024,
+        &cancel,
+    )
+    .await;
+    assert!(
+        !marker.exists(),
+        "{case}: SuperTag's Git read ran repository code"
+    );
+    (changed.is_ok(), outputs.is_ok())
+}
+
+/// A harness that can write the checkout's `.git` must not make SuperTag's own reads of it
+/// (changed paths, tracked outputs) run anything: not a hook, `core.fsmonitor`, or a filter
+/// from a redirected common directory, and a `gitdir:` pointer is never followed.
+#[tokio::test]
+async fn harness_written_checkout_git_metadata_cannot_execute_when_reading_changes() {
+    let fixture = Fixture::new();
+    let workspace = fixture.workspace();
+    let marker = fixture._root.path().join("executed");
+    // A script, not `sh -c '...; ...'`: Git configuration treats an unquoted `;` as a comment.
+    let run = fixture._root.path().join("payload");
+    fs::write(
+        &run,
+        format!("#!/bin/sh\ntouch {}\ncat\n", marker.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&run, fs::Permissions::from_mode(0o755)).unwrap();
+    let run = run.display();
+    let evil = format!(
+        "[core]\n\trepositoryformatversion = 0\n\tfsmonitor = {run}\n\thooksPath = hooks\n[filter \"evil\"]\n\tclean = {run}\n[diff]\n\texternal = {run}\n"
+    );
+    let poison = |checkout: &Checkout| {
+        fs::write(
+            checkout.path.join(".gitattributes"),
+            "* filter=evil diff=evil\n",
+        )
+        .unwrap();
+        fs::write(checkout.path.join("README.md"), "changed\n").unwrap();
+        // Same bytes, new timestamp: Git must hash it again, through any clean filter.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let ignore = fs::read(checkout.path.join(".gitignore")).unwrap();
+        fs::write(checkout.path.join(".gitignore"), ignore).unwrap();
+        let hooks = checkout.path.join(".git/hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        for hook in [
+            "pre-commit",
+            "post-checkout",
+            "reference-transaction",
+            "fsmonitor-watchman",
+        ] {
+            fs::write(
+                hooks.join(hook),
+                format!("#!/bin/sh\ntouch {}\n", marker.display()),
+            )
+            .unwrap();
+            fs::set_permissions(hooks.join(hook), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    };
+    // The checkout's own configuration, rewritten.
+    let checkout = prepare(&workspace, "task", "config", None).await;
+    poison(&checkout);
+    fs::write(checkout.path.join(".git/config"), &evil).unwrap();
+    assert_eq!(
+        read_changes("config", &checkout, &marker).await,
+        (false, false)
+    );
+
+    // An unchanged configuration whose common directory is redirected to one with a filter.
+    let checkout = prepare(&workspace, "task", "commondir", None).await;
+    poison(&checkout);
+    let redirected = fixture._root.path().join("redirected");
+    let copied = Command::new("/bin/cp")
+        .arg("-R")
+        .arg(checkout.path.join(".git"))
+        .arg(&redirected)
+        .status()
+        .unwrap();
+    assert!(copied.success());
+    fs::write(redirected.join("config"), &evil).unwrap();
+    fs::write(
+        checkout.path.join(".git/commondir"),
+        redirected.as_os_str().as_encoded_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        read_changes("commondir", &checkout, &marker).await,
+        (false, false)
+    );
+
+    // `.git` replaced by a pointer to a Git directory the harness controls.
+    let checkout = prepare(&workspace, "task", "pointer", None).await;
+    poison(&checkout);
+    fs::rename(
+        checkout.path.join(".git"),
+        fixture._root.path().join("moved.git"),
+    )
+    .unwrap();
+    fs::write(redirected.join("config"), &evil).unwrap();
+    fs::write(
+        checkout.path.join(".git"),
+        format!("gitdir: {}\n", redirected.display()),
+    )
+    .unwrap();
+    assert_eq!(
+        read_changes("pointer", &checkout, &marker).await,
+        (false, false)
+    );
 }
 
 #[tokio::test]

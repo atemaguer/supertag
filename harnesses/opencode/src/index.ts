@@ -47,18 +47,25 @@ export function openCodePermissions(
 ): Record<string, OpenCodeRule> {
   const allow = (action: string): OpenCodeAction => (actions.includes(action) ? "allow" : "deny");
   const readOnly = copies.filter(({ readWrite }) => !readWrite);
+  // SuperTag runs `git` in the worktree and copies outside any sandbox, so their Git metadata is
+  // never editable.
   const edit: OpenCodeRule =
-    allow("files:write") === "allow" && readOnly.length > 0 && worktree !== undefined
+    allow("files:write") === "allow"
       ? {
           "*": "allow",
           ...Object.fromEntries(
-            readOnly.flatMap(({ destination }) => [
-              [`${relative(worktree, destination)}/*`, "deny"],
-              [`${destination}/*`, "deny"],
-            ]),
+            [".git", ".git/*", "*/.git", "*/.git/*"].map((pattern) => [pattern, "deny"]),
           ),
+          ...(worktree === undefined
+            ? {}
+            : Object.fromEntries(
+                readOnly.flatMap(({ destination }) => [
+                  [`${relative(worktree, destination)}/*`, "deny"],
+                  [`${destination}/*`, "deny"],
+                ]),
+              )),
         }
-      : allow("files:write");
+      : "deny";
   return {
     "*": "deny",
     read: allow("files:read"),

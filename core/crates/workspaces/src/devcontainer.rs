@@ -453,7 +453,18 @@ fn git(repository: &Path, args: &[&str], limit: usize) -> Result<Vec<u8>> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repository)
-        .args(["-c", "core.hooksPath=/dev/null"])
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "protocol.allow=never",
+            "-c",
+            "protocol.ext.allow=never",
+            "-c",
+            "core.pager=cat",
+        ])
         .args(args)
         .env_clear()
         .env(

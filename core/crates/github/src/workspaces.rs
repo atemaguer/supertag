@@ -335,6 +335,8 @@ pub(crate) fn git_command(directory: &Path) -> Command {
             "-c",
             "protocol.https.allow=always",
             "-c",
+            "protocol.ext.allow=never",
+            "-c",
             "fetch.fsckObjects=true",
             "-c",
             "transfer.fsckObjects=true",

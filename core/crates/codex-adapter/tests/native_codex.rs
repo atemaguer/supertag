@@ -2114,11 +2114,23 @@ async fn disposable_write_and_commands_select_legacy_loopback_profile_and_protec
     ] {
         assert!(args.iter().any(|value| value == setting));
     }
+    // The worktree's `gitdir:` file and the common directory holding its Git directory.
     let protected = format!(
-        "permissions.supertag.filesystem={{ {} = \"read\" }}",
+        "permissions.supertag.filesystem={{ {} = \"read\", {} = \"read\" }}",
+        serde_json::to_string(
+            fixture
+                .workspace
+                .canonicalize()?
+                .join(".git")
+                .to_str()
+                .unwrap()
+        )?,
         serde_json::to_string(common.canonicalize()?.to_str().unwrap())?
     );
-    assert!(args.iter().any(|value| value == &protected));
+    assert!(
+        args.iter().any(|value| value == &protected),
+        "{protected} {args:?}"
+    );
     assert!(
         !args
             .iter()

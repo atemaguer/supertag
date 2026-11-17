@@ -1245,4 +1245,224 @@ mod tests {
         );
         Ok(())
     }
+
+    fn fixture_git(directory: &std::path::Path, args: &[&str]) -> Result<()> {
+        let status = std::process::Command::new("git")
+            .current_dir(directory)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+            ])
+            .args(args)
+            .status()?;
+        ensure!(status.success(), "git {args:?} failed");
+        Ok(())
+    }
+
+    /// Run `script` under the sandbox Codex configures from SuperTag's arguments for `policy`,
+    /// through the App Server's credential-free `command/exec`, which applies the configured
+    /// permission profile. `$TMPDIR` is the fixture root, so the Workspace lies under another
+    /// writable root, the case where Codex 0.163.0 drops its own `.git` protection.
+    async fn sandboxed(
+        executable: &std::ffi::OsStr,
+        root: &std::path::Path,
+        workspace: &std::path::Path,
+        policy: &Policy,
+        script: &str,
+    ) -> Result<Value> {
+        let home = root.join("native-home");
+        std::fs::create_dir_all(&home)?;
+        let mut child = Command::new(executable)
+            .args(crate::config::arguments(workspace, None, None, policy)?)
+            .current_dir(workspace)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").context("probe PATH")?)
+            .env("HOME", &home)
+            .env("CODEX_HOME", &home)
+            .env("TMPDIR", root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()?;
+        let mut transport =
+            Transport::new(child.stdin.take().unwrap(), child.stdout.take().unwrap());
+        let mut buffered = Vec::new();
+        transport
+            .call(
+                "initialize",
+                json!({"clientInfo":{"name":"supertag-sandbox-probe","version":"1"},"capabilities":{"experimentalApi":true}}),
+                &mut buffered,
+            )
+            .await?;
+        transport
+            .write(json!({"method":"initialized","params":{}}))
+            .await?;
+        let result = transport
+            .call(
+                "command/exec",
+                json!({"command":["/bin/sh","-c",script],"cwd":workspace,"timeoutMs":20_000}),
+                &mut buffered,
+            )
+            .await;
+        drop(transport);
+        child.kill().await?;
+        child.wait().await?;
+        result
+    }
+
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native sandbox probe"]
+    async fn installed_sandbox_keeps_every_workspace_git_directory_read_only() -> Result<()> {
+        let executable = std::env::var_os("SUPERTAG_TEST_CODEX_BINARY")
+            .context("set SUPERTAG_TEST_CODEX_BINARY")?;
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().canonicalize()?;
+        let main = root.join("main");
+        let clone = root.join("clone");
+        let copy = root.join("copy");
+        for repository in [&main, &clone, &copy] {
+            std::fs::create_dir(repository)?;
+            fixture_git(repository, &["init", "--quiet"])?;
+            fixture_git(
+                repository,
+                &["commit", "--quiet", "--allow-empty", "-m", "initial"],
+            )?;
+        }
+        fixture_git(&main, &["worktree", "add", "--quiet", "../linked"])?;
+        let linked = root.join("linked");
+        let common = main.join(".git");
+        let pointer = std::fs::read_to_string(linked.join(".git"))?;
+        let mut policy =
+            Policy::from_actions(&["files:write".into(), "commands:execute".into()], true)?;
+        // Linux runners may not permit Codex's sandbox at all; macOS always does.
+        let probe = sandboxed(&executable, &root, &clone, &policy, "true").await;
+        if cfg!(not(target_os = "macos")) && probe.as_ref().map_or(true, |r| r["exitCode"] != 0) {
+            eprintln!("skipping: Codex cannot start its sandbox here: {probe:?}");
+            return Ok(());
+        }
+        // A linked worktree: its `gitdir:` pointer, the common Git directory, and the
+        // worktree's own Git directory inside it.
+        let attempts = format!(
+            "echo ok > written; echo x >> .git; echo x > {common}/injected; \
+             echo x > {common}/worktrees/linked/injected; mkdir -p {common}/hooks; \
+             echo x > {common}/hooks/post-checkout; true",
+            common = common.display()
+        );
+        let result = sandboxed(&executable, &root, &linked, &policy, &attempts).await?;
+        assert_eq!(
+            std::fs::read_to_string(linked.join("written"))?,
+            "ok\n",
+            "{result}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(linked.join(".git")).unwrap_or_default(),
+            pointer,
+            "{result}"
+        );
+        for path in [
+            "injected",
+            "worktrees/linked/injected",
+            "hooks/post-checkout",
+        ] {
+            assert!(!common.join(path).exists(), "{path}: {result}");
+        }
+        // A full clone with a read-write Workspace copy, itself a Git checkout.
+        policy.writable_roots = vec![copy.clone()];
+        let attempts = format!(
+            "echo ok > written; echo ok > {copy}/written; echo x > .git/injected; \
+             echo x > .git/hooks/pre-commit; echo '[core] fsmonitor = x' >> .git/config; \
+             echo x > {copy}/.git/injected; mv .git moved; true",
+            copy = copy.display()
+        );
+        let config = std::fs::read_to_string(clone.join(".git/config"))?;
+        let result = sandboxed(&executable, &root, &clone, &policy, &attempts).await?;
+        assert_eq!(
+            std::fs::read_to_string(clone.join("written"))?,
+            "ok\n",
+            "{result}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(copy.join("written"))?,
+            "ok\n",
+            "{result}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(clone.join(".git/config")).unwrap_or_default(),
+            config,
+            "{result}"
+        );
+        for path in [
+            clone.join(".git/injected"),
+            clone.join(".git/hooks/pre-commit"),
+            copy.join(".git/injected"),
+            clone.join("moved"),
+        ] {
+            assert!(!path.exists(), "{}: {result}", path.display());
+        }
+        // A Workspace without Git metadata cannot create any.
+        let plain = root.join("plain");
+        std::fs::create_dir(&plain)?;
+        policy.writable_roots.clear();
+        let result = sandboxed(
+            &executable,
+            &root,
+            &plain,
+            &policy,
+            "echo ok > written; mkdir .git; true",
+        )
+        .await?;
+        assert_eq!(
+            std::fs::read_to_string(plain.join("written"))?,
+            "ok\n",
+            "{result}"
+        );
+        assert!(!plain.join(".git").exists(), "{result}");
+        // web:fetch selects Codex's own workspace-write mode, which keeps `.git` read-only.
+        let network = Policy::from_actions(
+            &[
+                "files:write".into(),
+                "commands:execute".into(),
+                "web:fetch".into(),
+            ],
+            true,
+        )?;
+        let result = sandboxed(
+            &executable,
+            &root,
+            &clone,
+            &network,
+            "echo ok > fetched; echo x > .git/injected; echo x >> .git; true",
+        )
+        .await?;
+        assert_eq!(
+            std::fs::read_to_string(clone.join("fetched"))?,
+            "ok\n",
+            "{result}"
+        );
+        assert!(!clone.join(".git/injected").exists(), "{result}");
+        let result = sandboxed(
+            &executable,
+            &root,
+            &linked,
+            &network,
+            "echo ok > fetched; echo x >> .git; true",
+        )
+        .await?;
+        assert_eq!(
+            std::fs::read_to_string(linked.join("fetched"))?,
+            "ok\n",
+            "{result}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(linked.join(".git")).unwrap_or_default(),
+            pointer,
+            "{result}"
+        );
+        Ok(())
+    }
 }

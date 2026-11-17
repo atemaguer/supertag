@@ -743,6 +743,57 @@ it("denies native file access through a workspace symlink", async () => {
   }
 });
 
+it("denies native file writes to Git metadata the host later runs git in", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "supertag-claude-git-")));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const workspace = join(directory, "workspace");
+  const copy = join(directory, "copy");
+  await mkdir(join(workspace, ".git/hooks"), { recursive: true });
+  await mkdir(join(copy, ".git"), { recursive: true });
+  await mkdir(join(workspace, "nested/.git"), { recursive: true });
+  await symlink(join(workspace, ".git"), join(workspace, "linked-metadata"));
+  const hook = permissionHook(
+    ["Read", "Write", "Edit"],
+    workspace,
+    new AbortController().signal,
+    new Set(),
+    [],
+    new Map(),
+    {
+      read: [],
+      write: [copy],
+    },
+  );
+  for (const [tool, path, decision] of [
+    ["Write", join(workspace, "src/main.ts"), "allow"],
+    ["Write", join(copy, "data.txt"), "allow"],
+    ["Read", join(workspace, ".git/config"), "allow"],
+    ["Write", join(workspace, ".git"), "deny"],
+    ["Write", join(workspace, ".git/config"), "deny"],
+    ["Edit", join(workspace, ".git/hooks/pre-commit"), "deny"],
+    ["Write", join(workspace, "nested/.git/config"), "deny"],
+    ["Write", join(workspace, "linked-metadata/config"), "deny"],
+    ["Write", join(copy, ".git/config"), "deny"],
+  ] as const) {
+    const result = await hook(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "session",
+        cwd: workspace,
+        transcript_path: "",
+        tool_name: tool,
+        tool_input: { file_path: path },
+        tool_use_id: "tool",
+      },
+      "tool",
+      { signal: new AbortController().signal },
+    );
+    expect(result, `${tool} ${path}`).toMatchObject({
+      hookSpecificOutput: { permissionDecision: decision },
+    });
+  }
+});
+
 it("reads staged Workspace copies and writes only read-write ones", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "supertag-claude-mounts-")));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));

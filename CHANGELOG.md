@@ -58,6 +58,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- Security: a Codex Task with `files:write` or `commands:execute` could write the Workspace's
+  `.git`, a directory or a linked worktree's `.git` file, when the Workspace sat under `/tmp` or
+  `$TMPDIR`. Claude Code's and OpenCode's file tools could write `.git` in any Workspace.
+  SuperTag later runs `git` there outside the sandbox. A rewritten Git directory that named
+  another common directory could make that `git` run a filter on the Worker Host. The Codex
+  adapter now grants every Workspace and Volume copy `.git` read-only, and Claude Code's and
+  OpenCode's file tools refuse `.git` writes. SuperTag's own Git reads refuse a checkout whose
+  Git directory names another common directory, and never use the `ext` transport or an external
+  diff the repository configures.
 - A Codex Task signed in with `CODEX_API_KEY` or `OPENAI_API_KEY` no longer fails with `401
   Unauthorized`: the key is staged as the Task's Codex sign-in, because `codex app-server` ignores
   it in the environment. A model stream that Codex retries no longer fails the turn, and the

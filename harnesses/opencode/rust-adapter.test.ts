@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import * as rustHarness from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it, vi } from "vitest";
-import { runOpenCode } from "./src/index.js";
+import { openCodePermissions, runOpenCode } from "./src/index.js";
 import { nativeRequest, taskModel } from "./src/rust-adapter/adapter.js";
 import { verifiedCompletionParts } from "./src/rust-adapter/completion.js";
 import { verifyWorkspaceLinks } from "./src/rust-adapter/workspace.js";
@@ -142,6 +142,24 @@ it("projects the admitted model, credentials and manager tools into a private na
       explore: { permission: { edit: "deny", read: "allow", external_directory: "deny" } },
     },
   });
+});
+
+it("never lets OpenCode edit Git metadata the host later runs git in", () => {
+  // OpenCode 1.15.12 refused `apply_patch` into `.git/` and `sub/.git/` under these rules and
+  // allowed it under a bare `edit: "allow"`; the last matching rule wins.
+  const denied = { ".git": "deny", ".git/*": "deny", "*/.git": "deny", "*/.git/*": "deny" };
+  expect(openCodePermissions(["files:read", "files:write"]).edit).toEqual({
+    "*": "allow",
+    ...denied,
+  });
+  expect(
+    openCodePermissions(
+      ["files:read", "files:write"],
+      [{ destination: "/mnt/data", readWrite: false }],
+      "/work",
+    ).edit,
+  ).toEqual({ "*": "allow", ...denied, "../mnt/data/*": "deny", "/mnt/data/*": "deny" });
+  expect(openCodePermissions(["files:read"]).edit).toBe("deny");
 });
 
 it("refuses unsafe auth sources and selected OAuth before producing a native request", async () => {

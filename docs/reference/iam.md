@@ -330,6 +330,33 @@ The profile also grants write access to the Task Attempt's output directory, so 
 Codex's `sandbox_workspace_write.network_access` setting is all-or-nothing, so it cannot express
 loopback alone.
 
+### Git metadata stays read-only
+
+SuperTag runs `git` in a Workspace outside any sandbox, for example to list changed paths and to
+capture a delivery. A Task therefore never writes the Workspace's Git metadata. Otherwise it could
+set a hook, an fsmonitor, or a filter that SuperTag would then run on the Worker Host.
+
+The `supertag` profile grants read-only access to:
+
+- the Workspace's `.git`, whether it is a directory or a linked worktree's `gitdir:` file. When
+  there is no `.git`, the grant also stops a command from creating one.
+- the Git directory a `gitdir:` file names, and a linked worktree's common Git directory.
+- the `.git` of each read-write Volume copy.
+
+Codex protects `.git` in its built-in profiles. A profile that extends `:workspace` loses that
+protection when the Workspace sits under another writable root, such as `/tmp` or `$TMPDIR`.
+The grants are therefore always explicit. With `web:fetch`, the adapter uses Codex's
+workspace-write sandbox, which keeps `.git` read-only itself.
+
+Claude Code's and OpenCode's file tools refuse a write to any `.git` path in the worktree or a
+Volume copy. Their commands, which need `allow-unsandboxed-commands`, can still write anything
+the Worker Host's user can.
+
+SuperTag's own Git commands on a Workspace also run nothing the repository configures. They turn
+off hooks, fsmonitor, the pager, external diff, and the `ext` transport. Before reading a
+checkout, the Worker Host refuses one whose Git configuration changed, or whose Git directory
+names another common directory. It never follows a `.git` file to a Git directory elsewhere.
+
 ### Fail-closed behavior
 
 Unknown runtime actions do not enable anything in the built-in harnesses. A harness must fail closed when it cannot enforce an admitted policy. Permission checks select tools; execution-environment isolation, filesystem mounts, and network policy provide the hard boundary.

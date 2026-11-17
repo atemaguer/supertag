@@ -142,10 +142,15 @@ impl Repository {
                 == config(self.oid_length, self.bare),
             "private Git configuration changed"
         );
-        ensure!(
-            !self.git_dir.join("config.worktree").try_exists()?,
-            "unexpected worktree Git configuration"
-        );
+        // A checkout's Git directory is writable by the harness. Git reads the configuration of
+        // a `commondir` instead of the one checked above, so a redirect could name a filter.
+        for name in ["config.worktree", "commondir", "gitdir"] {
+            ensure!(
+                fs::symlink_metadata(self.git_dir.join(name))
+                    .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+                "unexpected Git metadata: {name}"
+            );
+        }
         reject_object_links(&self.git_dir.join("objects"))?;
         let mut command = Command::new("/usr/bin/git");
         command
@@ -172,6 +177,7 @@ impl Repository {
             "commit.gpgSign=false",
             "tag.gpgSign=false",
             "protocol.allow=never",
+            "protocol.ext.allow=never",
             "core.pager=cat",
             "diff.external=",
         ] {

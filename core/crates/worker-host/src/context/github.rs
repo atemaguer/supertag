@@ -344,6 +344,8 @@ fn git(
             "core.hooksPath=/dev/null",
             "-c",
             "core.fsmonitor=false",
+            "-c",
+            "protocol.ext.allow=never",
         ])
         .args(args)
         .stdin(Stdio::null())

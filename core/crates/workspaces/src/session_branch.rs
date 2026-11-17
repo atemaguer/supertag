@@ -526,7 +526,9 @@ fn command(repository: &Path, environment: &[(&str, &OsStr)], args: &[&str]) -> 
         "gc.auto=0",
         "maintenance.auto=false",
         "protocol.allow=never",
+        "protocol.ext.allow=never",
         "core.pager=cat",
+        "diff.external=",
     ] {
         command.arg("-c").arg(value);
     }

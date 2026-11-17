@@ -160,19 +160,14 @@ pub(crate) fn arguments(
                 .map(str::to_owned),
             );
         }
-        let entries = filesystem(workspace, policy)?;
-        if !entries.is_empty() {
-            let entries = entries
-                .iter()
-                .map(|(path, access)| {
-                    Ok(format!("{} = \"{access}\"", serde_json::to_string(path)?))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            configuration.push(format!(
-                "permissions.supertag.filesystem={{ {} }}",
-                entries.join(", ")
-            ));
-        }
+        let entries = filesystem(workspace, policy)?
+            .iter()
+            .map(|(path, access)| Ok(format!("{} = \"{access}\"", serde_json::to_string(path)?)))
+            .collect::<Result<Vec<_>>>()?;
+        configuration.push(format!(
+            "permissions.supertag.filesystem={{ {} }}",
+            entries.join(", ")
+        ));
     } else {
         ensure!(
             policy.writable_roots.is_empty(),
@@ -199,13 +194,8 @@ pub(crate) fn thread_parameters(
             .split_once('=')
             .context("invalid owned Codex configuration")?;
         let value = if key == "permissions.supertag.filesystem" {
-            let entries = filesystem(workspace, policy)?;
-            ensure!(
-                !entries.is_empty(),
-                "protected Git directory is unavailable"
-            );
             serde_json::Value::Object(
-                entries
+                filesystem(workspace, policy)?
                     .into_iter()
                     .map(|(path, access)| (path, serde_json::Value::from(access)))
                     .collect(),
@@ -229,32 +219,37 @@ pub(crate) fn thread_parameters(
     Ok(params)
 }
 
-/// Extra filesystem grants: the Git common directory read-only and each
-/// read-write Workspace copy writable.
+/// Filesystem rules of the `supertag` permission profile. Each Git directory SuperTag or the
+/// Worker Host later runs `git` in is read-only: the Workspace's own `.git` (a directory, a
+/// linked worktree's `gitdir:` file, or absent), the common Git directory of a linked worktree,
+/// and the `.git` of each read-write Workspace copy, which is itself writable.
+///
+/// Codex 0.163.0 protects `.git` for its built-in profiles, but a profile that `extends`
+/// `:workspace` loses that protection when the Workspace lies under another writable root
+/// such as `/tmp` or `$TMPDIR` (openai/codex#52620), so the grants are always explicit. A
+/// grant for an absent `.git` also keeps a sandboxed command from creating one.
 fn filesystem(workspace: &Path, policy: &Policy) -> Result<Vec<(String, &'static str)>> {
-    let mut entries = vec![];
-    if let Some(directory) = protected_git_directory(workspace)? {
-        entries.push((
-            directory
-                .to_str()
-                .context("common Git path must be UTF-8")?
-                .to_owned(),
-            "read",
-        ));
+    let utf8 = |path: &Path, what: &str| {
+        path.to_str()
+            .map(str::to_owned)
+            .with_context(|| format!("{what} must be UTF-8"))
+    };
+    let mut entries = vec![(utf8(&workspace.join(".git"), "Workspace path")?, "read")];
+    for directory in pointed_git_directories(workspace)? {
+        entries.push((utf8(&directory, "Git directory path")?, "read"));
     }
     for root in &policy.writable_roots {
         ensure!(root.is_absolute(), "Workspace copy path must be absolute");
-        entries.push((
-            root.to_str()
-                .context("Workspace copy path must be UTF-8")?
-                .to_owned(),
-            "write",
-        ));
+        entries.push((utf8(root, "Workspace copy path")?, "write"));
+        entries.push((utf8(&root.join(".git"), "Workspace copy path")?, "read"));
     }
     Ok(entries)
 }
 
-fn protected_git_directory(workspace: &Path) -> Result<Option<PathBuf>> {
+/// The Git directories a `gitdir:` pointer at `<workspace>/.git` names: its own Git directory
+/// and, for a linked worktree, the common Git directory. A `.git` directory, or no `.git`,
+/// names none.
+fn pointed_git_directories(workspace: &Path) -> Result<Vec<PathBuf>> {
     let marker = match std::fs::read_to_string(workspace.join(".git")) {
         Ok(value) => value,
         Err(error)
@@ -263,30 +258,34 @@ fn protected_git_directory(workspace: &Path) -> Result<Option<PathBuf>> {
                 std::io::ErrorKind::NotFound | std::io::ErrorKind::IsADirectory
             ) =>
         {
-            return Ok(None);
+            return Ok(vec![]);
         }
         Err(_) => return Err(anyhow::anyhow!("could not inspect workspace Git metadata")),
     };
-    let Some(directory) = marker.trim().strip_prefix("gitdir: ") else {
-        return Ok(None);
-    };
-    let directory = Path::new(directory);
-    let directory = if directory.is_absolute() {
-        directory.to_owned()
-    } else {
-        workspace.join(directory)
-    };
+    let directory = marker
+        .trim()
+        .strip_prefix("gitdir: ")
+        .context("workspace Git pointer is invalid")?;
+    let directory = workspace
+        .join(directory)
+        .canonicalize()
+        .context("could not resolve workspace Git directory")?;
     let common = match std::fs::read_to_string(directory.join("commondir")) {
         Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(vec![directory]);
+        }
         Err(_) => return Err(anyhow::anyhow!("could not inspect common Git directory")),
     };
-    Ok(Some(
-        directory
-            .join(common.trim())
-            .canonicalize()
-            .context("could not resolve common Git directory")?,
-    ))
+    let common = directory
+        .join(common.trim())
+        .canonicalize()
+        .context("could not resolve common Git directory")?;
+    Ok(if directory.starts_with(&common) {
+        vec![common]
+    } else {
+        vec![directory, common]
+    })
 }
 
 #[cfg(test)]
@@ -303,14 +302,20 @@ mod tests {
         let mut policy = Policy::from_actions(&actions(&["files:read", "files:write"]), true)?;
         policy.writable_roots = vec![PathBuf::from("/mnt/data \"quoted\"")];
         let args = arguments(workspace.path(), None, None, &policy)?;
-        assert!(args.contains(
-            &"permissions.supertag.filesystem={ \"/mnt/data \\\"quoted\\\"\" = \"write\" }".into()
-        ));
+        let git = workspace.path().join(".git");
+        let git = git.to_str().unwrap();
+        assert!(args.contains(&format!(
+            "permissions.supertag.filesystem={{ \"{git}\" = \"read\", \"/mnt/data \\\"quoted\\\"\" = \"write\", \"/mnt/data \\\"quoted\\\"/.git\" = \"read\" }}"
+        )));
         assert!(args.contains(&"permissions.supertag.extends=\":workspace\"".into()));
         let params = thread_parameters(workspace.path(), &policy, &args)?;
         assert_eq!(
             params["config"]["permissions.supertag.filesystem"],
-            serde_json::json!({"/mnt/data \"quoted\"": "write"})
+            serde_json::json!({
+                git: "read",
+                "/mnt/data \"quoted\"": "write",
+                "/mnt/data \"quoted\"/.git": "read",
+            })
         );
         // A read-only Task cannot be given a writable copy.
         let mut read_only = Policy::from_actions(&actions(&["files:read"]), false)?;
@@ -324,6 +329,93 @@ mod tests {
                 .iter()
                 .any(|arg| arg.starts_with("permissions.supertag.filesystem"))
         );
+        Ok(())
+    }
+
+    fn git(directory: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .current_dir(directory)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+            ])
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    fn grants(workspace: &Path, policy: &Policy) -> Result<serde_json::Value> {
+        let args = arguments(workspace, None, None, policy)?;
+        let resumed = thread_parameters(workspace, policy, &args)?;
+        Ok(resumed["config"]["permissions.supertag.filesystem"].clone())
+    }
+
+    /// Every supertag profile names the Workspace's `.git` read-only, whatever its shape, and a
+    /// resumed thread gets the same grants.
+    #[test]
+    fn every_supertag_profile_keeps_workspace_git_metadata_read_only() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let root = root.path().canonicalize()?;
+        let at = |path: &Path| path.to_str().unwrap().to_owned();
+        for granted in [&["files:write"][..], &["commands:execute"]] {
+            let policy = Policy::from_actions(&actions(granted), true)?;
+            // No `.git`: the grant still keeps a command from creating one.
+            let plain = root.join("plain");
+            std::fs::create_dir_all(&plain)?;
+            assert_eq!(
+                grants(&plain, &policy)?,
+                serde_json::json!({at(&plain.join(".git")): "read"})
+            );
+            // A full clone: its `.git` directory.
+            let clone = root.join("clone");
+            if !clone.exists() {
+                std::fs::create_dir(&clone)?;
+                git(&clone, &["init", "--quiet"]);
+                git(
+                    &clone,
+                    &["commit", "--quiet", "--allow-empty", "-m", "initial"],
+                );
+                git(&clone, &["worktree", "add", "--quiet", "../linked"]);
+                git(
+                    &root,
+                    &[
+                        "init",
+                        "--quiet",
+                        "--separate-git-dir",
+                        "separate.git",
+                        "separated",
+                    ],
+                );
+            }
+            assert_eq!(
+                grants(&clone, &policy)?,
+                serde_json::json!({at(&clone.join(".git")): "read"})
+            );
+            // A linked worktree: the pointer file and the common directory, which holds the
+            // worktree's own Git directory.
+            let linked = root.join("linked");
+            assert_eq!(
+                grants(&linked, &policy)?,
+                serde_json::json!({
+                    at(&linked.join(".git")): "read",
+                    at(&clone.join(".git")): "read",
+                })
+            );
+            // A separate Git directory outside the Workspace.
+            let separated = root.join("separated");
+            assert_eq!(
+                grants(&separated, &policy)?,
+                serde_json::json!({
+                    at(&separated.join(".git")): "read",
+                    at(&root.join("separate.git")): "read",
+                })
+            );
+        }
         Ok(())
     }
 
