@@ -104,7 +104,10 @@ For PostgreSQL coverage, put the disposable test server URL in a private file an
 `SUPERTAG_RUST_TEST_POSTGRES_URL_FILE` to its path. Run the same command with
 `-- --include-ignored` to run the PostgreSQL cases. Stateful process tests run once per backend,
 as `NAME::sqlite` and `NAME::postgres`; each PostgreSQL case creates its own database and drops
-it afterwards. The process tests also use temporary state directories and a local HTTP provider
+it afterwards, and first drops any database left by a test process that was killed. To clear
+older leftovers, run
+`cargo test -p supertag-cli --test test_databases -- --ignored drop_abandoned` with the same
+variable set. The process tests also use temporary state directories and a local HTTP provider
 fixture. The partition case waits for the production 30-second execution lease to expire.
 
 Ignored tests that need a local fixture report `SKIPPED` on stderr and pass when it is missing.
