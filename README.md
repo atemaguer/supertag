@@ -162,7 +162,7 @@ off.
 
 | Compared with | What it does well | Why choose SuperTag |
 | --- | --- | --- |
-| **Hosted AI teammates** · [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | Hand off work to agents that stay available and can pick it up again later. | **Run proactive agents on your own infrastructure.** Set up persistent Tags and choose each one’s coding agent, model, tools, and where the work runs. |
+| **Hosted AI teammates** · [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | Hand off work to agents that stay available and can pick it up again later. | **Run persistent, proactive actors on your own infrastructure.** Set up persistent Tags and choose each one’s coding agent, model, tools, and where the work runs. |
 | **Coding agents** · [Claude Code](https://code.claude.com/docs/en/overview), [OpenCode](https://opencode.ai/docs/), [Codex](https://learn.chatgpt.com/docs/codex/cli) | Investigate, edit, and test code. | **Give the work a persistent owner.** Keep using your coding agents for execution. A Tag keeps its goal, permissions, and history across sessions, even when the next session uses a different coding agent. |
 | **Parallel agent workspaces** · [Paradev (formerly Superset)](https://docs.paradev.com/recipes/parallel-workstreams), [Conductor](https://www.conductor.build/docs/concepts/parallel-agents) ([winding down](https://www.conductor.build/announcement)) | Run coding sessions in separate Git worktrees and review their changes in one place. | **Hand off coordination to a Tag.** Give it an outcome and a way to verify it. It can start sessions, review how their results fit together, and bring you branches and decisions. |
 | **Agent projects** · [Cursor Projects](https://cursor.com/docs/agent/projects), [Claude Code Projects](https://code.claude.com/docs/en/claude-projects), [GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | Coordinate agent sessions around an ongoing goal. Cursor Projects lets teammates work in one Project alongside their agents. | **Work together across coding agents and machines.** Each teammate's Tags can run on a different coding agent and machine, toward one shared outcome. The same Tags keep their responsibilities and permissions across goals, and SuperTag records who requested each piece of work and what it was allowed to do. |
@@ -174,8 +174,8 @@ off.
 
 Use the same infrastructure to give your own application persistent actors. The Control Plane's
 gRPC API lets your application create and direct Tags, send them work, and inspect their
-progress. For example, you could connect a dependency scanner to a maintenance Tag and show its
-branches and test results in your own review interface. Generated Go, TypeScript, and Python
+progress. For example, you could forward Sentry errors to a `triage` Tag and show its branches and test
+results in your own review interface. Generated Go, TypeScript, and Python
 bindings come with the repository. [Explore the API](docs/reference/control-plane-api.md)
 
 To bring your own execution system, write a **harness adapter**: a program that a Worker Host
@@ -193,6 +193,11 @@ python -m pip install 'supertag==0.3.0'
 [Write a harness adapter](docs/guides/harness-adapters.md) · [Connect your own collaboration surface](docs/reference/connector-contract.md) · [Check API stability](docs/reference/api-stability.md)
 
 ## FAQ
+
+**What can a Tag do without asking me?** Only what its permissions allow. You decide which
+actions need your approval first. Repository changes always come back as branches for you to
+review, and merging stays with you.
+[Set permissions and approvals](docs/concepts/context-and-permissions.md)
 
 **How do I control changes to my repository?** Set what each Tag is allowed to do. Repository
 work happens in a separate pinned checkout and comes back as a branch you can review.
