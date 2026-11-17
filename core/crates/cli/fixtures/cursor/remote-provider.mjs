@@ -78,6 +78,9 @@ const trace = (value) =>
     `${JSON.stringify({ pid: process.pid, ...value })}\n`,
     { mode: 0o600 },
   );
+// One git or devcontainer setup step. Generous: a step that times out under machine load fails
+// a warm preparation, which the Worker Host then retries cold, and the test sees the wrong path.
+const FIXTURE_STEP_TIMEOUT_MS = 60_000;
 const serializable = (owner) => ({ ...owner, hostGeneration: String(owner.hostGeneration) });
 let allocation;
 let directory;
@@ -139,7 +142,7 @@ async function stopMcpServers() {
 async function git(cwd, ...args) {
   const { stdout } = await promisify(execFile)("/usr/bin/git", ["-C", cwd, ...args], {
     env: { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
-    timeout: 10_000,
+    timeout: FIXTURE_STEP_TIMEOUT_MS,
     maxBuffer: 1024 * 1024,
   });
   return stdout.trim();
@@ -268,7 +271,7 @@ const implementation = {
             "devcontainer-setup",
             checkout,
           ],
-          { env: { PATH: "/usr/bin:/bin", HOME: directory }, timeout: 10_000 },
+          { env: { PATH: "/usr/bin:/bin", HOME: directory }, timeout: FIXTURE_STEP_TIMEOUT_MS },
         );
         await trace({
           type: "setup",

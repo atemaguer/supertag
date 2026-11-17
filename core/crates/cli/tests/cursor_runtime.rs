@@ -45,7 +45,12 @@ use tonic::{
 use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
-const WAIT: Duration = Duration::from_secs(30);
+/// Bounds one test wait for a service, Task, or fixture step. Only the test waits this long; the
+/// product's own deadlines are unchanged. Parallel cases on a loaded machine (other builds, a
+/// shared PostgreSQL server) have stretched a remote Task past 30 seconds.
+const WAIT: Duration = Duration::from_secs(90);
+/// Bounds one test RPC, for the same reason.
+const RPC_DEADLINE: Duration = Duration::from_secs(15);
 const PROVIDER_KEY: &str = "synthetic-cursor-provider-key";
 const TAG: &str = "cursor-fixture";
 const SESSION: &str = "cursor-session";
@@ -237,7 +242,7 @@ impl Credentials {
 
     fn request<T>(&self, value: T) -> Result<Request<T>> {
         let mut request = authenticated_request(value, &self.operator, None)?;
-        request.set_timeout(Duration::from_secs(5));
+        request.set_timeout(RPC_DEADLINE);
         Ok(request)
     }
 }
@@ -260,7 +265,7 @@ impl<'a> Runtime<'a> {
         let (control, endpoint) = service(control).await?;
         let channel = protocol::negotiated(
             Channel::from_shared(endpoint.clone())?
-                .connect_timeout(Duration::from_secs(5))
+                .connect_timeout(RPC_DEADLINE)
                 .connect()
                 .await?,
         )
@@ -1389,9 +1394,19 @@ async fn cursor_remote_workspace_reuses_and_warms_prepared_artifacts(
                 &["files:read", "files:write"],
             )
             .await?;
+        let before = fixture.provider_trace()?.len();
         remote_task(&mut runtime, &fixture, "prepared", &format!("base-{round}")).await?;
         let trace = fixture.provider_trace()?;
-        let setup = kinds(&trace, "setup").pop().context("warm setup")?;
+        // This round prepared exactly once, warm: a failed warm preparation is retried cold,
+        // which would show as a second setup here.
+        let round_setups = kinds(&trace[before..], "setup");
+        assert_eq!(
+            round_setups.len(),
+            1,
+            "round {round}: {:?}",
+            &trace[before..]
+        );
+        let setup = round_setups[0].clone();
         assert_eq!(setup["prepare"], true);
         // Exports, then updateContentCommand alone.
         let lines: Vec<&str> = setup["setupCommands"]
@@ -1402,7 +1417,9 @@ async fn cursor_remote_workspace_reuses_and_warms_prepared_artifacts(
             .collect();
         assert_eq!(
             lines,
-            ["sh -c 'test ! -f notes.txt || cat notes.txt >> .setup-update'"]
+            ["sh -c 'test ! -f notes.txt || cat notes.txt >> .setup-update'"],
+            "round {round}: {:?}",
+            &trace[before..]
         );
         let snapshot = kinds(&trace, "snapshot").pop().context("warm snapshot")?;
         assert_eq!(snapshot["preparedArtifact"], *artifacts.last().unwrap());
