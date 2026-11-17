@@ -52,6 +52,8 @@ pub const MINIMUM_CODEX_VERSION: &str = "0.163.0";
 
 /// Bounds one native app-server exchange and local process steps.
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
+/// Bounds the app server's first answer, which includes starting the Codex process.
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Bounds one call to the supervising Worker Host. The host repeats an
 /// idempotent upstream call across a Gateway partition until its execution
 /// authority (a 30-second lease) ends, so the adapter waits longer than that

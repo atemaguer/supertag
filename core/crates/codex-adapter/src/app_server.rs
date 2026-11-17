@@ -19,8 +19,8 @@ use tokio::{
 use tonic::{Code, transport::Channel};
 
 use crate::{
-    MAX_STREAM, RPC_TIMEOUT, auth, checkpoint::UsageCounters, config::Policy, events, publish,
-    read_line, request, transient,
+    MAX_STREAM, RPC_TIMEOUT, STARTUP_TIMEOUT, auth, checkpoint::UsageCounters, config::Policy,
+    events, publish, read_line, request, transient,
 };
 
 type Take = Pin<Box<dyn Future<Output = (Instant, Result<Option<TakeInputResponse>>)> + Send>>;
@@ -139,7 +139,14 @@ impl Transport {
         buffered: &mut Vec<Value>,
     ) -> Result<Value> {
         let id = self.send(method, params).await?;
-        time::timeout(RPC_TIMEOUT, async {
+        // The first answer also waits for the app server process to start, which a loaded
+        // machine can stretch past one exchange's bound.
+        let limit = if method == "initialize" {
+            STARTUP_TIMEOUT
+        } else {
+            RPC_TIMEOUT
+        };
+        time::timeout(limit, async {
             loop {
                 let value = self
                     .output
@@ -182,12 +189,7 @@ impl Transport {
             }
         })
         .await
-        .with_context(|| {
-            format!(
-                "Codex did not answer {method} within {}s",
-                RPC_TIMEOUT.as_secs()
-            )
-        })?
+        .with_context(|| format!("Codex did not answer {method} within {}s", limit.as_secs()))?
     }
 }
 

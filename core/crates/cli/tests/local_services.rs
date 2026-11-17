@@ -25,7 +25,10 @@ use tonic::transport::Channel;
 use uuid::Uuid;
 const BIN: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
-const WAIT: Duration = Duration::from_secs(25);
+/// Bounds one test wait for the supervisor, a service, or a Task. Only the test waits this long;
+/// the product's own deadlines are unchanged. Parallel cases on a loaded machine have stretched
+/// startup and Task settlement past 25 seconds.
+const WAIT: Duration = Duration::from_secs(60);
 struct Process {
     child: Child,
     ready: mpsc::Receiver<String>,

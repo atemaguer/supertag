@@ -46,15 +46,13 @@ where
             let options = PgConnectOptions::from_str(admin_url.trim())?;
             let mut admin = PgConnection::connect_with(&options).await?;
             let name = format!("supertag_rust_process_{}", uuid::Uuid::new_v4().simple());
+            // template0 never accepts connections, so concurrent cases cannot contend for it.
             admin
-                .execute(format!("CREATE DATABASE {name}").as_str())
+                .execute(format!("CREATE DATABASE {name} TEMPLATE template0").as_str())
                 .await?;
             let url = options.database(&name).to_url_lossy().to_string();
             let outcome = AssertUnwindSafe(Box::pin(test(url))).catch_unwind().await;
-            // FORCE ends connections from any service a failed body left running.
-            let cleanup = admin
-                .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
-                .await;
+            let cleanup = drop_database(&mut admin, &name).await;
             admin.close().await?;
             match outcome {
                 Ok(result) => {
@@ -63,6 +61,30 @@ where
                 }
                 Err(panic) => std::panic::resume_unwind(panic),
             }
+        }
+    }
+}
+
+/// Drops `name` even while a service the body left running holds or reopens connections: new
+/// connections are refused first, then `FORCE` ends the existing ones. A backend that does not
+/// exit within PostgreSQL's five-second grace still fails the drop, so it is retried.
+pub async fn drop_database(admin: &mut PgConnection, name: &str) -> Result<()> {
+    let mut attempt = 0;
+    loop {
+        let _ = admin
+            .execute(format!("ALTER DATABASE {name} ALLOW_CONNECTIONS false").as_str())
+            .await;
+        match admin
+            .execute(format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)").as_str())
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(error) if attempt < 5 => {
+                attempt += 1;
+                eprintln!("retrying DROP DATABASE {name}: {error}");
+                tokio::time::sleep(std::time::Duration::from_millis(200 * attempt)).await;
+            }
+            Err(error) => return Err(error).with_context(|| format!("drop database {name}")),
         }
     }
 }
