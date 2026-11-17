@@ -2110,6 +2110,16 @@ message Assignment {
   Task task = 1;
   string attempt_id = 2;
   string lease_token = 3;
+  // Later messages from the same Session that this Attempt answers together with `task`,
+  // oldest first. The Worker Host renders them into the harness prompt.
+  repeated JoinedMessage joined = 4;
+}
+
+// A person's message joined into another Task's Attempt when that Attempt was claimed.
+message JoinedMessage {
+  string task_id = 1;
+  string text = 2;
+  int64 sent_at_ms = 3;
 }
 
 message StartTaskRequest {

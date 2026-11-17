@@ -2759,14 +2759,26 @@ class ClaimTaskResponse(_message.Message):
     def __init__(self, assignment: _Optional[_Union[Assignment, _Mapping]] = ...) -> None: ...
 
 class Assignment(_message.Message):
-    __slots__ = ("task", "attempt_id", "lease_token")
+    __slots__ = ("task", "attempt_id", "lease_token", "joined")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    JOINED_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
     lease_token: str
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ...) -> None: ...
+    joined: _containers.RepeatedCompositeFieldContainer[JoinedMessage]
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., joined: _Optional[_Iterable[_Union[JoinedMessage, _Mapping]]] = ...) -> None: ...
+
+class JoinedMessage(_message.Message):
+    __slots__ = ("task_id", "text", "sent_at_ms")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    SENT_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    text: str
+    sent_at_ms: int
+    def __init__(self, task_id: _Optional[str] = ..., text: _Optional[str] = ..., sent_at_ms: _Optional[int] = ...) -> None: ...
 
 class StartTaskRequest(_message.Message):
     __slots__ = ("task_id", "attempt_id", "lease_token")
