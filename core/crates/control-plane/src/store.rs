@@ -856,8 +856,71 @@ impl Store {
         .await
     }
 
-    /// Claims as `claim_task_with_sources` does, and says what the claim can run.
+    /// Claims as `claim_task_with_sources` does, and says what the claim can run. The claim is
+    /// one short transaction; the sweeps a claim used to run follow it in their own.
     pub(crate) async fn claim_scoped(
+        &self,
+        host: &HostAuthority,
+        operation_id: &str,
+        sources: (&[String], &[String]),
+        capabilities: (
+            HarnessKind,
+            &[ContextContract],
+            Option<&HarnessExecutionProfile>,
+        ),
+        claimed_scope: &mut Option<ClaimScope>,
+    ) -> Result<Option<Assignment>> {
+        let assignment = self
+            .claim_once(host, operation_id, sources, capabilities, claimed_scope)
+            .await?;
+        if assignment.is_some() {
+            // The Task is handed out at once; the sweeps follow without delaying it.
+            let store = self.clone();
+            tokio::spawn(async move {
+                let _ = store.sweep_after_claim().await;
+            });
+        } else {
+            self.sweep_after_claim().await?;
+        }
+        Ok(assignment)
+    }
+
+    /// The Objective, Mailbox and Work Session report sweeps, at most every 250 ms whoever
+    /// claims. They create or settle work rather than decide what a claim may take, and the
+    /// periodic maintenance pass runs them too. A Task one creates wakes the claims waiting.
+    async fn sweep_after_claim(&self) -> Result<()> {
+        const EVERY_MS: i64 = 250;
+        // Paced by the wall clock; the sweeps themselves use the execution clock.
+        let wall = authority::system_now_ms();
+        let last = self
+            .live
+            .claim_sweep
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if (0..EVERY_MS).contains(&(wall - last))
+            || self
+                .live
+                .claim_sweep
+                .compare_exchange(
+                    last,
+                    wall,
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                )
+                .is_err()
+        {
+            return Ok(());
+        }
+        let _wake = self.wake_follows();
+        let (mut transaction, _) = self.write().await?;
+        let now = self.execution_now_ms();
+        crate::objectives::objective_sweep_in(&mut transaction, now).await?;
+        crate::mailbox::sweep_in(&mut transaction).await?;
+        crate::work_sessions::reports::sweep_in(&mut transaction, now).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn claim_once(
         &self,
         host: &HostAuthority,
         operation_id: &str,
@@ -914,11 +977,11 @@ impl Store {
         let (mut transaction, _) = self.write().await?;
         let all_tags = hosts::current_scope_in(&mut transaction, host).await?;
         let now = self.execution_now_ms();
-        crate::objectives::objective_sweep_in(&mut transaction, now).await?;
+        // Only what decides which Tasks may be claimed now runs inside the claim: expired
+        // reservations go back to the queue, and live inputs that can no longer be delivered
+        // release their messages. The other sweeps run after it; see `sweep_after_claim`.
         authority::expire_due_attempts(&mut transaction, now).await?;
         crate::inputs::sweep_in(&mut transaction, now).await?;
-        crate::mailbox::sweep_in(&mut transaction).await?;
-        crate::work_sessions::reports::sweep_in(&mut transaction, now).await?;
         let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, gateway_workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
             .bind(&host.principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {

@@ -586,7 +586,8 @@ pub async fn run(
                     continue;
                 }
                 supertag_protocol::crash_point("worker-host.claim", "journaled");
-                presence.first_report(Duration::from_secs(5)).await;
+                // A claim made before the host's first presence report finds no work; the
+                // report then wakes the claims the Control Plane holds, so none waits for it.
                 let mut claim = claim;
                 if ready.is_some() {
                     // The host says it is ready after its first claim answers, so that one

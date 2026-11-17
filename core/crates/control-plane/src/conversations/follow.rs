@@ -39,6 +39,8 @@ pub(crate) struct Live {
     pub(crate) texts: super::texts::Texts,
     /// Worker Host claims held while they wait for a Task.
     pub(crate) claims: crate::claims::HeldClaims,
+    /// When the sweeps that follow a claim last ran, in milliseconds since the epoch.
+    pub(crate) claim_sweep: std::sync::atomic::AtomicI64,
     pub(crate) closing: CancellationToken,
 }
 
@@ -49,6 +51,7 @@ impl Default for Live {
             text_changes: tokio::sync::watch::Sender::new(0),
             texts: Default::default(),
             claims: Default::default(),
+            claim_sweep: Default::default(),
             closing: CancellationToken::new(),
         }
     }
