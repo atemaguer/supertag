@@ -696,10 +696,11 @@ async fn socket_mode_acknowledges_admitted_events_and_reconnects(database: Strin
     // Slack's redelivery of an admitted event is a replay.
     connection.acknowledged(mention.clone()).await?;
     assert_eq!(task_count(&database).await?, 1);
-    // A changed event under the same ID conflicts and is never acknowledged.
+    // A changed event under the same ID can never be admitted: it is acknowledged, not admitted.
     let mut conflict = mention.clone();
     conflict["event"]["text"] = "Changed provider content".into();
-    connection.unacknowledged(conflict).await?;
+    connection.acknowledged(conflict).await?;
+    assert_eq!(task_count(&database).await?, 1);
 
     let initial = receipt(&private, &credentials, &mention).await?;
     execute(
@@ -758,7 +759,53 @@ async fn socket_mode_acknowledges_admitted_events_and_reconnects(database: Strin
         receipt(&private, &credentials, &next).await?.session_id,
         initial.session_id
     );
-    assert_eq!(task_count(&database).await?, 3);
+    // With the reply and that mention, three quick messages wait in the thread: one run
+    // answers them together, with at most one acknowledgement and one reply.
+    let third = payload("EvREPLY2", "1794470004.100000", false, "and open a PR");
+    reconnected.acknowledged(third).await?;
+    assert_eq!(task_count(&database).await?, 4);
+    let before = slack.posts.lock().await.len();
+    execute(
+        &credentials,
+        directory.path(),
+        &private,
+        "host-two",
+        &followup,
+        &database,
+    )
+    .await?;
+    {
+        let posts = slack.posts.lock().await;
+        let texts: Vec<&str> = posts[before..]
+            .iter()
+            .filter_map(|(_, body)| body["text"].as_str())
+            .collect();
+        let finals: Vec<_> = texts
+            .iter()
+            .filter(|text| text.starts_with("Original Tag"))
+            .collect();
+        assert_eq!(finals.len(), 1, "{texts:?}");
+        for message in ["Continue with option A", "Verify the result", "and open a PR"] {
+            assert!(finals[0].contains(message), "{texts:?}");
+        }
+        // Everything else is the one acknowledgement, posted once and edited in place.
+        assert!(
+            texts
+                .iter()
+                .all(|text| text.starts_with("Original Tag") || text.starts_with("Got it")),
+            "{texts:?}"
+        );
+        let acknowledgements = posts[before..]
+            .iter()
+            .filter(|(path, body)| {
+                path == "/chat.postMessage"
+                    && body["text"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("Got it"))
+            })
+            .count();
+        assert!(acknowledgements <= 1, "{texts:?}");
+    }
     let logs = gateway.logs();
     assert!(!logs.contains(APP_TOKEN) && !logs.contains(BOT));
     gateway.stop().await?;

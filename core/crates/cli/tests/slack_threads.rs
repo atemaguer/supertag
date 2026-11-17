@@ -482,6 +482,140 @@ database_tests! {
     drain_hands_connector_to_second_gateway;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     slack_thread_starts_and_steers_an_objective;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    three_quick_messages_get_one_acknowledgement_and_one_reply;
+}
+
+/// Three quick messages in a thread: the first is acknowledged, the claim joins the other two
+/// into its run, and one reply replaces the acknowledgement. Nothing else is posted.
+async fn three_quick_messages_get_one_acknowledgement_and_one_reply(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let credentials = Credentials::new();
+    let mock = MockSlack::start().await?;
+    let database = Database { url: database };
+    let (mut cp, private) = control_plane(&credentials, directory.path(), &database).await?;
+    let (mut serving, public, http) = gateway(
+        &credentials,
+        &private,
+        directory.path(),
+        "gateway",
+        "builder",
+        &mock,
+    )
+    .await?;
+    put_builder(&credentials, &public).await?;
+    let mention = payload("EvQUICK1", THREAD, true, "check why CI is red");
+    for message in [
+        mention.clone(),
+        payload("EvQUICK2", "1794470000.200000", false, "also the flaky test"),
+        payload("EvQUICK3", "1794470000.300000", false, "and open a PR"),
+    ] {
+        assert_eq!(signed(&http, &message).await?, reqwest::StatusCode::OK);
+    }
+    assert_eq!(task_count(&database.url).await?, 3);
+    // The acknowledgement is posted before any work starts.
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while mock.requests.lock().await.is_empty() {
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "acknowledgement was not posted"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    let mut connector = ConnectorClient::new(protocol::dial(private.clone()).await?);
+    let first = receipt(&mut connector, &credentials, &mention).await?;
+    let completed = run_host(&credentials, directory.path(), &public, "host", &first).await?;
+    let result = completed.result.unwrap_or_default();
+    assert!(
+        result.contains("check why CI is red")
+            && result.contains("also the flaky test")
+            && result.contains("and open a PR"),
+        "{result}"
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let last = loop {
+        if let Some(index) = mock
+            .requests
+            .lock()
+            .await
+            .iter()
+            .position(|(_, body)| body["text"] == result.as_str())
+        {
+            break index;
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the reply was not delivered"
+        );
+        sleep(Duration::from_millis(50)).await;
+    };
+    // Mentioning another Tag in this thread is answered once, however often Slack delivers it.
+    OperatorClient::new(protocol::dial(public.clone()).await?)
+        .put_tag(credentials.operator(PutTagRequest {
+            tag_id: "another".into(),
+            instructions: "Wrong Tag".into(),
+            allowed_actions: vec!["files:read".into()],
+            ..Default::default()
+        })?)
+        .await?;
+    let (mut other, _, other_http) = gateway(
+        &credentials,
+        &private,
+        directory.path(),
+        "other-gateway",
+        "another",
+        &mock,
+    )
+    .await?;
+    let hijack = payload("EvQUICK4", "1794470000.400000", true, "take over");
+    for _ in 0..2 {
+        assert_eq!(signed(&other_http, &hijack).await?, reqwest::StatusCode::OK);
+    }
+    const REFUSAL: &str = "This thread belongs to builder. Mention builder, or start a new thread.";
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while !mock
+        .requests
+        .lock()
+        .await
+        .iter()
+        .any(|(_, body)| body["text"] == REFUSAL)
+    {
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the refusal was not answered"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(signed(&http, &hijack).await?, reqwest::StatusCode::OK);
+    assert_eq!(task_count(&database.url).await?, 3);
+    other.stop().await?;
+    serving.stop().await?;
+    cp.stop().await?;
+    let mut requests = mock.requests.lock().await;
+    let notice = requests.split_off(last + 1);
+    assert_eq!(notice.len(), 1, "one answer to the refused message");
+    assert_eq!(notice[0].0, "/chat.postMessage");
+    assert_eq!(notice[0].1["thread_ts"], THREAD);
+    assert_eq!(requests.len(), last + 1, "nothing else follows the reply");
+    let posts: Vec<_> = requests
+        .iter()
+        .filter(|(path, _)| path == "/chat.postMessage")
+        .collect();
+    assert_eq!(posts.len(), 1, "one acknowledgement and no other post");
+    assert_eq!(posts[0].1["text"], ACKNOWLEDGEMENT);
+    for (path, body) in &requests[1..last] {
+        assert_eq!(path, "/chat.update");
+        assert_eq!(
+            body["text"],
+            format!("{ACKNOWLEDGEMENT}\n\nAlso reading your follow-up.")
+        );
+    }
+    let (path, reply) = &requests[last];
+    assert_eq!(path, "/chat.update");
+    assert_eq!(reply["text"], result);
+    Ok(())
 }
 
 async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gateways(
@@ -586,9 +720,10 @@ async fn signed_thread_replies_survive_restart_and_deduplicate_across_two_gatewa
     );
     let mut conflict = reply.clone();
     conflict["event"]["text"] = "Changed provider content".into();
+    // Other content under the same event can never be admitted: acknowledged, never admitted.
     assert_eq!(
         signed(&second_http, &conflict).await?,
-        reqwest::StatusCode::CONFLICT
+        reqwest::StatusCode::OK
     );
     for (field, value) in [
         ("bot_id", json!("BBOT1")),

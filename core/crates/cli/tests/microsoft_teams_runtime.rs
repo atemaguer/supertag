@@ -493,6 +493,14 @@ async fn send(endpoint: &str, body: &Value, token: &str) -> Result<reqwest::Stat
         .status())
 }
 async fn receipt(private: &str, credentials: &Credentials, id: &str) -> Result<Task> {
+    receipt_text(private, credentials, id, "inspect").await
+}
+async fn receipt_text(
+    private: &str,
+    credentials: &Credentials,
+    id: &str,
+    prompt: &str,
+) -> Result<Task> {
     ConnectorClient::new(protocol::dial(private.to_owned()).await?)
         .accept_microsoft_teams_activity(credentials.connector(
             AcceptMicrosoftTeamsActivityRequest {
@@ -506,7 +514,7 @@ async fn receipt(private: &str, credentials: &Credentials, id: &str) -> Result<T
                 root_activity_id: ROOT.into(),
                 actor_id: USER.into(),
                 service_url: SERVICE.into(),
-                prompt: "inspect".into(),
+                prompt: prompt.into(),
                 tag_id: "builder".into(),
             },
         )?)
@@ -584,7 +592,9 @@ async fn microsoft_signed_activity_and_threaded_reply_survive_split_process_rest
     assert_eq!(task_count(&database).await?, 1);
     let mut conflict = body.clone();
     conflict["text"] = "<at>SuperTag</at> changed".into();
-    assert_eq!(signed(&web, &conflict, claims(), "first").await?, 409);
+    // A redelivery with other content can never be admitted, so it is acknowledged unadmitted.
+    assert_eq!(signed(&web, &conflict, claims(), "first").await?, 200);
+    assert_eq!(task_count(&database).await?, 1);
     // Unknown kid triggers bounded key rotation refresh, not disabled verification.
     *mock.kid.lock().await = "rotated".into();
     assert_eq!(signed(&web, &body, claims(), "rotated").await?, 200);
@@ -619,6 +629,26 @@ async fn microsoft_signed_activity_and_threaded_reply_survive_split_process_rest
     assert_eq!(task_count(&database).await?, 2);
     assert_eq!(mock.requests.lock().await.len(), 2);
     assert_eq!(mock.tokens.load(Ordering::SeqCst), 2);
+    // Three quick messages in the thread: one run answers them together with one reply.
+    let quick = ["1741000000003", "1741000000004", "1741000000005"];
+    for (id, text) in quick.iter().zip(["check CI", "also the flaky test", "and open a PR"]) {
+        let mut message = payload(id);
+        message["text"] = format!("<at>SuperTag</at> {text}").into();
+        assert_eq!(signed(&web, &message, claims(), "rotated").await?, 200);
+    }
+    let first = receipt_text(&private, &credentials, quick[0], "check CI").await?;
+    mock.responses.add_permits(1);
+    execute(&credentials, dir.path(), &public, &first).await?;
+    settled(&database, &first, ReplyState::Delivered).await?;
+    assert_eq!(task_count(&database).await?, 5);
+    let requests = mock.requests.lock().await;
+    assert_eq!(requests.len(), 3, "one reply answers the three messages");
+    let reply = requests[2].to_string();
+    assert!(
+        reply.contains("check CI") && reply.contains("also the flaky test") && reply.contains("and open a PR"),
+        "{reply}"
+    );
+    drop(requests);
     assert!(!restarted.logs().contains(SECRET) && !restarted.logs().contains(TOKEN));
     restarted.stop().await?;
     cp.stop().await?;

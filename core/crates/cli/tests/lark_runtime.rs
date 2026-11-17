@@ -641,6 +641,28 @@ async fn lark_websocket_replays_after_failed_admission_and_keeps_activated_threa
     settled(&database, &next, ReplyState::Delivered).await?;
     assert_eq!(task_count(&database).await?, 2);
     assert_eq!(mock.requests.lock().await.len(), 2);
+    // Three quick messages in the thread: one run answers them together with one reply.
+    for (index, text) in ["follow up", "also the flaky test", "and open a PR"]
+        .iter()
+        .enumerate()
+    {
+        let mut quick = payload(&format!("quick-{index}"), &format!("om_quick{index}"), false);
+        quick["event"]["message"]["content"] = json!({ "text": text }).to_string().into();
+        assert_eq!(connection.event(&quick, &format!("quick-{index}")).await?, 200);
+    }
+    let first = receipt(&private, &credentials, "quick-0", "om_quick0", false).await?;
+    mock.responses.add_permits(1);
+    execute(&credentials, dir.path(), &public, &first).await?;
+    settled(&database, &first, ReplyState::Delivered).await?;
+    assert_eq!(task_count(&database).await?, 5);
+    let requests = mock.requests.lock().await;
+    assert_eq!(requests.len(), 3, "one reply answers the three messages");
+    let reply = format!("{:?}", requests[2]);
+    assert!(
+        reply.contains("also the flaky test") && reply.contains("and open a PR"),
+        "{reply}"
+    );
+    drop(requests);
     assert!(!restarted.logs().contains(SECRET) && !restarted.logs().contains(TOKEN));
     replica.stop().await?;
     restarted.stop().await?;
