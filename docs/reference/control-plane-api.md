@@ -137,8 +137,10 @@ running drops it.
 Each has a preview of its latest message, when it was active, how many finished replies you have
 not read, whether one of its Tasks is queued or running, and `asking` when its latest message is
 the Tag's question still waiting for an answer. Quiet turns count in none of these, and a
-Schedule's turn counts only once it finishes. While it runs, `ListMessages` returns it with its
-`schedule_id`, so a client can refresh it, and the apps show it only once it finishes. Clients use
+Schedule's turn counts only once it finishes or a person's message joins it. While it runs,
+`ListMessages` returns it with its `schedule_id`, so a client can refresh it; the apps show it
+once it finishes, or at once when a message's `live_input` names it as the turn the message
+joins. Clients use
 the list for notifications and badges. `MarkConversationRead` records the
 latest finished turn you have read.
 

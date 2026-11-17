@@ -262,19 +262,69 @@ async fn one_off_fires_once_in_the_conversation(
         "{}",
         task.prompt
     );
+    // Running, it is not yet work the conversation shows.
+    let listed = store
+        .list_conversations(ALICE, &ListConversationsRequest {})
+        .await
+        .unwrap();
+    assert!(!listed.conversations[0].working);
+    // Alice writes while it runs: her message joins it, so it now answers her and shows as work.
+    // Clients find it through the message's live input, which names the running turn.
+    let joined = store
+        .send_message(
+            ALICE,
+            &SendMessageRequest {
+                tag_id: "lead".into(),
+                text: "Also check the release branch".into(),
+                operation_id: "join".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let input = joined
+        .live_input
+        .expect("the message joins the running turn");
+    assert_eq!(input.task_id, task.task_id);
+    assert_eq!(input.state(), LiveInputState::Pending);
+    let page = store
+        .list_messages(
+            ALICE,
+            &ListMessagesRequest {
+                tag_id: "lead".into(),
+                limit: 10,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let running = page
+        .messages
+        .iter()
+        .find(|message| message.task.as_ref().unwrap().task_id == task.task_id)
+        .expect("the running turn is in the history");
+    assert_eq!(
+        running.schedule_id.as_deref(),
+        Some(schedule.schedule_id.as_str())
+    );
+    let listed = store
+        .list_conversations(ALICE, &ListConversationsRequest {})
+        .await
+        .unwrap();
+    assert!(listed.conversations[0].working);
     finish(store, host, &identity, true).await;
-    // Once it finishes and posts, it is the latest message.
+    // Once it finishes and posts, its reply counts; Alice's later message stays the latest.
     let listed = store
         .list_conversations(ALICE, &ListConversationsRequest {})
         .await
         .unwrap();
     let after = &listed.conversations[0];
-    assert_eq!(
-        (after.preview.as_str(), after.preview_from_tag),
-        ("Handled", true)
-    );
-    assert_eq!(after.latest_order, latest.order);
+    assert_eq!(after.latest_order, joined.order);
     assert_eq!((before.unread_count, after.unread_count), (1, 2));
+    // Her message, not taken in before the turn ended, runs as its own turn.
+    let (follower, turn) = next(store, host).await.unwrap();
+    assert_eq!(follower.task_id, input.follower_task_id);
+    finish(store, host, &turn, true).await;
 }
 
 async fn recurrence_catches_up_once_and_coalesces(

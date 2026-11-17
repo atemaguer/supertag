@@ -110,6 +110,16 @@ describe("a Schedule's wake-up", () => {
       expect(ids(shownMessages([{ ...wake, task: { ...wake.task, state } }]))).toEqual([]);
     const posted = { ...wake, task: { ...wake.task, state: "succeeded", result: "CI is red" } };
     expect(ids(shownMessages([hello, posted]))).toEqual(["hello", "wake"]);
+    // A person's message joining it makes it their answer: it shows at once.
+    for (const state of ["pending", "dispatching", "accepted", "unknown"]) {
+      const joined = { ...message("ask", 3, "queued"), liveInput: { taskId: "wake", state } };
+      expect(ids(shownMessages([hello, wake, joined]))).toEqual(["hello", "wake", "ask"]);
+    }
+    const withdrawn = {
+      ...message("ask", 3, "queued"),
+      liveInput: { taskId: "wake", state: "withdrawn" },
+    };
+    expect(ids(shownMessages([hello, wake, withdrawn]))).toEqual(["hello", "ask"]);
     // A person's running turn shows at once.
     expect(ids(shownMessages([message("ask", 3, "running")]))).toEqual(["ask"]);
   });

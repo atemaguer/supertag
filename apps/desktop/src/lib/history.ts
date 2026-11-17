@@ -27,13 +27,24 @@ export function unsettled(message: Message) {
   return !FINISHED.has(message.task.state);
 }
 
+/** A person's message on its way into, or taken in by, a running turn: that turn answers it. */
+const JOINING = new Set(["pending", "dispatching", "accepted", "unknown"]);
+
 /**
  * The messages a conversation shows. A turn no person asked for, a Schedule's wake-up, shows
  * only once it finishes: it may find nothing to say and stay quiet, so it never appears, types,
- * and vanishes. The history still holds it, so the next read refreshes it.
+ * and vanishes. The history still holds it, so the next read refreshes it. Once a person's
+ * message joins it, it answers that person, so it shows at once, typing included.
  */
 export function shownMessages(messages: readonly Message[]): Message[] {
-  return messages.filter((message) => !(message.scheduleId && unsettled(message)));
+  const answering = new Set(
+    messages
+      .filter(({ liveInput }) => liveInput && JOINING.has(liveInput.state))
+      .map(({ liveInput }) => liveInput?.taskId),
+  );
+  return messages.filter(
+    (message) => !(message.scheduleId && unsettled(message) && !answering.has(message.task.taskId)),
+  );
 }
 
 /** What to read to bring `history` up to date: only what changed, once it holds a copy. */

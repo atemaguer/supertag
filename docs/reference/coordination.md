@@ -574,7 +574,8 @@ When a Schedule is due, the Control Plane queues an ordinary Task for the Tag. I
 run itself: the Session runs one turn at a time, in order, and the Tag's current Permission Sets
 apply. The turn's prompt says why the Tag was woken; the conversation shows only the Tag's reply,
 with a "Scheduled" caption, and nothing while the turn runs: no message, no typing indicator, and
-no work in the conversation list. When the check finds nothing that needs attention, the Tag calls
+no work in the conversation list. A message you send while it runs joins it, so from then on it
+answers you and shows as it works. When the check finds nothing that needs attention, the Tag calls
 `stay_quiet` and nothing is posted; see [Quiet results](#quiet-results). The prompt also says how
 the Schedule's last ten fires landed, such as "Of this Schedule's last 4 fires: 2 posted (2 read,
 1 answered); 2 stayed quiet.", so the Tag can calibrate when to speak.

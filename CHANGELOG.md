@@ -20,7 +20,7 @@ within the pre-1.0 compatibility policy described in
   how the Tag's unprompted messages of the last 30 days landed (posted, read, answered, quiet),
   and a Schedule's wake-up prompt says how its last fires did. A Schedule's turn shows in the
   desktop app and the terminal UI only once it finishes, with no typing indicator while it
-  runs.
+  runs, unless a message you send joins it.
 - The desktop app notifies you when a Tag replies or asks a question in a conversation you are
   not looking at, and clicking a notification opens that Tag. The Dock badge shows your unread
   replies. Choose all messages, questions only, or off under Notifications in the Control Plane

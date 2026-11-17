@@ -332,6 +332,11 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 	}
 	if input := message.GetLiveInput(); input != nil {
 		switch input.GetState() {
+		case v2.LiveInputState_LIVE_INPUT_STATE_PENDING, v2.LiveInputState_LIVE_INPUT_STATE_DISPATCHING,
+			v2.LiveInputState_LIVE_INPUT_STATE_ACCEPTED, v2.LiveInputState_LIVE_INPUT_STATE_UNKNOWN:
+			out.Answering = input.GetTaskId()
+		}
+		switch input.GetState() {
 		case v2.LiveInputState_LIVE_INPUT_STATE_PENDING:
 			out.WaitingReason = "Waiting to deliver your message to the running Task."
 			return out

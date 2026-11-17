@@ -335,6 +335,9 @@ type Message struct {
 	// The turn finished quietly: no person waited on it and it found nothing to say, so the
 	// conversation does not show it.
 	Quiet bool
+	// The running turn this message is on its way into, or was taken in by: that turn answers
+	// it. Empty when the message runs as its own turn.
+	Answering string
 }
 
 // A message the Tag wrote while its turn ran.

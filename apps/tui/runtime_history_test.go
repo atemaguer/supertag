@@ -428,3 +428,34 @@ func TestRuntimeHistoryHidesAScheduledTurnUntilItFinishes(t *testing.T) {
 		t.Fatalf("finished scheduled turn transcript:\n%s", got)
 	}
 }
+
+// A person's message that joins a running Schedule's turn makes that turn their answer: it shows
+// at once with the typing indicator, whether the message arrives in a read or as a send receipt.
+func TestRuntimeHistoryShowsAScheduledTurnAPersonJoined(t *testing.T) {
+	for _, receipt := range []bool{false, true} {
+		m := runtimeModel(t)
+		first := ordered(runtimeHistoryMessage("asked", "Check CI every morning", "I'll check at 9."), 1)
+		running := ordered(&views.Message{TaskId: "woken", Tag: "lead", SessionId: "session",
+			Status: views.ReplyStatus_REPLY_STATUS_WAITING, Started: true, ScheduleId: "sch_1"}, 2)
+		m = update(t, m, runtimePage(0, running, first))
+		if !m.shown().runtime.turns["woken"].hidden || m.showsTyping() {
+			t.Fatal("the running scheduled turn showed before anyone joined it")
+		}
+		joined := ordered(&views.Message{TaskId: "ask", Tag: "lead", SessionId: "session", Text: "Also check the release branch",
+			Status: views.ReplyStatus_REPLY_STATUS_WAITING, Answering: "woken",
+			WaitingReason: "Waiting to deliver your message to the running Task."}, 3)
+		if receipt {
+			m = update(t, m, sentMsg{tag: "lead", message: joined})
+		} else {
+			m = update(t, m, historyMsg{tag: "lead", items: client.History("lead", []*views.Message{joined}),
+				conversationID: runtimeConversationID, incremental: true, revision: m.shown().runtime.revision})
+		}
+		turn := m.shown().runtime.turns["woken"]
+		if turn == nil || turn.hidden || len(turn.entries) == 0 || turn.entries[0].text != "Scheduled" {
+			t.Fatalf("receipt=%v: joined scheduled turn = %+v", receipt, turn)
+		}
+		if !m.showsTyping() {
+			t.Fatalf("receipt=%v: the person waits without a typing indicator:\n%s", receipt, ansi.Strip(m.renderConversation()))
+		}
+	}
+}

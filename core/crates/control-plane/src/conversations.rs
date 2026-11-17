@@ -287,8 +287,9 @@ impl Store {
                 });
         }
         // Per conversation: its latest message, its unfinished Tasks, and its finished turns
-        // after the read mark. A Schedule's turn counts once it finished: it may stay quiet, so
-        // until then it is neither the latest message nor work the conversation shows.
+        // after the read mark. A Schedule's turn counts once it finished, or once a person's
+        // message joined it: it may stay quiet, so until then it is neither the latest message
+        // nor work the conversation shows.
         let rows = sqlx::query(&format!(
             "SELECT c.tag_id,MAX(h.accepted_order) AS latest_order,
                     SUM(CASE WHEN t.state IN ({UNFINISHED}) THEN 1 ELSE 0 END) AS working,
@@ -301,7 +302,9 @@ impl Store {
              LEFT JOIN supertag_v2_conversation_reads r ON r.principal=c.principal AND r.tag_id=c.tag_id
              WHERE c.principal=$1
                AND NOT (t.state IN ({UNFINISHED})
-                        AND EXISTS (SELECT 1 FROM supertag_v2_schedule_fires f WHERE f.task_id=t.task_id))
+                        AND EXISTS (SELECT 1 FROM supertag_v2_schedule_fires f WHERE f.task_id=t.task_id)
+                        AND NOT EXISTS (SELECT 1 FROM supertag_v2_live_inputs i
+                                        WHERE i.task_id=t.task_id AND i.state IN ({JOINING})))
              GROUP BY c.tag_id"
         ))
         .bind(principal)
@@ -562,6 +565,8 @@ const HISTORY_WITH_QUIET: &str = "SELECT h.task_id,h.accepted_order,h.work_sessi
                             WHERE c.principal=$1 AND c.tag_id=$2)";
 const UNFINISHED: &str = "1,2,6";
 const FINISHED: &str = "3,4,5";
+/// Live input states of a person's message on its way into, or taken in by, a running turn.
+const JOINING: &str = "1,2,3,5";
 /// How much of the latest message a conversation list shows.
 const PREVIEW_CHARS: usize = 200;
 
