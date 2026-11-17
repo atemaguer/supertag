@@ -992,6 +992,7 @@ mod tests {
             instructions: String::new(),
             allowed_actions: vec![],
             lead: None,
+            max_work_sessions: None,
         };
         assert_eq!(
             cp.put_tag(Request::new(tag.clone()))

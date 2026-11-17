@@ -8,7 +8,7 @@ pub(crate) async fn continue_in(
     prompt: &str,
     now: i64,
 ) -> Result<()> {
-    let Some(row)=sqlx::query("SELECT w.*,k.starter_task_id AS source_starter FROM supertag_v2_work_sessions w JOIN supertag_v2_work_session_tasks k ON k.task_id=w.latest_task_id AND k.kind=1 JOIN supertag_v2_tasks t ON t.task_id=k.task_id WHERE k.task_id=$1 AND t.state=3 AND t.cleanup_pending=0 AND EXISTS (SELECT 1 FROM supertag_v2_work_session_reports r WHERE r.child_task_id=k.task_id)")
+    let Some(row)=sqlx::query("SELECT w.*,k.starter_task_id AS source_starter FROM supertag_v2_work_sessions w JOIN supertag_v2_work_session_tasks k ON k.task_id=w.latest_task_id AND k.kind=1 JOIN supertag_v2_tasks t ON t.task_id=k.task_id WHERE k.task_id=$1 AND w.closed_at_ms IS NULL AND t.state=3 AND t.cleanup_pending=0 AND EXISTS (SELECT 1 FROM supertag_v2_work_session_reports r WHERE r.child_task_id=k.task_id)")
   .bind(&source.task_id).fetch_optional(&mut **tx).await? else {return Ok(())};
     let session: String = row.try_get("work_session_id")?;
     let objective: Option<String> = row.try_get("objective_id")?;

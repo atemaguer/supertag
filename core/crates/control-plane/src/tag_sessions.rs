@@ -93,7 +93,7 @@ impl Viewer {
         &self.task.session_id
     }
 
-    fn sees(&self, session: &str, audience: &Audience) -> bool {
+    pub(crate) fn sees(&self, session: &str, audience: &Audience) -> bool {
         session == self.session()
             || match audience {
                 Audience::Shared => true,
@@ -103,6 +103,16 @@ impl Viewer {
                 Audience::Private(None) => false,
             }
     }
+}
+
+/// Whether the viewing turn may see one of its Tag's Sessions.
+pub(crate) async fn sees_session_in(
+    tx: &mut Transaction<'_, Any>,
+    viewer: &Viewer,
+    session: &str,
+) -> Result<bool> {
+    let audience = audience_in(tx, &viewer.task.tag_id, session).await?;
+    Ok(viewer.sees(session, &audience))
 }
 
 /// The Session's audience, derived from the records that opened it; never configured.

@@ -24,6 +24,9 @@ pub(crate) const CHILD: i64 = 1;
 pub(crate) const REPORT: i64 = 2;
 const MAX_PER_TURN: i64 = 4;
 const MAX_OPEN: i64 = 8;
+/// A Tag's open Work Sessions by default, and the most it may set.
+pub(crate) const DEFAULT_MAX_WORK_SESSIONS: u32 = 8;
+const MAX_WORK_SESSIONS: u32 = 64;
 const MAX_RUNNING: i64 = 4;
 const SESSION_PREFIX: &str = "work/";
 
@@ -182,7 +185,214 @@ pub(crate) async fn may_start_in(tx: &mut Transaction<'_, Any>, parent: &Task) -
     }
 }
 
+/// A Tag's `max_work_sessions` being written: as requested, else as it was, else the default.
+pub(crate) async fn max_work_sessions_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    requested: Option<u32>,
+) -> Result<u32> {
+    if let Some(value) = requested {
+        if !(1..=MAX_WORK_SESSIONS).contains(&value) {
+            return Err(invalid("max_work_sessions must be from 1 to 64"));
+        }
+        return Ok(value);
+    }
+    let current: Option<i64> =
+        sqlx::query_scalar("SELECT max_work_sessions FROM supertag_v2_tags WHERE tag_id=$1")
+            .bind(tag_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    Ok(current.map_or(DEFAULT_MAX_WORK_SESSIONS, |value| value as u32))
+}
+
+/// How many Work Sessions a Tag started that are open, across all its conversations and
+/// Objectives, and how many it may have.
+pub(crate) async fn open_count_in(tx: &mut Transaction<'_, Any>, tag: &str) -> Result<(u32, u32)> {
+    let open: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_work_sessions WHERE parent_tag_id=$1 AND closed_at_ms IS NULL",
+    )
+    .bind(tag)
+    .fetch_one(&mut **tx)
+    .await?;
+    let max: Option<i64> =
+        sqlx::query_scalar("SELECT max_work_sessions FROM supertag_v2_tags WHERE tag_id=$1")
+            .bind(tag)
+            .fetch_optional(&mut **tx)
+            .await?;
+    Ok((
+        open as u32,
+        max.map_or(DEFAULT_MAX_WORK_SESSIONS, |value| value as u32),
+    ))
+}
+
+/// Closes a Work Session. Closing a closed one changes nothing.
+pub(crate) async fn close_in(
+    tx: &mut Transaction<'_, Any>,
+    work_session_id: &str,
+    reason: WorkSessionCloseReason,
+    now: i64,
+) -> Result<()> {
+    sqlx::query("UPDATE supertag_v2_work_sessions SET closed_at_ms=$1, close_reason=$2 WHERE work_session_id=$3 AND closed_at_ms IS NULL")
+        .bind(now).bind(reason as i64).bind(work_session_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+/// A closed Objective's Work Sessions close.
+pub(crate) async fn close_objective_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    now: i64,
+) -> Result<()> {
+    sqlx::query("UPDATE supertag_v2_work_sessions SET closed_at_ms=$1, close_reason=$2 WHERE objective_id=$3 AND closed_at_ms IS NULL")
+        .bind(now).bind(WorkSessionCloseReason::ObjectiveClosed as i64).bind(objective_id)
+        .execute(&mut **tx).await?;
+    Ok(())
+}
+
+/// Refuses a closed Work Session's continuation.
+pub(crate) async fn require_open_in(
+    tx: &mut Transaction<'_, Any>,
+    work_session_id: &str,
+) -> Result<()> {
+    let closed: Option<Option<i64>> = sqlx::query_scalar(
+        "SELECT closed_at_ms FROM supertag_v2_work_sessions WHERE work_session_id=$1",
+    )
+    .bind(work_session_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if matches!(closed, Some(Some(_))) {
+        return Err(StoreError::FailedPrecondition(format!(
+            "Work Session {work_session_id} is closed; start a new one"
+        )));
+    }
+    Ok(())
+}
+
+/// The refusal at the limit: the open Work Sessions, so the Tag can continue or close one. A
+/// Work Session in a conversation this turn may not see shows no title.
+async fn limit_refusal_in(
+    tx: &mut Transaction<'_, Any>,
+    parent: &Task,
+    open: u32,
+    max: u32,
+) -> Result<StoreError> {
+    let kind = task_kind_in(tx, &parent.task_id).await?;
+    let viewer = crate::tag_sessions::viewer_in(tx, parent.clone(), kind).await?;
+    let rows = sqlx::query(
+        "SELECT ws.work_session_id, ws.title, ws.parent_session_id, t.state,
+                CASE WHEN EXISTS (SELECT 1 FROM supertag_v2_work_session_reports r WHERE r.child_task_id=t.task_id)
+                     THEN 1 ELSE 0 END AS reported,
+                CASE WHEN EXISTS (SELECT 1 FROM supertag_v2_work_session_questions q WHERE q.task_id=t.task_id
+                        AND q.published_at_ms IS NOT NULL AND q.answer_task_id IS NULL) THEN 1 ELSE 0 END AS asking
+         FROM supertag_v2_work_sessions ws JOIN supertag_v2_tasks t ON t.task_id=ws.latest_task_id
+         WHERE ws.parent_tag_id=$1 AND ws.closed_at_ms IS NULL
+         ORDER BY ws.created_order LIMIT 64",
+    )
+    .bind(&parent.tag_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut lines = vec![format!(
+        "This Tag has {open} of {max} Work Sessions open, its limit, so no new one started. Continue one of this conversation's with continue_session, or close one that is done with close_session, then try again."
+    )];
+    for row in rows {
+        let id: String = row.try_get("work_session_id")?;
+        let parent_session: String = row.try_get("parent_session_id")?;
+        let state = match TaskState::try_from(row.try_get::<i64, _>("state")? as i32) {
+            _ if row.try_get::<i32, _>("asking")? != 0 => "asking a question",
+            Ok(TaskState::Queued) => "queued",
+            Ok(TaskState::Claimed | TaskState::Running) => "running",
+            Ok(TaskState::Uncertain) => "interrupted",
+            _ if row.try_get::<i32, _>("reported")? != 0 => "reported",
+            Ok(TaskState::Failed) => "failed",
+            Ok(TaskState::Cancelled) => "cancelled",
+            _ => "finished",
+        };
+        let visible = match &viewer {
+            Some(viewer) => {
+                crate::tag_sessions::sees_session_in(tx, viewer, &parent_session).await?
+            }
+            None => parent_session == parent.session_id,
+        };
+        if visible {
+            let title: String = row.try_get("title")?;
+            let here = if parent_session == parent.session_id {
+                ", this conversation"
+            } else {
+                ""
+            };
+            lines.push(format!("- {id} \"{title}\" ({state}{here})"));
+        } else {
+            lines.push(format!(
+                "- {id} ({state}, in a conversation this turn cannot see)"
+            ));
+        }
+    }
+    Ok(StoreError::FailedPrecondition(lines.join("\n")))
+}
+
 impl Store {
+    /// The `close_session` tool: closes a Work Session the turn's Tag started that the turn may
+    /// see.
+    pub async fn close_attempt_work_session(
+        &self,
+        host: &HostAuthority,
+        input: &CloseAttemptWorkSessionRequest,
+    ) -> Result<WorkSession> {
+        let attempt = input
+            .attempt
+            .as_ref()
+            .ok_or_else(|| invalid("Attempt identity is required"))?;
+        name("Work Session ID", &input.work_session_id)?;
+        let (mut tx, _) = self.write().await?;
+        let row = owned(
+            &mut tx,
+            host,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
+        )
+        .await?;
+        let parent = task_row(&row)?;
+        let now = self.execution_now_ms();
+        if parent.state() != TaskState::Running || !lease_is_live(&row, now)? {
+            return Err(StoreError::FailedPrecondition(
+                "closing work requires a live running Attempt".into(),
+            ));
+        }
+        if !may_start_in(&mut tx, &parent).await? {
+            return Err(StoreError::PermissionDenied);
+        }
+        let missing = || StoreError::NotFound("Work Session was not found".into());
+        let session: Option<String> = sqlx::query_scalar(
+            "SELECT parent_session_id FROM supertag_v2_work_sessions WHERE work_session_id=$1 AND parent_tag_id=$2",
+        )
+        .bind(&input.work_session_id)
+        .bind(&parent.tag_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let session = session.ok_or_else(missing)?;
+        let kind = task_kind_in(&mut tx, &parent.task_id).await?;
+        let visible = match crate::tag_sessions::viewer_in(&mut tx, parent.clone(), kind).await? {
+            Some(viewer) => {
+                crate::tag_sessions::sees_session_in(&mut tx, &viewer, &session).await?
+            }
+            None => session == parent.session_id,
+        };
+        if !visible {
+            return Err(missing());
+        }
+        close_in(
+            &mut tx,
+            &input.work_session_id,
+            WorkSessionCloseReason::Tag,
+            now,
+        )
+        .await?;
+        let result = work_session_in(&mut tx, &input.work_session_id).await?;
+        tx.commit().await?;
+        Ok(result)
+    }
+
     pub async fn start_work_session(
         &self,
         host: &HostAuthority,
@@ -274,6 +484,10 @@ impl Store {
         }
         let objective_id = work_session_admission_in(&mut tx, &parent, now).await?;
         continuation::budget_in(&mut tx, &parent).await?;
+        let (open, max) = open_count_in(&mut tx, &parent.tag_id).await?;
+        if open >= max {
+            return Err(limit_refusal_in(&mut tx, &parent, open, max).await?);
+        }
         let id = format!("{SESSION_PREFIX}{}", Uuid::new_v4());
         let prompt = format!(
             "Complete the following Work Session assignment. Return the result for the parent Session. If you need an answer to proceed, call ask with a text argument containing one question, then end this turn.\n\n{}",
@@ -359,6 +573,18 @@ impl attempt_work_sessions_server::AttemptWorkSessions for ControlPlane {
         Ok(Response::new(
             self.store
                 .ask_work_session_question(&host, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn close(
+        &self,
+        request: Request<CloseAttemptWorkSessionRequest>,
+    ) -> std::result::Result<Response<WorkSession>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .close_attempt_work_session(&host, request.get_ref())
                 .await?,
         ))
     }

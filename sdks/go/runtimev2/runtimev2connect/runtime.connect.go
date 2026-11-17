@@ -207,6 +207,8 @@ const (
 	WorkSessionsGetProcedure = "/supertag.runtime.v2.WorkSessions/Get"
 	// WorkSessionsListProcedure is the fully-qualified name of the WorkSessions's List RPC.
 	WorkSessionsListProcedure = "/supertag.runtime.v2.WorkSessions/List"
+	// WorkSessionsCloseProcedure is the fully-qualified name of the WorkSessions's Close RPC.
+	WorkSessionsCloseProcedure = "/supertag.runtime.v2.WorkSessions/Close"
 	// AttemptWorkSessionsStartProcedure is the fully-qualified name of the AttemptWorkSessions's Start
 	// RPC.
 	AttemptWorkSessionsStartProcedure = "/supertag.runtime.v2.AttemptWorkSessions/Start"
@@ -215,6 +217,9 @@ const (
 	AttemptWorkSessionsContinueProcedure = "/supertag.runtime.v2.AttemptWorkSessions/Continue"
 	// AttemptWorkSessionsAskProcedure is the fully-qualified name of the AttemptWorkSessions's Ask RPC.
 	AttemptWorkSessionsAskProcedure = "/supertag.runtime.v2.AttemptWorkSessions/Ask"
+	// AttemptWorkSessionsCloseProcedure is the fully-qualified name of the AttemptWorkSessions's Close
+	// RPC.
+	AttemptWorkSessionsCloseProcedure = "/supertag.runtime.v2.AttemptWorkSessions/Close"
 	// TeamsCreateTeamProcedure is the fully-qualified name of the Teams's CreateTeam RPC.
 	TeamsCreateTeamProcedure = "/supertag.runtime.v2.Teams/CreateTeam"
 	// TeamsGetTeamProcedure is the fully-qualified name of the Teams's GetTeam RPC.
@@ -468,6 +473,9 @@ const (
 	HarnessWorkSessionsContinueProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Continue"
 	// HarnessWorkSessionsAskProcedure is the fully-qualified name of the HarnessWorkSessions's Ask RPC.
 	HarnessWorkSessionsAskProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Ask"
+	// HarnessWorkSessionsCloseProcedure is the fully-qualified name of the HarnessWorkSessions's Close
+	// RPC.
+	HarnessWorkSessionsCloseProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Close"
 	// AttemptMcpEffectsReserveProcedure is the fully-qualified name of the AttemptMcpEffects's Reserve
 	// RPC.
 	AttemptMcpEffectsReserveProcedure = "/supertag.runtime.v2.AttemptMcpEffects/Reserve"
@@ -1971,6 +1979,9 @@ func (UnimplementedInboxHandler) DecideApproval(context.Context, *connect.Reques
 type WorkSessionsClient interface {
 	Get(context.Context, *connect.Request[runtimev2.GetWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	List(context.Context, *connect.Request[runtimev2.ListWorkSessionsRequest]) (*connect.Response[runtimev2.ListWorkSessionsResponse], error)
+	// Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
+	// Work Session cannot be continued. Closing a closed one changes nothing.
+	Close(context.Context, *connect.Request[runtimev2.CloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 }
 
 // NewWorkSessionsClient constructs a client for the supertag.runtime.v2.WorkSessions service. By
@@ -1996,13 +2007,20 @@ func NewWorkSessionsClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(workSessionsMethods.ByName("List")),
 			connect.WithClientOptions(opts...),
 		),
+		close: connect.NewClient[runtimev2.CloseWorkSessionRequest, runtimev2.WorkSession](
+			httpClient,
+			baseURL+WorkSessionsCloseProcedure,
+			connect.WithSchema(workSessionsMethods.ByName("Close")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // workSessionsClient implements WorkSessionsClient.
 type workSessionsClient struct {
-	get  *connect.Client[runtimev2.GetWorkSessionRequest, runtimev2.WorkSession]
-	list *connect.Client[runtimev2.ListWorkSessionsRequest, runtimev2.ListWorkSessionsResponse]
+	get   *connect.Client[runtimev2.GetWorkSessionRequest, runtimev2.WorkSession]
+	list  *connect.Client[runtimev2.ListWorkSessionsRequest, runtimev2.ListWorkSessionsResponse]
+	close *connect.Client[runtimev2.CloseWorkSessionRequest, runtimev2.WorkSession]
 }
 
 // Get calls supertag.runtime.v2.WorkSessions.Get.
@@ -2015,10 +2033,18 @@ func (c *workSessionsClient) List(ctx context.Context, req *connect.Request[runt
 	return c.list.CallUnary(ctx, req)
 }
 
+// Close calls supertag.runtime.v2.WorkSessions.Close.
+func (c *workSessionsClient) Close(ctx context.Context, req *connect.Request[runtimev2.CloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return c.close.CallUnary(ctx, req)
+}
+
 // WorkSessionsHandler is an implementation of the supertag.runtime.v2.WorkSessions service.
 type WorkSessionsHandler interface {
 	Get(context.Context, *connect.Request[runtimev2.GetWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	List(context.Context, *connect.Request[runtimev2.ListWorkSessionsRequest]) (*connect.Response[runtimev2.ListWorkSessionsResponse], error)
+	// Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
+	// Work Session cannot be continued. Closing a closed one changes nothing.
+	Close(context.Context, *connect.Request[runtimev2.CloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 }
 
 // NewWorkSessionsHandler builds an HTTP handler from the service implementation. It returns the
@@ -2040,12 +2066,20 @@ func NewWorkSessionsHandler(svc WorkSessionsHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(workSessionsMethods.ByName("List")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workSessionsCloseHandler := connect.NewUnaryHandler(
+		WorkSessionsCloseProcedure,
+		svc.Close,
+		connect.WithSchema(workSessionsMethods.ByName("Close")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.WorkSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkSessionsGetProcedure:
 			workSessionsGetHandler.ServeHTTP(w, r)
 		case WorkSessionsListProcedure:
 			workSessionsListHandler.ServeHTTP(w, r)
+		case WorkSessionsCloseProcedure:
+			workSessionsCloseHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2063,11 +2097,17 @@ func (UnimplementedWorkSessionsHandler) List(context.Context, *connect.Request[r
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkSessions.List is not implemented"))
 }
 
+func (UnimplementedWorkSessionsHandler) Close(context.Context, *connect.Request[runtimev2.CloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkSessions.Close is not implemented"))
+}
+
 // AttemptWorkSessionsClient is a client for the supertag.runtime.v2.AttemptWorkSessions service.
 type AttemptWorkSessionsClient interface {
 	Start(context.Context, *connect.Request[runtimev2.StartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	Continue(context.Context, *connect.Request[runtimev2.ContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	Ask(context.Context, *connect.Request[runtimev2.AskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error)
+	// The `close_session` tool, for a Work Session the turn's Tag started that the turn may see.
+	Close(context.Context, *connect.Request[runtimev2.CloseAttemptWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 }
 
 // NewAttemptWorkSessionsClient constructs a client for the supertag.runtime.v2.AttemptWorkSessions
@@ -2099,6 +2139,12 @@ func NewAttemptWorkSessionsClient(httpClient connect.HTTPClient, baseURL string,
 			connect.WithSchema(attemptWorkSessionsMethods.ByName("Ask")),
 			connect.WithClientOptions(opts...),
 		),
+		close: connect.NewClient[runtimev2.CloseAttemptWorkSessionRequest, runtimev2.WorkSession](
+			httpClient,
+			baseURL+AttemptWorkSessionsCloseProcedure,
+			connect.WithSchema(attemptWorkSessionsMethods.ByName("Close")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -2107,6 +2153,7 @@ type attemptWorkSessionsClient struct {
 	start     *connect.Client[runtimev2.StartWorkSessionRequest, runtimev2.WorkSession]
 	_continue *connect.Client[runtimev2.ContinueWorkSessionRequest, runtimev2.WorkSession]
 	ask       *connect.Client[runtimev2.AskWorkSessionQuestionRequest, runtimev2.WorkSessionQuestion]
+	close     *connect.Client[runtimev2.CloseAttemptWorkSessionRequest, runtimev2.WorkSession]
 }
 
 // Start calls supertag.runtime.v2.AttemptWorkSessions.Start.
@@ -2124,12 +2171,19 @@ func (c *attemptWorkSessionsClient) Ask(ctx context.Context, req *connect.Reques
 	return c.ask.CallUnary(ctx, req)
 }
 
+// Close calls supertag.runtime.v2.AttemptWorkSessions.Close.
+func (c *attemptWorkSessionsClient) Close(ctx context.Context, req *connect.Request[runtimev2.CloseAttemptWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return c.close.CallUnary(ctx, req)
+}
+
 // AttemptWorkSessionsHandler is an implementation of the supertag.runtime.v2.AttemptWorkSessions
 // service.
 type AttemptWorkSessionsHandler interface {
 	Start(context.Context, *connect.Request[runtimev2.StartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	Continue(context.Context, *connect.Request[runtimev2.ContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	Ask(context.Context, *connect.Request[runtimev2.AskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error)
+	// The `close_session` tool, for a Work Session the turn's Tag started that the turn may see.
+	Close(context.Context, *connect.Request[runtimev2.CloseAttemptWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 }
 
 // NewAttemptWorkSessionsHandler builds an HTTP handler from the service implementation. It returns
@@ -2157,6 +2211,12 @@ func NewAttemptWorkSessionsHandler(svc AttemptWorkSessionsHandler, opts ...conne
 		connect.WithSchema(attemptWorkSessionsMethods.ByName("Ask")),
 		connect.WithHandlerOptions(opts...),
 	)
+	attemptWorkSessionsCloseHandler := connect.NewUnaryHandler(
+		AttemptWorkSessionsCloseProcedure,
+		svc.Close,
+		connect.WithSchema(attemptWorkSessionsMethods.ByName("Close")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.AttemptWorkSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AttemptWorkSessionsStartProcedure:
@@ -2165,6 +2225,8 @@ func NewAttemptWorkSessionsHandler(svc AttemptWorkSessionsHandler, opts ...conne
 			attemptWorkSessionsContinueHandler.ServeHTTP(w, r)
 		case AttemptWorkSessionsAskProcedure:
 			attemptWorkSessionsAskHandler.ServeHTTP(w, r)
+		case AttemptWorkSessionsCloseProcedure:
+			attemptWorkSessionsCloseHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2184,6 +2246,10 @@ func (UnimplementedAttemptWorkSessionsHandler) Continue(context.Context, *connec
 
 func (UnimplementedAttemptWorkSessionsHandler) Ask(context.Context, *connect.Request[runtimev2.AskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkSessions.Ask is not implemented"))
+}
+
+func (UnimplementedAttemptWorkSessionsHandler) Close(context.Context, *connect.Request[runtimev2.CloseAttemptWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkSessions.Close is not implemented"))
 }
 
 // TeamsClient is a client for the supertag.runtime.v2.Teams service.
@@ -5490,6 +5556,7 @@ type HarnessWorkSessionsClient interface {
 	Start(context.Context, *connect.Request[runtimev2.HarnessStartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	Continue(context.Context, *connect.Request[runtimev2.HarnessContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	Ask(context.Context, *connect.Request[runtimev2.HarnessAskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error)
+	Close(context.Context, *connect.Request[runtimev2.HarnessCloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 }
 
 // NewHarnessWorkSessionsClient constructs a client for the supertag.runtime.v2.HarnessWorkSessions
@@ -5521,6 +5588,12 @@ func NewHarnessWorkSessionsClient(httpClient connect.HTTPClient, baseURL string,
 			connect.WithSchema(harnessWorkSessionsMethods.ByName("Ask")),
 			connect.WithClientOptions(opts...),
 		),
+		close: connect.NewClient[runtimev2.HarnessCloseWorkSessionRequest, runtimev2.WorkSession](
+			httpClient,
+			baseURL+HarnessWorkSessionsCloseProcedure,
+			connect.WithSchema(harnessWorkSessionsMethods.ByName("Close")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -5529,6 +5602,7 @@ type harnessWorkSessionsClient struct {
 	start     *connect.Client[runtimev2.HarnessStartWorkSessionRequest, runtimev2.WorkSession]
 	_continue *connect.Client[runtimev2.HarnessContinueWorkSessionRequest, runtimev2.WorkSession]
 	ask       *connect.Client[runtimev2.HarnessAskWorkSessionQuestionRequest, runtimev2.WorkSessionQuestion]
+	close     *connect.Client[runtimev2.HarnessCloseWorkSessionRequest, runtimev2.WorkSession]
 }
 
 // Start calls supertag.runtime.v2.HarnessWorkSessions.Start.
@@ -5546,12 +5620,18 @@ func (c *harnessWorkSessionsClient) Ask(ctx context.Context, req *connect.Reques
 	return c.ask.CallUnary(ctx, req)
 }
 
+// Close calls supertag.runtime.v2.HarnessWorkSessions.Close.
+func (c *harnessWorkSessionsClient) Close(ctx context.Context, req *connect.Request[runtimev2.HarnessCloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return c.close.CallUnary(ctx, req)
+}
+
 // HarnessWorkSessionsHandler is an implementation of the supertag.runtime.v2.HarnessWorkSessions
 // service.
 type HarnessWorkSessionsHandler interface {
 	Start(context.Context, *connect.Request[runtimev2.HarnessStartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	Continue(context.Context, *connect.Request[runtimev2.HarnessContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 	Ask(context.Context, *connect.Request[runtimev2.HarnessAskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error)
+	Close(context.Context, *connect.Request[runtimev2.HarnessCloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
 }
 
 // NewHarnessWorkSessionsHandler builds an HTTP handler from the service implementation. It returns
@@ -5579,6 +5659,12 @@ func NewHarnessWorkSessionsHandler(svc HarnessWorkSessionsHandler, opts ...conne
 		connect.WithSchema(harnessWorkSessionsMethods.ByName("Ask")),
 		connect.WithHandlerOptions(opts...),
 	)
+	harnessWorkSessionsCloseHandler := connect.NewUnaryHandler(
+		HarnessWorkSessionsCloseProcedure,
+		svc.Close,
+		connect.WithSchema(harnessWorkSessionsMethods.ByName("Close")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.HarnessWorkSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HarnessWorkSessionsStartProcedure:
@@ -5587,6 +5673,8 @@ func NewHarnessWorkSessionsHandler(svc HarnessWorkSessionsHandler, opts ...conne
 			harnessWorkSessionsContinueHandler.ServeHTTP(w, r)
 		case HarnessWorkSessionsAskProcedure:
 			harnessWorkSessionsAskHandler.ServeHTTP(w, r)
+		case HarnessWorkSessionsCloseProcedure:
+			harnessWorkSessionsCloseHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -5606,6 +5694,10 @@ func (UnimplementedHarnessWorkSessionsHandler) Continue(context.Context, *connec
 
 func (UnimplementedHarnessWorkSessionsHandler) Ask(context.Context, *connect.Request[runtimev2.HarnessAskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkSessions.Ask is not implemented"))
+}
+
+func (UnimplementedHarnessWorkSessionsHandler) Close(context.Context, *connect.Request[runtimev2.HarnessCloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkSessions.Close is not implemented"))
 }
 
 // AttemptMcpEffectsClient is a client for the supertag.runtime.v2.AttemptMcpEffects service.

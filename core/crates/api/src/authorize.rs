@@ -203,6 +203,7 @@ const TABLE: &[(&str, &str, u16)] = &[
     ("WorkSessions", "*", O),
     ("WorkSessions", "Get", OC),
     ("WorkSessions", "List", OC),
+    ("WorkSessions", "Close", OC),
     ("ArtifactCatalog", "*", O),
     ("ArtifactCatalog", "Get", OC),
     ("ArtifactCatalog", "List", OC),

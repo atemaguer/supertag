@@ -483,18 +483,54 @@ message AttemptCapabilities {
   bool may_schedule = 13;
   // The Control Plane's IANA time zone, in which `schedule` reads a time that names none.
   string time_zone = 14;
+  // With `may_start_work_session`: how many Work Sessions the Tag has open, across all its
+  // conversations and Objectives, and how many it may have (the Tag's `max_work_sessions`).
+  uint32 open_work_sessions = 15;
+  uint32 max_work_sessions = 16;
 }
 
 // Operators see the work started in Sessions they can access.
 service WorkSessions {
   rpc Get(GetWorkSessionRequest) returns (WorkSession);
   rpc List(ListWorkSessionsRequest) returns (ListWorkSessionsResponse);
+  // Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
+  // Work Session cannot be continued. Closing a closed one changes nothing.
+  rpc Close(CloseWorkSessionRequest) returns (WorkSession);
 }
 
 service AttemptWorkSessions {
   rpc Start(StartWorkSessionRequest) returns (WorkSession);
   rpc Continue(ContinueWorkSessionRequest) returns (WorkSession);
   rpc Ask(AskWorkSessionQuestionRequest) returns (WorkSessionQuestion);
+  // The `close_session` tool, for a Work Session the turn's Tag started that the turn may see.
+  rpc Close(CloseAttemptWorkSessionRequest) returns (WorkSession);
+}
+
+// Why a Work Session closed.
+enum WorkSessionCloseReason {
+  WORK_SESSION_CLOSE_REASON_UNSPECIFIED = 0;
+  // Its Tag closed it with `close_session`.
+  WORK_SESSION_CLOSE_REASON_TAG = 1;
+  // An operator or client closed it.
+  WORK_SESSION_CLOSE_REASON_OPERATOR = 2;
+  // Its delivery was pulled into a repository with `supertag fetch`.
+  WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED = 3;
+  // Its Objective closed.
+  WORK_SESSION_CLOSE_REASON_OBJECTIVE_CLOSED = 4;
+  // It had finished when SuperTag began counting open Work Sessions.
+  WORK_SESSION_CLOSE_REASON_UPGRADE = 5;
+}
+
+// An operator or client closes a Work Session it may see. `delivery_pulled` records that its
+// delivery was pulled, as `supertag fetch` does.
+message CloseWorkSessionRequest {
+  string work_session_id = 1;
+  bool delivery_pulled = 2;
+}
+
+message CloseAttemptWorkSessionRequest {
+  InspectAttemptRequest attempt = 1;
+  string work_session_id = 2;
 }
 
 message WorkSession {
@@ -512,6 +548,9 @@ message WorkSession {
   WorkspaceDeliveryReference workspace_delivery = 12;
   uint64 created_order = 13;
   WorkSessionQuestion question = 14;
+  // Set once it closed. An open Work Session counts toward its parent Tag's `max_work_sessions`.
+  optional int64 closed_at_ms = 15;
+  WorkSessionCloseReason close_reason = 16;
 }
 
 message WorkSessionQuestion {
@@ -563,6 +602,10 @@ message ListWorkSessionsRequest {
 message ListWorkSessionsResponse {
   repeated WorkSession work_sessions = 1;
   string next_cursor = 2;
+  // The parent Tag's open Work Sessions, across all its conversations and Objectives, and its
+  // `max_work_sessions`.
+  uint32 open_work_sessions = 3;
+  uint32 max_work_sessions = 4;
 }
 
 service Teams {
@@ -1307,6 +1350,11 @@ service HarnessWorkSessions {
   rpc Start(HarnessStartWorkSessionRequest) returns (WorkSession);
   rpc Continue(HarnessContinueWorkSessionRequest) returns (WorkSession);
   rpc Ask(HarnessAskWorkSessionQuestionRequest) returns (WorkSessionQuestion);
+  rpc Close(HarnessCloseWorkSessionRequest) returns (WorkSession);
+}
+
+message HarnessCloseWorkSessionRequest {
+  string work_session_id = 1;
 }
 
 message HarnessContinueWorkSessionRequest {
@@ -1533,6 +1581,9 @@ message PutTagRequest {
   // `supertag init` makes the Tag it creates the lead. Omitted keeps the current value; a new
   // Tag is not the lead.
   optional bool lead = 6600;
+  // How many Work Sessions the Tag may have open at once, across all its conversations and
+  // Objectives; from 1 to 64. Omitted keeps the current value; a new Tag gets 8.
+  optional uint32 max_work_sessions = 6700;
 }
 
 message Tag {
@@ -1551,6 +1602,10 @@ message Tag {
   // Whether this is the Control Plane's lead Tag: the default Tag `supertag init` creates, which
   // clients show first. At most one active Tag is the lead.
   bool lead = 6600;
+  // How many Work Sessions the Tag may have open at once.
+  uint32 max_work_sessions = 6700;
+  // How many Work Sessions the Tag has open now, when the Tag is read with GetTag or ListTags.
+  uint32 open_work_sessions = 6701;
 }
 
 message ListTagsRequest {

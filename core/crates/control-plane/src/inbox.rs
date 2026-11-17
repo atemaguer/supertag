@@ -81,6 +81,11 @@ impl Store {
             crate::work_sessions::continuation::may_continue_in(&mut tx, &task, scope.as_ref())
                 .await?;
         let may_start_work_session = crate::work_sessions::may_start_in(&mut tx, &task).await?;
+        let (open_work_sessions, max_work_sessions) = if may_start_work_session {
+            crate::work_sessions::open_count_in(&mut tx, &task.tag_id).await?
+        } else {
+            (0, 0)
+        };
         let mut tag_portfolio =
             match crate::tag_sessions::viewer_in(&mut tx, task.clone(), kind).await? {
                 Some(viewer) => Some(crate::tag_sessions::portfolio_in(&mut tx, &viewer).await?),
@@ -126,6 +131,8 @@ impl Store {
             objective_ongoing,
             may_schedule,
             time_zone: self.time_zone().name().to_owned(),
+            open_work_sessions,
+            max_work_sessions,
         })
     }
 

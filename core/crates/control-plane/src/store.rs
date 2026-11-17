@@ -101,7 +101,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 85;
+        const SCHEMA_VERSION: i64 = 86;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -283,6 +283,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0083_one_conversation_per_tag.sql"),
                 include_str!("../migrations/sqlite/0084_schedules.sql"),
                 include_str!("../migrations/sqlite/0085_checkpoint_garbage.sql"),
+                include_str!("../migrations/sqlite/0087_work_session_limit.sql"),
             ]
         } else {
             [
@@ -373,6 +374,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0083_one_conversation_per_tag.sql"),
                 include_str!("../migrations/postgresql/0084_schedules.sql"),
                 include_str!("../migrations/postgresql/0085_checkpoint_garbage.sql"),
+                include_str!("../migrations/postgresql/0087_work_session_limit.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -495,6 +497,7 @@ impl Store {
             name: None,
             expected_revision: None,
             lead: None,
+            max_work_sessions: None,
         })
         .await
     }
@@ -521,6 +524,7 @@ impl Store {
             name: display_name,
             expected_revision,
             lead,
+            max_work_sessions,
         } = input;
         let tag_id = tag_id.as_str();
         let instructions = instructions.as_str();
@@ -591,7 +595,10 @@ impl Store {
         let display_name =
             crate::tags::active_name_in(transaction, tag_id, display_name.as_deref()).await?;
         let lead = crate::tags::lead_in(transaction, tag_id, lead).await?;
-        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead RETURNING revision")
+        let max_work_sessions =
+            crate::work_sessions::max_work_sessions_in(transaction, tag_id, max_work_sessions)
+                .await?;
+        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name, workspace_mounts, workspace_mcp_servers, workspace_base_ref, lead, max_work_sessions) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name, workspace_mounts=excluded.workspace_mounts, workspace_mcp_servers=excluded.workspace_mcp_servers, workspace_base_ref=excluded.workspace_base_ref, lead=excluded.lead, max_work_sessions=excluded.max_work_sessions RETURNING revision")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
             .bind(workspace.as_ref().map(|spec| &spec.base_commit))
@@ -603,6 +610,7 @@ impl Store {
             .bind(crate::workspaces::encode_mcp_servers(workspace.as_ref()))
             .bind(crate::workspaces::encode_base_ref(workspace.as_ref()))
             .bind(i64::from(lead))
+            .bind(i64::from(max_work_sessions))
             .fetch_one(&mut **transaction).await?;
         Ok(Tag {
             tag_id: tag_id.into(),
@@ -617,6 +625,10 @@ impl Store {
             retired_at_ms: None,
             runs_on: crate::placement::runs_on_in(transaction, tag_id).await?,
             lead,
+            max_work_sessions,
+            open_work_sessions: crate::work_sessions::open_count_in(transaction, tag_id)
+                .await?
+                .0,
         })
     }
 

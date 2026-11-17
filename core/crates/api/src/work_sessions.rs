@@ -48,6 +48,20 @@ impl work_sessions_server::WorkSessions for Api {
         })
         .await
     }
+
+    async fn close(
+        &self,
+        request: Request<CloseWorkSessionRequest>,
+    ) -> Result<Response<WorkSession>, Status> {
+        self.forward(request, |channel, request| async {
+            work_sessions_client::WorkSessionsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .close(request)
+                .await
+        })
+        .await
+    }
 }
 
 #[tonic::async_trait]
@@ -61,6 +75,20 @@ impl attempt_work_sessions_server::AttemptWorkSessions for Api {
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
                 .r#continue(request)
+                .await
+        })
+        .await
+    }
+
+    async fn close(
+        &self,
+        request: Request<CloseAttemptWorkSessionRequest>,
+    ) -> Result<Response<WorkSession>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            attempt_work_sessions_client::AttemptWorkSessionsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .close(request)
                 .await
         })
         .await

@@ -84,6 +84,11 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         retired_at_ms: row.try_get("retired_at_ms")?,
         runs_on: serde_json::from_str(&row.try_get::<String, _>("runs_on")?)?,
         lead: row.try_get::<i64, _>("lead")? != 0,
+        max_work_sessions: row.try_get::<i64, _>("max_work_sessions")? as u32,
+        // Only Tag reads count them.
+        open_work_sessions: row
+            .try_get::<i64, _>("open_work_sessions")
+            .map_or(0, |open| open as u32),
     })
 }
 
@@ -123,10 +128,15 @@ fn missing(tag_id: &str) -> StoreError {
     StoreError::NotFound(format!("Tag {tag_id} was not found"))
 }
 
+/// A Tag as GetTag and ListTags read it: with its open Work Sessions.
+pub(crate) const READ: &str = "t.*, (SELECT COUNT(*) FROM supertag_v2_work_sessions w
+    WHERE w.parent_tag_id=t.tag_id AND w.closed_at_ms IS NULL) AS open_work_sessions
+    FROM supertag_v2_tags t";
+
 impl Store {
     pub async fn get_tag(&self, tag_id: &str) -> Result<Tag> {
         name("Tag ID", tag_id)?;
-        let row = sqlx::query("SELECT * FROM supertag_v2_tags WHERE tag_id=$1")
+        let row = sqlx::query(&format!("SELECT {READ} WHERE t.tag_id=$1"))
             .bind(tag_id)
             .fetch_optional(&self.pool)
             .await?

@@ -1,9 +1,10 @@
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        AskWorkSessionQuestionRequest, ContinueWorkSessionRequest,
-        HarnessAskWorkSessionQuestionRequest, HarnessContinueWorkSessionRequest,
-        HarnessStartWorkSessionRequest, StartWorkSessionRequest, WorkSession, WorkSessionQuestion,
+        AskWorkSessionQuestionRequest, CloseAttemptWorkSessionRequest, ContinueWorkSessionRequest,
+        HarnessAskWorkSessionQuestionRequest, HarnessCloseWorkSessionRequest,
+        HarnessContinueWorkSessionRequest, HarnessStartWorkSessionRequest, StartWorkSessionRequest,
+        WorkSession, WorkSessionQuestion,
         harness_work_sessions_server::{HarnessWorkSessions, HarnessWorkSessionsServer},
     },
 };
@@ -101,6 +102,30 @@ impl HarnessWorkSessions for Bridge {
             .retry(upstream, |request| {
                 let mut client = self.coordination.work_sessions.clone();
                 async move { client.start(request).await }
+            })
+            .await;
+        drop(state);
+        response
+    }
+
+    async fn close(
+        &self,
+        request: Request<HarnessCloseWorkSessionRequest>,
+    ) -> Result<Response<WorkSession>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        let state = self.state.lock().await;
+        if state.outcome.is_some() {
+            return Err(Status::failed_precondition("execution is complete"));
+        }
+        let upstream = CloseAttemptWorkSessionRequest {
+            attempt: Some(self.attempt()),
+            work_session_id: request.into_inner().work_session_id,
+        };
+        let response = self
+            .retry(upstream, |request| {
+                let mut client = self.coordination.work_sessions.clone();
+                async move { client.close(request).await }
             })
             .await;
         drop(state);

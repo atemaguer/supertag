@@ -2232,6 +2232,11 @@ class WorkSessionsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsResponse.FromString,
                 _registered_method=True)
+        self.Close = channel.unary_unary(
+                '/supertag.runtime.v2.WorkSessions/Close',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CloseWorkSessionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+                _registered_method=True)
 
 
 class WorkSessionsServicer:
@@ -2250,6 +2255,14 @@ class WorkSessionsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Close(self, request, context):
+        """Closes a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
+        Work Session cannot be continued. Closing a closed one changes nothing.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkSessionsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -2262,6 +2275,11 @@ def add_WorkSessionsServicer_to_server(servicer, server):
                     servicer.List,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsResponse.SerializeToString,
+            ),
+            'Close': grpc.unary_unary_rpc_method_handler(
+                    servicer.Close,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CloseWorkSessionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -2329,6 +2347,33 @@ class WorkSessions:
             metadata,
             _registered_method=True)
 
+    @staticmethod
+    def Close(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkSessions/Close',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CloseWorkSessionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
 
 class AttemptWorkSessionsStub:
     """Missing associated documentation comment in .proto file."""
@@ -2354,6 +2399,11 @@ class AttemptWorkSessionsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskWorkSessionQuestionRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.FromString,
                 _registered_method=True)
+        self.Close = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptWorkSessions/Close',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CloseAttemptWorkSessionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+                _registered_method=True)
 
 
 class AttemptWorkSessionsServicer:
@@ -2377,6 +2427,13 @@ class AttemptWorkSessionsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Close(self, request, context):
+        """The `close_session` tool, for a Work Session the turn's Tag started that the turn may see.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AttemptWorkSessionsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -2394,6 +2451,11 @@ def add_AttemptWorkSessionsServicer_to_server(servicer, server):
                     servicer.Ask,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskWorkSessionQuestionRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.SerializeToString,
+            ),
+            'Close': grpc.unary_unary_rpc_method_handler(
+                    servicer.Close,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CloseAttemptWorkSessionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -2477,6 +2539,33 @@ class AttemptWorkSessions:
             '/supertag.runtime.v2.AttemptWorkSessions/Ask',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskWorkSessionQuestionRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Close(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptWorkSessions/Close',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CloseAttemptWorkSessionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
             options,
             channel_credentials,
             insecure,
@@ -7171,6 +7260,11 @@ class HarnessWorkSessionsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskWorkSessionQuestionRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.FromString,
                 _registered_method=True)
+        self.Close = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessWorkSessions/Close',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessCloseWorkSessionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+                _registered_method=True)
 
 
 class HarnessWorkSessionsServicer:
@@ -7195,6 +7289,12 @@ class HarnessWorkSessionsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Close(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_HarnessWorkSessionsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -7212,6 +7312,11 @@ def add_HarnessWorkSessionsServicer_to_server(servicer, server):
                     servicer.Ask,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskWorkSessionQuestionRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.SerializeToString,
+            ),
+            'Close': grpc.unary_unary_rpc_method_handler(
+                    servicer.Close,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessCloseWorkSessionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -7296,6 +7401,33 @@ class HarnessWorkSessions:
             '/supertag.runtime.v2.HarnessWorkSessions/Ask',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskWorkSessionQuestionRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Close(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessWorkSessions/Close',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessCloseWorkSessionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
             options,
             channel_credentials,
             insecure,

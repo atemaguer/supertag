@@ -954,6 +954,7 @@ impl Store {
         save_in(&mut tx, &record).await?;
         cancel_open_in(&mut tx, &input.objective_id, None).await?;
         crate::schedules::close_objective_in(&mut tx, &input.objective_id, now_ms).await?;
+        crate::work_sessions::close_objective_in(&mut tx, &input.objective_id, now_ms).await?;
         receipt_in(
             &mut tx,
             principal,
@@ -1051,6 +1052,7 @@ pub(crate) async fn objective_action_in(
             }
             cancel_open_in(tx, &input.objective_id, None).await?;
             crate::schedules::close_objective_in(tx, &input.objective_id, now_ms).await?;
+            crate::work_sessions::close_objective_in(tx, &input.objective_id, now_ms).await?;
         }
         _ => return Err(invalid("unknown Objective action")),
     }
@@ -1094,6 +1096,7 @@ pub(crate) async fn review_in(
         record.change_status(ObjectiveStatus::Completed, now_ms);
         cancel_open_in(tx, &input.objective_id, None).await?;
         crate::schedules::close_objective_in(tx, &input.objective_id, now_ms).await?;
+        crate::work_sessions::close_objective_in(tx, &input.objective_id, now_ms).await?;
         report_completion_in(tx, &record, now_ms).await?;
     } else {
         if input.feedback.trim().is_empty() {
@@ -1418,6 +1421,7 @@ pub(crate) async fn objective_finish_in(
     if record.closed() {
         cancel_open_in(tx, &id, Some(&task.task_id)).await?;
         crate::schedules::close_objective_in(tx, &id, now_ms).await?;
+        crate::work_sessions::close_objective_in(tx, &id, now_ms).await?;
     }
     if status == ObjectiveStatus::Completed {
         report_completion_in(tx, &record, now_ms).await?;

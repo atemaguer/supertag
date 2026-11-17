@@ -114,10 +114,11 @@ impl Store {
         }
         let allowed = self.client_tags(principal).await?;
         let limit = page_size(input.limit);
-        let rows = sqlx::query(
-            "SELECT * FROM supertag_v2_tags
-             WHERE tag_id > $1 AND ($2=1 OR retired_at_ms IS NULL) ORDER BY tag_id LIMIT $3",
-        )
+        let rows = sqlx::query(&format!(
+            "SELECT {} WHERE t.tag_id > $1 AND ($2=1 OR t.retired_at_ms IS NULL)
+             ORDER BY t.tag_id LIMIT $3",
+            crate::tags::READ
+        ))
         .bind(&input.cursor)
         .bind(i64::from(input.include_retired))
         // A client's Tags are filtered below, so its page reads past the ones it may not see.

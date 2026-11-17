@@ -8,7 +8,7 @@ const VIEW: &str = "SELECT ws.work_session_id, ws.title, ws.parent_tag_id, ws.pa
     child.workspace_delivery, child.accepted_order AS created_order,
     report.report_task_id, delivered.state AS report_task_state,
     q.attempt_id AS question_attempt_id, q.text AS question_text,
-    q.asked_at_ms, q.published_at_ms, q.answer_task_id
+    q.asked_at_ms, q.published_at_ms, q.answer_task_id, ws.closed_at_ms, ws.close_reason
     FROM supertag_v2_work_sessions ws
     JOIN supertag_v2_work_session_tasks k ON k.work_session_id=ws.work_session_id AND k.kind=1
     JOIN supertag_v2_tasks child ON child.task_id=k.task_id
@@ -50,6 +50,8 @@ fn projection(row: &AnyRow) -> Result<WorkSession> {
         workspace_delivery: crate::workspaces::delivery_from_row(row)?,
         created_order: row.try_get::<i64, _>("created_order")? as u64,
         question,
+        closed_at_ms: row.try_get("closed_at_ms")?,
+        close_reason: row.try_get::<i64, _>("close_reason")? as i32,
     })
 }
 
@@ -96,6 +98,33 @@ pub(crate) async fn work_session_child_in(
 }
 
 impl Store {
+    /// An operator or client closes a Work Session it may see.
+    pub async fn close_work_session(
+        &self,
+        principal: &str,
+        input: &CloseWorkSessionRequest,
+    ) -> Result<WorkSession> {
+        crate::store::actor(principal)?;
+        name("Work Session ID", &input.work_session_id)?;
+        let (mut tx, _) = self.write().await?;
+        read_in(&mut tx, &input.work_session_id, Some(principal), None).await?;
+        let reason = if input.delivery_pulled {
+            WorkSessionCloseReason::DeliveryPulled
+        } else {
+            WorkSessionCloseReason::Operator
+        };
+        crate::work_sessions::close_in(
+            &mut tx,
+            &input.work_session_id,
+            reason,
+            self.execution_now_ms(),
+        )
+        .await?;
+        let value = read_in(&mut tx, &input.work_session_id, Some(principal), None).await?;
+        tx.commit().await?;
+        Ok(value)
+    }
+
     pub async fn get_work_session(&self, principal: &str, id: &str) -> Result<WorkSession> {
         self.get_work_session_report(principal, id, None).await
     }
@@ -155,9 +184,15 @@ impl Store {
             }
         }
         let (work_sessions, next_cursor) = page.finish();
+        let mut tx = self.pool.begin().await?;
+        let (open, max) =
+            crate::work_sessions::open_count_in(&mut tx, &input.parent_tag_id).await?;
+        tx.commit().await?;
         Ok(ListWorkSessionsResponse {
             work_sessions,
             next_cursor,
+            open_work_sessions: open,
+            max_work_sessions: max,
         })
     }
 }
@@ -197,6 +232,18 @@ impl work_sessions_server::WorkSessions for ControlPlane {
         Ok(Response::new(
             self.store
                 .list_work_sessions(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn close(
+        &self,
+        request: Request<CloseWorkSessionRequest>,
+    ) -> std::result::Result<Response<WorkSession>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store
+                .close_work_session(&principal, request.get_ref())
                 .await?,
         ))
     }
