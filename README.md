@@ -60,34 +60,36 @@ same Tag keeps the responsibilities you assigned it. [Connect a work tool](docs/
 ### Proactive
 
 Give a Tag an enduring responsibility, and it works to fulfill it without waiting to be asked.
-Say `triage` is responsible for new production errors:
+Each responsibility is an ongoing Objective, and related responsibilities belong to the same Tag.
+Say `reliability` keeps your service healthy. It owns four ongoing Objectives:
 
-> Investigate each new or regressed error. Reproduce it, find the change that caused it, and
-> prepare a fix with a failing test. Ask me before anything that touches production. Leave
-> merging to me.
-
-When Sentry reports a new error, `triage` takes it up under that responsibility. It decides
-whether the error matters, starts work to reproduce and fix it, and brings you the branch, the
-test, and any decision that's yours. When nothing needs doing, it rests until the next report,
-message, or result. Run it on an always-on host, and it keeps the responsibility while your
-laptop is off.
-
-| A Tag responsible for | Wakes on | Does | Leaves to you |
+| Ongoing Objective | Wakes on | Does | Leaves to you |
 | --- | --- | --- | --- |
-| Watching a service | A PagerDuty, Datadog, or health-check alert | Builds a timeline from logs, recent deploys, and the error spike, and prepares a revert branch | Rolling back or escalating |
-| Keeping main green | A failed CI run on main | Finds the breaking commit, tells a flaky test from a real failure, and prepares a fix or revert | Merging and quarantining tests |
-| Keeping dependencies safe | A Dependabot or Snyk advisory | Checks whether the project is affected and prepares the upgrade with test results | Major upgrades and merging |
-| Triaging bug reports | A new Linear or GitHub issue | Reproduces it, links duplicates, and asks the reporter for missing details | Priority |
+| Triage production errors | A new or regressed Sentry issue | Reproduces it, finds the change that caused it, and prepares a fix with a failing test | Merging and rolling back |
+| Watch the service | A PagerDuty, Datadog, or health-check alert | Builds a timeline from logs, recent deploys, and the error spike, and prepares a revert branch | Rolling back or escalating |
+| Keep main green | A failed CI run on main | Finds the breaking commit, tells a flaky test from a real failure, and prepares a fix or revert | Merging and quarantining tests |
+| Keep dependencies safe | A Dependabot or Snyk advisory | Checks whether the project is affected and prepares the upgrade with test results | Major upgrades and merging |
+
+When Sentry reports a new error, `reliability` takes it up under the first Objective. It decides
+whether the error matters, starts work to reproduce and fix it, and brings you the branch, the
+test, and any decision that's yours. Because one Tag holds all four, it can recall what it learned
+under the others, such as the failing deploy it looked at an hour earlier. When nothing needs
+doing, it rests until the next report, message, or result. Run it on an always-on host, and it
+keeps its responsibilities while your laptop is off.
+
+Give a different kind of responsibility to another Tag when it needs different permissions. A
+`support` Tag that triages bug reports can read the repository and talk to reporters without
+being able to prepare reverts.
 
 You choose which events reach a Tag and what it may do in response. Forward alerts and reports
-to its responsibility through the Control Plane API, or mention it in Slack, GitHub, or Linear.
+to an Objective through the Control Plane API, or mention the Tag in Slack, GitHub, or Linear.
 [Set up an ongoing responsibility](docs/guides/ongoing-responsibilities.md)
 
 ### Multiplayer
 
 Self-host one shared Control Plane, and your team works with Tags together. Each teammate directs
 Tags from their own terminal or connected tools, and private terminal conversations stay private
-to each person. One person can ask `triage` about an error in Slack, and another can follow up on
+to each person. One person can ask `reliability` about an error in Slack, and another can follow up on
 the same findings on GitHub.
 
 Your teammates' Tags coordinate with each other without involving you. When your Tag needs
@@ -145,7 +147,7 @@ work. When your team joins, deploy the Control Plane where everyone can reach it
 
 Connect teammates' laptops, servers, CI runners, or supported sandboxes as Worker Hosts. You can
 choose a different coding agent and model for each Tag. Keep a Tag with an enduring
-responsibility, such as `triage`, on an always-on host so it can act while everyone's laptop is
+responsibility, such as `reliability`, on an always-on host so it can act while everyone's laptop is
 off.
 
 [Self-host SuperTag](docs/guides/self-hosting.md) · [Connect a Worker Host](docs/guides/workers.md) · [See how the parts fit together](docs/concepts/how-it-works.md)
@@ -174,7 +176,7 @@ off.
 
 Use the same infrastructure to give your own application persistent actors. The Control Plane's
 gRPC API lets your application create and direct Tags, send them work, and inspect their
-progress. For example, you could forward Sentry errors to a `triage` Tag and show its branches and test
+progress. For example, you could forward Sentry errors to a `reliability` Tag and show its branches and test
 results in your own review interface. Generated Go, TypeScript, and Python
 bindings come with the repository. [Explore the API](docs/reference/control-plane-api.md)
 
