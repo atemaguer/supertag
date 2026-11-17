@@ -156,6 +156,7 @@ Use these pages when you are implementing an integration, protocol, or Control P
 - [Worker Host reference](reference/worker.md) — placement, leases, the journal, harnesses, Workspaces, and delivery
 - [Connector contract](reference/connector-contract.md) — how a connector in its own process admits surface events and delivers replies
 - [Devcontainer settings for remote workspaces](reference/devcontainer-subset.md) — supported repository toolchain settings and refusals
+- [Sandbox provider contract](reference/sandbox-providers.md) — what a split-execution sandbox provider implements and its security rules
 - [Scheduling and interrupted execution](reference/scheduling-and-recovery.md) — Worker Host selection, unknown outcomes, and reclaiming capacity
 - [Artifacts](reference/artifacts.md) — storage, limits, and handoff between Objectives
 - [Control Plane model](reference/control-plane.md) — service responsibilities and controllers

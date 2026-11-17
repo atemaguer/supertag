@@ -175,7 +175,8 @@ the checkout's `.gitignore` files match, except the Task output directory. A Tas
 Permission Sets hide paths does not run commands on such a host, and a Task with `web:fetch`,
 `web:search`, or `browser:use` does not run on it at all: those tools would run on the host. A repository's
 `.devcontainer` settings choose the sandbox image, user, and setup; see
-[Devcontainer settings](devcontainer-subset.md).
+[Devcontainer settings](devcontainer-subset.md). The
+[sandbox provider contract](sandbox-providers.md) states what a provider must do.
 
 A shared execution environment, served by `supertag-shared-execution`, holds one workspace that
 several Cursor Sessions use. The host connects with `--shared-execution-endpoint` and
