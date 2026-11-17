@@ -7,8 +7,6 @@ import {
   ArtifactTransfers,
   ArtifactVolumes,
 } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/artifact_pb.js";
-import { GithubPublications } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/github_publications_pb.js";
-import { GithubWorkspaces } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/github_workspaces_pb.js";
 import {
   ProtocolNegotiation,
   ServiceRole,
@@ -30,6 +28,11 @@ import {
   Transfers,
   WorkSessions,
 } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/runtime_pb.js";
+import { WorkspaceLandings } from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/workspace_landings_pb.js";
+import {
+  WorkspaceCredentials,
+  Workspaces,
+} from "../../../harnesses/sdk/src/rust-harness/gen/supertag/runtime/v2/workspaces_pb.js";
 
 export { Code, ConnectError } from "@connectrpc/connect";
 
@@ -59,7 +62,7 @@ function gatewayOrigin(value: string): URL {
 /** Names, on every call, the protocol version this client negotiated with the Gateway. */
 const PROTOCOL_HEADER = "x-supertag-protocol";
 /** The SuperTag protocol versions this client speaks. */
-const PROTOCOL_VERSIONS = [3];
+const PROTOCOL_VERSIONS = [4];
 
 function refusedByGateway(error: unknown): ConnectError {
   const status = ConnectError.from(error);
@@ -189,7 +192,7 @@ export function createGatewayClient(options: GatewayClientOptions) {
     ],
   });
   const artifacts = createClient(ArtifactTransfers, transport);
-  const workspaces = createClient(Transfers, transport);
+  const transfers = createClient(Transfers, transport);
   return {
     operator: createClient(Operator, transport),
     conversations: createClient(Conversations, transport),
@@ -203,14 +206,15 @@ export function createGatewayClient(options: GatewayClientOptions) {
     policy: createClient(PolicyCatalog, transport),
     manifestRelationships: createClient(ManifestRelationships, transport),
     surfaces: createClient(SurfacePolicyCatalog, transport),
-    githubWorkspaces: createClient(GithubWorkspaces, transport),
-    githubPublications: createClient(GithubPublications, transport),
+    workspaces: createClient(Workspaces, transport),
+    workspaceCredentials: createClient(WorkspaceCredentials, transport),
+    workspaceLandings: createClient(WorkspaceLandings, transport),
     artifacts: createClient(ArtifactCatalog, transport),
     artifactPublications: createClient(ArtifactPublications, transport),
     volumes: createClient(ArtifactVolumes, transport),
     downloadArtifactFile: artifacts.downloadFile,
-    downloadWorkspaceArtifact: workspaces.downloadWorkspaceArtifact,
-    downloadReviewArtifact: workspaces.downloadReviewArtifact,
+    downloadWorkspaceArtifact: transfers.downloadWorkspaceArtifact,
+    downloadReviewArtifact: transfers.downloadReviewArtifact,
     close() {
       closed = true;
       session.abort();

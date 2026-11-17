@@ -21,7 +21,7 @@ import (
 const protocolHeader = "X-Supertag-Protocol"
 
 // protocolVersions are the SuperTag protocol versions this client speaks.
-var protocolVersions = []uint32{3}
+var protocolVersions = []uint32{4}
 
 // negotiationTimeout bounds one negotiation exchange.
 const negotiationTimeout = 5 * time.Second

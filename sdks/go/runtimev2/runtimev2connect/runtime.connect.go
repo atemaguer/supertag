@@ -4040,7 +4040,9 @@ type TransfersClient interface {
 	DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
-	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.GithubWorkspaceDownload], error)
+	// The Task's Workspace source, or with `merge` the commit its merge follow-up must merge,
+	// read from the remote by the Control Plane and relayed as a bundle.
+	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.DownloadWorkspaceSourceRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceSourceDownload], error)
 	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
 
@@ -4097,7 +4099,7 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("DownloadReviewArtifact")),
 			connect.WithClientOptions(opts...),
 		),
-		downloadWorkspaceSource: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspaceDownload](
+		downloadWorkspaceSource: connect.NewClient[runtimev2.DownloadWorkspaceSourceRequest, runtimev2.WorkspaceSourceDownload](
 			httpClient,
 			baseURL+TransfersDownloadWorkspaceSourceProcedure,
 			connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceSource")),
@@ -4121,7 +4123,7 @@ type transfersClient struct {
 	downloadCompleteWorkspace   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
 	downloadWorkspaceArtifact   *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload]
 	downloadReviewArtifact      *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
-	downloadWorkspaceSource     *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspaceDownload]
+	downloadWorkspaceSource     *connect.Client[runtimev2.DownloadWorkspaceSourceRequest, runtimev2.WorkspaceSourceDownload]
 	verifyWorkspaceOutputRemote *connect.Client[runtimev2.VerifyWorkspaceOutputRemoteRequest, runtimev2.VerifyWorkspaceOutputRemoteResponse]
 }
 
@@ -4161,7 +4163,7 @@ func (c *transfersClient) DownloadReviewArtifact(ctx context.Context, req *conne
 }
 
 // DownloadWorkspaceSource calls supertag.runtime.v2.Transfers.DownloadWorkspaceSource.
-func (c *transfersClient) DownloadWorkspaceSource(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.GithubWorkspaceDownload], error) {
+func (c *transfersClient) DownloadWorkspaceSource(ctx context.Context, req *connect.Request[runtimev2.DownloadWorkspaceSourceRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceSourceDownload], error) {
 	return c.downloadWorkspaceSource.CallServerStream(ctx, req)
 }
 
@@ -4182,7 +4184,9 @@ type TransfersHandler interface {
 	DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
-	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.GithubWorkspaceDownload]) error
+	// The Task's Workspace source, or with `merge` the commit its merge follow-up must merge,
+	// read from the remote by the Control Plane and relayed as a bundle.
+	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.DownloadWorkspaceSourceRequest], *connect.ServerStream[runtimev2.WorkspaceSourceDownload]) error
 	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
 
@@ -4304,7 +4308,7 @@ func (UnimplementedTransfersHandler) DownloadReviewArtifact(context.Context, *co
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadReviewArtifact is not implemented"))
 }
 
-func (UnimplementedTransfersHandler) DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.GithubWorkspaceDownload]) error {
+func (UnimplementedTransfersHandler) DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.DownloadWorkspaceSourceRequest], *connect.ServerStream[runtimev2.WorkspaceSourceDownload]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadWorkspaceSource is not implemented"))
 }
 
@@ -4437,7 +4441,9 @@ func (UnimplementedCheckpointDirectoryHandler) CommitCheckpoint(context.Context,
 
 // WorkspaceDirectoryClient is a client for the supertag.runtime.v2.WorkspaceDirectory service.
 type WorkspaceDirectoryClient interface {
-	GetSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GithubWorkspace], error)
+	// The remote Workspace and the commit a live Attempt may download: its base commit, or with
+	// `merge` its merge follow-up's target commit. The bundle is left empty.
+	GetSource(context.Context, *connect.Request[runtimev2.DownloadWorkspaceSourceRequest]) (*connect.Response[runtimev2.WorkspaceSourceBundle], error)
 	GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
 	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
@@ -4456,7 +4462,7 @@ func NewWorkspaceDirectoryClient(httpClient connect.HTTPClient, baseURL string, 
 	baseURL = strings.TrimRight(baseURL, "/")
 	workspaceDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkspaceDirectory").Methods()
 	return &workspaceDirectoryClient{
-		getSource: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspace](
+		getSource: connect.NewClient[runtimev2.DownloadWorkspaceSourceRequest, runtimev2.WorkspaceSourceBundle](
 			httpClient,
 			baseURL+WorkspaceDirectoryGetSourceProcedure,
 			connect.WithSchema(workspaceDirectoryMethods.ByName("GetSource")),
@@ -4497,7 +4503,7 @@ func NewWorkspaceDirectoryClient(httpClient connect.HTTPClient, baseURL string, 
 
 // workspaceDirectoryClient implements WorkspaceDirectoryClient.
 type workspaceDirectoryClient struct {
-	getSource         *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspace]
+	getSource         *connect.Client[runtimev2.DownloadWorkspaceSourceRequest, runtimev2.WorkspaceSourceBundle]
 	getContinuation   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation]
 	reserveDelivery   *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
 	commitDelivery    *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
@@ -4506,7 +4512,7 @@ type workspaceDirectoryClient struct {
 }
 
 // GetSource calls supertag.runtime.v2.WorkspaceDirectory.GetSource.
-func (c *workspaceDirectoryClient) GetSource(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GithubWorkspace], error) {
+func (c *workspaceDirectoryClient) GetSource(ctx context.Context, req *connect.Request[runtimev2.DownloadWorkspaceSourceRequest]) (*connect.Response[runtimev2.WorkspaceSourceBundle], error) {
 	return c.getSource.CallUnary(ctx, req)
 }
 
@@ -4538,7 +4544,9 @@ func (c *workspaceDirectoryClient) GetReviewArtifact(ctx context.Context, req *c
 // WorkspaceDirectoryHandler is an implementation of the supertag.runtime.v2.WorkspaceDirectory
 // service.
 type WorkspaceDirectoryHandler interface {
-	GetSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GithubWorkspace], error)
+	// The remote Workspace and the commit a live Attempt may download: its base commit, or with
+	// `merge` its merge follow-up's target commit. The bundle is left empty.
+	GetSource(context.Context, *connect.Request[runtimev2.DownloadWorkspaceSourceRequest]) (*connect.Response[runtimev2.WorkspaceSourceBundle], error)
 	GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
 	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
@@ -4612,7 +4620,7 @@ func NewWorkspaceDirectoryHandler(svc WorkspaceDirectoryHandler, opts ...connect
 // UnimplementedWorkspaceDirectoryHandler returns CodeUnimplemented from all methods.
 type UnimplementedWorkspaceDirectoryHandler struct{}
 
-func (UnimplementedWorkspaceDirectoryHandler) GetSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GithubWorkspace], error) {
+func (UnimplementedWorkspaceDirectoryHandler) GetSource(context.Context, *connect.Request[runtimev2.DownloadWorkspaceSourceRequest]) (*connect.Response[runtimev2.WorkspaceSourceBundle], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetSource is not implemented"))
 }
 

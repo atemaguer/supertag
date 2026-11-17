@@ -47,17 +47,8 @@ const BASE_ENVIRONMENT: [&str; 8] = [
 /// The HTTP proxy every local service reaches a remote service through, from the process
 /// environment, then `env_file`, so a service unit can name it too.
 const PROXY_ENVIRONMENT: [&str; 4] = ["HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"];
-/// The GitHub account the Control Plane reads, given only when a Host serves a GitHub Workspace.
-const GITHUB_WORKSPACE_ENVIRONMENT: [&str; 7] = [
-    "SUPERTAG_GITHUB_ACCOUNT_ID",
-    "SUPERTAG_GITHUB_REPOSITORY_ID",
-    "SUPERTAG_GITHUB_REPOSITORY",
-    "SUPERTAG_GITHUB_TOKEN",
-    "SUPERTAG_GITHUB_APP_ID",
-    "SUPERTAG_GITHUB_INSTALLATION_ID",
-    "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
-];
-/// The credential vault selection the Gateway's Surface connectors and GitHub Workspaces use.
+/// The credential vault selection the Gateway's Surface connectors and git delivery's Workspace
+/// Credentials use.
 pub(crate) const CREDENTIAL_VAULT_ENVIRONMENT: [&str; 6] = [
     "SUPERTAG_CREDENTIAL_VAULT",
     "VAULT_ADDR",
@@ -239,8 +230,8 @@ pub fn gateway_connection(state_directory: &Path) -> Result<(String, String)> {
 
 /// What the local services run beyond the Control Plane's API.
 struct Extras<'a> {
-    /// Present only when a Host serves a GitHub Workspace: the Control Plane's GitHub source.
-    workspace: Option<&'a Environment>,
+    /// The environment git delivery's credential vault selection comes from.
+    vault: &'a Environment,
     /// Configured Surface connectors and the environment their credential vault comes from.
     surfaces: Option<(&'a BTreeMap<String, Surface>, &'a Environment)>,
 }
@@ -338,10 +329,7 @@ impl Children {
         extras: Extras<'_>,
         bootstrap_host: bool,
     ) -> Result<String> {
-        let Extras {
-            workspace,
-            surfaces,
-        } = extras;
+        let Extras { vault, surfaces } = extras;
         let mut plane = command(executable, "control-plane");
         plane
             .envs(self.proxy.iter().cloned())
@@ -369,23 +357,13 @@ impl Children {
         if bootstrap_host {
             plane.env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host);
         }
-        if let Some(environment) = workspace {
-            plane
-                .arg("--github-workspace-directory")
-                .arg(directory.join("github-sources"))
-                .env("SUPERTAG_STATE_DIR", directory)
-                .envs(environment.selected(GITHUB_WORKSPACE_ENVIRONMENT))
-                .envs(environment.selected(CREDENTIAL_VAULT_ENVIRONMENT));
-            #[cfg(feature = "test-fixtures")]
-            for name in [
-                "SUPERTAG_TEST_GITHUB_API_URL",
-                "SUPERTAG_TEST_GITHUB_GIT_URL",
-            ] {
-                if let Some(value) = std::env::var_os(name) {
-                    plane.env(name, value);
-                }
-            }
-        }
+        // Git delivery reads remote Workspaces with the Workspace Credentials in this machine's
+        // credential vault.
+        plane
+            .arg("--git-delivery-directory")
+            .arg(directory.join("git-delivery"))
+            .env("SUPERTAG_STATE_DIR", directory)
+            .envs(vault.selected(CREDENTIAL_VAULT_ENVIRONMENT));
         if let Some(audit_log) = &self.audit_log {
             plane.arg("--audit-log").arg(audit_log);
         }
@@ -481,10 +459,7 @@ impl Children {
                 credentials,
                 options.control_plane_listen,
                 Extras {
-                    workspace: options
-                        .adapter
-                        .uses_control_plane_workspace()
-                        .then_some(&Environment::default()),
+                    vault: &Environment::default(),
                     surfaces: None,
                 },
                 true,
@@ -1518,11 +1493,7 @@ pub async fn configured(
                     credentials.as_ref().expect("local credentials"),
                     listen,
                     Extras {
-                        workspace: config
-                            .hosts
-                            .iter()
-                            .any(|h| h.harnesses.iter().any(|a| a.uses_control_plane_workspace()))
-                            .then_some(&*environment),
+                        vault: &environment,
                         surfaces: Some((&config.surfaces, &*environment)),
                     },
                     false,

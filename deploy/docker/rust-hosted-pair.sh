@@ -43,8 +43,7 @@ trap stop TERM INT
 # command (not a function), so a background Gateway's PID is the Gateway itself.
 as_gateway="env -u SUPERTAG_DATABASE_URL -u SUPERTAG_OPERATOR_TOKEN
   -u SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL -u SUPERTAG_BOOTSTRAP_HOST_TOKEN -u SUPERTAG_TLS_CERT_FILE
-  -u SUPERTAG_TLS_KEY_FILE -u SUPERTAG_TLS_CLIENT_CA_FILE -u SUPERTAG_GITHUB_TOKEN
-  -u SUPERTAG_GITHUB_PRIVATE_KEY_FILE"
+  -u SUPERTAG_TLS_KEY_FILE -u SUPERTAG_TLS_CLIENT_CA_FILE"
 # The Control Plane's view: no client identity, no Gateway credential, and no surface settings,
 # which only the Gateway reads. A line inside a multi-line value that looks like such a setting only adds an `-u` for a
 # name that is not set, which changes nothing.

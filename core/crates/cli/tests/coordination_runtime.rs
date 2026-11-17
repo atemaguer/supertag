@@ -14,19 +14,14 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use anyhow::{Context, Result, ensure};
-use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
-use sha2::Sha256;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::TcpListener,
+    io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
-    sync::Mutex,
     time::{sleep, timeout},
 };
 use uuid::Uuid;
@@ -90,12 +85,10 @@ impl Credentials {
     }
 }
 
-/// A Control Plane with optional extra arguments, and a Gateway when a scenario needs surfaces.
+/// A Control Plane with optional extra arguments.
 struct Services {
     plane: Child,
-    gateway: Option<Child>,
     public: String,
-    extra: Vec<String>,
 }
 
 impl Services {
@@ -110,28 +103,8 @@ impl Services {
         let (plane, mut public) = service(command, 1).await?;
         Ok(Self {
             plane,
-            gateway: None,
             public: public.remove(0),
-            extra: Vec::new(),
         })
-    }
-
-    /// Also starts a Gateway configured by `gateway`, and keeps the `lines - 1` listener
-    /// addresses it reports after its own.
-    async fn with_gateway(
-        credentials: &Credentials,
-        database: &str,
-        gateway: impl Fn(&mut Command),
-        lines: usize,
-    ) -> Result<Self> {
-        let mut services = Self::start(credentials, database, |_| {}).await?;
-        let mut command = credentials.command(&["gateway", "--control-plane", &services.public]);
-        gateway(&mut command);
-        let (gateway, mut endpoints) = service(command, lines).await?;
-        endpoints.remove(0);
-        services.gateway = Some(gateway);
-        services.extra = endpoints;
-        Ok(services)
     }
 
     fn cli(&self, credentials: &Credentials, args: &[&str]) -> Command {
@@ -141,9 +114,6 @@ impl Services {
     }
 
     async fn stop(mut self) -> Result<()> {
-        if let Some(gateway) = &mut self.gateway {
-            gateway.kill().await?;
-        }
         self.plane.kill().await?;
         Ok(())
     }
@@ -191,12 +161,6 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .with_context(|| format!("missing {name}: {value}"))
 }
 
-fn spec(root: &Path, name: &str, value: Value) -> Result<String> {
-    let file = root.join(name);
-    std::fs::write(&file, serde_json::to_vec(&value)?)?;
-    Ok(file.to_str().context("spec path")?.into())
-}
-
 async fn git(source: &Path, arguments: &[&str]) -> Result<String> {
     let mut command = Command::new("/usr/bin/git");
     command
@@ -232,8 +196,6 @@ database_tests! {
     overlapping_work_sessions_warn_their_objective_once;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     worker_managed_effects_replay_and_stay_in_doubt_across_restart;
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    slack_message_selects_only_an_authorized_github_workspace;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     an_owner_report_finishes_its_objective_through_the_worker_host;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -845,266 +807,6 @@ async fn worker_managed_effects_replay_and_stay_in_doubt_across_restart(
         std::fs::read_to_string(&provider)?,
         "ticket/1\nticket/2\nticket/3\n"
     );
-    services.stop().await
-}
-
-const SLACK_ACCOUNT: &str = "slack-selection-test";
-const TEAM: &str = "TTEAM1";
-const CHANNEL: &str = "CCHANNEL1";
-const SIGNING: &str = "synthetic-slack-selection-signing-key";
-const BOT: &str = "xoxb-synthetic-slack-selection-token";
-
-/// Records the text of each Slack post or update.
-struct MockSlack {
-    endpoint: String,
-    texts: Arc<Mutex<Vec<String>>>,
-    server: tokio::task::JoinHandle<Result<()>>,
-}
-
-impl MockSlack {
-    async fn start() -> Result<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
-        let endpoint = format!("http://{}/chat.postMessage", listener.local_addr()?);
-        let texts = Arc::new(Mutex::new(Vec::new()));
-        let observed = texts.clone();
-        let server = tokio::spawn(async move {
-            let mut position = 0;
-            loop {
-                let (mut connection, _) = listener.accept().await?;
-                let mut bytes = Vec::new();
-                let mut buffer = [0; 4096];
-                let body = loop {
-                    let count = connection.read(&mut buffer).await?;
-                    ensure!(count > 0, "fixture HTTP request ended early");
-                    bytes.extend_from_slice(&buffer[..count]);
-                    let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
-                        continue;
-                    };
-                    let headers = String::from_utf8_lossy(&bytes[..end]).to_ascii_lowercase();
-                    let length: usize = headers
-                        .lines()
-                        .find_map(|line| line.strip_prefix("content-length:"))
-                        .context("fixture HTTP length missing")?
-                        .trim()
-                        .parse()?;
-                    if bytes.len() >= end + 4 + length {
-                        break serde_json::from_slice::<Value>(&bytes[end + 4..end + 4 + length])?;
-                    }
-                };
-                observed
-                    .lock()
-                    .await
-                    .push(body["text"].as_str().unwrap_or_default().to_owned());
-                position += 1;
-                let ts = body["ts"]
-                    .as_str()
-                    .map_or_else(|| format!("1794470100.{position:06}"), str::to_owned);
-                let reply = json!({"ok":true,"channel":CHANNEL,"ts":ts}).to_string();
-                connection.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len()).as_bytes()).await?;
-                connection.shutdown().await?;
-            }
-        });
-        Ok(Self {
-            endpoint,
-            texts,
-            server,
-        })
-    }
-
-    async fn wait_for(&self, expected: &str) -> Result<()> {
-        timeout(WAIT, async {
-            loop {
-                if self.texts.lock().await.iter().any(|text| text == expected) {
-                    return;
-                }
-                sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await
-        .with_context(|| format!("Slack never received {expected:?}: {:?}", self.texts))
-    }
-}
-
-impl Drop for MockSlack {
-    fn drop(&mut self) {
-        self.server.abort();
-    }
-}
-
-async fn mention(endpoint: &str, sequence: u64, text: &str) -> Result<()> {
-    reply(endpoint, sequence, sequence, text).await
-}
-
-/// A mention in the thread that message `thread` started.
-async fn reply(endpoint: &str, sequence: u64, thread: u64, text: &str) -> Result<()> {
-    let ts = format!("1794470000.{sequence:06}");
-    let thread_ts = format!("1794470000.{thread:06}");
-    let body = json!({"type":"event_callback","team_id":TEAM,"event_id":format!("Ev{sequence}"),"event":{"type":"app_mention","channel":CHANNEL,"user":"UALICE1","text":text,"ts":ts,"thread_ts":thread_ts}}).to_string();
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(5))
-        .build()?;
-    // As Slack does, redeliver after a 503 or no answer, up to three retries: the Gateway
-    // answers 503 when the Control Plane does not admit the event within its acknowledgement
-    // budget, which a loaded machine can exceed. Admission is idempotent per event ID.
-    let mut retry = 0;
-    let status = loop {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs()
-            .to_string();
-        let mut mac = Hmac::<Sha256>::new_from_slice(SIGNING.as_bytes())?;
-        mac.update(format!("v0:{timestamp}:{body}").as_bytes());
-        let mut request = client
-            .post(format!("{endpoint}/slack/events"))
-            .header("content-type", "application/json")
-            .header("x-slack-request-timestamp", timestamp)
-            .header(
-                "x-slack-signature",
-                format!("v0={:x}", mac.finalize().into_bytes()),
-            );
-        if retry > 0 {
-            request = request.header("x-slack-retry-num", retry.to_string());
-        }
-        let outcome = request.body(body.clone()).send().await;
-        let redeliver = match &outcome {
-            Ok(response) => response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE,
-            Err(error) => error.is_timeout(),
-        };
-        if !redeliver || retry == 3 {
-            break outcome?.status();
-        }
-        retry += 1;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    };
-    ensure!(status.is_success(), "Slack event was refused: {status}");
-    Ok(())
-}
-
-/// TypeScript parity: `tests/e2e/permission-target-workspace.test.ts`.
-async fn slack_message_selects_only_an_authorized_github_workspace(database: String) -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let root = directory.path();
-    let slack = MockSlack::start().await?;
-    let credentials = Credentials::new();
-    let services = Services::with_gateway(
-        &credentials,
-        &database,
-        |gateway| {
-            gateway
-                .args(["--slack-listen", "127.0.0.1:0", "--slack-state-directory"])
-                .arg(root.join("slack"))
-                .env("SUPERTAG_SLACK_ACCOUNT_ID", SLACK_ACCOUNT)
-                .env("SUPERTAG_SLACK_TEAM_ID", TEAM)
-                .env("SUPERTAG_SLACK_CHANNEL_ID", CHANNEL)
-                .env("SUPERTAG_SLACK_TAG_ID", "builder")
-                .env("SUPERTAG_SLACK_ALLOWED_USERS", "UALICE1")
-                .env("SUPERTAG_SLACK_SIGNING_SECRET", SIGNING)
-                .env("SUPERTAG_SLACK_BOT_TOKEN", BOT)
-                .env("SUPERTAG_TEST_SLACK_API_URL", &slack.endpoint);
-        },
-        2,
-    )
-    .await?;
-    let ingress = services.extra[0].clone();
-    let cli = |args: &[&str]| services.cli(&credentials, args);
-    json(cli(&[
-        "tag",
-        "put",
-        "builder",
-        "--instructions",
-        "Answer engineering questions",
-        "--allow",
-        "files:read",
-    ]))
-    .await?;
-    let account = spec(
-        root,
-        "account.json",
-        json!({"accountId":"github-source","identity":{"provider":"github","externalAccountId":"installation:42"},"enabled":true,"gateway":"local"}),
-    )?;
-    json(cli(&["surface-account", "put", &account])).await?;
-    json(cli(&[
-        "workspace",
-        "put",
-        "project",
-        "--account",
-        "github-source",
-        "--repository-id",
-        "123",
-        "--repository",
-        "acme/project",
-        "--commit",
-        "1111111111111111111111111111111111111111",
-        "--operation-id",
-        "source",
-    ]))
-    .await?;
-
-    // Without a read grant the request fails before execution, and the thread is told why.
-    mention(
-        &ingress,
-        1,
-        "<@U0BOT> In acme/project, why does deployment fail?",
-    )
-    .await?;
-    slack
-        .wait_for("I ran into a problem while working on this: Tag builder is not allowed to use GitHub repository acme/project")
-        .await?;
-
-    let grant = spec(
-        root,
-        "grant.json",
-        json!({"setId":"read-source","name":"read-source","permissions":[{"target":"surface","surfaceAccountId":"github-source","scope":"repository:123","action":"contents:read"}]}),
-    )?;
-    json(cli(&["permission-set", "put", &grant])).await?;
-    let role = spec(
-        root,
-        "role.json",
-        json!({"roleId":"reader","name":"reader","purpose":"Read source","permissionSets":["read-source"]}),
-    )?;
-    json(cli(&["role", "put", &role])).await?;
-    json(cli(&["role-assignment", "create", "reader", "builder"])).await?;
-    // The granted repository is selected, and the acknowledgement names its Workspace.
-    mention(
-        &ingress,
-        2,
-        "<@U0BOT> In acme/project, why does deployment fail?",
-    )
-    .await?;
-    slack
-        .wait_for("Got it. I’m looking into this in Workspace project now.")
-        .await?;
-
-    // Once a repository is readable, naming another one runs the Task without a Workspace and
-    // asks the requester to choose (TypeScript `selection-required`), rather than refusing.
-    mention(
-        &ingress,
-        3,
-        "<@U0BOT> In rust-lang/cargo, how is this handled?",
-    )
-    .await?;
-    slack.wait_for("Got it. I’m looking into this now.").await?;
-
-    // A revoked read fails a later turn of the selected Session with a reply, instead of an
-    // ingress error that Slack would retry without ever answering.
-    let narrowed = spec(
-        root,
-        "narrowed.json",
-        json!({"setId":"read-source","name":"read-source","permissions":[{"target":"surface","surfaceAccountId":"github-source","scope":"repository:124","action":"contents:read"}]}),
-    )?;
-    json(cli(&[
-        "permission-set",
-        "put",
-        &narrowed,
-        "--expected-revision",
-        "1",
-    ]))
-    .await?;
-    reply(&ingress, 4, 2, "<@U0BOT> One more question").await?;
-    slack
-        .wait_for("I ran into a problem while working on this: Tag builder is no longer allowed to use the GitHub Workspace project this Session selected")
-        .await?;
     services.stop().await
 }
 

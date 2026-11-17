@@ -277,7 +277,10 @@ async fn catalog_contract(url: String) {
         "{missing:?}"
     );
     let stored = credential(&store, "handbook").await;
-    assert_eq!(stored.revision, credential(&store, "handbook").await.revision);
+    assert_eq!(
+        stored.revision,
+        credential(&store, "handbook").await.revision
+    );
     // Remotes never carry secrets or transport helpers, and merge targets stay outside supertag/.
     for remote in [
         "https://user:token@github.com/acme/app.git",
@@ -293,7 +296,10 @@ async fn catalog_contract(url: String) {
         )
         .await
         .unwrap_err();
-        assert!(matches!(refused, StoreError::InvalidArgument(_)), "{remote}");
+        assert!(
+            matches!(refused, StoreError::InvalidArgument(_)),
+            "{remote}"
+        );
     }
     let refused = put(
         &store,
@@ -395,9 +401,12 @@ async fn catalog_contract(url: String) {
     // Only git delivery pins sources and claims landings.
     assert!(matches!(
         store
-            .claim_workspace_landing(OP, &ClaimWorkspaceLandingRequest {
-                operation_id: "x".into()
-            })
+            .claim_workspace_landing(
+                OP,
+                &ClaimWorkspaceLandingRequest {
+                    operation_id: "x".into()
+                }
+            )
             .await,
         Err(StoreError::PermissionDenied)
     ));
@@ -425,11 +434,7 @@ async fn branch_contract(url: String) {
         .await
         .unwrap()
         .with_execution_clock(move || clock.load(std::sync::atomic::Ordering::SeqCst));
-    setup(
-        &store,
-        workspace_land::Mode::Branch(WorkspaceLandBranch {}),
-    )
-    .await;
+    setup(&store, workspace_land::Mode::Branch(WorkspaceLandBranch {})).await;
     let host = support::register_host(&store, "docs-host").await;
     support::hold_artifacts(&store, &host).await;
 
@@ -457,7 +462,11 @@ async fn branch_contract(url: String) {
         .unwrap();
     let failed = store.get_task(&unreadable.task_id).await.unwrap();
     assert_eq!(failed.state(), TaskState::Failed);
-    assert!(failed.result().contains("no branch main"), "{:?}", failed.result);
+    assert!(
+        failed.result().contains("no branch main"),
+        "{:?}",
+        failed.result
+    );
 
     // A Session's Tasks wait until git delivery pins its source.
     let first = submit(&store, "notes", "Write the notes").await;
@@ -520,14 +529,20 @@ async fn branch_contract(url: String) {
     let states: Vec<_> = landings.iter().map(WorkspaceLanding::state).collect();
     assert_eq!(
         states,
-        [WorkspaceLandingState::Queued, WorkspaceLandingState::Superseded]
+        [
+            WorkspaceLandingState::Queued,
+            WorkspaceLandingState::Superseded
+        ]
     );
 
     let claimed = claim_landing(&store).await;
     let landing = claimed.landing.clone().unwrap();
     assert_eq!(landing.mode(), WorkspaceLandingMode::Branch);
     assert_eq!(landing.delivery.as_ref().unwrap().head_commit, second_head);
-    assert_eq!(landing.branch, supertag_protocol::session_branch("engineer", "notes"));
+    assert_eq!(
+        landing.branch,
+        supertag_protocol::session_branch("engineer", "notes")
+    );
     assert_eq!(landing.remote, REMOTE);
     assert_eq!(claimed.credential, "handbook");
     assert_eq!(claimed.holder.as_ref().unwrap().host_id, "docs-host");
@@ -709,7 +724,9 @@ fn sqlite(directory: &tempfile::TempDir, name: &str) -> String {
     )
 }
 
-async fn postgres(contract: fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>) {
+async fn postgres(
+    contract: fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>,
+) {
     let admin_url =
         std::fs::read_to_string(std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE").unwrap())
             .unwrap();

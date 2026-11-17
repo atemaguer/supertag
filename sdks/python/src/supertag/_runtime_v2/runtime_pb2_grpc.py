@@ -3,7 +3,6 @@
 import grpc
 import warnings
 
-from . import github_workspaces_pb2 as supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2
 from . import runtime_pb2 as supertag_dot_runtime_dot_v2_dot_runtime__pb2
 
 GRPC_GENERATED_VERSION = '1.85.1'
@@ -5172,8 +5171,8 @@ class TransfersStub:
                 _registered_method=True)
         self.DownloadWorkspaceSource = channel.unary_stream(
                 '/supertag.runtime.v2.Transfers/DownloadWorkspaceSource',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GithubWorkspaceDownload.FromString,
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DownloadWorkspaceSourceRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceSourceDownload.FromString,
                 _registered_method=True)
         self.VerifyWorkspaceOutputRemote = channel.unary_unary(
                 '/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote',
@@ -5232,7 +5231,9 @@ class TransfersServicer:
         raise NotImplementedError('Method not implemented!')
 
     def DownloadWorkspaceSource(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """The Task's Workspace source, or with `merge` the commit its merge follow-up must merge,
+        read from the remote by the Control Plane and relayed as a bundle.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -5283,8 +5284,8 @@ def add_TransfersServicer_to_server(servicer, server):
             ),
             'DownloadWorkspaceSource': grpc.unary_stream_rpc_method_handler(
                     servicer.DownloadWorkspaceSource,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GithubWorkspaceDownload.SerializeToString,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DownloadWorkspaceSourceRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceSourceDownload.SerializeToString,
             ),
             'VerifyWorkspaceOutputRemote': grpc.unary_unary_rpc_method_handler(
                     servicer.VerifyWorkspaceOutputRemote,
@@ -5507,8 +5508,8 @@ class Transfers:
             request,
             target,
             '/supertag.runtime.v2.Transfers/DownloadWorkspaceSource',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GithubWorkspaceDownload.FromString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.DownloadWorkspaceSourceRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceSourceDownload.FromString,
             options,
             channel_credentials,
             insecure,
@@ -5720,8 +5721,8 @@ class WorkspaceDirectoryStub:
         """
         self.GetSource = channel.unary_unary(
                 '/supertag.runtime.v2.WorkspaceDirectory/GetSource',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.GithubWorkspace.FromString,
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DownloadWorkspaceSourceRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceSourceBundle.FromString,
                 _registered_method=True)
         self.GetContinuation = channel.unary_unary(
                 '/supertag.runtime.v2.WorkspaceDirectory/GetContinuation',
@@ -5755,7 +5756,9 @@ class WorkspaceDirectoryServicer:
     """
 
     def GetSource(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """The remote Workspace and the commit a live Attempt may download: its base commit, or with
+        `merge` its merge follow-up's target commit. The bundle is left empty.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -5795,8 +5798,8 @@ def add_WorkspaceDirectoryServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'GetSource': grpc.unary_unary_rpc_method_handler(
                     servicer.GetSource,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.GithubWorkspace.SerializeToString,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DownloadWorkspaceSourceRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceSourceBundle.SerializeToString,
             ),
             'GetContinuation': grpc.unary_unary_rpc_method_handler(
                     servicer.GetContinuation,
@@ -5850,8 +5853,8 @@ class WorkspaceDirectory:
             request,
             target,
             '/supertag.runtime.v2.WorkspaceDirectory/GetSource',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.GithubWorkspace.FromString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.DownloadWorkspaceSourceRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceSourceBundle.FromString,
             options,
             channel_credentials,
             insecure,

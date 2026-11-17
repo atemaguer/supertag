@@ -60,21 +60,14 @@ const TLS_KEYS: [&str; 6] = [
     "SUPERTAG_CLIENT_CERT_FILE",
     "SUPERTAG_CLIENT_KEY_FILE",
 ];
-/// The GitHub Workspace account (`--github-workspace-directory`) and the credential vault it may
-/// read its secret from are optional Control Plane settings.
-const CONTROL_PLANE_KEYS: [&str; 18] = [
+/// Git delivery keeps its state under `SUPERTAG_STATE_DIR` and reads Workspace Credentials from
+/// the credential vault these select.
+const CONTROL_PLANE_KEYS: [&str; 11] = [
     "SUPERTAG_DATABASE_URL",
     "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
     "SUPERTAG_OPERATOR_TOKEN",
     "SUPERTAG_OPERATOR_PRINCIPAL",
     "SUPERTAG_STATE_DIR",
-    "SUPERTAG_GITHUB_ACCOUNT_ID",
-    "SUPERTAG_GITHUB_REPOSITORY_ID",
-    "SUPERTAG_GITHUB_REPOSITORY",
-    "SUPERTAG_GITHUB_TOKEN",
-    "SUPERTAG_GITHUB_APP_ID",
-    "SUPERTAG_GITHUB_INSTALLATION_ID",
-    "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
     "SUPERTAG_CREDENTIAL_VAULT",
     "VAULT_ADDR",
     "VAULT_TOKEN",

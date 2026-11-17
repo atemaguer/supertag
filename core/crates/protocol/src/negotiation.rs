@@ -36,7 +36,7 @@ use crate::v2::{
 };
 
 /// The protocol versions this build speaks, oldest first.
-pub const PROTOCOL_VERSIONS: &[u32] = &[3];
+pub const PROTOCOL_VERSIONS: &[u32] = &[4];
 const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_OFFERED_VERSIONS: usize = 32;
 const MAX_BUILD_VERSION_BYTES: usize = 64;

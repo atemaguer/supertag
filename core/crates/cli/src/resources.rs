@@ -608,7 +608,7 @@ pub enum DeleteCommand {
         #[command(flatten)]
         args: volumes::DeleteArgs,
     },
-    /// Delete a GitHub Workspace source at its exact revision.
+    /// Delete a remote Workspace at its exact revision.
     #[command(visible_alias = "workspaces")]
     Workspace {
         /// Workspace ID.

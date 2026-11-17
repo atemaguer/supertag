@@ -19,27 +19,27 @@ except ImportError as error:
 from ._runtime_v2 import artifact_pb2 as artifacts
 from ._runtime_v2 import (
     artifact_pb2_grpc,
-    github_publications_pb2_grpc,
-    github_workspaces_pb2_grpc,
     negotiation_pb2,
     negotiation_pb2_grpc,
     policy_pb2_grpc,
     runtime_pb2_grpc,
+    workspace_landings_pb2_grpc,
+    workspaces_pb2_grpc,
 )
-from ._runtime_v2 import github_publications_pb2 as github_publications
-from ._runtime_v2 import github_workspaces_pb2 as github_workspaces
 from ._runtime_v2 import policy_pb2 as policy
 from ._runtime_v2 import runtime_pb2 as runtime
+from ._runtime_v2 import workspace_landings_pb2 as workspace_landings
+from ._runtime_v2 import workspaces_pb2 as workspaces
 
 __all__ = [
     "GatewayClient",
     "GatewayClientSync",
     "GatewayProtocolError",
     "artifacts",
-    "github_publications",
-    "github_workspaces",
     "policy",
     "runtime",
+    "workspace_landings",
+    "workspaces",
 ]
 
 _MAX_MESSAGE_BYTES = 1024 * 1024
@@ -95,7 +95,7 @@ def _connection(url: str, token: str, *, ca: bytes | None, identity: tuple[bytes
 # Every call names the protocol version this client negotiated with the Gateway, which
 # refuses a call without it.
 _PROTOCOL_HEADER = "x-supertag-protocol"
-_PROTOCOL_VERSIONS = (3,)
+_PROTOCOL_VERSIONS = (4,)
 _NEGOTIATION_TIMEOUT = 5.0
 
 
@@ -334,15 +334,16 @@ class _Services:
         self.policy = policy_pb2_grpc.PolicyCatalogStub(channel)
         self.manifest_relationships = runtime_pb2_grpc.ManifestRelationshipsStub(channel)
         self.surfaces = policy_pb2_grpc.SurfacePolicyCatalogStub(channel)
-        self.github_workspaces = github_workspaces_pb2_grpc.GithubWorkspacesStub(channel)
-        self.github_publications = github_publications_pb2_grpc.GithubPublicationsStub(channel)
+        self.workspaces = workspaces_pb2_grpc.WorkspacesStub(channel)
+        self.workspace_credentials = workspaces_pb2_grpc.WorkspaceCredentialsStub(channel)
+        self.workspace_landings = workspace_landings_pb2_grpc.WorkspaceLandingsStub(channel)
         self.artifacts = artifact_pb2_grpc.ArtifactCatalogStub(channel)
         self.artifact_publications = artifact_pb2_grpc.ArtifactPublicationsStub(channel)
         self.volumes = artifact_pb2_grpc.ArtifactVolumesStub(channel)
         self.download_artifact_file = artifact_pb2_grpc.ArtifactTransfersStub(channel).DownloadFile
-        workspaces = runtime_pb2_grpc.TransfersStub(channel)
-        self.download_workspace_artifact = workspaces.DownloadWorkspaceArtifact
-        self.download_review_artifact = workspaces.DownloadReviewArtifact
+        transfers = runtime_pb2_grpc.TransfersStub(channel)
+        self.download_workspace_artifact = transfers.DownloadWorkspaceArtifact
+        self.download_review_artifact = transfers.DownloadReviewArtifact
 
 
 class GatewayClient(_Services):

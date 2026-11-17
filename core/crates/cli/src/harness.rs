@@ -119,7 +119,7 @@ pub struct AdapterOptions {
     /// Workspace's base commit, with a 10-minute limit.
     #[arg(long, value_name = "ID=COMMAND", requires = "workspace_id")]
     workspace_setup: Vec<String>,
-    /// Retrieve each Workspace's accepted GitHub source from the Control Plane.
+    /// Serve each --workspace-id as a remote Workspace whose source the Control Plane relays.
     #[arg(
         long,
         requires = "workspace_id",
@@ -137,17 +137,13 @@ impl AdapterOptions {
         self.adapter.is_some() || self.harness.is_some()
     }
 
-    pub fn uses_control_plane_workspace(&self) -> bool {
-        self.workspace_from_control_plane
-    }
-
     /// The host's Workspace mappings, each `--workspace-id` paired with the
     /// `--workspace-source` in the same position, or every ID served from the Control Plane.
     pub fn workspace_mappings(&self) -> Result<Vec<WorkspaceMapping>> {
         if self.workspace_from_control_plane {
             ensure!(
                 self.workspace_source.is_empty(),
-                "GitHub Workspaces take no --workspace-source"
+                "remote Workspaces take no --workspace-source"
             );
         } else {
             ensure!(

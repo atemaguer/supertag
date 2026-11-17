@@ -46,7 +46,7 @@ impl WorkspaceMapping {
 #[derive(Clone, Debug)]
 pub enum WorkspaceSource {
     Local(PathBuf),
-    /// A GitHub Workspace whose source the Control Plane serves.
+    /// A remote Workspace whose source the Control Plane relays.
     ControlPlane,
 }
 
@@ -175,7 +175,7 @@ impl Workspaces {
     }
 
     /// The commit the branch a Task's Workspace follows names now in this host's mapped source.
-    /// Only a local checkout resolves branches; a GitHub Workspace selects its own revision.
+    /// Only a local checkout resolves branches; a remote Workspace pins its own branch.
     pub async fn resolve_ref(
         &self,
         workspace_id: &str,

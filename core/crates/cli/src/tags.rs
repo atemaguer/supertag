@@ -62,7 +62,7 @@ pub struct PutArgs {
     /// Logical local or configured GitHub repository binding.
     #[arg(long)]
     workspace_id: Option<String>,
-    /// Full local Git base commit every Session starts from. Omit for a configured GitHub source.
+    /// Full local Git base commit every Session starts from. Omit for a remote Workspace.
     #[arg(long, requires = "workspace_id", conflicts_with = "workspace_ref")]
     workspace_base: Option<String>,
     /// Local Git branch whose current commit each new Session starts from, such as main.
