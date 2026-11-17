@@ -279,12 +279,27 @@ impl Repository {
         let checkout = self
             .checkout_metadata(directory, base, start, cancel)
             .await?;
+        // Git writes the files on several workers.
+        let workers = format!("checkout.workers={}", parallelism());
         checkout
-            .command(&["checkout-index", "--all", "--force"], &[], &[], cancel)
+            .command(
+                &[
+                    "-c",
+                    &workers,
+                    "-c",
+                    "checkout.thresholdForParallelism=64",
+                    "checkout-index",
+                    "--all",
+                    "--force",
+                ],
+                &[],
+                &[],
+                cancel,
+            )
             .await?;
         // Verify bytes and modes after checkout rather than trusting config, name
         // normalization, or a successful Git exit to imply the exact pinned tree. Reading and
-        // hashing every file runs on a blocking thread, so the caller's lease renewal goes on.
+        // hashing every file runs on blocking threads, so the caller's lease renewal goes on.
         let (directory, entries, cancel) = (directory.to_owned(), entries.clone(), cancel.clone());
         let oid_length = self.oid_length;
         tokio::task::spawn_blocking(move || {
@@ -293,15 +308,33 @@ impl Repository {
                 actual.len() == entries.len(),
                 "materialized checkout differs from its pinned tree"
             );
-            for (path, expected) in &entries {
-                check_cancelled(&cancel)?;
-                let actual = paths::read_checkout_file(&directory, path)?;
-                ensure!(
-                    actual.mode == expected.mode
-                        && blob_oid(&actual.bytes, oid_length) == expected.oid,
-                    "materialized file differs from its pinned tree: {path}"
-                );
-            }
+            let entries: Vec<_> = entries.iter().collect();
+            let chunk = entries.len().div_ceil(parallelism()).max(1);
+            std::thread::scope(|scope| {
+                let verifiers: Vec<_> = entries
+                    .chunks(chunk)
+                    .map(|part| {
+                        let (directory, cancel) = (&directory, &cancel);
+                        scope.spawn(move || -> Result<()> {
+                            for (path, expected) in part {
+                                check_cancelled(cancel)?;
+                                let actual = paths::read_checkout_file(directory, path)?;
+                                ensure!(
+                                    actual.mode == expected.mode
+                                        && blob_oid(&actual.bytes, oid_length) == expected.oid,
+                                    "materialized file differs from its pinned tree: {path}"
+                                );
+                            }
+                            Ok(())
+                        })
+                    })
+                    .collect();
+                verifiers.into_iter().try_for_each(|verifier| {
+                    verifier
+                        .join()
+                        .map_err(|_| anyhow::anyhow!("checkout verification stopped"))?
+                })
+            })?;
             check_cancelled(&cancel)
         })
         .await
@@ -854,6 +887,11 @@ impl Repository {
     pub(crate) fn sync(&self) -> Result<()> {
         paths::sync_tree(&self.git_dir)
     }
+}
+
+/// How many workers write and verify a checkout: the machine's cores, at most 8.
+fn parallelism() -> usize {
+    std::thread::available_parallelism().map_or(1, |cores| cores.get().min(8))
 }
 
 pub(crate) fn validate_oid(value: &str) -> Result<()> {
