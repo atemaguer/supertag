@@ -1152,6 +1152,10 @@ message WorkspaceCommand {
 message HarnessWorkspaceResult {
   string text = 1;
   bool is_error = 2;
+  // Set only by a remote Workspace provider, and only once it confirmed that the operation's
+  // sandbox no longer exists. The Worker Host then replaces the sandbox from the Attempt's
+  // starting files and tells the Harness; a Harness never receives it set.
+  bool sandbox_lost = 3;
 }
 
 // Private to a Worker Host and its provider helper. The Harness never receives

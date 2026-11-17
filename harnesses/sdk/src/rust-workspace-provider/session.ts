@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { posix } from "node:path";
-import type { ExecutionEnvironment, ProcessHandle } from "../index.js";
+import type { ExecutionEnvironment, ProcessHandle, SplitExecutionToolResult } from "../index.js";
 import {
   type CopyDownloadPart,
   type CopyUploadPart,
@@ -137,6 +137,13 @@ export interface SandboxWorkspaceProvider {
     artifact?: string,
   ): Promise<SandboxWorkspace>;
   stop(owner: SandboxOwner, sandboxId?: string): Promise<SandboxStopResult>;
+  /**
+   * Whether the provider confirms that this owner's sandbox no longer exists. Asked only after a
+   * Workspace call failed. Resolve true only on the provider's own answer that the sandbox is
+   * gone; a timeout, a network error, or any doubt is false. A true answer makes the Worker Host
+   * replace the sandbox from the turn's starting files.
+   */
+  sandboxGone?(owner: SandboxOwner, sandboxId: string): Promise<boolean>;
   /** Deletes a prepared artifact; one already gone counts as deleted. */
   removeArtifact(artifact: string): Promise<void>;
 }
@@ -146,6 +153,9 @@ export interface SandboxWorkspaceProvider {
  * artifact finds it. The setup lines name the checkout path, so it never changes.
  */
 export const PREPARED_ROOT = "/tmp/supertag-workspace-prepared";
+
+/** How long the provider may take to say whether a sandbox still exists. */
+const SANDBOX_GONE_CHECK_MS = 10_000;
 
 /** An E2B snapshot or template ID, or a Modal image ID. */
 export function validPreparedArtifact(artifact: string): boolean {
@@ -377,6 +387,8 @@ export function createSandboxWorkspaceSession(
   /** The Task may run commands; with any Workspace MCP server started, the seal is required. */
   let commands = false;
   let mcpStarted = false;
+  /** The provider confirmed the sandbox gone: every later call reports it without asking again. */
+  let sandboxLost = false;
   /** This Attempt's Workspace copies, once the first is staged. */
   let copies: WorkspaceCopies | undefined;
   const mcpServers = new Set<ProcessHandle>();
@@ -446,6 +458,38 @@ export function createSandboxWorkspaceSession(
     mcpServers.clear();
     const stopped = await Promise.all(running.map(stopMcpServer));
     if (stopped.includes(false)) uncertain = true;
+  }
+
+  function lostResult() {
+    return {
+      text: `The ${provider.label} sandbox no longer exists.`,
+      isError: true,
+      sandboxLost: true,
+    };
+  }
+
+  /** Asks the provider, once per failure, whether the staged sandbox is gone. */
+  async function confirmedGone(): Promise<boolean> {
+    if (sandboxLost) return true;
+    const check = provider.sandboxGone;
+    const id = sandboxId;
+    const who = owner;
+    if (!check || !id || !who || phase !== "staged") return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const gone = await Promise.race([
+        check.call(provider, who, id),
+        new Promise<false>((resolve) => {
+          timer = setTimeout(() => resolve(false), SANDBOX_GONE_CHECK_MS);
+        }),
+      ]);
+      sandboxLost = gone === true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+    return sandboxLost;
   }
 
   async function stop(request: { owner: SandboxOwner; sandboxId?: string }) {
@@ -734,6 +778,7 @@ export function createSandboxWorkspaceSession(
       return commands && seal !== undefined;
     },
     async execute(operation: WorkspaceOperation, caller?: AbortSignal) {
+      if (sandboxLost) return lostResult();
       if (phase !== "staged" || !tools) throw workspaceError("tools are not staged or were sealed");
       if (
         "path" in operation &&
@@ -752,7 +797,16 @@ export function createSandboxWorkspaceSession(
         () => undefined,
         () => undefined,
       );
-      return pending;
+      // A failed call may mean the sandbox died; only the provider's confirmation says so.
+      let result: SplitExecutionToolResult;
+      try {
+        result = await pending;
+      } catch (error) {
+        if (await confirmedGone()) return lostResult();
+        throw error;
+      }
+      if (result.isError && (await confirmedGone())) return lostResult();
+      return result;
     },
     /**
      * Starts one Workspace stdio MCP server in the trusted copy beside the checkout, with only a

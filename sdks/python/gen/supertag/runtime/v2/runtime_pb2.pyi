@@ -1617,12 +1617,14 @@ class WorkspaceCommand(_message.Message):
     def __init__(self, command: _Optional[str] = ..., timeout_ms: _Optional[int] = ...) -> None: ...
 
 class HarnessWorkspaceResult(_message.Message):
-    __slots__ = ("text", "is_error")
+    __slots__ = ("text", "is_error", "sandbox_lost")
     TEXT_FIELD_NUMBER: _ClassVar[int]
     IS_ERROR_FIELD_NUMBER: _ClassVar[int]
+    SANDBOX_LOST_FIELD_NUMBER: _ClassVar[int]
     text: str
     is_error: bool
-    def __init__(self, text: _Optional[str] = ..., is_error: _Optional[bool] = ...) -> None: ...
+    sandbox_lost: bool
+    def __init__(self, text: _Optional[str] = ..., is_error: _Optional[bool] = ..., sandbox_lost: _Optional[bool] = ...) -> None: ...
 
 class RemoteWorkspaceCopyFile(_message.Message):
     __slots__ = ("key", "size", "sha256")

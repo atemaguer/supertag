@@ -12,6 +12,7 @@ import { CommandExitError, Sandbox, type SandboxOpts, Template } from "e2b";
 import { E2BExecutionEnvironmentProvider } from "../index.js";
 import { adaptE2B, type E2BSandboxClient, shellQuote } from "../sandbox.js";
 import {
+  e2bSandboxGone,
   e2bSandboxInventory,
   type SandboxInventory,
   sandboxOwnershipMetadata,
@@ -237,6 +238,7 @@ export function createE2BWorkspaceSession(
         };
       },
       stop: (owner, sandboxId) => stopOwnedSandbox(inventory, owner, sandboxId),
+      sandboxGone: (owner, sandboxId) => e2bSandboxGone(inventory, owner, sandboxId),
       removeArtifact: (artifact) => factory.deleteSnapshot(artifact),
     },
     options.preparedRoot === undefined ? {} : { preparedRoot: options.preparedRoot },

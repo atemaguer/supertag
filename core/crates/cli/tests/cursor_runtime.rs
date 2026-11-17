@@ -687,6 +687,10 @@ database_tests! {
     cursor_remote_workspace_reuses_and_warms_prepared_artifacts;
     #[tokio::test]
     cursor_remote_workspace_runs_commands_in_the_sandbox_without_the_unsandboxed_opt_in;
+    #[tokio::test]
+    cursor_remote_sandbox_lost_mid_turn_is_replaced_from_the_starting_files;
+    #[tokio::test]
+    cursor_remote_sandbox_prepared_before_launch_is_replaced_from_the_starting_files;
 }
 
 /// A Cursor Task with `commands:execute` on an E2B host: the host never takes
@@ -2166,6 +2170,197 @@ async fn cursor_remote_lost_allocation_ack_keeps_work_fenced_until_absence_is_co
     assert_eq!(
         std::fs::read_to_string(fixture.source.join("workspace.txt"))?,
         "initial-content\n"
+    );
+    runtime.stop().await
+}
+
+/// How many sandboxes the provider had allocated when each sandbox-lost turn started.
+fn allocated_before_turn(fixture: &Fixture) -> Result<Vec<u64>> {
+    fixture
+        .trace()?
+        .into_iter()
+        .filter(|entry| entry["type"] == "sandbox-lost-turn")
+        .map(|entry| {
+            entry["allocatedBeforeTurn"]
+                .as_u64()
+                .context("sandbox-lost turn count")
+        })
+        .collect()
+}
+
+/// A Task whose MCP grant needs the sandbox before the Harness starts: the Worker Host prepares it
+/// before launch, and a sandbox lost mid-turn there is replaced the same way, from the turn's
+/// starting files, through the same replacer.
+async fn cursor_remote_sandbox_prepared_before_launch_is_replaced_from_the_starting_files(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut fixture = Fixture::prepare(directory.path()).await?;
+    commit_mcp(&mut fixture).await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag_with_mcp(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+            &["tools"],
+        )
+        .await?;
+    runtime
+        .grant(
+            &fixture.root,
+            TAG,
+            json!([{"target": "mcp", "action": "tools/read_marker"}]),
+        )
+        .await?;
+    let task = runtime
+        .submit_in(TAG, "sandbox-lost-early", "remote-sandbox-lost")
+        .await?;
+    let worker = runtime.worker_with_remote(
+        &fixture,
+        "sandbox-lost-early",
+        false,
+        Some(RemoteWorkspace::E2b),
+    )?;
+    let output = timeout(WAIT, worker.wait_with_output()).await??;
+    ensure!(
+        output.status.success(),
+        "Worker Host failed: {}; provider: {:?}",
+        String::from_utf8_lossy(&output.stderr),
+        fixture.provider_trace()?
+    );
+    runtime
+        .assert_success(&task.task_id, "remote-sandbox-lost")
+        .await?;
+    // The sandbox existed before the model started. (On the deferred path it may or may not.)
+    assert_eq!(allocated_before_turn(&fixture)?, [1]);
+    let trace = fixture.provider_trace()?;
+    let allocations: Vec<_> = trace
+        .iter()
+        .filter(|entry| entry["type"] == "allocate")
+        .collect();
+    assert_eq!(allocations.len(), 2, "{trace:?}");
+    let first = allocations[0]["owner"]["allocationId"].clone();
+    let stopped = trace
+        .iter()
+        .position(|entry| entry["type"] == "stop" && entry["owner"]["allocationId"] == first);
+    let second = trace
+        .iter()
+        .position(|entry| entry["type"] == "allocate" && entry["owner"]["allocationId"] != first);
+    assert!(
+        matches!((stopped, second), (Some(stopped), Some(second)) if stopped < second),
+        "{trace:?}"
+    );
+    let captures: Vec<_> = trace
+        .iter()
+        .filter(|entry| entry["type"] == "capture")
+        .collect();
+    assert_eq!(captures.len(), 1, "{trace:?}");
+    assert_eq!(
+        captures[0]["allocationId"],
+        allocations[1]["owner"]["allocationId"]
+    );
+    assert_eq!(captures[0]["content"], "first-turn-content\n");
+    runtime.stop().await
+}
+
+/// A remote sandbox its provider confirms gone mid-turn is a tool error, not a failed Attempt: the
+/// Worker Host stops it, journals it, and replaces it from the turn's starting files, and the call
+/// tells the model its earlier edits are gone. The turn redoes them and succeeds from the new
+/// sandbox. A third loss in one turn is not replaced, and that turn fails.
+async fn cursor_remote_sandbox_lost_mid_turn_is_replaced_from_the_starting_files(
+    database: String,
+) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials, &database).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let kinds = |kind: &str| -> Result<Vec<Value>> {
+        Ok(fixture
+            .provider_trace()?
+            .into_iter()
+            .filter(|entry| entry["type"] == kind)
+            .collect())
+    };
+
+    let replaced = runtime
+        .submit_in(TAG, "sandbox-lost", "remote-sandbox-lost")
+        .await?;
+    let worker =
+        runtime.worker_with_remote(&fixture, "sandbox-lost", false, Some(RemoteWorkspace::E2b))?;
+    let output = timeout(WAIT, worker.wait_with_output()).await??;
+    ensure!(
+        output.status.success(),
+        "Worker Host failed: {}; provider: {:?}",
+        String::from_utf8_lossy(&output.stderr),
+        fixture.provider_trace()?
+    );
+    runtime
+        .assert_success(&replaced.task_id, "remote-sandbox-lost")
+        .await?;
+    // Two sandboxes: the lost one was stopped before its replacement was allocated, and the
+    // turn's output came from the replacement, without the edit lost with the first.
+    let allocations = kinds("allocate")?;
+    assert_eq!(allocations.len(), 2, "{:?}", fixture.provider_trace()?);
+    assert_eq!(kinds("sandbox-lost")?.len(), 1);
+    let first = allocations[0]["owner"]["allocationId"].clone();
+    let trace = fixture.provider_trace()?;
+    let stopped = trace
+        .iter()
+        .position(|entry| entry["type"] == "stop" && entry["owner"]["allocationId"] == first);
+    let second = trace
+        .iter()
+        .position(|entry| entry["type"] == "allocate" && entry["owner"]["allocationId"] != first);
+    assert!(
+        matches!((stopped, second), (Some(stopped), Some(second)) if stopped < second),
+        "{trace:?}"
+    );
+    let captures = kinds("capture")?;
+    assert_eq!(captures.len(), 1);
+    assert_eq!(
+        captures[0]["allocationId"],
+        allocations[1]["owner"]["allocationId"]
+    );
+    // The fixture's last write in the replacement, never the edit lost with the first sandbox.
+    assert_eq!(captures[0]["content"], "first-turn-content\n");
+
+    let failed = runtime
+        .submit_in(TAG, "sandbox-lost-thrice", "remote-sandbox-lost-thrice")
+        .await?;
+    let worker = runtime.worker_with_remote(
+        &fixture,
+        "sandbox-lost-thrice",
+        false,
+        Some(RemoteWorkspace::E2b),
+    )?;
+    let _ = timeout(WAIT, worker.wait_with_output()).await??;
+    let failed = runtime.task(&failed.task_id).await?;
+    assert_eq!(failed.state(), TaskState::Failed, "{:?}", failed.result);
+    // The third loss was reported as not replaced, and the harness gave up.
+    assert!(
+        fixture
+            .trace()?
+            .iter()
+            .any(|entry| entry["type"] == "sandbox-not-replaced"),
+        "{:?}",
+        fixture.trace()?
+    );
+    // The first turn's two sandboxes, then this turn's first and its two replacements.
+    assert_eq!(
+        kinds("allocate")?.len(),
+        5,
+        "{:?}",
+        fixture.provider_trace()?
     );
     runtime.stop().await
 }

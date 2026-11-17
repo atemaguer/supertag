@@ -895,6 +895,7 @@ fn validate_owner(owner: &RemoteWorkspaceOwner) -> Result<()> {
     Ok(())
 }
 /// Where an allocation starts.
+#[derive(Clone)]
 pub(crate) enum Start {
     /// From the devcontainer image, or the operator's template or image.
     Fresh,
@@ -1356,6 +1357,7 @@ mod tests {
         ) -> Result<Response<HarnessWorkspaceResult>, Status> {
             self.authorize(&request)?;
             Ok(Response::new(HarnessWorkspaceResult {
+                sandbox_lost: false,
                 text: "remote fixture".into(),
                 is_error: false,
             }))

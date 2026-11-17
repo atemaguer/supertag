@@ -26,7 +26,17 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(130);
 pub(crate) struct RemoteWorkspace {
     provider: Provider,
     operation: Arc<Mutex<()>>,
+    /// Asks the Attempt to replace a sandbox its provider found gone.
+    replacer: Option<Replacer>,
+    /// The connection of the sandbox that replaced the first, once one did.
+    replaced: Arc<std::sync::Mutex<Option<(Channel, String)>>>,
 }
+
+/// A request to replace the Attempt's lost sandbox, answered with the new sandbox's connection
+/// or a fixed reason it could not be replaced.
+pub(crate) type Replacer = tokio::sync::mpsc::Sender<
+    tokio::sync::oneshot::Sender<Result<(Channel, String), &'static str>>,
+>;
 
 #[derive(Clone)]
 enum Provider {
@@ -49,13 +59,19 @@ impl RemoteWorkspace {
     pub(crate) fn new(channel: Channel, token: String) -> Self {
         Self {
             provider: Provider::Sandbox {
-                client: HarnessWorkspaceClient::new(channel)
-                    .max_decoding_message_size(MAX_WORKSPACE_TOOL_OUTPUT_BYTES + 16)
-                    .max_encoding_message_size(MAX_MESSAGE_BYTES),
+                client: client(channel),
                 token,
             },
             operation: Arc::default(),
+            replacer: None,
+            replaced: Arc::default(),
         }
+    }
+
+    /// Lets a lost sandbox be replaced through `replacer`.
+    pub(crate) fn with_replacer(mut self, replacer: Replacer) -> Self {
+        self.replacer = Some(replacer);
+        self
     }
 
     /// A workspace whose sandbox is prepared in the background; `ready` says when it is.
@@ -65,6 +81,8 @@ impl RemoteWorkspace {
             Self {
                 provider: Provider::Pending(receiver),
                 operation: Arc::default(),
+                replacer: None,
+                replaced: Arc::default(),
             },
             ready,
         )
@@ -74,6 +92,8 @@ impl RemoteWorkspace {
         Self {
             provider: Provider::Shared(access),
             operation: Arc::default(),
+            replacer: None,
+            replaced: Arc::default(),
         }
     }
 
@@ -85,6 +105,58 @@ impl RemoteWorkspace {
     }
 
     async fn execute(
+        &self,
+        input: HarnessWorkspaceRequest,
+        deadline: Instant,
+        bridge: &Bridge,
+    ) -> Result<HarnessWorkspaceResult, Status> {
+        let replaced = self
+            .replaced
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let result = match replaced {
+            Some((channel, token)) => sandbox(&client(channel), &token, input, deadline).await?,
+            None => self.execute_first(input, deadline, bridge).await?,
+        };
+        if !result.sandbox_lost {
+            return Ok(result);
+        }
+        // The provider confirmed this sandbox is gone. The call is not retried: a write or a
+        // command must not run again against files reverted to the start of the turn.
+        let text = match self.replace().await {
+            Ok(connection) => {
+                *self
+                    .replaced
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(connection);
+                crate::remote::SANDBOX_REPLACED.to_owned()
+            }
+            Err(reason) => format!(
+                "The sandbox stopped and could not be replaced ({reason}), so this turn's Workspace is gone."
+            ),
+        };
+        Ok(HarnessWorkspaceResult {
+            text,
+            is_error: true,
+            sandbox_lost: false,
+        })
+    }
+
+    async fn replace(&self) -> Result<(Channel, String), &'static str> {
+        let replacer = self
+            .replacer
+            .as_ref()
+            .ok_or("this Workspace cannot replace its sandbox")?;
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        replacer
+            .send(reply)
+            .await
+            .map_err(|_| "the Attempt is ending")?;
+        answer.await.map_err(|_| "the Attempt is ending")?
+    }
+
+    async fn execute_first(
         &self,
         input: HarnessWorkspaceRequest,
         deadline: Instant,
@@ -118,13 +190,16 @@ impl RemoteWorkspace {
                     .clone()
                     .expect("waited for a value");
                 let (channel, token) = prepared.map_err(Status::unavailable)?;
-                let client = HarnessWorkspaceClient::new(channel)
-                    .max_decoding_message_size(MAX_WORKSPACE_TOOL_OUTPUT_BYTES + 16)
-                    .max_encoding_message_size(MAX_MESSAGE_BYTES);
-                sandbox(&client, &token, input, deadline).await
+                sandbox(&client(channel), &token, input, deadline).await
             }
         }
     }
+}
+
+fn client(channel: Channel) -> HarnessWorkspaceClient<Channel> {
+    HarnessWorkspaceClient::new(channel)
+        .max_decoding_message_size(MAX_WORKSPACE_TOOL_OUTPUT_BYTES + 16)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
 /// Run one operation in the sandbox. A provider that cannot be reached, or fails, returns its

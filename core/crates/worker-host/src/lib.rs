@@ -1962,6 +1962,8 @@ async fn run_assignment(
             }
         }
     }
+    // What a replacement for a lost sandbox starts from, once the first sandbox is prepared.
+    let mut first_restart = None;
     let mut provider = if options.remote_provider.is_some() && !defer_sandbox {
         let workspace = workspace
             .as_ref()
@@ -2010,12 +2012,13 @@ async fn run_assignment(
         ))
         .await;
         match prepared {
-            Ok(((provider, instructions, execution_ends), expires)) => {
+            Ok(((provider, instructions, execution_ends, restart), expires)) => {
                 if let Some(instructions) = instructions {
                     task.instructions.push_str(&instructions);
                 }
                 valid_until = expires;
                 sandbox_execution_ends = Some(execution_ends);
+                first_restart = Some(restart);
                 Some(provider)
             }
             Err(error) => {
@@ -2155,14 +2158,19 @@ async fn run_assignment(
         Some((environment, pending)) => (Some(environment), Some(pending)),
         None => (None, None),
     };
+    // A provider that finds the sandbox gone asks for a replacement here; see `replacer` below.
+    let (replace_requests, mut replace_inbox) = tokio::sync::mpsc::channel(1);
+    let (restart_ready, restart_watch) = tokio::sync::watch::channel(first_restart);
     let remote_workspace = provider
         .as_ref()
-        .map(|provider| {
+        .map(|provider: &remote_provider::RemoteProvider| {
             let (channel, token) = provider.workspace_connection();
             adapter::RemoteWorkspace::new(channel, token)
         })
         .or(pending_workspace)
+        .map(|workspace| workspace.with_replacer(replace_requests.clone()))
         .or_else(|| shared_access.map(adapter::RemoteWorkspace::shared));
+    drop(replace_requests);
     let adapter_workspace = workspace
         .as_ref()
         .filter(|_| remote_workspace.is_none())
@@ -2272,7 +2280,7 @@ async fn run_assignment(
             shutdown,
         )
         .await;
-        // A sandbox still being prepared when the Harness ends is no longer needed.
+        // A sandbox still being prepared, or replaced, when the Harness ends is no longer needed.
         sandbox_cancel.cancel();
         outcome
     };
@@ -2294,16 +2302,71 @@ async fn run_assignment(
         .await;
         // Whether it failed while the Harness still ran, rather than being stopped after.
         let while_running = !sandbox_cancel.is_cancelled();
+        if let Ok((_, _, _, restart)) = &result {
+            restart_ready.send_replace(Some(restart.clone()));
+        }
         let _ = ready.send(Some(match &result {
-            Ok((provider, _, _)) => Ok(provider.workspace_connection()),
+            Ok((provider, _, _, _)) => Ok(provider.workspace_connection()),
             Err(_) => Err("Remote Workspace could not be prepared".to_owned()),
         }));
         Some((result, while_running))
     };
-    let (outcome, sandbox) = tokio::join!(run, background_sandbox);
+    // Replaces a sandbox its provider found gone, from the Attempt's starting files, while the
+    // Harness runs. Returns the replacements, the last of which is the Attempt's sandbox now.
+    let replacer = async {
+        let mut replacements = Vec::new();
+        loop {
+            let reply = tokio::select! {
+                request = replace_inbox.recv() => match request {
+                    Some(reply) => reply,
+                    None => break,
+                },
+                () = sandbox_cancel.cancelled() => break,
+            };
+            let Some(mut restart) = restart_watch.borrow().clone() else {
+                let _ = reply.send(Err("the sandbox is not prepared yet"));
+                continue;
+            };
+            let Some(prepared) = workspace.as_ref() else {
+                let _ = reply.send(Err("the Attempt has no Workspace"));
+                continue;
+            };
+            match remote::replace(
+                options,
+                journal,
+                workspaces,
+                (&attempt, prepared),
+                (mounted.as_ref(), registration),
+                &mut restart,
+                &sandbox_cancel,
+            )
+            .await
+            {
+                Ok(replacement) => {
+                    supertag_protocol::terminal_text::warn(&format!(
+                        "Task {} Attempt {}: its remote sandbox was lost and replaced from the turn's starting files",
+                        attempt.task_id, attempt.attempt_id
+                    ));
+                    let _ = reply.send(Ok(replacement.workspace_connection()));
+                    replacements.push(replacement);
+                }
+                Err(error) => {
+                    failures::note("A lost remote sandbox could not be replaced", &error);
+                    let _ = reply.send(Err(if restart.replaced >= remote::MAX_REPLACEMENTS {
+                        "this turn already replaced its sandbox twice"
+                    } else {
+                        "a new sandbox could not be prepared"
+                    }));
+                }
+            }
+            restart_ready.send_replace(Some(restart));
+        }
+        replacements
+    };
+    let (outcome, sandbox, mut replacements) = tokio::join!(run, background_sandbox, replacer);
     let outcome = match sandbox {
         None => outcome,
-        Some((Ok((prepared, _, _)), _)) => {
+        Some((Ok((prepared, _, _, _)), _)) => {
             provider = Some(prepared);
             outcome
         }
@@ -2333,6 +2396,13 @@ async fn run_assignment(
             attempt.task_id, attempt.attempt_id
         )
     });
+    // The last replacement is the Attempt's sandbox now: capture and cleanup use it. The lost
+    // sandboxes were stopped and their records retired; their provider processes only end here.
+    if let Some(latest) = replacements.pop() {
+        for mut lost in replacements.into_iter().chain(provider.replace(latest)) {
+            let _ = lost.shutdown().await;
+        }
+    }
     stop_reports.cancel();
     if let Some(reports) = reports {
         let _ = reports.await;

@@ -112,6 +112,7 @@ const sandbox = {
   readTransfer: async (path) => Readable.toWeb(createReadStream(path)),
 };
 let captured = false;
+let sandboxLost = false;
 const copyRoot = () => `volumes/${hash(allocation.owner.attemptId)}`;
 const enabled = (name) =>
   access(join(root, name)).then(
@@ -512,6 +513,16 @@ const implementation = {
   workspace: {
     async execute({ operation }) {
       assert.ok(staged && !allocation.stopped);
+      // The test kills the sandbox: this provider confirms it is gone, as E2B and Modal do once
+      // the sandbox no longer exists, and every later operation finds it gone too.
+      if (sandboxLost || (await enabled("lose-sandbox"))) {
+        if (!sandboxLost) {
+          await rm(join(root, "lose-sandbox"), { force: true });
+          await trace({ type: "sandbox-lost", allocationId: allocation.owner.allocationId });
+        }
+        sandboxLost = true;
+        return { text: "Fixture sandbox is gone", isError: true, sandboxLost: true };
+      }
       if (operation.case === "command") {
         // The sandbox runs the command in the checkout with no Worker Host variable.
         if (!actions.includes("commands:execute") || !actions.includes("files:write"))

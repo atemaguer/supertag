@@ -8703,9 +8703,13 @@ func (x *WorkspaceCommand) GetTimeoutMs() uint32 {
 }
 
 type HarnessWorkspaceResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	IsError       bool                   `protobuf:"varint,2,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Text    string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	IsError bool                   `protobuf:"varint,2,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	// Set only by a remote Workspace provider, and only once it confirmed that the operation's
+	// sandbox no longer exists. The Worker Host then replaces the sandbox from the Attempt's
+	// starting files and tells the Harness; a Harness never receives it set.
+	SandboxLost   bool `protobuf:"varint,3,opt,name=sandbox_lost,json=sandboxLost,proto3" json:"sandbox_lost,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8750,6 +8754,13 @@ func (x *HarnessWorkspaceResult) GetText() string {
 func (x *HarnessWorkspaceResult) GetIsError() bool {
 	if x != nil {
 		return x.IsError
+	}
+	return false
+}
+
+func (x *HarnessWorkspaceResult) GetSandboxLost() bool {
+	if x != nil {
+		return x.SandboxLost
 	}
 	return false
 }
@@ -25655,10 +25666,11 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\"\n" +
 	"\n" +
 	"timeout_ms\x18\x02 \x01(\rH\x00R\ttimeoutMs\x88\x01\x01B\r\n" +
-	"\v_timeout_ms\"G\n" +
+	"\v_timeout_ms\"j\n" +
 	"\x16HarnessWorkspaceResult\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x19\n" +
-	"\bis_error\x18\x02 \x01(\bR\aisError\"W\n" +
+	"\bis_error\x18\x02 \x01(\bR\aisError\x12!\n" +
+	"\fsandbox_lost\x18\x03 \x01(\bR\vsandboxLost\"W\n" +
 	"\x17RemoteWorkspaceCopyFile\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x04R\x04size\x12\x16\n" +

@@ -10,6 +10,7 @@ import { FILE_HELPER } from "../files.js";
 import { ModalExecutionEnvironmentProvider, type ModalSandboxClient } from "../index.js";
 import { adaptModal, collect } from "../sandbox.js";
 import {
+  modalSandboxGone,
   modalSandboxInventory,
   type SandboxInventory,
   sandboxOwnershipMatches,
@@ -285,6 +286,10 @@ export function createModalWorkspaceSession(
       async stop(owner, sandboxId) {
         const connection = await open();
         return stopOwnedSandbox(connection.inventory, owner, sandboxId);
+      },
+      async sandboxGone(owner, sandboxId) {
+        const connection = await open();
+        return modalSandboxGone(connection.inventory, owner, sandboxId);
       },
       async removeArtifact(artifact) {
         const connection = await open();

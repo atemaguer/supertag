@@ -494,3 +494,46 @@ it("snapshots a preparation sandbox into an image, starts from it, and deletes i
   await task.session.removeArtifact("im-prepared0000000000000000");
   expect(task.deleteImage).toHaveBeenCalledWith("im-prepared0000000000000000");
 });
+
+it("reports its sandbox lost only once Modal reports that sandbox finished", async () => {
+  const f = await fixture();
+  const { header, bytes } = await bundle();
+  await f.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await f.session.stage(header, bytes);
+  const outcome = (path: string) =>
+    f.session.execute({ kind: "read", path }).then(
+      (result) => result,
+      (error: unknown) => ({ thrown: String(error) }),
+    );
+  // A tool error in a live sandbox is not a loss.
+  const missing = await outcome("missing.txt");
+  expect(missing).toMatchObject({ isError: true });
+  expect(missing).not.toHaveProperty("sandboxLost");
+  f.exec.mockRejectedValue(new Error("stream reset"));
+  // Modal's NotFound, or a timeout, does not prove the sandbox stopped.
+  f.inventory.get.mockRejectedValueOnce(new Error("NotFound"));
+  expect(await outcome("a.txt")).not.toHaveProperty("sandboxLost");
+  f.inventory.poll.mockRejectedValueOnce(new Error("deadline exceeded"));
+  expect(await outcome("a.txt")).not.toHaveProperty("sandboxLost");
+  // Still running: not gone.
+  f.inventory.poll.mockResolvedValueOnce(null);
+  expect(await outcome("a.txt")).not.toHaveProperty("sandboxLost");
+  // Another owner's tags on that ID prove nothing about this sandbox.
+  f.inventory.get.mockResolvedValueOnce({ sandboxId, metadata: {} });
+  f.inventory.poll.mockResolvedValueOnce(137);
+  expect(await outcome("a.txt")).not.toHaveProperty("sandboxLost");
+  // The exact owned sandbox reports a terminal exit code: it is gone.
+  f.inventory.poll.mockResolvedValueOnce(137);
+  expect(await outcome("a.txt")).toEqual({
+    text: "The Modal sandbox no longer exists.",
+    isError: true,
+    sandboxLost: true,
+  });
+  const polled = f.inventory.poll.mock.calls.length;
+  expect(await outcome("a.txt")).toMatchObject({ sandboxLost: true });
+  expect(f.inventory.poll.mock.calls.length).toBe(polled);
+});

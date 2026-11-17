@@ -491,6 +491,7 @@ fn convert_receipt(
     let status = receipt.state();
     if status != OperationState::Completed {
         return Ok(HarnessWorkspaceResult {
+            sandbox_lost: false,
             is_error: true,
             text: if status == OperationState::Failed {
                 "Shared file operation failed within the fixed root".into()
@@ -533,6 +534,7 @@ fn convert_receipt(
         }
     };
     Ok(HarnessWorkspaceResult {
+        sandbox_lost: false,
         is_error: false,
         text,
     })

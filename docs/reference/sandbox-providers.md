@@ -34,6 +34,7 @@ implements these calls:
 | `provider.stop(owner, sandboxId?)` | Ends the owner's sandbox; returns `stopped` with its ID, or `uncertain` |
 | `provider.validateOwner(owner)` | Refuses an owner its labels cannot carry |
 | `provider.removeArtifact(artifact)` | Deletes a prepared artifact; one already gone counts as deleted |
+| `provider.sandboxGone(owner, sandboxId)` | Optional. Whether the provider confirms the owner's sandbox no longer exists. See [A lost sandbox](#a-lost-sandbox) |
 | `sandbox.run(argv, timeoutMs, signal)` | Runs a trusted program, returns its exit code and stdout |
 | `sandbox.environment(root)` | File and process access rooted at `root`, from `sandboxExecutionEnvironment` |
 | `sandbox.writeTransfer(path, bytes)` / `readTransfer(path)` | Moves the bundle in and the captured tree out |
@@ -111,6 +112,18 @@ the Task's path scope. No tool reaches `.git`. Edits run one at a time. Each com
   stops it;
 - returns at most the configured bytes of stdout and stderr; the rest is drained in the sandbox.
 
+### A lost sandbox
+
+When a tool call fails because its sandbox no longer exists, the provider answers that call with
+`sandbox_lost` set, and every later call the same way. The Worker Host then stops and journals the
+lost sandbox and replaces it from the turn's starting files, at most twice per Task Attempt; the call
+tells the harness that its earlier changes in the turn are gone. Set `sandbox_lost` only on the
+provider's own confirmation: a timeout, a network error, or a sandbox that is merely unresponsive
+is an ordinary tool error. On the SDK path, `sandboxGone` is asked only after a call failed, and
+any error or a wait over 10 seconds counts as not gone. E2B counts only its not-found answer for
+the exact sandbox ID. Modal counts only a terminal exit code from the exact sandbox, reattached
+with its owner's tags.
+
 ### Capture
 
 Capture returns the Workspace as one tree file:
@@ -184,8 +197,6 @@ them.
 - **Egress relay.** A sandbox will reach the network only through a relay inside it, which
   tunnels to the Worker Host's egress proxy. The proxy applies the Task's
   [network scope](iam.md#network-scopes). The sandbox will deny every other connection.
-- **Lost-sandbox signal.** When a sandbox dies mid-turn, the provider will report it as lost, so
-  the harness sees a failed tool call instead of the Task Attempt failing.
 
 ## Conformance suite
 

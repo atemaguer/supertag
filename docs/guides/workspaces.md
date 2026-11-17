@@ -319,6 +319,11 @@ A host can keep Cursor and Claude Code Tasks' checkouts in an E2B or Modal sandb
 harness stays on the host. A repository's `.devcontainer` settings choose the sandbox's image and setup. See
 [Run a harness in a sandbox](workers.md#run-a-harness-in-a-sandbox).
 
+If a sandbox stops in the middle of a turn, for example because the provider evicted it, the Worker
+Host replaces it with a new sandbox that starts from the turn's starting files, and the tool call
+that found it stopped tells the harness that its changes from earlier in the turn are gone. A turn
+gets at most two replacements; after a third stop, the turn fails.
+
 ## Where files live
 
 | What | Where |

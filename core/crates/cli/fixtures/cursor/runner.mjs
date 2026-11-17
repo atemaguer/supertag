@@ -121,6 +121,8 @@ async function runFixture() {
         "cancel",
         "after-cancel",
         "provider-failure",
+        "remote-sandbox-lost",
+        "remote-sandbox-lost-thrice",
       ].includes(mode),
     );
     if (mode === "provider-failure") {
@@ -139,6 +141,7 @@ async function runFixture() {
     const remoteInputs = mode.startsWith("remote-input-");
     const remoteMcp = mode === "remote-mcp";
     const remoteCommand = mode === "remote-command";
+    const sandboxLost = mode.startsWith("remote-sandbox-lost");
     const copies = mode === "copy" || mode === "remote-copy";
     const writable =
       writes ||
@@ -147,6 +150,7 @@ async function runFixture() {
       remoteInputs ||
       remoteMcp ||
       remoteCommand ||
+      sandboxLost ||
       (output && mode !== "remote-output-readonly");
     const resumes = mode === "resume" || mode === "remote-resume" || mode === "shared-resume";
     assert.deepEqual(request.tools, ["mcp"]);
@@ -214,6 +218,17 @@ async function runFixture() {
     emit({ type: "agent", agentId });
     // Cursor SDK activity, which the bridge reports as a `progress.updated` Task event.
     emit({ type: "event", event: { type: "thinking" } });
+    if (sandboxLost) {
+      // How many sandboxes existed when the model started: one when the Worker Host prepared it
+      // before launch, none when it prepares it while the Harness runs.
+      const provided = await readFile(join(fixture, "provider-calls.jsonl"), "utf8").catch(
+        () => "",
+      );
+      const allocatedBeforeTurn = provided
+        .split("\n")
+        .filter((line) => line && JSON.parse(line).type === "allocate").length;
+      await trace({ type: "sandbox-lost-turn", allocatedBeforeTurn });
+    }
 
     const existing = await call("read", { file_path: "workspace.txt" });
     assert.equal(existing.isError, false, "admitted Workspace read failed");
@@ -226,6 +241,37 @@ async function runFixture() {
     });
     assert.equal(command.isError, !commands);
     if (commands) assert.ok(command.text.includes("cursor-command-safe"));
+    if (sandboxLost) {
+      // An edit, then the sandbox dies: the next call reports the replacement, and the new
+      // sandbox has the turn's starting files. A third loss in one turn is not replaced.
+      const edit = await call("write", { file_path: "workspace.txt", content: "lost-edit\n" });
+      assert.equal(edit.isError, false);
+      const losses = mode === "remote-sandbox-lost" ? 1 : 3;
+      for (let loss = 1; loss <= losses; loss++) {
+        await writeFile(join(fixture, "lose-sandbox"), "lose");
+        const lost = await call("write", { file_path: "workspace.txt", content: `loss-${loss}\n` });
+        assert.equal(lost.isError, true);
+        if (loss <= 2) {
+          assert.match(lost.text, /^The sandbox stopped and was replaced\./u);
+          const reverted = await call("read", { file_path: "workspace.txt" });
+          assert.equal(reverted.isError, false);
+          assert.ok(reverted.text.includes("initial-content"), reverted.text);
+        } else {
+          assert.match(
+            lost.text,
+            /could not be replaced \(this turn already replaced its sandbox twice\)/u,
+          );
+        }
+      }
+      if (losses === 1) {
+        const redone = await call("write", { file_path: "workspace.txt", content: "redone\n" });
+        assert.equal(redone.isError, false);
+      } else {
+        // The turn has no Workspace left; the harness gives up.
+        await trace({ type: "sandbox-not-replaced", mode });
+        throw new Error("the remote Workspace is gone");
+      }
+    }
     if (sharedCommand) {
       const blocked = await call("command", {
         command: "/usr/bin/setsid /bin/sh -c 'echo $$ > lease.pid; exec /bin/sleep 60' & wait",

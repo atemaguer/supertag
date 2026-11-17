@@ -71,6 +71,23 @@ export async function stopOwnedSandbox(
   }
 }
 
+/**
+ * Whether E2B confirms that this owner's sandbox is gone: only its not-found answer for the
+ * exact ID counts. A sandbox E2B still lists, or any error such as a timeout, is not gone.
+ */
+export async function e2bSandboxGone(
+  inventory: SandboxInventory,
+  owner: SandboxOwner,
+  sandboxId: string,
+): Promise<boolean> {
+  sandboxOwnershipMetadata(owner);
+  try {
+    return (await inventory.get(sandboxId)) === undefined;
+  } catch {
+    return false;
+  }
+}
+
 export function e2bSandboxInventory(
   options: SandboxApiOpts = {},
   client: Pick<typeof Sandbox, "list" | "getInfo" | "kill"> = Sandbox,

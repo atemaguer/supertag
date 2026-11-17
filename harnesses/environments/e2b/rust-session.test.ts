@@ -1371,3 +1371,39 @@ it("prepares the trusted commit once, snapshots it, and starts Task sandboxes fr
   ).rejects.toThrow(/prepared artifact is invalid/u);
   expect(other.factory.create).not.toHaveBeenCalled();
 }, 30_000);
+
+it("reports its sandbox lost only once E2B says that sandbox no longer exists", async () => {
+  const f = await fixture();
+  const { header, bytes } = await bundle();
+  await f.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await f.session.stage(header, bytes);
+  const outcome = (path: string) =>
+    f.session.execute({ kind: "read", path }).then(
+      (result) => result,
+      (error: unknown) => ({ thrown: String(error) }),
+    );
+  // A tool error in a live sandbox is not a loss.
+  const missing = await outcome("missing.txt");
+  expect(missing).toMatchObject({ isError: true });
+  expect(missing).not.toHaveProperty("sandboxLost");
+  // The sandbox stops answering, but E2B does not answer either: a timeout proves nothing.
+  vi.mocked(f.client.commands.run).mockRejectedValue(new Error("socket hang up"));
+  f.inventory.get.mockRejectedValueOnce(new Error("request timed out"));
+  expect(await outcome("a.txt")).not.toHaveProperty("sandboxLost");
+  // E2B still lists the sandbox: not gone.
+  expect(await outcome("a.txt")).not.toHaveProperty("sandboxLost");
+  // E2B reports the exact ID not found: the sandbox is gone, and later calls say so at once.
+  f.inventory.get.mockResolvedValueOnce(undefined);
+  expect(await outcome("a.txt")).toEqual({
+    text: "The E2B sandbox no longer exists.",
+    isError: true,
+    sandboxLost: true,
+  });
+  const asked = f.inventory.get.mock.calls.length;
+  expect(await outcome("a.txt")).toMatchObject({ sandboxLost: true });
+  expect(f.inventory.get.mock.calls.length).toBe(asked);
+});

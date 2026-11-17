@@ -75,6 +75,26 @@ function terminal(code: unknown): code is number {
 }
 
 /**
+ * Whether Modal confirms that this owner's sandbox finished: the exact ID, reattached with its
+ * server-returned owner tags, reports a terminal exit code. NotFound, a sandbox still running, or
+ * any error such as a timeout is not proof, as for [`stopOwnedSandbox`].
+ */
+export async function modalSandboxGone(
+  inventory: SandboxInventory,
+  owner: SandboxOwner,
+  sandboxId: string,
+): Promise<boolean> {
+  try {
+    if (!validId(sandboxId)) return false;
+    const identity = await inventory.get(sandboxId);
+    if (identity.sandboxId !== sandboxId || !sandboxOwnershipMatches(owner, identity)) return false;
+    return terminal(await inventory.poll(sandboxId));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Modal inventory contains only running sandboxes. Missing list/name results and
  * NotFound errors therefore never prove a recorded allocation stopped. Require
  * exact server-returned owner tags and a terminal result for that sandbox ID.

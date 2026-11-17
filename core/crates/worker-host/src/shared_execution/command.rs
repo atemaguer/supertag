@@ -100,6 +100,7 @@ impl Access {
             ));
         }
         Ok(HarnessWorkspaceResult {
+            sandbox_lost: false,
             text,
             is_error: exit != Some(0),
         })

@@ -82,8 +82,8 @@ pub(crate) async fn prepare(
     ),
     (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
     cancel: &CancellationToken,
-) -> Result<(RemoteProvider, Option<String>, Instant)> {
-    let config = options
+) -> Result<(RemoteProvider, Option<String>, Instant, Restart)> {
+    options
         .remote_provider
         .as_ref()
         .context("remote Workspace provider is unavailable")?;
@@ -136,14 +136,6 @@ pub(crate) async fn prepare(
         ),
         None => None,
     };
-    let provider = RemoteProvider::spawn(config, &journal.remote_scratch()?, cancel).await?;
-    ensure!(!cancel.is_cancelled(), "sandbox preparation cancelled");
-    let record = journal.begin_remote_sandbox(
-        attempt,
-        &registration.host_id,
-        registration.generation,
-        config.authority_fingerprint(),
-    )?;
     let read_write = mounted.into_iter().flat_map(|mounted| {
         mounted
             .copies()
@@ -184,15 +176,92 @@ pub(crate) async fn prepare(
     let setup = environment
         .as_ref()
         .is_some_and(|environment| !environment.setup_commands.is_empty());
+    let restart = Restart {
+        allowed_actions,
+        file_scope: supertag_protocol::file_scope::of_task(task).cloned(),
+        environment,
+        start,
+        setup,
+        inputs: inputs.files.clone(),
+        mcp_commit: mcp_commit.map(str::to_owned),
+        margin,
+        execution_ends,
+        replaced: 0,
+    };
+    let provider = start_sandbox(
+        options,
+        journal,
+        (attempt, &export),
+        mounted,
+        registration,
+        &restart,
+        timeout,
+        cancel,
+    )
+    .await?;
+    let mut instructions = inputs.delivered(&acquisition, cancel).await?;
+    if let Some(mounted) = mounted {
+        instructions
+            .get_or_insert_default()
+            .push_str(&mounted.remote_instructions(&attempt.attempt_id)?);
+    }
+    Ok((provider, instructions, execution_ends, restart))
+}
+
+/// What a replacement sandbox needs to start from the Attempt's starting files, recorded when the
+/// first sandbox was prepared.
+#[derive(Clone)]
+pub(crate) struct Restart {
+    allowed_actions: Vec<String>,
+    file_scope: Option<supertag_protocol::v2::FileScope>,
+    environment: Option<RemoteWorkspaceEnvironment>,
+    start: Start,
+    setup: bool,
+    inputs: Vec<(supertag_protocol::v2::ArtifactInputFile, Vec<u8>)>,
+    mcp_commit: Option<String>,
+    margin: Duration,
+    /// When the Harness must stop; a replacement keeps it.
+    execution_ends: Instant,
+    /// How many sandboxes have replaced the first.
+    pub(crate) replaced: u32,
+}
+
+/// The most sandboxes that may replace an Attempt's first one.
+pub(crate) const MAX_REPLACEMENTS: u32 = 2;
+
+/// What the Harness reads when its sandbox was replaced.
+pub(crate) const SANDBOX_REPLACED: &str = "The sandbox stopped and was replaced. The new sandbox starts from this turn's starting files: changes made earlier in this turn, and any background processes, are gone. Make the changes again.";
+
+/// Allocates and stages one sandbox of the Attempt from its starting files.
+#[allow(clippy::too_many_arguments)]
+async fn start_sandbox(
+    options: &HostOptions,
+    journal: &Journal,
+    (attempt, export): (&Attempt, &supertag_workspaces::PreparedExport),
+    mounted: Option<&Mounted>,
+    registration: &HostRecord,
+    restart: &Restart,
+    timeout: Duration,
+    cancel: &CancellationToken,
+) -> Result<RemoteProvider> {
+    let config = options
+        .remote_provider
+        .as_ref()
+        .context("remote Workspace provider is unavailable")?;
+    let provider = RemoteProvider::spawn(config, &journal.remote_scratch()?, cancel).await?;
+    ensure!(!cancel.is_cancelled(), "sandbox preparation cancelled");
+    let record = journal.begin_remote_sandbox(
+        attempt,
+        &registration.host_id,
+        registration.generation,
+        config.authority_fingerprint(),
+    )?;
     let sandbox = provider
         .allocate(
             &record.owner(),
             timeout,
-            (
-                &allowed_actions,
-                supertag_protocol::file_scope::of_task(task),
-            ),
-            (environment, &start),
+            (&restart.allowed_actions, restart.file_scope.as_ref()),
+            (restart.environment.clone(), &restart.start),
             cancel,
         )
         .await?;
@@ -201,13 +270,12 @@ pub(crate) async fn prepare(
         .stage(
             &export.bundle,
             &export.checkout.start_commit,
-            &inputs.files,
-            mcp_commit,
-            setup,
+            &restart.inputs,
+            restart.mcp_commit.as_deref(),
+            restart.setup,
             cancel,
         )
         .await?;
-    let mut instructions = inputs.delivered(&acquisition, cancel).await?;
     if let Some(mounted) = mounted {
         // Each copy was staged on this host with its Volume's credential; only
         // its files reach the sandbox.
@@ -216,11 +284,55 @@ pub(crate) async fn prepare(
                 .stage_copy(copy, &attempt.attempt_id, cancel)
                 .await?;
         }
-        instructions
-            .get_or_insert_default()
-            .push_str(&mounted.remote_instructions(&attempt.attempt_id)?);
     }
-    Ok((provider, instructions, execution_ends))
+    Ok(provider)
+}
+
+/// Replaces a sandbox its provider found gone: once its stop is confirmed and journaled, a new
+/// sandbox starts from the Attempt's starting files, with the same allocation and the time the
+/// Harness has left. Fails, leaving the old sandbox's record, when the stop cannot be confirmed,
+/// after `MAX_REPLACEMENTS`, or when the Harness has no time left.
+pub(crate) async fn replace(
+    options: &HostOptions,
+    journal: &Journal,
+    workspaces: &Workspaces,
+    (attempt, workspace): (&Attempt, &PreparedWorkspace),
+    (mounted, registration): (Option<&Mounted>, &HostRecord),
+    restart: &mut Restart,
+    cancel: &CancellationToken,
+) -> Result<RemoteProvider> {
+    ensure!(
+        restart.replaced < MAX_REPLACEMENTS,
+        "this Attempt already replaced its sandbox {MAX_REPLACEMENTS} times"
+    );
+    let left = restart
+        .execution_ends
+        .saturating_duration_since(Instant::now());
+    ensure!(
+        !left.is_zero(),
+        "the Attempt has no time left for a new sandbox"
+    );
+    ensure_stopped(options, journal, attempt, registration).await?;
+    let stopped = journal
+        .remote_sandbox()?
+        .context("the lost sandbox has no journal record")?;
+    journal.retire_stopped_sandbox(&stopped)?;
+    restart.replaced += 1;
+    let export = workspaces.export_remote(workspace, cancel).await?;
+    let timeout = left
+        .saturating_add(restart.margin)
+        .min(MAX_SANDBOX_LIFETIME);
+    start_sandbox(
+        options,
+        journal,
+        (attempt, &export),
+        mounted,
+        registration,
+        restart,
+        timeout,
+        cancel,
+    )
+    .await
 }
 
 pub(crate) async fn capture(
