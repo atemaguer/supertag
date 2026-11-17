@@ -28,7 +28,12 @@ use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
-const WAIT: Duration = Duration::from_secs(15);
+/// Bounds one test wait. Only the test waits this long; product deadlines and leases are
+/// unchanged.
+const WAIT: Duration = Duration::from_secs(60);
+/// Bounds one test RPC. A SQLite Control Plane answers reads on its one connection after any
+/// write in progress, and parallel cases on a loaded machine stretched get_host past 2 seconds.
+const RPC_DEADLINE: Duration = Duration::from_secs(15);
 
 struct Credentials {
     gateway: String,
@@ -58,7 +63,7 @@ impl Credentials {
     }
     fn request<T>(&self, value: T) -> Result<Request<T>> {
         let mut request = authenticated_request(value, &self.operator, None)?;
-        request.set_timeout(Duration::from_secs(2));
+        request.set_timeout(RPC_DEADLINE);
         Ok(request)
     }
 }
@@ -190,7 +195,7 @@ async fn idle_host_expires_and_restart_preserves_drain_until_operator_resumes(
         &credentials.host,
         Some("operator:forged"),
     )?;
-    forged.set_timeout(Duration::from_secs(2));
+    forged.set_timeout(RPC_DEADLINE);
     assert_eq!(
         operator.list_hosts(forged).await.unwrap_err().code(),
         Code::PermissionDenied

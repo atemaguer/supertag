@@ -26,7 +26,10 @@ use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
 const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
-const WAIT: Duration = Duration::from_secs(15);
+/// Bounds one test wait for a service, a CLI command, or a whole `worker-host --once` run. Only the
+/// test waits this long; product deadlines are unchanged. Parallel PostgreSQL cases on a loaded
+/// machine stretched a Worker Host run past 15 seconds.
+const WAIT: Duration = Duration::from_secs(90);
 
 fn command(args: &[&str]) -> Command {
     let mut command = reaped(Command::new(BINARY));
