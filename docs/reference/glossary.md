@@ -59,6 +59,9 @@ whole system rather than another first-class resource.
   [Context and permissions](../concepts/context-and-permissions.md).
 - <a id="permission-set"></a>**Permission Set** — actions that a Task is allowed to perform through external tools or its
   execution system.
+- <a id="network-scope"></a>**network scope** — the `hosts`, `methods`, and `credential` on a
+  Permission Set's `web:fetch` grant: which origins and methods a Task may reach, and which Worker
+  Host credential its requests carry. See [Network scopes](iam.md#network-scopes).
 - <a id="path-scope"></a>**path scope** — the `paths`, `exclude`, and `additionalDirectories`
   on a Permission Set's `files:write` or `files:read` grant: which Workspace files a Task may
   write, which it may not read, and which outside directories it may use. See

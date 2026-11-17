@@ -1739,6 +1739,9 @@ Options:
       --allow-unsandboxed-commands
           Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
 
+      --network-credential <NAME=VARIABLE>
+          NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials
+
       --claude-path <CLAUDE_PATH>
           Claude executable used by the Agent SDK
 
@@ -2179,6 +2182,9 @@ Options:
 
       --allow-unsandboxed-commands
           Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
+
+      --network-credential <NAME=VARIABLE>
+          NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials
 
       --claude-path <CLAUDE_PATH>
           Claude executable used by the Agent SDK

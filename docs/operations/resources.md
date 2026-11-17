@@ -123,9 +123,34 @@ spec:
 Which harnesses can enforce each part, and when a Task waits instead, is in
 [Path scopes](../reference/iam.md#path-scopes).
 
+A `web:fetch` grant can name the origins and methods it covers, and a credential the Worker Host
+adds. This set lets a Task read packages from PyPI and read the GitHub API with the host's
+`github` credential, and reach nothing else:
+
+```yaml
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: python-and-github }
+spec:
+  permissions:
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://pypi.org", "https://files.pythonhosted.org"]
+      methods: [GET, HEAD]
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://api.github.com"]
+      methods: [GET]
+      credential: github
+```
+
+The credential is configured on the host; see
+[Network credentials](../reference/supertag-yaml.md#network-credentials). Which harnesses enforce
+a network scope is in [Network scopes](../reference/iam.md#network-scopes).
+
 | Kind | Declares |
 | --- | --- |
-| `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `reference`, `surfaceAccountId`, `scope`, and `approvalRequired`; `paths`, `exclude`, and `additionalDirectories` on `files:write` and `files:read`; and the set's `approvers` |
+| `PermissionSet` | Allowed actions: `target` (`runtime`, `surface`, or `mcp`), `action`, and optionally `resource`, `reference`, `surfaceAccountId`, `scope`, and `approvalRequired`; `paths`, `exclude`, and `additionalDirectories` on `files:write` and `files:read`; `hosts`, `methods`, and `credential` on `web:fetch`; and the set's `approvers` |
 | `ContextSet` | Knowledge items a Task may receive, each with an `itemKey`, `type`, `version`, and `config`, and optionally `required` |
 | `Role` | `purpose`, `instructions`, `permissionSets`, `contextSets`, and `execution` |
 | `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, `acceptsMessagesFrom`, `lead`, and `maxWorkSessions` |

@@ -153,6 +153,7 @@ echoing secret values.
 | `skills` | none | Local Skill directory or JSON catalog file selected by Context Sets. Relative paths resolve from this file |
 | `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
+| `network-credentials` | none | Credential name to `{ secret, environment }`, added to a Task's requests by the egress proxy. Codex only. See [Network credentials](#network-credentials) |
 | `concurrency` | `1` | Task Attempts each harness runs at once, from 1 through 16. See [Host concurrency](#host-concurrency) |
 | `attempt-timeout-seconds` | `3600` | Seconds a Task Attempt may run, from 1 through 86400 |
 | `depends_on` | none | The file's `control-plane` service, to bring up first. Only a host of the local Control Plane takes it |
@@ -211,6 +212,30 @@ receives, which may include its provider key. Cursor also needs `files:write` to
 
 A host started without supertag.yaml takes the same opt-in with `supertag worker-host
 --allow-unsandboxed-commands`.
+
+### Network credentials
+
+```yaml
+secrets:
+  github-token: { environment: GITHUB_PAT }
+services:
+  laptop:
+    type: host
+    harnesses: [codex]
+    network-credentials:
+      github: { secret: github-token, environment: GITHUB_TOKEN }
+```
+
+A Permission Set's `web:fetch` grant names a credential by its name, here `github`; see
+[Network scopes](iam.md#network-scopes). `secret` names an entry in `secrets`. `environment` is
+the variable a Task's commands see, holding a placeholder instead of the secret. The host's
+egress proxy swaps the placeholder for the secret only in requests the grant allows. Names are
+lowercase letters, digits, and `-`. `environment` cannot be a proxy, certificate, `PATH`, or
+`HOME` variable, or start with `SUPERTAG_`, `CODEX_`, `GIT_`, or another harness's prefix.
+
+Only the host's Codex lanes receive the secrets, and the Control Plane learns only the names. A
+host started without supertag.yaml takes `supertag worker-host --network-credential
+github=GITHUB_TOKEN` and reads the value from `SUPERTAG_NETWORK_CREDENTIAL_GITHUB`.
 
 ### Workspaces
 

@@ -37,6 +37,17 @@ within the pre-1.0 compatibility policy described in
   Sessions so the Tag can continue or close one; the turn goes on. The tool description, `supertag get session`, `supertag get tag`, the desktop app
   and the terminal UI show how many are open. On upgrade, finished work Sessions close
   except each Tag's four newest, which can still be continued.
+- Permission Sets can scope web access. A `web:fetch` grant takes `hosts` (`https://` origins),
+  `methods`, and a `credential`, the name of a secret configured on the Worker Host with
+  `network-credentials` in supertag.yaml or `supertag worker-host --network-credential`. Each
+  Task Attempt with a network scope runs an egress proxy on its Worker Host. The proxy allows
+  only the scope's origins and methods, refuses non-public addresses, and swaps a credential's
+  placeholder for the secret only in requests a grant naming it allows, so the secret never
+  enters the sandbox. Codex enforces scopes in its sandbox through its managed network proxy;
+  other harnesses and remote Workspaces wait with requirement `network-scope`, and so does a
+  Task whose credential no host offers. Codex code mode stays off under a scope that limits
+  hosts or methods. `supertag describe task` shows the scope and each Task Attempt's network
+  log of allowed and refused requests.
 - Permission Sets can scope file access to paths. A `files:write` grant takes `paths` it may
   write and `exclude` entries that stay read-only; a `files:read` grant takes `exclude` entries
   that are hidden, with `*`, `**`, and `?` globs; both take `additionalDirectories` outside the
