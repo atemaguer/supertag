@@ -124,6 +124,9 @@ database_tests! {
     claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_captures_selected_workspace_files_for_the_operator;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
@@ -1017,6 +1020,152 @@ async fn claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in(
             assert!(task["attempt_id"].is_null(), "{task}");
         }
     }
+    services.stop().await
+}
+
+/// Claude Code on an E2B host: no built-in tool, and its `workspace` tools reach the sandbox
+/// through the Worker Host. The host never takes `--allow-unsandboxed-commands`; the command runs
+/// in the provider's checkout and its write is delivered.
+async fn claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in(
+    database: String,
+) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let transport = repo_path("harnesses/sdk/dist/rust-workspace-provider/transport.js")?;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().canonicalize()?;
+    let native = claude_fixture(&root)?;
+    // The Cursor suite's provider helper fixture: it speaks the private provider protocol and
+    // runs the sandbox's operations in a private checkout.
+    let provider = root.join("remote-provider.mjs");
+    std::fs::write(
+        &provider,
+        include_str!("../fixtures/cursor/remote-provider.mjs"),
+    )?;
+    std::fs::write(
+        root.join("modules.json"),
+        serde_json::to_vec(&serde_json::json!({ "providerTransport": transport }))?,
+    )?;
+    std::fs::write(root.join("provider-kind"), "e2b")?;
+    let source = root.join("source");
+    std::fs::create_dir(&source)?;
+    let git = |args: &[&str]| {
+        let mut command = Command::new("git");
+        command
+            .current_dir(&source)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .arg("-c")
+            .arg("user.name=SuperTag Fixture")
+            .arg("-c")
+            .arg("user.email=fixture@example.invalid")
+            .args(args);
+        command
+    };
+    success(git(&["init", "--quiet"])).await?;
+    std::fs::write(source.join("workspace.txt"), b"initial-content\n")?;
+    success(git(&["add", "workspace.txt"])).await?;
+    success(git(&["commit", "--quiet", "-m", "Fixture source"])).await?;
+    let base = String::from_utf8(success(git(&["rev-parse", "HEAD"])).await?)?;
+    let services = LanguageServices::start(&root, &database).await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "runner",
+            "--instructions",
+            "Run the requested command.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--allow",
+            "files:write",
+            "--allow",
+            "commands:execute",
+            "--workspace-id",
+            "remote",
+            "--workspace-base",
+            base.trim(),
+        ])
+        .await?;
+    let task = services
+        .operator(&[
+            "task",
+            "submit",
+            "--tag",
+            "runner",
+            "--session",
+            "remote",
+            "remote-command",
+        ])
+        .await?;
+    let task_id = task["task_id"].as_str().context("Task ID missing")?;
+    let mut host = services.worker(
+        "claude-code",
+        &root.join("host"),
+        Path::new(&interpreter),
+        &entry,
+    );
+    host.arg("--claude-path")
+        .arg(&native)
+        .arg("--workspace-id")
+        .arg("remote")
+        .arg("--workspace-source")
+        .arg(&source)
+        .arg("--e2b-workspace-provider")
+        .arg(&interpreter)
+        .arg("--e2b-workspace-provider-arg")
+        .arg(&provider)
+        .env("ANTHROPIC_API_KEY", "fixture-provider-key")
+        .env("E2B_API_KEY", "synthetic-e2b-provider-key")
+        .env("E2B_DOMAIN", "fixture.e2b.invalid")
+        .env("SUPERTAG_E2B_TEMPLATE", "fixture-template");
+    // The remote round trip (allocate, stage, capture, stop) outlasts WAIT under load.
+    let output = timeout(Duration::from_secs(120), host.output()).await??;
+    if !output.status.success() {
+        let task = services.operator(&["get", "task", task_id]).await?;
+        let trace = std::fs::read_to_string(root.join("provider-calls.jsonl")).unwrap_or_default();
+        anyhow::bail!(
+            "{}; task: {task}; provider: {trace}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let task = services.operator(&["get", "task", task_id]).await?;
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    let result: Value = serde_json::from_str(task["result"].as_str().context("result")?)?;
+    assert_eq!(
+        result["listed"],
+        serde_json::json!(["read", "write", "edit", "glob", "grep", "ls", "command"]),
+        "{task}"
+    );
+    assert_eq!(result["isError"], false, "{task}");
+    let trace: Vec<Value> = std::fs::read_to_string(root.join("provider-calls.jsonl"))?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?;
+    assert_eq!(
+        trace
+            .iter()
+            .filter(|value| value["type"] == "command")
+            .count(),
+        1,
+        "{trace:?}"
+    );
+    let capture = trace
+        .iter()
+        .find(|value| value["type"] == "capture-request")
+        .context("provider never captured")?;
+    assert_eq!(
+        capture["actions"],
+        serde_json::json!(["commands:execute", "files:read", "files:write"])
+    );
+    // The command ran in the provider's checkout, never in the host's source.
+    assert!(!source.join("command-output.txt").exists());
     services.stop().await
 }
 
