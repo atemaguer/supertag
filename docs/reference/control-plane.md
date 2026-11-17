@@ -43,6 +43,26 @@ Control Plane relays them to authorized readers over that host's relay stream. S
 Plane processes can share one PostgreSQL database and one checkpoint directory; a SQLite database
 serves one process.
 
+### Session checkpoints
+
+A checkpoint is a harness's native session, saved after a successful turn so the next turn of the
+Session can resume it. It is a cache: the Session's Tasks and their events are the record, and a
+turn without a checkpoint starts from a recap of them (see
+[Continuity and recaps](../concepts/tasks.md#continuity-and-recaps)).
+
+| Rule | When |
+| --- | --- |
+| A Session keeps only its newest checkpoint | A successful turn's checkpoint replaces the Session's earlier ones |
+| A checkpoint over 8 MiB is never kept or resumed | Half the 16 MiB transfer limit, leaving room for one more long turn |
+| A checkpoint of another harness is not resumed | The Tag now runs on another harness |
+| An idle Session's checkpoint is dropped | 14 days after the Session's last finished turn |
+| An ended Objective's checkpoints are dropped | 14 days after the Objective completes or is cancelled |
+| A failed or cancelled Task Attempt's checkpoint is dropped | At the next maintenance pass |
+
+A dropped checkpoint's file leaves the checkpoint directory within about a minute, once no
+checkpoint names it. Two Sessions with byte-identical checkpoints share one file. These periods
+are fixed; there is no setting.
+
 The Gateway terminates collaboration surface connections, turns their events into Tasks through
 the `Connector` service, and delivers replies and operator notifications. It does not decide
 policy, create work on its own, or schedule Worker Hosts. Worker Hosts do not become part of the

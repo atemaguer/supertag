@@ -29,7 +29,7 @@ dies.
 | Artifacts on an artifact Volume | Yes, per the Volume's own durability |
 | Delivered git branches and pull requests | Yes, in the git remote |
 | The Control Plane's catalog, Tasks, and results | Yes, in its database |
-| Session checkpoints, which let a later Task resume the harness session | Yes, in the Control Plane's checkpoint directory |
+| Session checkpoints, which let a later Task resume the harness session | Yes, in the Control Plane's checkpoint directory, until dropped; see [Session checkpoints](../reference/control-plane.md#session-checkpoints) |
 
 ## Compared with Docker
 

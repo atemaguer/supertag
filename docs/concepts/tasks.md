@@ -60,10 +60,14 @@ Slack thread, GitHub issue, Linear issue, Lark chat thread, Teams channel
 thread, or conversation in the terminal UI. Replies in an established Session do not need to
 mention `@SuperTag` again.
 
-Continuity within a Session is automatic and limited to that conversation. Each Session maps to one
-native harness session. A new Task resumes that native session whenever the harness can load it: the
-same Tag, the same Session, the same harness, and the same reply audience. Another Worker Host
-that serves the same harness can resume it too.
+### Continuity and recaps
+
+Continuity within a Session is automatic and limited to that conversation. The Session's record
+is its Tasks and their events: each request, each result, and the messages the Tag wrote along
+the way. SuperTag keeps that record. A native harness session is a faster way to continue it. A
+new Task resumes the Session's native session whenever the harness can load it: the same Tag, the
+same Session, the same harness, and the same reply audience. Another Worker Host that serves the
+same harness can resume it too.
 
 Resuming carries the conversation, not authority. Each Task runs under the permissions, Context
 Sets, workspace, and tools admitted for that Task, so a policy change applies on the next turn.
@@ -71,9 +75,27 @@ One tradeoff follows. If an operator removes a permission, earlier tool output s
 transcript, such as a file read under the old permission. It grants no new access, but it is not
 erased. The transcript holds only what people in that same conversation already saw.
 
-When there is no usable native state, the Task receives bounded history entries from earlier
-completed Tasks in the Session instead. This replay covers a first turn, a switch to another
-harness, lost state, and a turn that failed for a reason other than its spending limit. A Task never receives the replay alongside a resume.
+When there is no usable native state, the Task starts a fresh native session with a recap of
+the Session's last ten finished turns instead. Each turn in the recap carries its request, its
+result, and the messages the Tag wrote during it. A Tag that reads its Sessions can reread older
+turns with `read_session`, and what happened during one turn with `read_turn`. A Task never
+receives the recap alongside a resume.
+
+The recap covers a first turn, lost state, and a turn that failed for a reason other than its
+spending limit. SuperTag also drops a Session's native state on purpose, so the next turn starts
+from the recap:
+
+- the Session has been idle for 14 days;
+- the native state is larger than 8 MiB, or the harness could not keep it at all;
+- the Tag now runs on another harness;
+- the Session's Objective ended 14 days ago;
+- on Codex, the Tag's tools changed, so the fresh session registers today's tools.
+
+So a conversation never grows too large to continue, and a Tag can change harness or model
+without losing it. A fresh native session loses the earlier tool output and the harness's own
+reasoning; the recap and `read_turn` recover what matters.
+
+### Other Sessions
 
 Different threads remain different Sessions, even when they invoke the same Tag. A Tag reads
 its other Sessions with `search_sessions` and `read_session`, but only shared
@@ -257,9 +279,10 @@ The Task itself stores the request text, response text, and structured result. I
 observable outcomes and references; execution events remain attached to the producing Task Attempt.
 There is no separate handoff resource created for every response.
 
-When a Task can't resume its Session's native harness session, SuperTag derives bounded history
-entries from up to five earlier completed Tasks in that Session. These entries exclude hidden reasoning, credentials, and raw tool logs.
-They are historical context, not new instructions or permission grants.
+When a Task can't resume its Session's native harness session, SuperTag derives its recap from up
+to ten earlier finished Tasks in that Session. The recap holds each request, result, and the
+messages the Tag wrote, each bounded. It excludes hidden reasoning, credentials, and raw tool
+logs. It is historical context, not new instructions or permission grants.
 
 Reusable work is saved explicitly in the [artifact catalog](../reference/artifacts.md), with its
 producing Task and Task Attempt and an immutable file manifest. A normal chat response is not
@@ -286,8 +309,9 @@ refused when it is submitted. See
 [execution settings](../reference/resource-model.md#execution-settings).
 
 The Control Plane records the selected harness and model on the Task before execution. Recovery
-keeps that selection. A Session with native state stays on the harness that produced it, and its
-checkpoint can be resumed by any Worker Host that serves that harness.
+keeps that selection. A Session's native state can be resumed by any Worker Host that serves the
+harness that produced it. When the Tag moves to another harness, its Sessions continue there from
+their recaps.
 
 ### Cancelling a Task
 
@@ -316,7 +340,7 @@ Attempt later confirms that it withdrew the unread message, SuperTag clears that
 The message runs once as its own Task in the Session's next turn.
 
 Without live input support, messages wait in Session order. Before the next execution starts,
-SuperTag refreshes its Session history and selects the latest compatible completed session state.
+SuperTag refreshes its Session's recap and selects the Session's native state, if it can resume it.
 Sessions started beneath this one still run independently.
 
 Codex supports steering. Claude Code runs through the Agent SDK and supports queueing. Claude Code

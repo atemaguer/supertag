@@ -18,7 +18,9 @@ Do not build one when Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents fit
 1. Read all of standard input: one `supertag.runtime.v2.AdapterBootstrap`, at most 4096 bytes,
    with a loopback `endpoint` and a `token`. Refuse a non-loopback endpoint.
 2. Call `Harness.Attach` with `authorization: Bearer TOKEN`. The `HarnessRun` holds the Task and
-   its prompt, the Session checkpoint, earlier turns, resolved Skills, and what the Task may do.
+   its prompt, the Session checkpoint, a recap of earlier turns (`history`), resolved Skills, and
+   what the Task may do. Resume the checkpoint, or start fresh with the recap in the first
+   message as untrusted history; never both.
 3. Work in the current directory, the Task's checkout. Report with `Harness.Publish`
    (increasing `sequence`, and a `kind`: `TASK_EVENT_KIND_MESSAGE` for each whole message the agent
    writes, `TASK_EVENT_KIND_ACTIVITY` for one line from a tool call's input, or
@@ -27,6 +29,7 @@ Do not build one when Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents fit
    stream reply text as it is written with `Harness.PublishText` (`after_sequence` is the last
    published event's sequence); the whole message, published afterwards, replaces it.
 4. End with `Harness.Complete`: `result`, `succeeded`, and a `checkpoint` if the agent can resume.
+   A checkpoint over 8 MiB is not kept; the next turn starts from the recap.
 
 Never print the token or pass it to the agent. The messages are in
 [`proto/supertag/runtime/v2/runtime.proto`](../../proto/supertag/runtime/v2/runtime.proto).

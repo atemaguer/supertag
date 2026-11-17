@@ -120,8 +120,8 @@ or a collaboration surface failure does not erase accepted work. See
 
 Each Task stores its request and result. A later Task in the same Session resumes that Session's
 native harness session from its checkpoint, possibly on another host. When no usable checkpoint
-exists, it receives bounded history from earlier turns instead. Reusable outputs are explicitly
-captured as artifacts.
+exists, it starts fresh from a recap of the Session's earlier turns instead. Reusable outputs are
+explicitly captured as artifacts.
 
 ## Extension points
 

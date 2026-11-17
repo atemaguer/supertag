@@ -30,8 +30,8 @@ Worker Host ── claims Task ── starts adapter ── writes bootstrap to 
 3. The adapter connects to that endpoint with gRPC and sends the token as a bearer credential
    on every call to the `supertag.runtime.v2.Harness` service.
 4. `Attach` returns a `HarnessRun`: the Task and its prompt, the Session checkpoint to resume
-   from, earlier turns of the Session, the Skills its Context Sets resolved, and what the Task may
-   do.
+   from, a recap of the Session's last finished turns (`history`: each request, result, and the
+   messages the agent wrote), the Skills its Context Sets resolved, and what the Task may do.
 5. While the agent works, the adapter reports what it does with `Publish`, token usage with
    `ReportUsage`, and the limits it enforces with `ConfirmExecutionLimits`. Each `Publish` names
    its `kind`:
@@ -151,7 +151,11 @@ supertag describe task TASK_ID
 - When a Task Attempt fails, the Worker Host log shows the last lines the adapter wrote to standard
   error, with secrets hidden. Write diagnostics there, never to standard output.
 - Send a checkpoint with `Complete` if your agent can resume a conversation; the next Task in the
-  Session receives it, possibly on another host.
+  Session receives it, possibly on another host. A checkpoint over 8 MiB is not kept, and the turn
+  still succeeds. Name your harness in the checkpoint's `harness` field.
+- When `Attach` brings no checkpoint, or one your agent cannot resume, start a fresh session with
+  the `history` recap in its first message, marked as untrusted history. Never send the recap
+  alongside a resumed session.
 - Report failures through `Complete` with `succeeded: false` and a result safe to show to people.
 - When the run carries execution limits, enforce them and confirm them with
   `ConfirmExecutionLimits` before the agent starts, and report usage with `ReportUsage`. A Task

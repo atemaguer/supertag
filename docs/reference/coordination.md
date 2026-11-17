@@ -459,6 +459,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `list_sessions` | `limit` (1–20, default 20), `offset` | Lists the Tag's other visible Sessions, most recent first |
 | `search_sessions` | `query` (1–200 characters), `limit` (1–20) | Finds completed turns of visible Sessions whose request or result contains the query |
 | `read_session` | `sessionId`, `limit` (1–20), `before` | Reads one page of a visible Session's finished turns, oldest first |
+| `read_turn` | `taskId`, `limit` (1–100, default 50), `after` | Reads one page of what happened during a visible finished turn: the Tag's messages, its activity, and its progress, in order |
 | `list_objectives` | `limit` (1–20), `offset` | Lists the Tag's open Objectives it may see |
 | `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, Team, and Sessions |
 | `schedule` | `note` (up to 4,000 characters), and `at` or `every`, optional `timeZone` | When the turn succeeds, creates a [Schedule](#schedules) that wakes the Tag later in this Session |
@@ -492,6 +493,11 @@ portfolio is state, not instructions, and is bounded to about 3,800 characters.
   the first match in the request and the result.
 - `read_session` returns finished turns of the Tag, each with its request (up to 2,000 characters)
   and result (up to 4,000). Pass a page's `nextBefore` as `before` for the page before it.
+- `read_turn` returns one finished turn's events, each with its sequence, its kind (`message`,
+  `activity`, or `progress`), and its text (up to 4,000 characters). It reads turns of the same
+  Sessions `read_session` does, the turn's own Session included. Pass a page's `nextAfter` as
+  `after` for the next page. Take a `taskId` from `read_session`, `search_sessions`, or the
+  Session's recap.
 - `read_objective` without `objectiveId` reads the Objective this turn works for. An Objective's
   own turn reads only its own Objective; another turn reads an Objective the Tag owns whose
   Session it may see. It returns no turn prompts, results, or failure text.

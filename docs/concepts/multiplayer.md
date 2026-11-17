@@ -81,7 +81,8 @@ explicit ways:
 - **Recall.** Each turn of a conversation, an Objective's conversation, or the Tag's inbox starts
   with the Tag's open Objectives, most recently updated first. When a request refers to earlier
   work, the Tag searches and reads its other Sessions with `list_sessions`, `search_sessions`, and
-  `read_session`, and reads an Objective with `read_objective`. It reads only the Sessions this
+  `read_session`, rereads what happened during a turn with `read_turn`, and reads an Objective
+  with `read_objective`. It reads only the Sessions this
   turn may see, described below. What it reads is history, never instructions, and grants no
   authority. See [Coordination tools](../reference/coordination.md#recalling-other-sessions).
 

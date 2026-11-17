@@ -47,6 +47,10 @@ within the pre-1.0 compatibility policy described in
   say so and name `supertag up`; the saved Control Planes stay available. Running `supertag-tui`
   directly finds it too.
 
+- A Tag can reread what happened during an earlier turn: the `read_turn` tool, on every built-in
+  harness, pages a visible finished turn's messages, activity, and progress
+  (`AttemptTagSessions.ReadTurn` and `HarnessTagSessions.ReadTurn` for adapters).
+
 ### Changed
 
 - When the lead Tag runs on Codex, `supertag init` adds `web:fetch` to the `local-tools`
@@ -85,6 +89,16 @@ within the pre-1.0 compatibility policy described in
   saying what it does), or `progress` (its plan). Harness adapters set `kind` on
   `Harness.Publish`, which refuses an event without one, and `supertag task events` prints it.
   OpenCode's result is the text after its last tool call; earlier text shows as messages.
+
+- A long conversation no longer fails when its native session grows past the 16 MiB checkpoint
+  limit. A Session keeps only its newest checkpoint. SuperTag drops it when it is over 8 MiB, for
+  another harness, idle for 14 days, or its Objective ended 14 days ago, and on Codex when the
+  Tag's tools changed. The next turn then starts a fresh native session from a recap of the
+  Session's last ten turns, with the messages the Tag wrote in them, on every harness. A dropped
+  checkpoint's file leaves the checkpoint directory. `AttemptHistoryEntry` carries `messages`.
+- A Tag can change harness without losing its Sessions: they continue on the new harness from
+  their recaps, instead of refusing new turns.
+- Claude Code runs without its own auto memory, which lasted only one Task Attempt.
 
 ### Removed
 
