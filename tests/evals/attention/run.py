@@ -133,11 +133,16 @@ def run(cli: Cli, scenarios: list[Scenario], harnesses: list[str], timeout: floa
         while pending and time.monotonic() < deadline:
             for index in sorted(pending):
                 outcome = outcomes[index]
-                if not outcome.task:
-                    outcome.task = cli("get", "schedule", schedules[index]).get("last_task_id") or ""
+                try:
                     if not outcome.task:
-                        continue
-                task = cli("get", "task", outcome.task)
+                        outcome.task = cli("get", "schedule", schedules[index]).get("last_task_id") or ""
+                        if not outcome.task:
+                            continue
+                    task = cli("get", "task", outcome.task)
+                except RuntimeError as error:
+                    # A busy Control Plane can drop a read; the next poll tries again.
+                    print(f"poll: {error}", file=sys.stderr)
+                    continue
                 if task.get("state") in TERMINAL:
                     outcome.state = task["state"]
                     outcome.quiet = bool(task.get("quiet"))

@@ -3511,6 +3511,45 @@ async fn native_stay_quiet_finishes_quietly_only_with_the_capability() -> Result
             assert!(!logs.contains("\"stay_quiet\""));
         }
     }
+    // A quiet turn may end without final text; its note is the result. Without `stay_quiet`
+    // the missing text still fails the turn.
+    let silent = event_lines(&[
+        json!({"type":"thread.started","thread_id":"native-thread"}),
+        json!({"type":"turn.started"}),
+        json!({"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}),
+    ]);
+    for may_stay_quiet in [true, false] {
+        let native = NativeFixture::new(&silent, "exit 0")?;
+        if may_stay_quiet {
+            std::fs::write(native.directory.path().join("quiet-mode"), "")?;
+        }
+        let server = HarnessProcess::configured_tools(
+            &["files:read"],
+            None,
+            "Scheduled wake-up. Check CI.",
+            false,
+            Some(AttemptCapabilities {
+                may_stay_quiet,
+                ..Default::default()
+            }),
+        )
+        .await?;
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome")?;
+        assert_eq!(outcome.succeeded, may_stay_quiet, "{}", outcome.result);
+        assert_eq!(outcome.quiet, may_stay_quiet);
+        if may_stay_quiet {
+            assert!(
+                outcome.result.starts_with("CI is green"),
+                "{}",
+                outcome.result
+            );
+            assert!(!outcome.result.contains(KEY));
+        } else {
+            assert_eq!(outcome.result, "Codex completed without a final response");
+        }
+    }
     Ok(())
 }
 

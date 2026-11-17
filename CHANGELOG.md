@@ -232,6 +232,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Codex turn that called `stay_quiet` and then wrote no final text no longer fails with
+  "Codex completed without a final response"; it finishes quietly with its note as the result.
 - A Linux Claude Code host offers Claude Code's sandbox only when a user namespace can be made
   inside bubblewrap's, as the sandbox needs. A host whose AppArmor policy forbids it, such as
   Ubuntu's `bwrap-userns-restrict`, no longer takes scoped command Tasks it would fail.

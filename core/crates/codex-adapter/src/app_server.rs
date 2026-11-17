@@ -647,7 +647,7 @@ impl Stream {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<(String, String)> {
+    fn finish(mut self, quiet: bool) -> Result<(String, String)> {
         ensure!(
             self.completed,
             "Codex process ended without a completed turn"
@@ -658,7 +658,7 @@ impl Stream {
             .context("Codex resume usage baseline is unavailable")?;
         self.native.accept(&serde_json::to_vec(&json!({"type":"turn.completed","usage":{"input_tokens":total[0]-baseline[0],"cached_input_tokens":total[1]-baseline[1],"output_tokens":total[2]-baseline[2]}}))?)?;
         let _ = self.native.take_usage();
-        self.native.finish()
+        self.native.finish(quiet)
     }
 
     fn budget_advisory(&self) -> Option<String> {
@@ -1072,7 +1072,7 @@ pub(crate) async fn execute(
         }
     }
     outcome?;
-    stream.finish()
+    stream.finish(questions.quiet_note().is_some())
 }
 
 /// A `progress.updated` Task event for a Codex plan: the first eight steps, the first

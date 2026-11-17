@@ -269,7 +269,9 @@ impl Stream {
         self.usage.take()
     }
 
-    pub(crate) fn finish(self) -> Result<(String, String)> {
+    /// The final response and thread. A quiet turn (`stay_quiet`) may end without final text;
+    /// its result is then empty, and the adapter records the quiet note instead.
+    pub(crate) fn finish(self, quiet: bool) -> Result<(String, String)> {
         ensure!(
             self.thread.is_some(),
             "Codex completed without a thread identity"
@@ -280,6 +282,7 @@ impl Stream {
         );
         Ok((
             self.final_response
+                .or_else(|| quiet.then(String::new))
                 .context("Codex completed without a final response")?,
             self.thread
                 .context("Codex completed without a thread identity")?,
