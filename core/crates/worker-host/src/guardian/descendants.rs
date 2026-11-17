@@ -66,6 +66,11 @@ impl Descendants {
         loop {
             let found = self.scan()?;
             if found.is_empty() {
+                // Descendants that exited are zombie children of this subreaper, which a scan
+                // skips. Reap them: once this guardian exits they would pass to PID 1, which in
+                // a container without an init never reaps them. With no live child left, no
+                // other child can exit after this.
+                reap_children()?;
                 return Ok(swept);
             }
             for process in &found {
@@ -76,6 +81,8 @@ impl Descendants {
                 }
                 process.kill()?;
             }
+            // Only after the kills: a child reaped between a scan and its kill could have its PID
+            // reused.
             reap_children()?;
             if Instant::now() >= deadline {
                 return Err(io::Error::new(
