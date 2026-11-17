@@ -16,8 +16,8 @@ within the pre-1.0 compatibility policy described in
   or the New Tag form. A work Session stays open after it reports, for `continue_session`, until
   the Tag closes it with a new `close_session` tool, an operator runs `supertag session close`,
   `supertag fetch` pulls its delivery, its Objective closes, or it has had no activity for 14
-  days (shown as "closed: idle"). Continuing a closed work Session reopens it when the Tag is
-  under its limit. At the limit, `start_session` starts nothing and returns the open work
+  days (shown as "closed: idle"). Continuing an idle-closed work Session reopens it when the
+  Tag is under its limit; other closes are final. At the limit, `start_session` starts nothing and returns the open work
   Sessions so the Tag can continue or close one; the turn goes on. The tool description, `supertag get session`, `supertag get tag`, the desktop app
   and the terminal UI show how many are open. On upgrade, finished work Sessions close
   except each Tag's four newest, which can still be continued.

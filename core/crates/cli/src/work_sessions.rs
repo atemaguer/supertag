@@ -34,8 +34,8 @@ pub struct ListArgs {
 
 #[derive(Subcommand)]
 pub enum SessionCommand {
-    /// Close a Work Session, so it no longer counts toward its Tag's open Work Sessions. Continuing
-    /// it later reopens it.
+    /// Close a Work Session, so it no longer counts toward its Tag's open Work Sessions. A closed
+    /// Work Session cannot be continued.
     Close {
         /// Work Session ID.
         work_session_id: String,

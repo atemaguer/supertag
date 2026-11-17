@@ -365,7 +365,7 @@ fn validate_page(limit: Option<u32>, cursor: &str) -> Result<()> {
 pub(crate) fn close_spec() -> Value {
     json!({
         "type":"function", "name":"close_session",
-        "description":"Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. Continuing it later reopens it.",
+        "description":"Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. A closed Work Session cannot be continued.",
         "inputSchema":{"type":"object","properties":{
             "sessionId":{"type":"string","minLength":1,"maxLength":256}
         },"required":["sessionId"],"additionalProperties":false}

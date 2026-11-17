@@ -1537,7 +1537,7 @@ export type WorkSession = Message<"supertag.runtime.v2.WorkSession"> & {
 
   /**
    * Set while it is closed. An open Work Session counts toward its parent Tag's
-   * `max_work_sessions`; continuing a closed one reopens it.
+   * `max_work_sessions`. Only an idle close is undone: continuing it reopens it.
    *
    * @generated from field: optional int64 closed_at_ms = 15;
    */
@@ -10805,6 +10805,7 @@ export enum WorkSessionCloseReason {
 
   /**
    * Closed after 14 days without activity: no turn, continuation, or delivery change.
+   * Continuing it reopens it when the Tag is under its limit.
    *
    * @generated from enum value: WORK_SESSION_CLOSE_REASON_IDLE = 6;
    */

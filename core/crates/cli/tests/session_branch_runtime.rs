@@ -40,6 +40,8 @@ database_tests! {
     fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branches;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     local_supervisor_advances_one_session_branch_for_each_task;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    fetching_a_work_session_delivery_closes_the_work_session;
 }
 
 struct Credentials {
@@ -379,6 +381,127 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("no Task or Session"));
 
+    plane.kill().await?;
+    Ok(())
+}
+
+/// Pulling a Work Session's delivery with `supertag fetch` accepts it: the Work Session closes,
+/// stops counting toward its Tag's open Work Sessions, and cannot be continued.
+async fn fetching_a_work_session_delivery_closes_the_work_session(database: String) -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let operator_repository = root.join("operator");
+    fs::create_dir(&operator_repository)?;
+    git(
+        &operator_repository,
+        &["init", "--quiet", "--initial-branch=main"],
+    )
+    .await?;
+    fs::write(operator_repository.join("workspace.txt"), "base\n")?;
+    git(&operator_repository, &["add", "workspace.txt"]).await?;
+    git(&operator_repository, &["commit", "--quiet", "-m", "Base"]).await?;
+    let base = git(&operator_repository, &["rev-parse", "HEAD"]).await?;
+    let checkout = root.join("host-checkout");
+    git(
+        root,
+        &[
+            "clone",
+            "--quiet",
+            "--no-local",
+            operator_repository.to_str().context("path")?,
+            checkout.to_str().context("path")?,
+        ],
+    )
+    .await?;
+    let credentials = Credentials::new();
+    let mut plane = credentials.command(&["control-plane"]);
+    plane
+        .env("SUPERTAG_DATABASE_URL", &database)
+        .arg("--checkpoint-directory")
+        .arg(root.join("transfers"));
+    let (mut plane, public) = service(plane).await?;
+    json(credentials.operator(
+        &[
+            "tag",
+            "put",
+            "builder",
+            "--instructions",
+            "Improve the repository",
+            "--allow",
+            "file:write",
+            "--workspace-id",
+            "project",
+            "--workspace-base",
+            &base,
+        ],
+        &public,
+    ))
+    .await?;
+    json(credentials.operator(
+        &[
+            "task",
+            "submit",
+            "--tag",
+            "builder",
+            "--session",
+            "feature",
+            "Split the work",
+        ],
+        &public,
+    ))
+    .await?;
+    // The root turn starts a Work Session; its own turn then delivers a commit.
+    let mut starter = credentials.worker(&public, &root.join("host-root"), &checkout);
+    starter.arg("--adapter-arg=--start-work-session");
+    success(starter).await?;
+    let listed = json(credentials.operator(
+        &[
+            "get",
+            "session",
+            "--parent-tag",
+            "builder",
+            "--parent-session",
+            "feature",
+        ],
+        &public,
+    ))
+    .await?;
+    ensure!(listed["open_work_sessions"] == 1, "{listed}");
+    let work = field(&listed["work_sessions"][0], "work_session_id")?.to_owned();
+    success(credentials.worker(&public, &root.join("host-child"), &checkout)).await?;
+    let delivered = json(credentials.operator(&["get", "session", &work], &public)).await?;
+    ensure!(
+        delivered["workspace_delivery"]["committed"] == true,
+        "{delivered}"
+    );
+    // The Control Plane stores no delivery; a holding host keeps it reachable for `fetch`.
+    let _holding =
+        holding_host::serve(credentials.holder(&public, &root.join("holder"), &checkout)).await?;
+    let mut fetch = credentials.operator(&["fetch", &work, "--tag", "builder"], &public);
+    fetch.arg("--repository").arg(&operator_repository);
+    let imported = json(fetch).await?;
+    ensure!(
+        imported["work_session_closed"] == true && imported["session_id"] == work.as_str(),
+        "{imported}"
+    );
+    let closed = json(credentials.operator(&["get", "session", &work], &public)).await?;
+    ensure!(
+        closed["close_reason"] == "WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED",
+        "{closed}"
+    );
+    let listed = json(credentials.operator(
+        &[
+            "get",
+            "session",
+            "--parent-tag",
+            "builder",
+            "--parent-session",
+            "feature",
+        ],
+        &public,
+    ))
+    .await?;
+    ensure!(listed["open_work_sessions"] == 0, "{listed}");
     plane.kill().await?;
     Ok(())
 }

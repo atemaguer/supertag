@@ -1,7 +1,7 @@
 //! A Tag's open Work Sessions: at its `max_work_sessions`, `start_session` is refused with the
 //! open Work Sessions listed; closing one, by the Tag, an operator, a pulled delivery, its
-//! Objective closing, or 14 days without activity, makes room, and continuing a closed one
-//! reopens it when there is room.
+//! Objective closing, or 14 days without activity, makes room. An explicit close is final;
+//! continuing an idle-closed one reopens it when there is room.
 mod support;
 
 use std::sync::{
@@ -193,7 +193,7 @@ async fn contract(url: String) {
         .await
         .unwrap();
 
-    // Reopening a closed Work Session at the limit is refused with the open ones listed.
+    // A Work Session the Tag closed is final.
     let continued = store
         .continue_work_session(
             &host,
@@ -206,7 +206,7 @@ async fn contract(url: String) {
         )
         .await;
     assert!(
-        matches!(&continued, Err(StoreError::FailedPrecondition(reason)) if reason.contains("2 of 2 Work Sessions open")),
+        matches!(&continued, Err(StoreError::FailedPrecondition(reason)) if reason.contains("is closed")),
         "{continued:?}"
     );
 
@@ -379,8 +379,10 @@ async fn run_claimed(store: &Store, host: &HostAuthority, assignment: Assignment
     finish(store, host, &attempt).await;
 }
 
-/// Continuing a closed Work Session reopens it under the limit; 14 days without activity close it.
+/// Fourteen days without activity close a Work Session; continuing it reopens it under the limit
+/// and is refused at it, while an explicit close stays final.
 async fn reopen_and_idle(url: String) {
+    const DAY: i64 = 24 * 3_600_000;
     let clock = Arc::new(AtomicI64::new(NOW));
     let now = Arc::clone(&clock);
     let store = Store::open(&url)
@@ -408,82 +410,20 @@ async fn reopen_and_idle(url: String) {
         .unwrap();
     finish(&store, &host, &a).await;
     drain(&store, &host).await; // the Work Session's turn and its report
-    store
-        .close_work_session(
-            OP,
-            &CloseWorkSessionRequest {
-                work_session_id: x.work_session_id.clone(),
-                delivery_pulled: false,
-            },
-        )
-        .await
-        .unwrap();
-    let second = store
-        .send_message(OP, &say("Another part"))
-        .await
-        .unwrap()
-        .task
-        .unwrap();
-    let b = run(&store, &host, &second.task_id).await;
-    let y = store
-        .start_work_session(&host, &start(&b, "y", "Another"))
-        .await
-        .unwrap();
-    let continue_x = |operation: &str| ContinueWorkSessionRequest {
-        attempt: Some(b.clone()),
-        operation_id: operation.into(),
-        work_session_id: x.work_session_id.clone(),
-        message: "Revise it".into(),
-    };
-    let refused = store
-        .continue_work_session(&host, &continue_x("at-limit"))
-        .await;
-    assert!(
-        matches!(&refused, Err(StoreError::FailedPrecondition(reason)) if reason.contains("1 of 1 Work Sessions open")),
-        "{refused:?}"
-    );
-    assert!(
-        store
-            .get_work_session(OP, &x.work_session_id)
-            .await
-            .unwrap()
-            .closed_at_ms
-            .is_some()
-    );
-    store
-        .close_attempt_work_session(&host, &close(&b, &y.work_session_id))
-        .await
-        .unwrap();
-    // Closing leaves Y's queued turn; cancel it so X's turns run next.
-    store.cancel_task(&y.latest_task_id).await.unwrap();
-    let reopened = store
-        .continue_work_session(&host, &continue_x("reopen"))
-        .await
-        .unwrap();
-    assert_eq!(reopened.closed_at_ms, None);
-    assert_eq!(reopened.close_reason(), WorkSessionCloseReason::Unspecified);
-    finish(&store, &host, &b).await;
-    drain(&store, &host).await; // the continued turn and its report
 
     // Thirteen days later it is still open; fifteen days later the sweep closes it as idle.
-    clock.store(NOW + 13 * 24 * 3_600_000, Ordering::SeqCst);
+    clock.store(NOW + 13 * DAY, Ordering::SeqCst);
     store.sweep_work_sessions().await.unwrap();
-    assert_eq!(
-        store
-            .get_work_session(OP, &x.work_session_id)
-            .await
-            .unwrap()
-            .closed_at_ms,
-        None
-    );
-    clock.store(NOW + 15 * 24 * 3_600_000, Ordering::SeqCst);
+    let read = |id: String| {
+        let store = store.clone();
+        async move { store.get_work_session(OP, &id).await.unwrap() }
+    };
+    assert_eq!(read(x.work_session_id.clone()).await.closed_at_ms, None);
+    clock.store(NOW + 15 * DAY, Ordering::SeqCst);
     store.sweep_work_sessions().await.unwrap();
-    let idle = store
-        .get_work_session(OP, &x.work_session_id)
-        .await
-        .unwrap();
+    let idle = read(x.work_session_id.clone()).await;
     assert_eq!(idle.close_reason(), WorkSessionCloseReason::Idle);
-    assert_eq!(idle.closed_at_ms, Some(NOW + 15 * 24 * 3_600_000));
+    assert_eq!(idle.closed_at_ms, Some(NOW + 15 * DAY));
     // The conversation's report turn says why it closed.
     let page = store
         .list_messages(
@@ -503,6 +443,53 @@ async fn reopen_and_idle(url: String) {
                 == Some(x.work_session_id.as_str())
                 && message.work_session_close_reason() == WorkSessionCloseReason::Idle)
     );
+
+    // At the limit, continuing the idle Work Session is refused with the open ones listed.
+    let second = store
+        .send_message(OP, &say("Another part"))
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    let b = run(&store, &host, &second.task_id).await;
+    let y = store
+        .start_work_session(&host, &start(&b, "y", "Another"))
+        .await
+        .unwrap();
+    let continuing = |session: &str, operation: &str| ContinueWorkSessionRequest {
+        attempt: Some(b.clone()),
+        operation_id: operation.into(),
+        work_session_id: session.into(),
+        message: "Revise it".into(),
+    };
+    let refused = store
+        .continue_work_session(&host, &continuing(&x.work_session_id, "at-limit"))
+        .await;
+    assert!(
+        matches!(&refused, Err(StoreError::FailedPrecondition(reason)) if reason.contains("1 of 1 Work Sessions open")),
+        "{refused:?}"
+    );
+    assert!(read(x.work_session_id.clone()).await.closed_at_ms.is_some());
+    // An explicit close is final.
+    store
+        .close_attempt_work_session(&host, &close(&b, &y.work_session_id))
+        .await
+        .unwrap();
+    let final_close = store
+        .continue_work_session(&host, &continuing(&y.work_session_id, "closed"))
+        .await;
+    assert!(
+        matches!(&final_close, Err(StoreError::FailedPrecondition(reason)) if reason.contains("is closed")),
+        "{final_close:?}"
+    );
+    // Under the limit, continuing the idle Work Session reopens it.
+    let reopened = store
+        .continue_work_session(&host, &continuing(&x.work_session_id, "reopen"))
+        .await
+        .unwrap();
+    assert_eq!(reopened.closed_at_ms, None);
+    assert_eq!(reopened.close_reason(), WorkSessionCloseReason::Unspecified);
+    finish(&store, &host, &b).await;
     store.close().await;
 }
 

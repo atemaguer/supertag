@@ -234,9 +234,10 @@ when:
 
 A work Session that has had no turn, continuation, or delivery change for 14 days also closes, as
 `closed after 14 days without activity`, so the limit cannot fill up with abandoned work.
-Closing a work Session leaves a turn it already queued. `continue_session` on a closed work
-Session reopens it when the Tag is under its limit; at the limit it is refused with the same list
-as `start_session`. `supertag get session ID` shows `closed_at_ms` and `close_reason`, and the
+Closing a work Session leaves a turn it already queued. An explicit close is final: the work
+Session cannot be continued. An idle close is not: `continue_session` reopens the work Session
+when the Tag is under its limit, and at the limit is refused with the same list as
+`start_session`. `supertag get session ID` shows `closed_at_ms` and `close_reason`, and the
 desktop app and the terminal UI mark a closed work Session, such as `closed: idle`.
 
 At the limit, `start_session` starts nothing and the turn goes on. The tool returns an error

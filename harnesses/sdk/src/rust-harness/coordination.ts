@@ -801,7 +801,7 @@ export function registerCoordinationTools(
       "close_session",
       {
         description:
-          "Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. Continuing it later reopens it.",
+          "Close one of this Tag's Work Sessions when its work is done or no longer needed, so it stops counting toward the Tag's limit of open Work Sessions. A closed Work Session cannot be continued.",
         inputSchema: schemas.close_session,
         _meta: meta,
       },

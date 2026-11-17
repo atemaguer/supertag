@@ -439,6 +439,7 @@ const (
 	// It had finished when SuperTag began counting open Work Sessions.
 	WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_UPGRADE WorkSessionCloseReason = 5
 	// Closed after 14 days without activity: no turn, continuation, or delivery change.
+	// Continuing it reopens it when the Tag is under its limit.
 	WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_IDLE WorkSessionCloseReason = 6
 )
 
@@ -5193,7 +5194,7 @@ type WorkSession struct {
 	CreatedOrder      uint64                      `protobuf:"varint,13,opt,name=created_order,json=createdOrder,proto3" json:"created_order,omitempty"`
 	Question          *WorkSessionQuestion        `protobuf:"bytes,14,opt,name=question,proto3" json:"question,omitempty"`
 	// Set while it is closed. An open Work Session counts toward its parent Tag's
-	// `max_work_sessions`; continuing a closed one reopens it.
+	// `max_work_sessions`. Only an idle close is undone: continuing it reopens it.
 	ClosedAtMs    *int64                 `protobuf:"varint,15,opt,name=closed_at_ms,json=closedAtMs,proto3,oneof" json:"closed_at_ms,omitempty"`
 	CloseReason   WorkSessionCloseReason `protobuf:"varint,16,opt,name=close_reason,json=closeReason,proto3,enum=supertag.runtime.v2.WorkSessionCloseReason" json:"close_reason,omitempty"`
 	unknownFields protoimpl.UnknownFields

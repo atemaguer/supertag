@@ -307,21 +307,31 @@ pub(crate) async fn close_idle_in(tx: &mut Transaction<'_, Any>, now: i64) -> Re
     .rows_affected())
 }
 
-/// Continuing a closed Work Session reopens it, when its Tag is under its limit; at the limit,
-/// the continuation is refused with the open Work Sessions, as a start is.
+/// Continuing a Work Session closed for 14 days without activity reopens it, when its Tag is
+/// under its limit; at the limit, the continuation is refused with the open Work Sessions, as a
+/// start is. An explicit close (the Tag, an operator, a pulled delivery, its Objective ending) is
+/// final.
 pub(crate) async fn reopen_in(
     tx: &mut Transaction<'_, Any>,
     parent: &Task,
     work_session_id: &str,
 ) -> Result<()> {
-    let closed: Option<Option<i64>> = sqlx::query_scalar(
-        "SELECT closed_at_ms FROM supertag_v2_work_sessions WHERE work_session_id=$1",
+    let row = sqlx::query(
+        "SELECT closed_at_ms, close_reason FROM supertag_v2_work_sessions WHERE work_session_id=$1",
     )
     .bind(work_session_id)
     .fetch_optional(&mut **tx)
     .await?;
-    if !matches!(closed, Some(Some(_))) {
+    let Some(row) = row else {
         return Ok(());
+    };
+    if row.try_get::<Option<i64>, _>("closed_at_ms")?.is_none() {
+        return Ok(());
+    }
+    if row.try_get::<i64, _>("close_reason")? != WorkSessionCloseReason::Idle as i64 {
+        return Err(StoreError::FailedPrecondition(format!(
+            "Work Session {work_session_id} is closed; start a new one"
+        )));
     }
     let (open, max) = open_count_in(tx, &parent.tag_id).await?;
     if open >= max {

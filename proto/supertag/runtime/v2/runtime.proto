@@ -523,6 +523,7 @@ enum WorkSessionCloseReason {
   // It had finished when SuperTag began counting open Work Sessions.
   WORK_SESSION_CLOSE_REASON_UPGRADE = 5;
   // Closed after 14 days without activity: no turn, continuation, or delivery change.
+  // Continuing it reopens it when the Tag is under its limit.
   WORK_SESSION_CLOSE_REASON_IDLE = 6;
 }
 
@@ -554,7 +555,7 @@ message WorkSession {
   uint64 created_order = 13;
   WorkSessionQuestion question = 14;
   // Set while it is closed. An open Work Session counts toward its parent Tag's
-  // `max_work_sessions`; continuing a closed one reopens it.
+  // `max_work_sessions`. Only an idle close is undone: continuing it reopens it.
   optional int64 closed_at_ms = 15;
   WorkSessionCloseReason close_reason = 16;
 }
