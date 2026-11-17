@@ -74,6 +74,7 @@ name in `supertag audit`.
 | `ObjectiveOverviews` | The readable progress overview that `describe objective` prints |
 | `Inbox` | Inbox items, questions and their answers, and approval decisions |
 | `WorkSessions` | Work Sessions started from a parent Session |
+| `Schedules` | [Schedules](coordination.md#schedules) that wake a Tag in your conversation: create, read, list, pause, resume, and delete |
 | `Teams` | Teams and their Workstream posts |
 | `Mailbox` | Messages between Tags and Mailbox grants |
 | `LiveInputs` | Messages to a running Task, and resolving an uncertain delivery |

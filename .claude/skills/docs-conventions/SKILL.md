@@ -47,8 +47,8 @@ implements**. Everything else is lowercase prose.
 Configuration resources: **Tag, Role, Permission Set, Context Set, Workspace, Volume, Surface
 Account**.
 
-Operational resources: **Objective, Team, Workstream, Mailbox, Session, Task, Task Attempt, Worker
-Host, Auth Key, Operator Token**.
+Operational resources: **Objective, Team, Workstream, Mailbox, Session, Schedule, Task, Task
+Attempt, Worker Host, Auth Key, Operator Token**.
 
 Extension contracts (as named in `api-stability.md`): **Connector**. Write *harness* and *harness
 adapter* in lowercase, like other industry terms, and keep code identifiers such as `Harness` as

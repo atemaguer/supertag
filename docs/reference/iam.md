@@ -166,6 +166,12 @@ Runtime permissions use the same Permission Set but have a different target:
 | `web:fetch` | Fetch a known web resource |
 | `web:search` | Search the web |
 | `browser:use` | Use browser or computer-control tools. No built-in harness supports it yet |
+| `schedule:create` | Create a [Schedule](coordination.md#schedules) with the `schedule` tool. Allowed without a grant |
+
+Every root turn may schedule, so `schedule:create` needs no grant. Schedules have no approval
+flow: a Permission Set that grants `schedule:create` with `approvalRequired: true` denies the
+`schedule` and `cancel_schedule` tools to the Tags it applies to. The action never reaches a
+harness.
 
 Other `namespace:action` names can be stored but enable nothing in the built-in harnesses. Published actions should describe authority, not a particular harness API.
 

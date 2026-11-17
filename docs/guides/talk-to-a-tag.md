@@ -101,6 +101,35 @@ one to see its commands, tool calls, and result.
 You can leave the terminal UI while work runs. The report appears in the conversation when you
 return.
 
+## Ask a Tag to follow up
+
+Ask the Tag to come back to something later, once or on a schedule:
+
+```text
+Check PR 412 again in two hours.
+Summarize open work every Monday at 9.
+```
+
+The Tag sets a **Schedule**, a durable wake-up for itself in this conversation, and tells you
+when it will look. When the time comes, its reply appears in the conversation as a normal
+message, marked "Scheduled", with no message from you before it. A Schedule takes effect only
+when the turn that set it succeeds. Recurring ones run at least an hour apart.
+
+To set one yourself, or to stop one:
+
+```sh
+supertag schedule create --tag lead --every "0 9 * * MON" --time-zone Europe/Berlin "Summarize open work"
+supertag get schedules --tag lead
+supertag schedule pause SCHEDULE_ID
+supertag schedule resume SCHEDULE_ID
+supertag delete schedule SCHEDULE_ID
+```
+
+`--at` takes a duration such as `2h` or a time such as `2026-11-17T09:00`. Without
+`--time-zone`, times are read in the Control Plane's time zone. `supertag describe schedule ID`
+shows the next time, the missed occurrences, and the latest turn it queued. See
+[Schedules](../reference/coordination.md#schedules) for the rules.
+
 ## Answer a question or decide an approval
 
 If the Tag asks which region a work Session should use, answer in the same conversation. The

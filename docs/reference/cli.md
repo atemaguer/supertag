@@ -61,6 +61,7 @@ Commands:
   workspace-volume      Register a Volume whose files Tasks receive as Workspace copies
   artifact              Download files captured by a Task
   fetch                 Import a Task's or Session's delivered commits as its Session branch in a repository
+  schedule              Wake a Tag later in your conversation with it, or pause and resume a Schedule
   input                 Resolve a message whose delivery to a running Task is uncertain
   test                  Check operator settings by sending a sample
   spend                 Report recorded spend by Objective, Tag, or day
@@ -3168,6 +3169,95 @@ Options:
           Print help
 ```
 
+## `supertag schedule`
+
+```text
+Wake a Tag later in your conversation with it, or pause and resume a Schedule
+
+Usage: supertag schedule [OPTIONS] <COMMAND>
+
+Commands:
+  create  Wake a Tag later in your conversation with it, once (--at) or on a recurrence (--every). The note is what the Tag is asked to do when it wakes
+  pause   Stop a Schedule firing until it is resumed
+  resume  Let a paused Schedule fire again. A recurrence continues at its next occurrence; a one-off whose time passed fires at once
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag schedule create`
+
+```text
+Wake a Tag later in your conversation with it, once (--at) or on a recurrence (--every). The note is what the Tag is asked to do when it wakes
+
+Usage: supertag schedule create [OPTIONS] --tag <TAG> <NOTE>
+
+Arguments:
+  <NOTE>  What the Tag should do when it wakes
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --tag <TAG>
+          The Tag to wake
+      --at <AT>
+          Once: a duration ahead such as 90m, 2h, or 3d, or a time such as 2026-11-17T09:00
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --every <EVERY>
+          Recurring: a five-field cron expression such as "0 9 * * MON", or @hourly, @daily, or @weekly, at least an hour apart
+      --time-zone <TIME_ZONE>
+          The IANA time zone that times and recurrences are read in, such as Europe/Berlin. Defaults to the Control Plane's
+      --operation-id <OPERATION_ID>
+          Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
+  -h, --help
+          Print help
+```
+
+## `supertag schedule pause`
+
+```text
+Stop a Schedule firing until it is resumed
+
+Usage: supertag schedule pause [OPTIONS] <SCHEDULE_ID>
+
+Arguments:
+  <SCHEDULE_ID>  Schedule ID
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag schedule resume`
+
+```text
+Let a paused Schedule fire again. A recurrence continues at its next occurrence; a one-off whose time passed fires at once
+
+Usage: supertag schedule resume [OPTIONS] <SCHEDULE_ID>
+
+Arguments:
+  <SCHEDULE_ID>  Schedule ID
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
 ## `supertag input`
 
 ```text
@@ -3325,6 +3415,7 @@ Commands:
   approval              Read the action, resource, and exact arguments an approval requests, or list approval history [alias: approvals]
   question              Read the full question an Objective Task asked [alias: questions]
   inbox-item            List the questions and work waiting for an operator [alias: inbox-items]
+  schedule              Read one Schedule: its next time, recurrence, missed occurrences, and latest turn, or list the Schedules that have not finished [alias: schedules]
   help                  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -4093,6 +4184,29 @@ Options:
           Print help
 ```
 
+## `supertag get schedule`
+
+```text
+Read one Schedule: its next time, recurrence, missed occurrences, and latest turn, or list the Schedules that have not finished
+
+Usage: supertag get schedule [OPTIONS] [ID]
+
+Arguments:
+  [ID]  Schedule ID. Omit to list
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --tag <TAG>
+          Only this Tag's Schedules
+      --all
+          Include Schedules that are done or cancelled
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
 ## `supertag describe`
 
 ```text
@@ -4101,7 +4215,7 @@ Describe one resource in readable text
 Usage: supertag describe [OPTIONS] <KIND> <ID>
 
 Arguments:
-  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, gateway, client, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, github-publication, reply, input, surface-account, surface-location, approval, question]
+  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, gateway, client, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, github-publication, reply, input, surface-account, surface-location, approval, question, schedule]
   <ID>    The resource's ID or name
 
 Options:
@@ -4129,6 +4243,7 @@ Commands:
   volume            Remove a Volume's metadata when no reserved or verified copies depend on it [alias: volumes]
   workspace         Delete a GitHub Workspace source at its exact revision [alias: workspaces]
   surface-location  Remove a location's policy and stop new work on its connector alias [alias: surface-locations]
+  schedule          Cancel a Schedule. A turn it already queued stays queued [alias: schedules]
   help              Print this message or the help of the given subcommand(s)
 
 Options:
@@ -4284,6 +4399,27 @@ Options:
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --dry-run
           Check the deletion and show what it would remove, without deleting anything
+  -h, --help
+          Print help
+```
+
+## `supertag delete schedule`
+
+```text
+Cancel a Schedule. A turn it already queued stays queued
+
+Usage: supertag delete schedule [OPTIONS] <ID>
+
+Arguments:
+  <ID>  Schedule ID
+
+Options:
+      --control-plane <URL|NAME>
+          Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --dry-run
+          Check that the Schedule exists and show what would be deleted, without deleting it
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
           Print help
 ```

@@ -74,6 +74,11 @@ Agree a cadence, such as every 20 minutes, and explain whether the current agent
 schedule it. Do not promise a timer without a verified scheduling facility. Otherwise ask the
 user to request each check-in. There is no notification channel into this operator thread; poll.
 
+A Tag can follow up on its own: ask it in its conversation ("check CI again in an hour"), or set
+a Schedule with `supertag schedule create --tag TAG --at 1h "NOTE"`. That wakes the Tag, not
+this thread; `supertag get schedules` lists them. See
+[Schedules](../../docs/reference/coordination.md#schedules).
+
 ```sh
 supertag get objective
 supertag describe objective OBJECTIVE_ID

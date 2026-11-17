@@ -85,6 +85,11 @@ supertag apply -f team.yaml
 
 A grant with `approvalRequired: true` waits in the operator inbox for each call.
 
+Every Tag may set [Schedules](../../docs/reference/coordination.md#schedules), wake-ups for itself,
+without a grant. To stop a Tag scheduling, grant
+`{ target: runtime, action: schedule:create, approvalRequired: true }`: Schedules have no
+approval flow, so the requirement denies the tool.
+
 Two harness rules decide whether `commands:execute` works:
 
 - Claude Code, Cursor, and OpenCode run commands without a sandbox. Their Tasks that may run

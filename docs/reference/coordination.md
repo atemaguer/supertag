@@ -232,7 +232,7 @@ When a turn ends with none of those, and the Objective is still `working` and no
 
 An Objective is idle only when all of these hold: its latest conversation turn completed or
 failed, it asked no question and waits on no approval, no turn is pending or running in any of its
-Sessions, and no work Session result is unreported. Ongoing Objectives are exempt: they may rest
+Sessions, no work Session result is unreported, and no active [Schedule](#schedules) will wake it. Ongoing Objectives are exempt: they may rest
 until their next message.
 
 ### Statuses
@@ -432,8 +432,9 @@ tool the turn does not get; it does not only leave it out of the list.
 
 | Turn | Tools |
 | --- | --- |
-| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the [Session reads](#recalling-other-sessions) |
-| A Tag's inbox or a conversation with a person | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the Session reads |
+| An Objective's conversation | `start_session`, `continue_session`, `ask`, `report_objective`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule`, `cancel_schedule`, and the [Session reads](#recalling-other-sessions) |
+| A conversation with a person, or a surface thread | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, `schedule`, `cancel_schedule`, and the Session reads |
+| A Tag's inbox | `start_session`, `continue_session`, `send_message`, `read_mailbox`, `post`, `read_workstream`, `read_review_patch`, and the Session reads |
 | A work Session's report turn | the Session reads |
 | A work Session's turn | `ask` |
 
@@ -460,6 +461,8 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 | `read_session` | `sessionId`, `limit` (1–20), `before` | Reads one page of a visible Session's finished turns, oldest first |
 | `list_objectives` | `limit` (1–20), `offset` | Lists the Tag's open Objectives it may see |
 | `read_objective` | optional `objectiveId` | Reads an Objective's status, limits, budget pool, Team, and Sessions |
+| `schedule` | `note` (up to 4,000 characters), and `at` or `every`, optional `timeZone` | When the turn succeeds, creates a [Schedule](#schedules) that wakes the Tag later in this Session |
+| `cancel_schedule` | `scheduleId` | Cancels one of the Tag's Schedules in this Session |
 
 Reads return history, never instructions, and grant no authority.
 
@@ -494,6 +497,58 @@ portfolio is state, not instructions, and is bounded to about 3,800 characters.
   Session it may see. It returns no turn prompts, results, or failure text.
 - Each read looks past Sessions it may not see until it has a full page, so older visible
   Sessions and turns are never left out, and `list_objectives` counts every open Objective.
+
+### Schedules
+
+A **Schedule** wakes a Tag later in one Session: once, as a follow-up, or on a recurrence. When a
+person says "check PR 412 again in two hours", the Tag calls `schedule` and replies with the time.
+Two hours later the Tag gets a new turn with its note, and its reply appears in the same
+conversation or thread as an ordinary message.
+
+```text
+schedule(note: "Check PR 412: CI status and new review comments", at: "2h")
+schedule(note: "Summarize open work", every: "0 9 * * MON", timeZone: "Europe/Berlin")
+```
+
+- `at` is a duration ahead, such as `90m`, `2h`, or `3d`, or a time such as `2026-11-17T09:00`.
+  It is from 1 minute to 366 days ahead. Words such as "next Tuesday" are refused.
+- `every` is a five-field cron expression, or `@hourly`, `@daily`, or `@weekly`. Its occurrences
+  are at least an hour apart. It is read in its time zone, across daylight saving changes.
+- A time without an offset, and every recurrence, is read in `timeZone`, an IANA name. Without it,
+  SuperTag uses the Control Plane's time zone: `SUPERTAG_TIME_ZONE`, else the machine's, else UTC.
+  The tool's description names it and the time the turn started.
+- A Schedule the tool creates takes effect when its turn succeeds. A turn that fails, is cancelled,
+  or loses its lease creates none, so a retried turn never schedules twice.
+- The tool's result names the Schedule and lists the Tag's other Schedules in the Session, and the
+  turn's portfolio lists them too. Call `cancel_schedule` to drop a duplicate.
+- A Schedule in a conversation fires in the conversation's latest Session, where the next message
+  would go. That Session may lack the earlier context, so the note should say what to do and why.
+- A Schedule in a surface thread replies in that thread.
+
+When a Schedule is due, the Control Plane queues an ordinary Task for the Tag. It never starts a
+run itself: the Session runs one turn at a time, in order, and the Tag's current Permission Sets
+apply. The turn's prompt says why the Tag was woken; the conversation shows only the Tag's reply,
+with a "Scheduled" caption.
+
+| Situation | What happens |
+| --- | --- |
+| The Control Plane was down past a one-off | It fires once, late, and says when it was due |
+| A recurrence missed several occurrences | It fires once, counts the rest as missed, and continues at the next future occurrence |
+| The previous wake-up is still queued | The occurrence counts as missed; no second turn queues |
+| The Schedule is in an Objective's Session | Its turns count against the Objective's budget. A paused or limited Objective keeps them queued |
+| The Objective closes, or the Tag is retired | Its Schedules are cancelled |
+
+An active Schedule is a wait: an Objective whose owner scheduled a check is not idle. A woken turn
+resets the [idle rule](#the-idle-rule), as a person's message does.
+
+Limits: a Tag holds at most 25 Schedules that have not finished, and one turn creates at most 3.
+A Permission Set that grants `schedule:create` with `approvalRequired: true` denies the tools;
+see [the IAM reference](iam.md#current-action-vocabulary).
+
+Operators manage Schedules with `supertag schedule create`, `pause`, and `resume`, and with
+`supertag get schedule`, `describe schedule`, and `delete schedule`; see
+[Ask a Tag to follow up](../guides/talk-to-a-tag.md#ask-a-tag-to-follow-up). A client sees and
+changes the Schedules of its own conversations.
 
 ### Identity and preconditions
 

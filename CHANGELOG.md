@@ -19,7 +19,14 @@ within the pre-1.0 compatibility policy described in
   changed paths outside its scope and names them. A Task whose harness cannot enforce its scope
   waits, and `supertag placement explain` reports a `file-scope` requirement. It now also
   reports `unsandboxed-commands` when no bound Worker Host lets the harness run commands.
-
+- Tags follow up on their own. Ask a Tag to "check PR 412 again in two hours" or "summarize open
+  work every Monday at 9", and it sets a Schedule with a new `schedule` tool on Claude Code,
+  Codex, Cursor, and OpenCode. When it is due, the Control Plane queues the Tag's next turn in
+  the same conversation or thread, and its reply appears as an ordinary message marked
+  "Scheduled". Recurrences use cron in a time zone, at least an hour apart; missed occurrences
+  fire once. An active Schedule keeps an Objective from counting as idle. Operators use
+  `supertag schedule create`, `pause`, and `resume`, and `get`, `describe`, and `delete
+  schedule`. A Permission Set that requires approval for `schedule:create` turns it off.
 - A Tag's conversation shows each message the Tag writes while it works, as soon as it writes
   it: every Tag opens longer work with one short sentence saying what it is about to do. A status
   line under the turn shows its current step, such as a command it runs, in the terminal UI and

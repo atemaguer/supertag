@@ -27,6 +27,9 @@ whole system rather than another first-class resource.
   [the coordination reference](coordination.md#objectives).
 - <a id="task"></a>**Task** — one request or assignment accepted for a Tag under a recorded policy. See
   [the task concepts](../concepts/tasks.md).
+- <a id="schedule"></a>**Schedule** — a durable wake-up for one Tag in one Session, once or on a
+  recurrence. When it is due, the Tag gets a new turn and its reply appears as an ordinary
+  message. See [Schedules](coordination.md#schedules).
 - <a id="session"></a>**Session** — a group of Tasks from the same conversation, with its own harness
   session. A Session is shared, such as a channel thread, or private to one person, such as a
   conversation in the terminal UI. A work Session is a Session a

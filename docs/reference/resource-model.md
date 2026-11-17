@@ -82,6 +82,10 @@ scheduler then chooses a compatible harness and model on one of those hosts. Non
   reports its conversation as `parent_session_id`. In `supertag get session`, `latest_task_state`
   is the state of a work Session's latest Task, `tag_id` its Tag, and `title` its title.
 - **Task** records one turn of a Session.
+- **Schedule** wakes one Tag later in one Session, once (`at`) or on a recurrence (`every`, a cron
+  expression in a time zone). When it is due, the Control Plane queues an ordinary Task; it never
+  starts a run. A Tag creates one with its `schedule` tool; an operator or client creates one in
+  its own conversation with `supertag schedule create`. See [Schedules](coordination.md#schedules).
 - **Task Attempt** records one execution or retry of a Task on a Worker Host.
 - An **approval request** records one ask for a decision on a gated action, with its scope and
   decider. It is operational state listed with `supertag get approval`, not an applied resource.
@@ -102,7 +106,8 @@ A **connection generation** is the increasing number that identifies the current
 Most of these records are inspectable but not declaratively applied. An Objective, with the Team
 it names, may also be declared in a manifest; see [Declared Objectives](#declared-objectives).
 Otherwise an Objective comes from `supertag objective create` or a person's `/goal` message,
-and a Team from `supertag team create`. A Team's Workstream exists with the Team. Status is never
+a Team from `supertag team create`, and a Schedule from a Tag's `schedule` tool or
+`supertag schedule create`. A Team's Workstream exists with the Team. Status is never
 declared: owners and operators record it explicitly. The execution records report what the service
 did.
 
