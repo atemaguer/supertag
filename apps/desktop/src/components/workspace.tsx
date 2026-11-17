@@ -1,4 +1,4 @@
-import { Keyboard, Plus } from "lucide-react";
+import { Keyboard, NotebookText, Plus } from "lucide-react";
 import {
   type CSSProperties,
   type MouseEvent,
@@ -64,8 +64,8 @@ interface ShellProps {
   actions?: readonly PaletteAction[];
   /** The text of each cached message of a Tag's conversation, newest first, for search. */
   messageTexts?(tagId: string): readonly string[];
-  /** Shows or hides the Tag details panel, from the Tag's name at the top. */
-  onTagDetails?(): void;
+  /** Shows the Tag details panel, or hides it, from the Tag's name at the top; `open` sets it. */
+  onTagDetails?(open?: boolean): void;
   detailsOpen?: boolean;
   children?: ReactNode;
 }
@@ -127,9 +127,21 @@ export function WorkspaceShell({
         keywords: "keys help",
         run: () => setListingShortcuts(true),
       },
+      ...(tag && onTagDetails
+        ? [
+            {
+              id: "tag-details",
+              label: "Notes",
+              caption: `what ${tag.name ?? tag.tagId} remembers · delete a note`,
+              icon: <NotebookText aria-hidden />,
+              keywords: "memory remember forget tag details",
+              run: () => onTagDetails(true),
+            },
+          ]
+        : []),
       ...actions,
     ],
-    [onNewTag, newTagRefusal, actions],
+    [onNewTag, newTagRefusal, actions, tag, onTagDetails],
   );
   return (
     <div
@@ -161,7 +173,7 @@ export function WorkspaceShell({
                 aria-expanded={Boolean(detailsOpen)}
                 aria-controls="tag-details"
                 title={detailsOpen ? "Hide Tag details" : "Show Tag details and notes"}
-                onClick={onTagDetails}
+                onClick={() => onTagDetails()}
               >
                 <TagAvatar tagId={tag.tagId} />
                 <span className="tag-name">{tag.name ?? tag.tagId}</span>
@@ -504,13 +516,9 @@ function TagWorkspace({
 }) {
   const tagId = tag.tagId;
   const [details, setDetails] = useState(false);
+  const toggleDetails = useCallback((open?: boolean) => setDetails((prior) => open ?? !prior), []);
   return (
-    <WorkspaceShell
-      {...shell}
-      tag={tag}
-      detailsOpen={details}
-      onTagDetails={() => setDetails((open) => !open)}
-    >
+    <WorkspaceShell {...shell} tag={tag} detailsOpen={details} onTagDetails={toggleDetails}>
       <ConversationPane
         key={tagId}
         controlPlane={controlPlane}

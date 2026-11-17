@@ -257,3 +257,19 @@ it("offers the Control Plane menu's choices as actions", () => {
   actions[6]?.run();
   expect(onNotifications).toHaveBeenCalledWith("questions");
 });
+
+it("opens the shown Tag's notes, in its details panel, as the Tag's name does", () => {
+  const onTagDetails = vi.fn();
+  render({ onTagDetails });
+  press("k", { ctrlKey: true });
+  type("remember");
+  expect(labels("Actions")).toEqual(["Notes"]);
+  press("Enter", {}, input());
+  expect(onTagDetails).toHaveBeenCalledWith(true);
+  expect(dialog()).toBeNull();
+  // Without the panel, or without a Tag in view, there is nothing to open.
+  render();
+  press("k", { ctrlKey: true });
+  type("notes");
+  expect(section("Actions")).toBeUndefined();
+});

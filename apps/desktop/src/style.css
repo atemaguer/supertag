@@ -1312,6 +1312,11 @@ button.identity-pill[aria-expanded="true"] {
   color: var(--muted);
   font-size: 11px;
 }
+.note-footer small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .workspace-dialog {
   width: min(440px, calc(100vw - 30px));
   padding: 23px;
@@ -1467,6 +1472,10 @@ button.identity-pill[aria-expanded="true"] {
   border: 0;
   color: var(--text);
   font-size: 15px;
+}
+/* The palette is the focus; an outline around its field would spill past its rounded edge. */
+.command-palette [data-slot="command-input"]:focus-visible {
+  outline: none;
 }
 .palette-row .avatar {
   width: 30px;

@@ -1,4 +1,4 @@
-import type { ControlPlane, Conversation, Message, Tag, TaskEvent } from "./control-plane";
+import type { ControlPlane, Conversation, Message, Note, Tag, TaskEvent } from "./control-plane";
 import type { TagAdmin } from "./tag-admin";
 
 const tags: Tag[] = [
@@ -78,7 +78,40 @@ function conversationFor(tagId: string): Message[] {
   return entries;
 }
 
+const hour = 60 * 60 * 1000;
+/** What the preview's Tags remember, newest first. */
+let notes: Note[] = [
+  {
+    memoryId: "mem_preview_1",
+    tagId: "finch",
+    text: "Flaky deadline tests usually mean the clock is read twice; check objective_sweep first.",
+    private: false,
+    createdBy: "tag:finch",
+    createdAtMs: Date.now() - 2 * hour,
+    updatedAtMs: Date.now() - 2 * hour,
+    lastSeenAtMs: Date.now() - 10 * 60 * 1000,
+  },
+  {
+    memoryId: "mem_preview_2",
+    tagId: "finch",
+    text: "You prefer one test covering both databases over two separate tests.",
+    private: true,
+    createdBy: "tag:finch",
+    createdAtMs: Date.now() - 30 * hour,
+    updatedAtMs: Date.now() - 30 * hour,
+  },
+];
+
 export const previewControlPlane: ControlPlane = {
+  async notes(tagId) {
+    return notes.filter((note) => note.tagId === tagId);
+  },
+  async deleteNote(memoryId) {
+    const deleted = notes.find((note) => note.memoryId === memoryId);
+    if (!deleted) throw new Error("Memory was not found");
+    notes = notes.filter((note) => note !== deleted);
+    return deleted;
+  },
   async tags() {
     return tags;
   },

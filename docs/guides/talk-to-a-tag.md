@@ -127,10 +127,10 @@ the terminal bell instead, or `off`.
 ## See what a Tag remembers
 
 A Tag keeps a few short notes between turns, such as your preferences and decisions. In the desktop
-app, select the Tag's name above the conversation to open its details: its notes, who sees each,
-and when a turn last used it. Delete one to have the Tag forget it. In the terminal UI, open the
-command palette with Ctrl-K and choose **Notes**, then press `x` to delete the selected note. The
-conversation itself shows only messages. To add or change a note, tell the Tag. See
+app, select the Tag's name above the conversation, or choose **Notes** in the ⌘K search, to open
+its details: its notes, who sees each, and when a turn last used it. Delete one to have the Tag
+forget it. In the terminal UI, open the command palette with Ctrl-K and choose **Notes**, then
+press `x` to delete the selected note. The conversation itself shows only messages. To add or change a note, tell the Tag. See
 [Memory](../reference/coordination.md#memory).
 
 ## Ask a Tag to follow up

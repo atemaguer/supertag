@@ -141,7 +141,8 @@ export function NotesSection({
             <p className="note-text">{note.text}</p>
             <div className="note-footer">
               <small>
-                {note.private && <Lock size={11} aria-hidden />} {noteCaption(note)}
+                {note.private && <Lock size={11} aria-hidden />}
+                {noteCaption(note)}
               </small>
               {controlPlane.deleteNote && (
                 <Button
