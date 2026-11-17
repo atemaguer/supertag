@@ -25,6 +25,17 @@ pub(crate) struct Attempt {
     pub execution_selection: Option<Vec<u8>>,
     #[serde(default)]
     pub requires_unsandboxed_commands: bool,
+    /// The later messages the Control Plane joined into this Attempt when it was claimed.
+    #[serde(default)]
+    pub joined: Vec<JoinedMessage>,
+}
+
+/// A person's message this Attempt answers together with its Task's own prompt.
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct JoinedMessage {
+    pub task_id: String,
+    pub text: String,
+    pub sent_at_ms: i64,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -862,6 +873,7 @@ mod tests {
             lease_token: "lease".into(),
             execution_selection: None,
             requires_unsandboxed_commands: false,
+            joined: vec![],
         };
         let processes = journal.processes(&attempt("attempt"));
         // No record at all is no evidence.
@@ -915,6 +927,7 @@ mod tests {
             lease_token: "lease-secret".into(),
             execution_selection: None,
             requires_unsandboxed_commands: false,
+            joined: vec![],
         };
         let journal = Journal::open(state.path())?;
         let provider_scope = "a".repeat(64);
@@ -1072,6 +1085,7 @@ mod tests {
                 lease_token: "lease".into(),
                 execution_selection: execution_selection.clone(),
                 requires_unsandboxed_commands: false,
+                joined: vec![],
             },
             prepared: None,
         })?;

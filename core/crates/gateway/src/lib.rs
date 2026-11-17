@@ -17,3 +17,21 @@ pub mod operator_auth;
 mod ownership;
 pub mod slack;
 pub mod surface_setup;
+
+/// Whether the Control Plane settled an event it will never admit: a redelivery of the same
+/// event with other content, or malformed input. Retrying cannot change the answer, so the
+/// Gateway acknowledges it to the provider and notes it, because it means a provider bug or
+/// tampering. Refusals a person should hear about are already answered in the thread.
+pub(crate) fn settled_without_admission(surface: &str, error: &tonic::Status) -> bool {
+    let settled = matches!(
+        error.code(),
+        tonic::Code::AlreadyExists | tonic::Code::InvalidArgument
+    );
+    if settled {
+        eprintln!(
+            "{surface} event acknowledged without admission: {}",
+            error.message()
+        );
+    }
+    settled
+}

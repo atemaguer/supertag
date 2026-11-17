@@ -55,6 +55,14 @@ pub(crate) enum VerifiedScope<'a> {
 }
 
 impl VerifiedScope<'_> {
+    /// A conversation thread a person writes in: Slack, Lark or Microsoft Teams.
+    fn is_chat(&self) -> bool {
+        matches!(
+            self,
+            Self::Slack { .. } | Self::Lark { .. } | Self::MicrosoftTeams { .. }
+        )
+    }
+
     fn matches(&self, account: &SurfaceAccount, location: &SurfaceLocation) -> bool {
         let identity = account
             .identity
@@ -201,7 +209,68 @@ pub(crate) async fn admit_connector_task_in(
     .await?;
     crate::artifact_context::resolve_in(tx, &mut task, now_ms).await?;
     objectives::objective_link_task_in(tx, &task).await?;
+    // A chat message sent while its thread's Session runs goes into that run. GitHub and Linear
+    // events are separate events with their own context, so each keeps its own turn.
+    if verified.scope.is_chat() {
+        let principal = format!("connector:{}", verified.connector_account_id);
+        let operation = format!("surface/{}", task.task_id);
+        crate::inputs::fold_in(tx, &principal, &operation, &task, order, now_ms).await?;
+    }
     Ok(Some(task))
+}
+
+/// A chat message's admission: its Task (`None` when the surface admits no new work) and whether
+/// that Task is a settled Control Plane answer, or the refusal to answer once in its thread.
+pub(crate) enum Admission {
+    Admitted(Option<Task>, bool),
+    Refused(String),
+}
+
+impl Admission {
+    pub(crate) fn from_handled(handled: crate::surface_objectives::Handled) -> Option<Self> {
+        use crate::surface_objectives::Handled;
+        match handled {
+            Handled::Ordinary => None,
+            Handled::Work(task) => Some(Self::Admitted(task, false)),
+            Handled::Status(task) => Some(Self::Admitted(Some(task), true)),
+            Handled::Refused(text) => Some(Self::Refused(text)),
+        }
+    }
+}
+
+/// What a person is told when admission refused their message for a reason a redelivery cannot
+/// change: their thread's Objective takes no new work. `None` leaves the refusal for the provider
+/// to retry, such as a Context Set the operator can still fix.
+pub(crate) async fn refusal_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    session_id: &str,
+    now_ms: i64,
+) -> Result<Option<String>> {
+    objectives::admission_refusal_in(tx, tag_id, session_id, now_ms).await
+}
+
+/// The refusal for a message mentioning one Tag in a thread another Tag answers.
+pub(crate) fn owned_by_another_tag(tag_id: &str, place: &str) -> String {
+    format!("This {place} belongs to {tag_id}. Mention {tag_id}, or start a new {place}.")
+}
+
+/// Posts a refused message's answer in its thread once: `key` names the refused message, and a
+/// redelivery finds the receipt the caller recorded with it before reaching here again.
+pub(crate) async fn refusal_notice_in(
+    tx: &mut Transaction<'_, Any>,
+    account: &str,
+    conversation: &str,
+    thread: Option<&str>,
+    key: &str,
+    text: &str,
+) -> Result<()> {
+    let order = crate::store::next_order(tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_replies (reply_id,notice_key,account_id,conversation_id,thread_id,text,state,ready_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(notice_key) DO NOTHING")
+        .bind(Uuid::new_v4().to_string()).bind(format!("refusal:{account}:{key}"))
+        .bind(account).bind(conversation).bind(thread).bind(text)
+        .bind(ReplyState::Pending as i64).bind(order).execute(&mut **tx).await?;
+    Ok(())
 }
 
 pub(crate) async fn reject_generic_in(tx: &mut Transaction<'_, Any>, account: &str) -> Result<()> {

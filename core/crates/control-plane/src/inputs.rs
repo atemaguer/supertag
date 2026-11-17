@@ -221,6 +221,7 @@ impl Store {
                     Some(&result),
                 )
                 .await?;
+                crate::reply_progress::follow_up_in(&mut tx, &input.task_id).await?;
             }
             LiveInputState::Withdrawn if current == LiveInputState::Accepted => {
                 update_follower(
@@ -376,6 +377,176 @@ pub(crate) async fn record_live_input_in(
         .bind(&input.attempt_id).bind(&input.follower_task_id).bind(i64::from(input.state))
         .execute(&mut **tx).await?;
     Ok(Some(input))
+}
+
+/// Delivers a person's just-admitted message into the Session's running Attempt as live input,
+/// when one is running and the message fits. The message stays an ordinary queued Task until the
+/// harness accepts it; if the harness never does, it runs on its own or joins the next claim.
+pub(crate) async fn fold_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    operation: &str,
+    follower: &Task,
+    order: i64,
+    now: i64,
+) -> Result<Option<LiveInput>> {
+    if follower.prompt.len() > MAX_INPUT_BYTES {
+        return Ok(None);
+    }
+    let active = sqlx::query("SELECT task_id,attempt_id FROM supertag_v2_tasks t WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND lease_expires_at_ms>$4 AND NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_tasks wt WHERE wt.task_id=t.task_id AND wt.kind=$5) ORDER BY accepted_order LIMIT 1")
+        .bind(&follower.tag_id).bind(&follower.session_id).bind(TaskState::Running as i64).bind(now)
+        .bind(crate::work_sessions::REPORT).fetch_optional(&mut **tx).await?;
+    let Some(active) = active else {
+        return Ok(None);
+    };
+    let source: String = active.try_get("task_id")?;
+    let attempt: String = active.try_get("attempt_id")?;
+    record_live_input_in(tx, principal, operation, &source, &attempt, follower, order).await
+}
+
+/// A batch answers at most this many messages: the claimed Task's and the ones joined to it.
+pub(crate) const MAX_BATCH_MESSAGES: usize = 10;
+/// Joined messages carry at most this much text in total.
+pub(crate) const MAX_JOINED_BYTES: usize = 16 * 1024;
+const JOIN_PRINCIPAL: &str = "control-plane:join";
+
+/// The person's messages a claimed Task answers together with its own. The first claim binds
+/// them: the later Queued messages of the Session, up to the first that is not a person's message,
+/// has another audience or policy, or would pass a cap. Each joined message is recorded as live
+/// input the Task accepted, so it settles now and gets no reply of its own. Every later claim of
+/// the Task (a lost-start replay, an expired reservation, a retry) presents the same messages.
+pub(crate) async fn join_at_claim_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    attempt_id: &str,
+) -> Result<Vec<supertag_protocol::v2::JoinedMessage>> {
+    let claimed_before: Option<String> =
+        sqlx::query_scalar("SELECT task_id FROM supertag_v2_claims WHERE task_id=$1 LIMIT 1")
+            .bind(&task.task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if claimed_before.is_some() {
+        return joined_in(tx, &task.task_id).await;
+    }
+    if !person_message_in(tx, &task.task_id).await? {
+        return Ok(vec![]);
+    }
+    let owner = audience_owner_in(tx, &task.task_id).await?;
+    let order: i64 =
+        sqlx::query_scalar("SELECT accepted_order FROM supertag_v2_tasks WHERE task_id=$1")
+            .bind(&task.task_id)
+            .fetch_one(&mut **tx)
+            .await?;
+    let later = sqlx::query("SELECT task_id,prompt,accepted_at_ms FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND attempt_id IS NULL AND accepted_order>$4 ORDER BY accepted_order LIMIT $5")
+        .bind(&task.tag_id).bind(&task.session_id).bind(TaskState::Queued as i64).bind(order)
+        .bind(MAX_BATCH_MESSAGES as i64).fetch_all(&mut **tx).await?;
+    let mut joined = Vec::new();
+    let mut bytes = 0;
+    for row in later {
+        let id: String = row.try_get("task_id")?;
+        let text: String = row.try_get("prompt")?;
+        if joined.len() + 1 >= MAX_BATCH_MESSAGES
+            || bytes + text.len() > MAX_JOINED_BYTES
+            || !person_message_in(tx, &id).await?
+            || audience_owner_in(tx, &id).await? != owner
+            || !compatible_policy_in(tx, &task.task_id, &id).await?
+        {
+            break;
+        }
+        let prior = sqlx::query(
+            "SELECT input_id,state FROM supertag_v2_live_inputs WHERE follower_task_id=$1",
+        )
+        .bind(&id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        match prior {
+            // An input its harness never took falls back to its queued Task, which joins here.
+            Some(prior)
+                if [
+                    LiveInputState::Rejected as i64,
+                    LiveInputState::Retried as i64,
+                    LiveInputState::Withdrawn as i64,
+                ]
+                .contains(&prior.try_get::<i64, _>("state")?) =>
+            {
+                sqlx::query("UPDATE supertag_v2_live_inputs SET task_id=$1,attempt_id=$2,state=$3,acknowledgement_deadline_ms=NULL,joined_at_claim=1 WHERE input_id=$4")
+                    .bind(&task.task_id).bind(attempt_id).bind(LiveInputState::Accepted as i64)
+                    .bind(prior.try_get::<String, _>("input_id")?).execute(&mut **tx).await?;
+            }
+            Some(_) => break,
+            None => {
+                sqlx::query("INSERT INTO supertag_v2_live_inputs (input_id,operator_principal,operation_id,task_id,attempt_id,follower_task_id,state,joined_at_claim) VALUES ($1,$2,$3,$4,$5,$6,$7,1)")
+                    .bind(Uuid::new_v4().to_string()).bind(JOIN_PRINCIPAL).bind(format!("join/{id}"))
+                    .bind(&task.task_id).bind(attempt_id).bind(&id).bind(LiveInputState::Accepted as i64)
+                    .execute(&mut **tx).await?;
+            }
+        }
+        let result = format!("Input accepted by Task {}.", task.task_id);
+        update_follower(
+            tx,
+            &id,
+            TaskState::Queued,
+            TaskState::Succeeded,
+            Some(&result),
+        )
+        .await?;
+        bytes += text.len();
+        joined.push(supertag_protocol::v2::JoinedMessage {
+            task_id: id,
+            text,
+            sent_at_ms: row
+                .try_get::<Option<i64>, _>("accepted_at_ms")?
+                .unwrap_or_default(),
+        });
+    }
+    Ok(joined)
+}
+
+/// The messages joined into `task_id` when it was first claimed, oldest first.
+pub(crate) async fn joined_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+) -> Result<Vec<supertag_protocol::v2::JoinedMessage>> {
+    let rows = sqlx::query("SELECT f.task_id,f.prompt,f.accepted_at_ms FROM supertag_v2_live_inputs i JOIN supertag_v2_tasks f ON f.task_id=i.follower_task_id WHERE i.task_id=$1 AND i.joined_at_claim=1 ORDER BY f.accepted_order")
+        .bind(task_id).fetch_all(&mut **tx).await?;
+    rows.iter()
+        .map(|row| {
+            Ok(supertag_protocol::v2::JoinedMessage {
+                task_id: row.try_get("task_id")?,
+                text: row.try_get("prompt")?,
+                sent_at_ms: row
+                    .try_get::<Option<i64>, _>("accepted_at_ms")?
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+/// A message a person sent: in a conversation, in a Slack, Teams or Lark thread, or as live input.
+/// Not an internal turn such as a Schedule firing, a notice, a Mailbox delivery or a report, and
+/// not a GitHub or Linear event.
+async fn person_message_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<bool> {
+    let found: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 WHERE EXISTS (SELECT 1 FROM supertag_v2_conversation_messages WHERE task_id=$1)
+            OR EXISTS (SELECT 1 FROM supertag_v2_slack_messages WHERE task_id=$1)
+            OR EXISTS (SELECT 1 FROM supertag_v2_lark_messages WHERE task_id=$1)
+            OR EXISTS (SELECT 1 FROM supertag_v2_microsoft_teams_activities WHERE task_id=$1)
+            OR EXISTS (SELECT 1 FROM supertag_v2_live_inputs WHERE follower_task_id=$1)",
+    )
+    .bind(task_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(found.is_some())
+}
+
+async fn audience_owner_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<String> {
+    Ok(
+        sqlx::query_scalar("SELECT owner FROM supertag_v2_task_audience WHERE task_id=$1")
+            .bind(task_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .unwrap_or_default(),
+    )
 }
 
 async fn compatible_policy_in(

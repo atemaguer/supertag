@@ -425,21 +425,31 @@ async fn contract(url: String) {
             .unwrap()
             .contains("already paused")
     );
-    let refused = accept(
-        &store,
-        event("EvPAUSED", "1794470009.100000", HOME, false, "Keep going"),
-    )
-    .await;
-    answered(
-        &store,
-        &url,
-        &refused,
-        &format!(
-            "Objective {} did not accept this message",
-            objective.objective_id
-        ),
-    )
-    .await;
+    // A message the paused Objective refuses is answered once in the thread, with no Task, and
+    // its redeliveries replay as answered.
+    let paused = event("EvPAUSED", "1794470009.100000", HOME, false, "Keep going");
+    let mut paused_twin = paused.clone();
+    paused_twin.event_id = "EvPAUSEDTWIN".into();
+    paused_twin.mention_tag_id = Some("builder".into());
+    let before = thread_replies(&url, HOME).await.len();
+    for delivery in [&paused, &paused, &paused_twin] {
+        assert!(
+            store
+                .accept_slack_event(PRINCIPAL, delivery)
+                .await
+                .unwrap()
+                .task
+                .is_none()
+        );
+    }
+    let replies = thread_replies(&url, HOME).await;
+    let id = &objective.objective_id;
+    assert_eq!(
+        replies[before..],
+        [format!(
+            "This thread's Objective {id} is paused, so I can't take new messages here. Resume it with `supertag objective resume {id}`."
+        )]
+    );
     let resume = accept(
         &store,
         event(
@@ -493,7 +503,16 @@ async fn contract(url: String) {
         assert_eq!(text, format!("Result of {task}"));
         ran.push(task);
     }
-    assert!(ran.contains(&steer.task_id) && ran.contains(&mention.task_id));
+    // A person's queued messages run, or join the run before them that answers them together.
+    for message in [&steer, &mention] {
+        let result = store.get_task(&message.task_id).await.unwrap().result;
+        assert!(
+            ran.contains(&message.task_id)
+                || ran.iter().any(|task| result.as_deref()
+                    == Some(format!("Input accepted by Task {task}.").as_str())),
+            "{result:?}"
+        );
+    }
     assert!(
         ran.len() >= 3,
         "resume queues an owner summary turn: {ran:?}"
@@ -532,12 +551,21 @@ async fn contract(url: String) {
         vec!["slack:UALICE1".to_owned(); 4]
     );
     // A closed Objective takes no more turns from its thread.
-    let late = accept(
-        &store,
-        event("EvLATE", "1794470012.100000", HOME, false, "One more thing"),
-    )
-    .await;
-    answered(&store, &url, &late, "Objective").await;
+    let late = store
+        .accept_slack_event(
+            PRINCIPAL,
+            &event("EvLATE", "1794470012.100000", HOME, false, "One more thing"),
+        )
+        .await
+        .unwrap();
+    assert!(late.task.is_none());
+    let id = &objective.objective_id;
+    assert_eq!(
+        thread_replies(&url, HOME).await.last().unwrap(),
+        &format!(
+            "This thread's Objective {id} is complete, so it takes no new messages. Start a new thread for new work."
+        )
+    );
     // Each action on the Objective is audited under the same person, with its outcome.
     let audited = store
         .list_audit_entries(&ListAuditEntriesRequest {

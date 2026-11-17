@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     ControlPlane, Store, StoreError,
-    inputs::{inputs_for_followers_in, record_live_input_in},
+    inputs::inputs_for_followers_in,
     objectives::{objective_admission_in, objective_link_task_in},
     store::{
         ID_BATCH, Result, insert_task_with_requirements, invalid, name, next_order,
@@ -244,24 +244,9 @@ impl Store {
             tx.commit().await?;
             return Ok(message);
         }
-        let active = if input.text.len() <= crate::inputs::MAX_INPUT_BYTES {
-            sqlx::query("SELECT task_id,attempt_id FROM supertag_v2_tasks t WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND lease_expires_at_ms>$4 AND NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_tasks wt WHERE wt.task_id=t.task_id AND wt.kind=$5) ORDER BY accepted_order LIMIT 1")
-                .bind(&input.tag_id).bind(&session).bind(TaskState::Running as i64).bind(now)
-                .bind(crate::work_sessions::REPORT).fetch_optional(&mut *tx).await?
-        } else {
-            None
-        };
-        let live_input = if let Some(active) = active {
-            let source: String = active.try_get("task_id")?;
-            let attempt: String = active.try_get("attempt_id")?;
-            let operation = format!("conversation/{}", task.task_id);
-            record_live_input_in(
-                &mut tx, principal, &operation, &source, &attempt, &task, order,
-            )
-            .await?
-        } else {
-            None
-        };
+        let operation = format!("conversation/{}", task.task_id);
+        let live_input =
+            crate::inputs::fold_in(&mut tx, principal, &operation, &task, order, now).await?;
         tx.commit().await?;
         Ok(sent(task, live_input, order, sent_at))
     }

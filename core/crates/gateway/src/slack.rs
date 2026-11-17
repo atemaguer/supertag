@@ -298,8 +298,9 @@ async fn webhook(State(slack): State<Slack>, headers: HeaderMap, body: Bytes) ->
 
 impl Connector {
     /// Admits one Events API payload, from either transport. `Ok` means Slack may consider the
-    /// event delivered (with the URL verification challenge to echo, if it was one); an error
-    /// leaves it for Slack to redeliver.
+    /// event delivered (with the URL verification challenge to echo, if it was one): it was
+    /// admitted, answered with a refusal, or can never be admitted. An error leaves it for Slack
+    /// to redeliver.
     async fn admit(&self, payload: Payload) -> Result<Option<String>, StatusCode> {
         let event = match normalize_payload(&self.config, payload)? {
             Ingress::Challenge(challenge) => return Ok(Some(challenge)),
@@ -316,9 +317,7 @@ impl Connector {
                 supertag_protocol::crash_point("gateway.slack-admission", "after-forward");
                 Ok(None)
             }
-            Ok(Err(error)) if error.code() == tonic::Code::AlreadyExists => {
-                Err(StatusCode::CONFLICT)
-            }
+            Ok(Err(error)) if crate::settled_without_admission("Slack", &error) => Ok(None),
             _ => Err(StatusCode::SERVICE_UNAVAILABLE),
         }
     }

@@ -1,6 +1,8 @@
 //! Durable Microsoft Teams activity routing and authenticated reply destinations.
 use super::*;
-use crate::surface_policy::{VerifiedConnectorOrigin, VerifiedScope, admit_connector_task_in};
+use crate::surface_policy::{
+    Admission, VerifiedConnectorOrigin, VerifiedScope, admit_connector_task_in,
+};
 use supertag_protocol::v2::{
     AcceptMicrosoftTeamsActivityRequest, AcceptMicrosoftTeamsActivityResponse,
     GetMicrosoftTeamsReplyRouteRequest, MicrosoftTeamsReplyRoute,
@@ -59,9 +61,13 @@ impl Store {
                     "Microsoft Teams activity changed content or routing".into(),
                 ));
             }
-            let task = task_in(&mut tx, &prior.try_get::<String, _>("task_id")?).await?;
+            // A refused activity replays as answered: its notice was posted once.
+            let task = match prior.try_get::<Option<String>, _>("task_id")? {
+                Some(task) => Some(task_in(&mut tx, &task).await?),
+                None => None,
+            };
             tx.commit().await?;
-            return Ok(AcceptMicrosoftTeamsActivityResponse { task: Some(task) });
+            return Ok(AcceptMicrosoftTeamsActivityResponse { task });
         }
         let route=sqlx::query("SELECT app_id,tenant_id,team_id,channel_id,tag_id FROM supertag_v2_microsoft_teams_routes WHERE account_id=$1").bind(account).fetch_optional(&mut *tx).await?;
         if let Some(route) = &route {
@@ -96,42 +102,63 @@ impl Store {
         };
         let event = hash(&(&input.tenant_id, &input.conversation_id, &input.activity_id))?;
         let now_ms = self.execution_now_ms();
-        let actor = format!("teams:{}", input.actor_id);
-        // The Gateway forwards only messages that mention the app, with the mention removed, so
-        // the message itself is the command: `@SuperTag /goal <outcome>` arrives as `/goal ...`.
-        let handled = Box::pin(crate::surface_objectives::handle_in(
-            &mut tx,
+        // A refusal a redelivery cannot change is answered in the thread instead of retried.
+        let mut savepoint = sqlx::Acquire::begin(&mut *tx).await?;
+        let admitted = Box::pin(admit(
+            &mut savepoint,
             order,
-            crate::surface_objectives::Message {
-                origin,
-                conversation_id: &input.conversation_id,
-                thread_id: &input.root_activity_id,
-                event_id: &event,
-                prompt: &input.prompt,
-                command: crate::surface_objectives::parse(&input.prompt),
-                actor: &actor,
-                method: "/supertag.runtime.v2.Connector/AcceptMicrosoftTeamsActivity",
-            },
+            input,
+            origin,
+            &event,
+            &session,
             now_ms,
         ))
-        .await?;
-        let (task, answered) = match handled {
-            crate::surface_objectives::Handled::Ordinary => (
-                admit_connector_task_in(&mut tx, order, origin, &session, &input.prompt, now_ms)
-                    .await?,
-                false,
-            ),
-            crate::surface_objectives::Handled::Work(task) => (task, false),
-            crate::surface_objectives::Handled::Status(task) => (Some(task), true),
+        .await;
+        let admitted = match admitted {
+            Ok(admitted) => {
+                savepoint.commit().await?;
+                admitted
+            }
+            Err(StoreError::FailedPrecondition(reason)) => {
+                savepoint.rollback().await?;
+                match crate::surface_policy::refusal_in(&mut tx, &input.tag_id, &session, now_ms)
+                    .await?
+                {
+                    Some(text) => Admission::Refused(text),
+                    None => return Err(StoreError::FailedPrecondition(reason)),
+                }
+            }
+            Err(error) => return Err(error),
         };
         let audit_call = crate::surface_objectives::audit_call_id(account, &event);
+        let (task, answered) = match admitted {
+            Admission::Admitted(task, answered) => (task, answered),
+            Admission::Refused(text) => {
+                if route.is_none() {
+                    insert_route(&mut tx, account, input).await?;
+                }
+                sqlx::query("INSERT INTO supertag_v2_microsoft_teams_activities (account_id,conversation_id,activity_id,root_activity_id,service_url,request_digest,refusal) VALUES ($1,$2,$3,$4,$5,$6,$7)").bind(account).bind(&input.conversation_id).bind(&input.activity_id).bind(&input.root_activity_id).bind(&input.service_url).bind(&digest).bind(&text).execute(&mut *tx).await?;
+                crate::surface_policy::refusal_notice_in(
+                    &mut tx,
+                    account,
+                    &input.conversation_id,
+                    Some(&input.root_activity_id),
+                    &format!("teams:{}:{}", input.conversation_id, input.activity_id),
+                    &text,
+                )
+                .await?;
+                tx.commit().await?;
+                self.emit_audit_call(&audit_call).await;
+                return Ok(AcceptMicrosoftTeamsActivityResponse { task: None });
+            }
+        };
         let Some(task) = task else {
             tx.commit().await?;
             self.emit_audit_call(&audit_call).await;
             return Ok(AcceptMicrosoftTeamsActivityResponse { task: None });
         };
         if route.is_none() {
-            sqlx::query("INSERT INTO supertag_v2_microsoft_teams_routes (account_id,app_id,tenant_id,team_id,channel_id,tag_id) VALUES ($1,$2,$3,$4,$5,$6)").bind(account).bind(&input.app_id).bind(&input.tenant_id).bind(&input.team_id).bind(&input.channel_id).bind(&input.tag_id).execute(&mut *tx).await?;
+            insert_route(&mut tx, account, input).await?;
         }
         let thread = Some(input.root_activity_id.clone());
         let source = hash(&(
@@ -198,10 +225,10 @@ impl Store {
                  FROM supertag_v2_replies r
                  JOIN supertag_v2_microsoft_teams_activities a ON a.account_id=r.account_id
                      AND a.conversation_id=r.conversation_id AND a.root_activity_id=r.thread_id
-                 JOIN supertag_v2_tasks t ON t.task_id=a.task_id
+                 LEFT JOIN supertag_v2_tasks t ON t.task_id=a.task_id
                  JOIN supertag_v2_microsoft_teams_routes c ON c.account_id=a.account_id
                  WHERE r.reply_id=$1 AND r.account_id=$2 AND r.lease_token=$3 AND r.state=$4
-                 ORDER BY t.accepted_order DESC LIMIT 1",
+                 ORDER BY COALESCE(t.accepted_order, 0) DESC LIMIT 1",
             )
             .bind(&input.reply_id)
             .bind(account)
@@ -222,6 +249,53 @@ impl Store {
         })
     }
 }
+async fn insert_route(
+    tx: &mut Transaction<'_, Any>,
+    account: &str,
+    input: &AcceptMicrosoftTeamsActivityRequest,
+) -> Result<()> {
+    sqlx::query("INSERT INTO supertag_v2_microsoft_teams_routes (account_id,app_id,tenant_id,team_id,channel_id,tag_id) VALUES ($1,$2,$3,$4,$5,$6)").bind(account).bind(&input.app_id).bind(&input.tenant_id).bind(&input.team_id).bind(&input.channel_id).bind(&input.tag_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+/// Runs the thread's Objective commands, then admits the activity as work.
+async fn admit(
+    tx: &mut Transaction<'_, Any>,
+    order: i64,
+    input: &AcceptMicrosoftTeamsActivityRequest,
+    origin: VerifiedConnectorOrigin<'_>,
+    event: &str,
+    session: &str,
+    now_ms: i64,
+) -> Result<Admission> {
+    let actor = format!("teams:{}", input.actor_id);
+    // The Gateway forwards only messages that mention the app, with the mention removed, so
+    // the message itself is the command: `@SuperTag /goal <outcome>` arrives as `/goal ...`.
+    let handled = Box::pin(crate::surface_objectives::handle_in(
+        tx,
+        order,
+        crate::surface_objectives::Message {
+            origin,
+            conversation_id: &input.conversation_id,
+            thread_id: &input.root_activity_id,
+            event_id: event,
+            prompt: &input.prompt,
+            command: crate::surface_objectives::parse(&input.prompt),
+            actor: &actor,
+            method: "/supertag.runtime.v2.Connector/AcceptMicrosoftTeamsActivity",
+        },
+        now_ms,
+    ))
+    .await?;
+    Ok(match Admission::from_handled(handled) {
+        Some(admission) => admission,
+        None => Admission::Admitted(
+            admit_connector_task_in(tx, order, origin, session, &input.prompt, now_ms).await?,
+            false,
+        ),
+    })
+}
+
 fn valid_account(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128

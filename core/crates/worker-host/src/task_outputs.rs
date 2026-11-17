@@ -452,6 +452,7 @@ mod tests {
             lease_token: "lease".into(),
             execution_selection: None,
             requires_unsandboxed_commands: false,
+            joined: vec![],
         };
         let mut pending =
             PendingOutputs::prepare(&task, Some(&checkout), &attempt, HarnessKind::ClaudeCode)?

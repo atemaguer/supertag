@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 86;
+        const SCHEMA_VERSION: i64 = 87;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -285,6 +285,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0084_schedules.sql"),
                 include_str!("../migrations/sqlite/0085_checkpoint_garbage.sql"),
                 include_str!("../migrations/sqlite/0086_work_session_limit.sql"),
+||||||| parent of 8d3fba3f (Fold and batch a person's messages, and answer refusals once)
+                include_str!("../migrations/sqlite/0087_surface_delivery.sql"),
             ]
         } else {
             [
@@ -376,6 +378,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0084_schedules.sql"),
                 include_str!("../migrations/postgresql/0085_checkpoint_garbage.sql"),
                 include_str!("../migrations/postgresql/0086_work_session_limit.sql"),
+||||||| parent of 8d3fba3f (Fold and batch a person's messages, and answer refusals once)
+                include_str!("../migrations/postgresql/0087_surface_delivery.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -938,6 +942,8 @@ impl Store {
                             ));
                         }
                         Some(Assignment {
+                            joined: crate::inputs::joined_in(&mut transaction, &task.task_id)
+                                .await?,
                             task: Some(task),
                             attempt_id,
                             lease_token: prior.try_get("lease_token")?,
@@ -980,15 +986,19 @@ impl Store {
         sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL WHERE task_id = $8")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
+        // Later messages from the person join this run, so one reply answers them all.
+        let task = task_in(&mut transaction, &id).await?;
+        let joined = crate::inputs::join_at_claim_in(&mut transaction, &task, &attempt).await?;
+        crate::reply_progress::claimed_in(&mut transaction, &task, !joined.is_empty()).await?;
         sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope, claimed_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
             .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).bind(gateway_workspace_scope).bind(now).execute(&mut *transaction).await?;
-        let task = task_in(&mut transaction, &id).await?;
         supertag_protocol::crash_point("control-plane.claim", "before-commit");
         transaction.commit().await?;
         Ok(Some(Assignment {
             task: Some(task),
             attempt_id: attempt,
             lease_token: lease,
+            joined,
         }))
     }
 
@@ -2225,7 +2235,10 @@ pub(crate) async fn reply_in(
 pub(crate) fn reply_row(row: &AnyRow) -> Result<Reply> {
     Ok(Reply {
         reply_id: row.try_get("reply_id")?,
-        task_id: row.try_get("task_id")?,
+        // A notice reply answers no Task.
+        task_id: row
+            .try_get::<Option<String>, _>("task_id")?
+            .unwrap_or_default(),
         account_id: row.try_get("account_id")?,
         destination: Some(ReplyDestination {
             conversation_id: row.try_get("conversation_id")?,

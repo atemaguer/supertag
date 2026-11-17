@@ -197,6 +197,15 @@ impl Attempt {
                 .attempt_execution
                 .map(|selection| selection.encode_to_vec()),
             requires_unsandboxed_commands,
+            joined: assignment
+                .joined
+                .into_iter()
+                .map(|message| journal::JoinedMessage {
+                    task_id: message.task_id,
+                    text: message.text,
+                    sent_at_ms: message.sent_at_ms,
+                })
+                .collect(),
         })
     }
 
@@ -2068,10 +2077,22 @@ async fn run_assignment(
     let file_scope = supertag_protocol::file_scope::of_task(&task)
         .map(supertag_protocol::file_scope::Rules::from);
     let sandbox_task = defer_sandbox.then(|| task.clone());
+    // The harness answers the joined messages in the same turn. The Task's stored prompt keeps
+    // only the person's own text.
+    task.prompt = joined_prompt(&task.prompt, &attempt.joined);
     let assignment = Assignment {
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
         lease_token: attempt.lease_token.clone(),
+        joined: attempt
+            .joined
+            .iter()
+            .map(|message| supertag_protocol::v2::JoinedMessage {
+                task_id: message.task_id.clone(),
+                text: message.text.clone(),
+                sent_at_ms: message.sent_at_ms,
+            })
+            .collect(),
     };
     let sandbox_cancel = shutdown.child_token();
     let run = async {
@@ -2698,5 +2719,50 @@ mod authority_tests {
         let error = result.expect_err("authority ended");
         assert_eq!(error.message(), "execution authority ended");
         assert!(cancel.is_cancelled());
+    }
+}
+
+/// A Task's prompt followed by the messages joined into its Attempt, oldest first.
+fn joined_prompt(prompt: &str, joined: &[journal::JoinedMessage]) -> String {
+    if joined.is_empty() {
+        return prompt.to_owned();
+    }
+    let mut text = format!("{prompt}\n\nMore messages sent before you started (oldest first):");
+    for message in joined {
+        let minutes = message.sent_at_ms.max(0) / 60_000 % (24 * 60);
+        text.push_str(&format!(
+            "\n[{:02}:{:02} UTC] {}",
+            minutes / 60,
+            minutes % 60,
+            message.text
+        ));
+    }
+    text.push_str("\nAnswer them together.");
+    text
+}
+
+#[cfg(test)]
+mod joined_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn joined_messages_follow_the_prompt_oldest_first() {
+        assert_eq!(joined_prompt("Check CI", &[]), "Check CI");
+        let joined = [
+            journal::JoinedMessage {
+                task_id: "a".into(),
+                text: "also the flaky test".into(),
+                sent_at_ms: 1_794_470_160_000,
+            },
+            journal::JoinedMessage {
+                task_id: "b".into(),
+                text: "and open a PR".into(),
+                sent_at_ms: 1_794_470_220_000,
+            },
+        ];
+        assert_eq!(
+            joined_prompt("Check CI", &joined),
+            "Check CI\n\nMore messages sent before you started (oldest first):\n[07:56 UTC] also the flaky test\n[07:57 UTC] and open a PR\nAnswer them together."
+        );
     }
 }

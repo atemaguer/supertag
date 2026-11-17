@@ -23,7 +23,81 @@ const LEASE_MS: i64 = 30_000;
 pub const UPDATE_INTERVAL_MS: i64 = 1_000;
 const MAX_PROGRESS_CHARS: usize = 3_000;
 
-/// Records the acknowledgement for a newly admitted Slack Task.
+/// The line an acknowledgement gains when a later message joins its run.
+pub(crate) const FOLLOW_UP: &str = "Also reading your follow-up.";
+
+/// Whether a just-admitted Task starts a run of its own now: nothing else in its Session is
+/// claimed, running or queued ahead of it, and it was not delivered into a running Attempt.
+/// Only such a message is acknowledged at admission; any other is acknowledged when its run
+/// starts, or is answered by the run it joins.
+pub(crate) async fn starts_run_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<bool> {
+    if task.state() != TaskState::Queued {
+        return Ok(true);
+    }
+    let waiting: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM supertag_v2_tasks other WHERE other.tag_id=$1 AND other.session_id=$2 AND other.task_id<>$3
+           AND (other.state IN ($4,$5,$6) OR other.cleanup_pending=1
+                OR (other.state=$7 AND other.accepted_order<(SELECT accepted_order FROM supertag_v2_tasks WHERE task_id=$3)))
+         UNION ALL SELECT 1 FROM supertag_v2_live_inputs WHERE follower_task_id=$3
+         LIMIT 1",
+    )
+    .bind(&task.tag_id)
+    .bind(&task.session_id)
+    .bind(&task.task_id)
+    .bind(TaskState::Claimed as i64)
+    .bind(TaskState::Running as i64)
+    .bind(TaskState::Uncertain as i64)
+    .bind(TaskState::Queued as i64)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(waiting.is_none())
+}
+
+/// Shows on a run's acknowledgement that a later message joined it. Several follow-ups add the
+/// line once.
+pub(crate) async fn follow_up_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<()> {
+    sqlx::query("UPDATE supertag_v2_reply_progress SET text=text || $1,revision=revision+1 WHERE task_id=$2 AND stopped=0 AND closed=0 AND text NOT LIKE $3")
+        .bind(format!("\n\n{FOLLOW_UP}")).bind(task_id).bind(format!("%{FOLLOW_UP}"))
+        .execute(&mut **tx).await?;
+    Ok(())
+}
+
+/// A claimed Slack Task's acknowledgement: posted now if its message was not acknowledged at
+/// admission, and marked when the claim joined later messages into it.
+pub(crate) async fn claimed_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    joined: bool,
+) -> Result<()> {
+    let acknowledged: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM supertag_v2_reply_progress WHERE task_id=$1")
+            .bind(&task.task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if acknowledged.is_none() {
+        let route = sqlx::query("SELECT e.account_id,e.conversation_id,e.thread_id FROM supertag_v2_inbound_events e JOIN supertag_v2_slack_messages m ON m.task_id=e.task_id WHERE e.task_id=$1")
+            .bind(&task.task_id).fetch_optional(&mut **tx).await?;
+        let Some(route) = route else {
+            return Ok(());
+        };
+        acknowledge_in(
+            tx,
+            task,
+            &route.try_get::<String, _>("account_id")?,
+            &route.try_get::<String, _>("conversation_id")?,
+            &route
+                .try_get::<Option<String>, _>("thread_id")?
+                .unwrap_or_default(),
+        )
+        .await?;
+    }
+    if joined {
+        follow_up_in(tx, &task.task_id).await?;
+    }
+    Ok(())
+}
+
+/// Records the acknowledgement for a Slack Task that starts a run.
 pub(crate) async fn acknowledge_in(
     tx: &mut Transaction<'_, Any>,
     task: &Task,

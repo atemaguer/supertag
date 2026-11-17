@@ -1,7 +1,9 @@
 //! Slack thread activation and message admission share one durable transaction.
 //! Gateway memory and its configured default Tag never own an activated route.
 use super::*;
-use crate::surface_policy::{VerifiedConnectorOrigin, VerifiedScope, admit_connector_task_in};
+use crate::surface_policy::{
+    Admission, VerifiedConnectorOrigin, VerifiedScope, admit_connector_task_in,
+};
 use supertag_protocol::v2::{AcceptSlackEventRequest, AcceptSlackEventResponse};
 
 impl Store {
@@ -45,28 +47,31 @@ impl Store {
             ))?)
         );
         let (mut tx, order) = self.write().await?;
+        // A refused message replays as answered: its notice was posted once, with its receipts.
         let prior = sqlx::query("SELECT request_digest,task_id FROM supertag_v2_slack_events WHERE account_id=$1 AND event_id=$2")
             .bind(account).bind(&input.event_id).fetch_optional(&mut *tx).await?;
         if let Some(prior) = prior {
             let task = replay(&mut tx, &prior, &fingerprint).await?;
             tx.commit().await?;
-            return Ok(AcceptSlackEventResponse { task: Some(task) });
+            return Ok(AcceptSlackEventResponse { task });
         }
-        let logical = sqlx::query("SELECT request_digest,task_id FROM supertag_v2_slack_messages WHERE account_id=$1 AND team_id=$2 AND channel_id=$3 AND message_ts=$4")
+        let logical = sqlx::query("SELECT request_digest,task_id,refusal FROM supertag_v2_slack_messages WHERE account_id=$1 AND team_id=$2 AND channel_id=$3 AND message_ts=$4")
             .bind(account).bind(&input.team_id).bind(&input.channel_id).bind(&input.message_ts)
             .fetch_optional(&mut *tx).await?;
         if let Some(logical) = logical {
             let task = replay(&mut tx, &logical, &fingerprint).await?;
+            let refusal: Option<String> = logical.try_get("refusal")?;
             record_event(
                 &mut tx,
                 account,
                 &input.event_id,
                 &fingerprint,
-                &task.task_id,
+                task.as_ref().map(|task| task.task_id.as_str()),
+                refusal.as_deref(),
             )
             .await?;
             tx.commit().await?;
-            return Ok(AcceptSlackEventResponse { task: Some(task) });
+            return Ok(AcceptSlackEventResponse { task });
         }
         let route = sqlx::query("SELECT tag_id,session_id FROM supertag_v2_slack_threads WHERE account_id=$1 AND team_id=$2 AND channel_id=$3 AND thread_ts=$4")
             .bind(account).bind(&input.team_id).bind(&input.channel_id).bind(&input.thread_ts)
@@ -79,9 +84,10 @@ impl Store {
                 .as_ref()
                 .is_some_and(|selected| selected != &tag)
             {
-                return Err(StoreError::Conflict(
-                    "Slack thread already belongs to another Tag".into(),
-                ));
+                let text = crate::surface_policy::owned_by_another_tag(&tag, "thread");
+                refuse(&mut tx, account, input, &fingerprint, &text).await?;
+                tx.commit().await?;
+                return Ok(AcceptSlackEventResponse { task: None });
             }
             (tag, route.try_get::<String, _>("session_id")?)
         } else if let Some(tag) = &input.mention_tag_id {
@@ -113,50 +119,60 @@ impl Store {
         };
         let now_ms = self.execution_now_ms();
         let actor = format!("slack:{}", input.actor_id);
-        let handled = Box::pin(crate::surface_objectives::handle_in(
-            &mut tx,
+        // A refusal a redelivery cannot change is answered in the thread instead of left for
+        // Slack to retry and drop.
+        let mut savepoint = sqlx::Acquire::begin(&mut *tx).await?;
+        let admitted = Box::pin(admit(
+            &mut savepoint,
             order,
-            crate::surface_objectives::Message {
-                origin,
-                conversation_id: &input.channel_id,
-                thread_id: &input.thread_ts,
-                event_id: &input.event_id,
-                prompt: &input.prompt,
-                // Only Slack's app_mention addresses the app. A plain thread
-                // message that mentions someone else is never a command.
-                command: input
-                    .mention_tag_id
-                    .as_ref()
-                    .and_then(|_| crate::surface_objectives::parse_mentioned(&input.prompt)),
-                actor: &actor,
-                method: "/supertag.runtime.v2.Connector/AcceptSlackEvent",
-            },
+            input,
+            origin,
+            &actor,
+            &session,
             now_ms,
         ))
-        .await?;
-        let (task, answered) = match handled {
-            crate::surface_objectives::Handled::Ordinary => (
-                admit_connector_task_in(&mut tx, order, origin, &session, &input.prompt, now_ms)
-                    .await?,
-                false,
-            ),
-            crate::surface_objectives::Handled::Work(task) => (task, false),
-            crate::surface_objectives::Handled::Status(task) => (Some(task), true),
+        .await;
+        let admitted = match admitted {
+            Ok(admitted) => {
+                savepoint.commit().await?;
+                admitted
+            }
+            Err(StoreError::FailedPrecondition(reason)) => {
+                savepoint.rollback().await?;
+                match crate::surface_policy::refusal_in(&mut tx, &tag, &session, now_ms).await? {
+                    Some(text) => Admission::Refused(text),
+                    None => return Err(StoreError::FailedPrecondition(reason)),
+                }
+            }
+            Err(error) => return Err(error),
         };
         let audit_call = crate::surface_objectives::audit_call_id(account, &input.event_id);
+        let (task, answered) = match admitted {
+            Admission::Admitted(task, answered) => (task, answered),
+            Admission::Refused(text) => {
+                refuse(&mut tx, account, input, &fingerprint, &text).await?;
+                tx.commit().await?;
+                self.emit_audit_call(&audit_call).await;
+                return Ok(AcceptSlackEventResponse { task: None });
+            }
+        };
         let Some(task) = task else {
             tx.commit().await?;
             self.emit_audit_call(&audit_call).await;
             return Ok(AcceptSlackEventResponse { task: None });
         };
-        crate::reply_progress::acknowledge_in(
-            &mut tx,
-            &task,
-            account,
-            &input.channel_id,
-            &input.thread_ts,
-        )
-        .await?;
+        // Only a message that starts a run is acknowledged now. One that went into a running
+        // turn, or waits behind another, is acknowledged by the run that answers it.
+        if crate::reply_progress::starts_run_in(&mut tx, &task).await? {
+            crate::reply_progress::acknowledge_in(
+                &mut tx,
+                &task,
+                account,
+                &input.channel_id,
+                &input.thread_ts,
+            )
+            .await?;
+        }
         if activate {
             sqlx::query("INSERT INTO supertag_v2_slack_threads (account_id,team_id,channel_id,thread_ts,tag_id,session_id) VALUES ($1,$2,$3,$4,$5,$6)")
                 .bind(account).bind(&input.team_id).bind(&input.channel_id).bind(&input.thread_ts).bind(&tag).bind(&session)
@@ -198,7 +214,8 @@ impl Store {
             account,
             &input.event_id,
             &fingerprint,
-            &task.task_id,
+            Some(&task.task_id),
+            None,
         )
         .await?;
         if answered {
@@ -211,13 +228,87 @@ impl Store {
     }
 }
 
-async fn replay(tx: &mut Transaction<'_, Any>, prior: &AnyRow, fingerprint: &str) -> Result<Task> {
+/// Runs the thread's Objective commands, then admits the message as work.
+async fn admit(
+    tx: &mut Transaction<'_, Any>,
+    order: i64,
+    input: &AcceptSlackEventRequest,
+    origin: VerifiedConnectorOrigin<'_>,
+    actor: &str,
+    session: &str,
+    now_ms: i64,
+) -> Result<Admission> {
+    let handled = Box::pin(crate::surface_objectives::handle_in(
+        tx,
+        order,
+        crate::surface_objectives::Message {
+            origin,
+            conversation_id: &input.channel_id,
+            thread_id: &input.thread_ts,
+            event_id: &input.event_id,
+            prompt: &input.prompt,
+            // Only Slack's app_mention addresses the app. A plain thread
+            // message that mentions someone else is never a command.
+            command: input
+                .mention_tag_id
+                .as_ref()
+                .and_then(|_| crate::surface_objectives::parse_mentioned(&input.prompt)),
+            actor,
+            method: "/supertag.runtime.v2.Connector/AcceptSlackEvent",
+        },
+        now_ms,
+    ))
+    .await?;
+    Ok(match Admission::from_handled(handled) {
+        Some(admission) => admission,
+        None => Admission::Admitted(
+            admit_connector_task_in(tx, order, origin, session, &input.prompt, now_ms).await?,
+            false,
+        ),
+    })
+}
+
+/// Records a refused message's receipts without a Task and answers it once in its thread.
+async fn refuse(
+    tx: &mut Transaction<'_, Any>,
+    account: &str,
+    input: &AcceptSlackEventRequest,
+    fingerprint: &str,
+    text: &str,
+) -> Result<()> {
+    sqlx::query("INSERT INTO supertag_v2_slack_messages (account_id,team_id,channel_id,message_ts,request_digest,refusal) VALUES ($1,$2,$3,$4,$5,$6)")
+        .bind(account).bind(&input.team_id).bind(&input.channel_id).bind(&input.message_ts)
+        .bind(fingerprint).bind(text).execute(&mut **tx).await?;
+    record_event(tx, account, &input.event_id, fingerprint, None, Some(text)).await?;
+    crate::surface_policy::refusal_notice_in(
+        tx,
+        account,
+        &input.channel_id,
+        Some(&input.thread_ts),
+        &format!(
+            "slack:{}:{}:{}",
+            input.team_id, input.channel_id, input.message_ts
+        ),
+        text,
+    )
+    .await
+}
+
+/// The Task a receipt recorded, or `None` for a refused message.
+async fn replay(
+    tx: &mut Transaction<'_, Any>,
+    prior: &AnyRow,
+    fingerprint: &str,
+) -> Result<Option<Task>> {
     if prior.try_get::<String, _>("request_digest")? != fingerprint {
         return Err(StoreError::Conflict(
             "Slack event or message was used with different content or routing".into(),
         ));
     }
-    task_in(tx, &prior.try_get::<String, _>("task_id")?).await
+    match prior.try_get::<Option<String>, _>("task_id")? {
+        Some(task) => Ok(Some(task_in(tx, &task).await?)),
+        None => Ok(None),
+    }
 }
 
 async fn record_event(
@@ -225,10 +316,11 @@ async fn record_event(
     account: &str,
     event: &str,
     fingerprint: &str,
-    task: &str,
+    task: Option<&str>,
+    refusal: Option<&str>,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO supertag_v2_slack_events (account_id,event_id,request_digest,task_id) VALUES ($1,$2,$3,$4)")
-        .bind(account).bind(event).bind(fingerprint).bind(task).execute(&mut **tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_slack_events (account_id,event_id,request_digest,task_id,refusal) VALUES ($1,$2,$3,$4,$5)")
+        .bind(account).bind(event).bind(fingerprint).bind(task).bind(refusal).execute(&mut **tx).await?;
     Ok(())
 }
 
@@ -368,10 +460,45 @@ mod tests {
                 .await,
             Err(StoreError::PermissionDenied)
         ));
-        let mut hijack = event("EvHIJACK", "1794470003.100000", true);
+        // Mentioning another Tag in an owned thread is answered once in the thread, and every
+        // redelivery of that message, under either of Slack's events, replays as answered.
+        let mut hijack = event("EvHIJACK", "1794470004.100000", true);
         hijack.mention_tag_id = Some("another".into());
+        let mut hijack_twin = hijack.clone();
+        hijack_twin.event_id = "EvHIJACKTWIN".into();
+        hijack_twin.mention_tag_id = None;
+        for (store, delivery) in [
+            (&second, &hijack),
+            (&first, &hijack),
+            (&first, &hijack_twin),
+        ] {
+            assert!(
+                store
+                    .accept_slack_event(PRINCIPAL, delivery)
+                    .await
+                    .unwrap()
+                    .task
+                    .is_none()
+            );
+        }
+        let notices: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT text,conversation_id,thread_id FROM supertag_v2_replies WHERE task_id IS NULL",
+        )
+        .fetch_all(&first.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            notices,
+            [(
+                "This thread belongs to builder. Mention builder, or start a new thread.".into(),
+                "CCHANNEL1".into(),
+                Some("1794470000.100000".into())
+            )]
+        );
+        let mut changed_hijack = hijack.clone();
+        changed_hijack.prompt = "changed".into();
         assert!(matches!(
-            second.accept_slack_event(PRINCIPAL, &hijack).await,
+            first.accept_slack_event(PRINCIPAL, &changed_hijack).await,
             Err(StoreError::Conflict(_))
         ));
         let next_mention = event("EvNEXTMENTION", "1794470003.100000", true);

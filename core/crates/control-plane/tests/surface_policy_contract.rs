@@ -228,10 +228,18 @@ async fn contract(url: &str) {
     assert_eq!(other.allowed_actions, ["files:read"]);
     assert!(other.policy_snapshot.unwrap().context_sets.is_empty());
     assert_ne!(other.session_id, admitted.session_id);
-    let mut wrong_tag = event("editing", "T123", "C123", 2);
+    // Mentioning another Tag in an owned thread is answered in the thread, not admitted.
+    let mut wrong_tag = event("editing", "T123", "C123", 90);
     wrong_tag.mention_tag_id = Some("other".into());
+    assert!(
+        store
+            .accept_slack_event("connector:editing", &wrong_tag)
+            .await
+            .unwrap()
+            .task
+            .is_none()
+    );
     for mismatched in [
-        wrong_tag,
         event("editing", "T123", "C777", 2),
         event("editing", "T999", "C123", 2),
     ] {
@@ -410,6 +418,15 @@ async fn contract(url: &str) {
             .reply
             .is_none()
     );
+    // The refusal notice for the message that mentioned another Tag was queued first.
+    let notice = reopened
+        .claim_reply("connector:editing", "notice-claim")
+        .await
+        .unwrap()
+        .reply
+        .unwrap();
+    assert!(notice.task_id.is_empty());
+    assert!(notice.text.starts_with("This thread belongs to engineer."));
     let reply = reopened
         .claim_reply("connector:editing", "original-reply-claim")
         .await

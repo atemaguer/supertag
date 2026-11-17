@@ -53,7 +53,7 @@ impl Store {
         if let Some(prior) = prior {
             let task = replay(&mut tx, &prior, &fingerprint).await?;
             tx.commit().await?;
-            return Ok(AcceptLarkEventResponse { task: Some(task) });
+            return Ok(AcceptLarkEventResponse { task });
         }
         let identity = sqlx::query(
             "SELECT domain,app_id,tenant_key FROM supertag_v2_lark_accounts WHERE account_id=$1",
@@ -70,19 +70,21 @@ impl Store {
                 "Lark account belongs to another domain, app, or tenant".into(),
             ));
         }
-        let logical=sqlx::query("SELECT request_digest,task_id FROM supertag_v2_lark_messages WHERE account_id=$1 AND chat_id=$2 AND message_id=$3").bind(account).bind(&input.chat_id).bind(&input.message_id).fetch_optional(&mut *tx).await?;
+        let logical=sqlx::query("SELECT request_digest,task_id,refusal FROM supertag_v2_lark_messages WHERE account_id=$1 AND chat_id=$2 AND message_id=$3").bind(account).bind(&input.chat_id).bind(&input.message_id).fetch_optional(&mut *tx).await?;
         if let Some(logical) = logical {
             let task = replay(&mut tx, &logical, &fingerprint).await?;
+            let refusal: Option<String> = logical.try_get("refusal")?;
             record(
                 &mut tx,
                 account,
                 &input.event_id,
                 &fingerprint,
-                &task.task_id,
+                task.as_ref().map(|task| task.task_id.as_str()),
+                refusal.as_deref(),
             )
             .await?;
             tx.commit().await?;
-            return Ok(AcceptLarkEventResponse { task: Some(task) });
+            return Ok(AcceptLarkEventResponse { task });
         }
         let chat: Option<String> = sqlx::query_scalar(
             "SELECT tag_id FROM supertag_v2_lark_chats WHERE account_id=$1 AND chat_id=$2",
@@ -94,9 +96,10 @@ impl Store {
         if let (Some(tag), Some(selected)) = (&chat, &input.mention_tag_id)
             && tag != selected
         {
-            return Err(StoreError::Conflict(
-                "Lark chat belongs to another Tag".into(),
-            ));
+            let text = crate::surface_policy::owned_by_another_tag(tag, "chat");
+            refuse(&mut tx, account, input, &fingerprint, &text).await?;
+            tx.commit().await?;
+            return Ok(AcceptLarkEventResponse { task: None });
         }
         let route=sqlx::query("SELECT tag_id,session_id,direct,actor_id FROM supertag_v2_lark_threads WHERE account_id=$1 AND chat_id=$2 AND root_message_id=$3").bind(account).bind(&input.chat_id).bind(&input.root_message_id).fetch_optional(&mut *tx).await?;
         let activate = route.is_none();
@@ -131,8 +134,11 @@ impl Store {
                 "event ID belongs to another connector route".into(),
             ));
         }
-        let Some(task) = admit_connector_task_in(
-            &mut tx,
+        let now_ms = self.execution_now_ms();
+        // A refusal a redelivery cannot change is answered in the thread instead of retried.
+        let mut savepoint = sqlx::Acquire::begin(&mut *tx).await?;
+        let admitted = admit_connector_task_in(
+            &mut savepoint,
             order,
             VerifiedConnectorOrigin {
                 connector_account_id: account,
@@ -146,10 +152,28 @@ impl Store {
             },
             &session,
             &input.prompt,
-            self.execution_now_ms(),
+            now_ms,
         )
-        .await?
-        else {
+        .await;
+        let admitted = match admitted {
+            Ok(admitted) => {
+                savepoint.commit().await?;
+                admitted
+            }
+            Err(StoreError::FailedPrecondition(reason)) => {
+                savepoint.rollback().await?;
+                let Some(text) =
+                    crate::surface_policy::refusal_in(&mut tx, &tag, &session, now_ms).await?
+                else {
+                    return Err(StoreError::FailedPrecondition(reason));
+                };
+                refuse(&mut tx, account, input, &fingerprint, &text).await?;
+                tx.commit().await?;
+                return Ok(AcceptLarkEventResponse { task: None });
+            }
+            Err(error) => return Err(error),
+        };
+        let Some(task) = admitted else {
             tx.commit().await?;
             return Ok(AcceptLarkEventResponse { task: None });
         };
@@ -178,7 +202,8 @@ impl Store {
             account,
             &input.event_id,
             &fingerprint,
-            &task.task_id,
+            Some(&task.task_id),
+            None,
         )
         .await?;
         tx.commit().await?;
@@ -201,23 +226,48 @@ fn valid_app(value: &str) -> bool {
         .strip_prefix("cli_")
         .is_some_and(|id| id.len() == 16 && id.bytes().all(|b| b.is_ascii_hexdigit()))
 }
-async fn replay(tx: &mut Transaction<'_, Any>, row: &AnyRow, digest: &str) -> Result<Task> {
+/// The Task a receipt recorded, or `None` for a refused message.
+async fn replay(tx: &mut Transaction<'_, Any>, row: &AnyRow, digest: &str) -> Result<Option<Task>> {
     if row.try_get::<String, _>("request_digest")? != digest {
         return Err(StoreError::Conflict(
             "Lark event or message changed content or identity".into(),
         ));
     }
-    task_in(tx, &row.try_get::<String, _>("task_id")?).await
+    match row.try_get::<Option<String>, _>("task_id")? {
+        Some(task) => Ok(Some(task_in(tx, &task).await?)),
+        None => Ok(None),
+    }
 }
 async fn record(
     tx: &mut Transaction<'_, Any>,
     account: &str,
     event: &str,
     digest: &str,
-    task: &str,
+    task: Option<&str>,
+    refusal: Option<&str>,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO supertag_v2_lark_events (account_id,event_id,request_digest,task_id) VALUES ($1,$2,$3,$4)").bind(account).bind(event).bind(digest).bind(task).execute(&mut **tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_lark_events (account_id,event_id,request_digest,task_id,refusal) VALUES ($1,$2,$3,$4,$5)").bind(account).bind(event).bind(digest).bind(task).bind(refusal).execute(&mut **tx).await?;
     Ok(())
+}
+/// Records a refused message's receipts without a Task and answers it once in its thread.
+async fn refuse(
+    tx: &mut Transaction<'_, Any>,
+    account: &str,
+    input: &AcceptLarkEventRequest,
+    digest: &str,
+    text: &str,
+) -> Result<()> {
+    sqlx::query("INSERT INTO supertag_v2_lark_messages (account_id,chat_id,message_id,request_digest,refusal) VALUES ($1,$2,$3,$4,$5)").bind(account).bind(&input.chat_id).bind(&input.message_id).bind(digest).bind(text).execute(&mut **tx).await?;
+    record(tx, account, &input.event_id, digest, None, Some(text)).await?;
+    crate::surface_policy::refusal_notice_in(
+        tx,
+        account,
+        &input.chat_id,
+        Some(&input.root_message_id),
+        &format!("lark:{}:{}", input.chat_id, input.message_id),
+        text,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -300,13 +350,12 @@ mod tests {
         assert_eq!(follow.session_id, task.session_id);
         assert_eq!(follow.instructions, "Updated");
         assert_ne!(follow.task_id, task.task_id);
-        for kind in ["tenant", "app", "domain", "tag"] {
+        for kind in ["tenant", "app", "domain"] {
             let mut bad = event("bad-route", "om_another", true);
             match kind {
                 "tenant" => bad.tenant_key = "tenant-other".into(),
                 "app" => bad.app_id = "cli_abcdef0123456789".into(),
                 "domain" => bad.domain = LarkDomain::Feishu.into(),
-                "tag" => bad.mention_tag_id = Some("other".into()),
                 _ => unreachable!(),
             }
             assert!(
@@ -317,6 +366,27 @@ mod tests {
                 "accepted {kind}"
             );
         }
+        // Mentioning another Tag in an owned chat is answered once in its thread.
+        let mut other = event("other-tag", "om_another", true);
+        other.mention_tag_id = Some("other".into());
+        for store in [&right, &left] {
+            assert!(
+                store
+                    .accept_lark_event("connector:lark/shared", &other)
+                    .await
+                    .unwrap()
+                    .task
+                    .is_none()
+            );
+        }
+        let notices: Vec<(String, String)> = sqlx::query_as(
+            "SELECT text,conversation_id FROM supertag_v2_replies WHERE task_id IS NULL",
+        )
+        .fetch_all(&left.pool)
+        .await
+        .unwrap();
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].0.starts_with("This chat belongs to "));
         let mut direct = event("direct", "om_private", true);
         direct.chat_id = "oc_private".into();
         direct.root_message_id = "om_private".into();

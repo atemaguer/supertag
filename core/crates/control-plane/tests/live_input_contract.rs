@@ -206,14 +206,23 @@ async fn ordered_receipts(store: &Store, host: &HostAuthority, other: &HostAutho
         withdrawn
     );
 
-    for input in [&one, &two, &three] {
-        let fallback = claim_start(store, host, &input.follower_task_id).await;
-        finish(store, host, &fallback).await;
+    // Inputs the finished Attempt never took fall back to their queued Tasks, and the next
+    // claim answers them together: the first runs, and the later ones join it.
+    let fallback = claim_start(store, host, &one.follower_task_id).await;
+    finish(store, host, &fallback).await;
+    for input in [&two, &three] {
+        let joined = store.get_input(&input.input_id).await.unwrap();
+        assert_eq!(joined.state(), LiveInputState::Accepted);
+        assert_eq!(joined.task_id, one.follower_task_id);
+        assert_eq!(
+            store
+                .get_task(&input.follower_task_id)
+                .await
+                .unwrap()
+                .state(),
+            TaskState::Succeeded
+        );
     }
-    assert_eq!(
-        store.get_input(&three.input_id).await.unwrap().state(),
-        LiveInputState::Rejected
-    );
 
     let active = submit(store, "reviewer", "ordinary-first", "ordinary-active").await;
     let attempt = claim_start(store, host, &active.task_id).await;

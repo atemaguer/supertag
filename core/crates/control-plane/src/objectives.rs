@@ -1203,6 +1203,48 @@ pub(crate) async fn objective_admission_in(
     Ok(())
 }
 
+/// What a person is told when their thread's Objective refused their message, or `None` when no
+/// Objective blocks the Session's new work.
+pub(crate) async fn admission_refusal_in(
+    tx: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    session_id: &str,
+    now_ms: i64,
+) -> Result<Option<String>> {
+    let id: Option<String> = sqlx::query_scalar(
+        "SELECT objective_id FROM supertag_v2_objective_sessions WHERE tag_id=$1 AND session_id=$2",
+    )
+    .bind(tag_id)
+    .bind(session_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    let record = get_in(tx, &id).await?;
+    let blocker = limits::admission_blocker(&record.limits, timestamp(now_ms)?);
+    Ok(blocker.map(|blocker| match blocker {
+        limits::AdmissionBlocker::Paused => format!(
+            "This thread's Objective {id} is paused, so I can't take new messages here. Resume it with `supertag objective resume {id}`."
+        ),
+        limits::AdmissionBlocker::Limited => format!(
+            "This thread's Objective {id} reached one of its limits, so I can't take new messages here. Change them with `supertag objective set-limits {id}`."
+        ),
+        limits::AdmissionBlocker::BudgetExhausted => format!(
+            "This thread's Objective {id} used its budget, so I can't take new messages here. Raise it with `supertag objective set-limits {id}`."
+        ),
+        limits::AdmissionBlocker::DeadlinePassed => format!(
+            "This thread's Objective {id} passed its deadline, so I can't take new messages here. Extend it with `supertag objective set-limits {id}`."
+        ),
+        limits::AdmissionBlocker::Completed => format!(
+            "This thread's Objective {id} is complete, so it takes no new messages. Start a new thread for new work."
+        ),
+        limits::AdmissionBlocker::Cancelled => format!(
+            "This thread's Objective {id} was cancelled, so it takes no new messages. Start a new thread for new work."
+        ),
+    }))
+}
+
 pub(crate) async fn objective_link_task_in(
     tx: &mut Transaction<'_, Any>,
     task: &Task,

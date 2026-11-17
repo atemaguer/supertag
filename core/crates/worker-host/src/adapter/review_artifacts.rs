@@ -141,6 +141,7 @@ mod tests {
                 }),
                 attempt_id: "review-attempt".into(),
                 lease_token: "review-lease".into(),
+                joined: vec![],
             },
             checkpoint: None,
             resolved_skills: vec![],

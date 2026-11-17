@@ -627,6 +627,7 @@ mod tests {
                 lease_token: "private-lease-token".into(),
                 execution_selection: None,
                 requires_unsandboxed_commands: false,
+                joined: vec![],
             },
             prepared: None,
         })?;

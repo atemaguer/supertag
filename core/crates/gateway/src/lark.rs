@@ -216,7 +216,13 @@ impl Connector {
             )
             .await
             .context("Lark admission timed out")?
-            .map_err(|_| anyhow::anyhow!("Lark admission rejected"))?;
+            .or_else(|error| {
+                if crate::settled_without_admission("Lark", &error) {
+                    Ok(tonic::Response::new(Default::default()))
+                } else {
+                    Err(anyhow::anyhow!("Lark admission rejected"))
+                }
+            })?;
         }
         Ok(())
     }

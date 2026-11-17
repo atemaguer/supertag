@@ -230,7 +230,9 @@ async fn webhook(State(teams): State<MicrosoftTeams>, headers: HeaderMap, body: 
     .await
     {
         Ok(Ok(_)) => StatusCode::OK,
-        Ok(Err(error)) if error.code() == tonic::Code::AlreadyExists => StatusCode::CONFLICT,
+        Ok(Err(error)) if crate::settled_without_admission("Microsoft Teams", &error) => {
+            StatusCode::OK
+        }
         Ok(Err(error)) if error.code() == tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     }

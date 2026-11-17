@@ -180,6 +180,8 @@ pub(crate) enum Handled {
     Work(Option<Task>),
     /// A settled Control Plane answer. Its reply posts in the thread.
     Status(Task),
+    /// The thread's Objective refused the message. The caller answers it once in the thread.
+    Refused(String),
 }
 
 struct Home {
@@ -307,7 +309,17 @@ pub(crate) async fn handle_in(
                     savepoint.rollback().await?;
                     let code = Some("FAILED_PRECONDITION");
                     audit_in(tx, &message, "message", id, code, now_ms).await?;
-                    format!("Objective {id} did not accept this message: {reason}")
+                    let text = objectives::admission_refusal_in(
+                        tx,
+                        &home.owner_tag_id,
+                        &home.session_id,
+                        now_ms,
+                    )
+                    .await?
+                    .unwrap_or_else(|| {
+                        format!("Objective {id} did not accept this message: {reason}")
+                    });
+                    return Ok(Handled::Refused(text));
                 }
                 Err(error) => return Err(error),
             }
