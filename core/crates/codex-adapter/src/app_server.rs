@@ -1405,10 +1405,13 @@ mod tests {
     async fn live_code_mode_under_a_narrowed_network_scope() -> Result<()> {
         use supertag_protocol::v2::{NetworkRule, NetworkScope};
         use supertag_worker_host::egress;
+        // Only an operator who supplies a signed-in home spends the turn; --include-ignored
+        // runs elsewhere skip it.
+        let Some(home) = std::env::var_os("SUPERTAG_LIVE_CODE_MODE_HOME") else {
+            return Ok(());
+        };
         let executable = std::env::var_os("SUPERTAG_TEST_CODEX_BINARY")
             .context("set SUPERTAG_TEST_CODEX_BINARY")?;
-        let home = std::env::var_os("SUPERTAG_LIVE_CODE_MODE_HOME")
-            .context("set SUPERTAG_LIVE_CODE_MODE_HOME")?;
         let model = std::env::var("SUPERTAG_LIVE_CODE_MODE_MODEL")
             .context("set SUPERTAG_LIVE_CODE_MODE_MODEL")?;
         let directory = tempfile::tempdir()?;
@@ -1481,7 +1484,6 @@ mod tests {
     /// A narrowed network scope, through the real sandbox, Codex's managed proxy, and the Worker
     /// Host's egress proxy: the allowed origin and method pass with the credential injected,
     /// everything else is refused, and the command never holds the secret.
-    #[cfg(target_os = "macos")]
     #[tokio::test]
     #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native sandbox probe"]
     async fn installed_sandbox_reaches_only_the_network_scope_through_the_egress_proxy()
@@ -1537,6 +1539,25 @@ mod tests {
             narrowed: true,
         });
         let environment = policy.egress.as_ref().unwrap().process_environment();
+        // Linux needs bubblewrap and unprivileged user namespaces for Codex's sandbox; macOS
+        // always permits it. The CI runtime lane requires `codex-sandbox`, so it cannot skip.
+        let probe = sandboxed_with(
+            &executable,
+            &root,
+            &workspace,
+            &policy,
+            &environment,
+            "true",
+        )
+        .await;
+        if cfg!(not(target_os = "macos")) && probe.as_ref().map_or(true, |r| r["exitCode"] != 0) {
+            // terminal-safe: test-only skip notice on standard error.
+            super::prerequisites::missing::<()>(
+                "codex-sandbox",
+                &format!("Codex cannot start its sandbox here: {probe:?}"),
+            )?;
+            return Ok(());
+        }
         let script = format!(
             "echo token=$GITHUB_TOKEN; \
              echo allowed=$(curl -sS -m 20 -H \"Authorization: Bearer $GITHUB_TOKEN\" {base}/ok); \
