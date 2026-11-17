@@ -128,6 +128,8 @@ Worker Host. See [MCP tools](worker-tools.md).
   this one. A redelivery of that message gets no second answer.
 - A redelivery under the same event ID with different content, and a malformed event, are
   acknowledged and never admitted. The Gateway log notes them.
+- The Control Plane keeps each event ID for 7 days; Slack redelivers for about an hour. A message
+  itself is remembered for good, so a later redelivery still reaches the same Task.
 - Over Socket Mode, the Gateway reconnects when Slack asks it to or the connection drops. It stops
   with an error when Slack refuses the app-level token or Socket Mode is turned off for the app.
 - The starter manifest does not subscribe to private channel messages.

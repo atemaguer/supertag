@@ -76,6 +76,7 @@ impl Store {
             let refusal: Option<String> = logical.try_get("refusal")?;
             record(
                 &mut tx,
+                self.execution_now_ms(),
                 account,
                 &input.event_id,
                 &fingerprint,
@@ -97,7 +98,15 @@ impl Store {
             && tag != selected
         {
             let text = crate::surface_policy::owned_by_another_tag(tag, "chat");
-            refuse(&mut tx, account, input, &fingerprint, &text).await?;
+            refuse(
+                &mut tx,
+                self.execution_now_ms(),
+                account,
+                input,
+                &fingerprint,
+                &text,
+            )
+            .await?;
             tx.commit().await?;
             return Ok(AcceptLarkEventResponse { task: None });
         }
@@ -167,7 +176,15 @@ impl Store {
                 else {
                     return Err(StoreError::FailedPrecondition(reason));
                 };
-                refuse(&mut tx, account, input, &fingerprint, &text).await?;
+                refuse(
+                    &mut tx,
+                    self.execution_now_ms(),
+                    account,
+                    input,
+                    &fingerprint,
+                    &text,
+                )
+                .await?;
                 tx.commit().await?;
                 return Ok(AcceptLarkEventResponse { task: None });
             }
@@ -199,6 +216,7 @@ impl Store {
         sqlx::query("INSERT INTO supertag_v2_lark_messages (account_id,chat_id,message_id,request_digest,task_id) VALUES ($1,$2,$3,$4,$5)").bind(account).bind(&input.chat_id).bind(&input.message_id).bind(&fingerprint).bind(&task.task_id).execute(&mut *tx).await?;
         record(
             &mut tx,
+            self.execution_now_ms(),
             account,
             &input.event_id,
             &fingerprint,
@@ -240,25 +258,27 @@ async fn replay(tx: &mut Transaction<'_, Any>, row: &AnyRow, digest: &str) -> Re
 }
 async fn record(
     tx: &mut Transaction<'_, Any>,
+    now: i64,
     account: &str,
     event: &str,
     digest: &str,
     task: Option<&str>,
     refusal: Option<&str>,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO supertag_v2_lark_events (account_id,event_id,request_digest,task_id,refusal) VALUES ($1,$2,$3,$4,$5)").bind(account).bind(event).bind(digest).bind(task).bind(refusal).execute(&mut **tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_lark_events (account_id,event_id,request_digest,task_id,refusal,received_at_ms) VALUES ($1,$2,$3,$4,$5,$6)").bind(account).bind(event).bind(digest).bind(task).bind(refusal).bind(now).execute(&mut **tx).await?;
     Ok(())
 }
 /// Records a refused message's receipts without a Task and answers it once in its thread.
 async fn refuse(
     tx: &mut Transaction<'_, Any>,
+    now: i64,
     account: &str,
     input: &AcceptLarkEventRequest,
     digest: &str,
     text: &str,
 ) -> Result<()> {
     sqlx::query("INSERT INTO supertag_v2_lark_messages (account_id,chat_id,message_id,request_digest,refusal) VALUES ($1,$2,$3,$4,$5)").bind(account).bind(&input.chat_id).bind(&input.message_id).bind(digest).bind(text).execute(&mut **tx).await?;
-    record(tx, account, &input.event_id, digest, None, Some(text)).await?;
+    record(tx, now, account, &input.event_id, digest, None, Some(text)).await?;
     crate::surface_policy::refusal_notice_in(
         tx,
         account,

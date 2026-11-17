@@ -209,6 +209,7 @@ impl ControlPlane {
         if self.slow_sweep_due() {
             self.store.sweep_checkpoints().await?;
             self.store.sweep_memory().await?;
+            self.store.sweep_event_receipts().await?;
         }
         self.store.prune_watch().await?;
         Ok(())

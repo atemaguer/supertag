@@ -63,6 +63,7 @@ impl Store {
             let refusal: Option<String> = logical.try_get("refusal")?;
             record_event(
                 &mut tx,
+                self.execution_now_ms(),
                 account,
                 &input.event_id,
                 &fingerprint,
@@ -85,7 +86,15 @@ impl Store {
                 .is_some_and(|selected| selected != &tag)
             {
                 let text = crate::surface_policy::owned_by_another_tag(&tag, "thread");
-                refuse(&mut tx, account, input, &fingerprint, &text).await?;
+                refuse(
+                    &mut tx,
+                    self.execution_now_ms(),
+                    account,
+                    input,
+                    &fingerprint,
+                    &text,
+                )
+                .await?;
                 tx.commit().await?;
                 return Ok(AcceptSlackEventResponse { task: None });
             }
@@ -150,7 +159,15 @@ impl Store {
         let (task, answered) = match admitted {
             Admission::Admitted(task, answered) => (*task, answered),
             Admission::Refused(text) => {
-                refuse(&mut tx, account, input, &fingerprint, &text).await?;
+                refuse(
+                    &mut tx,
+                    self.execution_now_ms(),
+                    account,
+                    input,
+                    &fingerprint,
+                    &text,
+                )
+                .await?;
                 tx.commit().await?;
                 self.emit_audit_call(&audit_call).await;
                 return Ok(AcceptSlackEventResponse { task: None });
@@ -211,6 +228,7 @@ impl Store {
             .execute(&mut *tx).await?;
         record_event(
             &mut tx,
+            self.execution_now_ms(),
             account,
             &input.event_id,
             &fingerprint,
@@ -273,6 +291,7 @@ async fn admit(
 /// Records a refused message's receipts without a Task and answers it once in its thread.
 async fn refuse(
     tx: &mut Transaction<'_, Any>,
+    now: i64,
     account: &str,
     input: &AcceptSlackEventRequest,
     fingerprint: &str,
@@ -281,7 +300,16 @@ async fn refuse(
     sqlx::query("INSERT INTO supertag_v2_slack_messages (account_id,team_id,channel_id,message_ts,request_digest,refusal) VALUES ($1,$2,$3,$4,$5,$6)")
         .bind(account).bind(&input.team_id).bind(&input.channel_id).bind(&input.message_ts)
         .bind(fingerprint).bind(text).execute(&mut **tx).await?;
-    record_event(tx, account, &input.event_id, fingerprint, None, Some(text)).await?;
+    record_event(
+        tx,
+        now,
+        account,
+        &input.event_id,
+        fingerprint,
+        None,
+        Some(text),
+    )
+    .await?;
     crate::surface_policy::refusal_notice_in(
         tx,
         account,
@@ -313,16 +341,39 @@ async fn replay(
     }
 }
 
+/// How long Slack and Lark event-ID receipts are kept. Slack redelivers an event for about an hour
+/// and Lark for less; the message receipts, which map messages to Tasks, are kept.
+pub(crate) const EVENT_RECEIPT_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+impl Store {
+    /// Deletes Slack and Lark event-ID receipts older than [`EVENT_RECEIPT_MS`]; returns how many.
+    pub async fn sweep_event_receipts(&self) -> Result<u64> {
+        let cutoff = self.execution_now_ms().saturating_sub(EVENT_RECEIPT_MS);
+        let (mut tx, _) = self.write().await?;
+        let mut removed = 0;
+        for table in ["supertag_v2_slack_events", "supertag_v2_lark_events"] {
+            removed += sqlx::query(&format!("DELETE FROM {table} WHERE received_at_ms<$1"))
+                .bind(cutoff)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        }
+        tx.commit().await?;
+        Ok(removed)
+    }
+}
+
 async fn record_event(
     tx: &mut Transaction<'_, Any>,
+    now: i64,
     account: &str,
     event: &str,
     fingerprint: &str,
     task: Option<&str>,
     refusal: Option<&str>,
 ) -> Result<()> {
-    sqlx::query("INSERT INTO supertag_v2_slack_events (account_id,event_id,request_digest,task_id,refusal) VALUES ($1,$2,$3,$4,$5)")
-        .bind(account).bind(event).bind(fingerprint).bind(task).bind(refusal).execute(&mut **tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_slack_events (account_id,event_id,request_digest,task_id,refusal,received_at_ms) VALUES ($1,$2,$3,$4,$5,$6)")
+        .bind(account).bind(event).bind(fingerprint).bind(task).bind(refusal).bind(now).execute(&mut **tx).await?;
     Ok(())
 }
 
@@ -583,5 +634,128 @@ mod tests {
             .unwrap();
         admin.close().await.unwrap();
         outcome.expect("PostgreSQL Slack thread contract failed");
+    }
+
+    /// Slack and Lark event-ID receipts expire after seven days; a redelivered message after that
+    /// still finds its message receipt and its original Task.
+    async fn receipt_expiry(url: &str) {
+        use supertag_protocol::v2::{AcceptLarkEventRequest, LarkDomain};
+        let clock = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(1_800_000_000_000));
+        let timer = clock.clone();
+        let store = Store::open(url)
+            .await
+            .unwrap()
+            .with_execution_clock(move || timer.load(std::sync::atomic::Ordering::SeqCst));
+        store
+            .put_tag("builder", "Instructions", vec!["files:read".into()])
+            .await
+            .unwrap();
+        let slack = event("EvEXPIRY", "1794470000.100000", true);
+        let lark = AcceptLarkEventRequest {
+            account_id: "lark/shared".into(),
+            domain: LarkDomain::Lark.into(),
+            app_id: "cli_0123456789abcdef".into(),
+            tenant_key: "tenant-one".into(),
+            event_id: "lark-expiry".into(),
+            chat_id: "oc_engineering".into(),
+            message_id: "om_root".into(),
+            root_message_id: "om_root".into(),
+            actor_id: "ou_alice".into(),
+            prompt: "Inspect the issue".into(),
+            mention_tag_id: Some("builder".into()),
+            direct: false,
+        };
+        let slack_task = store
+            .accept_slack_event("connector:slack-test", &slack)
+            .await
+            .unwrap()
+            .task
+            .unwrap();
+        let lark_task = store
+            .accept_lark_event("connector:lark/shared", &lark)
+            .await
+            .unwrap()
+            .task
+            .unwrap();
+        let receipts = |store: &Store| {
+            let pool = store.pool.clone();
+            async move {
+                let mut count = 0;
+                for table in ["supertag_v2_slack_events", "supertag_v2_lark_events"] {
+                    count += sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table}"))
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                }
+                count
+            }
+        };
+        assert_eq!(receipts(&store).await, 2);
+        // Within seven days both receipts stay.
+        clock.fetch_add(EVENT_RECEIPT_MS - 1, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(store.sweep_event_receipts().await.unwrap(), 0);
+        clock.fetch_add(2, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(store.sweep_event_receipts().await.unwrap(), 2);
+        assert_eq!(receipts(&store).await, 0);
+        // A late redelivery still maps to the original Tasks through the message receipts.
+        assert_eq!(
+            store
+                .accept_slack_event("connector:slack-test", &slack)
+                .await
+                .unwrap()
+                .task,
+            Some(slack_task)
+        );
+        assert_eq!(
+            store
+                .accept_lark_event("connector:lark/shared", &lark)
+                .await
+                .unwrap()
+                .task,
+            Some(lark_task)
+        );
+        let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(tasks, 2);
+        store.close().await;
+    }
+
+    #[tokio::test]
+    async fn sqlite_event_receipts_expire() {
+        let directory = tempfile::tempdir().unwrap();
+        receipt_expiry(&format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("receipts.db").display()
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+    async fn postgres_event_receipts_expire() {
+        let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+            .expect("PostgreSQL test URL file required");
+        let admin_url = std::fs::read_to_string(path).unwrap();
+        let name = format!("supertag_rust_receipts_{}", Uuid::new_v4().simple());
+        let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
+        admin
+            .execute(format!("CREATE DATABASE {name}").as_str())
+            .await
+            .unwrap();
+        let mut url = url::Url::parse(admin_url.trim()).unwrap();
+        url.set_path(&name);
+        let outcome = tokio::task::LocalSet::new()
+            .run_until(async move {
+                tokio::task::spawn_local(async move { receipt_expiry(url.as_str()).await }).await
+            })
+            .await;
+        admin
+            .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+            .await
+            .unwrap();
+        admin.close().await.unwrap();
+        outcome.expect("PostgreSQL receipt expiry contract failed");
     }
 }

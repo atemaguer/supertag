@@ -94,6 +94,8 @@ without another mention.
 - Mentioning another Tag in a chat that belongs to this one gets one short answer in the thread
   that says which Tag the chat belongs to. A redelivered event gets no second answer. A
   redelivered event with different content is acknowledged and never admitted.
+- The Control Plane keeps each event ID for 7 days. A message itself is remembered for good, so a
+  later redelivery still reaches the same Task.
 
 ## If something goes wrong
 
