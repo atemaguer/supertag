@@ -2899,6 +2899,7 @@ dependencies = [
  "supertag-control-plane",
  "supertag-credential-vault",
  "supertag-gateway",
+ "supertag-git-delivery",
  "supertag-github",
  "supertag-local-state",
  "supertag-protocol",
@@ -3029,19 +3030,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "supertag-github"
+name = "supertag-git-delivery"
 version = "0.3.0"
 dependencies = [
  "anyhow",
- "axum",
  "base64 0.22.1",
- "chrono",
  "libc",
- "reqwest",
- "ring",
- "rustls-pki-types",
- "serde_json",
  "sha2 0.10.9",
+ "supertag-credential-vault",
  "supertag-protocol",
  "supertag-workspaces",
  "tempfile",
@@ -3049,6 +3045,21 @@ dependencies = [
  "tokio-util",
  "tonic",
  "uuid",
+]
+
+[[package]]
+name = "supertag-github"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "reqwest",
+ "ring",
+ "rustls-pki-types",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
 ]
 
 [[package]]

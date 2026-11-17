@@ -2952,7 +2952,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
     ensure!(
         refused.code() == tonic::Code::FailedPrecondition
             && refused.message().starts_with(
-                &format!("incompatible SuperTag protocol: this Control Plane (SuperTag {VERSION}) speaks protocol versions [3], but the call names protocol 2")
+                &format!("incompatible SuperTag protocol: this Control Plane (SuperTag {VERSION}) speaks protocol versions [4], but the call names protocol 2")
             ),
         "{refused:?}"
     );

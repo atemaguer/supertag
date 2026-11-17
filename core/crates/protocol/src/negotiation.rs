@@ -660,9 +660,9 @@ mod tests {
             build_version: "0.1.0\u{1b}[31m".into(),
         };
         let accepted = gateway
-            .answer(&request(ServiceRole::WorkerHost, vec![2, 3]))
+            .answer(&request(ServiceRole::WorkerHost, vec![2, 3, 4]))
             .unwrap();
-        assert_eq!(accepted.protocol_version, 3);
+        assert_eq!(accepted.protocol_version, 4);
         assert_eq!(accepted.role, ServiceRole::Gateway as i32);
         let refused = gateway
             .answer(&request(ServiceRole::WorkerHost, vec![2]))
@@ -671,12 +671,12 @@ mod tests {
         assert_eq!(
             refused.message(),
             format!(
-                "incompatible SuperTag protocol: this Gateway (SuperTag {}) speaks protocol versions [3], but the connecting Worker Host (SuperTag 0.1.0[31m) offered [2]; upgrade the connecting Worker Host",
+                "incompatible SuperTag protocol: this Gateway (SuperTag {}) speaks protocol versions [4], but the connecting Worker Host (SuperTag 0.1.0[31m) offered [2]; upgrade the connecting Worker Host",
                 build_version()
             ),
         );
         let newer = gateway
-            .answer(&request(ServiceRole::WorkerHost, vec![4]))
+            .answer(&request(ServiceRole::WorkerHost, vec![5]))
             .unwrap_err();
         assert!(
             newer.message().ends_with("; upgrade this Gateway"),
@@ -786,7 +786,7 @@ mod tests {
                 .refusal("/grpc.health.v1.Health/Check", &headers(None))
                 .is_none()
         );
-        assert!(fence.refusal(operator, &headers(Some("3"))).is_none());
+        assert!(fence.refusal(operator, &headers(Some("4"))).is_none());
         let skipped = fence.refusal(operator, &headers(None)).unwrap();
         assert_eq!(skipped.code(), Code::FailedPrecondition);
         assert!(
@@ -799,7 +799,7 @@ mod tests {
         let old = fence.refusal(operator, &headers(Some("2"))).unwrap();
         assert!(
             old.message().starts_with(
-                &format!("incompatible SuperTag protocol: this Gateway (SuperTag {}) speaks protocol versions [3], but the call names protocol 2", build_version())
+                &format!("incompatible SuperTag protocol: this Gateway (SuperTag {}) speaks protocol versions [4], but the call names protocol 2", build_version())
             ),
             "{}",
             old.message()
@@ -808,8 +808,8 @@ mod tests {
             let refused = fence.refusal(operator, &headers(Some(invalid))).unwrap();
             assert!(refused.message().contains("invalid"), "{invalid}");
         }
-        let mut repeated = headers(Some("3"));
-        repeated.append(PROTOCOL_HEADER, "3".parse().unwrap());
+        let mut repeated = headers(Some("4"));
+        repeated.append(PROTOCOL_HEADER, "4".parse().unwrap());
         assert!(fence.refusal(operator, &repeated).is_some());
     }
 }

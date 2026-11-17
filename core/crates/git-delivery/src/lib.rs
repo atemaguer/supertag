@@ -22,20 +22,21 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
     git_remote::{RemoteTransport, remote_transport},
-    v2::{BlobHolder, BlobReference, Workspace},
+    v2::{BlobHolder, Workspace, WorkspaceDeliveryReference},
 };
 use tempfile::TempDir;
 
 pub use credentials::{Credential, Credentials};
 
-/// Reads a Workspace delivery's bundle from the Worker Host that holds it. The Control Plane
-/// stores no delivery bytes; its relay writes them to `destination`.
+/// Reads a complete bundle of a Workspace delivery's commit from the Worker Host that holds it.
+/// The Control Plane stores no delivery bytes; its relay writes them to `destination`. The bundle
+/// has no recorded digest: git delivery checks it with git against the delivered commit.
 #[tonic::async_trait]
 pub trait BundleReader: Send + Sync + 'static {
     async fn read(
         &self,
         holder: &BlobHolder,
-        bundle: &BlobReference,
+        delivery: &WorkspaceDeliveryReference,
         destination: &Path,
     ) -> Result<()>;
 }

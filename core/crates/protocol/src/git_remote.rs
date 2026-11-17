@@ -79,7 +79,7 @@ pub fn remote_transport(remote: &str) -> Result<RemoteTransport, String> {
                 if url.host_str().is_some_and(|host| !host.is_empty())
                     || !url.path().starts_with('/')
                     || url.path().len() <= 1
-                    || url.path().split('/').any(|part| part == "..")
+                    || remote.split('/').any(|part| part == "..")
                 {
                     return Err("a file:// Workspace remote names an absolute path".into());
                 }

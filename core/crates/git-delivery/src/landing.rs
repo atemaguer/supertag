@@ -124,7 +124,6 @@ impl GitDelivery {
             .delivery
             .as_ref()
             .context("landing has no delivery")?;
-        let blob = delivery.bundle.as_ref().context("delivery has no bundle")?;
         let head = delivery.head_commit.clone();
         ensure!(valid_git_commit(&head), "invalid delivered commit");
         let workspace = Workspace {
@@ -140,14 +139,20 @@ impl GitDelivery {
             Err(error) => return Ok(Outcome::Held(format!("{error:#}"))),
         };
         let session = self.session(&remote)?;
+        // The relayed bundle has no recorded digest: materializing it verifies it is complete
+        // and holds exactly the delivered commit.
+        let bytes = std::fs::read(bundle)?;
         let repository = source::materialize(
             &session.directory.path().join("delivered"),
             &TransferArtifact {
                 // Every directory on the way is checked, so a platform alias such as macOS's
                 // `/var` is resolved first.
                 path: bundle.canonicalize()?,
-                sha256: blob.sha256.clone(),
-                byte_length: blob.byte_length,
+                sha256: {
+                    use sha2::Digest as _;
+                    format!("{:x}", sha2::Sha256::digest(&bytes))
+                },
+                byte_length: bytes.len() as u64,
             },
             &head,
             cancel,
@@ -463,7 +468,6 @@ impl Runner {
             .delivery
             .as_ref()
             .context("landing has no delivery")?;
-        let blob = delivery.bundle.as_ref().context("delivery has no bundle")?;
         let Some(holder) = &claim.holder else {
             return Ok(Outcome::Retry(LANDING_HOLDER_OFFLINE.into()));
         };
@@ -471,7 +475,7 @@ impl Runner {
             .prefix(crate::SCRATCH_PREFIX)
             .tempdir_in(&self.delivery.0.directory)?;
         let path = scratch.path().join("delivery.bundle");
-        if let Err(error) = self.bundles.read(holder, blob, &path).await {
+        if let Err(error) = self.bundles.read(holder, delivery, &path).await {
             if error
                 .downcast_ref::<Status>()
                 .is_some_and(|status| status.code() == Code::Unavailable)

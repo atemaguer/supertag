@@ -19,8 +19,7 @@ Commands:
   verify                Check a running deployment through its public Control Plane endpoint
   diff                  Preview an organization manifest through the Control Plane
   apply                 Apply an organization manifest through the Control Plane
-  github-publication    Stop further provider writes of a GitHub publication
-  workspace             Select GitHub Workspace sources pinned to one repository and commit
+  workspace             Declare remote Workspaces on any git server, their Workspace Credentials, and check them
   reply                 Resolve uncertain connector replies from provider evidence
   role                  Define reusable Roles: purpose, instructions, Permission Sets, and Context Sets
   role-assignment       Assign Roles to Tags and deactivate assignments
@@ -453,59 +452,18 @@ Options:
           Print help
 ```
 
-## `supertag github-publication`
-
-```text
-Stop further provider writes of a GitHub publication
-
-Usage: supertag github-publication [OPTIONS] <COMMAND>
-
-Commands:
-  cancel  Stop further provider writes. This does not delete a branch or close a PR
-  help    Print this message or the help of the given subcommand(s)
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --state-directory <STATE_DIRECTORY>
-          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-  -h, --help
-          Print help
-```
-
-## `supertag github-publication cancel`
-
-```text
-Stop further provider writes. This does not delete a branch or close a PR
-
-Usage: supertag github-publication cancel [OPTIONS] --reason <REASON> <PUBLICATION_ID>
-
-Arguments:
-  <PUBLICATION_ID>  
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --reason <REASON>
-          Why provider writes stop; recorded with the cancellation
-      --operation-id <OPERATION_ID>
-          Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
-      --state-directory <STATE_DIRECTORY>
-          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-  -h, --help
-          Print help
-```
-
 ## `supertag workspace`
 
 ```text
-Select GitHub Workspace sources pinned to one repository and commit
+Declare remote Workspaces on any git server, their Workspace Credentials, and check them
 
 Usage: supertag workspace [OPTIONS] <COMMAND>
 
 Commands:
-  put   Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Control Plane
-  help  Print this message or the help of the given subcommand(s)
+  put         Create or replace a remote Workspace: a git remote, the branch Sessions start from, the Workspace Credentials that read and push it, and where Session changes land
+  check       Read the remote and check pushing with the Workspace's credentials, without changing it
+  credential  Store, list, and remove the Workspace Credentials git delivery uses
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -519,34 +477,157 @@ Options:
 ## `supertag workspace put`
 
 ```text
-Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Control Plane
+Create or replace a remote Workspace: a git remote, the branch Sessions start from, the Workspace Credentials that read and push it, and where Session changes land
 
-Usage: supertag workspace put [OPTIONS] --account <ACCOUNT> --repository-id <REPOSITORY_ID> --repository <REPOSITORY> <WORKSPACE_ID>
+Usage: supertag workspace put [OPTIONS] --remote <REMOTE> <WORKSPACE_ID>
+
+Arguments:
+  <WORKSPACE_ID>
+          
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+
+      --remote <REMOTE>
+          The git remote: https://..., ssh://..., user@host:path, or file:///path/to/bare.git
+
+      --ref <REFERENCE>
+          The branch each new Session starts from. Default: the remote's default branch
+
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+
+      --credential <CREDENTIAL>
+          The Workspace Credential that both reads and pushes
+
+      --read-credential <READ_CREDENTIAL>
+          The Workspace Credential that reads the remote
+
+      --push-credential <PUSH_CREDENTIAL>
+          The Workspace Credential that pushes to the remote
+
+      --land <LAND>
+          Where Session changes land. Omit to keep them with SuperTag (supertag fetch)
+
+          Possible values:
+          - branch: Each delivered Task updates its Session's branch supertag/session/ID on the remote
+          - merge:  Finished Sessions merge into --target, which is pushed
+
+      --target <TARGET>
+          The branch finished Sessions merge into, with --land merge
+
+      --expected-revision <EXPECTED_REVISION>
+          The revision you last read. If given, the change is refused when the resource has changed since
+
+      --operation-id <OPERATION_ID>
+          Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `supertag workspace check`
+
+```text
+Read the remote and check pushing with the Workspace's credentials, without changing it
+
+Usage: supertag workspace check [OPTIONS] <WORKSPACE_ID>
 
 Arguments:
   <WORKSPACE_ID>  
 
 Options:
-      --account <ACCOUNT>
-          Configured GitHub account that reads the repository
       --gateway <URL|NAME>
           Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --repository-id <REPOSITORY_ID>
-          Numeric GitHub repository ID, which survives renames
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-      --repository <REPOSITORY>
-          Repository as OWNER/NAME; must match the repository ID
-      --commit <COMMIT>
-          Pin this full commit SHA
-      --ref <REFERENCE>
-          Select a branch or tag. Omit commit and ref to use the default branch
-      --pull-request-base <PULL_REQUEST_BASE>
-          Publish verified results as a draft pull request into this branch
-      --expected-revision <EXPECTED_REVISION>
-          The revision you last read. If given, the change is refused when the resource has changed since
-      --operation-id <OPERATION_ID>
-          Idempotency key: a retry with the same key returns the first result instead of acting twice. Defaults to a new key
+  -h, --help
+          Print help
+```
+
+## `supertag workspace credential`
+
+```text
+Store, list, and remove the Workspace Credentials git delivery uses
+
+Usage: supertag workspace credential [OPTIONS] <COMMAND>
+
+Commands:
+  add     Store a Workspace Credential in this machine's credential vault and name it on the Control Plane. Run it on the machine that runs the Control Plane, or with its vault
+  list    List Workspace Credentials, without their secrets
+  remove  Remove a Workspace Credential no Workspace names, here and on the Control Plane
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag workspace credential add`
+
+```text
+Store a Workspace Credential in this machine's credential vault and name it on the Control Plane. Run it on the machine that runs the Control Plane, or with its vault
+
+Usage: supertag workspace credential add [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --ssh-key <PATH>
+          An SSH private key file, such as a deploy key without a passphrase
+      --known-hosts <PATH>
+          A known_hosts file with the server's host keys. Without it, the first key seen is trusted and remembered
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --https-token
+          An HTTPS token or password, read from SUPERTAG_WORKSPACE_TOKEN or a hidden prompt
+      --username <USERNAME>
+          The HTTPS user name sent with the token [default: supertag]
+      --credential-helper <HELPER>
+          A git credential helper, as git's credential.helper setting names it, such as `!/usr/local/bin/mint-token`
+  -h, --help
+          Print help
+```
+
+## `supertag workspace credential list`
+
+```text
+List Workspace Credentials, without their secrets
+
+Usage: supertag workspace credential list [OPTIONS]
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag workspace credential remove`
+
+```text
+Remove a Workspace Credential no Workspace names, here and on the Control Plane
+
+Usage: supertag workspace credential remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
           Print help
 ```
@@ -1766,7 +1847,7 @@ Options:
           ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
 
       --workspace-from-control-plane
-          Retrieve each Workspace's accepted GitHub source from the Control Plane
+          Serve each --workspace-id as a remote Workspace whose source the Control Plane relays
 
       --skill-catalog <SKILL_CATALOG>
           Private host allowlist of Skill packages.
@@ -1924,8 +2005,8 @@ Options:
       --artifact-s3-volumes <ARTIFACT_S3_VOLUMES>
           Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Control Plane reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto.
 
-      --github-workspace-directory <GITHUB_WORKSPACE_DIRECTORY>
-          Private scratch for GitHub source and publication bundles, using the GitHub account in the `SUPERTAG_GITHUB_*` variables. Each bundle is deleted once its read or publication ends; publication scratch a stopped Control Plane left is removed when it starts
+      --git-delivery-directory <GIT_DELIVERY_DIRECTORY>
+          Private directory of git delivery, which reads remote Workspaces and lands Session changes on them: scratch for each operation and remembered SSH host keys. Default: git-delivery in SUPERTAG_STATE_DIR or ~/.supertag. Workspace Credentials come from the credential vault there (SUPERTAG_CREDENTIAL_VAULT)
 
       --audit-log <stderr|PATH>
           Also write each committed audit entry as one JSON line to `stderr` or to this absolute file path, created owner-only. The database keeps every entry either way
@@ -2210,7 +2291,7 @@ Options:
           ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
 
       --workspace-from-control-plane
-          Retrieve each Workspace's accepted GitHub source from the Control Plane
+          Serve each --workspace-id as a remote Workspace whose source the Control Plane relays
 
       --workspace-mount-mappings <WORKSPACE_MOUNT_MAPPINGS>
           Owner-controlled JSON mappings for Workspace Volume copies: each maps a Volume to a destination root, and an S3 Volume's credential name to an endpoint, region, and key variables
@@ -2519,7 +2600,7 @@ Options:
       --workspace-id <WORKSPACE_ID>
           Logical local or configured GitHub repository binding
       --workspace-base <WORKSPACE_BASE>
-          Full local Git base commit every Session starts from. Omit for a configured GitHub source
+          Full local Git base commit every Session starts from. Omit for a remote Workspace
       --workspace-ref <WORKSPACE_REF>
           Local Git branch whose current commit each new Session starts from, such as main
       --workspace-mounts <WORKSPACE_MOUNTS>
@@ -3473,13 +3554,13 @@ Commands:
   volume                Read one Volume, or list registered Volumes [alias: volumes]
   volume-copy           Read one recorded artifact copy, or list them newest first, optionally for one Volume [alias: volume-copies]
   workspace-volume      Read one Workspace data Volume [alias: workspace-volumes]
-  workspace             Read one GitHub Workspace source, or list them [alias: workspaces]
+  workspace             Read one remote Workspace, or list them [alias: workspaces]
   auth-key              Read one Auth Key without its secret, or list Auth Keys, revoked, expired and used ones included [alias: auth-keys]
   operator-token        Read one Operator Token without its secret, or list them. Admin operator token only [alias: operator-tokens]
   artifact              Read an artifact's provenance and exact file manifest, or list the artifacts a Task captured [alias: artifacts]
   artifact-publication  Read one artifact publication, or list those approved from an Objective [alias: artifact-publications]
   artifact-consumption  Read one consumption approval, or list those for a destination Objective [alias: artifact-consumptions]
-  github-publication    Read one GitHub publication, or list verified Workspace results and their publication status [alias: github-publications]
+  landing               Read where one Session's changes landed on a remote Workspace, or list landings [alias: landings]
   reply                 Read a connector reply, its delivery status, and its audit history, or list replies [alias: replies]
   input                 Read the delivery status and fallback Task of a message sent to a running Task [alias: inputs]
   surface-account       Read one verified connector account, or list them [alias: surface-accounts]
@@ -3835,7 +3916,7 @@ Options:
 ## `supertag get workspace`
 
 ```text
-Read one GitHub Workspace source, or list them
+Read one remote Workspace, or list them
 
 Usage: supertag get workspace [OPTIONS] [ID]
 
@@ -3976,25 +4057,27 @@ Options:
           Print help
 ```
 
-## `supertag get github-publication`
+## `supertag get landing`
 
 ```text
-Read one GitHub publication, or list verified Workspace results and their publication status
+Read where one Session's changes landed on a remote Workspace, or list landings
 
-Usage: supertag get github-publication [OPTIONS] [ID]
+Usage: supertag get landing [OPTIONS] [ID]
 
 Arguments:
-  [ID]  Publication ID. Omit to list
+  [ID]  Landing ID. Omit to list
 
 Options:
       --gateway <URL|NAME>
           Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --task-id <TASK_ID>
-          Only results of this Task [default: ""]
-      --limit <LIMIT>
-          Most entries to return on one page [default: 50]
+          Only landings of this Task's delivery [default: ""]
+      --session-id <SESSION_ID>
+          Only landings of this Session [default: ""]
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --limit <LIMIT>
+          Most entries to return on one page [default: 50]
       --before-order <BEFORE_ORDER>
           Continue from the next_before_order the previous page returned [default: 0]
   -h, --help
@@ -4313,7 +4396,7 @@ Describe one resource in readable text
 Usage: supertag describe [OPTIONS] <KIND> <ID>
 
 Arguments:
-  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, gateway, client, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, github-publication, reply, input, surface-account, surface-location, approval, question, schedule, memory]
+  <KIND>  The kind of resource. Only kinds read by ID can be described [possible values: tag, task, objective, team, host, gateway, client, session, role, permission-set, context-set, volume, volume-copy, workspace-volume, workspace, auth-key, operator-token, artifact, artifact-publication, artifact-consumption, landing, reply, input, surface-account, surface-location, approval, question, schedule, memory]
   <ID>    The resource's ID or name
 
 Options:
@@ -4339,7 +4422,7 @@ Commands:
   permission-set    Delete an unused Permission Set [alias: permission-sets]
   context-set       Delete an unused Context Set [alias: context-sets]
   volume            Remove a Volume's metadata when no reserved or verified copies depend on it [alias: volumes]
-  workspace         Delete a GitHub Workspace source at its exact revision [alias: workspaces]
+  workspace         Delete a remote Workspace at its exact revision [alias: workspaces]
   surface-location  Remove a location's policy and stop new work on its connector alias [alias: surface-locations]
   schedule          Cancel a Schedule. A turn it already queued stays queued [alias: schedules]
   memory            Delete one of a Tag's notes. To change a note, tell the Tag [alias: memories]
@@ -4455,7 +4538,7 @@ Options:
 ## `supertag delete workspace`
 
 ```text
-Delete a GitHub Workspace source at its exact revision
+Delete a remote Workspace at its exact revision
 
 Usage: supertag delete workspace [OPTIONS] --expected-revision <EXPECTED_REVISION> <ID>
 

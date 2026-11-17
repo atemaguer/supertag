@@ -630,7 +630,7 @@ impl Store {
         }) {
             return Err(StoreError::FailedPrecondition(reason));
         }
-        crate::github_workspaces::validate_tag_in(transaction, workspace.as_ref()).await?;
+        crate::remote_workspaces::validate_tag_in(transaction, workspace.as_ref()).await?;
         crate::remote_workspaces::validate_tag_in(transaction, workspace.as_ref()).await?;
         crate::workspace_mounts::configure_in(transaction, &mut workspace).await?;
         if let Some(spec) = workspace.as_mut()

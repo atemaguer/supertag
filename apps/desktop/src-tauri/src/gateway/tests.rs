@@ -103,7 +103,7 @@ async fn a_gateway_from_an_older_protocol_is_refused_on_connect_with_the_fix() {
     assert_eq!(
         refused,
         format!(
-            "This app speaks SuperTag protocol 3, but the Gateway at {address} runs SuperTag {} (protocol 2). Upgrade the Gateway.",
+            "This app speaks SuperTag protocol 4, but the Gateway at {address} runs SuperTag {} (protocol 2). Upgrade the Gateway.",
             supertag_protocol::negotiation::build_version()
         )
     );

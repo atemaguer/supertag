@@ -179,7 +179,7 @@ impl ApiTransfers {
     }
 
     /// Writes a complete bundle of `delivery`'s commit, which `holder` builds on demand, into
-    /// `destination`. The GitHub publisher reads deliveries this way: its scratch repository
+    /// `destination`. Git delivery reads deliveries this way: its scratch repository
     /// starts empty. The bundle has no recorded digest; the caller checks it with Git against the
     /// delivered commit and deletes the file.
     pub async fn relay_complete_bundle_to_file(
