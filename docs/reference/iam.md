@@ -616,11 +616,8 @@ this Worker Host offers no network credential github; configure it under network
 a host that runs the Tag
 ```
 
-Codex code mode stays off for a Task whose scope limits hosts or methods. Code-mode commands can
-reach the network outside the sandbox, so they would bypass the proxy. Every current Codex model
-runs commands only in code mode. Such a Task therefore runs commands only on a Codex model that
-is not code-mode-only, and otherwise fails when its turn starts, naming the model. See
-[Codex commands and models](../operations/requirements.md#codex-commands-and-models).
+Codex code-mode commands run under the same profile, so they reach the network only through
+the managed proxy and the egress proxy as well.
 
 ### Network log
 

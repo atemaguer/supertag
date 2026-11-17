@@ -187,12 +187,13 @@ pub(crate) fn user_home() -> Result<PathBuf> {
 /// the limited network profile in the Codex 0.163.0 macOS integration probe, so it runs only when
 /// the Task also admits web:fetch and the sandbox allows the network anyway.
 ///
-/// A narrowed network scope keeps it off too: code-mode commands would bypass the sandbox's
-/// network policy and so the egress proxy's allow-list.
+/// A narrowed network scope keeps code mode: code-mode commands run under the same managed-proxy
+/// profile and reach only the scope's hosts through the egress proxy (live probe on Codex
+/// 0.163.0 with gpt-6-sol, 2026-11-17: the allowed origin passed through the egress proxy, another
+/// origin got 403 from the managed proxy, a direct connection could not resolve, and code-mode
+/// JavaScript has no fetch).
 pub(crate) fn code_mode_host(policy: &Policy) -> bool {
-    policy.commands
-        && policy.network
-        && !policy.egress.as_ref().is_some_and(|egress| egress.narrowed)
+    policy.commands && policy.network
 }
 
 pub(crate) fn arguments(
@@ -967,8 +968,8 @@ mod tests {
             "permissions.supertag.network.allow_upstream_proxy=true",
             "features.network_proxy.enabled=true",
             "permissions.supertag.network.domains={ \"api.github.com\" = \"allow\", \"pypi.org\" = \"allow\" }",
-            // Code-mode commands would bypass the sandbox's network policy.
-            "features.code_mode_host=false",
+            // Code-mode commands run under the same profile.
+            "features.code_mode_host=true",
         ] {
             assert!(args.contains(&expected.to_owned()), "{expected}: {args:?}");
         }

@@ -211,8 +211,6 @@ struct Stream {
     inventory: crate::questions::Tools,
     /// Commands are admitted, but the code-mode host stays off; see `config::code_mode_host`.
     commands_without_code_mode: bool,
-    /// The code-mode host is off because of a narrowed network scope, not a missing web:fetch.
-    network_scoped: bool,
 }
 
 impl Stream {
@@ -227,7 +225,6 @@ impl Stream {
     ) -> Result<Self> {
         let resumed = expected_thread.is_some();
         let commands_without_code_mode = policy.commands && !crate::config::code_mode_host(&policy);
-        let network_scoped = policy.egress.as_ref().is_some_and(|egress| egress.narrowed);
         let mut native = events::Stream::new(policy, expected_thread);
         native.accept(&serde_json::to_vec(
             &json!({"type":"thread.started","thread_id":thread}),
@@ -249,7 +246,6 @@ impl Stream {
             resumed,
             inventory,
             commands_without_code_mode,
-            network_scoped,
         })
     }
 
@@ -592,21 +588,6 @@ impl Stream {
                         .as_str()
                         .is_some_and(|message| message.contains("code-mode host is disabled")) =>
             {
-                let model = self
-                    .configured_model
-                    .as_deref()
-                    .or(self.observed_model.as_deref())
-                    .unwrap_or("default");
-                if self.network_scoped {
-                    bail!(
-                        "Codex model {model} needs Codex code mode to run commands, and SuperTag \
-                         keeps code mode off for a Task whose Permission Sets limit web:fetch to \
-                         hosts or methods, because code-mode commands can reach the network \
-                         outside the sandbox and its egress proxy. Select a Codex model that is \
-                         not code-mode-only, or remove hosts and methods from the Tag's web:fetch \
-                         grants"
-                    );
-                }
                 bail!(
                     "Codex model {} needs Codex code mode to run commands, and SuperTag starts \
                      code mode only when the Task also has web:fetch, because code-mode commands \
@@ -1410,6 +1391,91 @@ mod tests {
         child.kill().await?;
         child.wait().await?;
         result
+    }
+
+    /// One live model turn (operator-approved): a code-mode command under a narrowed network
+    /// scope's profile. On 2026-11-17 with gpt-6-sol, the allowed origin passed through the egress
+    /// proxy, another got 403 from the managed proxy, a direct connection could not resolve, and
+    /// code-mode JavaScript had no fetch. Prints what happened; a person judges.
+    /// Needs SUPERTAG_TEST_CODEX_BINARY, SUPERTAG_LIVE_CODE_MODE_HOME (a private CODEX_HOME
+    /// holding a copied auth.json), and SUPERTAG_LIVE_CODE_MODE_MODEL.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "spends one live Codex turn; run only with operator approval"]
+    async fn live_code_mode_under_a_narrowed_network_scope() -> Result<()> {
+        use supertag_protocol::v2::{NetworkRule, NetworkScope};
+        use supertag_worker_host::egress;
+        let executable = std::env::var_os("SUPERTAG_TEST_CODEX_BINARY")
+            .context("set SUPERTAG_TEST_CODEX_BINARY")?;
+        let home = std::env::var_os("SUPERTAG_LIVE_CODE_MODE_HOME")
+            .context("set SUPERTAG_LIVE_CODE_MODE_HOME")?;
+        let model = std::env::var("SUPERTAG_LIVE_CODE_MODE_MODEL")
+            .context("set SUPERTAG_LIVE_CODE_MODE_MODEL")?;
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().canonicalize()?;
+        let workspace = root.join("workspace");
+        std::fs::create_dir(&workspace)?;
+        let proxy = egress::EgressProxy::start(egress::Config::new(
+            NetworkScope {
+                any_origin: false,
+                rules: vec![NetworkRule {
+                    origins: vec!["https://example.com".into()],
+                    methods: vec!["GET".into()],
+                    credential: String::new(),
+                }],
+            },
+            vec![],
+        ))
+        .await?;
+        let files = egress::write_sandbox_files(&proxy, &root.join("egress"))?;
+        let mut policy = Policy::from_actions(
+            &[
+                "files:write".into(),
+                "commands:execute".into(),
+                "web:fetch".into(),
+            ],
+            true,
+        )?;
+        policy.egress = Some(crate::config::Egress {
+            proxy: proxy.url(),
+            ca_certificate: files.ca_certificate.clone(),
+            ca_bundle: files.ca_bundle.clone(),
+            placeholders: Default::default(),
+            hosts: ["example.com".to_owned()].into(),
+            narrowed: true,
+        });
+        let args = crate::config::arguments(&workspace, Some(&model), Some("low"), &policy)?;
+        assert!(args.contains(&"features.code_mode_host=true".to_owned()));
+        let configuration: Vec<String> = args[3..].to_vec();
+        let prompt = "Run exactly these three shell commands, one after the other, then try one \
+            JavaScript fetch, and reply with only the four results, one per line, nothing else:\n\
+            curl -sS -m 15 -o /dev/null -w 'allowed=%{http_code}' https://example.com/ || echo allowed-failed=$?\n\
+            curl -sS -m 15 -o /dev/null -w 'denied=%{http_code}' https://example.org/ || echo denied-failed=$?\n\
+            curl -sS -m 15 --noproxy '*' -o /dev/null -w 'direct=%{http_code}' https://example.org/ || echo direct-failed=$?\n\
+            In the same code-mode script, if a global fetch exists, call \
+            fetch('https://example.org/') and report fetch=STATUS, or fetch-error=MESSAGE, or \
+            fetch=unavailable.";
+        let output = Command::new(&executable)
+            .arg("exec")
+            .args(["--skip-git-repo-check", "--json"])
+            .args(configuration)
+            .arg(prompt)
+            .current_dir(&workspace)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").context("probe PATH")?)
+            .env("HOME", &home)
+            .env("CODEX_HOME", &home)
+            .env("TMPDIR", &root)
+            .envs(policy.egress.as_ref().unwrap().process_environment())
+            .stdin(Stdio::null())
+            .output()
+            .await?;
+        // terminal-safe: probe output for the operator.
+        println!("status: {}", output.status);
+        println!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+        println!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+        println!("egress log: {:#?}", proxy.stop().await);
+        Ok(())
     }
 
     /// A narrowed network scope, through the real sandbox, Codex's managed proxy, and the Worker

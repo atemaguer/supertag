@@ -18,7 +18,7 @@ for flag in [
     "features.network_proxy.enabled=true",
     "permissions.supertag.network.allow_upstream_proxy=true",
     'permissions.supertag.network.domains={ "api.github.com" = "allow" }',
-    "features.code_mode_host=false",
+    "features.code_mode_host=true",
 ]:
     assert flag in sys.argv, (flag, sys.argv)
 Path("@RECORD@").write_text(

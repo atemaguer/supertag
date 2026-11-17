@@ -45,8 +45,8 @@ within the pre-1.0 compatibility policy described in
   placeholder for the secret only in requests a grant naming it allows, so the secret never
   enters the sandbox. Codex enforces scopes in its sandbox through its managed network proxy;
   other harnesses and remote Workspaces wait with requirement `network-scope`, and so does a
-  Task whose credential no host offers. Codex code mode stays off under a scope that limits
-  hosts or methods. `supertag describe task` shows the scope and each Task Attempt's network
+  Task whose credential no host offers. Codex code-mode commands run under the same limits.
+  `supertag describe task` shows the scope and each Task Attempt's network
   log of allowed and refused requests.
 - Permission Sets can scope file access to paths. A `files:write` grant takes `paths` it may
   write and `exclude` entries that stay read-only; a `files:read` grant takes `exclude` entries
