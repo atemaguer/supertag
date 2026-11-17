@@ -107,7 +107,8 @@ revocation block older connections without exposing credentials through ordinary
 A **connection generation** is the increasing number that identifies the current connection.
 
 Most of these records are inspectable but not declaratively applied. An Objective, with the Team
-it names, may also be declared in a manifest; see [Declared Objectives](#declared-objectives).
+it names, may also be declared in a manifest; see [Declared Objectives](#declared-objectives). So
+may a recurring Schedule; see [Declared Schedules](#declared-schedules).
 Otherwise an Objective comes from `supertag objective create` or a person's `/goal` message,
 a Team from `supertag team create`, a Schedule from a Tag's `schedule` tool or
 `supertag schedule create`, and a note of a Tag's Memory from its `remember` tool. A Team's Workstream exists with the Team. Status is never
@@ -632,6 +633,38 @@ Applying an Objective that does not exist creates it and queues its owner's firs
 with `objective set-limits`, `set-runtime-actions`, `pause`, `resume`, `cancel`, or `complete`.
 `supertag get objective ID` returns the full Objective record as JSON.
 
+## Declared Schedules
+
+A Schedule manifest declares a recurring wake-up, such as a weekly summary, beside the Tag that
+does it. Operators only.
+
+```yaml
+apiVersion: supertag/v1
+kind: Schedule
+metadata:
+  name: weekly-summary
+spec:
+  tag: lead
+  every: "0 9 * * MON"
+  timeZone: Europe/Berlin
+  note: Summarize open work and what is blocked.
+```
+
+| Field | Meaning |
+| --- | --- |
+| `metadata.name` | The Schedule ID: 1 to 63 lowercase letters, digits, and hyphens. |
+| `spec.tag` | Required. The Tag's ID. It cannot change once the Schedule exists. |
+| `spec.every` | Required. A cron expression. Occurrences are at least an hour apart. |
+| `spec.timeZone` | An IANA name. Omitted: the Control Plane's time zone. |
+| `spec.note` | Required. What the Tag should do when woken, up to 4,000 characters. |
+
+The Schedule fires in the applying operator's conversation with the Tag. Applying it again with a
+changed `every`, `timeZone`, or `note` updates it in place, keeps its history, and moves its next
+time to the next occurrence. A paused Schedule stays paused; a deleted one becomes active again.
+A one-off Schedule cannot be declared; use `supertag schedule create --at`. Each field has a
+[field manager](#field-managers-and-apply-sets), and `apply --set NAME --prune` deletes a Schedule
+the set no longer declares.
+
 ## Declared Surface Accounts
 
 A SurfaceAccount manifest records a connected account's identity and the Gateway that serves it.
@@ -673,7 +706,8 @@ fields. `supertag get surface-account NAME` returns the account as JSON.
 ## Deletion
 
 `supertag delete` removes a Team, Permission Set, Context Set, Volume, Workspace, or surface
-location. Tags and Roles are retired instead, and Objectives cancelled; none is erased. Deletion
+location. Tags and Roles are retired instead, and Objectives and Schedules cancelled; none is
+erased. Deletion
 never erases history, and it refuses a resource that is still in use:
 
 | Resource | Refused while |

@@ -570,7 +570,8 @@ schedule(note: "Summarize open work", every: "0 9 * * MON", timeZone: "Europe/Be
 - `every` is a five-field cron expression, or `@hourly`, `@daily`, or `@weekly`. Its occurrences
   are at least an hour apart. It is read in its time zone, across daylight saving changes.
 - A time without an offset, and every recurrence, is read in `timeZone`, an IANA name. Without it,
-  SuperTag uses the Control Plane's time zone: `SUPERTAG_TIME_ZONE`, else the machine's, else UTC.
+  SuperTag uses the Control Plane's time zone: the `time-zone` in `supertag.yaml` or
+  `SUPERTAG_TIME_ZONE`, else the machine's, else UTC.
   The tool's description names it and the time the turn started.
 - A Schedule the tool creates takes effect when its turn succeeds. A turn that fails, is cancelled,
   or loses its lease creates none, so a retried turn never schedules twice.
@@ -605,10 +606,13 @@ Limits: a Tag holds at most 25 Schedules that have not finished, and one turn cr
 A turn gets the tools only when its Tag holds the `schedule:create` runtime action; see
 [the IAM reference](iam.md#current-action-vocabulary).
 
-Operators manage Schedules with `supertag schedule create`, `pause`, and `resume`, and with
-`supertag get schedule`, `describe schedule`, and `delete schedule`; see
+Operators manage Schedules with `supertag schedule create`, `pause`, `resume`, and `backfill`,
+and `get`, `describe`, and `delete schedule`, or declare recurring ones in
+[manifests](resource-model.md#declared-schedules); see
 [Ask a Tag to follow up](../guides/talk-to-a-tag.md#ask-a-tag-to-follow-up). A client sees and
-changes the Schedules of its own conversations.
+changes the Schedules of its own conversations. `backfill ID --from TIME` queues one turn for
+each occurrence since `TIME` that queued none, at most 24; a replayed occurrence is never
+replayed again. The Watch reports each Schedule change as `WATCH_KIND_SCHEDULE`.
 
 ### Memory
 

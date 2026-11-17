@@ -14,8 +14,10 @@ the [glossary](../reference/glossary.md) for other terms, and
 | Local | `supertag up` runs it, with a Gateway, from `~/.supertag/supertag.yaml` | SQLite at `~/.supertag/runtime.sqlite3`, or PostgreSQL from the `control-plane` service's `database` |
 | Hosted | `supertag control-plane` in a container, from the files `supertag setup deployment` writes | PostgreSQL from `SUPERTAG_DATABASE_URL` |
 
-The Control Plane reads Schedule times that name no time zone in `SUPERTAG_TIME_ZONE`, an IANA
-name such as `Europe/Berlin`; without it, in the machine's time zone, or UTC when that is unknown.
+The Control Plane reads Schedule times that name no time zone in its own time zone: the
+`control-plane` service's `time-zone` in `supertag.yaml`, which `supertag init` sets to the
+machine's, or `SUPERTAG_TIME_ZONE` for a hosted Control Plane. Each is an IANA name such as
+`Europe/Berlin`. Without either, it uses the machine's time zone, or UTC when that is unknown.
 
 The Control Plane creates and migrates its schema when it starts. It keeps Session checkpoints in
 `--checkpoint-directory`, outside the database. It stores no artifact or Workspace delivery

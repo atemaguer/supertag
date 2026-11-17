@@ -134,6 +134,7 @@ echoing secret values.
 | `url` | `http://LISTENER` | Must match the listener when set |
 | `database.url` | SQLite at `~/.supertag/runtime.sqlite3` | `postgresql://USER@HOST:PORT/DATABASE` without a password. `SUPERTAG_DATABASE_URL` also selects PostgreSQL |
 | `database.password` | none | A secret name. It becomes `PGPASSWORD` for the Control Plane |
+| `time-zone` | the machine's | An IANA name such as `Europe/Berlin`. Schedule times that name no time zone are read in it. `supertag init` writes the machine's |
 | `credentials` | `file` | The credential vault. The local supervisor supports `file` only |
 | `notify` | none | One destination or a list: `webhook:https://HOST/PATH[#SECRET_NAME]` or `slack:CHANNEL_OR_USER` (optionally `slack:WORKSPACE/CHANNEL_OR_USER`). A webhook's secret name must exist under `secrets:`. See [Set up operator notifications](../guides/notifications.md) |
 | `logging.audit` | off | Also write each audit entry as one JSON line to `stderr` or an absolute file path. The database keeps every entry either way. See [Audit log](../operations/control-plane.md#audit-log) |

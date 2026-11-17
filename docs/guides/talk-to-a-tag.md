@@ -173,6 +173,20 @@ supertag delete schedule SCHEDULE_ID
 shows the next time, the missed occurrences, and the latest turn it queued. See
 [Schedules](../reference/coordination.md#schedules) for the rules.
 
+The desktop app lists the Tag's Schedules above the message box, and the terminal UI's
+**Schedules** palette command lists them too. Both show each one's next time and let you pause,
+resume, or delete it.
+
+When SuperTag was down through several occurrences of a recurring Schedule, it fires once and
+counts the rest as missed. To run the missed ones after all:
+
+```sh
+supertag schedule backfill SCHEDULE_ID --from 2d
+```
+
+`--from` takes a duration ago, such as `2d`, or an RFC 3339 time. Each missed occurrence since
+then queues one turn, at most 24.
+
 ## Answer a question or decide an approval
 
 If the Tag asks which region a work Session should use, answer in the same conversation. The

@@ -119,6 +119,12 @@ within the pre-1.0 compatibility policy described in
   schedule`. A Tag schedules only when it holds the new `schedule:create` runtime action:
   `supertag init` and the desktop and terminal UI New Tag forms grant it, and operators add it
   to a Permission Set to let an existing Tag schedule.
+- The desktop app and the terminal UI list a Tag's Schedules with their next time, and pause,
+  resume, or delete them; the lists follow a new `WATCH_KIND_SCHEDULE` Watch kind. Operators
+  declare recurring Schedules in `kind: Schedule` manifests, which `apply --set --prune` manages
+  like other resources, and replay missed occurrences with `supertag schedule backfill ID --from
+  TIME`. `supertag init` writes the machine's time zone as the Control Plane's `time-zone` in
+  `supertag.yaml`.
 - A Tag's conversation shows each message the Tag writes while it works, as soon as it writes
   it: every Tag opens longer work with one short sentence saying what it is about to do. A status
   line under the turn shows its current step, such as a command it runs, in the terminal UI and

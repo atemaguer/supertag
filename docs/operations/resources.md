@@ -156,6 +156,7 @@ a network scope is in [Network scopes](../reference/iam.md#network-scopes).
 | `Tag` | `roles`, `instructions`, `allowedActions`, `execution`, `workspace`, `runsOn`, `acceptsMessagesFrom`, `lead`, `maxWorkSessions`, `memory`, and `startRate` |
 | `Team` | `members` and `maxConcurrency` |
 | `Objective` | An outcome; see [Declare Objectives](#declare-objectives) |
+| `Schedule` | A recurring wake-up of a Tag: `tag`, `every`, `note`, and optionally `timeZone`; see [Declared Schedules](../reference/resource-model.md#declared-schedules) |
 | `Workspace` | A GitHub repository source: `github` with `accountId`, `repositoryId`, `repository`, and a `revision` or `commitSha`, and optionally `pullRequestBase`. A repository on a Worker Host is not a manifest; map it in the host's `workspaces` in `supertag.yaml` |
 | `Volume` | A storage `source`: `file:///absolute/path` or `s3://bucket/prefix` |
 | `SurfaceAccount`, `SurfaceLocation` | A connected account's identity and Gateway, and a location's Tag and policy; see [Declare Surface Accounts](#declare-surface-accounts) |
