@@ -59,6 +59,7 @@ type app struct {
 	files         *taskFilesDialog
 	notes         *notesDialog
 	network       *networkDialog
+	schedules     *schedulesDialog
 	gatewayStore  *gatewayStore
 	savedGateways []client.Target
 	gatewayDialog *gatewayDialog
@@ -102,6 +103,7 @@ func (a *app) start(i int) error {
 	a.closeTaskFiles()
 	a.closeNotes()
 	a.closeNetwork()
+	a.closeSchedules()
 	a.closeGatewayDialog()
 	if a.cancel != nil {
 		a.inner.flush(true)
@@ -125,6 +127,7 @@ func (a *app) stop() {
 	a.closeTaskFiles()
 	a.closeNotes()
 	a.closeNetwork()
+	a.closeSchedules()
 	a.closeGatewayDialog()
 	if a.cancel != nil {
 		a.inner.flush(true)
@@ -172,6 +175,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.network != nil {
 			return a, a.networkKey(msg)
+		}
+		if a.schedules != nil {
+			return a, a.schedulesKey(msg)
 		}
 		if a.palette != nil {
 			return a, a.paletteKeyPress(msg)
@@ -236,10 +242,10 @@ func (a *app) forward(msg tea.Msg) tea.Cmd {
 	if !a.hasTarget {
 		return nil
 	}
-	if a.taskFilesMessage(msg) || a.notesMessage(msg) || a.networkMessage(msg) {
+	if a.taskFilesMessage(msg) || a.notesMessage(msg) || a.networkMessage(msg) || a.schedulesMessage(msg) {
 		return nil
 	}
-	watched := tea.Batch(a.notesWatched(msg), a.networkWatched(msg))
+	watched := tea.Batch(a.notesWatched(msg), a.networkWatched(msg), a.schedulesWatched(msg))
 	next, cmd := a.inner.Update(msg)
 	a.inner = next.(model)
 	return tea.Batch(a.scope(cmd), watched)
@@ -341,7 +347,7 @@ func ownMessage(msg tea.Msg) bool {
 }
 
 func (a *app) View() tea.View {
-	if (!a.choosing && a.palette == nil && a.files == nil && a.notes == nil && a.network == nil && a.gatewayDialog == nil) || a.width == 0 {
+	if (!a.choosing && a.palette == nil && a.files == nil && a.notes == nil && a.network == nil && a.schedules == nil && a.gatewayDialog == nil) || a.width == 0 {
 		if !a.hasTarget {
 			return tea.NewView("")
 		}
@@ -359,6 +365,9 @@ func (a *app) View() tea.View {
 	}
 	if a.network != nil {
 		shown = a.renderNetwork
+	}
+	if a.schedules != nil {
+		shown = a.renderSchedules
 	}
 	if a.gatewayDialog != nil {
 		shown = a.renderGatewayDialog

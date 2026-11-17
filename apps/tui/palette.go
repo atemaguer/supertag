@@ -29,6 +29,7 @@ const (
 	commandOpenInbox
 	commandNotes
 	commandNetwork
+	commandSchedules
 )
 
 // paletteCommand is one row of the palette: a Tag in the Tags section, or an action in the
@@ -113,6 +114,7 @@ func (a *app) commands() []paletteCommand {
 		out = append(out, paletteCommand{id: commandCreateObjective, title: "/goal · Create Objective", about: "owned by " + tag})
 		out = append(out, paletteCommand{id: commandNotes, title: "Notes", about: "what " + tag + " remembers · delete a note"})
 		out = append(out, paletteCommand{id: commandNetwork, title: "Network", about: "web requests " + tag + "'s Tasks made, allowed or refused"})
+		out = append(out, paletteCommand{id: commandSchedules, title: "Schedules", about: "when " + tag + " wakes up · pause, resume or delete"})
 	}
 	out = append(out, paletteCommand{id: commandTaskFiles, title: "Task files", about: "save files from a completed Task"})
 
@@ -256,6 +258,8 @@ func (a *app) run(c paletteCommand) tea.Cmd {
 		return a.openNotes()
 	case commandNetwork:
 		return a.openNetwork()
+	case commandSchedules:
+		return a.openSchedules()
 	case commandOpenInbox:
 		cmd = a.inner.openInbox()
 	case commandNewTag:

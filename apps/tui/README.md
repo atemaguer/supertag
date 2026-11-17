@@ -41,6 +41,10 @@ conversation.
 The command palette's **Notes** lists the selected Tag's notes you may see, with who sees each and
 when a turn last used it, and `x` deletes the selected one. Watch keeps the list current.
 
+The command palette's **Schedules** lists the selected Tag's Schedules that will still fire: each
+one's note, recurrence, next time, and who created it. `p` pauses or resumes the selected one and
+`x` deletes it. Watch keeps the list current.
+
 The TUI also keeps a cache on disk, so `supertag` shows the last Tag's conversation before any
 call to the Gateway: the Tag list with each conversation's row, the selected Tag, the latest
 50 messages of each conversation shown, with their rendering at the terminal's width, messages not

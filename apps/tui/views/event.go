@@ -47,6 +47,9 @@ const (
 	// or deleted. `id` and `team_id` are the Team's ID. Reread it with
 	// `TeamService.GetTeam`, which fails with `NotFound` once it is deleted.
 	WatchKind_WATCH_KIND_TEAM WatchKind = 9
+	// A Schedule was created, changed, fired, or deleted. `id` is the Schedule's ID and `tag`
+	// its Tag's.
+	WatchKind_WATCH_KIND_SCHEDULE WatchKind = 10
 	// A Tag's note was kept, rewritten, or deleted. `id` is the note's ID and `tag` its Tag's.
 	WatchKind_WATCH_KIND_MEMORY WatchKind = 11
 )
@@ -64,6 +67,7 @@ var (
 		7:  "WATCH_KIND_CONVERSATION_MESSAGE",
 		8:  "WATCH_KIND_WORKSTREAM_POST",
 		9:  "WATCH_KIND_TEAM",
+		10: "WATCH_KIND_SCHEDULE",
 		11: "WATCH_KIND_MEMORY",
 	}
 	WatchKind_value = map[string]int32{
@@ -77,6 +81,7 @@ var (
 		"WATCH_KIND_CONVERSATION_MESSAGE": 7,
 		"WATCH_KIND_WORKSTREAM_POST":      8,
 		"WATCH_KIND_TEAM":                 9,
+		"WATCH_KIND_SCHEDULE":             10,
 		"WATCH_KIND_MEMORY":               11,
 	}
 )

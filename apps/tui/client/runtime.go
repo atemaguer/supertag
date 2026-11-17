@@ -39,6 +39,7 @@ type runtimeClient struct {
 	enrollments   runtimev2connect.EnrollmentsClient
 	memories      runtimev2connect.MemoriesClient
 	networkLogs   runtimev2connect.NetworkLogsClient
+	schedules     runtimev2connect.SchedulesClient
 	streams       conversationStreams
 }
 
@@ -137,6 +138,7 @@ func New(target Target, version string) (*Client, error) {
 		enrollments:   runtimev2connect.NewEnrollmentsClient(httpClient, origin, options...),
 		memories:      runtimev2connect.NewMemoriesClient(httpClient, origin, options...),
 		networkLogs:   runtimev2connect.NewNetworkLogsClient(httpClient, origin, options...),
+		schedules:     runtimev2connect.NewSchedulesClient(httpClient, origin, options...),
 	}
 	return c, nil
 }
