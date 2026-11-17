@@ -138,10 +138,9 @@ A decision chooses its scope:
 | Scope | Effect |
 | --- | --- |
 | `once` | Allows one call with the same Task, action, and arguments digest. For a work Session, any Task of that work Session matches, so the retry in its next Task runs |
-| `objective` | Allows every matching action in the Objective, optionally until a time |
+| `objective` | Allows the same Tag's later requests for the same action and resource in the Objective, optionally until a time. Not available for a GitHub publication, which is bound to one destination and commit |
 
-An Objective-scope approval of `workstream:post` or `mailbox:send` also covers later Tasks in that
-Objective. See [Approval requests](coordination.md#approval-requests) for the
+An Objective-scope approval also covers later Tasks in that Objective. See [Approval requests](coordination.md#approval-requests) for the
 lifecycle.
 
 ## Current action vocabulary

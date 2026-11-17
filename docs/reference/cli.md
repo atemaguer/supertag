@@ -1293,7 +1293,7 @@ Options:
       --control-plane <URL|NAME>
           Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
       --objective-scope
-          Allow this Tag's Workstream posts to the same Team for this Objective
+          Also allow this Tag's later requests for the same action and resource in this Objective. Not for GitHub publications
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --valid-until-ms <VALID_UNTIL_MS>

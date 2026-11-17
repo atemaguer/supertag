@@ -87,7 +87,7 @@ pub enum ApprovalCommand {
     /// Approve the exact requested action once or for its Objective.
     Approve {
         approval_id: String,
-        /// Allow this Tag's Workstream posts to the same Team for this Objective.
+        /// Also allow this Tag's later requests for the same action and resource in this Objective. Not for GitHub publications.
         #[arg(long)]
         objective_scope: bool,
         /// End of the approval, in milliseconds since the Unix epoch. Omit for no end.
