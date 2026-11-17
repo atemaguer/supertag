@@ -24,7 +24,8 @@ within the pre-1.0 compatibility policy described in
 - Permission Sets can scope file access to paths. A `files:write` grant takes `paths` it may
   write and `exclude` entries that stay read-only; a `files:read` grant takes `exclude` entries
   that are hidden, with `*`, `**`, and `?` globs; both take `additionalDirectories` outside the
-  Workspace. Codex enforces scopes in its sandbox, for commands too; Claude Code, OpenCode, and
+  Workspace. Codex enforces scopes in its sandbox, for commands too, with or without
+  `web:fetch`; Claude Code, OpenCode, and
   remote Cursor enforce them in their file tools. The Worker Host fails a Task Attempt that
   changed paths outside its scope and names them. A Task whose harness cannot enforce its scope
   waits, and `supertag placement explain` reports a `file-scope` requirement. It now also
@@ -151,6 +152,10 @@ within the pre-1.0 compatibility policy described in
   timed out". SuperTag runs the native Codex binary behind the npm launcher instead of starting
   Node for every Codex process, and gives the version probe the 30-second startup bound.
   `supertag sign-in codex` and `supertag init` print which Codex binary they use.
+- A Codex Task with `web:fetch` runs under the same `supertag` permission profile as other Codex
+  Tasks, with outbound network turned on, instead of Codex's `workspace-write` mode. Its
+  read-write Volume copies are now writable, and `.git`, `.codex`, `.agents`, and `.aws` stay
+  read-only in each.
 - A Codex Task no longer fails with "Codex did not answer initialize within 5s" on a busy
   machine. The first exchange with the Codex app server, which also waits for the process to
   start, now has 30 seconds; later exchanges keep 5.

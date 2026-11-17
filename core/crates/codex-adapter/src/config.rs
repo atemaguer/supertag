@@ -186,28 +186,38 @@ pub(crate) fn arguments(
         "web_search=\"{}\"",
         if policy.search { "live" } else { "disabled" }
     ));
-    ensure!(
-        policy.scope.is_none() || !policy.network,
-        "Codex cannot apply a path scope to a web:fetch Task yet"
-    );
-    if policy.network {
-        configuration.push("sandbox_mode=\"workspace-write\"".into());
-        configuration.push("sandbox_workspace_write.network_access=true".into());
-    } else if policy.commands || policy.write || policy.scope.is_some() {
-        // Exact legacy profile: permit loopback only for admitted commands and
-        // deny external sockets via the limited network proxy's empty allowlist.
+    if policy.commands || policy.write || policy.scope.is_some() {
+        // Every Task that writes, runs commands, or has a path scope uses SuperTag's own
+        // `supertag` permission profile, so its filesystem table (protected entries, Workspace
+        // copies, the path scope) applies whatever the network access.
         // A path scope that narrows Workspace writes starts from `:read-only` and grants each
         // write path explicitly.
         configuration.push("default_permissions=\"supertag\"".into());
         configuration.push(format!(
             "permissions.supertag.extends=\"{}\"",
-            if policy.write && !policy.scope.as_ref().is_some_and(Scope::narrows_writes) {
+            if workspace_writable(policy) {
                 ":workspace"
             } else {
                 ":read-only"
             }
         ));
-        if policy.commands {
+        if policy.network {
+            // web:fetch: direct, unrestricted outbound network, as Codex's legacy
+            // `workspace-write` mode with `network_access`. Without the network proxy the
+            // profile's network grant leaves sockets open (probed on Codex 0.163.0); the mode
+            // only selects the proxy's policy, so it is stated for when one is configured.
+            configuration.extend(
+                [
+                    "permissions.supertag.network.enabled=true",
+                    "permissions.supertag.network.mode=\"full\"",
+                    "permissions.supertag.network.allow_local_binding=true",
+                    "features.network_proxy.enabled=false",
+                ]
+                .map(str::to_owned),
+            );
+        } else if policy.commands {
+            // Exact legacy profile: permit loopback only for admitted commands and
+            // deny external sockets via the limited network proxy's empty allowlist.
             configuration.extend(
                 [
                     "permissions.supertag.network.enabled=true",
@@ -290,7 +300,7 @@ const PROTECTED_ENTRIES: [&str; 4] = [".git", ".codex", ".agents", ".aws"];
 /// Codex 0.163.0 protects these entries for its built-in profiles, but a profile that `extends`
 /// `:workspace` loses that protection when the Workspace lies under another writable root such as
 /// `/tmp` or `$TMPDIR` (openai/codex#52620), so the grants are always explicit. A grant for an
-/// absent entry also keeps a sandboxed command from creating it.
+/// absent entry also keeps a sandboxed command from creating it where the Workspace is writable.
 fn filesystem(workspace: &Path, policy: &Policy) -> Result<Vec<(String, &'static str)>> {
     let utf8 = |path: &Path, what: &str| {
         path.to_str()
@@ -328,13 +338,58 @@ fn filesystem(workspace: &Path, policy: &Policy) -> Result<Vec<(String, &'static
             None => unique.push((path, access)),
         }
     }
+    if policy.scope.is_some() && !workspace_writable(policy) {
+        unique = without_absent_mount_points(workspace, unique);
+    }
     Ok(unique)
+}
+
+/// Whether the profile lets the Task write anywhere in the Workspace: it extends `:workspace`.
+fn workspace_writable(policy: &Policy) -> bool {
+    policy.write && !policy.scope.as_ref().is_some_and(Scope::narrows_writes)
+}
+
+/// Drop `read` and `deny` entries for Workspace paths that do not exist, where a path scope
+/// leaves the Workspace itself read-only. On Linux, Codex 0.163.0's bubblewrap sandbox creates a mount point
+/// for each such entry and fails to start when its parent is read-only.
+///
+/// An absent path that no write grant covers cannot be created, so its entry adds nothing. One
+/// under a write path can be: its `read` entry stays, since bubblewrap mounts that one. A `deny`
+/// entry there is dropped on Linux only. The agent can then create that path and read what it
+/// wrote, as with a hidden glob Codex snapshots at start, and the delivery check refuses it.
+fn without_absent_mount_points(
+    workspace: &Path,
+    entries: Vec<(String, &'static str)>,
+) -> Vec<(String, &'static str)> {
+    let writable: Vec<PathBuf> = entries
+        .iter()
+        .filter(|(path, access)| *access == "write" && !path.starts_with(':'))
+        .map(|(path, _)| PathBuf::from(path))
+        .collect();
+    entries
+        .into_iter()
+        .filter(|(path, access)| {
+            let candidate = Path::new(path);
+            if *access == "write"
+                || path.contains(['*', '?'])
+                || !candidate.starts_with(workspace)
+                || candidate.symlink_metadata().is_ok()
+            {
+                return true;
+            }
+            let creatable = writable
+                .iter()
+                .any(|root| candidate != root && candidate.starts_with(root));
+            creatable && (*access == "read" || cfg!(not(target_os = "linux")))
+        })
+        .collect()
 }
 
 /// The profile entries for a Task's path scope. SuperTag's pattern semantics, translated:
 /// a write path is an exact path or subtree; a read-only entry stays readable; a hidden entry
-/// or glob is denied with its whole subtree, because Codex matches a deny glob against the
-/// path itself only. Outside directories are already canonical.
+/// is denied with its whole subtree. A literal deny covers its subtree already; a glob also gets
+/// `<glob>/**`, because Codex matches a deny glob against the path itself only. Outside
+/// directories are already canonical.
 fn scoped_entries(
     workspace: &Path,
     policy: &Policy,
@@ -376,7 +431,12 @@ fn scoped_entries(
     }
     for entry in &scope.files.hidden {
         let path = utf8(&inside(entry))?;
-        entries.push((format!("{path}/**"), "deny"));
+        // A literal deny already covers its subtree. Adding `<literal>/**` would make Linux's
+        // bubblewrap mask each file inside a directory it has already masked, which fails to
+        // start the sandbox (Codex 0.163.0).
+        if entry.contains(['*', '?']) {
+            entries.push((format!("{path}/**"), "deny"));
+        }
         entries.push((path, "deny"));
     }
     Ok(entries)
@@ -579,13 +639,17 @@ mod tests {
     }
 
     /// A path scope maps onto the profile: narrowed writes start from `:read-only`, read-only
-    /// entries stay `read`, hidden entries deny their subtree too, and the protected entries
+    /// entries stay `read`, hidden globs deny their subtree too, and the protected entries
     /// stay. A resumed thread gets the same table.
     #[test]
     fn a_path_scope_extends_the_supertag_profile() -> Result<()> {
         let workspace = tempfile::tempdir()?;
         let ws = workspace.path().canonicalize()?;
         let at = |entry: &str| ws.join(entry).to_str().unwrap().to_owned();
+        // Under a read-only Workspace only existing entries are listed; see the absent case below.
+        std::fs::create_dir_all(ws.join(".git"))?;
+        std::fs::create_dir_all(ws.join("secrets"))?;
+        let existing_protected = || vec![(at(".git"), "read")];
         let mut policy = Policy::from_actions(
             &actions(&["files:read", "files:write", "commands:execute"]),
             true,
@@ -602,7 +666,7 @@ mod tests {
         policy.scope = Some(narrowed);
         let args = arguments(&ws, None, None, &policy)?;
         assert!(args.contains(&"permissions.supertag.extends=\":read-only\"".into()));
-        let mut expected = protected(&ws);
+        let mut expected = existing_protected();
         expected.extend([
             (":tmpdir".to_owned(), "write"),
             (ws.to_str().unwrap().to_owned(), "read"),
@@ -614,7 +678,6 @@ mod tests {
             (at("src/generated"), "read"),
             (format!("{}/**", at("**/.env")), "deny"),
             (at("**/.env"), "deny"),
-            (format!("{}/**", at("secrets")), "deny"),
             (at("secrets"), "deny"),
         ]);
         assert_eq!(grants(&ws, &policy)?, object(expected.clone(), &[]));
@@ -644,16 +707,118 @@ mod tests {
         let args = arguments(&ws, None, None, &reader)?;
         assert!(args.contains(&"permissions.supertag.extends=\":read-only\"".into()));
         assert!(!args.contains(&"sandbox_mode=\"read-only\"".into()));
-        // web:fetch runs in Codex's own sandbox mode, which cannot apply a scope yet.
+        // web:fetch keeps the same profile and table and adds direct outbound network.
         let mut fetch = Policy::from_actions(
             &actions(&["files:write", "commands:execute", "web:fetch"]),
             true,
         )?;
         fetch.scope = Some(scope(supertag_protocol::v2::FileScope {
             write: vec!["src/".into()],
+            hidden: vec!["secrets/".into()],
             ..Default::default()
         }));
-        assert!(arguments(&ws, None, None, &fetch).is_err());
+        let args = arguments(&ws, None, None, &fetch)?;
+        assert!(args.contains(&"permissions.supertag.extends=\":read-only\"".into()));
+        let mut expected = existing_protected();
+        expected.extend([
+            (":tmpdir".to_owned(), "write"),
+            (ws.to_str().unwrap().to_owned(), "read"),
+            (at("src"), "write"),
+            (at("secrets"), "deny"),
+        ]);
+        assert_eq!(grants(&ws, &fetch)?, object(expected, &[]));
+        Ok(())
+    }
+
+    /// web:fetch moves onto the `supertag` profile: direct outbound network without the proxy,
+    /// no legacy `sandbox_mode`, and the same filesystem table, including Workspace copies. A
+    /// resumed thread reapplies all of it.
+    #[test]
+    fn web_fetch_grants_network_on_the_supertag_profile() -> Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let ws = workspace.path().canonicalize()?;
+        let copy = PathBuf::from("/mnt/copy");
+        for granted in [
+            &["files:write", "web:fetch"][..],
+            &["files:write", "commands:execute", "web:fetch"],
+        ] {
+            let mut policy = Policy::from_actions(&actions(granted), true)?;
+            policy.writable_roots = vec![copy.clone()];
+            let args = arguments(&ws, None, None, &policy)?;
+            for expected in [
+                "default_permissions=\"supertag\"",
+                "permissions.supertag.extends=\":workspace\"",
+                "permissions.supertag.network.enabled=true",
+                "permissions.supertag.network.mode=\"full\"",
+                "features.network_proxy.enabled=false",
+            ] {
+                assert!(args.contains(&expected.to_owned()), "{expected}: {args:?}");
+            }
+            assert!(
+                !args.iter().any(|arg| arg.starts_with("sandbox_mode")
+                    || arg.starts_with("sandbox_workspace_write"))
+            );
+            let mut expected = protected(&ws);
+            expected.push((copy.to_str().unwrap().to_owned(), "write"));
+            expected.extend(protected(&copy));
+            assert_eq!(grants(&ws, &policy)?, object(expected, &[]));
+            let resumed = thread_parameters(&ws, &policy, &args)?;
+            assert!(resumed.get("sandbox").is_none());
+            assert_eq!(
+                resumed["config"]["permissions.supertag.network.enabled"],
+                true
+            );
+            assert_eq!(resumed["config"]["features.network_proxy.enabled"], false);
+        }
+        Ok(())
+    }
+
+    /// Under a read-only Workspace, an entry for an absent path is listed only when a write path
+    /// covers it, so it could be created: Codex's Linux sandbox cannot mount over an absent path
+    /// in a read-only directory. A covered absent hidden path stays denied except on Linux.
+    #[test]
+    fn a_read_only_workspace_lists_only_entries_that_exist_or_can_be_created() -> Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let ws = workspace.path().canonicalize()?;
+        let at = |entry: &str| ws.join(entry).to_str().unwrap().to_owned();
+        std::fs::create_dir_all(ws.join("src"))?;
+        std::fs::write(ws.join(".env"), "KEY=1\n")?;
+        let mut policy =
+            Policy::from_actions(&actions(&["files:write", "commands:execute"]), true)?;
+        policy.scope = Some(scope(supertag_protocol::v2::FileScope {
+            write: vec!["src/".into()],
+            read_only: vec!["src/generated/".into(), "docs/".into()],
+            hidden: vec![
+                ".env".into(),
+                "secrets/".into(),
+                "src/secret".into(),
+                "**/.npmrc".into(),
+            ],
+            ..Default::default()
+        }));
+        let mut expected = vec![
+            (":tmpdir".to_owned(), "write"),
+            (ws.to_str().unwrap().to_owned(), "read"),
+            (at("src"), "write"),
+            (at("src/generated"), "read"),
+            (at(".env"), "deny"),
+        ];
+        if cfg!(not(target_os = "linux")) {
+            expected.push((at("src/secret"), "deny"));
+        }
+        expected.extend([
+            (format!("{}/**", at("**/.npmrc")), "deny"),
+            (at("**/.npmrc"), "deny"),
+        ]);
+        assert_eq!(grants(&ws, &policy)?, object(expected, &[]));
+        // A whole-Workspace write keeps every entry: Codex mounts over absent paths there.
+        policy.scope = Some(scope(supertag_protocol::v2::FileScope {
+            hidden: vec!["secrets/".into()],
+            ..Default::default()
+        }));
+        let mut expected = protected(&ws);
+        expected.push((at("secrets"), "deny"));
+        assert_eq!(grants(&ws, &policy)?, object(expected, &[]));
         Ok(())
     }
 

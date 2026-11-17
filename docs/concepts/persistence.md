@@ -82,7 +82,7 @@ details, see [Run the Control Plane](../operations/control-plane.md#artifact-sto
 
 Catalog grants control what SuperTag Worker Hosts fetch. They do not isolate a Task from files its
 operating-system account can read. In particular, a Worker Host's artifact storage under `~/.supertag`, `file://` artifact
-Volumes, and Volume credential files are readable by Codex read-only and workspace-write sandboxes
+Volumes, and Volume credential files are readable by Codex sandboxes
 and by Claude Code, OpenCode, or Cursor with `allow-unsandboxed-commands` when running under that
 account. Those Tasks can read local copies without catalog grants, and credentials may give access to other artifacts on a shared Volume.
 Keeping credentials outside the workspace does not prevent these reads. Use separate operating-system

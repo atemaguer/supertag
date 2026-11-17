@@ -612,9 +612,9 @@ pub fn harness_reason(task: &Task, harness: HarnessKind) -> Option<String> {
     let commands = has(task, "commands:execute");
     let restricted_write = !scope.write.is_empty() || !scope.read_only.is_empty();
     match harness {
-        HarnessKind::Codex => has(task, "web:fetch").then(|| {
-            "Codex runs web:fetch Tasks in its own workspace-write sandbox, which cannot apply path scopes yet; remove web:fetch or the path scope from the Tag's Permission Sets".to_owned()
-        }),
+        // Codex applies every part at the operating-system level through SuperTag's permission
+        // profile, with or without web:fetch.
+        HarnessKind::Codex => None,
         HarnessKind::ClaudeCode | HarnessKind::Opencode => {
             if commands && !scope.hidden.is_empty() {
                 Some(format!(
@@ -1074,24 +1074,19 @@ mod tests {
         };
         let commands = ["files:read", "files:write", "commands:execute"];
         let tools = ["files:read", "files:write"];
-        // Codex enforces every part at the operating-system level, but not with web:fetch yet.
+        // Codex enforces every part at the operating-system level, with web:fetch too.
         for scope in [&hidden, &writes, &outside] {
-            assert!(supports(
-                &task(&commands, scope.clone(), false),
-                HarnessKind::Codex,
-                &local
-            ));
+            for actions in [
+                &commands[..],
+                &["files:write", "commands:execute", "web:fetch"],
+            ] {
+                assert!(supports(
+                    &task(actions, scope.clone(), false),
+                    HarnessKind::Codex,
+                    &local
+                ));
+            }
         }
-        let fetch = task(
-            &["files:write", "commands:execute", "web:fetch"],
-            writes.clone(),
-            true,
-        );
-        assert!(
-            harness_reason(&fetch, HarnessKind::Codex)
-                .unwrap()
-                .contains("web:fetch")
-        );
         for harness in [HarnessKind::ClaudeCode, HarnessKind::Opencode] {
             // Tool-level is enough without commands.
             assert!(supports(

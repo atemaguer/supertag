@@ -291,9 +291,9 @@ Runtime actions are captured separately from collaboration surface resources in 
 | --- | --- | --- | --- |
 | `files:read` | enables `Read`, `Glob`, and `Grep` | read-only sandbox | read, grep, glob, ls, and MCP tools |
 | no write permission | removes `Write` and `Edit` | read-only sandbox | no edit tool |
-| `files:write` | enables `Write` and `Edit` | workspace-write sandbox | adds edit |
+| `files:write` | enables `Write` and `Edit` | Workspace writes in the `supertag` permission profile | adds edit |
 | `commands:execute` | enables `Bash` only with `allow-unsandboxed-commands: [claude-code]`; otherwise a Claude Code host does not run the Task | enables shell and unified execution features, and lets commands use loopback sockets. A code-mode-only model, which is every current Codex model, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) | adds shell only with `files:write` and `allow-unsandboxed-commands: [cursor]`; otherwise the Task waits |
-| `web:fetch` | enables `WebFetch` | requires `files:write`; enables sandbox network access, for commands too | not supported: the Task waits |
+| `web:fetch` | enables `WebFetch` | requires `files:write`; enables outbound network in the `supertag` permission profile, for commands too | not supported: the Task waits |
 | `web:search` | enables `WebSearch` | enables live web search | adds `webSearch` |
 | `browser:use` | not supported | not supported | not supported: the Task waits |
 
@@ -321,20 +321,24 @@ may run commands, the Codex adapter therefore allows loopback and nothing more:
 | `commands:execute` without `web:fetch` | the workspace with `files:write`, otherwise none | loopback only |
 | `files:write` and `web:fetch` | the workspace | outbound network |
 
-For loopback, the adapter replaces Codex's `--sandbox` mode with a SuperTag-owned Codex permission
-profile named `supertag`. The profile extends Codex's `:workspace` or `:read-only` profile, so
-file access does not change. Its network section sets `allow_local_binding = true`. It also turns
+Every Codex Task with `files:write`, `commands:execute`, or a path scope runs under a
+SuperTag-owned Codex permission profile named `supertag`, in place of Codex's `--sandbox` mode.
+The profile extends Codex's `:workspace` or `:read-only` profile and adds the same filesystem
+rules whatever the network access: [Git metadata](#git-metadata-stays-read-only), Volume copies,
+and the Task's [path scope](#path-scopes).
+
+For loopback, the profile's network section sets `allow_local_binding = true`. It also turns
 on Codex's managed network proxy in `limited` mode with no allowed domains. Commands can bind,
 accept, and connect on loopback. The sandbox still refuses direct external connections, and the
 proxy refuses every external request. Codex also rejects commands that name an external host.
 With the proxy on, Codex sets `HTTP_PROXY`, `HTTPS_PROXY`, and related variables inside commands.
 Its `NO_PROXY` value keeps loopback addresses direct.
 
+With `web:fetch`, the profile's network section turns network access on in `full` mode and the
+managed proxy off, so commands connect to external hosts directly, as well as on loopback.
+
 The profile also grants write access to the Task Attempt's output directory, so a Task with
 `files:write` can still write its deliverables there.
-
-Codex's `sandbox_workspace_write.network_access` setting is all-or-nothing, so it cannot express
-loopback alone.
 
 ### Git metadata stays read-only
 
@@ -352,9 +356,8 @@ The `supertag` profile grants read-only access to:
 
 Codex protects these entries in its built-in profiles. A profile that extends `:workspace` loses
 that protection when the Workspace sits under another writable root, such as `/tmp` or
-`$TMPDIR`. The grants are therefore always explicit. Codex's `apply_patch` tool refuses `.git`
-and paths outside the writable roots on its own. With `web:fetch`, the adapter uses Codex's
-workspace-write sandbox, which keeps `.git` read-only itself.
+`$TMPDIR`. The grants are therefore always explicit, with or without `web:fetch`. Codex's
+`apply_patch` tool refuses `.git` and paths outside the writable roots on its own.
 
 Claude Code's, OpenCode's, and Cursor's file tools refuse a write to any `.git` path in the
 worktree or a Volume copy, in any letter case, since macOS treats `.GIT` as `.git`. Cursor's
@@ -453,7 +456,7 @@ A harness enforces a scope at one of three strengths:
 
 | Harness | File tools | Commands |
 | --- | --- | --- |
-| Codex | operating system: the `supertag` permission profile | operating system. Not yet with `web:fetch`: such a Task waits |
+| Codex | operating system: the `supertag` permission profile | operating system, with or without `web:fetch` |
 | Claude Code | tool: SuperTag's file-tool hook and Claude Code's own deny rules | write scope at delivery; hidden entries not enforced, so such a Task waits |
 | OpenCode | tool: OpenCode's `edit` and `read` rules | write scope at delivery; hidden entries not enforced, so such a Task waits |
 | Cursor, remote or shared execution | tool: SuperTag's Workspace tools | write or hidden scope not enforced, so such a Task waits |
@@ -475,11 +478,6 @@ Claude Code cannot keep commands from reading hidden paths (**/.env); run the Ta
 remove commands:execute from its Permission Sets
 ```
 
-Current Codex models run commands only with `web:fetch`, as
-[Codex commands and models](../operations/requirements.md#codex-commands-and-models) explains.
-Until Codex applies path scopes to `web:fetch` Tasks, a Codex Task with a path scope therefore
-runs without commands in practice.
-
 ### Path scope delivery check
 
 When a Task Attempt completes, the Worker Host checks every Workspace path it added, changed, or
@@ -493,6 +491,12 @@ outside the Workspace.
 - Codex on Linux matches hidden globs against the files that exist when it starts. A checked-in
   `.env` stays hidden; a matching file the agent creates later is not. Prefer literal hidden
   entries for paths an agent might create.
+- Codex on Linux also cannot hide a literal path that does not exist yet under a write path, such
+  as `src/secret` with `paths: [src/]`. The agent may create it and read what it wrote; the
+  delivery check still refuses to deliver it. On macOS such a path stays hidden.
+- Codex on Linux cannot start its sandbox when a hidden glob matches a path inside a hidden
+  directory, for example `secrets/` and `**/.env` with a `secrets/.env`. The Task Attempt fails;
+  nothing is exposed. Hide the directory alone, or narrow the glob.
 - A hard link reaches a file through a different name. On macOS, Codex's sandbox refuses to
   link a hidden file. A harness without that boundary could link one into an allowed path. The
   delivery check therefore refuses a delivered file that is a hard link to a hidden file.

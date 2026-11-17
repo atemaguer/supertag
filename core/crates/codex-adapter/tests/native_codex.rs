@@ -2116,7 +2116,19 @@ async fn code_mode_commands_run_only_with_web_fetch_and_fail_clearly_without_it(
         let server = HarnessProcess::start(actions).await?;
         run(options, server.bootstrap.clone()).await?;
         let setting = format!("features.code_mode_host={code_mode_host}");
-        assert!(fixture.args()?.contains(&setting), "{actions:?}");
+        let args = fixture.args()?;
+        assert!(args.contains(&setting), "{actions:?}");
+        if actions.contains(&"web:fetch") {
+            // web:fetch runs on SuperTag's own profile with direct network, not a legacy mode.
+            for setting in [
+                "default_permissions=\"supertag\"",
+                "permissions.supertag.network.enabled=true",
+                "features.network_proxy.enabled=false",
+            ] {
+                assert!(args.iter().any(|value| value == setting), "{setting}");
+            }
+            assert!(!args.iter().any(|value| value.starts_with("sandbox_")));
+        }
         let observed = server.observed.lock().await;
         let outcome = observed.outcome.as_ref().unwrap();
         assert_eq!(

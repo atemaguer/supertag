@@ -206,21 +206,26 @@ async fn contract(url: &str) {
         claim(&store, &codex, HarnessKind::Codex, &sandboxed).await,
         Some(task)
     );
-    // But not yet for web:fetch, which runs in Codex's own sandbox mode.
+    // With web:fetch too: the network grant lives on the same permission profile.
     let task = scoped_task(
         &store,
         "codex-fetch",
         HarnessKind::Codex,
-        &["files:read", "files:write", "web:fetch"],
+        &["files:read", "files:write", "commands:execute", "web:fetch"],
     )
     .await;
     assert_eq!(
-        claim(&store, &codex, HarnessKind::Codex, &sandboxed).await,
-        None
+        store
+            .diagnose_task_placement(&task)
+            .await
+            .unwrap()
+            .requirement,
+        ""
     );
-    let waiting = store.diagnose_task_placement(&task).await.unwrap();
-    assert_eq!(waiting.requirement, "file-scope");
-    assert!(waiting.summary.contains("web:fetch"), "{}", waiting.summary);
+    assert_eq!(
+        claim(&store, &codex, HarnessKind::Codex, &sandboxed).await,
+        Some(task)
+    );
 
     // Local Cursor refuses any scope; the reason depends on the host, so explain reports it
     // when no bound host's Cursor lane can apply it.

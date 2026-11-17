@@ -1467,8 +1467,9 @@ mod tests {
             "{result}"
         );
         assert!(!plain.join(".git").exists(), "{result}");
-        // web:fetch selects Codex's own workspace-write mode, which keeps `.git` read-only.
-        let network = Policy::from_actions(
+        // web:fetch keeps the same profile: protected entries stay read-only, and a read-write
+        // Workspace copy is writable.
+        let mut network = Policy::from_actions(
             &[
                 "files:write".into(),
                 "commands:execute".into(),
@@ -1476,20 +1477,24 @@ mod tests {
             ],
             true,
         )?;
-        let result = sandboxed(
-            &executable,
-            &root,
-            &clone,
-            &network,
-            "echo ok > fetched; echo x > .git/injected; echo x >> .git; true",
-        )
-        .await?;
-        assert_eq!(
-            std::fs::read_to_string(clone.join("fetched"))?,
-            "ok\n",
-            "{result}"
+        network.writable_roots = vec![copy.clone()];
+        let attempts = format!(
+            "echo ok > fetched; echo ok > {copy}/fetched; echo x > .git/fetch-injected; \
+             echo x > {copy}/.git/fetch-injected; for name in .codex .agents .aws; do \
+             echo x > $name/fetch-injected; echo x > {copy}/$name/fetch-injected; done; true",
+            copy = copy.display()
         );
-        assert!(!clone.join(".git/injected").exists(), "{result}");
+        let result = sandboxed(&executable, &root, &clone, &network, &attempts).await?;
+        for written in [clone.join("fetched"), copy.join("fetched")] {
+            assert_eq!(std::fs::read_to_string(&written)?, "ok\n", "{result}");
+        }
+        for root in [&clone, &copy] {
+            for name in [".git", ".codex", ".agents", ".aws"] {
+                let path = root.join(name).join("fetch-injected");
+                assert!(!path.exists(), "{}: {result}", path.display());
+            }
+        }
+        network.writable_roots.clear();
         let result = sandboxed(
             &executable,
             &root,
@@ -1517,10 +1522,41 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native sandbox probe"]
     async fn installed_sandbox_applies_the_tasks_path_scope() -> Result<()> {
+        path_scope_probe(&[]).await
+    }
+
+    /// With web:fetch, the same profile keeps the whole path scope and `.git` protection, and
+    /// commands reach external hosts directly.
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native sandbox probe"]
+    async fn installed_sandbox_applies_a_path_scope_with_web_fetch() -> Result<()> {
+        path_scope_probe(&["web:fetch"]).await
+    }
+
+    /// Whether this machine reaches `https://example.com` outside any sandbox. A runner without
+    /// egress makes the in-sandbox network check vacuous, not failing.
+    fn host_has_egress() -> bool {
+        std::process::Command::new("curl")
+            .args([
+                "-sS",
+                "-o",
+                "/dev/null",
+                "--max-time",
+                "10",
+                "https://example.com",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    async fn path_scope_probe(extra: &[&str]) -> Result<()> {
         use crate::config::Scope;
         use supertag_protocol::v2::FileScope;
         let executable = std::env::var_os("SUPERTAG_TEST_CODEX_BINARY")
             .context("set SUPERTAG_TEST_CODEX_BINARY")?;
+        let fetch = extra.contains(&"web:fetch");
         let directory = tempfile::tempdir()?;
         let root = directory.path().canonicalize()?;
         let workspace = root.join("workspace");
@@ -1548,8 +1584,12 @@ mod tests {
             std::fs::write(workspace.join(path), contents)?;
         }
         std::fs::write(data.join("input"), "data\n")?;
-        let mut policy =
-            Policy::from_actions(&["files:write".into(), "commands:execute".into()], true)?;
+        let actions = ["files:write", "commands:execute"]
+            .iter()
+            .chain(extra)
+            .map(|action| (*action).to_owned())
+            .collect::<Vec<_>>();
+        let mut policy = Policy::from_actions(&actions, true)?;
         policy.scope = Some(Scope {
             files: FileScope {
                 write: vec!["src/".into()],
@@ -1564,7 +1604,10 @@ mod tests {
         let probe = sandboxed(&executable, &root, &workspace, &policy, "true").await;
         if cfg!(not(target_os = "macos")) && probe.as_ref().map_or(true, |r| r["exitCode"] != 0) {
             // terminal-safe: test-only skip notice on standard error.
-            eprintln!("skipping: Codex cannot start its sandbox here: {probe:?}");
+            super::prerequisites::missing::<()>(
+                "codex-sandbox",
+                &format!("Codex cannot start its sandbox here: {probe:?}"),
+            )?;
             return Ok(());
         }
         let attempts = format!(
@@ -1575,7 +1618,9 @@ mod tests {
              ln -s ../.env src/link; cat src/link; ln .env src/hard; cat src/hard; \
              echo x > .env; echo x > apps/web/.env.local; mkdir -p deep/.env; \
              printf x > .git/hooks/pre-commit; echo ok > {cache}/written; cat {data}/input; \
-             echo x > {data}/written; true",
+             echo x > {data}/written; \
+             curl -sS -o /dev/null --max-time 10 -w 'network=%{{http_code}}' https://example.com; \
+             true",
             cache = cache.display(),
             data = data.display(),
         );
@@ -1583,6 +1628,16 @@ mod tests {
         let output = result.to_string();
         assert!(!output.contains(secret), "a hidden file leaked: {result}");
         assert!(output.contains("data"), "{result}");
+        // web:fetch reaches an external host; without it the sandbox blocks the connection.
+        let reached = output.contains("network=200");
+        if fetch {
+            assert!(
+                reached || !host_has_egress(),
+                "no network with web:fetch: {result}"
+            );
+        } else {
+            assert!(!reached, "network reached without web:fetch: {result}");
+        }
         for (path, expected) in [
             (workspace.join("src/written.rs"), Some("ok\n")),
             (workspace.join("outputs/report.md"), Some("ok\n")),
