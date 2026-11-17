@@ -514,9 +514,13 @@ async function coordinationTools(workstream) {
 
 async function workSessionTools() {
   const tools = (await sdkMcp("tools/list", {})).result?.tools;
+  const start = tools?.find(({ name }) => name === "start_session");
   if (
-    tools?.map(({ name }) => name).join() !== "start_session" ||
-    tools[0].inputSchema.additionalProperties !== false
+    tools
+      ?.map(({ name }) => name)
+      .sort()
+      .join() !== "close_session,start_session" ||
+    start?.inputSchema.additionalProperties !== false
   )
     throw new Error("Unexpected Work Session tool or argument schema");
   const input = {
