@@ -452,7 +452,7 @@ async fn scenario(database: String, merge: bool) -> Result<()> {
     let (_plane, endpoints) = service(plane, 1).await?;
     let public = endpoints[0].clone();
     let cli = |args: &[&str]| {
-        let mut c = command(&[args[0], "--control-plane", &public]);
+        let mut c = command(&[args[0], "--gateway", &public]);
         c.args(&args[1..]);
         c
     };

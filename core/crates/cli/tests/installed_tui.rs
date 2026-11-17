@@ -34,7 +34,7 @@ async fn launch(
 ) -> Result<()> {
     let mut command = reaped(Command::new(cli));
     command
-        .args(["tui", "--control-plane", "http://127.0.0.1:9"])
+        .args(["tui", "--gateway", "http://127.0.0.1:9"])
         .current_dir(home)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")

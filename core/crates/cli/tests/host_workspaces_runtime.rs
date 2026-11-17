@@ -69,7 +69,7 @@ impl Services {
     }
 
     fn cli(&self, args: &[&str]) -> Command {
-        let mut command = bare(&[args[0], "--control-plane", &self.public]);
+        let mut command = bare(&[args[0], "--gateway", &self.public]);
         command
             .args(&args[1..])
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator);

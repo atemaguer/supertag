@@ -90,7 +90,7 @@ async fn an_external_connector_admits_an_event_and_delivers_its_reply_once(
     plane.env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, url) = service(plane).await?;
     let operator = |args: &[&str]| {
-        let mut full = vec![args[0], "--control-plane", url.as_str()];
+        let mut full = vec![args[0], "--gateway", url.as_str()];
         full.extend_from_slice(&args[1..]);
         command(BINARY, &full, &tokens)
     };

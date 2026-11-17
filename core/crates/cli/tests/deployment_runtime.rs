@@ -607,7 +607,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     ];
     let operator = |args: &[&str]| {
         let mut args = args.to_vec();
-        args.extend_from_slice(&["--control-plane", &public_url]);
+        args.extend_from_slice(&["--gateway", &public_url]);
         command(&home, &args, &operator_env)
     };
     let manifest = root.join("organization.yaml");
@@ -718,7 +718,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     // Once the review host is idle, the builder's Task, submitted first, is still unclaimed:
     // no Attempt exists, so the host without the builder label never ran it.
     let grouped = |group: &str, args: &[&str]| {
-        let mut all = vec![group, "--control-plane", public_url.as_str()];
+        let mut all = vec![group, "--gateway", public_url.as_str()];
         all.extend_from_slice(args);
         command(&home, &all, &operator_env)
     };

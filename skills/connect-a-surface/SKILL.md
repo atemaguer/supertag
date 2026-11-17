@@ -38,7 +38,7 @@ stores them in the credential vault, records a Surface Account in the Control Pl
 the account and its listener in `supertag.yaml`, so the local Gateway serves it. Never construct a
 command that puts a secret in argv, and never ask the user to paste a secret into chat.
 
-For a shared deployment, add `--control-plane NAME` and `--gateway NAME` for the enrolled Gateway
+For a shared deployment, add `--gateway NAME` and `--serving-gateway NAME` for the enrolled Gateway
 that serves the account. That Gateway's machine holds the credentials.
 
 ## Place a Tag

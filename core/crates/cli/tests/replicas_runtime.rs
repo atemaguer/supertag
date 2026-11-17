@@ -625,7 +625,7 @@ async fn exercise_replicas(database: &str, directory: &Path) -> Result<()> {
     for (replica, objective) in [(1, "release"), (2, "hotfix")] {
         let mut command = credentials.command();
         command
-            .args(["objective", "--control-plane", &endpoints[replica]])
+            .args(["objective", "--gateway", &endpoints[replica]])
             .args(["create", objective, "--owner", TAG, QUESTION]);
         cli(command, directory).await?;
     }

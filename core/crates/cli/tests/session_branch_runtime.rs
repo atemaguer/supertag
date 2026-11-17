@@ -76,7 +76,7 @@ impl Credentials {
 
     fn operator(&self, args: &[&str], public: &str) -> Command {
         let mut command = self.command(args);
-        command.args(["--control-plane", public]);
+        command.args(["--gateway", public]);
         command
     }
 

@@ -42,7 +42,7 @@ supertag get surface-location
    repository, where the Tag admits work.
 
 Both default to this machine's local services. Name a shared Control Plane with
-`--control-plane`, and the Gateway that serves the account with `--gateway`.
+`--gateway`, and the Gateway that serves the account with `--serving-gateway`.
 
 ## Declare accounts and locations in manifests
 

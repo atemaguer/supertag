@@ -5,7 +5,7 @@ responsibilities and permissions, to the **Worker Host** that runs it and back. 
 steps in order; each checks one layer. Terms are defined in the [glossary](../reference/glossary.md).
 
 Commands talk to a **Control Plane**, the service that stores your organization. Without
-`--control-plane NAME`, they use this machine's local services, as shown.
+`--gateway NAME`, they use this machine's local services, as shown.
 
 ## 1. Check the services
 
@@ -20,7 +20,7 @@ supertag status
 deployment, run `supertag verify deployment URL --env-file operator.env`.
 
 If a command says `no local Control Plane is running`, start the local services with
-`supertag up`, or pass `--control-plane URL` or the `--control-plane NAME` of a saved Control
+`supertag up`, or pass `--gateway URL` or the `--gateway NAME` of a saved Control
 Plane.
 
 ## 2. Check the Surface Account

@@ -163,15 +163,9 @@ async fn tag_reads_its_sessions_and_the_objective_its_goal_created(database: Str
     let (mut plane, public) = service(plane).await?;
     let created = timeout(
         WAIT,
-        command(&[
-            "operator-token",
-            "create",
-            "bob",
-            "--control-plane",
-            &public,
-        ])
-        .env("SUPERTAG_OPERATOR_TOKEN", &alice_token)
-        .output(),
+        command(&["operator-token", "create", "bob", "--gateway", &public])
+            .env("SUPERTAG_OPERATOR_TOKEN", &alice_token)
+            .output(),
     )
     .await??;
     ensure!(

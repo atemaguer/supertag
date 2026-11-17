@@ -84,6 +84,11 @@ path = "tests/crash_durability.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "two_gateways"
+path = "tests/two_gateways.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "client_forwarding"
 path = "tests/client_forwarding.rs"
 required-features = ["test-fixtures"]

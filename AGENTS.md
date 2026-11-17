@@ -49,8 +49,8 @@ protocol version with a digest of `proto/`, and `cargo test -p supertag-protocol
 protocol_lock` fails until you update it. If a peer from the last release would misread or refuse
 the change (a removed, renamed or renumbered field, method or message; a changed type; a new
 meaning for an old value), bump `PROTOCOL_VERSIONS` in `core/crates/protocol/src/negotiation.rs`
-and its copies in `sdks/typescript/src/control-plane-client.ts`,
-`sdks/python/src/supertag/control_plane_client.py`, and `apps/tui/client/protocol.go`, and write the
+and its copies in `sdks/typescript/src/gateway-client.ts`,
+`sdks/python/src/supertag/gateway_client.py`, and `apps/tui/client/protocol.go`, and write the
 new version to the lock. Before a stable release a build speaks only the current version; peers
 from earlier releases are refused at connect with an error naming both releases.
 

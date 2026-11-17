@@ -82,7 +82,7 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 fn operator(args: &[&str], gateway: &str, token: &str) -> Command {
     let mut command = binary(args);
     command
-        .args(["--control-plane", gateway])
+        .args(["--gateway", gateway])
         .env("SUPERTAG_OPERATOR_TOKEN", token);
     command
 }

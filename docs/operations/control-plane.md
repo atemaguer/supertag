@@ -55,9 +55,9 @@ Tag's `runsOn` can select. Revoking an Auth Key stops further enrollment; princi
 joined stay enrolled.
 
 ```sh
-supertag auth-key create laptops --role host --reusable --tag lead --control-plane team
-supertag get auth-key --control-plane team
-supertag auth-key revoke laptops --control-plane team
+supertag auth-key create laptops --role host --reusable --tag lead --gateway team
+supertag get auth-key --gateway team
+supertag auth-key revoke laptops --gateway team
 ```
 
 Rotate or revoke an enrolled principal with `host rotate-credential`, `client
@@ -79,16 +79,16 @@ app's stores, so all three clients share them. For a certificate from your own C
 `--server-ca-file`; for a Control Plane that requires client certificates, add
 `--client-cert-file` and `--client-key-file`.
 
-A command can also name a URL directly: `--control-plane https://supertag.example.com` with
+A command can also name a URL directly: `--gateway https://supertag.example.com` with
 `SUPERTAG_OPERATOR_TOKEN` set.
 
 ### Give teammates Operator Tokens
 
 ```sh
-supertag operator-token create laptop-2 --control-plane team
-supertag operator-token rotate laptop-2 --control-plane team
-supertag operator-token revoke laptop-2 --control-plane team
-supertag get operator-token --control-plane team
+supertag operator-token create laptop-2 --gateway team
+supertag operator-token rotate laptop-2 --gateway team
+supertag operator-token revoke laptop-2 --gateway team
+supertag get operator-token --gateway team
 ```
 
 Each command that issues a token prints its secret once. A token expires 90 days after it is
@@ -100,7 +100,7 @@ Every operator change is recorded with its actor, action, target, and outcome in
 transaction as the change:
 
 ```sh
-supertag audit --since 2026-11-01 --actor token:laptop-2 --control-plane team
+supertag audit --since 2026-11-01 --actor token:laptop-2 --gateway team
 ```
 
 The JSON-lines audit stream is off unless you configure it. To stream each entry as one JSON
@@ -122,8 +122,8 @@ The operator inbox lists what needs a person:
 | `mcp-login` | A Task is held until an MCP server is logged in on a Worker Host |
 
 ```sh
-supertag get inbox-item --kind question --control-plane team
-supertag watch inbox-item --control-plane team
+supertag get inbox-item --kind question --gateway team
+supertag watch inbox-item --gateway team
 ```
 
 `watch inbox-item` prints every item already waiting, then each new item once as it appears,
@@ -140,7 +140,7 @@ UI notify on their own device without one. Send a sample with `supertag test not
 ```sh
 supertag health --endpoint https://supertag.example.com
 supertag verify deployment https://supertag.example.com --env-file operator.env --require-ready
-supertag get host --control-plane team
+supertag get host --gateway team
 ```
 
 `health` checks the gRPC health service through your TLS settings. On the tunnel listener,

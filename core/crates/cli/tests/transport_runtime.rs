@@ -1734,7 +1734,7 @@ async fn wait_for_marker(path: &Path, host: &Host) -> Result<()> {
 
 async fn operator_cli(services: &Services, tokens: &Tokens, args: &[&str]) -> Result<Value> {
     let gateway = format!("http://{}", services.address);
-    let mut full = vec![args[0], "--control-plane", gateway.as_str()];
+    let mut full = vec![args[0], "--gateway", gateway.as_str()];
     full.extend_from_slice(&args[1..]);
     let mut command = binary(&full);
     command.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
@@ -2476,7 +2476,7 @@ async fn exercise_mutual_tls(database: String) -> Result<()> {
     let operator = |args: &[&str], leaf: Option<&Leaf>| {
         let mut command = binary(args);
         command
-            .args(["--control-plane", &public])
+            .args(["--gateway", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
         client_tls(&mut command, &pki.ca(), leaf);
         command
@@ -2988,7 +2988,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
 
     // The CLI negotiates as an operator client.
     let gateway = format!("http://{}", services.address);
-    let mut list = binary(&["get", "tags", "--control-plane", &gateway]);
+    let mut list = binary(&["get", "tags", "--gateway", &gateway]);
     list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
     let listed = run(list).await?;
     ensure!(
@@ -3005,12 +3005,7 @@ async fn exercise_protocol_fence(database: String) -> Result<()> {
         ),
     )
     .await?;
-    let mut list = binary(&[
-        "get",
-        "tags",
-        "--control-plane",
-        &format!("http://{old_plane}"),
-    ]);
+    let mut list = binary(&["get", "tags", "--gateway", &format!("http://{old_plane}")]);
     list.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
     let refused = run(list).await?;
     let stderr = String::from_utf8_lossy(&refused.stderr);
@@ -3157,7 +3152,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     let operator = |args: &[&str]| {
         let mut command = binary(args);
         command
-            .args(["--control-plane", &public])
+            .args(["--gateway", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
         client_tls(&mut command, &pki.ca(), Some(&operator_leaf));
         command
@@ -3207,7 +3202,7 @@ async fn exercise_tls_proxy_traversal(database: String) -> Result<()> {
     // open; its other Control Plane channels sit idle, and when the proxy closes them
     // they reconnect on their next call. Neither stops the host.
     let host_ready = || {
-        let mut command = binary(&["get", "--control-plane", &public, "host", "proxy-host"]);
+        let mut command = binary(&["get", "--gateway", &public, "host", "proxy-host"]);
         command.env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator);
         client_tls(&mut command, &pki.ca(), Some(&operator_leaf));
         run_json(command)

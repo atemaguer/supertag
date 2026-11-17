@@ -381,6 +381,20 @@ pub async fn negotiate_versions(
     expected: ServiceRole,
     local: &[u32],
 ) -> Result<u32, NegotiationError> {
+    negotiate_with(channel, role, &[expected], local)
+        .await
+        .map(|(version, _)| version)
+}
+
+/// Negotiates as `role` with a peer that must answer as one of `expected_roles`, the first of
+/// which names the peer in errors. Returns the selected version and the peer's role.
+async fn negotiate_with(
+    channel: Channel,
+    role: ServiceRole,
+    expected_roles: &[ServiceRole],
+    local: &[u32],
+) -> Result<(u32, ServiceRole), NegotiationError> {
+    let expected = expected_roles[0];
     let local_name = role_name(role);
     let expected_name = role_name(expected);
     let mut request = Request::new(NegotiateProtocolRequest {
@@ -441,7 +455,7 @@ pub async fn negotiate_versions(
         }
     };
     let peer_role = ServiceRole::try_from(response.role).unwrap_or(ServiceRole::Unspecified);
-    if peer_role != expected {
+    if !expected_roles.contains(&peer_role) {
         return Err(NegotiationError::Incompatible(format!(
             "this {local_name} expected a SuperTag {expected_name} but reached a {}",
             role_name(peer_role)
@@ -452,7 +466,7 @@ pub async fn negotiate_versions(
             .protocol_versions
             .contains(&response.protocol_version)
     {
-        let mut mismatch = VersionMismatch::new(role, expected, local);
+        let mut mismatch = VersionMismatch::new(role, peer_role, local);
         let mut peer_versions = response.protocol_versions;
         peer_versions.truncate(MAX_OFFERED_VERSIONS);
         if peer_versions.is_empty() {
@@ -461,7 +475,7 @@ pub async fn negotiate_versions(
         mismatch.peer_release = Some((printable(&response.build_version), peer_versions));
         return Err(NegotiationError::Mismatch(mismatch));
     }
-    Ok(response.protocol_version)
+    Ok((response.protocol_version, peer_role))
 }
 
 /// The metadata header that carries a negotiated protocol version on each call.
@@ -516,6 +530,19 @@ pub async fn connect(
 ) -> Result<ProtocolChannel, NegotiationError> {
     let version = negotiate(channel.clone(), role, expected).await?;
     Ok(bind(channel, version))
+}
+
+/// Negotiates as `role` with a peer that may answer as any of `expected`, the first of which names
+/// the peer in errors, then returns the channel bound to the selected version and the peer's role.
+pub async fn connect_any(
+    channel: Channel,
+    role: ServiceRole,
+    expected: &[ServiceRole],
+) -> Result<(ProtocolChannel, ServiceRole), NegotiationError> {
+    assert!(!expected.is_empty(), "an expected peer role is required");
+    let (version, peer) =
+        negotiate_with(channel.clone(), role, expected, PROTOCOL_VERSIONS).await?;
+    Ok((bind(channel, version), peer))
 }
 
 /// Refuses every call that does not name a protocol version this service

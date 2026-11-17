@@ -68,7 +68,7 @@ Ask an operator of the shared Control Plane for a host **Auth Key**, a short-liv
 enrolls one machine:
 
 ```sh
-supertag auth-key create laptop-2 --role host --tag lead --control-plane team
+supertag auth-key create laptop-2 --role host --tag lead --gateway team
 ```
 
 Save it to a private file and point a host service at the Control Plane:
@@ -127,8 +127,8 @@ services:
 A Tag's `runsOn` names labels a host must carry to run the Tag's Tasks:
 
 ```sh
-supertag placement runs-on builder gpu --control-plane team
-supertag placement explain TASK_ID --control-plane team
+supertag placement runs-on builder gpu --gateway team
+supertag placement explain TASK_ID --gateway team
 ```
 
 `placement explain` says why a queued Task waits: no host may run its Tag, the eligible hosts lack
@@ -252,10 +252,10 @@ trusts its CA with `--artifact-peer-ca-file`. See [Artifacts](../reference/artif
 ## Drain, resume, and remove a host
 
 ```sh
-supertag host drain build-1 --control-plane team
-supertag host resume build-1 --control-plane team
-supertag host revoke build-1 --control-plane team
-supertag host rotate-credential build-1 --control-plane team --out build-1.credential
+supertag host drain build-1 --gateway team
+supertag host resume build-1 --gateway team
+supertag host revoke build-1 --gateway team
+supertag host rotate-credential build-1 --gateway team --out build-1.credential
 ```
 
 A draining host finishes its running Task Attempts and claims no new ones. Revoking a host refuses
@@ -280,7 +280,7 @@ execution, an operator decides:
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
   --evidence "The sandbox was deleted; no commit was pushed." --confirmed-stopped \
-  --control-plane team
+  --gateway team
 ```
 
 `--decision retry` runs the Task again. See [Scheduling and recovery](../reference/scheduling-and-recovery.md).
@@ -288,7 +288,7 @@ supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
 ## Check that it worked
 
 ```sh
-supertag get host --control-plane team
+supertag get host --gateway team
 supertag status
 ```
 

@@ -99,12 +99,12 @@ fn plane(credentials: &Credentials, root: &Path, database: &str, listen: &str) -
     c
 }
 fn publication(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
-    let mut c = credentials.command(&["artifact-publication", "--control-plane", public]);
+    let mut c = credentials.command(&["artifact-publication", "--gateway", public]);
     c.args(args);
     c
 }
 fn consumption(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
-    let mut c = credentials.command(&["artifact-consumption", "--control-plane", public]);
+    let mut c = credentials.command(&["artifact-consumption", "--gateway", public]);
     c.args(args);
     c
 }
@@ -293,8 +293,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     ))
     .await?;
     assert_eq!(consent["revision"], 1);
-    let mut list =
-        credentials.command(&["get", "--control-plane", &public, "artifact-publications"]);
+    let mut list = credentials.command(&["get", "--gateway", &public, "artifact-publications"]);
     list.args(["--objective", &destination.objective_id]);
     let audience = json(list).await?;
     assert_eq!(audience["publications"][0]["artifact_id"], artifact_id);
@@ -311,7 +310,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     let admitted = json(credentials.command(&[
         "task",
         "submit",
-        "--control-plane",
+        "--gateway",
         &public,
         "--tag",
         "consumer",
@@ -332,7 +331,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     );
     json(credentials.command(&[
         "volume",
-        "--control-plane",
+        "--gateway",
         &public,
         "put",
         "published",
@@ -344,7 +343,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     .await?;
     json(credentials.command(&[
         "volume",
-        "--control-plane",
+        "--gateway",
         &public,
         "copy",
         "published",

@@ -89,7 +89,7 @@ impl OperatorServices {
 
     /// Runs `supertag --control-plane URL ARGS` with the operator token.
     pub async fn run(&self, args: &[&str]) -> Result<Output> {
-        let args = [&["--control-plane", self.gateway_url.as_str()][..], args].concat();
+        let args = [&["--gateway", self.gateway_url.as_str()][..], args].concat();
         let mut command = command(self.home.path(), &args);
         command.env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token);
         let output = timeout(WAIT, command.output()).await??;

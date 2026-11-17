@@ -119,7 +119,7 @@ machine that owns the **harness** (the coding agent that does the work, such as 
 
 ```sh
 supertag auth-key create build-1 --role host --tag engineering \
-  --control-plane wss://supertag.YOUR-SUBDOMAIN.workers.dev
+  --gateway wss://supertag.YOUR-SUBDOMAIN.workers.dev
 # Save the printed key as build-1.key (mode 0600) on the Worker Host, then, with the same
 # SUPERTAG_SERVER_CA_FILE (and, if the Control Plane requires client certificates, the host's own
 # SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE):

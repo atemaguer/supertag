@@ -9,25 +9,28 @@ Terms used here: the **Control Plane** stores your organization and schedules it
 work in a **Session**, one thread of work. An **Objective** is an outcome a Tag owns until it is
 met. See the [glossary](../reference/glossary.md) for other terms.
 
-## How commands find the Control Plane
+## How commands find the Gateway
 
-Commands that read or change your organization talk to one Control Plane. They pick it in this
-order:
+Commands that read or change your organization talk to one **Gateway**, the SuperTag service
+that clients and operators connect to. It forwards each command to its **Control Plane**, the
+service that stores your organization, which checks what your credential allows. Commands pick
+the Gateway in this order:
 
 | You pass | Commands use |
 | --- | --- |
-| `--control-plane NAME` | A Control Plane saved under `NAME` by `supertag connect`, the terminal UI, or the desktop app |
-| `--control-plane https://HOST` or `wss://HOST` | That Control Plane, with the Operator Token in `SUPERTAG_OPERATOR_TOKEN` |
-| `--state-directory DIR` | The Control Plane that `supertag up` runs from `DIR`, with that directory's local operator credential |
-| `SUPERTAG_CONTROL_PLANE_URL` set to a saved name or a URL | That Control Plane, as with `--control-plane` |
-| Nothing | The Control Plane that `supertag up` runs on this machine, from `SUPERTAG_STATE_DIR` or `~/.supertag` |
+| `--gateway NAME` | A Gateway saved under `NAME` by `supertag connect`, the terminal UI, or the desktop app |
+| `--gateway https://HOST` or `wss://HOST` | That Gateway, with the Operator Token in `SUPERTAG_OPERATOR_TOKEN` |
+| `--state-directory DIR` | The Gateway that `supertag up` runs from `DIR`, with that directory's local operator credential |
+| `SUPERTAG_GATEWAY_URL` set to a saved name or a URL | That Gateway, as with `--gateway` |
+| Nothing | The Gateway that `supertag up` runs on this machine, from `SUPERTAG_STATE_DIR` or `~/.supertag` |
 
-`--control-plane` may also come before the command, as in `supertag --control-plane team get tag`.
-The examples on this page use your local services, so they name no Control Plane. Against a
-shared Control Plane, add `--control-plane NAME`.
+`--gateway` may also come before the command, as in `supertag --gateway team get tag`.
+The examples on this page use your local services, so they name no Gateway. Against a shared
+deployment, add `--gateway NAME`. If a Gateway is down, an operator can pass the Control Plane's
+own URL to `--gateway`: it serves the same commands.
 
-When no local Control Plane is running and you name none, a command stops with `no local Control
-Plane is running from DIR; start one with supertag up, or pass --control-plane`.
+When no local Gateway is running and you name none, a command stops with `no local Gateway is
+running from DIR; start one with supertag up, or pass --gateway`.
 
 ## Start in a repository
 
@@ -99,7 +102,7 @@ A service with `restart: unless-stopped` makes `supertag up` install a per-user 
 ## Talk to a Tag
 
 The terminal UI is the place for conversations. Plain `supertag` opens it for your local
-services; `supertag tui --control-plane NAME` opens it for a saved Control Plane. See
+services; `supertag tui --gateway NAME` opens it for a saved Control Plane. See
 [Talk to a Tag from your terminal](../guides/talk-to-a-tag.md).
 
 The terminal UI and the desktop app find the local Control Plane on their own. While
@@ -234,8 +237,8 @@ Save a shared Control Plane under a name. `connect` reads one secret, from
 
 ```sh
 supertag connect https://supertag.example.com --name team
-supertag get objective --control-plane team
-supertag tui --control-plane team
+supertag get objective --gateway team
+supertag tui --gateway team
 ```
 
 The terminal UI and the desktop app read the same saved names. Add `--server-ca-file` when the

@@ -18,7 +18,7 @@ Prefer a user-level skill outside the repository the team changes. Tags can edit
 ## Establish the scope
 
 Confirm the Control Plane, owner Tag, Workspace, and the user's requested outcome. Every operator
-command uses this machine's local services unless it passes `--control-plane NAME`, one saved
+command uses this machine's local services unless it passes `--gateway NAME`, one saved
 with `supertag connect`. The examples use the local services; add the user's Control Plane when
 it is shared. Verify commands with `supertag COMMAND --help` or the
 [CLI reference](https://github.com/atemaguer/supertag/blob/main/docs/reference/cli.md). If setup

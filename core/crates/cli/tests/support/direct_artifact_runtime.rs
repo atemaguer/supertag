@@ -178,14 +178,7 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_directly_across_producer
     let private_digest = format!("{:x}", Sha256::digest(b"separate private file\n"));
     assert!(!cas.join(&digest).exists() && !cas.join(&private_digest).exists());
 
-    json(credentials.command(&[
-        "host",
-        "--control-plane",
-        &public,
-        "drain",
-        "direct-producer",
-    ]))
-    .await?;
+    json(credentials.command(&["host", "--gateway", &public, "drain", "direct-producer"])).await?;
     let mut restarting = producer(false);
     restarting.stdout(Stdio::piped());
     let mut producer = restarting.spawn()?;
@@ -244,8 +237,7 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_directly_across_producer
         .strip_prefix("derived:")
         .context("consumer receipt")?;
     let metadata =
-        json(credentials.command(&["get", "--control-plane", &public, "artifact", derived]))
-            .await?;
+        json(credentials.command(&["get", "--gateway", &public, "artifact", derived])).await?;
     assert_eq!(
         metadata["inputs"],
         serde_json::json!([{"artifact_id":artifact,"paths":["evidence.txt"]}])

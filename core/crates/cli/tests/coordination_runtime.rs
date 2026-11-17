@@ -135,7 +135,7 @@ impl Services {
     }
 
     fn cli(&self, credentials: &Credentials, args: &[&str]) -> Command {
-        let mut command = credentials.command(&[args[0], "--control-plane", &self.public]);
+        let mut command = credentials.command(&[args[0], "--gateway", &self.public]);
         command.args(&args[1..]);
         command
     }

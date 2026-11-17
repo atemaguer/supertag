@@ -90,7 +90,7 @@ On a shared deployment, enroll the account against the Control Plane and name th
 serves it:
 
 ```sh
-supertag setup surface slack --control-plane team --gateway local
+supertag setup surface slack --gateway team --serving-gateway local
 ```
 
 Then start that Gateway with `--slack-socket-mode --slack-state-directory

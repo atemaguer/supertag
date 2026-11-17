@@ -66,7 +66,7 @@ async fn success(mut command: Command) -> Result<Vec<u8>> {
 
 async fn operator(args: &[&str], gateway: &str, token: &str) -> Result<Value> {
     let (subcommand, args) = args.split_first().context("operator subcommand required")?;
-    let mut command = command(&[subcommand, "--control-plane", gateway]);
+    let mut command = command(&[subcommand, "--gateway", gateway]);
     command.args(args).env("SUPERTAG_OPERATOR_TOKEN", token);
     Ok(serde_json::from_slice(&success(command).await?)?)
 }
@@ -360,7 +360,7 @@ async fn last_usage(services: &LanguageServices, task: &Value) -> Result<Value> 
         "usage",
         task["task_id"].as_str().context("Task ID missing")?,
         task["attempt_id"].as_str().context("Attempt ID missing")?,
-        "--control-plane",
+        "--gateway",
         &services.public,
     ]);
     command.env("SUPERTAG_OPERATOR_TOKEN", &services.operator_token);

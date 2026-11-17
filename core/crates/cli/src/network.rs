@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use supertag_protocol::{
-    negotiation::{ProtocolChannel, connect},
+    negotiation::{ProtocolChannel, connect, connect_any},
     v2::ServiceRole,
 };
 use supertag_transport::{KEEPALIVE_INTERVAL, KEEPALIVE_TIMEOUT, Proxy, Target, tunneled_uri};
@@ -43,13 +43,19 @@ fn keepalive(server: Server) -> Server {
         .http2_keepalive_timeout(Some(KEEPALIVE_TIMEOUT))
 }
 
-/// Connects to a Control Plane as an operator client and negotiates the protocol
-/// version every later call names; the Control Plane refuses calls that skip this.
+/// Connects to a Gateway as an operator client and negotiates the protocol version every later
+/// call names; the Gateway refuses calls that skip this. A Control Plane serves the same calls
+/// directly, so an operator can still reach one when its Gateway is down.
 pub async fn operator_channel(target: &Target) -> Result<ProtocolChannel> {
     let channel = target.connect().await?;
-    connect(channel, ServiceRole::Client, ServiceRole::ControlPlane)
-        .await
-        .map_err(|error| error.at(target.url()).speaking_as("This CLI").into())
+    connect_any(
+        channel,
+        ServiceRole::Client,
+        &[ServiceRole::Gateway, ServiceRole::ControlPlane],
+    )
+    .await
+    .map(|(channel, _)| channel)
+    .map_err(|error| error.at(target.url()).speaking_as("This CLI").into())
 }
 
 /// Connects to a Gateway as an operator client, for its test notification.

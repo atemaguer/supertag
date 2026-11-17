@@ -10,7 +10,7 @@ failures are resolved in the first three.
 
 The human-facing version is the
 [first-reply troubleshooting checklist](../../docs/guides/troubleshooting.md); point users there.
-Operator commands use the local services unless they pass `--control-plane NAME`. The examples
+Operator commands use the local services unless they pass `--gateway NAME`. The examples
 use the local services.
 
 ## 0. Reproduce precisely
@@ -36,8 +36,8 @@ supertag version
 `supertag verify deployment URL --env-file operator.env` checks health and the operator token.
 
 - `no local Control Plane is running from DIR; start one with supertag up, or pass
-  --control-plane`: the command looked for local services in `DIR`. Run `supertag up` there, set
-  `SUPERTAG_STATE_DIR` to the directory `up` uses, or pass `--control-plane NAME`.
+  --gateway`: the command looked for local services in `DIR`. Run `supertag up` there, set
+  `SUPERTAG_STATE_DIR` to the directory `up` uses, or pass `--gateway NAME`.
 - `... speaks SuperTag protocol N, but the Control Plane at URL runs SuperTag X (protocol M)`: the
   client and the Control Plane come from releases with different protocol versions. Upgrade the
   side the message names; upgrade them together. After installing a new CLI, `supertag up`

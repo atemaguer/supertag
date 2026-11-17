@@ -6,12 +6,12 @@ The Python SDK has three parts:
   Task Attempt.
 - `supertag.openai_agents_adapter`: the OpenAI Agents harness adapter that a Worker Host starts for
   a Tag whose harness is `openai-agents`.
-- `supertag.control_plane_client`: call a SuperTag Control Plane from Python.
+- `supertag.gateway_client`: call a SuperTag Gateway from Python.
 
 It also contains the Worker composition interfaces (`create_worker`, harnesses, execution
 environments, Runtime Inputs, and Session continuity) that the OpenAI Agents adapter is built on.
 
-For the SuperTag CLI and Control Plane, see [Requirements](../../docs/operations/requirements.md).
+For the SuperTag CLI, Control Plane, and Gateway, see [Requirements](../../docs/operations/requirements.md).
 Python dependencies are declared in [pyproject.toml](pyproject.toml).
 
 Install the published SDK from PyPI, pinned to the version of your CLI:
@@ -21,7 +21,7 @@ python -m pip install 'supertag==0.3.0'
 python -m pip install 'supertag[runtime]==0.3.0'
 ```
 
-The `runtime` extra installs gRPC and protobuf for the adapter and Control Plane clients. Add the
+The `runtime` extra installs gRPC and protobuf for the adapter and Gateway clients. Add the
 harness integrations you use:
 
 ```sh
@@ -69,32 +69,32 @@ body when retrying an event.
 The OpenAI Agents adapter runs as `python -m supertag.openai_agents_adapter`; the Worker Host starts
 it for a Tag whose harness is `openai-agents`. It needs `OPENAI_API_KEY` and the `agents` extra.
 
-## Call the Control Plane
+## Call the Gateway
 
-Use `supertag.control_plane_client`. The `runtime` extra installs gRPC and protobuf. This example
+Use `supertag.gateway_client`. The `runtime` extra installs gRPC and protobuf. This example
 lists Tags, the persistent AI actors in your organization.
 
 ```python
 import os
 
-from supertag.control_plane_client import ControlPlaneClientSync, runtime
+from supertag.gateway_client import GatewayClientSync, runtime
 
-with ControlPlaneClientSync(
-    os.environ["SUPERTAG_CONTROL_PLANE_URL"], os.environ["SUPERTAG_OPERATOR_TOKEN"]
+with GatewayClientSync(
+    os.environ["SUPERTAG_GATEWAY_URL"], os.environ["SUPERTAG_OPERATOR_TOKEN"]
 ) as client:
     response = client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
     for tag in response.tags:
         print(tag.name)
 ```
 
-`ControlPlaneClient` exposes the same services with `async with` and awaitable unary calls.
+`GatewayClient` exposes the same services with `async with` and awaitable unary calls.
 The generated gRPC methods use the protobuf RPC names, such as `ListTags` and `Watch`.
 Pass a `timeout` in seconds to bound a call. Watch streams can resume from their last
-`resume_token`. Use HTTPS for a remote Control Plane and a loopback IP address for local
+`resume_token`. Use HTTPS for a remote Gateway and a loopback IP address for local
 cleartext. Pass a PEM `ca` for private TLS and a PEM certificate chain and key as
-`identity=(cert, key)` if the Control Plane requires mutual TLS. The first call negotiates the
-SuperTag protocol version with the Control Plane and raises `ControlPlaneProtocolError` when the
-Control Plane runs an incompatible release.
+`identity=(cert, key)` if the Gateway requires mutual TLS. The first call negotiates the
+SuperTag protocol version with the Gateway and raises `GatewayProtocolError` when the
+Gateway runs an incompatible release.
 
 ## Compose a Worker in process
 

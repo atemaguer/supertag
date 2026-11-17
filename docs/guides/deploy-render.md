@@ -109,13 +109,13 @@ works. It reports readiness as `not ready` until a Worker Host connects.
 ## 5. Connect a Worker Host
 
 Run operator commands with the operator token in `SUPERTAG_OPERATOR_TOKEN` and the URL in
-`--control-plane`. Create an **Auth Key** (a one-time enrollment secret) for the host, then enroll
+`--gateway`. Create an **Auth Key** (a one-time enrollment secret) for the host, then enroll
 and run it on the machine that owns the **harness** (the coding agent that does the work, such as
 Codex):
 
 ```sh
 supertag auth-key create build-1 --role host --tag engineering \
-  --control-plane wss://supertag-control-plane.onrender.com
+  --gateway wss://supertag-control-plane.onrender.com
 # Save the printed key as build-1.key (mode 0600) on the Worker Host, then, with the same
 # SUPERTAG_SERVER_CA_FILE (and, if the Control Plane requires client certificates, the host's own
 # SUPERTAG_CLIENT_CERT_FILE and SUPERTAG_CLIENT_KEY_FILE):

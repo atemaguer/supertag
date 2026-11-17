@@ -801,7 +801,7 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
         &credentials,
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "replies",
             "--account",
@@ -816,11 +816,8 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
     assert_eq!(list["deliveries"][0]["reply_id"], id);
     assert_eq!(list["deliveries"][0]["state"], "REPLY_STATE_UNCERTAIN");
     assert_eq!(list["next_before_order"], 0);
-    let inspected = operator_cli(
-        &credentials,
-        &["get", "--control-plane", &public, "reply", &id],
-    )
-    .await?;
+    let inspected =
+        operator_cli(&credentials, &["get", "--gateway", &public, "reply", &id]).await?;
     assert_eq!(inspected["audit"][0]["kind"], "claim-expired");
     mock.responses.add_permits(1);
     let decision = ResolveReplyRequest {
@@ -834,7 +831,7 @@ async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts
         &credentials,
         &[
             "reply",
-            "--control-plane",
+            "--gateway",
             &public,
             "resolve",
             &id,

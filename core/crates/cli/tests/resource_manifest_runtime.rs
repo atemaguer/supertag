@@ -58,9 +58,7 @@ async fn command(gateway: &str, args: &[&str], success: bool) -> Result<String> 
     let (first, rest) = args.split_first().context("missing command")?;
     let output = timeout(
         Duration::from_secs(12),
-        cli(&[first, "--control-plane", gateway])
-            .args(rest)
-            .output(),
+        cli(&[first, "--gateway", gateway]).args(rest).output(),
     )
     .await??;
     let stderr = String::from_utf8(output.stderr)?;
@@ -532,7 +530,7 @@ async fn lead_tag(root: &Path, gateway: &str) -> Result<()> {
 async fn volume_exists(gateway: &str, id: &str) -> Result<bool> {
     let output = timeout(
         Duration::from_secs(12),
-        cli(&["get", "--control-plane", gateway, "volume", id]).output(),
+        cli(&["get", "--gateway", gateway, "volume", id]).output(),
     )
     .await??;
     Ok(output.status.success())

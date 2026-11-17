@@ -48,7 +48,7 @@ export function parseReference(text) {
   return { commands, aliases, firstArgument, urlArgument, allFlags };
 }
 
-const globalFlags = new Set(["--control-plane", "--help", "--version"]);
+const globalFlags = new Set(["--gateway", "--help", "--version"]);
 // A placeholder such as KIND, ID, or a|b stands for a value the reader chooses.
 const variable = (token) =>
   /^[A-Z][A-Z0-9_]*$/u.test(token) || token.includes("|") || /^[<[]/u.test(token);
@@ -67,9 +67,9 @@ export function checkCommand(reference, command) {
     .split(/\s+/u)
     .filter(Boolean)
     .slice(1);
-  // The global Control Plane selector may come before the command.
+  // The global Gateway selector may come before the command.
   while (words[0]?.startsWith("--")) {
-    if (words[0] === "--control-plane") words.splice(0, 2);
+    if (words[0] === "--gateway") words.splice(0, 2);
     else if (globalFlags.has(words[0])) return null;
     else return `unknown global flag ${words[0]}`;
   }

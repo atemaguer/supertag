@@ -115,7 +115,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
             &[
                 "tag",
                 "put",
-                "--control-plane",
+                "--gateway",
                 &public,
                 tag,
                 "--instructions",
@@ -130,7 +130,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     cli(
         &[
             "team",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "readers",
@@ -144,7 +144,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     .await?;
     let allow = [
         "mailbox-grant",
-        "--control-plane",
+        "--gateway",
         &public,
         "allow",
         "sender",
@@ -170,7 +170,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     cli(
         &[
             "mailbox-grant",
-            "--control-plane",
+            "--gateway",
             &public,
             "allow",
             "sender",
@@ -182,7 +182,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let page = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "mailbox-grants",
             "--tag",
@@ -199,7 +199,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let next = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "mailbox-grants",
             "--tag",
@@ -227,7 +227,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let revoked = cli(
         &[
             "mailbox-grant",
-            "--control-plane",
+            "--gateway",
             &public,
             "revoke",
             "sender",
@@ -245,7 +245,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
         &[
             "task",
             "submit",
-            "--control-plane",
+            "--gateway",
             &public,
             "--tag",
             "sender",
@@ -282,7 +282,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     );
     let source_id = submitted["task_id"].as_str().context("sender Task ID")?;
     let source = cli(
-        &["get", "task", "--control-plane", &public, source_id],
+        &["get", "task", "--gateway", &public, source_id],
         &operator_token,
     )
     .await?;
@@ -293,7 +293,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let pending = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "messages",
             "--mailbox",
@@ -320,7 +320,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
         &[
             "tag",
             "put",
-            "--control-plane",
+            "--gateway",
             &public,
             "recipient",
             "--instructions",
@@ -335,7 +335,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let durable = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "mailbox-grants",
             "--tag",
@@ -377,7 +377,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let handled = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "messages",
             "--mailbox",
@@ -399,7 +399,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
         .as_str()
         .context("inbox Task ID")?;
     let inbox = cli(
-        &["get", "task", "--control-plane", &public, inbox_id],
+        &["get", "task", "--gateway", &public, inbox_id],
         &operator_token,
     )
     .await?;
@@ -416,7 +416,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let observed = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "messages",
             "--mailbox",
@@ -434,7 +434,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let workstream = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "workstream-posts",
             "--team",
@@ -454,7 +454,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     cli(
         &[
             "mailbox-grant",
-            "--control-plane",
+            "--gateway",
             &public,
             "revoke",
             "sender",
@@ -466,7 +466,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let replay = cli(
         &[
             "mailbox-grant",
-            "--control-plane",
+            "--gateway",
             &public,
             "allow",
             "sender",
@@ -481,7 +481,7 @@ async fn direct_mailbox_grants_and_private_harness_delivery_survive_control_plan
     let current = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "mailbox-grants",
             "--tag",
@@ -528,7 +528,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_through_the_control_
         &[
             "tag",
             "put",
-            "--control-plane",
+            "--gateway",
             &public,
             "engineer",
             "--instructions",
@@ -562,7 +562,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_through_the_control_
         let value = cli(
             &[
                 kind,
-                "--control-plane",
+                "--gateway",
                 &public,
                 "put",
                 file.to_str().context("policy fixture path")?,
@@ -575,7 +575,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_through_the_control_
     let assignment = cli(
         &[
             "role-assignment",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "review",
@@ -635,7 +635,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_through_the_control_
     let inactive = cli(
         &[
             "role-assignment",
-            "--control-plane",
+            "--gateway",
             &public,
             "deactivate",
             id,
@@ -690,7 +690,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         &[
             "tag",
             "put",
-            "--control-plane",
+            "--gateway",
             &public,
             "owner",
             "--instructions",
@@ -705,7 +705,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     cli(
         &[
             "team",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "release",
@@ -720,7 +720,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let objective = cli(
         &[
             "objective",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "rollout",
@@ -764,7 +764,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let page = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "inbox-items",
             "--kind",
@@ -777,7 +777,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         .as_str()
         .context("Objective Task ID")?;
     let task = cli(
-        &["get", "task", "--control-plane", &public, source_id],
+        &["get", "task", "--gateway", &public, source_id],
         &operator_token,
     )
     .await?;
@@ -789,11 +789,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let approval_id = match item["approval"]["approval_id"].as_str() {
         Some(id) => id,
         None => {
-            let history = cli(
-                &["get", "--control-plane", &public, "approvals"],
-                &operator_token,
-            )
-            .await?;
+            let history = cli(&["get", "--gateway", &public, "approvals"], &operator_token).await?;
             anyhow::bail!(
                 "missing approval for fixture Task {task}; Inbox {page}; approval history {history}"
             );
@@ -803,7 +799,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     assert_eq!(item["operator_eligible"], true);
     assert_eq!(item["approval"]["resource"], "release");
     let detail = cli(
-        &["get", "--control-plane", &public, "approval", approval_id],
+        &["get", "--gateway", &public, "approval", approval_id],
         &operator_token,
     )
     .await?;
@@ -882,7 +878,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     );
     let decision_args = [
         "approval",
-        "--control-plane",
+        "--gateway",
         &public,
         "approve",
         approval_id,
@@ -939,7 +935,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
         Code::AlreadyExists
     );
     let used = cli(
-        &["get", "--control-plane", &public, "approval", approval_id],
+        &["get", "--gateway", &public, "approval", approval_id],
         &operator_token,
     )
     .await?;
@@ -947,7 +943,7 @@ async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_wri
     let page = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "workstream-posts",
             "--team",
@@ -983,7 +979,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
             &[
                 "tag",
                 "put",
-                "--control-plane",
+                "--gateway",
                 &public,
                 tag,
                 "--instructions",
@@ -996,7 +992,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     let team = cli(
         &[
             "team",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "release",
@@ -1017,7 +1013,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     let update = cli(
         &[
             "team",
-            "--control-plane",
+            "--gateway",
             &public,
             "update",
             "Release review",
@@ -1031,7 +1027,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     let objective = cli(
         &[
             "objective",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "rollout",
@@ -1049,7 +1045,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     let (deleted, _, refusal) = run(
         &[
             "delete",
-            "--control-plane",
+            "--gateway",
             &public,
             "team",
             "release",
@@ -1168,7 +1164,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     let page = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "workstream-posts",
             "--team",
@@ -1345,7 +1341,7 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     cli(
         &[
             "team",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "spare",
@@ -1356,32 +1352,25 @@ async fn operator_teams_and_attempt_workstreams_run_through_the_control_plane(
     )
     .await?;
     let (deleted, preview, _) = run(
-        &[
-            "delete",
-            "--control-plane",
-            &public,
-            "team",
-            "spare",
-            "--dry-run",
-        ],
+        &["delete", "--gateway", &public, "team", "spare", "--dry-run"],
         &operator_token,
     )
     .await?;
     assert!(deleted);
     assert_eq!(preview, "delete Team/spare\n");
     let kept = cli(
-        &["get", "--control-plane", &public, "team", "spare"],
+        &["get", "--gateway", &public, "team", "spare"],
         &operator_token,
     )
     .await?;
     assert_eq!(kept["team_id"], "spare");
     cli(
-        &["delete", "--control-plane", &public, "team", "spare"],
+        &["delete", "--gateway", &public, "team", "spare"],
         &operator_token,
     )
     .await?;
     let (found, _, _) = run(
-        &["get", "--control-plane", &public, "team", "spare"],
+        &["get", "--gateway", &public, "team", "spare"],
         &operator_token,
     )
     .await?;
@@ -1411,7 +1400,7 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
         &[
             "tag",
             "put",
-            "--control-plane",
+            "--gateway",
             &public,
             "owner",
             "--instructions",
@@ -1423,7 +1412,7 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
     let objective = cli(
         &[
             "objective",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "question-flow",
@@ -1506,7 +1495,7 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
     // is published.
     let mut watcher = command(&[
         "watch",
-        "--control-plane",
+        "--gateway",
         &public,
         "inbox-item",
         "--objective",
@@ -1556,7 +1545,7 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
             .is_some()
     );
     let listed = cli(
-        &["get", "--control-plane", &public, "inbox-items"],
+        &["get", "--gateway", &public, "inbox-items"],
         &operator_token,
     )
     .await?;
@@ -1575,7 +1564,7 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
     let (watched, line, _) = run(
         &[
             "watch",
-            "--control-plane",
+            "--gateway",
             &public,
             "inbox-item",
             "--kind",
@@ -1613,20 +1602,14 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
     let (restarted, public) = service(plane_command()).await?;
     plane = restarted;
     let question = cli(
-        &[
-            "get",
-            "--control-plane",
-            &public,
-            "question",
-            &attempt.task_id,
-        ],
+        &["get", "--gateway", &public, "question", &attempt.task_id],
         &operator_token,
     )
     .await?;
     assert_eq!(question["text"], "Which release route should I use?");
     let answer_args = [
         "question",
-        "--control-plane",
+        "--gateway",
         &public,
         "answer",
         &attempt.task_id,
@@ -1640,7 +1623,7 @@ async fn objective_questions_survive_control_plane_restart_and_answer_once(
     assert_eq!(replay["task_id"], answer["task_id"]);
     assert!(
         cli(
-            &["get", "--control-plane", &public, "inbox-items"],
+            &["get", "--gateway", &public, "inbox-items"],
             &operator_token
         )
         .await?["items"]

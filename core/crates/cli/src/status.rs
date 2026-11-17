@@ -25,9 +25,9 @@ const MAX_PAGES: usize = 100;
 
 #[derive(Args)]
 pub struct StatusArgs {
-    /// Remote Control Plane URL or saved name; a URL reads SUPERTAG_OPERATOR_TOKEN.
+    /// Remote Gateway URL or saved name; a URL reads SUPERTAG_OPERATOR_TOKEN.
     #[arg(long, conflicts_with = "state_directory")]
-    control_plane: Option<String>,
+    gateway: Option<String>,
     /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
     #[arg(long)]
     state_directory: Option<PathBuf>,
@@ -83,7 +83,7 @@ struct InboxView {
 /// operator inbox, read through the Control Plane's operator API.
 pub async fn status(args: StatusArgs) -> Result<()> {
     let (channel, token) = crate::connect_operator(Connection {
-        control_plane: args.control_plane,
+        gateway: args.gateway,
         state_directory: args.state_directory,
     })
     .await?;

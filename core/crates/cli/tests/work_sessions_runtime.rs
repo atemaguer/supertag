@@ -54,13 +54,7 @@ async fn service(mut command: Command) -> Result<(Child, String)> {
 /// Issues the Operator Token `name` with the admin `token`, for a second operator.
 async fn operator_token(endpoint: &str, token: &str, name: &str) -> Result<String> {
     let created = cli(
-        &[
-            "operator-token",
-            "create",
-            name,
-            "--control-plane",
-            endpoint,
-        ],
+        &["operator-token", "create", name, "--gateway", endpoint],
         token,
     )
     .await?;
@@ -430,7 +424,7 @@ async fn private_harness_work_session_reports_once_after_service_restart(
     let detail = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "session",
             &started.work_session_id,
@@ -443,7 +437,7 @@ async fn private_harness_work_session_reports_once_after_service_restart(
     let listed = cli(
         &[
             "get",
-            "--control-plane",
+            "--gateway",
             &public,
             "sessions",
             "--parent-tag",
@@ -859,7 +853,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     cli(
         &[
             "team",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "release-team",
@@ -874,7 +868,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     let created = cli(
         &[
             "objective",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "release",
@@ -1046,7 +1040,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     // The operator manages the ceiling with an exact revision and operation
     // receipt. Host credentials cannot use this management entry point.
     let current = cli(
-        &["get", "--control-plane", &public, "objective", "release"],
+        &["get", "--gateway", &public, "objective", "release"],
         &operator_token,
     )
     .await?;
@@ -1068,7 +1062,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     let revision_arg = revision.to_string();
     let clear = [
         "objective",
-        "--control-plane",
+        "--gateway",
         &public,
         "set-runtime-actions",
         "release",
@@ -1100,7 +1094,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     assert_eq!(stale.code(), Code::AlreadyExists);
     let mut update = command(&[
         "objective",
-        "--control-plane",
+        "--gateway",
         &public,
         "set-runtime-actions",
         "release",
@@ -1135,7 +1129,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     let defaults = cli(
         &[
             "objective",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "owner-defaults",
@@ -1154,7 +1148,7 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling(
     let empty = cli(
         &[
             "objective",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "explicit-empty",
@@ -1192,7 +1186,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         &[
             "tag",
             "put",
-            "--control-plane",
+            "--gateway",
             &public,
             "planner",
             "--instructions",
@@ -1204,7 +1198,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     let created = cli(
         &[
             "objective",
-            "--control-plane",
+            "--gateway",
             &public,
             "create",
             "budgeted",
@@ -1228,7 +1222,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         .context("Objective starting Task ID")?;
     let list = [
         "get",
-        "--control-plane",
+        "--gateway",
         &public,
         "sessions",
         "--parent-tag",
@@ -1295,11 +1289,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
             20,
         ),
     ] {
-        let task = cli(
-            &["get", "task", "--control-plane", &public, id],
-            &operator_token,
-        )
-        .await?;
+        let task = cli(&["get", "task", "--gateway", &public, id], &operator_token).await?;
         assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
         assert_eq!(
             task["execution_limits"]["max_reported_cost"],
@@ -1343,7 +1333,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
                 .as_str()
                 .context("first child Attempt ID")?;
             let usage = cli(
-                &["task", "usage", "--control-plane", &public, id, attempt],
+                &["task", "usage", "--gateway", &public, id, attempt],
                 &operator_token,
             )
             .await?;
@@ -1355,7 +1345,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         }
     }
     let before = cli(
-        &["get", "--control-plane", &public, "objective", "budgeted"],
+        &["get", "--gateway", &public, "objective", "budgeted"],
         &operator_token,
     )
     .await?;
@@ -1363,7 +1353,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     let submit = [
         "task",
         "submit",
-        "--control-plane",
+        "--gateway",
         &public,
         "--tag",
         "planner",
@@ -1378,7 +1368,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
     cli(
         &[
             "objective",
-            "--control-plane",
+            "--gateway",
             &public,
             "set-limits",
             "budgeted",
@@ -1399,7 +1389,7 @@ async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised(
         &[
             "task",
             "submit",
-            "--control-plane",
+            "--gateway",
             &public,
             "--tag",
             "planner",

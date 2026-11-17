@@ -72,13 +72,7 @@ fn control_plane(secret: &str, token: &str, identity: &str) -> Command {
 
 /// Issues the Operator Token `name` with the admin `token`, for a second operator.
 async fn operator_token(endpoint: &str, token: &str, name: &str) -> Result<String> {
-    let mut create = command(&[
-        "operator-token",
-        "create",
-        name,
-        "--control-plane",
-        endpoint,
-    ]);
+    let mut create = command(&["operator-token", "create", name, "--gateway", endpoint]);
     create.env("SUPERTAG_OPERATOR_TOKEN", token);
     let output = timeout(WAIT, create.output()).await??;
     ensure!(
@@ -140,7 +134,7 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity(database: Str
     let run = |args: &[&str]| {
         let mut command = command(args);
         command
-            .args(["--control-plane", &public])
+            .args(["--gateway", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &token);
         async move {
             let output = timeout(WAIT, command.output()).await??;
@@ -545,7 +539,7 @@ async fn tui_save_task_file(
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\nexport SUPERTAG_OPERATOR_TOKEN='{}'\nexec env HOME={} {} tui --control-plane '{}' --binary {}\n",
+            "#!/bin/sh\nexport SUPERTAG_OPERATOR_TOKEN='{}'\nexec env HOME={} {} tui --gateway '{}' --binary {}\n",
             token,
             shell_path(directory)?,
             shell_path(Path::new(BINARY))?,
@@ -824,7 +818,7 @@ async fn tui_handover_uses_descriptor_three_and_version_match() -> Result<()> {
     let token = "fixture-operator-credential";
     let mut command = command(&[
         "tui",
-        "--control-plane",
+        "--gateway",
         "http://127.0.0.1:1",
         "--workspace",
         "example",

@@ -50,10 +50,9 @@ use crate::{
 /// directory (which also holds the file credential vault).
 #[derive(Args, Clone)]
 pub struct Target {
-    /// Control Plane URL or saved Control Plane name. Defaults to this machine's running local
-    /// services.
+    /// Gateway URL or saved Gateway name. Defaults to this machine's running local services.
     #[arg(long, value_name = "URL|NAME")]
-    control_plane: Option<String>,
+    gateway: Option<String>,
     /// State directory with supertag.yaml and the file credential vault. Defaults to
     /// SUPERTAG_STATE_DIR, then ~/.supertag.
     #[arg(long)]
@@ -80,8 +79,8 @@ pub struct Common {
     name: Option<String>,
     /// The enrolled Gateway that serves the account, by the NAME of gateway:NAME. The local
     /// services' Gateway is local.
-    #[arg(long, default_value = "local")]
-    gateway: String,
+    #[arg(long, value_name = "NAME", default_value = "local")]
+    serving_gateway: String,
     #[command(flatten)]
     target: Target,
 }
@@ -321,10 +320,9 @@ impl Local {
         ProtocolChannel,
         String,
     )> {
-        let local =
-            self.target.control_plane.is_none() && crate::ROOT_CONTROL_PLANE.get().is_none();
+        let local = self.target.gateway.is_none() && crate::ROOT_GATEWAY.get().is_none();
         let (channel, token) = crate::connect_operator(Connection {
-            control_plane: self.target.control_plane.clone(),
+            gateway: self.target.gateway.clone(),
             state_directory: local.then(|| self.state.clone()),
         })
         .await?;
@@ -848,7 +846,7 @@ pub async fn setup(command: SetupCommand) -> Result<()> {
     // Choose where the secrets go before asking for them.
     let vault = context.vault()?;
     let verified = verify(&kind, &prompter, &endpoints).await?;
-    let gateway = common.gateway.clone();
+    let gateway = common.serving_gateway.clone();
     finish(
         context, vault, name, gateway, provider, listen, prior, verified,
     )

@@ -88,7 +88,7 @@ Check what the Task Attempt did, then record a decision:
 ```sh
 supertag task resolve-attempt TASK_ID ATTEMPT_ID --decision failed \
   --evidence "The sandbox is gone and no commit was delivered." --confirmed-stopped \
-  --control-plane team
+  --gateway team
 ```
 
 `--decision retry` runs the Task again. The decision and its evidence are audited.

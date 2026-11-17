@@ -10,7 +10,7 @@ use anyhow::{Context, Result, ensure};
 use serde_json::json;
 use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 
-use crate::{Connection, ROOT_CONTROL_PLANE, resolve_target};
+use crate::{Connection, ROOT_GATEWAY, resolve_target};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The format `supertag __local-control-plane` prints; the terminal UI checks it.
@@ -46,8 +46,8 @@ pub async fn launch(
     binary: Option<PathBuf>,
     workspace: Option<String>,
 ) -> Result<()> {
-    let implicit = connection.control_plane.is_none()
-        && ROOT_CONTROL_PLANE.get().is_none()
+    let implicit = connection.gateway.is_none()
+        && ROOT_GATEWAY.get().is_none()
         && connection.state_directory.is_none();
     ensure!(
         // terminal-safe: only checks whether output is a terminal.
@@ -59,7 +59,7 @@ pub async fn launch(
     // The terminal UI finds the local Control Plane in the same state directory.
     let state = supertag_local_state::state_directory(connection.state_directory.clone()).ok();
     let allow_saved_only = implicit
-        && crate::environment_control_plane().is_none()
+        && crate::environment_gateway().is_none()
         && std::env::var_os("SUPERTAG_STATE_DIR").is_none()
         && workspace.is_none();
     let target = match resolve_target(connection) {

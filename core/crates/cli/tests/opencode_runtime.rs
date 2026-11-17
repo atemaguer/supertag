@@ -904,7 +904,7 @@ async fn put_tag_cli_preserves_model_and_effort_order_at_admission(database: Str
                 "tag",
                 "put",
                 "reviewer",
-                "--control-plane",
+                "--gateway",
                 &runtime.endpoint,
                 "--instructions",
                 "Review the fixture change",

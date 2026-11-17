@@ -367,7 +367,7 @@ async fn configured_local_hosts_restart_and_reap_with_stable_private_state(
     Ok(())
 }
 /// With no flag, operator commands reach the Control Plane `supertag up` runs from
-/// `~/.supertag`, or from `SUPERTAG_STATE_DIR`; `SUPERTAG_CONTROL_PLANE_URL` and the flags win.
+/// `~/.supertag`, or from `SUPERTAG_STATE_DIR`; `SUPERTAG_GATEWAY_URL` and the flags win.
 async fn operator_commands_default_to_the_local_control_plane(database: String) -> Result<()> {
     let temp = tempfile::tempdir()?;
     let home = temp.path().join("home");
@@ -435,7 +435,7 @@ async fn operator_commands_default_to_the_local_control_plane(database: String) 
     let output = get_tags(
         &[
             ("HOME", home_text),
-            ("SUPERTAG_CONTROL_PLANE_URL", "http://127.0.0.1:9"),
+            ("SUPERTAG_GATEWAY_URL", "http://127.0.0.1:9"),
             ("SUPERTAG_OPERATOR_TOKEN", "stop_unused"),
         ],
         &[],

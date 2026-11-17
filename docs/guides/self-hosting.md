@@ -112,7 +112,7 @@ supertag connect https://supertag.example.com --name team
 ```
 
 Paste the token at the masked prompt. Commands, the terminal UI, and the desktop app then use
-`--control-plane team`.
+`--gateway team`.
 
 ## 6. Connect a Worker Host
 
@@ -120,7 +120,7 @@ Create a host **Auth Key**, a short-lived secret that enrolls one machine, for t
 may run:
 
 ```sh
-supertag auth-key create build-1 --role host --tag lead --control-plane team
+supertag auth-key create build-1 --role host --tag lead --gateway team
 ```
 
 On the Worker Host, save the printed key to a private file and add a host service to
@@ -166,9 +166,9 @@ Key enrolls their device as `client:NAME` and saves only the device's own creden
 To end access, revoke what you issued:
 
 ```sh
-supertag operator-token revoke laptop-2 --control-plane team
-supertag client revoke laptop-2 --control-plane team
-supertag host revoke laptop-2 --control-plane team
+supertag operator-token revoke laptop-2 --gateway team
+supertag client revoke laptop-2 --gateway team
+supertag host revoke laptop-2 --gateway team
 ```
 
 `supertag audit` lists every operator change with the actor that made it.
@@ -179,16 +179,16 @@ Keep your manifests in a repository and let CI apply them. Give CI its own Opera
 its changes are recorded under its name:
 
 ```sh
-supertag operator-token create ci --control-plane team
+supertag operator-token create ci --gateway team
 ```
 
 Store the secret as a CI secret named `SUPERTAG_OPERATOR_TOKEN`, install the CLI, and run:
 
 ```sh
 # On each pull request: show what would change
-supertag diff -f org/ --set org --prune --control-plane https://supertag.example.com
+supertag diff -f org/ --set org --prune --gateway https://supertag.example.com
 # After merging: apply it
-supertag apply -f org/ --set org --prune --control-plane https://supertag.example.com
+supertag apply -f org/ --set org --prune --gateway https://supertag.example.com
 ```
 
 `--set org` names the resources these manifests own. With `--prune`, apply deletes a resource in

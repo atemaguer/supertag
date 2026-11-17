@@ -58,7 +58,7 @@ impl Credentials {
     }
     fn operator(&self, args: &[&str], public: &str) -> Command {
         let mut command = self.command(args);
-        command.args(["--control-plane", public]);
+        command.args(["--gateway", public]);
         command
     }
     fn worker(&self, public: &str, state: &Path, source: Option<&Path>) -> Command {
@@ -143,7 +143,7 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
     };
     let (mut plane, public) = service(plane_command("127.0.0.1:0")).await?;
     let cli = |args: &[&str]| {
-        let mut command = credentials.command(&[args[0], "--control-plane", &public]);
+        let mut command = credentials.command(&[args[0], "--gateway", &public]);
         command.args(&args[1..]);
         command
     };
@@ -683,14 +683,9 @@ async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspac
             let produced = field(&result, "result")?
                 .strip_prefix("artifact:")
                 .context("missing produced artifact")?;
-            let metadata = json(credentials.command(&[
-                "get",
-                "--control-plane",
-                &public,
-                "artifact",
-                produced,
-            ]))
-            .await?;
+            let metadata =
+                json(credentials.command(&["get", "--gateway", &public, "artifact", produced]))
+                    .await?;
             assert_eq!(
                 metadata["summary"]["description"]["title"],
                 "Reusable evidence from https://[REDACTED]@git.example/repo.git",
@@ -709,14 +704,9 @@ async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspac
             let derived = field(&result, "result")?
                 .strip_prefix("derived:")
                 .context("missing derived artifact")?;
-            let metadata = json(credentials.command(&[
-                "get",
-                "--control-plane",
-                &public,
-                "artifact",
-                derived,
-            ]))
-            .await?;
+            let metadata =
+                json(credentials.command(&["get", "--gateway", &public, "artifact", derived]))
+                    .await?;
             assert_eq!(metadata["inputs"].as_array().unwrap().len(), 1);
             assert_eq!(
                 metadata["inputs"][0]["paths"],

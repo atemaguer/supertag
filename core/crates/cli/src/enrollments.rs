@@ -98,7 +98,7 @@ pub enum ClientCommand {
         connection: Connection,
         name: String,
     },
-    /// Replace a client credential: this device's own, saved under --control-plane NAME, or any
+    /// Replace a client credential: this device's own, saved under --gateway NAME, or any
     /// client's as an operator with NAME and --out.
     RotateCredential {
         #[command(flatten)]
@@ -316,20 +316,18 @@ pub(crate) async fn rotate_other(
     }))
 }
 
-/// Rotates this device's own client credential, saved under a Control Plane name.
+/// Rotates this device's own client credential, saved under a Gateway name.
 async fn rotate_saved_client(connection: Connection) -> Result<Value> {
     let name = connection
-        .control_plane
+        .gateway
         .clone()
-        .or_else(|| crate::ROOT_CONTROL_PLANE.get().cloned())
+        .or_else(|| crate::ROOT_GATEWAY.get().cloned())
         .filter(|name| !crate::profiles::is_url(name))
-        .context(
-            "name the saved Control Plane whose client credential to rotate: --control-plane NAME",
-        )?;
+        .context("name the saved Gateway whose client credential to rotate: --gateway NAME")?;
     let saved = crate::profiles::resolve(&name)?;
     ensure!(
         is_secret(CREDENTIAL_SECRET_PREFIX, &saved.token),
-        "the Control Plane saved as {name} is connected with an operator token, not a client credential"
+        "the Gateway saved as {name} is connected with an operator token, not a client credential"
     );
     let (channel, token) = connect_operator(connection).await?;
     let secret = new_secret(CREDENTIAL_SECRET_PREFIX);

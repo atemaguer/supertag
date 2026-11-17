@@ -1,6 +1,6 @@
 //! Operator access through a Control Plane process: an audit entry commits
 //! with the change it records, Worker Hosts joining with an Auth Key are recorded under that key,
-//! and `supertag connect` saves a proven operator token for `--control-plane NAME`.
+//! and `supertag connect` saves a proven operator token for `--gateway NAME`.
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
@@ -107,7 +107,7 @@ impl Services {
     fn operator(&self, args: &[&str]) -> Command {
         let mut command = binary(args);
         command
-            .args(["--control-plane", &self.public])
+            .args(["--gateway", &self.public])
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token);
         command
     }
@@ -526,7 +526,7 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     assert_eq!(profiles["control_planes"][0]["token"], token.as_str());
 
     // A later command names the saved Control Plane and needs no token in its environment.
-    let mut listed = binary(&["get", "tags", "--control-plane", "prod"]);
+    let mut listed = binary(&["get", "tags", "--gateway", "prod"]);
     listed.env("HOME", home.path());
     let output = timeout(WAIT, listed.output()).await??;
     ensure!(
@@ -665,9 +665,7 @@ async fn connect_saves_a_proven_token_for_later_commands(database: String) -> Re
     );
     let as_client = |args: &[&str]| {
         let mut command = binary(args);
-        command
-            .args(["--control-plane", "work"])
-            .env("HOME", home.path());
+        command.args(["--gateway", "work"]).env("HOME", home.path());
         command
     };
     let tags = timeout(WAIT, as_client(&["get", "tags"]).output()).await??;

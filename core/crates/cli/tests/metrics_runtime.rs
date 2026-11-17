@@ -92,7 +92,7 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
     let operator = |args: &[&str]| {
         let mut command = binary(args);
         command
-            .args(["--control-plane", &public])
+            .args(["--gateway", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
         command
     };

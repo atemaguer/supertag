@@ -1,7 +1,7 @@
 {
   "name": "supertag-ai",
   "version": "0.3.0",
-  "description": "TypeScript SDK for SuperTag: a Control Plane client and the harness adapter client for Worker Hosts.",
+  "description": "TypeScript SDK for SuperTag: a Gateway client and the harness adapter client for Worker Hosts.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "SuperTag contributors",
@@ -25,9 +25,9 @@
     "node": ">=22.13.0"
   },
   "exports": {
-    "./control-plane-client": {
-      "types": "./dist/control-plane-client.d.ts",
-      "import": "./dist/control-plane-client.js"
+    "./gateway-client": {
+      "types": "./dist/gateway-client.d.ts",
+      "import": "./dist/gateway-client.js"
     },
     "./harness": {
       "types": "./dist/harness.d.ts",
@@ -45,7 +45,7 @@
     "build": "tsup",
     "clean": "rm -rf dist",
     "prepack": "pnpm build",
-    "test:package": "pnpm build && publint && attw --pack . --profile esm-only && node scripts/verify-control-plane-client.mjs",
+    "test:package": "pnpm build && publint && attw --pack . --profile esm-only && node scripts/verify-gateway-client.mjs",
     "typecheck": "tsc --noEmit --pretty false"
   },
   "dependencies": {

@@ -98,14 +98,14 @@ fn plane(credentials: &Credentials, root: &Path, database: &str, mapped: bool) -
     c
 }
 fn volume(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
-    let mut c = credentials.command(&["volume", "--control-plane", public]);
+    let mut c = credentials.command(&["volume", "--gateway", public]);
     c.args(args);
     c
 }
 /// `supertag get` for Volumes and their copies, or `supertag delete` with a leading "delete".
 fn resource(credentials: &Credentials, public: &str, args: &[&str]) -> Command {
     let (verb, args) = args.split_first().expect("a verb");
-    let mut c = credentials.command(&[verb, "--control-plane", public]);
+    let mut c = credentials.command(&[verb, "--gateway", public]);
     c.args(args);
     c
 }
@@ -233,7 +233,7 @@ fn capture_download(
     artifact: &str,
     output: &Path,
 ) -> Command {
-    let mut command = credentials.command(&["artifact", "--control-plane", public]);
+    let mut command = credentials.command(&["artifact", "--gateway", public]);
     command
         .args(["download", artifact, "--path", "report.txt", "--output"])
         .arg(output);

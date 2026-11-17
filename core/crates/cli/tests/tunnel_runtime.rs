@@ -531,7 +531,7 @@ impl Deployment {
     fn operator_at(&self, url: &str, args: &[&str], leaf: Option<&Leaf>) -> Command {
         let mut command = binary(args);
         command
-            .args(["--control-plane", url])
+            .args(["--gateway", url])
             .env("SUPERTAG_OPERATOR_TOKEN", &self.tokens.operator);
         client_tls(&mut command, &self.pki.ca(), leaf);
         command
@@ -2159,7 +2159,7 @@ async fn operator_clients_verify_save_and_hand_over_a_wss_control_plane(
     };
     let profiles: Value = serde_json::from_slice(&std::fs::read(&store)?)?;
     assert_eq!(profiles["control_planes"][0]["url"], public.as_str());
-    let mut tags = binary(&["get", "tags", "--control-plane", "tunnel"]);
+    let mut tags = binary(&["get", "tags", "--gateway", "tunnel"]);
     tags.env("HOME", &home);
     let output = run(tags).await?;
     ensure!(
@@ -2172,9 +2172,9 @@ async fn operator_clients_verify_save_and_hand_over_a_wss_control_plane(
     handover_fixture(&launcher)?;
     let ca = std::fs::canonicalize(deployment.pki.ca())?;
     let cert = std::fs::canonicalize(&deployment.operator_leaf.cert)?;
-    let mut by_name = binary(&["tui", "--control-plane", "tunnel", "--binary"]);
+    let mut by_name = binary(&["tui", "--gateway", "tunnel", "--binary"]);
     by_name.arg(&launcher).env("HOME", &home);
-    let mut by_url = binary(&["tui", "--control-plane", &public, "--binary"]);
+    let mut by_url = binary(&["tui", "--gateway", &public, "--binary"]);
     by_url
         .arg(&launcher)
         .env("SUPERTAG_OPERATOR_TOKEN", &deployment.tokens.operator);
@@ -2319,7 +2319,7 @@ async fn go_tui_reaches_the_control_plane_through_a_wss_tunnel() -> Result<()> {
 
     let accepted = deployment.control_edge.accepted();
     let handed = format!(
-        "{base} SUPERTAG_OPERATOR_TOKEN={} SUPERTAG_SERVER_CA_FILE={} SUPERTAG_CLIENT_CERT_FILE={} SUPERTAG_CLIENT_KEY_FILE={} {} tui --control-plane {}",
+        "{base} SUPERTAG_OPERATOR_TOKEN={} SUPERTAG_SERVER_CA_FILE={} SUPERTAG_CLIENT_CERT_FILE={} SUPERTAG_CLIENT_KEY_FILE={} {} tui --gateway {}",
         deployment.tokens.operator,
         shell_word(&deployment.pki.ca())?,
         shell_word(&deployment.operator_leaf.cert)?,

@@ -41,13 +41,13 @@ require changes at any time.
 
 | Import | Level | Main exports |
 | --- | --- | --- |
-| `supertag-ai/control-plane-client` | Experimental | `createControlPlaneClient`, operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams |
+| `supertag-ai/gateway-client` | Experimental | `createGatewayClient`, operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams |
 | `supertag-ai/harness` | Experimental | `openHarness`, exact-request receipt retries, Worker-managed effect receipts (`effects`, `EffectReceiptState`), Task event kinds (`TaskEventKind`), and execution-scoped `supertag.runtime.v2` clients |
 
 The Python SDK (`supertag` on PyPI) has two Experimental modules, both installed with the
-`runtime` extra. `supertag.control_plane_client` provides `ControlPlaneClient` and
-`ControlPlaneClientSync`, which connect to a Control Plane over gRPC and expose its operator
-services. `supertag.harness_adapter` provides `open_harness`, which opens a Worker Host's
+`runtime` extra. `supertag.gateway_client` provides `GatewayClient` and `GatewayClientSync`,
+which connect to a Gateway over gRPC and expose the operator services it forwards to the Control
+Plane. `supertag.harness_adapter` provides `open_harness`, which opens a Worker Host's
 execution-scoped services for a custom harness adapter from its standard input. The OpenAI Agents
 harness adapter, `python -m supertag.openai_agents_adapter`, is Experimental. Other Python
 modules are internal.

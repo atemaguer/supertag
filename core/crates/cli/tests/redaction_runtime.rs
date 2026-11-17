@@ -88,7 +88,7 @@ async fn redaction_keeps_harness_text_within_its_limit(database: String) -> Resu
     let operator = |args: &[&str]| {
         let mut command = binary(args);
         command
-            .args(["--control-plane", &public])
+            .args(["--gateway", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
         command
     };
@@ -171,7 +171,7 @@ async fn harness_output_is_redacted_before_it_leaves_the_worker_host(
     let operator = |args: &[&str]| {
         let mut command = binary(args);
         command
-            .args(["--control-plane", &public])
+            .args(["--gateway", &public])
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
         command
     };

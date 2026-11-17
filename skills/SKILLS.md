@@ -66,8 +66,8 @@ file: a `control-plane` service and `host` services (the machine as a Worker Hos
 also runs a local Gateway. Local state uses SQLite; shared deployments use PostgreSQL.
 
 Operator commands use this machine's local services (`SUPERTAG_STATE_DIR` or `~/.supertag`)
-unless they name `--control-plane NAME`, one saved with `supertag connect`, or
-`SUPERTAG_CONTROL_PLANE_URL` names one.
+unless they name `--gateway NAME`, one saved with `supertag connect`, or
+`SUPERTAG_GATEWAY_URL` names one.
 
 Credentials come from masked prompts, environment variables, or private files, **never**
 command-line flags. Do not construct a command that puts a secret in argv.

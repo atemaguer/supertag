@@ -10,8 +10,8 @@ native programs; see the
 
 This package is the TypeScript SDK. It has two entry points:
 
-- `supertag-ai/control-plane-client`: `createControlPlaneClient` connects an operator application
-  to a SuperTag Control Plane over gRPC. It negotiates the SuperTag protocol version before its
+- `supertag-ai/gateway-client`: `createGatewayClient` connects an operator application
+  to a SuperTag Gateway over gRPC. It negotiates the SuperTag protocol version before its
   first call and names it on every call.
 - `supertag-ai/harness`: `openHarness` reads the execution bootstrap a Worker Host writes to a
   harness adapter's standard input and connects to the Worker Host's private harness service for
@@ -23,10 +23,10 @@ npm install supertag-ai
 ```
 
 ```ts
-import { createControlPlaneClient } from "supertag-ai/control-plane-client";
+import { createGatewayClient } from "supertag-ai/gateway-client";
 
-const client = createControlPlaneClient({
-  url: "https://control-plane.example.com",
+const client = createGatewayClient({
+  url: "https://gateway.example.com",
   token: process.env.SUPERTAG_OPERATOR_TOKEN!,
 });
 try {

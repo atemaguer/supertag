@@ -74,7 +74,7 @@ test("accepts documented commands, aliases, and placeholders", () => {
     "supertag get KIND",
     "supertag watch objective ID --limit 3",
     "supertag tag put lead [--expected-revision N]",
-    "supertag --control-plane https://cp.example get tag lead",
+    "supertag --gateway https://gw.example get tag lead",
   ])
     assert.equal(check(command), null, command);
 });

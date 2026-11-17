@@ -67,7 +67,7 @@ supertag verify deployment https://supertag.example.com \
 
 ```sh
 supertag connect https://supertag.example.com --name team
-supertag auth-key create build-1 --role host --tag lead --control-plane team
+supertag auth-key create build-1 --role host --tag lead --gateway team
 ```
 
 `connect` reads the admin token from `operator.env`'s value at a masked prompt or from
@@ -99,7 +99,7 @@ with the deployment's owner.
 ```sh
 supertag health --endpoint https://supertag.example.com
 supertag verify deployment https://supertag.example.com --env-file supertag-deployment/operator.env --require-ready
-supertag get host --control-plane team
+supertag get host --gateway team
 ```
 
 ## Ongoing
@@ -109,4 +109,4 @@ supertag get host --control-plane team
   volume.
 - Rotate Operator Tokens before their 90-day expiry; revoke departed teammates' tokens, clients,
   and hosts.
-- `supertag audit --control-plane team` lists operator changes with their actor.
+- `supertag audit --gateway team` lists operator changes with their actor.

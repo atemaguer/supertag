@@ -47,7 +47,7 @@ that lists the harness in `allow-unsandboxed-commands`.
 An operator creates a host Auth Key:
 
 ```sh
-supertag auth-key create laptop-2 --role host --tag lead --control-plane team
+supertag auth-key create laptop-2 --role host --tag lead --gateway team
 ```
 
 The user saves it to a private file; never paste it into chat. The host service names the
@@ -104,8 +104,8 @@ the shell. Never handle the user's keys yourself.
 ## Place Tags on the right hosts
 
 ```sh
-supertag placement runs-on builder gpu --control-plane team
-supertag placement explain TASK_ID --control-plane team
+supertag placement runs-on builder gpu --gateway team
+supertag placement explain TASK_ID --gateway team
 ```
 
 A host carries labels from `--label`, its host service's `labels: [...]` in supertag.yaml, or its
@@ -128,9 +128,9 @@ the configured model and may incur charges.
 ## Operate
 
 ```sh
-supertag host drain build-1 --control-plane team    # finish running work, claim nothing new
-supertag host resume build-1 --control-plane team
-supertag host revoke build-1 --control-plane team   # refuse its credential at once
+supertag host drain build-1 --gateway team    # finish running work, claim nothing new
+supertag host resume build-1 --gateway team
+supertag host revoke build-1 --gateway team   # refuse its credential at once
 ```
 
 `supertag down` drains this machine's hosts before stopping them.

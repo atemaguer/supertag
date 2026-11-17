@@ -5,6 +5,7 @@ import selectors
 import subprocess
 import sys
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,16 +13,17 @@ import grpc
 import pytest
 
 from supertag._runtime_v2 import negotiation_pb2, negotiation_pb2_grpc, runtime_pb2_grpc
-from supertag.control_plane_client import (
-    ControlPlaneClient,
-    ControlPlaneClientSync,
-    ControlPlaneProtocolError,
+from supertag.gateway_client import (
+    GatewayClient,
+    GatewayClientSync,
+    GatewayProtocolError,
     artifacts,
     runtime,
 )
 
 TOKEN = "fixture-operator-token"
-HOST_TOKEN = "fixture-worker-host-credential-12345"
+HOST_TOKEN = "stcr_" + "b" * 64
+GATEWAY_CREDENTIAL = "stcr_" + "a" * 64
 
 
 @pytest.mark.parametrize(
@@ -31,18 +33,18 @@ HOST_TOKEN = "fixture-worker-host-credential-12345"
         ("http://localhost:3434", TOKEN, "loopback"),
         ("http://[::1]tail:3434", TOKEN, "origin"),
         ("http://127.0.0.1:0", TOKEN, "origin"),
-        ("https://control-plane.test/path", TOKEN, "origin"),
-        ("https://user:password@control-plane.test", TOKEN, "origin"),
-        ("https://control-plane.test?", TOKEN, "origin"),
-        ("https://control-plane.test", TOKEN + "\n", "operator token"),
+        ("https://gateway.test/path", TOKEN, "origin"),
+        ("https://user:password@gateway.test", TOKEN, "origin"),
+        ("https://gateway.test?", TOKEN, "origin"),
+        ("https://gateway.test", TOKEN + "\n", "operator token"),
     ],
 )
-def test_control_plane_client_rejects_invalid_connection_options(url, token, error):
+def test_gateway_client_rejects_invalid_connection_options(url, token, error):
     with pytest.raises(ValueError, match=error):
-        ControlPlaneClientSync(url, token)
+        GatewayClientSync(url, token)
 
 
-class _OldControlPlane(negotiation_pb2_grpc.ProtocolNegotiationServicer):
+class _OldGateway(negotiation_pb2_grpc.ProtocolNegotiationServicer):
     def __init__(self) -> None:
         self.calls: list[str] = []
 
@@ -52,18 +54,18 @@ class _OldControlPlane(negotiation_pb2_grpc.ProtocolNegotiationServicer):
         assert list(request.protocol_versions) == [3]
         context.abort(
             grpc.StatusCode.FAILED_PRECONDITION,
-            "incompatible SuperTag protocol: this Control Plane (SuperTag 0.3.0) speaks protocol "
+            "incompatible SuperTag protocol: this Gateway (SuperTag 0.3.0) speaks protocol "
             "versions [2], but the connecting operator client (SuperTag supertag-python) "
             "offered [3]; run the same SuperTag release on both services",
         )
 
 
 @contextmanager
-def old_control_plane():
+def old_gateway():
     from concurrent import futures
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
-    handler = _OldControlPlane()
+    handler = _OldGateway()
     negotiation_pb2_grpc.add_ProtocolNegotiationServicer_to_server(handler, server)
     port = server.add_insecure_port("127.0.0.1:0")
     server.start()
@@ -73,35 +75,34 @@ def old_control_plane():
         server.stop(None)
 
 
-def test_sync_client_refuses_a_control_plane_from_another_protocol_epoch():
-    with old_control_plane() as (url, handler), ControlPlaneClientSync(url, TOKEN) as client:
-        with pytest.raises(ControlPlaneProtocolError, match="refused this operator client"):
+def test_sync_client_refuses_a_gateway_from_another_protocol_epoch():
+    with old_gateway() as (url, handler), GatewayClientSync(url, TOKEN) as client:
+        with pytest.raises(GatewayProtocolError, match="refused this operator client"):
             client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
         # Negotiation carries no credential, and no operator call was sent.
         assert handler.calls == [""]
 
 
-async def test_async_client_refuses_a_control_plane_from_another_protocol_epoch():
-    with old_control_plane() as (url, handler):
-        async with ControlPlaneClient(url, TOKEN) as client:
-            with pytest.raises(ControlPlaneProtocolError, match="offered \\[3\\]"):
+async def test_async_client_refuses_a_gateway_from_another_protocol_epoch():
+    with old_gateway() as (url, handler):
+        async with GatewayClient(url, TOKEN) as client:
+            with pytest.raises(GatewayProtocolError, match="offered \\[3\\]"):
                 await client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
         assert handler.calls == [""]
 
 
 _EPOCH_REFUSAL = (
-    "incompatible SuperTag protocol: this Control Plane (SuperTag 0.2.0) was replaced; "
-    "negotiate again"
+    "incompatible SuperTag protocol: this Gateway (SuperTag 0.2.0) was replaced; negotiate again"
 )
 
 
-class _ReplacedControlPlane(
+class _ReplacedGateway(
     negotiation_pb2_grpc.ProtocolNegotiationServicer,
     runtime_pb2_grpc.OperatorServicer,
     runtime_pb2_grpc.OperatorEventsServicer,
 ):
     """Refuses the first operator call and the first Watch with a protocol
-    refusal, as a Control Plane replaced by another release does, then serves."""
+    refusal, as a Gateway replaced by another release does, then serves."""
 
     def __init__(self) -> None:
         self.negotiations = 0
@@ -110,7 +111,7 @@ class _ReplacedControlPlane(
     def Negotiate(self, request, context):  # noqa: N802
         self.negotiations += 1
         return negotiation_pb2.NegotiateProtocolResponse(
-            role=negotiation_pb2.SERVICE_ROLE_CONTROL_PLANE,
+            role=negotiation_pb2.SERVICE_ROLE_GATEWAY,
             protocol_version=3,
             protocol_versions=[3],
             build_version="fixture",
@@ -131,11 +132,11 @@ class _ReplacedControlPlane(
 
 
 @contextmanager
-def replaced_control_plane():
+def replaced_gateway():
     from concurrent import futures
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
-    handler = _ReplacedControlPlane()
+    handler = _ReplacedGateway()
     negotiation_pb2_grpc.add_ProtocolNegotiationServicer_to_server(handler, server)
     runtime_pb2_grpc.add_OperatorServicer_to_server(handler, server)
     runtime_pb2_grpc.add_OperatorEventsServicer_to_server(handler, server)
@@ -148,7 +149,7 @@ def replaced_control_plane():
 
 
 def test_sync_client_negotiates_again_after_a_protocol_refusal():
-    with replaced_control_plane() as (url, handler), ControlPlaneClientSync(url, TOKEN) as client:
+    with replaced_gateway() as (url, handler), GatewayClientSync(url, TOKEN) as client:
         with pytest.raises(grpc.RpcError) as refused:
             client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
         assert refused.value.code() == grpc.StatusCode.FAILED_PRECONDITION
@@ -163,8 +164,8 @@ def test_sync_client_negotiates_again_after_a_protocol_refusal():
 async def test_async_client_negotiates_again_after_a_protocol_refusal():
     import asyncio
 
-    with replaced_control_plane() as (url, handler):
-        async with ControlPlaneClient(url, TOKEN) as client:
+    with replaced_gateway() as (url, handler):
+        async with GatewayClient(url, TOKEN) as client:
             with pytest.raises(grpc.aio.AioRpcError) as refused:
                 await client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
             assert refused.value.code() == grpc.StatusCode.FAILED_PRECONDITION
@@ -178,6 +179,14 @@ async def test_async_client_negotiates_again_after_a_protocol_refusal():
             watch = client.events.Watch(runtime.WatchRequest(), timeout=5)
             assert [event async for event in watch] == []
             assert handler.negotiations == 3
+
+
+@dataclass(frozen=True)
+class Deployment:
+    """A Control Plane and the Gateway in front of it."""
+
+    control_plane: str
+    gateway: str
 
 
 @contextmanager
@@ -206,7 +215,7 @@ def service(binary: str, args: list[str], env: dict[str, str]):
 
 
 @pytest.fixture
-def control_plane_url(tmp_path: Path):
+def deployment(tmp_path: Path):
     binary = os.environ.get("SUPERTAG_RUST_TEST_CLI")
     if not binary:
         pytest.skip("requires SUPERTAG_RUST_TEST_CLI pointing to the native SuperTag CLI")
@@ -214,18 +223,29 @@ def control_plane_url(tmp_path: Path):
         "SUPERTAG_OPERATOR_TOKEN": TOKEN,
         "SUPERTAG_DATABASE_URL": f"sqlite://{tmp_path / 'control.sqlite'}?mode=rwc",
         "SUPERTAG_BOOTSTRAP_HOST_TOKEN": HOST_TOKEN,
+        "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL": GATEWAY_CREDENTIAL,
     }
     with ExitStack() as services:
-        yield services.enter_context(service(binary, ["control-plane"], env))
+        control_plane = services.enter_context(service(binary, ["control-plane"], env))
+        # Clients connect to the Gateway, which forwards their calls to the Control Plane.
+        gateway = services.enter_context(
+            service(
+                binary,
+                ["gateway", "--control-plane", control_plane, "--listen", "127.0.0.1:0"],
+                {"SUPERTAG_GATEWAY_CREDENTIAL": GATEWAY_CREDENTIAL},
+            )
+        )
+        yield Deployment(control_plane=control_plane, gateway=gateway)
 
 
-async def test_control_plane_clients_replay_task_and_stream_events(control_plane_url):
-    with ControlPlaneClientSync(control_plane_url, "invalid-fixture-token") as wrong:
+async def test_gateway_clients_replay_task_and_stream_events(deployment):
+    gateway_url = deployment.gateway
+    with GatewayClientSync(gateway_url, "invalid-fixture-token") as wrong:
         with pytest.raises(grpc.RpcError) as rejected:
             wrong.operator.ListTags(runtime.ListTagsRequest(), timeout=3)
         assert rejected.value.code() == grpc.StatusCode.UNAUTHENTICATED
 
-    with ControlPlaneClientSync(control_plane_url, TOKEN) as client:
+    with GatewayClientSync(gateway_url, TOKEN) as client:
         tags = client.operator.ListTags(runtime.ListTagsRequest(), timeout=3)
         assert not tags.tags
         with pytest.raises(grpc.RpcError) as missing:
@@ -234,7 +254,7 @@ async def test_control_plane_clients_replay_task_and_stream_events(control_plane
             )
         assert missing.value.code() == grpc.StatusCode.NOT_FOUND
 
-    async with ControlPlaneClient(control_plane_url, TOKEN) as client:
+    async with GatewayClient(gateway_url, TOKEN) as client:
         stream = client.events.Watch(
             runtime.WatchRequest(kinds=[runtime.WATCH_KIND_TAG]), timeout=5
         )
@@ -254,7 +274,7 @@ async def test_control_plane_clients_replay_task_and_stream_events(control_plane
             tag_id=tag.tag_id,
             session_id="fixture",
             operation_id=str(uuid4()),
-            prompt="Verify the installed Control Plane client.",
+            prompt="Verify the installed Gateway client.",
         )
         accepted = await client.operator.SubmitTask(submission, timeout=3)
         replay = await client.operator.SubmitTask(submission, timeout=3)
@@ -269,7 +289,8 @@ async def test_control_plane_clients_replay_task_and_stream_events(control_plane
         assert rejected.value.code() == grpc.StatusCode.NOT_FOUND
 
 
-def test_installed_harness_runs_one_task_and_replays_event(control_plane_url, tmp_path):
+def test_installed_harness_runs_one_task_and_replays_event(deployment, tmp_path):
+    gateway_url = deployment.gateway
     adapter = tmp_path / "adapter.py"
     adapter.write_text(
         """import asyncio
@@ -312,7 +333,7 @@ asyncio.run(run())
 """,
         encoding="utf-8",
     )
-    with ControlPlaneClientSync(control_plane_url, TOKEN) as client:
+    with GatewayClientSync(gateway_url, TOKEN) as client:
         tag = client.operator.PutTag(
             runtime.PutTagRequest(tag_id="python-harness", instructions="Verify SDK."),
             timeout=3,
@@ -331,7 +352,7 @@ asyncio.run(run())
                 os.environ["SUPERTAG_RUST_TEST_CLI"],
                 "worker-host",
                 "--control-plane",
-                control_plane_url,
+                deployment.control_plane,
                 "--state-directory",
                 str(tmp_path / "host"),
                 "--adapter",

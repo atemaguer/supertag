@@ -19,7 +19,7 @@ agree, or the Task fails closed.
 
 For the vocabulary, see [Tasks and Sessions](../../docs/concepts/tasks.md) and the
 [glossary](../../docs/reference/glossary.md). Operator commands use the local services unless
-they pass `--control-plane NAME`.
+they pass `--gateway NAME`.
 
 ## Create a Tag
 

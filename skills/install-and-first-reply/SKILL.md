@@ -59,7 +59,7 @@ starts from the current commit of the branch `init` found (`workspace.ref`). Whe
 detached, `init` pins the checked-out commit (`workspace.baseCommit`) instead and says so in its
 output. To follow another branch or pin a commit, apply a Tag manifest; see [Workspaces](../../docs/guides/workspaces.md#2-bind-a-tag-to-the-workspace).
 
-Operator commands use these local services without a flag; `--control-plane NAME` targets
+Operator commands use these local services without a flag; `--gateway NAME` targets
 another Control Plane.
 
 If `lead` runs on Codex, `local-tools` also grants `web:fetch`, and `init` says so. Current Codex

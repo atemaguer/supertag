@@ -426,7 +426,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
         &[
             "tag",
             "put",
-            "--control-plane",
+            "--gateway",
             &services.endpoint,
             "engineer",
             "--instructions",
@@ -442,7 +442,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
         &[
             "task",
             "submit",
-            "--control-plane",
+            "--gateway",
             &services.endpoint,
             "--tag",
             "engineer",
@@ -3034,7 +3034,7 @@ async fn operator_notifications_reach_slack_and_webhook_once(database: String) -
         let mut command = credentials.command();
         command
             .arg(args[0])
-            .args(["--control-plane", &services.endpoint])
+            .args(["--gateway", &services.endpoint])
             .args(&args[1..]);
         command
     };
@@ -3138,7 +3138,7 @@ async fn operator_notifications_reach_slack_and_webhook_once(database: String) -
     let mut create = credentials.command();
     create
         .arg("objective")
-        .args(["--control-plane", &services.endpoint])
+        .args(["--gateway", &services.endpoint])
         .args([
             "create",
             "hotfix",

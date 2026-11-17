@@ -83,7 +83,7 @@ async fn json(command: Command) -> Result<Value> {
 fn operator(group: &[&str], rest: &[&str], gateway: &str, token: &str) -> Command {
     let mut command = binary(group);
     command
-        .args(["--control-plane", gateway])
+        .args(["--gateway", gateway])
         .args(rest)
         .env("SUPERTAG_OPERATOR_TOKEN", token);
     command

@@ -516,7 +516,7 @@ impl Services {
     ) -> Result<Output> {
         let mut child = reaped(Command::new(BINARY))
             .args(args)
-            .args(["--control-plane", &self.public, "--state-directory"])
+            .args(["--gateway", &self.public, "--state-directory"])
             .arg(state)
             .env_clear()
             .env("HOME", self.directory.path())
@@ -567,7 +567,7 @@ impl Services {
 
     fn json(&self, args: &[&str]) -> Result<Value> {
         let output = reaped(Command::new(BINARY))
-            .args(["--control-plane", &self.public])
+            .args(["--gateway", &self.public])
             .args(args)
             .env_clear()
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator_token)

@@ -7,9 +7,9 @@ Objectives, Surface Accounts, and Workspaces shape what they do. See the
 [resource model](../reference/resource-model.md) for every kind and the
 [glossary](../reference/glossary.md) for terms.
 
-Without `--control-plane`, commands use the Control Plane that `supertag up` runs on this machine.
-The examples use these local services; add `--control-plane NAME` for a saved one. See
-[How commands find the Control Plane](cli.md#how-commands-find-the-control-plane).
+Without `--gateway`, commands use the Gateway that `supertag up` runs on this machine.
+The examples use these local services; add `--gateway NAME` for a saved one. See
+[How commands find the Gateway](cli.md#how-commands-find-the-gateway).
 
 ## Read and describe
 

@@ -107,36 +107,33 @@ use tonic::Request;
 #[derive(Parser)]
 #[command(name = "supertag", version)]
 struct Cli {
-    /// Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app,
-    /// for the operator command that follows.
-    #[arg(
-        long = "control-plane",
-        id = "root_control_plane",
-        value_name = "URL|NAME"
-    )]
-    control_plane: Option<String>,
+    /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app, for the
+    /// operator command that follows.
+    #[arg(long = "gateway", id = "root_gateway", value_name = "URL|NAME")]
+    gateway: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
 
-/// The Control Plane selected before the command name, if any.
-static ROOT_CONTROL_PLANE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+/// The Gateway selected before the command name, if any.
+static ROOT_GATEWAY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// Where an operator command connects. Both options are global, so a command group accepts them
-/// before or after its subcommand: `supertag get --control-plane C tag` or `supertag get tag --control-plane C`.
+/// before or after its subcommand: `supertag get --gateway G tag` or `supertag get tag --gateway G`.
+/// Operator commands connect to a Gateway, which forwards them to its Control Plane.
 #[derive(Args)]
 struct Connection {
-    /// Control Plane URL or the name of a Control Plane saved in the terminal UI or desktop app.
-    /// A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN.
+    /// Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads
+    /// the operator token from SUPERTAG_OPERATOR_TOKEN.
     #[arg(
         long,
         global = true,
         value_name = "URL|NAME",
         conflicts_with = "state_directory"
     )]
-    control_plane: Option<String>,
+    gateway: Option<String>,
     /// Use the local services `supertag up` runs from this state directory. Without either
-    /// option, SUPERTAG_CONTROL_PLANE_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag.
+    /// option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag.
     #[arg(long, global = true)]
     state_directory: Option<PathBuf>,
 }
@@ -459,12 +456,12 @@ enum Command {
         )]
         notify: Vec<String>,
     },
-    /// Open the terminal UI for a saved or explicitly configured Control Plane.
+    /// Open the terminal UI for a saved or explicitly configured Gateway.
     Tui {
-        /// Control Plane URL or the name of a saved Control Plane.
+        /// Gateway URL or the name of a saved Gateway.
         #[arg(long, conflicts_with = "state_directory")]
-        control_plane: Option<String>,
-        /// Use the local services in this state directory instead of a Control Plane URL.
+        gateway: Option<String>,
+        /// Use the local services in this state directory instead of a Gateway URL.
         #[arg(long)]
         state_directory: Option<PathBuf>,
         /// Terminal UI executable. Also reads SUPERTAG_TUI_BINARY.
@@ -594,12 +591,12 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(subcommand)]
         command: auth_keys::AuthKeyCommand,
     },
-    /// Save a Control Plane under a name for `--control-plane NAME` and the terminal UI. Reads one
-    /// secret from SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a
-    /// masked prompt in a terminal: an operator token is checked and saved; a client Auth Key
-    /// (stak_...) enrolls this device as client:NAME and saves only the resulting credential.
+    /// Save a Gateway under a name for `--gateway NAME` and the terminal UI. Reads one secret from
+    /// SUPERTAG_OPERATOR_TOKEN, or from standard input when that is not set, with a masked prompt
+    /// in a terminal: an operator token is checked and saved; a client Auth Key (stak_...) enrolls
+    /// this device as client:NAME and saves only the resulting credential.
     Connect {
-        /// The Control Plane origin, such as https://supertag.example.com, or its wss:// tunnel URL.
+        /// The Gateway origin, such as https://supertag.example.com, or its wss:// tunnel URL.
         url: String,
         /// The name to save it under.
         #[arg(long)]
@@ -607,13 +604,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// The client name this device enrolls as with an Auth Key. Defaults to its host name.
         #[arg(long)]
         client_name: Option<String>,
-        /// Replace a Control Plane already saved under this name for the same origin.
+        /// Replace a Gateway already saved under this name for the same origin.
         #[arg(long)]
         replace: bool,
-        /// PEM file of the certificate authority that signed the Control Plane's TLS certificate.
+        /// PEM file of the certificate authority that signed the Gateway's TLS certificate.
         #[arg(long)]
         server_ca_file: Option<PathBuf>,
-        /// PEM client certificate for a Control Plane that requires mutual TLS.
+        /// PEM client certificate for a Gateway that requires mutual TLS.
         #[arg(long, requires = "client_key_file")]
         client_cert_file: Option<PathBuf>,
         /// PEM private key of the client certificate.
@@ -822,13 +819,13 @@ fn dispatch(cli: Cli) -> Result<()> {
     let command = match cli.command {
         Some(command) => command,
         None => Command::Tui {
-            control_plane: None,
+            gateway: None,
             state_directory: None,
             binary: None,
             workspace: None,
         },
     };
-    if let Some(control_plane) = cli.control_plane {
+    if let Some(gateway) = cli.gateway {
         ensure!(
             !matches!(
                 command,
@@ -854,9 +851,9 @@ fn dispatch(cli: Cli) -> Result<()> {
                     | Command::AdapterGuardian { .. }
                     | Command::LocalControlPlane
             ),
-            "--control-plane before the command applies only to operator commands"
+            "--gateway before the command applies only to operator commands"
         );
-        let _ = ROOT_CONTROL_PLANE.set(control_plane);
+        let _ = ROOT_GATEWAY.set(gateway);
     }
     match command {
         Command::AdapterGuardian {
@@ -1106,14 +1103,14 @@ async fn run(command: Command) -> Result<()> {
             .await?
         }
         Command::Tui {
-            control_plane,
+            gateway,
             state_directory,
             binary,
             workspace,
         } => {
             tui::launch(
                 Connection {
-                    control_plane,
+                    gateway,
                     state_directory,
                 },
                 binary,
@@ -2694,12 +2691,12 @@ fn test_host_environment(
     Ok((keep_awake, disk_space))
 }
 
-/// Selects the Control Plane for an operator command when no flag names one.
-const CONTROL_PLANE_ENV: &str = "SUPERTAG_CONTROL_PLANE_URL";
+/// Selects the Gateway for an operator command when no flag names one.
+const GATEWAY_ENV: &str = "SUPERTAG_GATEWAY_URL";
 
-/// The Control Plane `SUPERTAG_CONTROL_PLANE_URL` selects; empty selects none.
-pub(crate) fn environment_control_plane() -> Option<String> {
-    std::env::var(CONTROL_PLANE_ENV)
+/// The Gateway `SUPERTAG_GATEWAY_URL` selects; empty selects none.
+pub(crate) fn environment_gateway() -> Option<String> {
+    std::env::var(GATEWAY_ENV)
         .ok()
         .filter(|value| !value.trim().is_empty())
 }
@@ -2708,7 +2705,7 @@ pub(crate) fn environment_control_plane() -> Option<String> {
 fn local_target(directory: &Path) -> Result<OperatorTarget> {
     let (url, token) = local::connection(directory).with_context(|| {
         format!(
-            "no local Control Plane is running from {}; start one with supertag up, or pass --control-plane",
+            "no local Control Plane is running from {}; start one with supertag up, or pass --gateway",
             directory.display()
         )
     })?;
@@ -2719,35 +2716,35 @@ fn local_target(directory: &Path) -> Result<OperatorTarget> {
     })
 }
 
-/// The Control Plane an operator command talks to: `--control-plane` (before or after the
-/// command name), else `--state-directory`, else `SUPERTAG_CONTROL_PLANE_URL`, else the local
+/// The Gateway an operator command talks to: `--gateway` (before or after the
+/// command name), else `--state-directory`, else `SUPERTAG_GATEWAY_URL`, else the local
 /// services `supertag up` runs from `SUPERTAG_STATE_DIR` or `~/.supertag`.
 fn resolve_target(connection: Connection) -> Result<OperatorTarget> {
-    let root = ROOT_CONTROL_PLANE.get().cloned();
+    let root = ROOT_GATEWAY.get().cloned();
     ensure!(
-        connection.control_plane.is_none() || root.is_none(),
-        "pass --control-plane once"
+        connection.gateway.is_none() || root.is_none(),
+        "pass --gateway once"
     );
-    let control_plane = connection.control_plane.or(root);
+    let gateway = connection.gateway.or(root);
     if let Some(directory) = connection.state_directory {
         ensure!(
-            control_plane.is_none(),
-            "--control-plane cannot be combined with --state-directory"
+            gateway.is_none(),
+            "--gateway cannot be combined with --state-directory"
         );
         return local_target(&local_config::state_directory(Some(directory))?);
     }
-    let control_plane = match control_plane.or_else(environment_control_plane) {
-        Some(control_plane) => control_plane,
+    let gateway = match gateway.or_else(environment_gateway) {
+        Some(gateway) => gateway,
         None => return local_target(&local_config::state_directory(None)?),
     };
-    if profiles::is_url(&control_plane) {
+    if profiles::is_url(&gateway) {
         return Ok(OperatorTarget {
-            url: control_plane,
+            url: gateway,
             token: required_env("SUPERTAG_OPERATOR_TOKEN")?,
             tls: None,
         });
     }
-    let saved = profiles::resolve(&control_plane)?;
+    let saved = profiles::resolve(&gateway)?;
     Ok(OperatorTarget {
         url: saved.url,
         token: saved.token,
@@ -2796,7 +2793,7 @@ async fn connect_control_plane(
     };
     let channel = network::operator_channel(&target.endpoint(Duration::from_secs(15)).await?)
         .await
-        .with_context(|| format!("could not reach the Control Plane at {}", saved.url))?;
+        .with_context(|| format!("could not reach the Gateway at {}", saved.url))?;
     if auth_key {
         let name = match client_name {
             Some(name) => name,
@@ -2813,7 +2810,7 @@ async fn connect_control_plane(
             &saved.token,
         )?)
         .await
-        .context("the Control Plane refused the credential")?
+        .context("the Gateway refused the credential")?
         .into_inner();
     ensure!(
         matches!(
@@ -3535,17 +3532,10 @@ mod tests {
                 "builder",
                 "--provider",
                 "slack",
-                "--control-plane",
+                "--gateway",
                 "g",
             ],
-            &[
-                "supertag",
-                "get",
-                "surface-location",
-                "l",
-                "--control-plane",
-                "g",
-            ],
+            &["supertag", "get", "surface-location", "l", "--gateway", "g"],
             &["supertag", "get", "surface-locations", "--account", "slack"],
             &[
                 "supertag",
@@ -3596,48 +3586,13 @@ mod tests {
     fn kinds_accept_plurals_and_connection_options_follow_the_subcommand() {
         for arguments in [
             ["supertag", "get", "tags", "--state-directory", "/tmp/x"].as_slice(),
-            &[
-                "supertag",
-                "get",
-                "--control-plane",
-                "local",
-                "tag",
-                "builder",
-            ],
-            &[
-                "supertag",
-                "get",
-                "tag",
-                "builder",
-                "--control-plane",
-                "local",
-            ],
+            &["supertag", "get", "--gateway", "local", "tag", "builder"],
+            &["supertag", "get", "tag", "builder", "--gateway", "local"],
             &["supertag", "describe", "hosts", "laptop"],
-            &[
-                "supertag",
-                "delete",
-                "teams",
-                "release",
-                "--control-plane",
-                "g",
-            ],
+            &["supertag", "delete", "teams", "release", "--gateway", "g"],
             &["supertag", "watch", "tasks", "objective"],
-            &[
-                "supertag",
-                "task",
-                "cancel",
-                "task-1",
-                "--control-plane",
-                "g",
-            ],
-            &[
-                "supertag",
-                "host",
-                "drain",
-                "laptop",
-                "--control-plane",
-                "g",
-            ],
+            &["supertag", "task", "cancel", "task-1", "--gateway", "g"],
+            &["supertag", "host", "drain", "laptop", "--gateway", "g"],
         ] {
             Cli::try_parse_from(arguments).unwrap_or_else(|error| panic!("{arguments:?}: {error}"));
         }
@@ -3669,10 +3624,7 @@ mod tests {
             }
             _ => panic!("host enroll parses as host enroll"),
         }
-        assert!(
-            enroll.control_plane.is_none(),
-            "no root --control-plane was given"
-        );
+        assert!(enroll.gateway.is_none(), "no root --gateway was given");
         for arguments in [
             ["supertag", "get", "task"].as_slice(),
             &["supertag", "get", "tag", "builder", "--include-retired"],

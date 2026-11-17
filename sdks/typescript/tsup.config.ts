@@ -2,7 +2,7 @@ import { defineConfig } from "tsup";
 
 export default defineConfig({
   entry: {
-    "control-plane-client": "src/control-plane-client.ts",
+    "gateway-client": "src/gateway-client.ts",
     harness: "src/harness.ts",
   },
   clean: true,

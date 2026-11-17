@@ -76,7 +76,7 @@ WebSocket tunnel behind platforms that forward only HTTP, or `http://` on loopba
 connection first negotiates a protocol version. See [Control Plane API](control-plane-api.md).
 
 The CLI, the terminal UI, and the desktop app share saved Control Planes: `supertag connect URL
---name NAME` saves one, and `--control-plane NAME` uses it. `--state-directory` reaches the local
+--name NAME` saves one, and `--gateway NAME` uses it. `--state-directory` reaches the local
 services that `supertag up` runs.
 
 Every client finds the local Control Plane the same way. The state directory

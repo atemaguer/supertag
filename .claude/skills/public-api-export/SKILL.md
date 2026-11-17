@@ -33,7 +33,7 @@ SUPERTAG_RUST_TEST_CLI=/path/to/supertag pnpm --filter supertag-ai test:package
 ```
 
 `test:package` builds, runs `publint` and `attw --pack . --profile esm-only`, and runs
-`scripts/verify-control-plane-client.mjs` against a native Control Plane and Worker Host when
+`scripts/verify-gateway-client.mjs` against a native Control Plane, Gateway, and Worker Host when
 `SUPERTAG_RUST_TEST_CLI` names the built CLI. A malformed `exports` map or unresolvable types fail
 here, not in `pnpm build`.
 

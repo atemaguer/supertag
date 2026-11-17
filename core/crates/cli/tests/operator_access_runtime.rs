@@ -151,7 +151,7 @@ fn cli(credentials: &Credentials, token: &str, gateway: &str, args: &[&str]) -> 
 /// `supertag COMMAND --control-plane URL ARGS...`: the connection belongs to the top-level command.
 fn command(credentials: &Credentials, gateway: &str, args: &[&str]) -> Command {
     let mut command = credentials.command(&args[..1]);
-    command.args(["--control-plane", gateway]).args(&args[1..]);
+    command.args(["--gateway", gateway]).args(&args[1..]);
     command
 }
 

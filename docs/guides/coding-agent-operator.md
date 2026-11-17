@@ -33,7 +33,7 @@ share one Control Plane, its rules, and its record of the work. The **Control Pl
 organization and schedules work. A **Worker Host** provides execution capacity. Check that `supertag status`
 shows the host `ready`. Note the lead Tag's name; the example below uses `lead`. Do not start a
 second Control Plane. Operator commands use your local services unless you name another Control
-Plane: add `--control-plane NAME` for a shared one saved with `supertag connect`.
+Plane: add `--gateway NAME` for a shared one saved with `supertag connect`.
 
 Give your agent the
 [operate-supertag skill](../../skills/operate-supertag/SKILL.md).

@@ -316,7 +316,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         &[
             "tag",
             "put",
-            "--control-plane",
+            "--gateway",
             &public,
             "builder",
             "--name",
@@ -339,16 +339,16 @@ async fn exercise(database_url: &str) -> Result<()> {
     let desktop = json!({"active":public,"controlPlanes":[{"profile":{"name":"desk","origin":public},"token":operator}]});
     write_private(&desktop_store, &desktop)?;
     for args in [
-        vec!["--control-plane", "local", "get", "tag", "builder"],
-        vec!["get", "tag", "--control-plane", "local", "builder"],
-        vec!["--control-plane", "desk", "get", "tag", "builder"],
+        vec!["--gateway", "local", "get", "tag", "builder"],
+        vec!["get", "tag", "--gateway", "local", "builder"],
+        vec!["--gateway", "desk", "get", "tag", "builder"],
     ] {
         let tag = json_of(&home, &args, None).await?;
         assert_eq!(tag["tag_id"], "builder", "{args:?}");
     }
     let (success, _, stderr) = run(
         &home,
-        &["--control-plane", "missing", "get", "tag", "builder"],
+        &["--gateway", "missing", "get", "tag", "builder"],
         None,
     )
     .await?;
@@ -359,11 +359,11 @@ async fn exercise(database_url: &str) -> Result<()> {
     let (success, _, stderr) = run(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "get",
             "tag",
-            "--control-plane",
+            "--gateway",
             "local",
             "builder",
         ],
@@ -371,7 +371,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     )
     .await?;
     ensure!(
-        !success && stderr.contains("pass --control-plane once"),
+        !success && stderr.contains("pass --gateway once"),
         "{stderr}"
     );
     // The same name for two different connections is refused, not guessed.
@@ -381,7 +381,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     )?;
     let (success, _, stderr) = run(
         &home,
-        &["--control-plane", "local", "get", "tag", "builder"],
+        &["--gateway", "local", "get", "tag", "builder"],
         None,
     )
     .await?;
@@ -394,7 +394,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     std::fs::set_permissions(&tui_store, std::fs::Permissions::from_mode(0o644))?;
     let (success, _, stderr) = run(
         &home,
-        &["--control-plane", "local", "get", "tag", "builder"],
+        &["--gateway", "local", "get", "tag", "builder"],
         None,
     )
     .await?;
@@ -411,7 +411,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let mut watcher = command(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "watch",
             "tag",
@@ -435,7 +435,7 @@ async fn exercise(database_url: &str) -> Result<()> {
                 &[
                     "tag",
                     "put",
-                    "--control-plane",
+                    "--gateway",
                     &gateway,
                     id,
                     "--instructions",
@@ -477,7 +477,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let resumed = ok(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "watch",
             "tag",
@@ -503,7 +503,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let (success, _, stderr) = run(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "watch",
             "--resume-token",
@@ -519,7 +519,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let text = ok(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "watch",
             "tag",
@@ -538,12 +538,12 @@ async fn exercise(database_url: &str) -> Result<()> {
 
     // Spend: one budgeted Objective Attempt with estimated cost and one
     // unassigned Attempt with tokens for a model that reported no cost.
-    let empty = ok(&home, &["--control-plane", "local", "spend"], None).await?;
+    let empty = ok(&home, &["--gateway", "local", "spend"], None).await?;
     assert_eq!(empty, "No Task Attempts.\n");
     let objective = json_of(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "objective",
             "create",
@@ -594,7 +594,7 @@ async fn exercise(database_url: &str) -> Result<()> {
             ok(
                 &home,
                 &[
-                    "--control-plane",
+                    "--gateway",
                     "local",
                     "task",
                     "submit",
@@ -681,7 +681,7 @@ async fn exercise(database_url: &str) -> Result<()> {
 
     let by_objective = json_of(
         &home,
-        &["--control-plane", "local", "spend", "--output", "json"],
+        &["--gateway", "local", "spend", "--output", "json"],
         None,
     )
     .await?;
@@ -707,7 +707,7 @@ async fn exercise(database_url: &str) -> Result<()> {
             },
         ])
     );
-    let text = ok(&home, &["--control-plane", "local", "spend"], None).await?;
+    let text = ok(&home, &["--gateway", "local", "spend"], None).await?;
     assert_eq!(
         text,
         "launch | 1 Attempt(s) | cost $0.42; 1 estimated-cost Attempt(s) | tokens 120 | budget $5.00\n\
@@ -716,7 +716,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let by_tag = json_of(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "spend",
             "--by",
@@ -735,7 +735,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let by_day = json_of(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "spend",
             "--by",
@@ -756,7 +756,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let future = json_of(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "spend",
             "--since",
@@ -771,7 +771,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     assert_eq!(future["since"], "2999-01-01T00:00:00.000Z");
     let (success, _, stderr) = run(
         &home,
-        &["--control-plane", "local", "spend", "--since", "yesterday"],
+        &["--gateway", "local", "spend", "--since", "yesterday"],
         None,
     )
     .await?;
@@ -780,7 +780,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     // Describe: readable text by default and the get JSON on request.
     let tag = ok(
         &home,
-        &["--control-plane", "local", "describe", "tag", "builder"],
+        &["--gateway", "local", "describe", "tag", "builder"],
         None,
     )
     .await?;
@@ -790,7 +790,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let tag_json = json_of(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "describe",
             "tag",
@@ -805,20 +805,14 @@ async fn exercise(database_url: &str) -> Result<()> {
         tag_json,
         json_of(
             &home,
-            &["--control-plane", "local", "get", "tag", "builder"],
+            &["--gateway", "local", "get", "tag", "builder"],
             None
         )
         .await?
     );
     let task = ok(
         &home,
-        &[
-            "--control-plane",
-            "local",
-            "describe",
-            "task",
-            &objective_task,
-        ],
+        &["--gateway", "local", "describe", "task", &objective_task],
         None,
     )
     .await?;
@@ -829,13 +823,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     );
     let described = ok(
         &home,
-        &[
-            "--control-plane",
-            "local",
-            "describe",
-            "objective",
-            "launch",
-        ],
+        &["--gateway", "local", "describe", "objective", "launch"],
         None,
     )
     .await?;
@@ -855,7 +843,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let overview = json_of(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "describe",
             "objective",
@@ -878,13 +866,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     assert_eq!(overview["tasks"][0]["kind"], "start");
     let worker_host = ok(
         &home,
-        &[
-            "--control-plane",
-            "local",
-            "describe",
-            "host",
-            &host.host_id,
-        ],
+        &["--gateway", "local", "describe", "host", &host.host_id],
         None,
     )
     .await?;
@@ -895,7 +877,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     );
     let (success, _, stderr) = run(
         &home,
-        &["--control-plane", "local", "describe", "tag", "nobody"],
+        &["--gateway", "local", "describe", "tag", "nobody"],
         None,
     )
     .await?;
@@ -930,17 +912,12 @@ async fn exercise(database_url: &str) -> Result<()> {
         ("context-set", &context),
         ("role", &role),
     ] {
-        ok(
-            &home,
-            &["--control-plane", "local", kind, "put", file],
-            None,
-        )
-        .await?;
+        ok(&home, &["--gateway", "local", kind, "put", file], None).await?;
     }
     ok(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "team",
             "create",
@@ -956,7 +933,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     ok(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "volume",
             "put",
@@ -978,7 +955,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     ok(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "workspace-volume",
             "put",
@@ -995,20 +972,14 @@ async fn exercise(database_url: &str) -> Result<()> {
     )?;
     ok(
         &home,
-        &[
-            "--control-plane",
-            "local",
-            "surface-account",
-            "put",
-            &account,
-        ],
+        &["--gateway", "local", "surface-account", "put", &account],
         None,
     )
     .await?;
     ok(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "workspace",
             "put",
@@ -1090,18 +1061,13 @@ async fn exercise(database_url: &str) -> Result<()> {
             vec!["get", "workspace", "project"],
         ),
     ] {
-        let text = ok(
-            &home,
-            &["--control-plane", "local", "describe", kind, id],
-            None,
-        )
-        .await?;
+        let text = ok(&home, &["--gateway", "local", "describe", kind, id], None).await?;
         ensure!(text.starts_with(&format!("{title}\n")), "{kind}: {text}");
         ensure!(text.contains(id), "{kind}: {text}");
         let described = json_of(
             &home,
             &[
-                "--control-plane",
+                "--gateway",
                 "local",
                 "describe",
                 kind,
@@ -1112,7 +1078,7 @@ async fn exercise(database_url: &str) -> Result<()> {
             None,
         )
         .await?;
-        let mut args = vec!["--control-plane", "local"];
+        let mut args = vec!["--gateway", "local"];
         args.extend(get);
         assert_eq!(described, json_of(&home, &args, None).await?, "{kind}");
     }
@@ -1125,7 +1091,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         let (success, _, stderr) = run(
             &home,
             &[
-                "--control-plane",
+                "--gateway",
                 "local",
                 "objective",
                 "complete",
@@ -1146,7 +1112,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         "Launched to all regions.\nChecks: smoke tests passed.\n",
     )?;
     let complete = [
-        "--control-plane",
+        "--gateway",
         "local",
         "objective",
         "complete",
@@ -1162,13 +1128,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     );
     let described = ok(
         &home,
-        &[
-            "--control-plane",
-            "local",
-            "describe",
-            "objective",
-            "launch",
-        ],
+        &["--gateway", "local", "describe", "objective", "launch"],
         None,
     )
     .await?;
@@ -1191,7 +1151,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let timeline = ok(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "watch",
             "objective",
@@ -1225,7 +1185,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     let timeline = ok(
         &home,
         &[
-            "--control-plane",
+            "--gateway",
             "local",
             "watch",
             "objective",
@@ -1246,17 +1206,12 @@ async fn exercise(database_url: &str) -> Result<()> {
     );
     let (success, _, stderr) = run(
         &home,
-        &["--control-plane", "local", "watch", "objective", "nobody"],
+        &["--gateway", "local", "watch", "objective", "nobody"],
         None,
     )
     .await?;
     ensure!(!success && stderr.contains("not found"), "{stderr}");
-    let (success, _, stderr) = run(
-        &home,
-        &["--control-plane", "local", "watch", "launch"],
-        None,
-    )
-    .await?;
+    let (success, _, stderr) = run(&home, &["--gateway", "local", "watch", "launch"], None).await?;
     ensure!(
         !success && stderr.contains("unknown kind launch"),
         "{stderr}"
@@ -1268,7 +1223,7 @@ async fn exercise(database_url: &str) -> Result<()> {
     std::fs::set_permissions(tui_directory, std::fs::Permissions::from_mode(0o750))?;
     let (success, _, stderr) = run(
         &home,
-        &["--control-plane", "local", "get", "tag", "builder"],
+        &["--gateway", "local", "get", "tag", "builder"],
         None,
     )
     .await?;
@@ -1279,19 +1234,10 @@ async fn exercise(database_url: &str) -> Result<()> {
     std::fs::set_permissions(tui_directory, std::fs::Permissions::from_mode(0o700))?;
     let desktop_directory = desktop_store.parent().context("store directory")?;
     std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o755))?;
-    json_of(
-        &home,
-        &["--control-plane", "desk", "get", "tag", "builder"],
-        None,
-    )
-    .await?;
+    json_of(&home, &["--gateway", "desk", "get", "tag", "builder"], None).await?;
     std::fs::set_permissions(desktop_directory, std::fs::Permissions::from_mode(0o775))?;
-    let (success, _, stderr) = run(
-        &home,
-        &["--control-plane", "desk", "get", "tag", "builder"],
-        None,
-    )
-    .await?;
+    let (success, _, stderr) =
+        run(&home, &["--gateway", "desk", "get", "tag", "builder"], None).await?;
     ensure!(
         !success && stderr.contains("saved Control Plane directory"),
         "{stderr}"
@@ -1325,18 +1271,14 @@ async fn exercise(database_url: &str) -> Result<()> {
     )?;
     let tag = json_of(
         &home,
-        &["--control-plane", "secure", "get", "tag", "builder"],
+        &["--gateway", "secure", "get", "tag", "builder"],
         None,
     )
     .await?;
     assert_eq!(tag["tag_id"], "builder");
     for name in ["no-client", "no-trust"] {
-        let (success, _, stderr) = run(
-            &home,
-            &["--control-plane", name, "get", "tag", "builder"],
-            None,
-        )
-        .await?;
+        let (success, _, stderr) =
+            run(&home, &["--gateway", name, "get", "tag", "builder"], None).await?;
         ensure!(!success, "{name} connected without its TLS files: {stderr}");
     }
     let fixture = temporary.path().join("tui-fixture");
@@ -1352,7 +1294,7 @@ async fn exercise(database_url: &str) -> Result<()> {
         &home,
         &[
             "tui",
-            "--control-plane",
+            "--gateway",
             "secure",
             "--binary",
             path(&fixture)?.as_str(),

@@ -380,7 +380,7 @@ async fn scenario(
     };
     let (mut plane, public) = service(plane_command("127.0.0.1:0")).await?;
     let cli = |args: &[&str]| {
-        let mut c = command(&[args[0], "--control-plane", &public]);
+        let mut c = command(&[args[0], "--gateway", &public]);
         c.args(&args[1..]);
         c
     };

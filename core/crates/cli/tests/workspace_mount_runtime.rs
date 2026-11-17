@@ -57,7 +57,7 @@ impl Credentials {
     }
     fn operator(&self, args: &[&str], public: &str) -> Command {
         let mut command = self.command(args);
-        command.args(["--control-plane", public]);
+        command.args(["--gateway", public]);
         command
     }
 }
@@ -199,7 +199,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
 
     let volume = json_output(credentials.command(&[
         "workspace-volume",
-        "--control-plane",
+        "--gateway",
         &public,
         "put",
         "data",
@@ -530,7 +530,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     std::fs::create_dir(&other)?;
     json_output(credentials.command(&[
         "workspace-volume",
-        "--control-plane",
+        "--gateway",
         &public,
         "put",
         "data",

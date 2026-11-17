@@ -874,7 +874,7 @@ fn exercise_status(database: &str) -> Result<()> {
     )?;
     services.cli(&[
         "apply",
-        "--control-plane",
+        "--gateway",
         &gateway,
         "-f",
         manifest.to_str().unwrap(),
@@ -883,7 +883,7 @@ fn exercise_status(database: &str) -> Result<()> {
     let status = loop {
         let status: Value = serde_json::from_str(&services.cli(&[
             "status",
-            "--control-plane",
+            "--gateway",
             &gateway,
             "--output",
             "json",
@@ -903,7 +903,7 @@ fn exercise_status(database: &str) -> Result<()> {
     assert_eq!(status["objectives"][0]["id"], "ship-it", "{status}");
     assert_eq!(status["objectives"][0]["owner"], "owner", "{status}");
     assert_eq!(status["objectives"][0]["status"], "working", "{status}");
-    let text = services.cli(&["status", "--control-plane", &gateway])?;
+    let text = services.cli(&["status", "--gateway", &gateway])?;
     assert!(
         text.contains(
             "\nObjectives not finished\n  ship-it  working; owner owner; no budget; no deadline\n"
@@ -912,7 +912,7 @@ fn exercise_status(database: &str) -> Result<()> {
     );
     // Without an operator token, status fails without echoing anything secret.
     let output = reaped(Command::new(BIN))
-        .args(["status", "--control-plane", &gateway])
+        .args(["status", "--gateway", &gateway])
         .env_clear()
         .output()?;
     assert!(!output.status.success());

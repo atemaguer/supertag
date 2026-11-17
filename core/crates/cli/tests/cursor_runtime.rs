@@ -328,7 +328,7 @@ impl<'a> Runtime<'a> {
         let (subcommand, args) = args.split_first().context("operator subcommand required")?;
         let output = self
             .credentials
-            .command(&[subcommand, "--control-plane", &self.endpoint])
+            .command(&[subcommand, "--gateway", &self.endpoint])
             .args(args)
             .output()
             .await?;
