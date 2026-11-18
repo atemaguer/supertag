@@ -1043,9 +1043,15 @@ async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -
     assert_eq!(stores[0]["harness"], "claude-code", "{stores}");
     assert_eq!(stores[0]["revision"], 1, "{stores}");
     assert_eq!(stores[0]["files"], 1, "{stores}");
+    // The host keeps the files in its artifact storage, which its lanes share, beside the
+    // Tag's Session checkpoints.
+    let tag = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(b"keeper"));
     assert!(
-        directory.path().join("host/native-memory/keeper").is_dir(),
-        "the host keeps the files under its state directory"
+        directory
+            .path()
+            .join(format!("host/artifacts/tags/{tag}/native-memory"))
+            .is_dir(),
+        "the host keeps the files in its artifact storage"
     );
 
     assert!(run("recall-native").await?.contains("- fixture memory"));

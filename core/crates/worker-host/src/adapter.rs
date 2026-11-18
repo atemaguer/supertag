@@ -668,9 +668,15 @@ async fn prepare_native_memory(
     let harness = crate::native_memory::harness_directory(options.harness)?;
     let tag = assignment.task.as_ref()?.tag_id.clone();
     let state = options.state_directory.clone();
+    // The store lives in the host's artifact storage, which every lane shares, so any lane of
+    // the host finds the Tag's memory; the Attempt's copy stays in this lane's state directory.
+    let storage = options.artifact_source.as_ref().map_or_else(
+        || state.join("artifacts"),
+        |source| source.directory.clone(),
+    );
     let attempt = assignment.attempt_id.clone();
     match tokio::task::spawn_blocking(move || {
-        crate::native_memory::Prepared::prepare(&state, &tag, harness, &attempt, &grant)
+        crate::native_memory::Prepared::prepare((&storage, &state), &tag, harness, &attempt, &grant)
     })
     .await
     {

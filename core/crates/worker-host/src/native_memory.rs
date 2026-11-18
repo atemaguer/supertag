@@ -2,8 +2,9 @@
 //! Claude Code's auto-memory.
 //!
 //! One store per Tag, harness, and scope (the Control Plane's grant: shared, or one person's)
-//! lives at `STATE/native-memory/<tag>/<harness>/<scope>/current`. Each Attempt gets its own
-//! copy to work in; when its harness stops, the host merges the copy back file by file against
+//! lives in the host's artifact storage, which every lane of the host shares, at
+//! `tags/<sha256(tag)>/native-memory/<harness>/<scope>/current`, beside the Tag's Session
+//! checkpoints. Each Attempt gets its own copy to work in, in the lane's state directory; when its harness stops, the host merges the copy back file by file against
 //! the revision it started from, so parallel Sessions of one Tag keep each other's memories.
 //! The Control Plane never holds the files; the host reports only counts and a digest.
 use std::{
@@ -314,7 +315,7 @@ impl Prepared {
     /// Copies the store into a fresh working copy for `attempt`. A copy made before the Tag's
     /// latest reset (`grant.reset_generation`) is dropped first.
     pub(crate) fn prepare(
-        state: &Path,
+        (storage, state): (&Path, &Path),
         tag: &str,
         harness: &str,
         attempt: &str,
@@ -324,9 +325,8 @@ impl Prepared {
         component("harness", harness)?;
         component("native memory scope", &grant.scope)?;
         component("Attempt ID", attempt)?;
-        let store = state
+        let store = crate::checkpoints::tag_directory(storage, tag)
             .join("native-memory")
-            .join(tag)
             .join(harness)
             .join(&grant.scope);
         private_directory(&store)?;
@@ -457,10 +457,20 @@ mod tests {
     #[test]
     fn parallel_attempts_both_land_and_a_reset_drops_older_copies() -> Result<()> {
         let state = tempfile::tempdir()?;
-        let first =
-            Prepared::prepare(state.path(), "tag-1", "claude-code", "attempt-1", &grant(0))?;
-        let second =
-            Prepared::prepare(state.path(), "tag-1", "claude-code", "attempt-2", &grant(0))?;
+        let first = Prepared::prepare(
+            (state.path(), state.path()),
+            "tag-1",
+            "claude-code",
+            "attempt-1",
+            &grant(0),
+        )?;
+        let second = Prepared::prepare(
+            (state.path(), state.path()),
+            "tag-1",
+            "claude-code",
+            "attempt-2",
+            &grant(0),
+        )?;
         fs::write(first.working_directory().join("one.md"), "first")?;
         fs::write(first.working_directory().join("MEMORY.md"), "- one\n")?;
         fs::write(second.working_directory().join("two.md"), "second")?;
@@ -468,9 +478,8 @@ mod tests {
         assert_eq!(first.finish()?.revision, 1);
         let summary = second.finish()?;
         assert_eq!((summary.revision, summary.files), (2, 3));
-        let current = state
-            .path()
-            .join("native-memory/tag-1/claude-code/shared/current");
+        let current = crate::checkpoints::tag_directory(state.path(), "tag-1")
+            .join("native-memory/claude-code/shared/current");
         assert_eq!(
             fs::read_to_string(current.join("MEMORY.md"))?,
             "- one\n- two\n"
@@ -482,16 +491,26 @@ mod tests {
                 .exists()
         );
 
-        let unchanged =
-            Prepared::prepare(state.path(), "tag-1", "claude-code", "attempt-3", &grant(0))?;
+        let unchanged = Prepared::prepare(
+            (state.path(), state.path()),
+            "tag-1",
+            "claude-code",
+            "attempt-3",
+            &grant(0),
+        )?;
         assert_eq!(
             fs::read_to_string(unchanged.working_directory().join("one.md"))?,
             "first"
         );
         assert_eq!(unchanged.finish()?.revision, 2);
 
-        let reset =
-            Prepared::prepare(state.path(), "tag-1", "claude-code", "attempt-4", &grant(1))?;
+        let reset = Prepared::prepare(
+            (state.path(), state.path()),
+            "tag-1",
+            "claude-code",
+            "attempt-4",
+            &grant(1),
+        )?;
         assert!(fs::read_dir(reset.working_directory())?.next().is_none());
         let summary = reset.finish()?;
         assert_eq!(
@@ -504,16 +523,34 @@ mod tests {
     #[test]
     fn a_turn_over_the_caps_or_with_a_link_leaves_the_store_as_it_was() -> Result<()> {
         let state = tempfile::tempdir()?;
-        let big = Prepared::prepare(state.path(), "tag", "claude-code", "attempt-a", &grant(0))?;
+        let big = Prepared::prepare(
+            (state.path(), state.path()),
+            "tag",
+            "claude-code",
+            "attempt-a",
+            &grant(0),
+        )?;
         fs::write(
             big.working_directory().join("big.md"),
             vec![b'x'; MAX_FILE_BYTES as usize + 1],
         )?;
         assert!(big.finish().is_err());
-        let linked = Prepared::prepare(state.path(), "tag", "claude-code", "attempt-b", &grant(0))?;
+        let linked = Prepared::prepare(
+            (state.path(), state.path()),
+            "tag",
+            "claude-code",
+            "attempt-b",
+            &grant(0),
+        )?;
         std::os::unix::fs::symlink("/etc/passwd", linked.working_directory().join("p.md"))?;
         assert!(linked.finish().is_err());
-        let after = Prepared::prepare(state.path(), "tag", "claude-code", "attempt-c", &grant(0))?;
+        let after = Prepared::prepare(
+            (state.path(), state.path()),
+            "tag",
+            "claude-code",
+            "attempt-c",
+            &grant(0),
+        )?;
         assert!(fs::read_dir(after.working_directory())?.next().is_none());
         assert_eq!(after.finish()?.revision, 0);
         assert!(
@@ -530,7 +567,7 @@ mod tests {
         for bad in ["", "..", "../x", "a/b", ".hidden"] {
             assert!(
                 Prepared::prepare(
-                    Path::new("/nonexistent"),
+                    (Path::new("/nonexistent"), Path::new("/nonexistent")),
                     bad,
                     "claude-code",
                     "a",

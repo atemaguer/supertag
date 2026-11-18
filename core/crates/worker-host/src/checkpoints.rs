@@ -54,6 +54,12 @@ fn hashed(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
 }
 
+/// A Tag's directory in this host's artifact storage, which every lane of the host shares:
+/// `tags/<sha256(tag)>`. Its Session checkpoints and its harness's native memory live in it.
+pub(crate) fn tag_directory(storage: &Path, tag: &str) -> PathBuf {
+    storage.join("tags").join(hashed(tag))
+}
+
 fn private_directory(path: &Path) -> std::io::Result<()> {
     fs::DirBuilder::new()
         .recursive(true)
@@ -71,14 +77,13 @@ fn private_directory(path: &Path) -> std::io::Result<()> {
 impl Held {
     pub(crate) fn new(storage: &Path, host_id: &str) -> Self {
         Self {
-            root: storage.join("tags"),
+            root: storage.to_owned(),
             host_id: host_id.to_owned(),
         }
     }
 
     fn directory(&self, tag: &str, session: &str) -> PathBuf {
-        self.root
-            .join(hashed(tag))
+        tag_directory(&self.root, tag)
             .join("sessions")
             .join(hashed(session))
             .join("checkpoint")
@@ -159,7 +164,7 @@ impl Held {
     /// it is younger than an hour. Returns how many it deleted.
     pub(crate) fn sweep(&self, live: &HashSet<String>, now: SystemTime) -> usize {
         let mut deleted = 0;
-        let Ok(tags) = fs::read_dir(&self.root) else {
+        let Ok(tags) = fs::read_dir(self.root.join("tags")) else {
             return 0;
         };
         for tag in tags.flatten() {
@@ -416,7 +421,7 @@ mod tests {
         // Hashed names: no Tag or Session ID appears in the path, and only the owner can read.
         let directory = held.directory("tag", "session");
         assert!(!directory.to_string_lossy().contains("session/"));
-        assert!(directory.starts_with(state.path().join("tags")));
+        assert!(directory.starts_with(tag_directory(state.path(), "tag")));
         let file = directory.join(format!("{}.bin", first.sha256));
         assert_eq!(fs::metadata(&file).unwrap().mode() & 0o777, 0o600);
         assert_eq!(fs::metadata(&directory).unwrap().mode() & 0o777, 0o700);

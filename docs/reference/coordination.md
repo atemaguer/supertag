@@ -677,9 +677,10 @@ example, is a folder of Markdown files with a `MEMORY.md` index, which Claude Co
 start of each turn and updates with its file tools. A Tag that keeps memory keeps its harness's
 memory too, beside its [notes](#memory), across Tasks:
 
-- **Where it lives.** On the Worker Host that ran the turn, under the host's state directory at
-  `native-memory/TAG/HARNESS/SCOPE/current`. The Control Plane never holds the files, only a record
-  of what each host holds: the revision, file count, size, and a digest.
+- **Where it lives.** On the Worker Host that ran the turn, in its artifact storage, which every
+  lane of the host shares, at `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/current`, beside
+  the Tag's Session checkpoints. The Control Plane never holds the files, only a record of what
+  each host holds: the revision, file count, size, and a digest.
 - **Who shares it.** It follows the audience rule for notes: one store for the Tag's shared turns
   and one for each person's conversations, so one person's conversation never feeds another's.
   A turn a GitHub or Linear event started gets none.
