@@ -264,7 +264,7 @@ func (x *WorkspaceDelivery) GetBase() string {
 // One patch artifact.
 type PatchDelivery struct {
 
-	// The artifact's ID, for `supertag download artifact`.
+	// The artifact's ID. Clients fetch no files; the artifact stays where it was captured.
 	ArtifactId string
 	// The patch file's path within the artifact.
 	Path string
@@ -348,7 +348,7 @@ func (x *PullRequestDelivery) GetNextAttemptAt() *timestamppb.Timestamp {
 // One output artifact and the files in it.
 type OutputDelivery struct {
 
-	// The artifact's ID, for `supertag download artifact`.
+	// The artifact's ID. Clients fetch no files; the artifact stays where it was captured.
 	ArtifactId string
 	// The paths of its files.
 	Paths []string

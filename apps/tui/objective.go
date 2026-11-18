@@ -442,8 +442,8 @@ func deliveryLines(delivery *views.TaskDelivery, indent string) []string {
 		lines = append(lines, fmt.Sprintf("%sBranch %s in Workspace %s%s", indent, workspace.GetBranch(), workspace.GetName(), files))
 	}
 	for _, patch := range delivery.GetPatches() {
-		lines = append(lines, fmt.Sprintf("%sPatch %s: supertag download artifact %s --path %s --out %s", indent, patch.GetPath(),
-			shellWord(patch.GetArtifactId()), shellWord(patch.GetPath()), shellWord(baseName(patch.GetPath()))))
+		// Clients fetch no files; the patch stays where it was captured.
+		lines = append(lines, fmt.Sprintf("%sPatch %s (artifact %s)", indent, patch.GetPath(), patch.GetArtifactId()))
 	}
 	if pr := delivery.GetPullRequest(); pr != nil {
 		state := "draft"
@@ -464,12 +464,7 @@ func deliveryLines(delivery *views.TaskDelivery, indent string) []string {
 	}
 	for _, output := range delivery.GetOutputs() {
 		for _, path := range output.GetPaths() {
-			out := baseName(path)
-			if out == "" {
-				out = "output"
-			}
-			lines = append(lines, fmt.Sprintf("%sOutput %s: supertag download artifact %s --path %s --out %s", indent, path,
-				shellWord(output.GetArtifactId()), shellWord(path), shellWord(out)))
+			lines = append(lines, fmt.Sprintf("%sOutput %s (artifact %s)", indent, path, output.GetArtifactId()))
 		}
 	}
 	return lines
@@ -530,11 +525,6 @@ func firstLine(text string) string {
 
 func timestamp(at *timestamppb.Timestamp) string {
 	return at.AsTime().UTC().Format(time.RFC3339)
-}
-
-func baseName(path string) string {
-	parts := strings.Split(strings.TrimRight(path, "/"), "/")
-	return parts[len(parts)-1]
 }
 
 var plainWord = regexp.MustCompile(`^[A-Za-z0-9_./:@%+=,-]+$`)
