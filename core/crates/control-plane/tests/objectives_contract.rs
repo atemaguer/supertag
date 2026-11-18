@@ -624,8 +624,14 @@ async fn idle_and_unstarted_claims(
     assert_eq!(still.status, ObjectiveStatus::Working as i32);
     assert_eq!(still.idle_since_ms, Some(idle_at));
     let shown = store.get_tag("owner").await.unwrap();
-    assert!(shown.idle_objectives.is_empty(), "GetTag fills them per caller");
-    let idle_objectives = store.idle_objectives("operator:local", "owner").await.unwrap();
+    assert!(
+        shown.idle_objectives.is_empty(),
+        "GetTag fills them per caller"
+    );
+    let idle_objectives = store
+        .idle_objectives("operator:local", "owner")
+        .await
+        .unwrap();
     assert_eq!(
         idle_objectives
             .iter()

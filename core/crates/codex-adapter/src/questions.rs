@@ -767,8 +767,7 @@ fn report_spec(reporting: Reporting) -> Value {
 
 /// What `stay_quiet` tells the model; the harness adapters say the same.
 pub(crate) const QUIET_DESCRIPTION: &str = "Finish this turn without posting anything, when it found nothing that needs a person's attention: no reply is posted to the thread or conversation and nothing counts as unread. The note says why in one line; it is kept in the Tag's history, never posted. Use it only when nothing changed since what you last reported. Report a change even when it seems minor, and say when a problem you reported is resolved; the person decides what matters. A problem the person already knows about and someone is handling, with nothing new, needs no message. Call this last, then finish the turn.";
-const QUIET_RECORDED: &str =
-    "Recorded: nothing from this turn is posted.";
+const QUIET_RECORDED: &str = "Recorded: nothing from this turn is posted.";
 
 fn quiet_spec() -> Value {
     json!({

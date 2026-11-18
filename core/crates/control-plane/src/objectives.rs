@@ -617,7 +617,11 @@ impl Store {
     /// Operators list every Objective; a client lists only the Objectives it created.
     /// The Tag's working Objectives that sit idle, as `principal` may see them: an operator
     /// sees every one, anyone else only those it created.
-    pub async fn idle_objectives(&self, principal: &str, tag_id: &str) -> Result<Vec<IdleObjective>> {
+    pub async fn idle_objectives(
+        &self,
+        principal: &str,
+        tag_id: &str,
+    ) -> Result<Vec<IdleObjective>> {
         let creator = if principal.starts_with("operator:") {
             ""
         } else {
