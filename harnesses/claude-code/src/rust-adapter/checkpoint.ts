@@ -71,10 +71,11 @@ export function toolSet(tools: readonly string[]): string[] {
 }
 
 /** Whether a turn offered `tools` may resume `checkpoint`'s native Session: only when it offers
- * the same built-in tools, since a resumed Claude Code Session keeps the tools it started with. */
+ * the same built-in tools as the checkpoint records, since a resumed Claude Code Session keeps the
+ * tools it started with. */
 export function resumable(checkpoint: Archive | undefined, tools: readonly string[]): boolean {
-  if (!checkpoint) return false;
-  if (checkpoint.tools === undefined) return true;
+  // A checkpoint that records no tools predates this rule, so its tools are unknown.
+  if (!checkpoint || checkpoint.tools === undefined) return false;
   const offered = toolSet(tools);
   return (
     checkpoint.tools.length === offered.length &&
