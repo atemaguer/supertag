@@ -57,6 +57,11 @@ harness's Tasks in containers on it, defaulting to yes; `--yes` accepts. The hos
 `environment: local-vm`, and the first Task builds the container image. See
 [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
 
+`init` doesn't offer containers for Codex, which runs commands in its own operating-system
+sandbox. To run a Codex host's Tasks in containers anyway, add `environment: local-vm` to its
+service in supertag.yaml and run `supertag up`. Each image then gets the host's Codex version;
+see [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
+
 Otherwise, or when you decline the containers, `init` suggests local-vm and asks whether to let
 the harness run commands without a sandbox instead, defaulting to no. A yes prints what that
 allows and becomes the host's `allow-unsandboxed-commands`; without it, the lead Tag's Tasks that
