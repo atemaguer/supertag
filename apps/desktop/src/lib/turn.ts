@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Gateway, TaskEvent } from "../gateway";
+import { linkText } from "./preview-line";
 
 /** What a turn shows from its recorded events, beside its prompt and result. */
 export interface TurnView {
@@ -32,6 +33,7 @@ export function turnView(events: readonly TaskEvent[], result?: string): TurnVie
 
 /** One line for an event: its text, or a plan's summary and current step. */
 export function eventLine(event: TaskEvent): string | undefined {
+  if (event.kind === "message") return linkText(event.text).trim() || undefined;
   if (event.kind !== "progress") return event.text.trim() || undefined;
   try {
     const { progress } = JSON.parse(event.text) as {

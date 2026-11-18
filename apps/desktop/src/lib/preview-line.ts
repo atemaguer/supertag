@@ -12,6 +12,8 @@ export function previewLine(text: string): string {
     line
       // Images and links keep their text.
       .replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1")
+      // A preview the Control Plane cut short may end inside a link's target.
+      .replace(/!?\[([^\]]*)\]\([^)]*$/u, "$1")
       // Headings, quotes, and list markers.
       .replace(/^(#{1,6}\s+|>\s*|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)/u, "")
       // Emphasis and code spans.
@@ -20,4 +22,9 @@ export function previewLine(text: string): string {
       .replace(/`+([^`]+)`+/gu, "$1")
       .trim()
   );
+}
+
+/** Markdown links as their text, so a link to a long file path reads as the file's name. */
+export function linkText(text: string): string {
+  return text.replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1");
 }

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { mergeEvents, turnView } from "./turn";
+import { eventLine, mergeEvents, turnView } from "./turn";
 
 it("shows the latest activity or plan step only while the turn runs", () => {
   const plan = JSON.stringify({
@@ -57,4 +57,14 @@ it("merges a turn's carried events with those read since, once each and in order
     status: "Editing main.go",
   });
   expect(mergeEvents(carried, [])).toBe(carried);
+});
+
+it("shows a message's links in Task activity as their text", () => {
+  expect(
+    eventLine({
+      sequence: 1,
+      kind: "message",
+      text: "Created [hello.txt](/private/tmp/home/.supertag/hosts/outputs/hello.txt) containing “hi”.",
+    }),
+  ).toBe("Created hello.txt containing “hi”.");
 });
