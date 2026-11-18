@@ -53,6 +53,7 @@ services:
         spec:
           permissions:
             - { target: runtime, action: commands:execute }
+            - { target: runtime, action: files:read }
             - { target: runtime, action: files:write }
             - { target: runtime, action: web:fetch }
       - apiVersion: supertag/v1

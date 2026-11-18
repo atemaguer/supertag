@@ -70,7 +70,7 @@ sandbox. To run a Codex host's Tasks in containers anyway, add `environment: loc
 service in supertag.yaml and run `supertag up`. Each image then gets the host's Codex version;
 see [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
 
-The `local-tools` Permission Set grants `files:write`, plus `commands:execute` when the host may run
+The `local-tools` Permission Set grants `files:read` and `files:write`, plus `commands:execute` when the host may run
 the lead's commands, which it always may on Codex. For a Codex `lead`, it also grants `web:fetch`,
 and `init` says so: current Codex models run commands only in Codex
 code mode, which SuperTag starts only for Tasks that may also fetch from the web. Code-mode
@@ -123,7 +123,7 @@ then run:
 ```sh
 supertag up
 supertag tag put codex-lead --harness codex --workspace-id WORKSPACE --workspace-ref BRANCH \
-  --allow files:write --allow commands:execute --allow web:fetch
+  --allow files:read --allow files:write --allow commands:execute --allow web:fetch
 ```
 
 `WORKSPACE` is the name `init` gave the Workspace, under the host's `workspaces`, and `BRANCH` the
@@ -147,6 +147,7 @@ metadata: { name: local-tools }
 spec:
   permissions:
     - { target: runtime, action: commands:execute }
+    - { target: runtime, action: files:read }
     - { target: runtime, action: files:write }
     - { target: runtime, action: schedule:create }
 END

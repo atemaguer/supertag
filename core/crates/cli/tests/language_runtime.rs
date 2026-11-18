@@ -1863,6 +1863,8 @@ async fn a_first_run_claude_code_lead_replies_without_docker_or_the_unsandboxed_
             "--harness",
             "claude-code",
             "--allow",
+            "files:read",
+            "--allow",
             "files:write",
             "--allow",
             "schedule:create",

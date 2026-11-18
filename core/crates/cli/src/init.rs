@@ -792,7 +792,9 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
     // A harness without a sandbox, on a host that may not run its commands, gets no
     // commands:execute: every Task with it would wait for a host that can run commands.
     let commands = answers.harness == Found::Codex || answers.commands != Commands::Unset;
+    // files:write does not imply files:read: Claude Code's Read, Glob and Grep need it.
     let mut permissions = vec![
+        json!({ "target": "runtime", "action": "files:read" }),
         json!({ "target": "runtime", "action": "files:write" }),
         json!({ "target": "runtime", "action": "schedule:create" }),
     ];
@@ -927,6 +929,7 @@ mod tests {
                 actions,
                 [
                     "commands:execute",
+                    "files:read",
                     "files:write",
                     "schedule:create",
                     "web:fetch"
@@ -960,7 +963,7 @@ mod tests {
         let document = document(&answers, &repository);
         let permissions =
             &document["services"]["control-plane"]["provision"][0]["spec"]["permissions"];
-        assert_eq!(permissions.as_array().unwrap().len(), 3, "{permissions}");
+        assert_eq!(permissions.as_array().unwrap().len(), 4, "{permissions}");
         assert!(
             !permissions.to_string().contains("web:fetch"),
             "{permissions}"
@@ -989,6 +992,8 @@ mod tests {
         };
         // Its Tasks would otherwise wait for a host that may run commands, the first reply too.
         assert!(!permissions(Found::ClaudeCode, Commands::Unset).contains("commands:execute"));
+        // Without commands, Claude Code reads the repository only with files:read.
+        assert!(permissions(Found::ClaudeCode, Commands::Unset).contains("files:read"));
         for (harness, commands) in [
             (Found::ClaudeCode, Commands::LocalVm),
             (Found::ClaudeCode, Commands::Unsandboxed),
