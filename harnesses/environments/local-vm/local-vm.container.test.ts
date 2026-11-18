@@ -1,10 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import {
   containerDockerfile,
   containerSandboxProvider,
+  EGRESS_RELAY_PROGRAM,
   nativePlatform,
   type SandboxOwner,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
@@ -68,7 +69,10 @@ describe.skipIf(!answers)("local-vm provider", () => {
       const run = (script: string) =>
         workspace.run(["sh", "-c", script], 30_000, AbortSignal.timeout(30_000));
       expect((await run("id -u")).stdout.trim()).toBe("1000");
-      expect((await run("grep CapEff /proc/self/status")).stdout).toMatch(/0{16}/u);
+      // No capability in any set a Task process could use.
+      const sets = (await run("grep -E '^Cap(Inh|Prm|Eff|Amb)' /proc/self/status")).stdout;
+      expect(sets.trim().split("\n")).toHaveLength(4);
+      for (const line of sets.trim().split("\n")) expect(line).toMatch(/\s0{16}$/u);
       expect((await run("grep NoNewPrivs /proc/self/status")).stdout).toMatch(/1/u);
       expect((await run("ls /sys/class/net")).stdout.trim()).toBe("lo");
       expect((await run("uname -m")).stdout.trim()).toBe(
@@ -77,14 +81,14 @@ describe.skipIf(!answers)("local-vm provider", () => {
       for (const tool of ["git", "python3", "node", "rg", "curl", "ps"])
         expect((await run(`command -v ${tool}`)).exitCode, tool).toBe(0);
       expect((await run("command -v sudo")).exitCode).not.toBe(0);
-      // The seal's own process gets its capabilities back, for that process only.
+      // Root, for the seal and Capture, holds exactly CHOWN, DAC_OVERRIDE, DAC_READ_SEARCH,
+      // FOWNER, and KILL, never a privileged container's full set.
       const privileged = await workspace.runPrivileged?.(
         ["sh", "-c", "id -u; grep CapEff /proc/self/status"],
         30_000,
         AbortSignal.timeout(30_000),
       );
-      expect(privileged?.stdout).toMatch(/^0\n/u);
-      expect(privileged?.stdout).not.toMatch(/CapEff:\s+0{16}/u);
+      expect(privileged?.stdout).toMatch(/^0\nCapEff:\s+000000000000002f\n$/u);
     } finally {
       await provider.stop(who, workspace.sandboxId);
     }
@@ -175,7 +179,7 @@ describe.skipIf(!answers)("local-vm provider", () => {
       expect(direct.stdout.trim()).toBe("blocked");
       // The Task's user cannot stop the relay, which runs as root.
       const kill = await workspace.run(
-        ["sh", "-c", "pkill -x python3; pgrep -x -u 0 python3 >/dev/null && echo alive"],
+        ["sh", "-c", "pkill python3; pgrep -u 0 -f 'relay ready' >/dev/null && echo alive"],
         30_000,
         AbortSignal.timeout(30_000),
       );
@@ -183,6 +187,123 @@ describe.skipIf(!answers)("local-vm provider", () => {
     } finally {
       await provider.stop(who, workspace.sandboxId);
       proxy.close();
+    }
+  }, 120_000);
+
+  it(
+    "refuses an image whose Workspace user can change what root runs",
+    async () => {
+      const who = owner();
+      await expect(
+        provider.allocate(who, 60_000, AbortSignal.timeout(BUILD_MS), {
+          dockerfileCommands: [
+            "USER root",
+            "RUN chmod g+w,o+w \"$(python3 -I -S -c 'import os; print(os.__file__)')\"",
+            "USER user",
+          ],
+          user: "user",
+          setupCommands: [],
+        }),
+      ).rejects.toThrow(
+        /can change what the sandbox runs as root: \/usr\/lib\/python3[.0-9]*\/os\.py/u,
+      );
+      expect(ownedContainers()).toEqual([]);
+    },
+    BUILD_MS,
+  );
+
+  it("keeps the relay from a Task that would signal it or take its port", async () => {
+    const proxy = createServer((socket) => socket.end()).listen(0, "127.0.0.1");
+    await once(proxy, "listening");
+    const who = owner();
+    const workspace = await provider.allocate(
+      who,
+      60_000,
+      AbortSignal.timeout(60_000),
+      undefined,
+      undefined,
+      {
+        proxy: `127.0.0.1:${(proxy.address() as { port: number }).port}`,
+        variables: {},
+        caPem: "-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n",
+      },
+    );
+    try {
+      const attempt = await workspace.run(
+        [
+          "python3",
+          "-c",
+          [
+            "import os, signal, socket, subprocess",
+            "pids = subprocess.run(['pgrep', '-x', '-u', '0', 'python3.11'], capture_output=True, text=True).stdout.split() or subprocess.run(['pgrep', '-u', '0', 'python3'], capture_output=True, text=True).stdout.split()",
+            "assert pids, 'no root relay'",
+            "for pid in pids:",
+            "    try:",
+            "        os.kill(int(pid), signal.SIGKILL)",
+            "        print('killed')",
+            "    except PermissionError:",
+            "        print('denied')",
+            "for reuse in (False, True):",
+            "    s = socket.socket()",
+            "    if reuse: s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)",
+            "    try:",
+            "        s.bind(('127.0.0.1', 3128))",
+            "        print('bound')",
+            "    except OSError:",
+            "        print('in use')",
+          ].join("\n"),
+        ],
+        30_000,
+        AbortSignal.timeout(30_000),
+      );
+      expect(attempt.stdout).not.toMatch(/killed|bound/u);
+      expect(attempt.stdout).toMatch(/denied/u);
+      expect(attempt.stdout.match(/in use/gu)).toHaveLength(2);
+    } finally {
+      await provider.stop(who, workspace.sandboxId);
+      proxy.close();
+    }
+  }, 120_000);
+
+  it("ends the relay in the container when its exec client goes away", async () => {
+    const who = owner();
+    const workspace = await provider.allocate(who, 60_000, AbortSignal.timeout(60_000));
+    try {
+      const child = spawn(
+        runtime,
+        [
+          "exec",
+          "-i",
+          "-u",
+          "0",
+          workspace.sandboxId,
+          "python3",
+          "-I",
+          "-S",
+          "-c",
+          EGRESS_RELAY_PROGRAM,
+          "3128",
+        ],
+        { stdio: ["pipe", "pipe", "ignore"] },
+      );
+      await new Promise<void>((resolve) =>
+        child.stdout.on("data", (data: Buffer) => {
+          if (data.toString().includes("relay ready")) resolve();
+        }),
+      );
+      const running = () =>
+        spawnSync(runtime, ["exec", workspace.sandboxId, "pgrep", "-u", "0", "-f", "relay ready"], {
+          encoding: "utf8",
+        }).stdout.trim();
+      expect(running()).not.toBe("");
+      // As the helper's abort does: the exec client is killed, and the relay sees its input end.
+      child.kill("SIGKILL");
+      const deadline = Date.now() + 10_000;
+      while (running() !== "" && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(running()).toBe("");
+    } finally {
+      await provider.stop(who, workspace.sandboxId);
     }
   }, 120_000);
 

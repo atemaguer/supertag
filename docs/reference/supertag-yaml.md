@@ -215,11 +215,11 @@ the host. This is the setup `supertag init` writes when Docker or Podman is runn
       app: ~/code/app
 ```
 
-The container has no network, no capabilities, and none of your files but the Workspace copy. A
+The container has no network, and none of your files but the Workspace copy. A
 Task whose commands have a scoped `web:fetch` reaches only the hosts its
 [network scope](iam.md#network-scopes) allows, through a relay to the Attempt's egress proxy on
 the host; names do not resolve otherwise. Such a host can also take `network-credentials`. Its
-commands run as an unprivileged user without sudo. Before the Workspace returns, SuperTag stops
+commands run as an unprivileged user without sudo or any capability. Before the Workspace returns, SuperTag stops
 every process the Task left running; the Task cannot hide a process from that step. The first
 Task Attempt on a machine builds the container image, which takes a few minutes; the host's log
 shows the progress.
@@ -231,7 +231,7 @@ shell or `env_file`, change the container:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `SUPERTAG_LOCAL_VM_RUNTIME` | `docker`, or `podman` when only it is installed | The container runtime |
-| `SUPERTAG_LOCAL_VM_IMAGE` | a Debian image with Git, Python, Node, and ripgrep | An image with `python3`, `git`, and a POSIX shell |
+| `SUPERTAG_LOCAL_VM_IMAGE` | a Debian image with Git, Python, Node, and ripgrep | An image with `python3`, `git`, and a POSIX shell. A Task Attempt fails to start when the image lets its user write `python3`, `git`, or what they load, such as a Python installed under the user's home |
 | `SUPERTAG_LOCAL_VM_USER` | `user` | The image's unprivileged user. Root is refused |
 | `SUPERTAG_LOCAL_VM_MEMORY` | `8g` | The container's memory limit |
 

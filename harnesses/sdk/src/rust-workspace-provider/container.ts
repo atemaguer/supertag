@@ -4,11 +4,16 @@
  * against (docs/reference/sandbox-providers.md).
  *
  * Each sandbox is a container with no network, labelled with its owner, whose first process
- * ends at the requested lifetime. Task processes run as the image's unprivileged user with every
- * capability dropped and no way to gain privileges, so the seal, which runs as root through the
- * runtime's own exec, is a boundary here: the Task cannot replace the interpreter or hide from
- * it. Snapshots are `<runtime> commit` images. A devcontainer's image and layers are built with
- * an empty context, on the host's native platform.
+ * ends at the requested lifetime. Task processes run as the image's unprivileged user, with no
+ * capability and no way to gain one. The seal, Capture, and the egress relay run as root through
+ * the runtime's own exec, holding only the few capabilities the container keeps for root
+ * (`ROOT_CAPABILITIES`), never `--privileged`.
+ *
+ * Root runs only programs the Workspace user cannot change: at allocation the provider refuses
+ * the container when that user can write the interpreter root runs, anything it maps or imports,
+ * or a directory on the way to them. With that, the seal is a boundary here: the Task can neither
+ * replace the program that stops it nor hide from it. Snapshots are `<runtime> commit` images. A
+ * devcontainer's image and layers are built with an empty context, on the host's native platform.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -66,6 +71,80 @@ export interface ContainerProviderOptions {
 
 /** The allocation limit when the provider's own image may be built first. */
 export const CONTAINER_ALLOCATE_TIMEOUT_MS = BUILD_TIMEOUT_MS;
+
+/**
+ * What root keeps in the container: stopping the Task's processes, reading and returning its
+ * files. Only root holds them; a Task process, never root and unable to gain privileges, holds
+ * none.
+ */
+export const ROOT_CAPABILITIES = ["KILL", "DAC_OVERRIDE", "DAC_READ_SEARCH", "CHOWN", "FOWNER"];
+
+/**
+ * Run as the Workspace user right after the container starts, with the image's `python3`: prints
+ * the interpreter's real path, then every path root would run or read that this user can write.
+ * Covered: `/usr/bin/env`, the PATH root uses, every file the interpreter maps (itself, its
+ * libraries, the dynamic loader), the loader's configuration, every module directory of an
+ * isolated interpreter, recursively, `git` (which Capture runs as root) with its helpers and
+ * libraries, and every directory on the way to each of them.
+ */
+export const WRITABLE_ROOT_PROGRAMS = `import os, sys
+seen = set()
+found = []
+def check(path):
+    path = os.path.abspath(path)
+    while path not in seen:
+        seen.add(path)
+        # A link itself cannot be changed, only replaced through its directory; its target can.
+        if os.path.islink(path):
+            check(os.path.join(os.path.dirname(path), os.readlink(path)))
+        elif os.path.exists(path) and os.access(path, os.W_OK):
+            found.append(path)
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+def tree(root):
+    check(root)
+    for directory, names, files in os.walk(root):
+        for name in names + files:
+            check(os.path.join(directory, name))
+interpreter = os.path.realpath(sys.executable)
+print(interpreter)
+for path in ["/usr/bin/env", "/usr/local/bin", "/usr/bin", "/bin", "/etc/ld.so.preload",
+             "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", sys.executable]:
+    check(path)
+with open("/proc/self/maps") as maps:
+    for line in maps:
+        fields = line.split(None, 5)
+        if len(fields) == 6 and fields[5].startswith("/"):
+            check(fields[5].strip())
+for entry in sys.path:
+    if entry and os.path.isdir(entry):
+        tree(entry)
+    elif entry:
+        check(entry)
+# Capture runs git as root: the binary, its helpers, and everything it maps.
+import shutil, subprocess
+git = shutil.which("git", path="/usr/local/bin:/usr/bin:/bin")
+if git:
+    check(git)
+    helpers = subprocess.run([git, "--exec-path"], capture_output=True, text=True).stdout.strip()
+    if helpers.startswith("/") and os.path.isdir(helpers):
+        tree(helpers)
+    with subprocess.Popen([git, "cat-file", "--batch"], stdin=subprocess.PIPE,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as running:
+        try:
+            # Let the loader map git's libraries before reading what it mapped.
+            __import__("time").sleep(0.3)
+            with open("/proc/%d/maps" % running.pid) as maps:
+                for line in maps:
+                    fields = line.split(None, 5)
+                    if len(fields) == 6 and fields[5].startswith("/"):
+                        check(fields[5].strip())
+        finally:
+            running.stdin.close()
+for path in found[:20]:
+    print("writable " + path)`;
 
 /** The host's own Linux platform, so a container never runs under emulation. */
 export function nativePlatform(): string {
@@ -206,8 +285,9 @@ export function containerSandboxProvider(
         "-i",
         // The container drops every capability, so the seal and Capture, which must stop and
         // read the Task's processes and files, get them back here, for this one process only.
-        // Every other process runs as the container's own unprivileged user.
-        ...(rest.privileged ? ["--privileged", "-u", "0"] : []),
+        // Root holds only the capabilities the container keeps; every other process runs as
+        // the container's own unprivileged user, with none.
+        ...(rest.privileged ? ["-u", "0"] : []),
         "-w",
         "/tmp",
         id,
@@ -382,12 +462,16 @@ export function containerSandboxProvider(
   const relays = new Map<string, EgressRelayHost>();
 
   /**
-   * Starts the egress relay in the container as one long-lived exec, as root with no
-   * capability, so no Task process can signal or replace it. Its standard input and output carry
+   * Starts the egress relay in the container as one long-lived exec, as root, so no Task
+   * process can signal or replace it. Its standard input and output carry
    * every Task connection to the Attempt's egress proxy on this host; the container keeps no
    * network. It starts before the session records the container's processes, so the seal spares it.
    */
-  async function startEgressRelay(id: string, egress: SandboxEgress): Promise<EgressRelayHost> {
+  async function startEgressRelay(
+    id: string,
+    egress: SandboxEgress,
+    interpreter: string,
+  ): Promise<EgressRelayHost> {
     const proxy = egressProxy(egress);
     if (!proxy) throw new Error("Container egress proxy is invalid");
     const child = spawn(
@@ -401,7 +485,8 @@ export function containerSandboxProvider(
         "/usr/bin/env",
         "-i",
         "PATH=/usr/local/bin:/usr/bin:/bin",
-        "python3",
+        // The interpreter checked at allocation, never a name a writable PATH entry could shadow.
+        interpreter,
         "-I",
         "-S",
         "-c",
@@ -484,6 +569,7 @@ export function containerSandboxProvider(
           "none",
           "--cap-drop",
           "ALL",
+          ...ROOT_CAPABILITIES.flatMap((capability) => ["--cap-add", capability]),
           "--security-opt",
           "no-new-privileges",
           "--pids-limit",
@@ -511,8 +597,29 @@ export function containerSandboxProvider(
         await cli(runtime, ["rm", "-f", id]);
         throw new Error("The Workspace user must not be root");
       }
+      // Root runs only an interpreter, and only modules, the Workspace user cannot change.
+      const programs = await exec(id, ["python3", "-I", "-S", "-c", WRITABLE_ROOT_PROGRAMS], {
+        signal,
+      });
+      const [interpreter, ...writable] = programs.stdout.trim().split("\n");
+      if (
+        programs.exitCode !== 0 ||
+        !interpreter ||
+        !/^\/[A-Za-z0-9._/+-]{1,255}$/u.test(interpreter) ||
+        writable.length > 0
+      ) {
+        await cli(runtime, ["rm", "-f", id]);
+        throw new Error(
+          writable.length > 0
+            ? `The Workspace user can change what the sandbox runs as root: ${writable
+                .map((line) => line.replace(/^writable /u, ""))
+                .slice(0, 3)
+                .join(", ")}`
+            : "The Workspace image has no usable python3",
+        );
+      }
       const sandbox = instance(id);
-      const relay = egress ? await startEgressRelay(id, egress) : undefined;
+      const relay = egress ? await startEgressRelay(id, egress, interpreter) : undefined;
       if (relay) relays.set(id, relay);
       const workspace: SandboxWorkspace = {
         sandboxId: id,

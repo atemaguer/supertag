@@ -194,9 +194,12 @@ trusted.
 
 Where the Task can never become root, the seal is also a boundary. The local-vm container
 provider runs every Task process as an unprivileged user, with every capability dropped and no
-way to gain privileges, and refuses a root Workspace user. Only the seal and Capture run as root,
-each in a privileged process of its own. A Task process there cannot hide from the seal or replace
-the program that reads the tree. Rules 1 and 3 still protect the host.
+way to gain privileges, and refuses a root Workspace user. Only the seal, Capture, and the egress
+relay run as root, holding just the capabilities they need: to stop processes and to read and
+return files, never a privileged container's. The provider refuses a container whose Workspace
+user could write anything root runs: the interpreter, the libraries and modules it loads, `git`,
+or a directory on the way to them. A Task process there cannot hide from the seal or replace the
+program that reads the tree. Rules 1 and 3 still protect the host.
 
 ### Planned additions
 
