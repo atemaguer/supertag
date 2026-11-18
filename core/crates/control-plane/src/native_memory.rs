@@ -261,6 +261,13 @@ async fn name_objects_in(
     for (key, blob) in keyed {
         crate::volume_garbage::unqueue_native_object_in(tx, volume, &key).await?;
         sqlx::query(
+            "DELETE FROM supertag_v2_native_memory_pending_objects WHERE volume_id=$1 AND storage_key=$2",
+        )
+        .bind(volume)
+        .bind(&key)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
             "INSERT INTO supertag_v2_native_memory_volume_objects
              (tag_id,harness,audience_principal,volume_id,storage_key,sha256,byte_length)
              VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",
@@ -276,6 +283,40 @@ async fn name_objects_in(
         .await?;
     }
     Ok(())
+}
+
+/// How long after its grant an object no store names may still be named: its turn may be about to
+/// move the head. Past this, and once the writing Attempt no longer runs, it is garbage.
+const PENDING_GRACE_MS: i64 = 60 * 60 * 1000;
+/// Pending objects one sweep pass looks at.
+const PENDING_SWEEP_BATCH: i64 = 500;
+
+/// Records an object a host was granted to write: until a store names it, the sweep may send it
+/// to Volume garbage. Writing it again takes it out of the queue, so bytes a later turn reuses
+/// are never collected under it.
+pub(crate) async fn pending_in(
+    tx: &mut Transaction<'_, Any>,
+    (tag, attempt): (&str, &str),
+    (volume, key, blob): (&str, &str, &BlobReference),
+    now: i64,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO supertag_v2_native_memory_pending_objects
+           (volume_id,storage_key,sha256,byte_length,tag_id,attempt_id,granted_at_ms)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (volume_id,storage_key) DO UPDATE SET
+           attempt_id=excluded.attempt_id, granted_at_ms=excluded.granted_at_ms",
+    )
+    .bind(volume)
+    .bind(key)
+    .bind(&blob.sha256)
+    .bind(blob.byte_length as i64)
+    .bind(tag)
+    .bind(attempt)
+    .bind(now)
+    .execute(&mut **tx)
+    .await?;
+    crate::volume_garbage::unqueue_native_object_in(tx, volume, key).await
 }
 
 /// Retiring a Tag drops its records. Its hosts' copies go when the hosts next see a reset or
@@ -357,6 +398,57 @@ impl Store {
             stores,
             reset_generation,
         })
+    }
+
+    /// Sends native memory objects a host wrote but no store named to Volume garbage, once the
+    /// writing Attempt no longer runs and [`PENDING_GRACE_MS`] has passed. Returns how many.
+    pub async fn sweep_native_memory_objects(&self) -> Result<u64> {
+        let cutoff = self.execution_now_ms() - PENDING_GRACE_MS;
+        let (mut tx, _) = self.write().await?;
+        let rows = sqlx::query(
+            "SELECT p.volume_id,p.storage_key,p.sha256,p.byte_length,p.tag_id,
+                    EXISTS (SELECT 1 FROM supertag_v2_native_memory_volume_objects o
+                            WHERE o.volume_id=p.volume_id AND o.storage_key=p.storage_key) AS named
+             FROM supertag_v2_native_memory_pending_objects p
+             WHERE p.granted_at_ms < $1
+               AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks t
+                               WHERE t.attempt_id=p.attempt_id AND t.state IN ($2,$3))
+             ORDER BY p.granted_at_ms LIMIT $4",
+        )
+        .bind(cutoff)
+        .bind(TaskState::Claimed as i64)
+        .bind(TaskState::Running as i64)
+        .bind(PENDING_SWEEP_BATCH)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut queued = 0;
+        for row in &rows {
+            let volume: String = row.try_get("volume_id")?;
+            let key: String = row.try_get("storage_key")?;
+            let named = match row.try_get::<bool, _>("named") {
+                Ok(named) => named,
+                Err(_) => row.try_get::<i64, _>("named")? != 0,
+            };
+            if !named {
+                let blob = BlobReference {
+                    sha256: row.try_get("sha256")?,
+                    byte_length: row.try_get::<i64, _>("byte_length")?.max(0) as u64,
+                };
+                let tag: String = row.try_get("tag_id")?;
+                crate::volume_garbage::queue_native_object_in(&mut tx, &tag, &volume, &key, &blob)
+                    .await?;
+                queued += 1;
+            }
+            sqlx::query(
+                "DELETE FROM supertag_v2_native_memory_pending_objects WHERE volume_id=$1 AND storage_key=$2",
+            )
+            .bind(&volume)
+            .bind(&key)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(queued)
     }
 
     /// Moves the turn's store on its Tag's Volume to the manifest the host wrote, if the store is

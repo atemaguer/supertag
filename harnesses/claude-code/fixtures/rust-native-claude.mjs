@@ -967,9 +967,8 @@ async function turn(message) {
   if (prompt === "recall-native") {
     // A later Attempt reads what an earlier one kept.
     const memory = process.env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE;
-    result = memory
-      ? await readFile(join(memory, "MEMORY.md"), "utf8").catch(() => "no memory")
-      : "no directory";
+    // The checkout this turn ran in, so a test can see memory crossed checkouts.
+    result = `${memory ? await readFile(join(memory, "MEMORY.md"), "utf8").catch(() => "no memory") : "no directory"}\ncwd=${cwd}`;
   }
   if (prompt === "remember-native") {
     // Claude Code keeps auto memory with its own file tools in the override directory.
@@ -983,6 +982,7 @@ async function turn(message) {
       memoryRead: await hook("Read", { file_path: index }),
       workspaceWrite: await hook("Write", { file_path: join(cwd, "escaped.txt"), content: "x" }),
       elsewhereRead: await hook("Read", { file_path: "/etc/hosts" }),
+      cwd,
     });
   }
   if (message.uuid) result += `; input: ${prompt}`;

@@ -770,6 +770,7 @@ it("keeps Claude's auto memory in the Tag's native memory directory, writable ev
     memoryRead: true,
     workspaceWrite: false,
     elsewhereRead: false,
+    cwd: expect.any(String),
   });
   expect(await readFile(join(readOnly.memory, "MEMORY.md"), "utf8")).toBe("- fixture memory\n");
 }, 60000);

@@ -1359,11 +1359,19 @@ async fn claude_keeps_native_memory_on_its_tags_volume_across_hosts(
     };
     let written: Value = serde_json::from_str(&run("first-host", "remember-native").await?)?;
     assert_eq!(written["memoryWrite"], true, "{written}");
+    let recalled = run("second-host", "recall-native").await?;
     assert!(
-        run("second-host", "recall-native")
-            .await?
-            .contains("- fixture memory"),
-        "another host that maps the Volume reads the memory"
+        recalled.contains("- fixture memory"),
+        "another host that maps the Volume reads the memory: {recalled}"
+    );
+    assert_ne!(
+        written["cwd"].as_str().map(|cwd| format!("cwd={cwd}")),
+        recalled.lines().last().map(str::to_owned),
+        "the turns ran in different checkouts"
+    );
+    assert!(
+        written["cwd"].is_string() && recalled.contains("\ncwd=/"),
+        "both turns report their checkout"
     );
     let stores = services
         .operator(&["describe", "tag", "keeper", "--output", "json"])
@@ -1395,7 +1403,11 @@ async fn claude_keeps_native_memory_on_its_tags_volume_across_hosts(
     services
         .operator(&["delete", "memory", "--native", "keeper"])
         .await?;
-    assert_eq!(run("third-host", "recall-native").await?, "no memory");
+    assert!(
+        run("third-host", "recall-native")
+            .await?
+            .starts_with("no memory\n")
+    );
     services.stop().await
 }
 
@@ -1555,13 +1567,25 @@ async fn claude_keeps_native_memory_on_its_host_across_tasks(database: String) -
         "nothing goes to the default storage when another is configured"
     );
 
-    assert!(run("recall-native").await?.contains("- fixture memory"));
+    // A later turn runs in another checkout path, and Claude Code still finds the memory: its
+    // folder is the store's working copy, never keyed on the checkout.
+    let recalled = run("recall-native").await?;
+    assert!(recalled.contains("- fixture memory"), "{recalled}");
+    assert_ne!(
+        written["cwd"].as_str().map(|cwd| format!("cwd={cwd}")),
+        recalled.lines().last().map(str::to_owned),
+        "the turns ran in different checkouts"
+    );
+    assert!(
+        written["cwd"].is_string() && recalled.contains("\ncwd=/"),
+        "both turns report their checkout"
+    );
 
     let reset = services
         .operator(&["delete", "memory", "--native", "keeper"])
         .await?;
     assert_eq!(reset["reset_generation"], 1, "{reset}");
-    assert_eq!(run("recall-native").await?, "no memory");
+    assert!(run("recall-native").await?.starts_with("no memory\n"));
     let stores = services
         .operator(&["describe", "tag", "keeper", "--output", "json"])
         .await?["native_memory"]

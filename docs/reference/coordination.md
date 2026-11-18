@@ -704,12 +704,15 @@ memory too, beside its [notes](#memory), across Tasks:
   `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/objects/`; the Control Plane keeps only which
   manifest is current. When two turns end at once, the second merges onto what the first kept, as
   on one host. Objects the store no longer names, and all of them after
-  `supertag delete memory --native`, are deleted from the Volume like other Volume garbage.
+  `supertag delete memory --native`, are deleted from the Volume like other Volume garbage; so are
+  objects a turn wrote but never kept, once that turn has ended and an hour has passed since it
+  wrote them.
 
 Claude Code and Codex keep harness memory this way:
 
 - **Claude Code** keeps its auto-memory folder. A read-only turn may still write to its memory
-  folder, and nowhere else.
+  folder, and nowhere else. The folder belongs to the store, not to the checkout, so a turn in
+  another checkout path, or on another host, finds the same memory.
 - **Codex** keeps its memory folder: notes it saves with its memory tools, and the summary it
   reads at the start of each turn. Each turn is told to search its notes before answering
   anything that may depend on earlier work. Codex's own extraction and consolidation, which run

@@ -287,6 +287,135 @@ async fn exercise(url: &str) {
     store.close().await;
 }
 
+fn write(attempt: &InspectAttemptRequest, blob: BlobReference) -> VolumeObjectGrantRequest {
+    VolumeObjectGrantRequest {
+        attempt: Some(attempt.clone()),
+        purpose: VolumeObjectPurpose::NativeMemoryBlob.into(),
+        access: VolumeAccess::Write.into(),
+        native_memory_blob: Some(blob),
+        ..Default::default()
+    }
+}
+
+/// Ages every pending native memory object by `hours`, as if its grant were that long ago.
+async fn age_pending(url: &str, hours: i64) {
+    sqlx::any::install_default_drivers();
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
+    sqlx::query(&format!(
+        "UPDATE supertag_v2_native_memory_pending_objects SET granted_at_ms=granted_at_ms-{}",
+        hours * 60 * 60 * 1000
+    ))
+    .execute(&mut connection)
+    .await
+    .unwrap();
+    connection.close().await.unwrap();
+}
+
+/// Objects a host wrote that no store names, such as those of a turn that lost the race for the
+/// head or ended before moving it, go to Volume garbage once that turn is over and an hour has
+/// passed since their grant; writing the same bytes again takes them back out.
+async fn orphans(url: &str) {
+    let store = Store::open(url).await.unwrap();
+    store
+        .put_artifact_volume(
+            OP,
+            &PutArtifactVolumeRequest {
+                operation_id: "register".into(),
+                volume_id: "vault".into(),
+                source: "file:///srv/vault".into(),
+                expected_revision: 0,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .put_tag_spec(PutTagRequest {
+            tag_id: "keeper".into(),
+            instructions: "Keep the work".into(),
+            harness_kind: HarnessKind::Codex.into(),
+            allowed_actions: vec!["files:read".into()],
+            volume: Some("vault".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let host = support::register_host(&store, "laptop").await;
+
+    // The turn writes two files but moves the head naming only one.
+    let (first, _) = turn(&store, &host).await;
+    for tag in ['7', '8'] {
+        store
+            .grant_volume_object(&host, &write(&first, file(tag)))
+            .await
+            .unwrap();
+    }
+    let moved = store
+        .advance_native_memory(&host, &advance(&first, 0, manifest('9'), 0, &['8']))
+        .await
+        .unwrap();
+    assert!(moved.advanced);
+    // Nothing goes within the hour after the grant, or while the turn may still move the head.
+    assert_eq!(store.sweep_native_memory_objects().await.unwrap(), 0);
+    age_pending(url, 2).await;
+    assert_eq!(store.sweep_native_memory_objects().await.unwrap(), 0);
+    assert!(garbage(&store, &host).await.is_empty());
+    finish(&store, &host, &first).await;
+    assert_eq!(store.sweep_native_memory_objects().await.unwrap(), 1);
+    assert_eq!(garbage(&store, &host).await, shas(&['7']));
+    assert_eq!(store.sweep_native_memory_objects().await.unwrap(), 0);
+
+    // A later turn that writes the same bytes takes them out of the queue; they stay until that
+    // turn is over and an hour has passed again.
+    let (second, _) = turn(&store, &host).await;
+    store
+        .grant_volume_object(&host, &write(&second, file('7')))
+        .await
+        .unwrap();
+    assert!(garbage(&store, &host).await.is_empty());
+    finish(&store, &host, &second).await;
+    assert_eq!(store.sweep_native_memory_objects().await.unwrap(), 0);
+    age_pending(url, 2).await;
+    assert_eq!(store.sweep_native_memory_objects().await.unwrap(), 1);
+    assert_eq!(garbage(&store, &host).await, shas(&['7']));
+    store.close().await;
+}
+
+#[tokio::test]
+async fn sqlite_native_memory_orphans_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    orphans(&format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("native-orphans.db").display()
+    ))
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_native_memory_orphans_contract() {
+    let path =
+        std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE").expect("test database file");
+    let admin_url = std::fs::read_to_string(path).unwrap();
+    let database = format!("supertag_native_orphans_{}", Uuid::new_v4().simple());
+    let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
+    admin
+        .execute(format!("CREATE DATABASE {database}").as_str())
+        .await
+        .unwrap();
+    let mut url = url::Url::parse(admin_url.trim()).unwrap();
+    url.set_path(&database);
+    let result = tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(async move { orphans(url.as_str()).await }).await
+        })
+        .await;
+    admin
+        .execute(format!("DROP DATABASE {database} WITH (FORCE)").as_str())
+        .await
+        .unwrap();
+    result.unwrap();
+}
+
 #[tokio::test]
 async fn sqlite_native_memory_volume_contract() {
     let dir = tempfile::tempdir().unwrap();

@@ -565,6 +565,15 @@ impl Store {
         let volume = volume_in(&mut tx, &id).await?;
         if input.purpose() == VolumeObjectPurpose::NativeMemoryBlob {
             let (key, blob) = native_memory_object_in(&mut tx, &task, input).await?;
+            if access == VolumeAccess::Write {
+                crate::native_memory::pending_in(
+                    &mut tx,
+                    (&task.tag_id, &attempt.attempt_id),
+                    (&id, &key, &blob),
+                    self.execution_now_ms(),
+                )
+                .await?;
+            }
             tx.commit().await?;
             return Ok(VolumeObjectGrant {
                 volume: Some(volume),
