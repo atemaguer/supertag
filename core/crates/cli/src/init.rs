@@ -491,9 +491,21 @@ pub async fn init(args: InitArgs) -> Result<()> {
         results: Vec::new(),
     };
     let mut signed_in = Vec::new();
+    let mut without_node = false;
     for harness in &installed {
         if *harness == Found::Opencode {
             outln!("  opencode: sign-in not checked (choose a model)");
+            continue;
+        }
+        // SuperTag runs Claude Code through its Node bridge: without a Node it can use, the
+        // Worker Host could not start, so say so now rather than after writing supertag.yaml.
+        if *harness == Found::ClaudeCode
+            && let Some(problem) = crate::node_bridges::node_problem()
+        {
+            outln!(
+                "  claude-code: can't run: {problem}. SuperTag runs Claude Code through Node.js 22.13 or a later 22.x release. Install it from https://nodejs.org/en/download (or brew install node@22 and put it on PATH), then run supertag init again."
+            );
+            without_node = true;
             continue;
         }
         let result = sign_ins.check(*harness, None).await?;
@@ -504,6 +516,15 @@ pub async fn init(args: InitArgs) -> Result<()> {
             outln!("{}", harness_checks::instructions(harness.check()));
         }
     }
+    // A harness that can't run is not offered.
+    let installed: Vec<Found> = installed
+        .into_iter()
+        .filter(|harness| !(without_node && *harness == Found::ClaudeCode))
+        .collect();
+    ensure!(
+        !installed.is_empty(),
+        "Claude Code is the only harness on this machine, and it needs Node.js 22.13 or a later 22.x release on PATH. Install that, or install Codex (npm install -g @openai/codex), then run supertag init again."
+    );
     if prompter.is_none() && signed_in.is_empty() {
         return Err(no_sign_in(&installed));
     }

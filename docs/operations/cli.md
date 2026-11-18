@@ -43,7 +43,9 @@ supertag init
 
 `init` finds the harnesses on your `PATH`, checks each one's sign-in with the credentials a
 Worker Host will have, and asks for a Control Plane port, a harness, a Workspace name, and the
-Tag's name; for OpenCode it also asks for a `provider/model`. It writes
+Tag's name; for OpenCode it also asks for a `provider/model`. Claude Code runs through Node.js
+22.13.0 or a later 22.x release; without one on `PATH`, `init` says so and doesn't offer Claude
+Code. It writes
 `~/.supertag/supertag.yaml` with two services and starts them in the background:
 
 - a `control-plane` service, which also creates a `local-tools` Permission Set, a `Lead` Role,

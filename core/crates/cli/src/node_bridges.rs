@@ -189,6 +189,21 @@ fn resolve_node(runtime: PathBuf) -> Result<PathBuf> {
         .context("packaged Node bridge interpreter is unavailable on PATH")
 }
 
+/// Why the Node on PATH can't run the packaged Node bridges, for `supertag init` to say before it
+/// picks a harness that needs one; `None` when it can.
+pub fn node_problem() -> Option<String> {
+    let runtime = match resolve_node("node".into()) {
+        Ok(runtime) => runtime,
+        Err(_) => return Some("Node.js is not on PATH".to_owned()),
+    };
+    check_node_version(&runtime, PROBE_TIMEOUT).err().map(|_| {
+        format!(
+            "the Node.js on PATH ({}) is not 22.13 or a later 22.x release",
+            runtime.display()
+        )
+    })
+}
+
 pub fn launch(
     executable: &Path,
     bridge: NodeBridge,
