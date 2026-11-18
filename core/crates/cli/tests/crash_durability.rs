@@ -1335,7 +1335,7 @@ crash_matrix! {
 
     // Terminal outcome.
     // The host accepts a proposed result only from an adapter that then exits
-    // cleanly (worker-host/src/adapter.rs), so a killed adapter settles as failed.
+    // cleanly (worker-host/src/worker/adapter.rs), so a killed adapter settles as failed.
     adapter_completed =>
         case(Adapter, "adapter.completed", Slack, Failed { events: 2 });
     worker_host_finish_journaled =>

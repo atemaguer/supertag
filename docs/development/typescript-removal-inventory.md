@@ -28,7 +28,7 @@ sits beside the ledger in this directory.
 
 | Path | Package | Decision | Evidence |
 | --- | --- | --- | --- |
-| `packages/runtime/harnesses/claude-code` | `@supertag/worker-claude-code` | Keep, pruned | `rust/crates/cli/src/node_bridges.rs` starts `dist/rust-adapter/entry.js`; `rust/scripts/node_bridges.py` packages it; `language_runtime.rs`, `github_workspace_runtime.rs`, and `support/mcp_runtime.rs` start it and its `fixtures/*.mjs`; `worker-host/src/mcp/stdio.rs` uses `fixtures/rust-mcp-stdio-provider.mjs`; `rust-port.yml` builds it |
+| `packages/runtime/harnesses/claude-code` | `@supertag/worker-claude-code` | Keep, pruned | `rust/crates/cli/src/node_bridges.rs` starts `dist/rust-adapter/entry.js`; `rust/scripts/node_bridges.py` packages it; `language_runtime.rs`, `github_workspace_runtime.rs`, and `support/mcp_runtime.rs` start it and its `fixtures/*.mjs`; `worker-host/src/worker/mcp/stdio.rs` uses `fixtures/rust-mcp-stdio-provider.mjs`; `rust-port.yml` builds it |
 | `packages/runtime/harnesses/cursor` | `@supertag/worker-cursor` | Keep, pruned | `node_bridges.rs` and `node_bridges.py`; `cursor_runtime.rs` starts `dist/rust-adapter/adapter.js`; `rust-port.yml` `runtime` and `linux-root` jobs build it |
 | `packages/runtime/harnesses/opencode` | `@supertag/worker-opencode` | Keep, pruned | `node_bridges.rs` and `node_bridges.py`; `opencode_runtime.rs` includes `fixtures/native-opencode.mjs` and starts `dist/rust-adapter/entry.js` |
 | `packages/runtime/environments/e2b` | `@supertag/worker-environment-e2b` | Keep, pruned | `node_bridges.py` packages `dist/rust-provider/main.js` as the E2B Workspace provider; `rust-port.yml` builds it |
