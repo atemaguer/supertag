@@ -127,6 +127,9 @@ database_tests! {
     claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_keeps_its_remote_task_output;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_captures_selected_workspace_files_for_the_operator;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
@@ -1023,14 +1026,24 @@ async fn claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in(
     services.stop().await
 }
 
-/// Claude Code on an E2B host: no built-in tool, and its `workspace` tools reach the sandbox
-/// through the Worker Host. The host never takes `--allow-unsandboxed-commands`; the command runs
-/// in the provider's checkout and its write is delivered.
-async fn claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in(
-    database: String,
-) -> Result<()> {
+/// A Claude Code Task run on an E2B host through the Cursor suite's fixture provider.
+struct ClaudeRemote {
+    _directory: tempfile::TempDir,
+    root: std::path::PathBuf,
+    source: std::path::PathBuf,
+    services: LanguageServices,
+    task_id: String,
+}
+
+/// Runs one Claude Code Task, with `allow`ed actions and `prompt`, on an E2B host through the
+/// fixture provider, and waits for the host to finish it. `None` when no Node runtime is set.
+async fn claude_remote(
+    database: &str,
+    allow: &[&str],
+    prompt: &str,
+) -> Result<Option<ClaudeRemote>> {
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
-        return Ok(());
+        return Ok(None);
     };
     let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let transport = repo_path("harnesses/sdk/dist/rust-workspace-provider/transport.js")?;
@@ -1071,28 +1084,21 @@ async fn claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in
     success(git(&["add", "workspace.txt"])).await?;
     success(git(&["commit", "--quiet", "-m", "Fixture source"])).await?;
     let base = String::from_utf8(success(git(&["rev-parse", "HEAD"])).await?)?;
-    let services = LanguageServices::start(&root, &database).await?;
-    services
-        .operator(&[
-            "tag",
-            "put",
-            "runner",
-            "--instructions",
-            "Run the requested command.",
-            "--harness",
-            "claude-code",
-            "--allow",
-            "files:read",
-            "--allow",
-            "files:write",
-            "--allow",
-            "commands:execute",
-            "--workspace-id",
-            "remote",
-            "--workspace-base",
-            base.trim(),
-        ])
-        .await?;
+    let services = LanguageServices::start(&root, database).await?;
+    let mut tag = vec![
+        "tag",
+        "put",
+        "runner",
+        "--instructions",
+        "Run the requested command.",
+        "--harness",
+        "claude-code",
+    ];
+    for action in allow {
+        tag.extend(["--allow", action]);
+    }
+    tag.extend(["--workspace-id", "remote", "--workspace-base", base.trim()]);
+    services.operator(&tag).await?;
     let task = services
         .operator(&[
             "task",
@@ -1101,10 +1107,13 @@ async fn claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in
             "runner",
             "--session",
             "remote",
-            "remote-command",
+            prompt,
         ])
         .await?;
-    let task_id = task["task_id"].as_str().context("Task ID missing")?;
+    let task_id = task["task_id"]
+        .as_str()
+        .context("Task ID missing")?
+        .to_owned();
     let mut host = services.worker(
         "claude-code",
         &root.join("host"),
@@ -1128,14 +1137,41 @@ async fn claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in
     // The remote round trip (allocate, stage, capture, stop) outlasts WAIT under load.
     let output = timeout(Duration::from_secs(120), host.output()).await??;
     if !output.status.success() {
-        let task = services.operator(&["get", "task", task_id]).await?;
+        let task = services.operator(&["get", "task", &task_id]).await?;
         let trace = std::fs::read_to_string(root.join("provider-calls.jsonl")).unwrap_or_default();
         anyhow::bail!(
             "{}; task: {task}; provider: {trace}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let task = services.operator(&["get", "task", task_id]).await?;
+    Ok(Some(ClaudeRemote {
+        _directory: directory,
+        root,
+        source,
+        services,
+        task_id,
+    }))
+}
+
+/// Claude Code on an E2B host: no built-in tool, and its `workspace` tools reach the sandbox
+/// through the Worker Host. The host never takes `--allow-unsandboxed-commands`; the command runs
+/// in the provider's checkout and its write is delivered.
+async fn claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in(
+    database: String,
+) -> Result<()> {
+    let Some(remote) = claude_remote(
+        &database,
+        &["files:read", "files:write", "commands:execute"],
+        "remote-command",
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+    let task = remote
+        .services
+        .operator(&["get", "task", &remote.task_id])
+        .await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     let result: Value = serde_json::from_str(task["result"].as_str().context("result")?)?;
     assert_eq!(
@@ -1144,7 +1180,7 @@ async fn claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in
         "{task}"
     );
     assert_eq!(result["isError"], false, "{task}");
-    let trace: Vec<Value> = std::fs::read_to_string(root.join("provider-calls.jsonl"))?
+    let trace: Vec<Value> = std::fs::read_to_string(remote.root.join("provider-calls.jsonl"))?
         .lines()
         .map(serde_json::from_str)
         .collect::<Result<_, _>>()?;
@@ -1165,8 +1201,60 @@ async fn claude_runs_remote_workspace_commands_in_the_sandbox_without_the_opt_in
         serde_json::json!(["commands:execute", "files:read", "files:write"])
     );
     // The command ran in the provider's checkout, never in the host's source.
-    assert!(!source.join("command-output.txt").exists());
-    services.stop().await
+    assert!(!remote.source.join("command-output.txt").exists());
+    remote.services.stop().await
+}
+
+/// Claude Code on an E2B host writes a file to its Task output directory through the sandbox's
+/// workspace tools; Capture returns it and the Worker Host commits it as the Task's output, as for
+/// Cursor.
+async fn claude_keeps_its_remote_task_output(database: String) -> Result<()> {
+    let Some(remote) =
+        claude_remote(&database, &["files:read", "files:write"], "remote-output").await?
+    else {
+        return Ok(());
+    };
+    let task = remote
+        .services
+        .operator(&["get", "task", &remote.task_id])
+        .await?;
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    let result: Value = serde_json::from_str(task["result"].as_str().context("result")?)?;
+    assert_eq!(result["isError"], false, "{task}");
+    let attempt = task["attempt_id"].as_str().context("Attempt ID")?;
+    let directory = supertag_protocol::artifacts::managed_output_directory(attempt);
+    assert_eq!(result["directory"], directory.as_str(), "{task}");
+    let path = format!("{directory}/report.md");
+    let selections = task["artifacts"].as_array().context("Task artifacts")?;
+    assert_eq!(selections.len(), 1, "{task}");
+    assert_eq!(selections[0]["paths"], serde_json::json!([path]), "{task}");
+    let artifact_id = selections[0]["artifact_id"]
+        .as_str()
+        .context("artifact ID")?;
+    let artifact = remote
+        .services
+        .operator(&["get", "artifact", artifact_id])
+        .await?;
+    assert_eq!(
+        artifact["summary"]["producer"]["task_id"],
+        remote.task_id.as_str(),
+        "{artifact}"
+    );
+    assert_eq!(
+        artifact["summary"]["producer"]["harness"], "HARNESS_KIND_CLAUDE_CODE",
+        "{artifact}"
+    );
+    // The file the native manager wrote in the sandbox, byte for byte.
+    assert_eq!(artifact["files"][0]["path"], path.as_str(), "{artifact}");
+    assert_eq!(
+        artifact["files"][0]["blob"]["sha256"],
+        format!(
+            "{:x}",
+            <sha2::Sha256 as sha2::Digest>::digest(b"remote evidence\n")
+        ),
+        "{artifact}"
+    );
+    remote.services.stop().await
 }
 
 async fn claude_captures_selected_workspace_files_for_the_operator(database: String) -> Result<()> {

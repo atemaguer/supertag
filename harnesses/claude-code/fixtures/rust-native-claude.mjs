@@ -873,6 +873,25 @@ async function turn(message) {
       .result;
     result = JSON.stringify({ listed, text: called.content[0].text, isError: called.isError });
   }
+  if (prompt === "remote-output") {
+    // A remote Workspace's Task output directory reaches the native manager in its instructions;
+    // a file written there through the workspace tools returns as the Task's output.
+    const directory = /Task output directory: (\S+)/u.exec(
+      initialized.systemPrompt?.join("\n") ?? "",
+    )?.[1];
+    if (!directory) throw new Error("The remote Task output directory did not reach Claude");
+    const input = { file_path: `${directory}/report.md`, content: "remote evidence\n" };
+    const metadata = { mcp_server: { name: "workspace", source: "sdk" } };
+    if (!(await hook("mcp__workspace__write", input, metadata)))
+      throw new Error("Admitted workspace write was denied");
+    const written = (await sdkMcp("tools/call", { name: "write", arguments: input }, "workspace"))
+      .result;
+    result = JSON.stringify({
+      directory,
+      isError: written.isError,
+      text: written.content[0]?.text,
+    });
+  }
   if (prompt === "run-command") {
     // Claude Code's Bash runs as the host user; the fixture runs the admitted command the same way.
     const command = "echo ran > command-output.txt";
