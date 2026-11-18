@@ -711,8 +711,8 @@ Claude Code and Codex keep harness memory this way:
   summary. Codex's git repository inside the folder is not kept.
 
 OpenCode and Cursor keep no memory of their own on the Worker Host. A turn in a remote Workspace
-(E2B or Modal) keeps no harness memory either: the memory folder is on the Worker Host, and a
-remote turn runs nothing there.
+(E2B, Modal, or a local-vm container) keeps no harness memory either: the memory folder is on the
+Worker Host, and a remote turn runs nothing there.
 
 `supertag describe tag` lists the copies Worker Hosts hold (`native_memory`), and
 `supertag delete memory --native TAG` drops all of them: each host deletes
