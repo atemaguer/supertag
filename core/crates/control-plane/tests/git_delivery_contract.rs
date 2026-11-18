@@ -704,6 +704,27 @@ async fn work_session(store: &Store, host: &HostAuthority, head: &str) -> WorkSe
     let parent = submit(store, "chat", "Delegate the notes").await;
     pin_all(store).await;
     let (attempt, _) = run(store, host, &parent.task_id).await;
+    // A Work Session works in its parent's Workspace: naming another is refused, naming it.
+    let elsewhere = store
+        .start_work_session(
+            host,
+            &StartWorkSessionRequest {
+                attempt: Some(attempt.clone()),
+                operation_id: "start-elsewhere".into(),
+                title: "Notes".into(),
+                instruction: "Write the notes".into(),
+                workspace_id: Some("handbook".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+    match elsewhere {
+        Err(StoreError::FailedPrecondition(reason)) => assert!(
+            reason.contains("Workspace handbook is not this Task's Workspace project"),
+            "{reason}"
+        ),
+        other => panic!("{other:?}"),
+    }
     let work = store
         .start_work_session(
             host,

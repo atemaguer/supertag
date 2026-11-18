@@ -215,8 +215,9 @@ conversation is told why.
 ### Where a work Session's edits go
 
 A work Session keeps its edits the way an Objective Task does. It works in the Workspace of the
-Tag that runs it, and the Worker Host commits its changes to the work Session's own branch, such
-as `supertag/session/0f3c2a9e`. A Tag with no Workspace runs its work Sessions without one. See
+Task that started it, even when it runs on another Tag, and the Worker Host commits its changes
+to the work Session's own branch, such as `supertag/session/0f3c2a9e`. A Task with no Workspace
+starts its work Sessions without one. See
 [Workspaces](../reference/resource-model.md#workspaces).
 
 A work Session has one branch, and every Task of it works there. A continued Task picks up the

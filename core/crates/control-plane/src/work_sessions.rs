@@ -579,14 +579,23 @@ impl Store {
             .workspace
             .as_ref()
             .map(|spec| spec.workspace_id.as_str());
-        if input
+        if let Some(requested) = &input.workspace_id {
+            name("Workspace ID", requested)?;
+        }
+        // A Work Session always works in its parent Task's Workspace; a request may only repeat it.
+        if let Some(requested) = input
             .workspace_id
             .as_deref()
-            .is_some_and(|requested| Some(requested) != workspace)
+            .filter(|requested| Some(*requested) != workspace)
         {
-            return Err(StoreError::FailedPrecondition(
-                "Workspace differs from the accepted parent Task".into(),
-            ));
+            return Err(StoreError::FailedPrecondition(match workspace {
+                Some(accepted) => format!(
+                    "Workspace {requested} is not this Task's Workspace {accepted}; a Work Session works in {accepted}, so name no Workspace"
+                ),
+                None => format!(
+                    "Workspace {requested} is not available: this Task has no Workspace, so name none"
+                ),
+            }));
         }
         // A start that names no harness keeps the digest it had before starts could name one, so a
         // retry of an operation recorded then still matches.

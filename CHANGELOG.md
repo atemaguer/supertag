@@ -227,6 +227,9 @@ within the pre-1.0 compatibility policy described in
   The database gains `-wal` and `-shm` files beside it, owner-only like the database; back up the
   whole state directory after `supertag down`, as before. An existing database switches the first
   time the Control Plane opens it.
+- `start_session` no longer takes `workspace`: a work Session always works in the Workspace of the
+  Task that started it, including on another Tag. A start that still names another Workspace is
+  refused naming the Task's own, instead of "Workspace differs from the accepted parent Task".
 - Worker Hosts deliver Workspace changes themselves. Every delivered Task's Session branch
   `supertag/session/...` is pushed to a remote Workspace's server by the host that ran it, with a
   short-lived credential the Control Plane mints for that one push; `land` adds only a merge or a

@@ -86,7 +86,6 @@ fn bounded_identity(value: &str) -> bool {
 pub(crate) struct StartSession {
     title: String,
     instruction: String,
-    workspace: Option<String>,
     tag: Option<String>,
     harness: Option<String>,
 }
@@ -114,9 +113,7 @@ impl StartSession {
                 && !self.instruction.trim().is_empty()
                 && self.instruction.encode_utf16().count() <= 8000
                 && !self.instruction.contains('\0')
-                && [&self.workspace, &self.tag]
-                    .into_iter()
-                    .all(|field| field.as_deref().is_none_or(bounded_identity))
+                && self.tag.as_deref().is_none_or(bounded_identity)
                 && self
                     .harness
                     .as_deref()
@@ -334,7 +331,7 @@ pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Argument
         }
         Some("start_session") if inventory >= Inventory::WorkSessions => {
             ensure!(
-                ["workspace", "tag", "harness"]
+                ["tag", "harness"]
                     .into_iter()
                     .all(|key| input.get(key).is_none_or(Value::is_string)),
                 "invalid Codex Work Session arguments"
@@ -501,11 +498,10 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
     if inventory >= Inventory::WorkSessions {
         tools.push(json!({
             "type":"function", "name":"start_session",
-            "description":"Start a Work Session with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session reports to this conversation. An Objective owner can specify an eligible Tag on its Team. You may name another harness for the Work Session; it keeps that harness, and you talk to it only through its report and continue_session.",
+            "description":"Start a Work Session with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session works in this Task's Workspace and reports to this conversation. An Objective owner can specify an eligible Tag on its Team. You may name another harness for the Work Session; it keeps that harness, and you talk to it only through its report and continue_session.",
             "inputSchema":{"type":"object","properties":{
                 "title":{"type":"string","minLength":1,"maxLength":120},
                 "instruction":{"type":"string","minLength":1,"maxLength":8000},
-                "workspace":{"type":"string","minLength":1,"maxLength":256},
                 "tag":{"type":"string","minLength":1,"maxLength":256},
                 "harness":{"type":"string","enum":HARNESSES}
             },"required":["title","instruction"],"additionalProperties":false}
@@ -570,7 +566,6 @@ impl Client {
         let start = StartSession {
             title: crate::auth::redact(start.normalized_title(), secrets),
             instruction: crate::auth::redact(start.instruction.trim().to_owned(), secrets),
-            workspace: start.workspace.clone(),
             tag: start.tag.clone(),
             harness: start.harness.clone(),
         };
@@ -582,7 +577,7 @@ impl Client {
             operation_id,
             title: title.clone(),
             instruction: start.instruction,
-            workspace_id: start.workspace,
+            workspace_id: None,
             target_tag_id: start.tag,
             harness: start.harness,
         };

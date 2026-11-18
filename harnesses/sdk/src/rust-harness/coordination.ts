@@ -108,7 +108,6 @@ const schemas = {
   start_session: z.strictObject({
     title: nonblankText(120),
     instruction: nonblankText(8000),
-    workspace: tagId.optional(),
     tag: tagId.optional(),
     harness: z.enum(["codex", "claude-code", "openai-agents", "opencode", "cursor"]).optional(),
   }),
@@ -768,11 +767,11 @@ export function registerCoordinationTools(
     server.registerTool(
       "start_session",
       {
-        description: `Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction. You may specify the accepted Workspace ID. When this Task owns an Objective, you can delegate to an eligible Tag on its Team. You may name another harness for the Work Session; it keeps that harness, and you talk to it only through its report and continue_session.${capacity}`,
+        description: `Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction; it works in this Task's Workspace. When this Task owns an Objective, you can delegate to an eligible Tag on its Team. You may name another harness for the Work Session; it keeps that harness, and you talk to it only through its report and continue_session.${capacity}`,
         inputSchema: schemas.start_session,
         _meta: meta,
       },
-      ({ title, instruction, workspace, tag, harness }, tool) =>
+      ({ title, instruction, tag, harness }, tool) =>
         write(async () => {
           if (asked || pending.size || scope.hasPendingExternalApprovals?.())
             return response(
@@ -785,11 +784,9 @@ export function registerCoordinationTools(
             !schemas.start_session.safeParse({
               title: safeTitle,
               instruction: safeInstruction,
-              workspace,
               tag,
               harness,
             }).success ||
-            (workspace !== undefined && safeText(workspace) !== workspace) ||
             (tag !== undefined && safeText(tag) !== tag)
           )
             return response("Provide a valid Work Session request.", true);
@@ -801,7 +798,6 @@ export function registerCoordinationTools(
                   operationId,
                   title: safeTitle,
                   instruction: safeInstruction,
-                  workspaceId: workspace,
                   targetTagId: tag,
                   harness,
                 },

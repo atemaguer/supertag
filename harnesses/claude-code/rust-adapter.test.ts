@@ -1387,10 +1387,11 @@ it("starts a Work Session through the real Claude SDK with a scoped replay recei
     operationId: expect.stringMatching(/^claude-work-session:[0-9a-f-]{36}$/),
     title: "Investigate release",
     instruction: "Inspect the pinned checkout [REDACTED]",
-    workspaceId: "release",
     targetTagId: "actor",
     harness: "claude-code",
   });
+  // A Work Session works in its parent Task's Workspace; the tool takes none.
+  expect(first?.workspaceId).toBeUndefined();
   expect(retry).toEqual(first);
   expect(second?.operationId).not.toBe(first?.operationId);
 }, 30000);
