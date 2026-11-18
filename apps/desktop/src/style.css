@@ -1606,8 +1606,12 @@ button.identity-pill[aria-expanded="true"] {
   top: max(60px, calc(50% - 240px));
   width: min(620px, calc(100vw - 40px));
   max-width: none;
-  translate: 0 0;
-  transform: translateX(-50%);
+  /* Keep the dialog's own horizontal half-width shift and drop its vertical one, through the
+     variables its Tailwind translate utilities read. The minifier drops a plain `translate`
+     here, and a `transform` would add to theirs: either pinned the palette to the top left of a
+     built app while the dev server showed it centred. */
+  --tw-translate-x: -50%;
+  --tw-translate-y: 0;
   border: 1px solid #514a51;
   border-radius: 16px;
   background: var(--panel);
