@@ -856,8 +856,10 @@ async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
                 String::from_utf8_lossy(&output.stderr).contains("cleanup receipt is unavailable")
             );
             let unsettled = runtime.task(&queued.task_id).await?;
+            // The harness finished, so its reply is already the Task's result, but completion
+            // stays fenced until cleanup is verified.
             assert_eq!(unsettled.state(), TaskState::Running);
-            assert!(unsettled.result.is_none());
+            assert!(unsettled.result.is_some());
             fixture.started(mode)?;
             sqlx::query("DROP TRIGGER hold_revoke")
                 .execute(&mut database)
