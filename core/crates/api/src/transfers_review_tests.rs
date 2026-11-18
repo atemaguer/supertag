@@ -1,14 +1,15 @@
 use super::*;
 use crate::PRINCIPAL;
+use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use supertag_protocol::host_generation;
 use supertag_protocol::{
     authenticated_request,
     v2::{
         credential_directory_server::{CredentialDirectory, CredentialDirectoryServer},
-        host_relay_client::HostRelayClient,
         transfers_client::TransfersClient,
         workspace_directory_server::{WorkspaceDirectory, WorkspaceDirectoryServer},
+        workspace_git_access_client::WorkspaceGitAccessClient,
     },
 };
 use tonic::{
@@ -20,7 +21,8 @@ use tonic::{
 struct Directory {
     reference: WorkspaceDeliveryReference,
     reads: Arc<AtomicUsize>,
-    deny_after: Arc<AtomicUsize>,
+    /// The reviewed delivery's remote Workspace; None for a local one.
+    workspace: Option<Workspace>,
 }
 
 const HOST_TOKEN: &str = "stcr_7777777777777777777777777777777777777777777777777777777777777777";
@@ -77,15 +79,19 @@ impl WorkspaceDirectory for Directory {
         if input.review_id != "review" || input.attempt.as_ref() != Some(&expected) {
             return Err(Status::permission_denied("not the intended review Attempt"));
         }
-        if self.reads.fetch_add(1, Ordering::SeqCst) >= self.deny_after.load(Ordering::SeqCst) {
-            return Err(Status::permission_denied("review authority expired"));
-        }
+        self.reads.fetch_add(1, Ordering::SeqCst);
         Ok(Response::new(HeldWorkspaceDelivery {
             delivery: Some(self.reference.clone()),
             holder: Some(BlobHolder {
-                host_id: "reviewer-host".into(),
+                host_id: "producer-host".into(),
                 attempt_id: "producer-attempt".into(),
             }),
+            session_branch: if self.workspace.is_some() {
+                "supertag/session/producer".into()
+            } else {
+                String::new()
+            },
+            workspace: self.workspace.clone(),
         }))
     }
     async fn get_continuation(
@@ -141,42 +147,42 @@ fn request(review_id: &str, token: &str, generation: u64) -> Request<GetReviewAr
     request
 }
 
-fn host_request<T>(message: T) -> Request<T> {
-    let mut request = authenticated_request(message, HOST_TOKEN, None).unwrap();
-    request
-        .metadata_mut()
-        .insert(supertag_protocol::HOST_GENERATION_HEADER, 7u64.into());
-    request
-}
+struct Git;
 
-/// The holding Worker Host: answers every relay request with the current `bytes`.
-async fn holder(
-    address: std::net::SocketAddr,
-    bytes: Arc<std::sync::Mutex<Vec<u8>>>,
-) -> anyhow::Result<ServerTask> {
-    let channel = Endpoint::from_shared(format!("http://{address}"))?
-        .connect()
-        .await?;
-    let mut requests = HostRelayClient::new(channel.clone())
-        .r#await(host_request(AwaitRelayRequest {}))
-        .await?
-        .into_inner();
-    Ok(ServerTask(tokio::spawn(async move {
-        while let Ok(Some(request)) = requests.message().await {
-            assert_eq!(request.attempt_id, "producer-attempt");
-            let content = bytes.lock().unwrap().clone();
-            let mut frames = vec![RelayFrame {
-                part: Some(relay_frame::Part::RelayId(request.relay_id)),
-            }];
-            frames.extend(content.chunks(7).map(|chunk| RelayFrame {
-                part: Some(relay_frame::Part::Chunk(chunk.to_vec())),
-            }));
-            let _ = HostRelayClient::new(channel.clone())
-                .deliver(host_request(tokio_stream::iter(frames)))
-                .await;
-        }
-        Ok(())
-    })))
+#[tonic::async_trait]
+impl WorkspaceGit for Git {
+    async fn grant(
+        &self,
+        workspace: &Workspace,
+        push: bool,
+    ) -> Result<(Option<workspace_git_grant::Credential>, i64)> {
+        assert_eq!(workspace.workspace_id, "project");
+        assert!(!push, "a review reads, never pushes");
+        Ok((
+            Some(workspace_git_grant::Credential::Https(HttpsGitCredential {
+                username: "x-access-token".into(),
+                token: "read-token".into(),
+            })),
+            42,
+        ))
+    }
+
+    async fn advertised_output_remote(
+        &self,
+        _: &Workspace,
+        _: &str,
+        _: &tokio_util::sync::CancellationToken,
+    ) -> Result<Option<String>> {
+        unreachable!("not used")
+    }
+
+    async fn check(
+        &self,
+        _: &Workspace,
+        _: &tokio_util::sync::CancellationToken,
+    ) -> Result<WorkspaceCheck> {
+        unreachable!("not used")
+    }
 }
 
 async fn api(
@@ -184,7 +190,7 @@ async fn api(
 ) -> anyhow::Result<(
     ServerTask,
     TransfersClient<tonic::transport::Channel>,
-    std::net::SocketAddr,
+    WorkspaceGitAccessClient<tonic::transport::Channel>,
 )> {
     let api = Api::new(
         channel,
@@ -194,45 +200,41 @@ async fn api(
     )?;
     let incoming = TcpIncoming::bind("127.0.0.1:0".parse()?)?;
     let address = incoming.local_addr()?;
-    // The API tier stores no bytes at all.
-    let transfers = ApiTransfers::new(api);
+    let transfers = ApiTransfers::new(api).with_workspace_git(Arc::new(Git));
     let server = tokio::spawn(
         Server::builder()
-            .add_service(transfers.host_relay_service())
+            .add_service(transfers.workspace_git_access_service())
             .add_service(transfers.service())
             .serve_with_incoming(incoming),
     );
-    let client = TransfersClient::connect(format!("http://{address}")).await?;
-    Ok((ServerTask(server), client, address))
+    let channel = Endpoint::from_shared(format!("http://{address}"))?
+        .connect()
+        .await?;
+    Ok((
+        ServerTask(server),
+        TransfersClient::new(channel.clone()),
+        WorkspaceGitAccessClient::new(channel),
+    ))
 }
 
-#[tokio::test]
-async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eof()
--> anyhow::Result<()> {
-    let bytes = b"diff --git a/setup.sh b/setup.sh\n+untrusted patch text\n";
-    let blob = BlobReference {
-        sha256: format!("{:x}", Sha256::digest(bytes)),
-        byte_length: bytes.len() as u64,
-    };
-    let state = Directory {
-        reference: WorkspaceDeliveryReference {
-            workspace_id: "project".into(),
-            delivery_id: "a".repeat(64),
-            base_commit: "1".repeat(40),
-            start_commit: "1".repeat(40),
-            head_commit: "2".repeat(40),
-            committed: true,
-            changed_files: 1,
-            patch: Some(blob.clone()),
-            bundle: Some(blob.clone()),
+fn mint(review_id: &str, token: &str, generation: u64) -> Request<MintWorkspaceGitAccessRequest> {
+    let (metadata, extensions, review) = request(review_id, token, generation).into_parts();
+    Request::from_parts(
+        metadata,
+        extensions,
+        MintWorkspaceGitAccessRequest {
+            attempt: review.attempt,
+            review_id: review.review_id,
+            permission: WorkspaceGitPermission::Read.into(),
+            ..Default::default()
         },
-        reads: Arc::default(),
-        deny_after: Arc::new(AtomicUsize::new(usize::MAX)),
-    };
-    let held = Arc::new(std::sync::Mutex::new(bytes.to_vec()));
+    )
+}
+
+async fn private(state: &Directory) -> anyhow::Result<(ServerTask, ProtocolChannel)> {
     let incoming = TcpIncoming::bind("127.0.0.1:0".parse()?)?;
     let address = incoming.local_addr()?;
-    let _private = ServerTask(tokio::spawn(
+    let server = ServerTask(tokio::spawn(
         Server::builder()
             .add_service(CredentialDirectoryServer::new(state.clone()))
             .add_service(WorkspaceDirectoryServer::new(state.clone()))
@@ -241,128 +243,110 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
     let channel = Endpoint::from_shared(format!("http://{address}"))?
         .connect()
         .await?;
+    Ok((
+        server,
+        supertag_protocol::negotiation::bind_current(channel),
+    ))
+}
 
-    for _ in 0..2 {
-        let (_server, mut client, address) = api(supertag_protocol::negotiation::bind_current(
-            channel.clone(),
-        ))
-        .await?;
-        // With the holding host offline, the reader learns which host holds the bytes.
-        let offline = client
-            .download_review_artifact(request("review", HOST_TOKEN, 7))
-            .await
-            .unwrap_err();
-        assert_eq!(offline.code(), Code::Unavailable);
-        assert!(offline.message().contains("Worker Host reviewer-host"));
-        let _holder = holder(address, held.clone()).await?;
-        for (token, generation, review, expected) in [
-            ("operator-token", 7, "review", Code::PermissionDenied),
-            (HOST_TOKEN, 6, "review", Code::PermissionDenied),
-            (HOST_TOKEN, 7, "another-review", Code::PermissionDenied),
-        ] {
-            assert_eq!(
-                client
-                    .download_review_artifact(request(review, token, generation))
-                    .await
-                    .unwrap_err()
-                    .code(),
-                expected
-            );
-        }
-        let mut stream = client
-            .download_review_artifact(request("review", HOST_TOKEN, 7))
-            .await?
-            .into_inner();
-        assert_eq!(
-            stream.message().await?.unwrap().part,
-            Some(workspace_download::Part::Reference(state.reference.clone()))
-        );
-        let mut received = vec![];
-        while let Some(message) = stream.message().await? {
-            let Some(workspace_download::Part::Chunk(chunk)) = message.part else {
-                panic!("unexpected reference")
-            };
-            received.extend(chunk);
-        }
-        assert_eq!(received, bytes);
+fn reference() -> WorkspaceDeliveryReference {
+    let bytes = b"diff --git a/setup.sh b/setup.sh\n+untrusted patch text\n";
+    let blob = BlobReference {
+        sha256: format!("{:x}", Sha256::digest(bytes)),
+        byte_length: bytes.len() as u64,
+    };
+    WorkspaceDeliveryReference {
+        workspace_id: "project".into(),
+        delivery_id: "a".repeat(64),
+        base_commit: "1".repeat(40),
+        start_commit: "1".repeat(40),
+        head_commit: "2".repeat(40),
+        committed: true,
+        changed_files: 1,
+        patch: Some(blob.clone()),
+        bundle: Some(blob),
     }
-    assert!(state.reads.load(Ordering::SeqCst) >= 4);
+}
 
-    let (_server, mut client, address) =
-        api(supertag_protocol::negotiation::bind_current(channel)).await?;
-    let _holder = holder(address, held.clone()).await?;
-    state.reads.store(0, Ordering::SeqCst);
-    state.deny_after.store(1, Ordering::SeqCst);
-    let mut stream = client
-        .download_review_artifact(request("review", HOST_TOKEN, 7))
+/// The reviewer's Worker Host learns where the reviewed delivery lives, and for a remote
+/// Workspace gets a read credential for its Session branch. No delivery bytes pass through the
+/// Control Plane; the state owner checks every request's review scope.
+#[tokio::test]
+async fn review_delivery_names_its_source_and_grants_only_a_read_of_its_session_branch()
+-> anyhow::Result<()> {
+    let state = Directory {
+        reference: reference(),
+        reads: Arc::default(),
+        workspace: Some(Workspace {
+            workspace_id: "project".into(),
+            remote: "https://example.com/project.git".into(),
+            ..Default::default()
+        }),
+    };
+    let (_private, channel) = private(&state).await?;
+    let (_server, mut transfers, mut git) = api(channel).await?;
+
+    let held = transfers
+        .get_review_delivery(request("review", HOST_TOKEN, 7))
         .await?
         .into_inner();
-    let failure = loop {
-        match stream.message().await {
-            Ok(Some(_)) => {}
-            Ok(None) => panic!("revoked review transfer reported success"),
-            Err(error) => break error,
-        }
-    };
-    assert_eq!(failure.code(), Code::PermissionDenied);
+    assert_eq!(held.delivery, Some(state.reference.clone()));
+    assert_eq!(held.holder.unwrap().attempt_id, "producer-attempt");
+    assert_eq!(held.workspace, state.workspace);
+    assert_eq!(held.session_branch, "supertag/session/producer");
 
-    state.deny_after.store(usize::MAX, Ordering::SeqCst);
-    *held.lock().unwrap() = b"corrupt".to_vec();
-    let mut stream = client
-        .download_review_artifact(request("review", HOST_TOKEN, 7))
-        .await?
-        .into_inner();
-    let failure = loop {
-        match stream.message().await {
-            Ok(Some(_)) => {}
-            Ok(None) => panic!("corrupt review transfer reported success"),
-            Err(error) => break error,
-        }
-    };
-    assert_eq!(failure.code(), Code::DataLoss);
+    let grant = git.mint(mint("review", HOST_TOKEN, 7)).await?.into_inner();
+    assert_eq!(grant.commit, state.reference.head_commit);
+    assert_eq!(grant.branch, "supertag/session/producer");
+    assert_eq!(grant.workspace, state.workspace);
+    assert_eq!(grant.expires_at_ms, 42);
+    assert!(matches!(
+        grant.credential,
+        Some(workspace_git_grant::Credential::Https(_))
+    ));
+
+    for (token, generation, review) in [
+        ("operator-token", 7, "review"),
+        (HOST_TOKEN, 6, "review"),
+        (HOST_TOKEN, 7, "another-review"),
+    ] {
+        assert_eq!(
+            transfers
+                .get_review_delivery(request(review, token, generation))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::PermissionDenied
+        );
+        assert_eq!(
+            git.mint(mint(review, token, generation))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::PermissionDenied
+        );
+    }
+    assert!(state.reads.load(Ordering::SeqCst) >= 2);
     Ok(())
 }
 
-/// A transfer that fails behind a slow reader ends the reader's stream with the error after the
-/// chunks already sent, never cleanly but short. The reader here waits longer than a producer
-/// once waited to deliver the error before giving up.
+/// A local Workspace's delivery is readable only on the Worker Host holding it: no credential.
 #[tokio::test]
-async fn a_failed_download_ends_with_its_error_even_for_a_slow_reader() -> anyhow::Result<()> {
-    use tonic::codegen::tokio_stream::StreamExt as _;
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("held");
-    // The receipt promises more than the file holds, so the transfer fails at its end. The file
-    // fits in the stream's buffer, so the failure comes while the reader is still asleep.
-    let bytes = vec![7u8; 1000];
-    std::fs::write(&path, &bytes)?;
-    let receipt = BlobReference {
-        sha256: "0".repeat(64),
-        byte_length: bytes.len() as u64 * 2,
+async fn a_local_review_delivery_grants_no_git_read() -> anyhow::Result<()> {
+    let state = Directory {
+        reference: reference(),
+        reads: Arc::default(),
+        workspace: None,
     };
-    let permit = Arc::new(Semaphore::new(1)).try_acquire_owned()?;
-    let mut stream = download_stream(
-        Source::File(tokio::fs::File::open(&path).await?),
-        permit,
-        receipt,
-        Vec::new(),
-        |chunk| chunk,
-        || async { Ok(()) },
-        Duration::from_secs(30),
-    );
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    let mut received = 0;
-    let mut ended = None;
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(chunk) => received += chunk.len(),
-            Err(error) => {
-                ended = Some(error);
-                break;
-            }
-        }
-    }
-    assert_eq!(received, bytes.len());
-    let error = ended.expect("the stream must end with the transfer's error, not cleanly");
-    assert_eq!(error.code(), Code::DataLoss, "{error:?}");
+    let (_private, channel) = private(&state).await?;
+    let (_server, mut transfers, mut git) = api(channel).await?;
+    let held = transfers
+        .get_review_delivery(request("review", HOST_TOKEN, 7))
+        .await?
+        .into_inner();
+    assert_eq!(held.workspace, None);
+    assert_eq!(held.holder.unwrap().host_id, "producer-host");
+    let error = git.mint(mint("review", HOST_TOKEN, 7)).await.unwrap_err();
+    assert_eq!(error.code(), Code::FailedPrecondition, "{error:?}");
     Ok(())
 }

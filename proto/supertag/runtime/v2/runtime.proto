@@ -1039,7 +1039,9 @@ service Transfers {
   // No bytes: the host reads the commit from its own repository, or from the remote Workspace's
   // Session branch, where the delivering host pushed it.
   rpc GetWorkspaceContinuation(InspectAttemptRequest) returns (WorkspaceContinuation);
-  rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
+  // The delivery a review request names, and where it is: the Worker Host holding it and, for a
+  // remote Workspace, the Workspace and the Session branch that hold its commits. No bytes.
+  rpc GetReviewDelivery(GetReviewArtifactRequest) returns (HeldWorkspaceDelivery);
   rpc VerifyWorkspaceOutputRemote(VerifyWorkspaceOutputRemoteRequest) returns (VerifyWorkspaceOutputRemoteResponse);
 }
 
@@ -1103,6 +1105,9 @@ message RelayDelivered {}
 message HeldWorkspaceDelivery {
   WorkspaceDeliveryReference delivery = 1;
   BlobHolder holder = 2;
+  // The delivering Task's remote Workspace, absent for a local Workspace, and its Session branch.
+  Workspace workspace = 3;
+  string session_branch = 4;
 }
 
 // An adapter connects only to its supervising Worker Host. The launch pipe
@@ -2909,6 +2914,9 @@ message MintWorkspaceGitAccessRequest {
   // lease token (a `WorkspaceLandingLease`).
   string landing_id = 4;
   string landing_lease_token = 5;
+  // Instead of the Attempt's own source, for READ: the delivery of a review request this Attempt
+  // reviews, read from its Session's branch.
+  string review_id = 6;
 }
 
 // What a Worker Host needs to read one commit of a remote Workspace. The credential lives only in
@@ -2924,6 +2932,8 @@ message WorkspaceGitGrant {
   }
   // When a minted token expires, in milliseconds since the epoch; 0 for a credential that does not.
   int64 expires_at_ms = 5;
+  // For a review read: the Session branch that holds the commit.
+  string branch = 6;
 }
 
 // An HTTPS user name and token: a GitHub App token minted for this one repository and permission,

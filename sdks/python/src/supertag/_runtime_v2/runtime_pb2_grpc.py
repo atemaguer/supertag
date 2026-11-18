@@ -5367,10 +5367,10 @@ class TransfersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceContinuation.FromString,
                 _registered_method=True)
-        self.DownloadReviewArtifact = channel.unary_stream(
-                '/supertag.runtime.v2.Transfers/DownloadReviewArtifact',
+        self.GetReviewDelivery = channel.unary_unary(
+                '/supertag.runtime.v2.Transfers/GetReviewDelivery',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.FromString,
                 _registered_method=True)
         self.VerifyWorkspaceOutputRemote = channel.unary_unary(
                 '/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote',
@@ -5399,8 +5399,10 @@ class TransfersServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def DownloadReviewArtifact(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+    def GetReviewDelivery(self, request, context):
+        """The delivery a review request names, and where it is: the Worker Host holding it and, for a
+        remote Workspace, the Workspace and the Session branch that hold its commits. No bytes.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -5424,10 +5426,10 @@ def add_TransfersServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceContinuation.SerializeToString,
             ),
-            'DownloadReviewArtifact': grpc.unary_stream_rpc_method_handler(
-                    servicer.DownloadReviewArtifact,
+            'GetReviewDelivery': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetReviewDelivery,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.SerializeToString,
             ),
             'VerifyWorkspaceOutputRemote': grpc.unary_unary_rpc_method_handler(
                     servicer.VerifyWorkspaceOutputRemote,
@@ -5501,7 +5503,7 @@ class Transfers:
             _registered_method=True)
 
     @staticmethod
-    def DownloadReviewArtifact(request,
+    def GetReviewDelivery(request,
             target,
             options=(),
             channel_credentials=None,
@@ -5511,12 +5513,12 @@ class Transfers:
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_stream(
+        return grpc.experimental.unary_unary(
             request,
             target,
-            '/supertag.runtime.v2.Transfers/DownloadReviewArtifact',
+            '/supertag.runtime.v2.Transfers/GetReviewDelivery',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.FromString,
             options,
             channel_credentials,
             insecure,

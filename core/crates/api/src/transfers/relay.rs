@@ -196,25 +196,6 @@ impl RelayHub {
         .await
     }
 
-    /// Asks the holding host to build a complete bundle of `delivery`'s head, for a reader that
-    /// lacks the delivery's start commit. Its size is bounded only by the Workspace blob limit:
-    /// it has no receipt, and the reader checks it with Git.
-    pub(crate) async fn open_complete_bundle(
-        &self,
-        holder: &BlobHolder,
-        delivery: &WorkspaceDeliveryReference,
-    ) -> Result<Incoming, RelayError> {
-        self.ask(
-            holder,
-            RelayRequest {
-                complete_bundle: Some(delivery.clone()),
-                ..Default::default()
-            },
-            supertag_protocol::MAX_WORKSPACE_BLOB_BYTES as u64,
-        )
-        .await
-    }
-
     async fn ask(
         &self,
         holder: &BlobHolder,

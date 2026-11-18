@@ -186,6 +186,8 @@ pub(crate) struct CoordinationClients {
     changed_paths: AttemptChangedPathsClient<InterceptedService<Channel, HostHeaders>>,
     task_files: AttemptTaskFilesClient<InterceptedService<Channel, HostHeaders>>,
     effects: AttemptEffectsClient<InterceptedService<Channel, HostHeaders>>,
+    /// Git for reading a reviewed delivery from its remote Workspace's Session branch.
+    review_git: Option<supertag_git_delivery::GitDelivery>,
 }
 
 impl Attempt {
@@ -486,6 +488,10 @@ pub async fn run(
         )
         .await?;
     let coordination = CoordinationClients {
+        review_git: supertag_git_delivery::GitDelivery::for_host(
+            &options.state_directory.join("review-git"),
+        )
+        .ok(),
         acquisitions,
         artifact_source: Some(serving.storage.clone()),
         artifact_peers: options.artifact_peers.clone(),

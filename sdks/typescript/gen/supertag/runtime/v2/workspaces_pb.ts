@@ -42,7 +42,7 @@ export type Workspace = Message<"supertag.runtime.v2.Workspace"> & {
   credentials?: WorkspaceCredentialNames | undefined;
 
   /**
-   * Absent: Session changes stay with SuperTag (download them with `supertag fetch`).
+   * Absent: Session changes stay on their Session branches.
    *
    * @generated from field: supertag.runtime.v2.WorkspaceLand land = 5;
    */

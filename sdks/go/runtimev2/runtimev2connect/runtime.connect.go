@@ -381,9 +381,9 @@ const (
 	// TransfersGetWorkspaceContinuationProcedure is the fully-qualified name of the Transfers's
 	// GetWorkspaceContinuation RPC.
 	TransfersGetWorkspaceContinuationProcedure = "/supertag.runtime.v2.Transfers/GetWorkspaceContinuation"
-	// TransfersDownloadReviewArtifactProcedure is the fully-qualified name of the Transfers's
-	// DownloadReviewArtifact RPC.
-	TransfersDownloadReviewArtifactProcedure = "/supertag.runtime.v2.Transfers/DownloadReviewArtifact"
+	// TransfersGetReviewDeliveryProcedure is the fully-qualified name of the Transfers's
+	// GetReviewDelivery RPC.
+	TransfersGetReviewDeliveryProcedure = "/supertag.runtime.v2.Transfers/GetReviewDelivery"
 	// TransfersVerifyWorkspaceOutputRemoteProcedure is the fully-qualified name of the Transfers's
 	// VerifyWorkspaceOutputRemote RPC.
 	TransfersVerifyWorkspaceOutputRemoteProcedure = "/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote"
@@ -4181,7 +4181,9 @@ type TransfersClient interface {
 	// No bytes: the host reads the commit from its own repository, or from the remote Workspace's
 	// Session branch, where the delivering host pushed it.
 	GetWorkspaceContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
-	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
+	// The delivery a review request names, and where it is: the Worker Host holding it and, for a
+	// remote Workspace, the Workspace and the Session branch that hold its commits. No bytes.
+	GetReviewDelivery(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error)
 	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
 
@@ -4208,10 +4210,10 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("GetWorkspaceContinuation")),
 			connect.WithClientOptions(opts...),
 		),
-		downloadReviewArtifact: connect.NewClient[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload](
+		getReviewDelivery: connect.NewClient[runtimev2.GetReviewArtifactRequest, runtimev2.HeldWorkspaceDelivery](
 			httpClient,
-			baseURL+TransfersDownloadReviewArtifactProcedure,
-			connect.WithSchema(transfersMethods.ByName("DownloadReviewArtifact")),
+			baseURL+TransfersGetReviewDeliveryProcedure,
+			connect.WithSchema(transfersMethods.ByName("GetReviewDelivery")),
 			connect.WithClientOptions(opts...),
 		),
 		verifyWorkspaceOutputRemote: connect.NewClient[runtimev2.VerifyWorkspaceOutputRemoteRequest, runtimev2.VerifyWorkspaceOutputRemoteResponse](
@@ -4227,7 +4229,7 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 type transfersClient struct {
 	commitWorkspace             *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
 	getWorkspaceContinuation    *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation]
-	downloadReviewArtifact      *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
+	getReviewDelivery           *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.HeldWorkspaceDelivery]
 	verifyWorkspaceOutputRemote *connect.Client[runtimev2.VerifyWorkspaceOutputRemoteRequest, runtimev2.VerifyWorkspaceOutputRemoteResponse]
 }
 
@@ -4241,9 +4243,9 @@ func (c *transfersClient) GetWorkspaceContinuation(ctx context.Context, req *con
 	return c.getWorkspaceContinuation.CallUnary(ctx, req)
 }
 
-// DownloadReviewArtifact calls supertag.runtime.v2.Transfers.DownloadReviewArtifact.
-func (c *transfersClient) DownloadReviewArtifact(ctx context.Context, req *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error) {
-	return c.downloadReviewArtifact.CallServerStream(ctx, req)
+// GetReviewDelivery calls supertag.runtime.v2.Transfers.GetReviewDelivery.
+func (c *transfersClient) GetReviewDelivery(ctx context.Context, req *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error) {
+	return c.getReviewDelivery.CallUnary(ctx, req)
 }
 
 // VerifyWorkspaceOutputRemote calls supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote.
@@ -4259,7 +4261,9 @@ type TransfersHandler interface {
 	// No bytes: the host reads the commit from its own repository, or from the remote Workspace's
 	// Session branch, where the delivering host pushed it.
 	GetWorkspaceContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
-	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
+	// The delivery a review request names, and where it is: the Worker Host holding it and, for a
+	// remote Workspace, the Workspace and the Session branch that hold its commits. No bytes.
+	GetReviewDelivery(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error)
 	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
 
@@ -4282,10 +4286,10 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(transfersMethods.ByName("GetWorkspaceContinuation")),
 		connect.WithHandlerOptions(opts...),
 	)
-	transfersDownloadReviewArtifactHandler := connect.NewServerStreamHandler(
-		TransfersDownloadReviewArtifactProcedure,
-		svc.DownloadReviewArtifact,
-		connect.WithSchema(transfersMethods.ByName("DownloadReviewArtifact")),
+	transfersGetReviewDeliveryHandler := connect.NewUnaryHandler(
+		TransfersGetReviewDeliveryProcedure,
+		svc.GetReviewDelivery,
+		connect.WithSchema(transfersMethods.ByName("GetReviewDelivery")),
 		connect.WithHandlerOptions(opts...),
 	)
 	transfersVerifyWorkspaceOutputRemoteHandler := connect.NewUnaryHandler(
@@ -4300,8 +4304,8 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 			transfersCommitWorkspaceHandler.ServeHTTP(w, r)
 		case TransfersGetWorkspaceContinuationProcedure:
 			transfersGetWorkspaceContinuationHandler.ServeHTTP(w, r)
-		case TransfersDownloadReviewArtifactProcedure:
-			transfersDownloadReviewArtifactHandler.ServeHTTP(w, r)
+		case TransfersGetReviewDeliveryProcedure:
+			transfersGetReviewDeliveryHandler.ServeHTTP(w, r)
 		case TransfersVerifyWorkspaceOutputRemoteProcedure:
 			transfersVerifyWorkspaceOutputRemoteHandler.ServeHTTP(w, r)
 		default:
@@ -4321,8 +4325,8 @@ func (UnimplementedTransfersHandler) GetWorkspaceContinuation(context.Context, *
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.GetWorkspaceContinuation is not implemented"))
 }
 
-func (UnimplementedTransfersHandler) DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadReviewArtifact is not implemented"))
+func (UnimplementedTransfersHandler) GetReviewDelivery(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.GetReviewDelivery is not implemented"))
 }
 
 func (UnimplementedTransfersHandler) VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error) {

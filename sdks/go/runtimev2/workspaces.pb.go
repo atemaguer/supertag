@@ -197,7 +197,7 @@ type Workspace struct {
 	// The branch each new Session starts from. Empty follows the remote's default branch.
 	Ref         string                    `protobuf:"bytes,3,opt,name=ref,proto3" json:"ref,omitempty"`
 	Credentials *WorkspaceCredentialNames `protobuf:"bytes,4,opt,name=credentials,proto3" json:"credentials,omitempty"`
-	// Absent: Session changes stay with SuperTag (download them with `supertag fetch`).
+	// Absent: Session changes stay on their Session branches.
 	Land     *WorkspaceLand `protobuf:"bytes,5,opt,name=land,proto3" json:"land,omitempty"`
 	Revision uint64         `protobuf:"varint,6,opt,name=revision,proto3" json:"revision,omitempty"`
 	// Set only on a Task's copy: the commit its Session started from, and the branch the

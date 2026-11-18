@@ -838,6 +838,12 @@ its final reply in the Session. Answering a sender takes another `send_message`.
   root Session. `to` is the requester. The request fixes the Objective and commit, and
   `verdict` is `approved` or `changes_requested`. The Control Plane records one verdict per
   request and accepts a repeat of the same verdict and text. The tool returns `recorded`.
+- `read_review_patch` reads the patch on the reviewer's Worker Host, never through the Control
+  Plane. The host reads it from its own storage when it holds the delivery. Otherwise it fetches
+  the delivery's Session branch from a remote Workspace's git remote with a read-only credential
+  for that one operation, rebuilds the patch, and checks its length and SHA-256 against the
+  delivery. A local Workspace's patch is readable only on the Worker Host that holds it, and a
+  Session branch that hasn't been pushed yet fails `Unavailable`.
 - The Objective overview lists requests and verdicts, and a working Objective receives the
   verdict as a conversation turn. The verdict neither approves an Objective nor grants actions.
 

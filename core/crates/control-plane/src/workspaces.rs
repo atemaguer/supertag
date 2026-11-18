@@ -308,6 +308,26 @@ impl Store {
         tx.commit().await?;
         Ok(holder)
     }
+
+    /// Where a delivered Attempt's commits are besides its holding host: the delivering Task's
+    /// remote Workspace, if it has one, and its Session branch.
+    pub async fn delivery_source(
+        &self,
+        holder: &BlobHolder,
+    ) -> Result<(Option<supertag_protocol::v2::Workspace>, String)> {
+        let mut tx = self.pool.begin().await?;
+        let task_id: String = sqlx::query_scalar(
+            "SELECT task_id FROM supertag_v2_workspace_deliveries WHERE attempt_id=$1",
+        )
+        .bind(&holder.attempt_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| StoreError::NotFound("Workspace delivery was not recorded".into()))?;
+        let task = crate::store::task_in(&mut tx, &task_id).await?;
+        tx.commit().await?;
+        let branch = supertag_protocol::session_branch(&task.tag_id, &task.session_id);
+        Ok((task.workspace.and_then(|spec| spec.remote), branch))
+    }
 }
 
 pub(crate) async fn finish_in(
@@ -580,9 +600,12 @@ impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
             .get_review_artifact(&host, &request.into_inner())
             .await?;
         let holder = self.store.workspace_delivery_holder(&delivery).await?;
+        let (workspace, session_branch) = self.store.delivery_source(&holder).await?;
         Ok(Response::new(HeldWorkspaceDelivery {
             delivery: Some(delivery),
             holder: Some(holder),
+            workspace,
+            session_branch,
         }))
     }
 

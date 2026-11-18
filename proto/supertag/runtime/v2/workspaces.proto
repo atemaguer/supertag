@@ -23,7 +23,7 @@ message Workspace {
   // The branch each new Session starts from. Empty follows the remote's default branch.
   string ref = 3;
   WorkspaceCredentialNames credentials = 4;
-  // Absent: Session changes stay with SuperTag (download them with `supertag fetch`).
+  // Absent: Session changes stay on their Session branches.
   WorkspaceLand land = 5;
   uint64 revision = 6;
   // Set only on a Task's copy: the commit its Session started from, and the branch the

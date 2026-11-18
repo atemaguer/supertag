@@ -1573,12 +1573,16 @@ class RelayDelivered(_message.Message):
     def __init__(self) -> None: ...
 
 class HeldWorkspaceDelivery(_message.Message):
-    __slots__ = ("delivery", "holder")
+    __slots__ = ("delivery", "holder", "workspace", "session_branch")
     DELIVERY_FIELD_NUMBER: _ClassVar[int]
     HOLDER_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    SESSION_BRANCH_FIELD_NUMBER: _ClassVar[int]
     delivery: WorkspaceDeliveryReference
     holder: BlobHolder
-    def __init__(self, delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., holder: _Optional[_Union[BlobHolder, _Mapping]] = ...) -> None: ...
+    workspace: _workspaces_pb2.Workspace
+    session_branch: str
+    def __init__(self, delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., holder: _Optional[_Union[BlobHolder, _Mapping]] = ..., workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., session_branch: _Optional[str] = ...) -> None: ...
 
 class HarnessWorkspaceRequest(_message.Message):
     __slots__ = ("read", "write", "edit", "glob", "grep", "list", "command")
@@ -3666,32 +3670,36 @@ class VerifyWorkspaceOutputRemoteResponse(_message.Message):
     def __init__(self, remote: _Optional[str] = ...) -> None: ...
 
 class MintWorkspaceGitAccessRequest(_message.Message):
-    __slots__ = ("attempt", "merge", "permission", "landing_id", "landing_lease_token")
+    __slots__ = ("attempt", "merge", "permission", "landing_id", "landing_lease_token", "review_id")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     MERGE_FIELD_NUMBER: _ClassVar[int]
     PERMISSION_FIELD_NUMBER: _ClassVar[int]
     LANDING_ID_FIELD_NUMBER: _ClassVar[int]
     LANDING_LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    REVIEW_ID_FIELD_NUMBER: _ClassVar[int]
     attempt: InspectAttemptRequest
     merge: bool
     permission: WorkspaceGitPermission
     landing_id: str
     landing_lease_token: str
-    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., merge: _Optional[bool] = ..., permission: _Optional[_Union[WorkspaceGitPermission, str]] = ..., landing_id: _Optional[str] = ..., landing_lease_token: _Optional[str] = ...) -> None: ...
+    review_id: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., merge: _Optional[bool] = ..., permission: _Optional[_Union[WorkspaceGitPermission, str]] = ..., landing_id: _Optional[str] = ..., landing_lease_token: _Optional[str] = ..., review_id: _Optional[str] = ...) -> None: ...
 
 class WorkspaceGitGrant(_message.Message):
-    __slots__ = ("workspace", "commit", "https", "ssh", "expires_at_ms")
+    __slots__ = ("workspace", "commit", "https", "ssh", "expires_at_ms", "branch")
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     COMMIT_FIELD_NUMBER: _ClassVar[int]
     HTTPS_FIELD_NUMBER: _ClassVar[int]
     SSH_FIELD_NUMBER: _ClassVar[int]
     EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    BRANCH_FIELD_NUMBER: _ClassVar[int]
     workspace: _workspaces_pb2.Workspace
     commit: str
     https: HttpsGitCredential
     ssh: SshGitCredential
     expires_at_ms: int
-    def __init__(self, workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., commit: _Optional[str] = ..., https: _Optional[_Union[HttpsGitCredential, _Mapping]] = ..., ssh: _Optional[_Union[SshGitCredential, _Mapping]] = ..., expires_at_ms: _Optional[int] = ...) -> None: ...
+    branch: str
+    def __init__(self, workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ..., commit: _Optional[str] = ..., https: _Optional[_Union[HttpsGitCredential, _Mapping]] = ..., ssh: _Optional[_Union[SshGitCredential, _Mapping]] = ..., expires_at_ms: _Optional[int] = ..., branch: _Optional[str] = ...) -> None: ...
 
 class HttpsGitCredential(_message.Message):
     __slots__ = ("username", "token")

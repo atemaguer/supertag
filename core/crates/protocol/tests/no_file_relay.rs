@@ -16,8 +16,6 @@ use supertag_protocol::authorization::{PEER_LOCAL, access};
 /// The byte-carrying RPCs the Control Plane still serves, and the no-file-relay slice that
 /// removes each. Unary RPCs are not checked: the only ones carrying `bytes` carry credentials.
 const REMAINING: &[(&str, &str, u8)] = &[
-    // Slice 2: hosts fetch sources, continuations, and review patches from the git remote.
-    ("Transfers", "DownloadReviewArtifact", 2),
     // Slice 6: the relay itself.
     ("HostRelay", "Deliver", 6),
 ];

@@ -4,11 +4,12 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
-    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES, authenticated_request,
-    v2::{transfers_client::TransfersClient, workspace_download, *},
+    authenticated_request,
+    v2::{
+        transfers_client::TransfersClient, workspace_git_access_client::WorkspaceGitAccessClient, *,
+    },
     validate_workspace_delivery,
 };
-use tokio_stream::{Stream, StreamExt};
 use tonic::{Request, Response, Status};
 
 use super::Bridge;
@@ -32,95 +33,143 @@ impl Bridge {
             .active_deadline()?
             .min(tokio::time::Instant::now() + REVIEW_READ_TIMEOUT);
         let input = request.into_inner();
-        let transfers = &self.coordination.transfers;
-        let mut upstream = authenticated_request(
-            GetReviewArtifactRequest {
-                attempt: Some(self.attempt()),
-                review_id: input.review_id.clone(),
-            },
-            &self.host_token,
-            None,
-        )?;
-        upstream.set_timeout(deadline.saturating_duration_since(tokio::time::Instant::now()));
         let read = async {
-            let stream = TransfersClient::with_interceptor(
-                transfers.channel.clone(),
-                transfers.headers.clone(),
-            )
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .download_review_artifact(upstream)
-            .await?
-            .into_inner();
-            verified_page(&input.review_id, input.offset, stream)
-                .await
-                .map(Response::new)
+            let (reference, bytes) = self.reviewed_patch(&input.review_id).await?;
+            page(&input.review_id, input.offset, reference, &bytes).map(Response::new)
         };
         self.inputs.forward(deadline, read).await
     }
+
+    /// The reviewed delivery's patch, checked against its receipt. The Control Plane names the
+    /// delivery and where it is, and passes no bytes: this host reads the patch from its own
+    /// artifact storage when it holds it, or rebuilds it from the remote Workspace's Session
+    /// branch with a read grant for the review.
+    async fn reviewed_patch(
+        &self,
+        review_id: &str,
+    ) -> Result<(WorkspaceDeliveryReference, Vec<u8>), Status> {
+        let transfers = &self.coordination.transfers;
+        let review = GetReviewArtifactRequest {
+            attempt: Some(self.attempt()),
+            review_id: review_id.into(),
+        };
+        let held =
+            TransfersClient::with_interceptor(transfers.channel.clone(), transfers.headers.clone())
+                .get_review_delivery(authenticated_request(review, &self.host_token, None)?)
+                .await?
+                .into_inner();
+        let reference = held
+            .delivery
+            .ok_or_else(|| Status::data_loss("review has no delivery receipt"))?;
+        validate_workspace_delivery(&reference).map_err(|error| {
+            crate::failures::noted(
+                Status::data_loss("review patch delivery receipt is invalid"),
+                &error,
+            )
+        })?;
+        let blob = reference.patch.clone().expect("validated patch reference");
+        if let (Some(storage), Some(holder)) = (&transfers.storage, &held.holder) {
+            let storage = storage.clone();
+            let attempt = holder.attempt_id.clone();
+            let local = blob.clone();
+            if let Ok(Ok(bytes)) =
+                tokio::task::spawn_blocking(move || storage.read_held(&attempt, &local)).await
+            {
+                return Ok((reference, bytes));
+            }
+        }
+        if held.workspace.is_none() {
+            return Err(Status::failed_precondition(
+                "the reviewed delivery is in a local Workspace, readable only on the Worker Host holding it",
+            ));
+        }
+        let git =
+            self.coordination.review_git.as_ref().ok_or_else(|| {
+                Status::unavailable("this Worker Host cannot read remote Workspaces")
+            })?;
+        let grant = WorkspaceGitAccessClient::with_interceptor(
+            transfers.channel.clone(),
+            transfers.headers.clone(),
+        )
+        .mint(authenticated_request(
+            MintWorkspaceGitAccessRequest {
+                attempt: Some(self.attempt()),
+                permission: WorkspaceGitPermission::Read as i32,
+                review_id: review_id.into(),
+                ..Default::default()
+            },
+            &self.host_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+        if grant.commit != reference.head_commit || grant.branch.is_empty() {
+            return Err(Status::data_loss("the review grant names another delivery"));
+        }
+        let workspace = grant
+            .workspace
+            .clone()
+            .ok_or_else(|| Status::data_loss("the review grant has no Workspace"))?;
+        let unreadable = |error: anyhow::Error| {
+            crate::failures::noted(
+                Status::unavailable("the reviewed Session branch could not be read"),
+                &format!("{error:#}"),
+            )
+        };
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let fetched = git
+            .fetch_session(
+                &workspace,
+                &grant.branch,
+                &reference.head_commit,
+                crate::workspaces::granted_credential(grant.credential),
+                &cancel,
+            )
+            .await
+            .map_err(unreadable)?
+            .ok_or_else(|| {
+                Status::unavailable(
+                    "the reviewed Session branch does not hold the delivery yet: its Worker Host has not pushed it",
+                )
+            })?;
+        let bytes = supertag_workspaces::source::delivery_patch(
+            &fetched.directory.path().join("review"),
+            &fetched.bundle,
+            &reference.start_commit,
+            &reference.head_commit,
+            &cancel,
+        )
+        .await
+        .map_err(unreadable)?;
+        if bytes.len() as u64 != blob.byte_length
+            || format!("{:x}", Sha256::digest(&bytes)) != blob.sha256
+        {
+            return Err(Status::data_loss(
+                "review patch does not match its delivery receipt",
+            ));
+        }
+        Ok((reference, bytes))
+    }
 }
 
-/// Retain only one page, but verify the entire artifact before exposing any byte.
-/// A later corrupt chunk or rejected authority check invalidates even a valid prefix.
-async fn verified_page<S>(
+/// One page of a review patch whose bytes were checked against its receipt.
+fn page(
     review_id: &str,
     offset: u64,
-    mut stream: S,
-) -> Result<HarnessReviewPatch, Status>
-where
-    S: Stream<Item = Result<WorkspaceDownload, Status>> + Unpin,
-{
-    let reference = match stream.next().await.transpose()? {
-        Some(WorkspaceDownload {
-            part: Some(workspace_download::Part::Reference(reference)),
-        }) => reference,
-        _ => return Err(Status::data_loss("review patch has no delivery receipt")),
-    };
-    validate_workspace_delivery(&reference).map_err(|error| {
-        crate::failures::noted(
-            Status::data_loss("review patch delivery receipt is invalid"),
-            &error,
-        )
-    })?;
-    let blob = reference.patch.as_ref().expect("validated patch reference");
-    if offset > blob.byte_length {
+    reference: WorkspaceDeliveryReference,
+    bytes: &[u8],
+) -> Result<HarnessReviewPatch, Status> {
+    let length = bytes.len() as u64;
+    if offset > length {
         return Err(Status::invalid_argument(
             "review patch offset exceeds its length",
         ));
     }
-    let end = offset
-        .saturating_add(REVIEW_PAGE_BYTES as u64)
-        .min(blob.byte_length);
-    let mut page = Vec::with_capacity((end - offset) as usize);
-    let mut length = 0u64;
-    let mut digest = Sha256::new();
-    while let Some(message) = stream.next().await {
-        let Some(workspace_download::Part::Chunk(chunk)) = message?.part else {
-            return Err(Status::data_loss("unexpected review patch record"));
-        };
-        if chunk.is_empty()
-            || chunk.len() > CHECKPOINT_CHUNK_BYTES
-            || length + chunk.len() as u64 > blob.byte_length
-        {
-            return Err(Status::data_loss("invalid review patch chunk"));
-        }
-        let next = length + chunk.len() as u64;
-        let begin = offset.max(length);
-        let finish = end.min(next);
-        if begin < finish {
-            page.extend_from_slice(&chunk[(begin - length) as usize..(finish - length) as usize]);
-        }
-        digest.update(&chunk);
-        length = next;
-    }
-    if length != blob.byte_length || format!("{:x}", digest.finalize()) != blob.sha256 {
-        return Err(Status::data_loss(
-            "review patch does not match its delivery receipt",
-        ));
-    }
+    let end = offset.saturating_add(REVIEW_PAGE_BYTES as u64).min(length);
     Ok(HarnessReviewPatch {
         review_id: review_id.into(),
         offset,
-        data: page,
+        data: bytes[offset as usize..end as usize].to_vec(),
         next_offset: (end < length).then_some(end),
         delivery: Some(reference),
     })
@@ -175,6 +224,7 @@ mod tests {
                 ),
                 transfers: crate::checkpoints::Transfers::new(channel.clone(), headers.clone()),
                 artifact_source: None,
+                review_git: None,
                 artifact_peers: crate::ArtifactPeers::default(),
                 volumes: Default::default(),
                 volume_objects: supertag_protocol::v2::volume_objects_client::VolumeObjectsClient::with_interceptor(
@@ -296,29 +346,15 @@ mod tests {
         }
     }
 
-    fn records(bytes: &[u8]) -> Vec<Result<WorkspaceDownload, Status>> {
-        let mut records = vec![Ok(WorkspaceDownload {
-            part: Some(workspace_download::Part::Reference(reference(bytes))),
-        })];
-        records.extend(bytes.chunks(CHECKPOINT_CHUNK_BYTES).map(|chunk| {
-            Ok(WorkspaceDownload {
-                part: Some(workspace_download::Part::Chunk(chunk.to_vec())),
-            })
-        }));
-        records
-    }
-
-    #[tokio::test]
-    async fn pages_verified_binary_patch_without_truncation() {
+    #[test]
+    fn pages_a_checked_binary_patch_without_truncation() {
         let bytes: Vec<u8> = (0..REVIEW_PAGE_BYTES * 2 + 17)
             .map(|index| (index % 256) as u8)
             .collect();
         let mut assembled = vec![];
         let mut offset = 0;
         loop {
-            let page = verified_page("review", offset, tokio_stream::iter(records(&bytes)))
-                .await
-                .unwrap();
+            let page = page("review", offset, reference(&bytes), &bytes).unwrap();
             assert_eq!(page.review_id, "review");
             assert_eq!(page.offset, offset);
             assert_eq!(page.delivery, Some(reference(&bytes)));
@@ -329,95 +365,17 @@ mod tests {
             offset = next;
         }
         assert_eq!(assembled, bytes);
-        let eof = verified_page(
-            "review",
-            bytes.len() as u64,
-            tokio_stream::iter(records(&bytes)),
-        )
-        .await
-        .unwrap();
+        let eof = page("review", bytes.len() as u64, reference(&bytes), &bytes).unwrap();
         assert!(eof.data.is_empty());
         assert_eq!(eof.next_offset, None);
         assert_eq!(
-            verified_page("review", u64::MAX, tokio_stream::iter(records(&bytes)))
-                .await
+            page("review", u64::MAX, reference(&bytes), &bytes)
                 .unwrap_err()
                 .code(),
             tonic::Code::InvalidArgument
         );
-    }
-
-    #[tokio::test]
-    async fn does_not_release_a_valid_prefix_when_later_bytes_or_authority_fail() {
-        let bytes = vec![b'a'; CHECKPOINT_CHUNK_BYTES + 17];
-        let mut corrupt = records(&bytes);
-        if let Some(workspace_download::Part::Chunk(chunk)) =
-            &mut corrupt.last_mut().unwrap().as_mut().unwrap().part
-        {
-            chunk[0] = b'b';
-        }
-        assert_eq!(
-            verified_page("review", 0, tokio_stream::iter(corrupt))
-                .await
-                .unwrap_err()
-                .code(),
-            tonic::Code::DataLoss
-        );
-        let mut revoked = records(&bytes);
-        revoked.push(Err(Status::permission_denied("reviewer authority expired")));
-        assert_eq!(
-            verified_page("review", 0, tokio_stream::iter(revoked))
-                .await
-                .unwrap_err()
-                .code(),
-            tonic::Code::PermissionDenied
-        );
-        let mut truncated = records(&bytes);
-        truncated.pop();
-        assert_eq!(
-            verified_page("review", 0, tokio_stream::iter(truncated))
-                .await
-                .unwrap_err()
-                .code(),
-            tonic::Code::DataLoss
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_malformed_transfer_records() {
-        let mut duplicate_header = records(b"patch");
-        duplicate_header.push(duplicate_header[0].clone());
-        let mut empty_chunk = records(b"patch");
-        empty_chunk.push(Ok(WorkspaceDownload {
-            part: Some(workspace_download::Part::Chunk(vec![])),
-        }));
-        let mut oversized = records(b"patch");
-        oversized[1] = Ok(WorkspaceDownload {
-            part: Some(workspace_download::Part::Chunk(vec![
-                0;
-                CHECKPOINT_CHUNK_BYTES
-                    + 1
-            ])),
-        });
-        for messages in [
-            vec![],
-            records(b"patch")[1..].to_vec(),
-            duplicate_header,
-            empty_chunk,
-            oversized,
-        ] {
-            assert_eq!(
-                verified_page("review", 0, tokio_stream::iter(messages))
-                    .await
-                    .unwrap_err()
-                    .code(),
-                tonic::Code::DataLoss
-            );
-        }
-        let page = verified_page("review", 0, tokio_stream::iter(records(b"")))
-            .await
-            .unwrap();
-        assert!(page.data.is_empty());
-        assert_eq!(page.next_offset, None);
+        let empty = page("review", 0, reference(b""), b"").unwrap();
+        assert!(empty.data.is_empty());
+        assert_eq!(empty.next_offset, None);
     }
 }

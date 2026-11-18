@@ -551,6 +551,18 @@ async fn record_paused_verdict(
             .workspace_delivery
             .unwrap()
     );
+    // The reviewer's host reads the patch from the producer's Session branch: a local Workspace
+    // names no remote, so only its holder can.
+    let holder = store.workspace_delivery_holder(&frozen).await.unwrap();
+    assert_eq!(holder.attempt_id, work.attempt_id);
+    let work_task = store.get_task(&work.task_id).await.unwrap();
+    assert_eq!(
+        store.delivery_source(&holder).await.unwrap(),
+        (
+            None,
+            supertag_protocol::session_branch(&work_task.tag_id, &work_task.session_id)
+        )
+    );
     let wrong_token = GetReviewArtifactRequest {
         attempt: Some(InspectAttemptRequest {
             lease_token: "wrong".into(),

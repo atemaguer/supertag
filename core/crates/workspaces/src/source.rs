@@ -87,6 +87,24 @@ pub async fn materialize(
     Ok(repository.path().to_owned())
 }
 
+/// A delivered Session's patch, `start..head`, from a complete bundle of `head` materialized in
+/// `directory`: the same `git diff` the delivering Worker Host recorded, so the caller checks it
+/// against the delivery's patch receipt.
+pub async fn delivery_patch(
+    directory: &Path,
+    artifact: &TransferArtifact,
+    start: &str,
+    head: &str,
+    cancel: &CancellationToken,
+) -> Result<Vec<u8>> {
+    git::validate_oid(start)?;
+    materialize(directory, artifact, head, cancel).await?;
+    let (directory, _lock) = root(directory)?;
+    git::Repository::empty(&directory, head.len())?
+        .patch(start, head, cancel)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
