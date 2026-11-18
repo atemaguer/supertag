@@ -897,6 +897,12 @@ pub(crate) fn unproxied_key_warning(options: &HostOptions) -> Option<String> {
                     || opencode_file_key(options, provider).is_some());
             (!held).then(|| format!("OpenCode's {provider} sign-in on this host can't be kept in the Worker Host, so the commands it runs without a sandbox can read it. SuperTag keeps an anthropic or openai API key there, from {variable} in the host's env_file or an api key in the OpenCode auth file."))
         }
+        // The Cursor SDK takes its backend from CURSOR_BACKEND_URL, but trades the API key for an
+        // access token it then sends itself, and the backend can switch it to HTTP/2
+        // bidirectional streams, which the provider proxy doesn't carry. So the adapter holds
+        // the key, and commands it runs leave it out of their environment but can still read
+        // the adapter's.
+        HarnessKind::Cursor => Some("Cursor's API key can't be kept in the Worker Host: the Cursor adapter holds CURSOR_API_KEY, and the commands it runs without a sandbox, as the same user, can read it from the adapter process. Use environment: local-vm to keep the key out of their reach.".to_owned()),
         _ => None,
     }
 }

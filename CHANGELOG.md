@@ -212,6 +212,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- A Worker Host that runs Cursor's commands without a sandbox warns as it starts that Cursor's API
+  key stays readable to them: unlike Claude Code's and OpenCode's, it can't go behind the
+  provider proxy.
 - `supertag up` hands each Worker Host its harness's provider keys and tokens in a private file the
   host reads and deletes as it starts, instead of in its environment, and a Linux Worker Host marks
   itself non-dumpable. This keeps keys out of `ps eww`, `/proc/<pid>/environ`, and core dumps: it

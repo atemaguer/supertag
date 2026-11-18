@@ -53,6 +53,8 @@ const WAIT: Duration = Duration::from_secs(90);
 const RPC_DEADLINE: Duration = Duration::from_secs(15);
 const PROVIDER_KEY: &str = "synthetic-cursor-provider-key";
 const TAG: &str = "cursor-fixture";
+/// The start of the Worker Host's warning that Cursor's API key stays reachable.
+const CURSOR_KEY_WARNING: &str = "Cursor's API key can't be kept in the Worker Host";
 const SESSION: &str = "cursor-session";
 const WORKSPACE: &str = "cursor-project";
 
@@ -1859,16 +1861,21 @@ async fn service(mut command: Command) -> Result<(Child, String)> {
 }
 
 async fn worker_finished(worker: Child, fixture: &Fixture) -> Result<()> {
+    worker_output(worker, fixture).await.map(drop)
+}
+
+/// The settled Worker Host's standard error.
+async fn worker_output(worker: Child, fixture: &Fixture) -> Result<String> {
     let output = timeout(WAIT, worker.wait_with_output())
         .await
         .context("Cursor Worker did not settle")??;
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     ensure!(
         output.status.success(),
-        "Cursor Worker failed: {}; fixture: {:?}",
-        String::from_utf8_lossy(&output.stderr),
+        "Cursor Worker failed: {stderr}; fixture: {:?}",
         fixture.trace()?
     );
-    Ok(())
+    Ok(stderr)
 }
 
 fn pid(entry: &Value, field: &str) -> Result<i32> {
@@ -1934,7 +1941,10 @@ async fn cursor_streams_scoped_tools_and_resumes_after_services_restart(
         "Cursor exited before streaming was observed"
     );
     std::fs::write(fixture.root.join(format!("release-{runner}")), b"go")?;
-    worker_finished(worker, &fixture).await?;
+    // Cursor's key can't go behind the provider proxy, and the host that runs its commands
+    // unsandboxed says so as it starts.
+    let stderr = worker_output(worker, &fixture).await?;
+    assert!(stderr.contains(CURSOR_KEY_WARNING), "{stderr}");
     gone(runner).await?;
     let completed = runtime.assert_success(&first.task_id, "first").await?;
     assert!(
@@ -1962,7 +1972,8 @@ async fn cursor_streams_scoped_tools_and_resumes_after_services_restart(
         .tag(&fixture, TAG, HarnessKind::Cursor, &["files:read"])
         .await?;
     let second = runtime.submit(TAG, "resume").await?;
-    worker_finished(runtime.worker(&fixture, "second", false)?, &fixture).await?;
+    let stderr = worker_output(runtime.worker(&fixture, "second", false)?, &fixture).await?;
+    assert!(!stderr.contains(CURSOR_KEY_WARNING), "{stderr}");
     let completed = runtime.assert_success(&second.task_id, "resume").await?;
     runtime.assert_usage(&completed).await?;
     let second_call = fixture.started("resume")?;

@@ -220,6 +220,13 @@ points at the proxy, which forwards only to `api.anthropic.com` or `api.openai.c
 providers, and an OpenCode sign-in that isn't an API key, stay readable to the commands OpenCode
 runs; the Worker Host warns about that when it starts.
 
+Cursor's key doesn't go behind the proxy. The Cursor SDK trades `CURSOR_API_KEY` for an access
+token that it then sends itself, and Cursor's service can switch it to streams the proxy doesn't
+carry. On a host with `allow-unsandboxed-commands: [cursor]`, the commands Cursor runs get an
+environment without the key, but the Cursor adapter holds it, and a command running as the same
+user can read it from the adapter process. The Worker Host warns about this when it starts. Use
+`environment: local-vm` to keep the key out of their reach.
+
 `supertag up` hands each Worker Host its harness's provider keys and tokens in a private file
 that the host reads and deletes as it starts, rather than in its environment, so `ps eww`,
 `/proc/<pid>/environ`, and tools that dump a process's environment don't show them. On Linux the
