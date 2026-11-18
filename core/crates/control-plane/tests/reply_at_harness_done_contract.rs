@@ -311,12 +311,152 @@ async fn contract(url: String) {
     store.close().await;
 }
 
+const CONNECTOR: &str = "connector:slack-test";
+
+fn mention(id: &str, message: &str) -> AcceptSlackEventRequest {
+    AcceptSlackEventRequest {
+        account_id: "slack-test".into(),
+        event_id: id.into(),
+        team_id: "TTEAM1".into(),
+        channel_id: "CCHANNEL1".into(),
+        message_ts: message.into(),
+        thread_ts: message.into(),
+        prompt: format!("Message {message}"),
+        mention_tag_id: Some("builder".into()),
+        actor_id: "UALICE1".into(),
+    }
+}
+
+/// Posts the acknowledgement of a mention, as the Slack Gateway does, and returns its receipt.
+async fn acknowledge(store: &Store, operation: &str, receipt: &str) {
+    let claimed = store
+        .claim_reply_progress(CONNECTOR, operation)
+        .await
+        .unwrap();
+    let update = claimed.update.expect("an acknowledgement");
+    store
+        .settle_reply_progress(
+            CONNECTOR,
+            &SettleReplyProgressRequest {
+                task_id: update.task_id,
+                lease_token: claimed.lease_token,
+                state: ReplyState::Delivered.into(),
+                provider_receipt: Some(receipt.into()),
+            },
+        )
+        .await
+        .unwrap();
+}
+
+/// The next reply the Slack Gateway would send, delivered.
+async fn delivered(store: &Store, operation: &str) -> Option<Reply> {
+    let claimed = store.claim_reply(CONNECTOR, operation).await.unwrap();
+    let reply = claimed.reply?;
+    store
+        .settle_reply(
+            CONNECTOR,
+            &SettleReplyRequest {
+                reply_id: reply.reply_id.clone(),
+                lease_token: claimed.lease_token,
+                state: ReplyState::Delivered.into(),
+                provider_receipt: Some(format!("{operation}.000001")),
+            },
+        )
+        .await
+        .unwrap();
+    Some(reply)
+}
+
+/// A surface thread gets a person's turn's reply when its harness finishes, replacing the
+/// acknowledgement; FinishTask sends no second reply, and a failure to deliver the turn's changes
+/// follows the reply as a message of its own.
+async fn surface(url: String) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let tick = Arc::clone(&clock);
+    let store = Store::open(&url)
+        .await
+        .unwrap()
+        .with_execution_clock(move || tick.load(Ordering::SeqCst));
+    store
+        .put_tag("builder", "Answer", vec!["files:read".into()])
+        .await
+        .unwrap();
+    let host = support::register_host(&store, "slack-worker").await;
+
+    for (event, thread, ack, succeeded) in [
+        ("EvONE", "1794470000.000001", "1794470009.000001", true),
+        ("EvTWO", "1794470000.000002", "1794470009.000002", false),
+    ] {
+        store
+            .accept_slack_event(CONNECTOR, &mention(event, thread))
+            .await
+            .unwrap();
+        acknowledge(&store, &format!("{event}-ack"), ack).await;
+        let turn = next(&store, &host).await;
+        store
+            .report_attempt_milestone(&host, &harness_finished(&turn, Some("Fixed it."), false))
+            .await
+            .unwrap();
+        clock.fetch_add(
+            supertag_control_plane::reply_progress::UPDATE_INTERVAL_MS,
+            Ordering::SeqCst,
+        );
+        let reply = delivered(&store, &format!("{event}-reply"))
+            .await
+            .expect("the reply goes out when the harness finishes");
+        assert_eq!(reply.task_id, turn.task_id);
+        assert_eq!(reply.text, "Fixed it.");
+        assert_eq!(reply.replace_provider_receipt.as_deref(), Some(ack));
+        let result = if succeeded {
+            "Fixed it."
+        } else {
+            "Workspace delivery could not be committed"
+        };
+        store
+            .finish_task(&host, &finish(&turn, result, succeeded, false))
+            .await
+            .unwrap();
+        clock.fetch_add(
+            supertag_control_plane::reply_progress::UPDATE_INTERVAL_MS,
+            Ordering::SeqCst,
+        );
+        let after = delivered(&store, &format!("{event}-after")).await;
+        if succeeded {
+            assert_eq!(after, None, "a delivered turn sent its reply twice");
+        } else {
+            let after = after.expect("the failure follows the reply");
+            assert_eq!(
+                after.text,
+                "I ran into a problem while working on this: Workspace delivery could not be committed"
+            );
+            assert_eq!(
+                after.replace_provider_receipt, None,
+                "the failure replaced the reply"
+            );
+            assert_eq!(
+                after.destination,
+                Some(ReplyDestination {
+                    conversation_id: "CCHANNEL1".into(),
+                    thread_id: Some(thread.into()),
+                })
+            );
+            assert_eq!(delivered(&store, &format!("{event}-again")).await, None);
+        }
+    }
+    store.close().await;
+}
+
 #[tokio::test]
 async fn sqlite_reply_at_harness_done_contract() {
     let directory = tempfile::tempdir().unwrap();
     contract(format!(
         "sqlite://{}?mode=rwc",
         directory.path().join("store.db").display()
+    ))
+    .await;
+    surface(format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("surface.db").display()
     ))
     .await;
 }
@@ -337,7 +477,13 @@ async fn postgres_reply_at_harness_done_contract() {
     url.set_path(&database);
     let local = tokio::task::LocalSet::new();
     let result = local
-        .run_until(async move { tokio::task::spawn_local(contract(url.to_string())).await })
+        .run_until(async move {
+            tokio::task::spawn_local(async move {
+                contract(url.to_string()).await;
+                surface(url.to_string()).await;
+            })
+            .await
+        })
         .await;
     admin
         .execute(format!("DROP DATABASE {database} WITH (FORCE)").as_str())

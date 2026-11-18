@@ -1375,6 +1375,11 @@ impl Store {
             .bind(TaskState::Running as i64)
             .execute(&mut **transaction)
             .await?;
+        // A surface thread gets the reply now too, replacing its acknowledgement. FinishTask
+        // queues no second one, and a failure to deliver the changes follows it.
+        let task = task_in(transaction, &attempt.task_id).await?;
+        let order = next_order(transaction).await?;
+        enqueue_reply(transaction, &task, order).await?;
         Ok(())
     }
 
@@ -1626,6 +1631,8 @@ impl Store {
         if task.state == TaskState::Succeeded as i32 {
             enqueue_reply(&mut transaction, &task, order).await?;
             crate::workspace_landings::finish_in(&mut transaction, &task).await?;
+        } else if matches!(task.state(), TaskState::Failed | TaskState::Cancelled) {
+            crate::reply_progress::after_reply_in(&mut transaction, &task).await?;
         }
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         if state == TaskState::Running {

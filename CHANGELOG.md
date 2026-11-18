@@ -216,10 +216,12 @@ within the pre-1.0 compatibility policy described in
 - Deleting a Volume sends the Session checkpoints and native memory still on it for deletion, and
   those Sessions and memory stores start fresh. A Volume can't move to another source while it
   holds either, or while objects at its old source wait for deletion.
-- A person's turn shows its reply in the desktop app and the terminal UI as soon as the harness
-  finishes, instead of after the Worker Host delivers the turn's changes and checkpoint: the reply
-  is the running Task's result, and the conversation is no longer working. A delivery that then
-  fails shows its error beside the reply, not instead of it.
+- A person's turn shows its reply in the desktop app, the terminal UI, and its surface thread
+  (Slack, Teams, Lark, GitHub, Linear) as soon as the harness finishes, instead of after the
+  Worker Host delivers the turn's changes and checkpoint: the reply is the running Task's result,
+  the conversation is no longer working, and the thread's acknowledgement is replaced by it. A
+  delivery that then fails shows its error beside the reply in the app, and as a message of its
+  own after the reply in the thread.
 - A Worker Host that runs Cursor's commands without a sandbox warns as it starts that Cursor's API
   key stays readable to them: unlike Claude Code's and OpenCode's, it can't go behind the
   provider proxy.

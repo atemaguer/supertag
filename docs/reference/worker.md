@@ -127,9 +127,11 @@ lockfiles, are always verified against the Task Attempt's start commit.
 
 ### Delivery
 
-When the harness finishes a turn a person is waiting on, the host reports its reply at once, and
-the desktop app and the terminal UI show it while the host delivers the turn's changes. If
-delivering them fails, the turn fails and shows the error beside the reply. A turn no person waits
+When the harness finishes a turn a person is waiting on, the host reports its reply at once: the
+desktop app and the terminal UI show it, and a surface thread such as Slack gets it in place of its
+acknowledgement, while the host delivers the turn's changes. If delivering them fails, the turn
+fails: the app shows the error beside the reply, and the thread gets the error as a message of its
+own after the reply. A turn no person waits
 on, such as a Schedule's, shows its reply only when it finishes, since it may stay quiet.
 
 After the harness finishes, the host commits the Task's changes and verifies them. It records the

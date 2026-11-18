@@ -293,6 +293,35 @@ pub(crate) fn unsuccessful_text(cancelled: bool, error: Option<&str>) -> String 
     }
 }
 
+/// A turn whose reply already went to its surface thread when its harness finished, but which
+/// then failed or was cancelled while delivering its changes, says so in a message of its own
+/// after the reply, which stays.
+pub(crate) async fn after_reply_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Result<()> {
+    let Some(row) = sqlx::query(
+        "SELECT account_id,conversation_id,thread_id FROM supertag_v2_replies WHERE task_id=$1",
+    )
+    .bind(&task.task_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(());
+    };
+    let text = unsuccessful_text(task.state() == TaskState::Cancelled, task.result.as_deref());
+    let order = next_order(tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_replies (reply_id,notice_key,account_id,conversation_id,thread_id,text,state,ready_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(notice_key) DO NOTHING")
+        .bind(Uuid::new_v4().to_string())
+        .bind(format!("after-reply:{}", task.task_id))
+        .bind(row.try_get::<String, _>("account_id")?)
+        .bind(row.try_get::<String, _>("conversation_id")?)
+        .bind(row.try_get::<Option<String>, _>("thread_id")?)
+        .bind(text)
+        .bind(ReplyState::Pending as i64)
+        .bind(order)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 /// Adds the in-place replacement target and the result card to a claimed final reply, and
 /// stops further progress for its Task.
 pub(crate) async fn present_in(tx: &mut Transaction<'_, Any>, reply: &mut Reply) -> Result<()> {
