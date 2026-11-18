@@ -203,7 +203,7 @@ impl Harness for Bridge {
             .await?
             .entries;
         if !self.attached.swap(true, Ordering::AcqRel) {
-            crate::report_milestone(
+            crate::worker::milestones::report_milestone(
                 &self.host,
                 &self.attempt(),
                 &self.host_token,

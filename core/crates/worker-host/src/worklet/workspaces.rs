@@ -1233,7 +1233,7 @@ mod tests {
         assert!(!pending.uploaded);
         assert_eq!(waiting_approval_ids, ["test-approval"]);
         assert_eq!(workspaces.verify(&pending)?, receipt);
-        crate::save_finish(
+        crate::worklet::finish::save_finish(
             &journal,
             attempt.clone(),
             crate::worker::adapter::failed("upload failed"),
@@ -1271,7 +1271,13 @@ mod tests {
         let Some(Entry::Terminal { prepared, attempt }) = journal.load()? else {
             anyhow::bail!("terminal receipt lost")
         };
-        crate::cleanup_terminal(&journal, &recovered, &state, &attempt, prepared.as_deref())?;
+        crate::worklet::recovery::cleanup_terminal(
+            &journal,
+            &recovered,
+            &state,
+            &attempt,
+            prepared.as_deref(),
+        )?;
         assert!(!pending.checkout.path.exists());
         assert!(pending.delivery.bundle_path.exists());
         assert!(pending.delivery.patch_path.exists());
