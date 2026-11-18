@@ -15,6 +15,9 @@ server. The journeys:
 - HTTPS token: a remote behind `git http-backend` that requires basic auth, with a Workspace
   Credential the Control Plane grants for each read and push;
 - SSH key: a remote served by sshd in a disposable Docker container (skipped without Docker).
+- local-vm: a remote Workspace whose Task runs commands in a local-vm container, on a Worker Host
+  enrolled with a host Auth Key, and whose Session branch lands (`LocalVmJourney`; skipped without
+  Docker or the built Claude Code adapter and local-vm provider).
 
 The credentialed journeys also check that the secret never reaches the harness's environment or
 the host's disk (its state directory, which holds every checkout).
@@ -509,6 +512,148 @@ spec:
                                capture_output=True, text=True,
                                env={**os.environ, "GIT_SSH_COMMAND": self.ssh_command}).stdout
         self.assertTrue(shown.startswith(landing["landed_commit"]), shown)
+
+
+REPOSITORY = Path(__file__).resolve().parent.parent
+LOCAL_VM_ADAPTER = REPOSITORY / "harnesses/claude-code/dist/rust-adapter/entry.js"
+LOCAL_VM_PROVIDER = REPOSITORY / "harnesses/environments/local-vm/dist/rust-provider/main.js"
+LOCAL_VM_CLAUDE = REPOSITORY / "harnesses/claude-code/fixtures/rust-native-claude.mjs"
+
+
+def docker_runs() -> bool:
+    return shutil.which("docker") is not None and subprocess.run(
+        ["docker", "info"], capture_output=True).returncode == 0
+
+
+@unittest.skipUnless(BINARY, "set SUPERTAG_E2E_BINARY to a supertag built with --features test-fixtures")
+@unittest.skipUnless(docker_runs(), "the local-vm journey needs Docker")
+@unittest.skipUnless(shutil.which("node") and LOCAL_VM_ADAPTER.exists() and LOCAL_VM_PROVIDER.exists(),
+                     "build the Claude Code adapter and the local-vm provider: pnpm -r build")
+class LocalVmJourney(unittest.TestCase):
+    """A remote Workspace whose Task runs commands in a local-vm container, on a Worker Host
+    enrolled with a host Auth Key, and whose Session branch lands on the git server. The host runs
+    the fixture Claude Code, so no model is called; the first run builds the container image."""
+
+    timeout = 1_200
+
+    @classmethod
+    def setUpClass(cls):
+        cls.binary = Path(BINARY).resolve()
+        cls.temporary = tempfile.TemporaryDirectory(prefix="st-e2e-vm-")
+        cls.root = Path(cls.temporary.name)
+        cls.state = cls.root / "state"
+        cls.state.mkdir(mode=0o700)
+        repository = cls.root / "app"
+        cls.server = cls.root / "server.git"
+        repository.mkdir()
+        git(repository, "init", "-q", "-b", "main")
+        (repository / "workspace.txt").write_text(BASE)
+        git(repository, "add", "-A")
+        git(repository, "commit", "-qm", "Initial")
+        git(cls.root, "init", "-q", "--bare", "-b", "main", str(cls.server))
+        git(repository, "push", "-q", str(cls.server), "main")
+        cls.port = free_port()
+        (cls.state / "supertag.yaml").write_text(f"""version: 1
+name: st-e2e-vm
+services:
+  control-plane:
+    type: control-plane
+    ports: ["127.0.0.1:{cls.port}"]
+    provision:
+      - apiVersion: supertag/v1
+        kind: PermissionSet
+        metadata: {{ name: run }}
+        spec:
+          permissions:
+            - {{ target: runtime, action: files:write }}
+            - {{ target: runtime, action: commands:execute }}
+      - apiVersion: supertag/v1
+        kind: Role
+        metadata: {{ name: Builder }}
+        spec:
+          purpose: "Run the requested command in the Workspace."
+          permissionSets: [run]
+""")
+        cls.cli("up")
+        cls.addClassCleanup(cls.down)
+        cls.cli("workspace", "put", "handbook-vm", "--remote", f"file://{cls.server}", "--ref", "main")
+        manifest = cls.root / "tag.yaml"
+        manifest.write_text("""apiVersion: supertag/v1
+kind: Tag
+metadata: { name: vm }
+spec:
+  instructions: "Run the requested command."
+  roles: [Builder]
+  execution: { harness: claude-code }
+  workspace: { id: handbook-vm }
+""")
+        cls.cli("apply", "-f", str(manifest))
+        # A Worker Host of its own: the Claude Code adapter with the fixture CLI, its remote
+        # Workspace in a local-vm container on this machine's Docker.
+        key = cls.cli("auth-key", "create", "vm-host", "--role", "host", "--tag", "vm")
+        key = key["auth_key"] if isinstance(key, dict) else key.strip().split()[-1]
+        host_state = cls.root / "host"
+        control_plane = f"http://127.0.0.1:{cls.port}"
+        cls.cli("host", "enroll", "vm-host", "--control-plane", control_plane,
+                "--state-directory", str(host_state), "--auth-key", key)
+        claude = cls.root / "claude-fixture.mjs"
+        shutil.copy(LOCAL_VM_CLAUDE, claude)
+        claude.chmod(0o700)
+        node = shutil.which("node")
+        docker = Path(shutil.which("docker")).parent
+        environment = {**cls.environment(), "ANTHROPIC_API_KEY": "fixture-provider-key",
+                       "PATH": f"{Path(node).parent}:{docker}:/usr/bin:/bin"}
+        cls.host_log = open(cls.root / "host.log", "w")
+        cls.host = subprocess.Popen(
+            [str(cls.binary), "worker-host", "--control-plane", control_plane,
+             "--state-directory", str(host_state), "--harness", "claude-code",
+             "--harness-model", "fixture-model", "--harness-entrypoint", str(LOCAL_VM_ADAPTER),
+             "--harness-runtime", node, "--claude-path", str(claude),
+             "--remote-workspace", "handbook-vm",
+             "--local-vm-workspace-provider", node,
+             "--local-vm-workspace-provider-arg", str(LOCAL_VM_PROVIDER)],
+            env=environment, stdout=cls.host_log, stderr=subprocess.STDOUT)
+        cls.addClassCleanup(cls.stop_host)
+
+    @classmethod
+    def stop_host(cls):
+        cls.host.terminate()
+        try:
+            cls.host.wait(30)
+        except subprocess.TimeoutExpired:
+            cls.host.kill()
+        cls.host_log.close()
+
+    down = Journeys.__dict__["down"]
+    environment = Journeys.__dict__["environment"]
+    cli = Journeys.__dict__["cli"]
+    until = Journeys.until
+    finished = Journeys.finished
+    landing = Journeys.landing
+
+    def test_a_local_vm_task_runs_commands_in_its_container_and_lands_its_session_branch(self):
+        task_id = self.cli("task", "submit", "--tag", "vm", "--session", "journey-vm",
+                           "local-vm-command")["task_id"]
+        try:
+            task = self.finished(task_id)
+        except AssertionError:
+            raise AssertionError((self.root / "host.log").read_text()[-4000:])
+        # The command ran in the container: as its unprivileged user, on Linux, with no network.
+        output = json.loads(task["result"])
+        self.assertFalse(output["isError"], output)
+        self.assertEqual(output["text"].splitlines()[:3], ["1000", "Linux", "lo"], output)
+        # Its file returns with the Workspace, and the Session branch lands on the server.
+        landing = self.landing("journey-vm", "branch")
+        self.assertEqual(landing["state"], "landed", landing)
+        self.assertEqual(git(self.server, "rev-parse", landing["branch"]).strip(),
+                         task["workspace_delivery"]["head_commit"])
+        landed = git(self.server, "show", f"{landing['branch']}:command-output.txt")
+        self.assertEqual(landed.splitlines()[:3], ["1000", "Linux", "lo"])
+        self.assertEqual(git(self.server, "show", "main:workspace.txt"), BASE)
+        # The Task's container is gone.
+        left = subprocess.run(["docker", "ps", "-aq", "--filter", f"label=supertag.taskId={task_id}"],
+                              capture_output=True, text=True).stdout
+        self.assertEqual(left.strip(), "")
 
 
 if __name__ == "__main__":
