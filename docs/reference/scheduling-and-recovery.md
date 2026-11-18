@@ -49,7 +49,7 @@ limited in three places:
 | Native agents and work Sessions one turn may start | `task submit --max-native-agents` |
 
 `supertag metrics` shows queued Tasks, host capacity, and how long Tasks waited: before a claim,
-between claim and start, and, for the last 500 started Attempts, the median and longest time from
+between claim and start, and, for the last 500 started Task Attempts, the median and longest time from
 start to a ready Workspace, an attached harness adapter, and the harness's first event.
 
 ### Start rates
