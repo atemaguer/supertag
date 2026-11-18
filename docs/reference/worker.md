@@ -106,12 +106,19 @@ A Tag's Workspace is a repository the host maps: a local Git source
 Workspace on a git server (`--remote-workspace ID`, or `ID: { remote: true }` in `supertag.yaml`),
 which the host reads and pushes with a credential the Control Plane grants for each operation. One
 host may serve both kinds. Each Task Attempt runs in its
-own checkout pinned to an exact commit. The host's own Git commands never run repository hooks,
+own checkout pinned to an exact commit. When a Session's next Task Attempt runs on the same host
+and starts from the commit its last completed Task Attempt delivered, the host moves that checkout to
+it instead of writing every file again. It removes files Git does not track (except setup
+outputs), verifies every tracked file, and rebuilds the `.git` directory from objects it kept
+outside the checkout, never the previous harness's. A checkout that fails verification is replaced
+by a fresh one. The host keeps the last checkout of at most 8 Sessions per Workspace and base
+commit. The host's own Git commands never run repository hooks,
 filters, or configuration a Task wrote, and the host fails a Task Attempt whose repository Git
 configuration changed while it ran.
 
 `--workspace-setup ID=COMMAND`, or `setup` in a `supertag.yaml` Workspace, runs a shell command
-such as `npm ci` in each new checkout before the harness starts. It runs on the host, outside any
+such as `npm ci` in each new checkout before the harness starts. A reused checkout keeps its
+setup outputs, and setup does not run again. It runs on the host, outside any
 harness sandbox, with a 10-minute limit, and receives no provider credentials.
 
 ### Delivery

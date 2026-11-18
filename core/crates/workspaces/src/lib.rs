@@ -311,6 +311,20 @@ struct Preparation {
     merge: Option<PreparedMerge>,
 }
 
+/// A Session's last delivered checkout, kept for its next Attempt on this host.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+struct ParkedCheckout {
+    session_id: String,
+    /// The delivered head the files hold, which the next Attempt must start from.
+    head_commit: String,
+    /// The commit the parked Attempt started from: its trusted packs hold everything it reaches.
+    start_commit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    setup: Option<String>,
+    #[serde(default)]
+    setup_outputs: Vec<String>,
+}
+
 #[derive(Deserialize, Serialize)]
 struct Finalization {
     request: FinalizeRequest,
@@ -377,6 +391,8 @@ impl Workspace {
             "artifacts",
             "temporary",
             "mcp",
+            PARKED,
+            TRUSTED,
             DISCARDED,
         ] {
             paths::create_private_root(&root.join(name))?;
@@ -467,6 +483,10 @@ impl Workspace {
         if fs::symlink_metadata(&checkout.path).is_ok() {
             paths::remove_owned_directory(&checkout.path)?;
         }
+        let trusted = self.inner.root.join(TRUSTED).join(&id);
+        if fs::symlink_metadata(&trusted).is_ok() {
+            paths::remove_owned_directory(&trusted)?;
+        }
         // A merge follow-up's checkout holds the merge, with conflict markers left in place.
         let (merged_tree, merge) = match &request.merge_commit {
             None => (None, None),
@@ -493,8 +513,24 @@ impl Workspace {
                 "submodules require an explicit workspace implementation"
             );
         }
+        // The Session's previous checkout on this host, if it holds exactly where this Attempt
+        // starts, is moved here instead of written again.
+        let reused = match &merge {
+            None => {
+                self.reuse_parked(
+                    &repository,
+                    &request,
+                    (&checkout, &start, &trusted),
+                    &entries,
+                    cancel,
+                )
+                .await
+            }
+            Some(_) => None,
+        };
         // Setup runs in this checkout on the base commit, so its outputs keep their paths.
         let held = match &request.setup {
+            _ if reused.is_some() => None,
             None => None,
             Some(command) => Some(
                 setup::run(
@@ -508,18 +544,24 @@ impl Workspace {
                 .await?,
             ),
         };
-        repository
-            .checkout(
-                &checkout.path,
-                (&self.inner.config.base_commit, &start),
-                merged_tree.as_deref(),
-                &entries,
-                cancel,
-            )
-            .await?;
+        if reused.is_none() {
+            repository
+                .checkout(
+                    &checkout.path,
+                    (&self.inner.config.base_commit, &start),
+                    merged_tree.as_deref(),
+                    &entries,
+                    cancel,
+                )
+                .await?;
+            // The objects SuperTag wrote, kept before the harness can write the checkout's `.git`,
+            // so a next Attempt reusing this checkout need not pack them again.
+            paths::create_private_root(&trusted)?;
+            git::copy_packs(&checkout.path.join(".git/objects/pack"), &trusted)?;
+        }
         preparation.merge = merge;
         preparation.setup_outputs = match held {
-            None => Vec::new(),
+            None => reused.unwrap_or_default(),
             Some(held) => {
                 let copied = held.restore(&checkout.path, cancel)?;
                 // Only what Git ignores at the Task's commit stays, so setup never changes a
@@ -1034,8 +1076,167 @@ impl Workspace {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
+        let trusted = self.inner.root.join(TRUSTED).join(&id);
+        if fs::symlink_metadata(&trusted).is_ok() {
+            paths::verify_directory(&trusted)?;
+            discard(&trusted, &discarded)?;
+        }
         transfer::discard_staging(&self.inner.root.join("records").join(id), &discarded)?;
         Ok(())
+    }
+
+    /// Ends a settled Attempt's checkout as [`Self::discard_checkout`] does, but keeps a completed
+    /// Attempt's checkout for its Session's next Attempt on this host, which then starts without
+    /// writing its files again. The checkout's `.git`, which the harness could write, is removed
+    /// here; the next Attempt rebuilds it from packs SuperTag kept. At most [`MAX_PARKED`]
+    /// Sessions keep one; the oldest is discarded.
+    pub fn park_checkout(&self, checkout: &Checkout) -> Result<()> {
+        if let Err(error) = self.park(checkout) {
+            tracing::debug!("checkout was not kept for its Session: {error:#}");
+        }
+        self.discard_checkout(checkout)
+    }
+
+    fn park(&self, checkout: &Checkout) -> Result<()> {
+        let _guard = self
+            .inner
+            .gate
+            .try_lock()
+            .context("workspace operation is in progress")?;
+        let id = identity(&checkout.task_id, &checkout.attempt_id);
+        ensure!(
+            checkout.path == self.inner.root.join("checkouts").join(&id)
+                && checkout.base_commit == self.inner.config.base_commit,
+            "checkout does not belong to this workspace state"
+        );
+        let record_dir = self.inner.root.join("records").join(&id);
+        let prepared: Preparation = read_json(&record_dir.join("prepare.json"))?
+            .context("Task Attempt has no workspace preparation")?;
+        ensure!(
+            prepared.ready && prepared.checkout == *checkout,
+            "checkout differs from the accepted preparation"
+        );
+        let finalized: Finalization = read_json(&record_dir.join("finalize.json"))?
+            .context("only a delivered checkout is kept")?;
+        ensure!(
+            finalized.delivery.outcome == Outcome::Completed
+                && finalized.delivery.start_commit == checkout.start_commit,
+            "only a completed Attempt's checkout is kept"
+        );
+        let trusted = self.inner.root.join(TRUSTED).join(&id);
+        paths::verify_directory(&trusted)?;
+        paths::verify_directory(&checkout.path)?;
+        let discarded = self.inner.root.join(DISCARDED);
+        let parked = self.inner.root.join(PARKED);
+        paths::verify_directory(&parked)?;
+        let slot = parked.join(sha256(checkout.session_id.as_bytes()));
+        if fs::symlink_metadata(&slot).is_ok() {
+            paths::verify_directory(&slot)?;
+            discard(&slot, &discarded)?;
+        }
+        let git = checkout.path.join(".git");
+        if fs::symlink_metadata(&git).is_ok() {
+            match fs::symlink_metadata(&git)?.is_dir() {
+                true => discard(&git, &discarded)?,
+                false => fs::remove_file(&git)?,
+            }
+        }
+        paths::create_private_root(&slot)?;
+        fs::rename(&checkout.path, slot.join("checkout"))?;
+        fs::rename(&trusted, slot.join("packs"))?;
+        atomic_json(
+            &slot.join("parked.json"),
+            &ParkedCheckout {
+                session_id: checkout.session_id.clone(),
+                head_commit: finalized.delivery.head_commit,
+                start_commit: checkout.start_commit.clone(),
+                setup: prepared.request.setup,
+                setup_outputs: prepared.setup_outputs,
+            },
+        )?;
+        File::open(&parked)?.sync_all()?;
+        // Keep the most recently parked; a slot a crash left without its record goes first.
+        let mut slots = Vec::new();
+        for entry in fs::read_dir(&parked)? {
+            let path = entry?.path();
+            let parked_at = fs::metadata(path.join("parked.json"))
+                .and_then(|metadata| metadata.modified())
+                .ok();
+            slots.push((parked_at, path));
+        }
+        slots.sort();
+        let excess = slots.len().saturating_sub(MAX_PARKED);
+        for (_, path) in slots.into_iter().take(excess) {
+            paths::verify_directory(&path)?;
+            discard(&path, &discarded)?;
+        }
+        Ok(())
+    }
+
+    /// Takes the Session's parked checkout into `checkout` when it holds exactly `start` and was
+    /// prepared with the same setup command. Returns its setup outputs, or `None` when there is
+    /// none to reuse or it failed verification; the caller then prepares a fresh checkout.
+    async fn reuse_parked(
+        &self,
+        repository: &git::Repository,
+        request: &PrepareRequest,
+        (checkout, start, trusted): (&Checkout, &str, &Path),
+        entries: &BTreeMap<String, git::TreeEntry>,
+        cancel: &CancellationToken,
+    ) -> Option<Vec<String>> {
+        let slot = self
+            .inner
+            .root
+            .join(PARKED)
+            .join(sha256(request.session_id.as_bytes()));
+        let taken = async {
+            let Some(parked) = read_json::<ParkedCheckout>(&slot.join("parked.json"))? else {
+                return Ok(None);
+            };
+            // Each reuse adds a pack; past a few dozen, Git reads slowly and a fresh checkout
+            // starts over with one.
+            if parked.session_id != request.session_id
+                || parked.head_commit != start
+                || parked.setup != request.setup
+                || fs::read_dir(slot.join("packs"))?.count() > MAX_REUSED_PACK_FILES
+            {
+                return Ok(None);
+            }
+            // Taking it is final: a crash from here leaves no record, and the slot is discarded.
+            fs::remove_file(slot.join("parked.json"))?;
+            paths::verify_directory(&slot.join("checkout"))?;
+            paths::verify_directory(&slot.join("packs"))?;
+            fs::rename(slot.join("checkout"), &checkout.path)?;
+            fs::rename(slot.join("packs"), trusted)?;
+            fs::remove_dir(&slot)?;
+            repository
+                .reuse_checkout(
+                    &checkout.path,
+                    (&self.inner.config.base_commit, start, &parked.start_commit),
+                    (trusted, &parked.setup_outputs),
+                    entries,
+                    cancel,
+                )
+                .await?;
+            // This Attempt's trusted packs: the parked ones and the one just written.
+            git::copy_packs(&checkout.path.join(".git/objects/pack"), trusted)?;
+            anyhow::Ok(Some(parked.setup_outputs))
+        }
+        .await;
+        match taken {
+            Ok(reused) => reused,
+            Err(error) => {
+                tracing::debug!("the Session's previous checkout was not reused: {error:#}");
+                let discarded = self.inner.root.join(DISCARDED);
+                for path in [&slot, &checkout.path, &trusted.to_owned()] {
+                    if fs::symlink_metadata(path).is_ok() {
+                        let _ =
+                            paths::verify_directory(path).and_then(|()| discard(path, &discarded));
+                    }
+                }
+                None
+            }
+        }
     }
 
     async fn repository(&self, cancel: &CancellationToken) -> Result<git::Repository> {
@@ -1093,6 +1294,14 @@ pub async fn complete_delivery_bundle(
 
 /// Where removed checkouts wait for `purge_discarded`, inside the workspace state directory.
 const DISCARDED: &str = "discarded";
+/// Each Session's last delivered checkout, kept for its next Attempt.
+const PARKED: &str = "parked";
+/// The packs SuperTag wrote into each prepared checkout's `.git`, where its harness cannot write.
+const TRUSTED: &str = "trusted";
+/// How many Sessions keep a checkout in one workspace state directory.
+const MAX_PARKED: usize = 8;
+/// Pack, index and reverse-index files a reused checkout may carry: about 30 reuses.
+const MAX_REUSED_PACK_FILES: usize = 96;
 
 /// Moves an owned directory into `discarded` with one rename, so the caller does not wait for
 /// its files to be deleted. A checkout of a large repository took seconds to delete, and the

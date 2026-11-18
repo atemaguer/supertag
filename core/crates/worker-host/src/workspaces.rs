@@ -736,7 +736,8 @@ impl Workspaces {
     }
 
     /// Moves the Attempt's checkout aside and returns the workspace state directory whose
-    /// `purge_discarded` deletes it, which the caller may run in the background.
+    /// `purge_discarded` deletes it, which the caller may run in the background. A completed
+    /// Attempt's checkout is kept instead for its Session's next Attempt on this host.
     pub fn discard(&self, prepared: &PreparedWorkspace) -> Result<PathBuf> {
         let identity = format!(
             "{:x}",
@@ -746,7 +747,7 @@ impl Workspaces {
             ))?)
         );
         let state = self.directory.join(identity);
-        Workspace::open_existing(&state)?.discard_checkout(&prepared.checkout)?;
+        Workspace::open_existing(&state)?.park_checkout(&prepared.checkout)?;
         Ok(state)
     }
 

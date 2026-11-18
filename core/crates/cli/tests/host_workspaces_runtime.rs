@@ -36,6 +36,8 @@ database_tests! {
     workspace_setup_prepares_checkouts_and_a_failure_fails_the_task;
     #[tokio::test]
     a_tag_following_a_branch_starts_each_session_at_its_current_commit;
+    #[tokio::test]
+    a_sessions_next_task_reuses_its_checkout_on_the_same_host;
 }
 
 struct Services {
@@ -367,6 +369,90 @@ async fn workspace_setup_prepares_checkouts_and_a_failure_fails_the_task(
     ensure!(
         !result.contains("Change:"),
         "the harness never ran: {result}"
+    );
+    Ok(())
+}
+
+/// A Session's later Tasks on the same host move its delivered checkout instead of writing it
+/// again: setup runs once, an unchanged file keeps its inode, and each delivery still continues the
+/// last one.
+async fn a_sessions_next_task_reuses_its_checkout_on_the_same_host(database: String) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let app = root.join("app");
+    std::fs::create_dir(&app)?;
+    git(&app, &["init", "--quiet"]).await?;
+    std::fs::write(app.join("workspace.txt"), "app source\n")?;
+    std::fs::write(app.join("keep.txt"), "unchanged\n")?;
+    std::fs::write(app.join(".gitignore"), "deps/\n")?;
+    git(&app, &["add", "-A"]).await?;
+    git(&app, &["commit", "--quiet", "-m", "Initial source"]).await?;
+    let base = git(&app, &["rev-parse", "HEAD"]).await?;
+    let services = Services::start(&database, root).await?;
+    let cli = |args: &[&str]| services.cli(args);
+    json(cli(&[
+        "tag",
+        "put",
+        "builder",
+        "--instructions",
+        "Edit the repository",
+        "--allow",
+        "files:write",
+        "--workspace-id",
+        "app",
+        "--workspace-base",
+        &base,
+    ]))
+    .await?;
+    let runs = root.join("setup-runs");
+    let install = format!("echo run >> '{}' && mkdir deps", runs.display());
+    let state = root.join("host-state");
+    // The checkout the host kept for the Session, and its unchanged file's inode.
+    let parked = || -> Result<u64> {
+        let slots = std::fs::read_dir(state.join("workspaces"))?
+            .flatten()
+            .map(|entry| entry.path().join("parked"))
+            .filter(|parked| parked.is_dir())
+            .flat_map(|parked| std::fs::read_dir(parked).into_iter().flatten().flatten())
+            .collect::<Vec<_>>();
+        ensure!(slots.len() == 1, "{slots:?}");
+        Ok(std::fs::metadata(slots[0].path().join("checkout/keep.txt"))?.ino())
+    };
+    let mut inodes = Vec::new();
+    let mut heads = Vec::new();
+    for prompt in ["first", "second", "third"] {
+        let task = field(
+            &json(cli(&[
+                "task",
+                "submit",
+                "--tag",
+                "builder",
+                "--session",
+                "reused",
+                prompt,
+            ]))
+            .await?,
+            "task_id",
+        )?
+        .to_owned();
+        let mut worker = services.worker(&state, Some(&services.host), &[("app", &app)]);
+        worker.arg(format!("--workspace-setup=app={install}"));
+        success(worker).await?;
+        let task = json(cli(&["get", "task", &task])).await?;
+        assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+        let delivery = &task["workspace_delivery"];
+        if let Some(previous) = heads.last() {
+            assert_eq!(&delivery["start_commit"], previous, "{task}");
+        }
+        heads.push(delivery["head_commit"].clone());
+        inodes.push(parked()?);
+    }
+    // Setup ran for the first checkout only; the later two reused it.
+    assert_eq!(std::fs::read_to_string(&runs)?.lines().count(), 1);
+    assert!(
+        inodes.windows(2).all(|pair| pair[0] == pair[1]),
+        "{inodes:?}"
     );
     Ok(())
 }

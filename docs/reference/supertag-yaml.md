@@ -300,8 +300,9 @@ takes no `path`, `land`, or `setup`: the resource's own `land` applies. `superta
 Control Plane defines no such Workspace yet; create it with `supertag workspace put`. The rest of
 this section is about local repositories.
 
-Each Task Attempt runs in its own checkout of the repository, pinned to an exact commit. `setup`
-runs in each new checkout before the harness starts, on the host and outside any harness sandbox,
+Each Task Attempt runs in its own checkout of the repository, pinned to an exact commit; a
+Session's next Attempt on the same host reuses its previous checkout when it starts from that
+Attempt's delivery. `setup` runs in each new checkout, not a reused one, before the harness starts, on the host and outside any harness sandbox,
 with a 10-minute limit. `land` says where a Session's changes go. The host writes each Session branch into the repository
 itself; `supertag up` runs `push` and `merge` only for a host of the file's own Control Plane.
 

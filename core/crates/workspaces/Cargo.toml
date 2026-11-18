@@ -15,5 +15,6 @@ supertag-protocol.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+tracing = "0.1"
 url = "2"
 uuid.workspace = true

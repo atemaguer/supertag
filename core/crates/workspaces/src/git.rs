@@ -79,6 +79,59 @@ fn initialize(git_dir: &Path, oid_length: usize, bare: bool) -> Result<()> {
     Ok(())
 }
 
+/// Removes every empty directory under `directory` (`prefix` relative to the checkout), except
+/// `.git` and `keep`, without following links. Returns whether `directory` itself is now empty.
+fn remove_empty_directories(directory: &Path, prefix: &str, keep: &[String]) -> Result<bool> {
+    let mut empty = true;
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_str().context("checkout path is not UTF-8")?;
+        let path = if prefix.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        if entry.file_type()?.is_dir()
+            && !(prefix.is_empty() && name == ".git")
+            && !keep.contains(&path)
+            && remove_empty_directories(&entry.path(), &path, keep)?
+        {
+            fs::remove_dir(entry.path())?;
+        } else {
+            empty = false;
+        }
+    }
+    Ok(empty)
+}
+
+/// Copies the pack and index files in `from` to `to`. Copies, not links: a checkout's packs are
+/// writable by its harness, and a trusted copy must not change with them. Copying clones the file
+/// where the file system can.
+pub(crate) fn copy_packs(from: &Path, to: &Path) -> Result<()> {
+    paths::verify_directory(from)?;
+    paths::verify_directory(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_str().context("pack file name is not UTF-8")?;
+        ensure!(
+            name.starts_with("pack-")
+                && [".pack", ".idx", ".rev"]
+                    .iter()
+                    .any(|suffix| name.ends_with(suffix))
+                && entry.file_type()?.is_file(),
+            "unexpected file among packs: {name}"
+        );
+        let target = to.join(name);
+        if fs::symlink_metadata(&target).is_ok() {
+            continue;
+        }
+        fs::copy(entry.path(), &target)?;
+    }
+    Ok(())
+}
+
 impl Repository {
     pub(crate) fn empty(root: &Path, oid_length: usize) -> Result<Self> {
         let git_dir = root.join("repository.git");
@@ -396,7 +449,7 @@ impl Repository {
             paths::validate_link(&entry.path, &target)?;
         }
         let checkout = self
-            .checkout_metadata_with(directory, base, start, index_tree, cancel)
+            .checkout_metadata_with(directory, base, start, index_tree, None, cancel)
             .await?;
         // Git writes the files on several workers.
         let workers = format!("checkout.workers={}", parallelism());
@@ -417,12 +470,94 @@ impl Repository {
             )
             .await?;
         // Verify bytes and modes after checkout rather than trusting config, name
-        // normalization, or a successful Git exit to imply the exact pinned tree. Reading and
-        // hashing every file runs on blocking threads, so the caller's lease renewal goes on.
-        let (directory, entries, cancel) = (directory.to_owned(), entries.clone(), cancel.clone());
+        // normalization, or a successful Git exit to imply the exact pinned tree.
+        self.verify_files(directory, entries, &[], cancel).await
+    }
+
+    /// Moves a Session's previous checkout, whose files are its delivered head `start`, to the
+    /// next Attempt without writing its files again. The previous `.git` must already be gone:
+    /// the harness could write it. The new one is built from `packs`, the objects SuperTag wrote
+    /// for the previous Attempt from `prior_start` (kept where the harness cannot write), and a
+    /// pack of only the commits since. Files Git does not track at `start` are removed, except
+    /// `keep` (setup outputs), and every tracked file is verified: an error means the caller takes
+    /// a fresh checkout.
+    pub(crate) async fn reuse_checkout(
+        &self,
+        directory: &Path,
+        (base, start, prior_start): (&str, &str, &str),
+        (packs, keep): (&Path, &[String]),
+        entries: &BTreeMap<String, TreeEntry>,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        validate_oid(prior_start)?;
+        self.assert_ancestor(prior_start, start, cancel).await?;
+        for entry in entries.values().filter(|entry| entry.mode == "120000") {
+            let target = self
+                .command(&["cat-file", "blob", &entry.oid], &[], &[], cancel)
+                .await?;
+            paths::validate_link(&entry.path, &target)?;
+        }
+        ensure!(
+            fs::symlink_metadata(directory.join(".git"))
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+            "a reused checkout still has the harness's Git metadata"
+        );
+        self.checkout_metadata_with(
+            directory,
+            base,
+            start,
+            None,
+            Some((packs, prior_start)),
+            cancel,
+        )
+        .await?;
+        let (root, tracked, kept, stop) = (
+            directory.to_owned(),
+            entries.clone(),
+            keep.to_vec(),
+            cancel.clone(),
+        );
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            for path in paths::scan_skipping(&root, &kept, &stop)?.into_keys() {
+                if !tracked.contains_key(&path) {
+                    crate::check_cancelled(&stop)?;
+                    fs::remove_file(root.join(&path))?;
+                }
+            }
+            // Empty directories go too, as a fresh checkout has none.
+            remove_empty_directories(&root, "", &kept)?;
+            // A file hard-linked elsewhere would let this Attempt write outside its checkout.
+            for path in tracked.keys() {
+                if let Some((_, _, links)) = paths::file_identity(&root, path)? {
+                    ensure!(links == 1, "a reused checkout file has other links: {path}");
+                }
+            }
+            Ok(())
+        })
+        .await
+        .context("reused checkout cleanup stopped")??;
+        self.verify_files(directory, entries, keep, cancel).await
+    }
+
+    /// Checks that the checkout's files, besides `skip`, are exactly `entries`, bytes and modes.
+    /// Reading and hashing every file runs on blocking threads, so the caller's lease renewal
+    /// goes on.
+    async fn verify_files(
+        &self,
+        directory: &Path,
+        entries: &BTreeMap<String, TreeEntry>,
+        skip: &[String],
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let (directory, entries, skip, cancel) = (
+            directory.to_owned(),
+            entries.clone(),
+            skip.to_vec(),
+            cancel.clone(),
+        );
         let oid_length = self.oid_length;
         tokio::task::spawn_blocking(move || {
-            let actual = paths::scan(&directory, &cancel)?;
+            let actual = paths::scan_skipping(&directory, &skip, &cancel)?;
             ensure!(
                 actual.len() == entries.len(),
                 "materialized checkout differs from its pinned tree"
@@ -473,18 +608,20 @@ impl Repository {
         start: &str,
         cancel: &CancellationToken,
     ) -> Result<Self> {
-        self.checkout_metadata_with(directory, base, start, None, cancel)
+        self.checkout_metadata_with(directory, base, start, None, None, cancel)
             .await
     }
 
     /// As [`Self::checkout_metadata`], with the index holding `index_tree` instead of `start`'s
-    /// tree, and that tree's objects copied too.
+    /// tree, and that tree's objects copied too. With `reuse`, the objects reachable from its
+    /// commit are copied from its trusted packs instead of packed again.
     async fn checkout_metadata_with(
         &self,
         directory: &Path,
         base: &str,
         start: &str,
         index_tree: Option<&str>,
+        reuse: Option<(&Path, &str)>,
         cancel: &CancellationToken,
     ) -> Result<Self> {
         validate_oid(base)?;
@@ -529,10 +666,16 @@ impl Repository {
         if !shallow.is_empty() {
             crate::write_synced(&checkout.git_dir.join("shallow"), shallow.as_bytes())?;
         }
+        let mut listed = list.clone();
+        if let Some((packs, prior_start)) = reuse {
+            validate_oid(prior_start)?;
+            copy_packs(packs, &checkout.git_dir.join("objects/pack"))?;
+            listed.push_str(&format!("^{prior_start}\n"));
+        }
         let mut objects = self
             .command(
                 &["rev-list", "--objects", "--no-walk", "--stdin"],
-                list.as_bytes(),
+                listed.as_bytes(),
                 &[],
                 cancel,
             )
@@ -556,12 +699,14 @@ impl Repository {
                 }
             }
         }
-        let pack = self
-            .command(&["pack-objects", "--stdout"], &objects, &[], cancel)
-            .await?;
-        checkout
-            .command(&["index-pack", "--stdin", "--strict"], &pack, &[], cancel)
-            .await?;
+        if !objects.is_empty() {
+            let pack = self
+                .command(&["pack-objects", "--stdout"], &objects, &[], cancel)
+                .await?;
+            checkout
+                .command(&["index-pack", "--stdin", "--strict"], &pack, &[], cancel)
+                .await?;
+        }
         checkout
             .command(&["update-ref", "HEAD", start], &[], &[], cancel)
             .await?;
