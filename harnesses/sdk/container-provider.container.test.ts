@@ -16,7 +16,7 @@ if (!available && process.env["SUPERTAG_TEST_REQUIRE_CONTAINER"] === "1")
   throw new Error(`${runtime} with ${IMAGE} is required for the container provider`);
 
 for (const check of sandboxProviderConformance(
-  async () => {
+  async ({ hostId }) => {
     const session = createContainerWorkspaceSession({
       // The provider refuses an image with setuid programs its user can run, as node's has.
       image: {
@@ -30,11 +30,19 @@ for (const check of sandboxProviderConformance(
     return {
       session,
       async lose() {
-        // Out of band, as a crashed or expired sandbox ends. Cases run one at a time in this
-        // file, so the only reference container is this case's.
+        // Out of band, as a crashed or expired sandbox ends: only this case's container, so
+        // another run on the same runtime keeps its own.
         const listed = spawnSync(
           runtime,
-          ["ps", "-aq", "--no-trunc", "--filter", "label=supertag.reference=1"],
+          [
+            "ps",
+            "-aq",
+            "--no-trunc",
+            "--filter",
+            "label=supertag.reference=1",
+            "--filter",
+            `label=supertag.hostId=${hostId}`,
+          ],
           { encoding: "utf8" },
         );
         for (const id of listed.stdout.split("\n").filter(Boolean)) {

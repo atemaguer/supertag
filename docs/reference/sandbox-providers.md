@@ -272,7 +272,8 @@ for (const check of sandboxProviderConformance(
   it(check.name, check.run, check.timeoutMs);
 ```
 
-Each case gets a fresh session and a scratch `directory`. The options:
+Each case gets a fresh session, a scratch `directory`, and a `hostId` of its own for the owner
+of every sandbox it allocates. The options:
 
 | Option | Means |
 | --- | --- |
@@ -281,7 +282,8 @@ Each case gets a fresh session and a scratch `directory`. The options:
 | `isolated` | The sandbox is a separate machine or container. Set it for a real provider. A test double that runs on the test machine leaves it unset, and the host-reach and seal cases then check the protocol only |
 
 A session may also offer `lose()`, which ends its sandbox out of band, to run the lost-sandbox
-case.
+case. Find the sandbox by the case's `hostId`, so another run against the same provider keeps its
+own.
 
 The cases check allocation and ownership, Stage's digest check and its refusal of links that leave
 the checkout, file tools within the checkout, Capture and its exclusions, Stop, rule 1 after Stop

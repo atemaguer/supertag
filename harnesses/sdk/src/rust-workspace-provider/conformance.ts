@@ -33,9 +33,12 @@ import { startRemoteWorkspaceTransport } from "./transport.js";
 /**
  * Makes a fresh provider session for one case. `directory` is the case's private scratch
  * directory, removed afterwards, for a test double's own state such as a prepared root.
+ * `hostId` is the owner's host ID, new for every case, so `lose` can find exactly the case's
+ * sandboxes even while another run uses the same provider.
  */
 export type ConformanceFactory = (context: {
   readonly directory: string;
+  readonly hostId: string;
 }) => Promise<ConformanceProvider>;
 
 /** One provider session under test, made fresh for every case. */
@@ -192,21 +195,22 @@ async function withHarness(
   await writeFile(join(host, "sentinel"), "host\n");
   const provider = join(directory, "provider");
   await mkdir(provider);
-  const under = await factory({ directory: provider });
+  const id = randomUUID();
+  const hostId = `conformance-host-${id.slice(0, 8)}`;
+  const under = await factory({ directory: provider, hostId });
   const server = await startRemoteWorkspaceTransport({
     ...createWorkspaceHandlers(under.session),
     token: TOKEN,
   });
   const sessions = new Http2SessionManager(server.endpoint);
   const transport = createGrpcTransport({ baseUrl: server.endpoint, sessionManager: sessions });
-  const id = randomUUID();
   try {
     await body({
       provider: createClient(RemoteWorkspaceProvider, transport),
       workspace: createClient(HarnessWorkspace, transport),
       under,
       owner: {
-        hostId: "conformance-host",
+        hostId,
         hostGeneration: 1n,
         taskId: `task-${id}`,
         attemptId: `attempt-${id}`,

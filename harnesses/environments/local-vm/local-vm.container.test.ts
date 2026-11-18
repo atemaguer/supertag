@@ -611,10 +611,10 @@ describe.skipIf(!answers)("local-vm provider", () => {
   );
 
   for (const check of sandboxProviderConformance(
-    async () => ({
+    async ({ hostId }) => ({
       session: createLocalVmWorkspaceSession(options),
       async lose() {
-        for (const id of ownedContainers("conformance-host")) spawnSync(runtime, ["rm", "-f", id]);
+        for (const id of ownedContainers(hostId)) spawnSync(runtime, ["rm", "-f", id]);
       },
     }),
     { commands: true, snapshots: true, isolated: true, timeoutMs: 120_000 },
