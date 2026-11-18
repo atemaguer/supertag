@@ -7,6 +7,7 @@ export {
   nativePlatform,
 } from "./container.js";
 export { type CopySandbox, createWorkspaceCopies } from "./copies.js";
+export { WorkspaceConfigurationError } from "./errors.js";
 export { createWorkspaceHandlers } from "./handlers.js";
 export {
   COMMAND_GRACE_MS,

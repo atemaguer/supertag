@@ -350,6 +350,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Modal Workspace whose `SUPERTAG_MODAL_WORKSPACE_APP` names no existing app, or that is missing
+  its configuration, now fails naming it, instead of "Remote workspace operation failed".
 - A client device that opens a Tag's network log is told that only operators can see it, in the
   desktop app and the terminal UI, instead of a raw refusal.
 - The terminal UI shows a Schedule's reply as soon as the turn finishes, and updates the Tag list

@@ -16,6 +16,7 @@ import {
   RemoteWorkspaceProvider,
   RemoteWorkspaceProviderBootstrapSchema,
 } from "../rust-harness/index.js";
+import { WorkspaceConfigurationError } from "./errors.js";
 
 const HOST = "127.0.0.1";
 const MAX_BOOTSTRAP_BYTES = 4096;
@@ -113,9 +114,11 @@ function limitsFor(input: TransportOptions["limits"]) {
 
 function safeError(error: unknown, context: HandlerContext): ConnectError {
   if (context.signal.aborted) return cancelled();
-  return error instanceof ConnectError
-    ? error
-    : new ConnectError("Remote workspace operation failed", Code.Internal);
+  if (error instanceof ConnectError) return error;
+  // The operator's fix, such as a provider resource to create, reaches the Worker Host.
+  if (error instanceof WorkspaceConfigurationError)
+    return new ConnectError(error.message, Code.FailedPrecondition);
+  return new ConnectError("Remote workspace operation failed", Code.Internal);
 }
 
 async function invoke<T>(context: HandlerContext, call: () => T | Promise<T>): Promise<T> {

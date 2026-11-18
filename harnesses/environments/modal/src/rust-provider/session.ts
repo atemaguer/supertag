@@ -4,8 +4,9 @@ import {
   MAX_TRANSFER,
   type SandboxEnvironment,
   type SandboxWorkspaceSession,
+  WorkspaceConfigurationError,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
-import { ModalClient } from "modal";
+import { ModalClient, NotFoundError } from "modal";
 import { FILE_HELPER } from "../files.js";
 import { ModalExecutionEnvironmentProvider, type ModalSandboxClient } from "../index.js";
 import { adaptModal, collect } from "../sandbox.js";
@@ -65,8 +66,20 @@ export interface ModalWorkspaceSandbox extends ModalSandboxClient {
 function required(name: string): string {
   const value = process.env[name];
   if (!value?.trim() || value.length > 2048 || /\p{Cc}/u.test(value))
-    throw new Error(`Missing Modal Workspace configuration ${name}`);
+    throw new WorkspaceConfigurationError(`Missing Modal Workspace configuration ${name}`);
   return value;
+}
+
+/**
+ * The operator names an existing app, so a typo never creates a stray one: a missing app is a
+ * configuration error the Worker Host reports as is. Any other error passes through.
+ */
+export function missingApp(error: unknown, appName: string, environment: string): unknown {
+  return error instanceof NotFoundError
+    ? new WorkspaceConfigurationError(
+        `Modal app ${appName} was not found in environment ${environment}: deploy or create it, or set SUPERTAG_MODAL_WORKSPACE_APP to an existing app`,
+      )
+    : error;
 }
 
 async function openNativeScope(): Promise<ModalWorkspaceScope> {
@@ -82,7 +95,11 @@ async function openNativeScope(): Promise<ModalWorkspaceScope> {
     maxRetries: 0,
   });
   try {
-    const app = await client.apps.fromName(appName, { createIfMissing: false });
+    const app = await client.apps
+      .fromName(appName, { createIfMissing: false })
+      .catch((error: unknown) => {
+        throw missingApp(error, appName, environment);
+      });
     return {
       inventory: modalSandboxInventory(client, { appId: app.appId, environment }),
       async create({ image: devcontainer, artifact, ...params }) {

@@ -15,6 +15,7 @@ import {
   readRemoteWorkspaceBootstrap,
   runRemoteWorkspaceTransport,
   startRemoteWorkspaceTransport,
+  WorkspaceConfigurationError,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { expect, it, vi } from "vitest";
 
@@ -197,6 +198,14 @@ it("keeps the Host channel alive after one cancelled call and redacts untyped pr
     await expect(calls.provider.allocate({}, auth)).rejects.toMatchObject({
       code: Code.Internal,
       rawMessage: "Remote workspace operation failed",
+    });
+    // A configuration the operator must fix is named, as a failed precondition.
+    implementation.provider.allocate = async () => {
+      throw new WorkspaceConfigurationError("Provider app missing was not found");
+    };
+    await expect(calls.provider.allocate({}, auth)).rejects.toMatchObject({
+      code: Code.FailedPrecondition,
+      rawMessage: "Provider app missing was not found",
     });
   } finally {
     calls.close();

@@ -214,7 +214,7 @@ has no built-in tool that could run on the host:
 | --- | --- |
 | `--local-vm` (`environment: local-vm`) | A container on this machine's Docker or Podman per Task Attempt |
 | `--e2b-workspace-provider` | An E2B sandbox per Task Attempt |
-| `--modal-workspace-provider` | A Modal sandbox per Task Attempt, with `SUPERTAG_MODAL_WORKSPACE_APP` and optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` |
+| `--modal-workspace-provider` | A Modal sandbox per Task Attempt, in the existing Modal app named by `SUPERTAG_MODAL_WORKSPACE_APP` (the host never creates one; a missing app fails the Task naming it), with optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` and the token in `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` |
 | `--workspace-provider` | Your own provider's sandbox per Task Attempt, given only the variables you name with `--workspace-provider-env`; see [Run your own provider](../reference/sandbox-providers.md#run-your-own-provider) |
 | `--shared-execution-endpoint` | A long-lived shared execution environment, served by `supertag-shared-execution`, that several Cursor Sessions share (Cursor only) |
 

@@ -3,9 +3,12 @@ import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { WorkspaceConfigurationError } from "@supertag/worker-sdk/internal/rust-workspace-provider";
+import { NotFoundError } from "modal";
 import { afterEach, expect, it, vi } from "vitest";
 import { collected, fakePrivileged, sandboxId, fixture as sharedFixture } from "./rust-fixture.ts";
 import { sandboxOwnershipMetadata, sandboxOwnershipName } from "./src/rust-provider/ownership.ts";
+import { missingApp } from "./src/rust-provider/session.ts";
 
 const owner = {
   hostId: "host-modal",
@@ -537,3 +540,22 @@ it("reports its sandbox lost only once Modal reports that sandbox finished", asy
   expect(await outcome("a.txt")).toMatchObject({ sandboxLost: true });
   expect(f.inventory.poll.mock.calls.length).toBe(polled);
 });
+
+it("names a missing Modal app instead of an unverified allocation", async () => {
+  const missing = missingApp(new NotFoundError("App 'live' not found"), "live", "main");
+  expect(missing).toBeInstanceOf(WorkspaceConfigurationError);
+  expect((missing as Error).message).toBe(
+    "Modal app live was not found in environment main: deploy or create it, or set SUPERTAG_MODAL_WORKSPACE_APP to an existing app",
+  );
+  const other = new Error("private provider detail");
+  expect(missingApp(other, "live", "main")).toBe(other);
+  // The session passes the configuration error through; any other failure stays opaque.
+  const f = await fixture();
+  f.create.mockImplementationOnce(async () => {
+    throw missing;
+  });
+  await expect(
+    f.session.allocate({ owner, timeoutMs: 60_000, allowedActions: [] }),
+  ).rejects.toThrow(/^Modal app live was not found in environment main/);
+  await f.session.close();
+}, 15_000);

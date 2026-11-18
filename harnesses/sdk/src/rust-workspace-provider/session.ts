@@ -10,6 +10,7 @@ import {
   readTransfer,
   type WorkspaceCopies,
 } from "./copies.js";
+import { WorkspaceConfigurationError } from "./errors.js";
 import { type InputFile, inputManifest, inputRoot } from "./input-files.js";
 import { createWorkspaceOperations, type WorkspaceOperation } from "./operations.js";
 import {
@@ -641,7 +642,9 @@ export function createSandboxWorkspaceSession(
         root = preparing || fromArtifact ? preparedRoot : `/tmp/supertag-workspace-${randomUUID()}`;
         phase = "allocated";
         return { sandboxId };
-      } catch {
+      } catch (error) {
+        // A configuration the operator must fix is named; anything else stays opaque.
+        if (error instanceof WorkspaceConfigurationError) throw error;
         throw workspaceError("allocation could not be verified");
       }
     },
