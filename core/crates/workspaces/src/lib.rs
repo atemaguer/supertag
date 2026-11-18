@@ -648,12 +648,15 @@ impl Workspace {
         let captured: Vec<String> = all_files
             .keys()
             .filter(|path| {
-                // Ignored files, and new files in the output directory, are not delivered.
+                // Ignored files, new files in the output directory, and untracked caches are not
+                // delivered.
+                let untracked = !base_tree.contains_key(*path);
                 let new_output = output_prefix
                     .as_ref()
                     .is_some_and(|prefix| path.starts_with(prefix))
-                    && !base_tree.contains_key(*path);
-                !ignored.contains(*path) && !new_output
+                    && untracked;
+                let cache = untracked && cache_path(path);
+                !(ignored.contains(*path) || new_output || cache)
             })
             .cloned()
             .collect();
@@ -1432,6 +1435,44 @@ fn check_cancelled(cancel: &CancellationToken) -> Result<()> {
     Ok(())
 }
 
+/// Directories tools fill with caches and dependencies that a repository almost never means to
+/// track. A delivery leaves out an untracked path under one of them, as if a `.gitignore` named
+/// it; a repository that tracks such a path keeps it.
+const CACHE_DIRECTORIES: [&str; 13] = [
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".next",
+    ".turbo",
+    ".gradle",
+    ".parcel-cache",
+    ".eggs",
+];
+/// Files tools write beside sources that a repository almost never means to track.
+const CACHE_FILES: [&str; 3] = [".DS_Store", "Thumbs.db", ".coverage"];
+/// Extensions of compiled or temporary files a repository almost never means to track.
+const CACHE_EXTENSIONS: [&str; 4] = ["pyc", "pyo", "swp", "egg-info"];
+
+/// Whether a delivery leaves this untracked path out as a well-known cache.
+fn cache_path(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    let (name, directories) = parts.split_last().expect("split yields one part");
+    directories.iter().any(|part| {
+        CACHE_DIRECTORIES.contains(part)
+            || part
+                .rsplit_once('.')
+                .is_some_and(|(_, extension)| CACHE_EXTENSIONS.contains(&extension))
+    }) || CACHE_FILES.contains(name)
+        || name.rsplit_once('.').is_some_and(|(stem, extension)| {
+            !stem.is_empty() && CACHE_EXTENSIONS.contains(&extension)
+        })
+}
+
 /// The commit message: the subject, the whole first line when the subject had to shorten it,
 /// and the requester as a `Co-authored-by` trailer.
 fn commit_message(summary: &str, author: Option<&CommitAuthor>) -> String {
@@ -1658,6 +1699,33 @@ mod tests {
         );
         assert_eq!(commit_subject("Fix a[0] and [b]"), "Fix a[0] and [b]");
         assert_eq!(commit_subject("[x](y"), "[x](y");
+    }
+
+    #[test]
+    fn well_known_caches_are_recognized_by_directory_file_and_extension() {
+        for cached in [
+            "__pycache__/calc.cpython-312.pyc",
+            "src/__pycache__/x.pyc",
+            "calc.pyc",
+            "web/node_modules/left-pad/index.js",
+            ".venv/bin/python",
+            ".pytest_cache/v/cache/lastfailed",
+            ".DS_Store",
+            "docs/.DS_Store",
+            "pkg.egg-info/PKG-INFO",
+        ] {
+            assert!(cache_path(cached), "{cached}");
+        }
+        for kept in [
+            "calc.py",
+            "src/pycache.md",
+            "node_modules.md",
+            "docs/venv-setup.md",
+            ".pyc",
+            "notes/.DS_Store.md",
+        ] {
+            assert!(!cache_path(kept), "{kept}");
+        }
     }
 
     #[test]

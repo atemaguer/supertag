@@ -1122,3 +1122,73 @@ async fn a_checkout_holds_only_the_session_history_since_its_base() {
         assert!(!held.success(), "{missing} is readable from the checkout");
     }
 }
+
+#[tokio::test]
+async fn a_delivery_leaves_out_untracked_caches_but_keeps_tracked_ones() {
+    let mut fixture = Fixture::new();
+    // The repository tracks one cache file on purpose; it stays delivered.
+    fs::create_dir(fixture.source.join("tracked_cache")).unwrap();
+    fs::create_dir(fixture.source.join("tracked_cache/__pycache__")).unwrap();
+    fs::write(
+        fixture.source.join("tracked_cache/__pycache__/kept.pyc"),
+        "v1",
+    )
+    .unwrap();
+    git(&fixture.source, &["add", "-A"]);
+    git(
+        &fixture.source,
+        &["commit", "--quiet", "-m", "Track a cache"],
+    );
+    fixture.base = git(&fixture.source, &["rev-parse", "HEAD"]);
+    let workspace = fixture.workspace();
+    let checkout = prepare(&workspace, "task-1", "attempt-1", None).await;
+    fs::write(
+        checkout.path.join("calc.py"),
+        "def add(a, b):\n    return a + b\n",
+    )
+    .unwrap();
+    fs::create_dir(checkout.path.join("__pycache__")).unwrap();
+    fs::write(
+        checkout.path.join("__pycache__/calc.cpython-312.pyc"),
+        "bytecode",
+    )
+    .unwrap();
+    fs::write(checkout.path.join("stray.pyc"), "bytecode").unwrap();
+    fs::create_dir_all(checkout.path.join(".pytest_cache/v")).unwrap();
+    fs::write(checkout.path.join(".pytest_cache/v/lastfailed"), "{}").unwrap();
+    fs::write(checkout.path.join(".DS_Store"), "finder").unwrap();
+    fs::write(
+        checkout.path.join("tracked_cache/__pycache__/kept.pyc"),
+        "v2",
+    )
+    .unwrap();
+    let delivery = workspace
+        .finalize(&checkout, complete(), &CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(delivery.committed);
+    // The delivery's patch names every file it changed.
+    let patch = String::from_utf8_lossy(&fs::read(&delivery.patch_path).unwrap()).into_owned();
+    let delivered: Vec<&str> = patch
+        .lines()
+        .filter_map(|line| line.strip_prefix("diff --git a/"))
+        .filter_map(|line| line.split(" b/").next())
+        .collect();
+    assert!(delivered.contains(&"calc.py"), "{delivered:?}");
+    assert!(
+        delivered.contains(&"tracked_cache/__pycache__/kept.pyc"),
+        "{delivered:?}"
+    );
+    for left_out in [
+        "__pycache__/calc.cpython-312.pyc",
+        "stray.pyc",
+        ".pytest_cache/v/lastfailed",
+        ".DS_Store",
+    ] {
+        assert!(
+            !delivered.contains(&left_out),
+            "{left_out} in {delivered:?}"
+        );
+    }
+    assert_eq!(delivery.changed_files, 2);
+}

@@ -134,7 +134,11 @@ fails: the app shows the error beside the reply, and the thread gets the error a
 own after the reply. A turn no person waits
 on, such as a Schedule's, shows its reply only when it finishes, since it may stay quiet.
 
-After the harness finishes, the host commits the Task's changes and verifies them. It records the
+After the harness finishes, the host commits the Task's changes and verifies them. The commit
+leaves out what the checkout's `.gitignore` files match, and untracked caches that a repository
+almost never means to track even without a `.gitignore`: directories such as `__pycache__`,
+`.pytest_cache`, `.venv`, and `node_modules`, files such as `.DS_Store` and `*.pyc`. A repository
+that tracks such a path keeps it delivered. It records the
 result as a Git bundle, with the ref `refs/heads/supertag-deliveries/DELIVERY_ID`, and a patch. The
 bundle carries only what the Task added to its start commit: the Session's previous delivery, or
 the Workspace base for its first Task. The host keeps the bundle and patch in its artifact storage
