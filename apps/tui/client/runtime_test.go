@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -585,5 +586,48 @@ func TestCloseReasonNamesWhyAWorkSessionClosed(t *testing.T) {
 	}
 	if got := CloseReason(&v2.WorkSession{CloseReason: v2.WorkSessionCloseReason_WORK_SESSION_CLOSE_REASON_IDLE}); got != "" {
 		t.Fatalf("an open work Session = %q", got)
+	}
+}
+
+// A reply shows as soon as the Tag's harness finishes, while the turn still delivers its
+// changes; the turn stays followed, and a failure to deliver them adds the error beside the
+// reply instead of replacing it.
+func TestAReplyShowsAtHarnessDoneAndAFailedDeliveryAddsItsError(t *testing.T) {
+	events := []*v2.TaskEvent{{Sequence: 1, Kind: v2.TaskEventKind_TASK_EVENT_KIND_MESSAGE, Text: "Fixed it."}}
+	running := runtimeMessage(&v2.ConversationMessage{
+		Task:   &v2.Task{TaskId: "turn", TagId: "lead", Prompt: "Fix it", State: v2.TaskState_TASK_STATE_RUNNING, Result: proto.String("Fixed it.")},
+		Events: events})
+	if running.GetStatus() != views.ReplyStatus_REPLY_STATUS_REPLIED || !running.GetFinalizing() ||
+		running.GetReply().GetText() != "Fixed it." {
+		t.Fatalf("running turn with its reply = %+v", running)
+	}
+	working := runtimeMessage(&v2.ConversationMessage{
+		Task: &v2.Task{TaskId: "busy", TagId: "lead", Prompt: "Fix it", State: v2.TaskState_TASK_STATE_RUNNING}})
+	if working.GetStatus() == views.ReplyStatus_REPLY_STATUS_REPLIED || working.GetFinalizing() {
+		t.Fatalf("running turn without a reply = %+v", working)
+	}
+
+	shown := newShown("lead")
+	shown.finalizing = running.GetFinalizing()
+	got := shown.reply(running.GetReply())
+	if len(got) != 1 || got[0].Kind != EventReply || shown.settled() {
+		t.Fatalf("early reply events %v, settled %v", got, shown.settled())
+	}
+	failed := runtimeReply(&v2.Task{State: v2.TaskState_TASK_STATE_FAILED, Result: proto.String("Workspace delivery could not be committed")})
+	shown.finalizing = false
+	got = shown.reply(failed)
+	if len(got) != 1 || got[0].Kind != EventTurnError || !strings.Contains(got[0].Text, "could not be committed") {
+		t.Fatalf("failure after the reply = %v", got)
+	}
+	if again := shown.reply(failed); len(again) != 0 || !shown.settled() {
+		t.Fatalf("failure shown twice: %v", again)
+	}
+
+	succeeded := newShown("lead")
+	succeeded.finalizing = true
+	succeeded.reply(running.GetReply())
+	succeeded.finalizing = false
+	if more := succeeded.reply(runtimeReply(&v2.Task{State: v2.TaskState_TASK_STATE_SUCCEEDED, Result: proto.String("Fixed it.")})); len(more) != 0 || !succeeded.settled() {
+		t.Fatalf("a delivered turn repeated its reply: %v", more)
 	}
 }

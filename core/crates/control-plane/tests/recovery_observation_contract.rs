@@ -302,6 +302,7 @@ async fn milestones(url: String) {
     let reach = |milestone: AttemptMilestone| ReportAttemptMilestoneRequest {
         attempt: Some(attempt.clone()),
         milestone: milestone as i32,
+        ..Default::default()
     };
     assert!(
         store

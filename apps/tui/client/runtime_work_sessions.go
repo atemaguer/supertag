@@ -149,7 +149,10 @@ func (c *runtimeClient) projectWork(ctx context.Context, work *v2.WorkSession, r
 	if report.GetTaskId() != work.GetReportTaskId() || report.GetTagId() != work.GetParentTagId() || report.GetSessionId() != work.GetParentSessionId() {
 		return nil, workSessionDataLoss("Gateway returned a different Work Session report Task.")
 	}
-	out.Report = runtimeReply(report)
+	// A report counts once its turn finished: only a person's turn shows its reply earlier.
+	if report.GetState() != v2.TaskState_TASK_STATE_RUNNING {
+		out.Report = runtimeReply(report)
+	}
 	if out.Report != nil {
 		out.ReportStatus = views.ReplyStatus_REPLY_STATUS_REPLIED
 		if report.GetState() == v2.TaskState_TASK_STATE_FAILED {

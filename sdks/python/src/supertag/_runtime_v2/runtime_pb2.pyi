@@ -1353,12 +1353,18 @@ class ReadMailboxRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
 
 class ReportAttemptMilestoneRequest(_message.Message):
-    __slots__ = ("attempt", "milestone")
+    __slots__ = ("attempt", "milestone", "reply", "quiet", "objective_signal")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     MILESTONE_FIELD_NUMBER: _ClassVar[int]
+    REPLY_FIELD_NUMBER: _ClassVar[int]
+    QUIET_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_SIGNAL_FIELD_NUMBER: _ClassVar[int]
     attempt: InspectAttemptRequest
     milestone: AttemptMilestone
-    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., milestone: _Optional[_Union[AttemptMilestone, str]] = ...) -> None: ...
+    reply: str
+    quiet: bool
+    objective_signal: ObjectiveSignal
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., milestone: _Optional[_Union[AttemptMilestone, str]] = ..., reply: _Optional[str] = ..., quiet: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ...) -> None: ...
 
 class ReportAttemptMilestoneResponse(_message.Message):
     __slots__ = ()

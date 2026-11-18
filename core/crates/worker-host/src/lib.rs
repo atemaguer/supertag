@@ -2575,12 +2575,24 @@ async fn run_assignment(
         replacements
     };
     let (outcome, sandbox, mut replacements) = tokio::join!(run, background_sandbox, replacer);
-    report_milestone(
-        host,
-        &attempt.inspect(),
-        token,
-        supertag_protocol::v2::AttemptMilestone::HarnessFinished,
-    );
+    // A turn that succeeded and waits for no approval shows its reply now; capture, delivery and
+    // the checkpoint follow. A sandbox that failed while the harness ran fails the turn instead.
+    let reply = outcome
+        .as_ref()
+        .ok()
+        .filter(|outcome| {
+            outcome.succeeded
+                && outcome.waiting_approval_ids.is_empty()
+                && !matches!(&sandbox, Some((Err(_), true)))
+        })
+        .map(|outcome| {
+            (
+                outcome.result.clone(),
+                outcome.quiet,
+                outcome.objective_signal,
+            )
+        });
+    report_harness_finished(host, &attempt.inspect(), token, reply);
     let outcome = match sandbox {
         None => outcome,
         Some((Ok((prepared, _, _, _)), _)) => {
@@ -3135,13 +3147,48 @@ pub(crate) fn report_milestone(
     token: &str,
     milestone: supertag_protocol::v2::AttemptMilestone,
 ) {
-    let Ok(report) = request(
+    send_milestone(
+        host,
+        token,
         supertag_protocol::v2::ReportAttemptMilestoneRequest {
             attempt: Some(attempt.clone()),
             milestone: milestone as i32,
+            ..Default::default()
         },
+    );
+}
+
+/// The harness finished the turn, with its reply, quiet flag and Objective signal when it
+/// succeeded and waits for no approval.
+fn report_harness_finished(
+    host: &RegisteredHost,
+    attempt: &supertag_protocol::v2::InspectAttemptRequest,
+    token: &str,
+    reply: Option<(String, bool, i32)>,
+) {
+    let (reply, quiet, objective_signal) = match reply {
+        Some((text, quiet, signal)) => (Some(text), quiet, signal),
+        None => (None, false, 0),
+    };
+    send_milestone(
+        host,
         token,
-    ) else {
+        supertag_protocol::v2::ReportAttemptMilestoneRequest {
+            attempt: Some(attempt.clone()),
+            milestone: supertag_protocol::v2::AttemptMilestone::HarnessFinished as i32,
+            reply,
+            quiet,
+            objective_signal,
+        },
+    );
+}
+
+fn send_milestone(
+    host: &RegisteredHost,
+    token: &str,
+    input: supertag_protocol::v2::ReportAttemptMilestoneRequest,
+) {
+    let Ok(report) = request(input, token) else {
         return;
     };
     let mut host = host.clone();

@@ -268,3 +268,41 @@ it("says why a report's work Session closed", () => {
   );
   expect(html).toContain("Work Session report · closed: idle");
 });
+
+it("shows a reply when the harness finishes, with no activity line, and keeps it beside a later failure", () => {
+  const events = [
+    { sequence: 1, kind: "message" as const, text: "Fixed the flaky test." },
+    { sequence: 2, kind: "activity" as const, text: "Delivering changes" },
+  ];
+  const ready = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: {
+        order: 1,
+        task: { ...task, prompt: "Fix it", state: "running", result: "Fixed the flaky test." },
+      },
+      events,
+      onActivity: () => {},
+    }),
+  );
+  // The reply shows once, the Tag is no longer typing, and nothing says it is delivering.
+  expect(visible(ready).split("Fixed the flaky test.").length - 1).toBe(1);
+  expect(ready).not.toContain("working-dots");
+  expect(visible(ready)).not.toContain("Delivering changes");
+  const failed = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: {
+        order: 1,
+        task: {
+          ...task,
+          prompt: "Fix it",
+          state: "failed",
+          result: "Workspace delivery could not be committed",
+        },
+      },
+      events,
+      onActivity: () => {},
+    }),
+  );
+  expect(visible(failed)).toContain("Fixed the flaky test.");
+  expect(visible(failed)).toContain("Workspace delivery could not be committed");
+});

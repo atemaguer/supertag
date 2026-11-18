@@ -853,6 +853,13 @@ enum AttemptMilestone {
 message ReportAttemptMilestoneRequest {
   InspectAttemptRequest attempt = 1;
   AttemptMilestone milestone = 2;
+  // With ATTEMPT_MILESTONE_HARNESS_FINISHED, when the harness finished the turn successfully and
+  // it waits for no approval: the turn's reply, as FinishTask will report it, with its `quiet`
+  // and `objective_signal`. The Control Plane shows the reply at once as the running Task's
+  // result while the Worker Host finalizes, and keeps the quiet decision it makes now.
+  optional string reply = 3;
+  bool quiet = 4;
+  ObjectiveSignal objective_signal = 5;
 }
 
 message ReportAttemptMilestoneResponse {}

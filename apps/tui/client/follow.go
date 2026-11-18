@@ -81,7 +81,11 @@ type Shown struct {
 	joined       bool
 	joinedOnPage string
 	replied      bool
-	started      bool
+	// finalizing: the reply showed while the turn still delivers its changes, so a failure to
+	// deliver them can still follow it.
+	finalizing bool
+	failed     bool
+	started    bool
 	// after is the sequence of the turn's latest event shown.
 	after   uint64
 	waiting map[string]bool
@@ -131,11 +135,20 @@ func (s *Shown) wait(reason string) []FollowEvent {
 }
 
 func (s *Shown) reply(reply *views.Reply) []FollowEvent {
-	if s.replied || reply == nil {
+	if reply == nil {
+		return nil
+	}
+	failure := reply.GetPresentation() == views.ReplyPresentation_REPLY_PRESENTATION_ERROR
+	if s.replied {
+		// A turn that failed to deliver its changes after its reply showed keeps the reply and
+		// adds the error.
+		if failure && !s.failed {
+			return s.turnError(reply.GetText())
+		}
 		return nil
 	}
 	s.replied = true
-	if reply.GetPresentation() == views.ReplyPresentation_REPLY_PRESENTATION_ERROR {
+	if failure {
 		return s.turnError(reply.GetText())
 	}
 	return []FollowEvent{{Kind: EventReply, Reply: reply}}
@@ -143,6 +156,7 @@ func (s *Shown) reply(reply *views.Reply) []FollowEvent {
 
 func (s *Shown) turnError(text string) []FollowEvent {
 	s.replied = true
+	s.failed = true
 	if !s.once("turn-error") {
 		return nil
 	}
@@ -221,7 +235,7 @@ func (s *Shown) message(message *views.Message) []FollowEvent {
 // Session reported and does not wait on an approval decision only, since deciding it continues
 // the work Session.
 func (s *Shown) settled() bool {
-	if !s.replied {
+	if !s.replied || s.finalizing {
 		return false
 	}
 	for _, session := range s.sessions {
@@ -298,6 +312,7 @@ func History(tag string, page []*views.Message, displayedTaskIDs ...string) []Hi
 			}
 			shown.after = message.GetLastSequence()
 			if message.GetStatus() == views.ReplyStatus_REPLY_STATUS_REPLIED {
+				shown.finalizing = message.GetFinalizing()
 				item.Events = append(item.Events, shown.reply(message.GetReply())...)
 			} else {
 				item.Events = append(item.Events, shown.wait(message.GetWaitingReason())...)

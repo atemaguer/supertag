@@ -229,7 +229,9 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 		// starter is on an older history page. It is not another operator turn.
 		state.shown.replied = true
 	}
-	if !state.shown.replied {
+	// A reply that showed while the turn still delivers its changes keeps the turn followed, so
+	// a failure to deliver them still shows.
+	if !state.shown.replied || state.shown.finalizing {
 		switch task.GetState() {
 		case v2.TaskState_TASK_STATE_QUEUED, v2.TaskState_TASK_STATE_UNSPECIFIED:
 			state.running = false
@@ -254,6 +256,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 		if reply := runtimeReply(task); reply != nil {
 			state.running = false
 			state.text = ""
+			state.shown.finalizing = task.GetState() == v2.TaskState_TASK_STATE_RUNNING
 			emit(state.shown.reply(reply)...)
 		} else if state.stream != nil {
 			// The message the Tag is writing shows as it is written, after the messages it

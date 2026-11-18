@@ -1176,7 +1176,7 @@ impl Store {
         let attempt = Uuid::new_v4().to_string();
         let lease = Uuid::new_v4().to_string();
         let attempt_execution = attempt_execution.encode_to_vec();
-        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL, failure_detail = NULL, waiting_holder = NULL WHERE task_id = $8")
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7, applied_execution_limits = NULL, cleanup_failure = NULL, failure_detail = NULL, waiting_holder = NULL, result = NULL WHERE task_id = $8")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
         // Later messages from the person join this run, so one reply answers them all.
@@ -1299,6 +1299,8 @@ impl Store {
         host: &HostAuthority,
         input: &ReportAttemptMilestoneRequest,
     ) -> Result<()> {
+        // A reply shown now reaches the turn's followers at once.
+        let _wake = self.wake_follows();
         let column = match AttemptMilestone::try_from(input.milestone) {
             Ok(AttemptMilestone::WorkspaceReady) => "workspace_ready_at_ms",
             Ok(AttemptMilestone::AdapterAttached) => "attached_at_ms",
@@ -1320,14 +1322,59 @@ impl Store {
             &attempt.lease_token,
         )
         .await?;
-        sqlx::query(&format!(
+        let stamped = sqlx::query(&format!(
             "UPDATE supertag_v2_claims SET {column} = $1 WHERE attempt_id = $2 AND {column} IS NULL"
         ))
         .bind(self.execution_now_ms())
         .bind(&attempt.attempt_id)
         .execute(&mut *transaction)
-        .await?;
+        .await?
+        .rows_affected()
+            > 0;
+        if column == "harness_finished_at_ms" {
+            if let Some(reply) = input.reply.as_deref().filter(|_| stamped) {
+                self.reply_ready_in(&mut transaction, attempt, reply)
+                    .await?;
+            }
+        } else if input.reply.is_some() {
+            return Err(invalid("only a finished harness reports its reply"));
+        }
         transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Shows a person's turn's reply as soon as its harness finished: it becomes the running
+    /// Task's result, which clients show as the reply, while the Worker Host captures and
+    /// delivers the Workspace. A turn no person waits on, which may stay quiet or be held, shows
+    /// its reply only when it finishes.
+    async fn reply_ready_in(
+        &self,
+        transaction: &mut Transaction<'_, Any>,
+        attempt: &supertag_protocol::v2::InspectAttemptRequest,
+        reply: &str,
+    ) -> Result<()> {
+        text("result", reply, 262_144)?;
+        let row = sqlx::query(
+            "SELECT * FROM supertag_v2_tasks WHERE task_id=$1 AND attempt_id=$2 AND state=$3",
+        )
+        .bind(&attempt.task_id)
+        .bind(&attempt.attempt_id)
+        .bind(TaskState::Running as i64)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        let Some(row) = row else {
+            return Ok(());
+        };
+        if !crate::attention::person_turn_in(transaction, &task_row(&row)?).await? {
+            return Ok(());
+        }
+        sqlx::query("UPDATE supertag_v2_tasks SET result=$1 WHERE task_id=$2 AND attempt_id=$3 AND state=$4")
+            .bind(reply)
+            .bind(&attempt.task_id)
+            .bind(&attempt.attempt_id)
+            .bind(TaskState::Running as i64)
+            .execute(&mut **transaction)
+            .await?;
         Ok(())
     }
 

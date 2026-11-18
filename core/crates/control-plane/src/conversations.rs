@@ -305,8 +305,9 @@ impl Store {
         // nor work the conversation shows.
         let rows = sqlx::query(&format!(
             "SELECT c.tag_id,MAX(h.accepted_order) AS latest_order,
-                    SUM(CASE WHEN t.state IN ({UNFINISHED}) THEN 1 ELSE 0 END) AS working,
-                    SUM(CASE WHEN t.state IN ({FINISHED}) AND h.accepted_order>COALESCE(r.read_order,0)
+                    SUM(CASE WHEN t.state IN ({UNFINISHED}) AND NOT (t.state=2 AND t.result IS NOT NULL) THEN 1 ELSE 0 END) AS working,
+                    SUM(CASE WHEN (t.state IN ({FINISHED}) OR (t.state=2 AND t.result IS NOT NULL))
+                             AND h.accepted_order>COALESCE(r.read_order,0)
                         THEN 1 ELSE 0 END) AS unread,
                     COALESCE(MAX(r.read_order),0) AS read_order
              FROM supertag_v2_conversations c
@@ -354,7 +355,11 @@ impl Store {
                 .task
                 .result
                 .as_deref()
-                .filter(|result| !result.is_empty() && finished(row.task.state()));
+                // A running turn has a result only once its reply showed at harness done.
+                .filter(|result| {
+                    !result.is_empty()
+                        && (finished(row.task.state()) || row.task.state() == TaskState::Running)
+                });
             let (preview, from_tag) = match reply {
                 Some(reply) => (reply, true),
                 None if entry.report_id.is_some() || fired.contains_key(&entry.task_id) => {

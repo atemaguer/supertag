@@ -312,6 +312,9 @@ type Message struct {
 	// The Tag's final reply: the turn's result, or the error that ended it.
 	// Set when `status` is `REPLY_STATUS_REPLIED`.
 	Reply *Reply
+	// The reply showed when the Tag's harness finished, and the turn is still delivering its
+	// changes: a failure to deliver them still follows, beside the reply.
+	Finalizing bool
 	// The running turn this message was delivered into, when it joined one
 	// instead of starting its own. That turn's reply is `reply`. It goes back
 	// to empty when that turn ends without reading the message, which then
@@ -450,6 +453,13 @@ func (x *Message) GetScheduleId() string {
 		return x.ScheduleId
 	}
 	return ""
+}
+
+func (x *Message) GetFinalizing() bool {
+	if x != nil {
+		return x.Finalizing
+	}
+	return false
 }
 
 func (x *Message) GetJoinedTaskId() string {

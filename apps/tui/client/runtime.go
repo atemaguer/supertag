@@ -359,6 +359,7 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 	if out.Reply != nil {
 		out.Status = views.ReplyStatus_REPLY_STATUS_REPLIED
 		out.Activity = ""
+		out.Finalizing = task.GetState() == v2.TaskState_TASK_STATE_RUNNING
 	} else if task.GetState() == v2.TaskState_TASK_STATE_UNCERTAIN {
 		out.WaitingReason = "Execution is uncertain and needs operator recovery."
 	}
@@ -388,6 +389,13 @@ func runtimeReply(task *v2.Task) *views.Reply {
 	text := task.GetResult()
 	switch task.GetState() {
 	case v2.TaskState_TASK_STATE_SUCCEEDED:
+		return &views.Reply{Presentation: views.ReplyPresentation_REPLY_PRESENTATION_FINAL_RESULT, Text: text}
+	case v2.TaskState_TASK_STATE_RUNNING:
+		// The reply shows as soon as the harness finishes, while the Worker Host still delivers
+		// the turn's changes.
+		if text == "" {
+			return nil
+		}
 		return &views.Reply{Presentation: views.ReplyPresentation_REPLY_PRESENTATION_FINAL_RESULT, Text: text}
 	case v2.TaskState_TASK_STATE_FAILED:
 		if text == "" {

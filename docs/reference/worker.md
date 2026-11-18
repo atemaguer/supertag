@@ -127,6 +127,11 @@ lockfiles, are always verified against the Task Attempt's start commit.
 
 ### Delivery
 
+When the harness finishes a turn a person is waiting on, the host reports its reply at once, and
+the desktop app and the terminal UI show it while the host delivers the turn's changes. If
+delivering them fails, the turn fails and shows the error beside the reply. A turn no person waits
+on, such as a Schedule's, shows its reply only when it finishes, since it may stay quiet.
+
 After the harness finishes, the host commits the Task's changes and verifies them. It records the
 result as a Git bundle, with the ref `refs/heads/supertag-deliveries/DELIVERY_ID`, and a patch. The
 bundle carries only what the Task added to its start commit: the Session's previous delivery, or
