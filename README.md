@@ -19,10 +19,10 @@ Open source and self-hosted, on the coding agents you already use.
 
 </div>
 
-A Tag is an AI actor with its own identity, permissions, and memory. Give it a job: the
-responsibilities it keeps up and the outcomes it delivers. It keeps the work going between
-sessions, acts without being asked, and works with your teammates' Tags. Your coding agents,
-Claude Code, Codex, Cursor, or OpenCode, still write the code.
+A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work
+history. Its job is made of those responsibilities and the outcomes it delivers. It keeps the work
+going between sessions, acts without being asked, and works with your teammates' Tags. Your coding
+agents, Claude Code, Codex, Cursor, or OpenCode, still write the code.
 
 ## Give them jobs, not tasks
 
