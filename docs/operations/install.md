@@ -69,17 +69,29 @@ reads the same `SUPERTAG_INSTALL_ROOT` and `SUPERTAG_BIN_DIR`.
 
 ## Install the desktop app
 
-On an Apple silicon Mac, the desktop app gives your conversations with Tags a window of their own.
-Intel Macs and Linux have no desktop app; use the terminal UI there.
+The desktop app gives your conversations with Tags a window of their own, on an Apple silicon Mac
+or on Linux (amd64 or arm64). Intel Macs have no desktop app; use the terminal UI there. Get the
+files from the [latest release](https://github.com/atemaguer/supertag/releases/latest).
 
-1. Download `SuperTag-VERSION-darwin-arm64.dmg` from the
-   [latest release](https://github.com/atemaguer/supertag/releases/latest), open it, and drag
-   **SuperTag** to **Applications**.
+On a Mac:
+
+1. Download `SuperTag-VERSION-darwin-arm64.dmg`, open it, and drag **SuperTag** to
+   **Applications**.
 2. Open SuperTag from Applications.
 
-The app carries its own `supertag` CLI, terminal UI, and Node.js bridges, so it needs no separate
-install. Claude Code still needs [Node.js](requirements.md) on your Mac; Codex needs nothing more. To
-also use `supertag` in a terminal, install it with the install script above.
+The Mac app carries its own `supertag` CLI, terminal UI, and Node.js bridges, so it needs no
+separate install. Claude Code still needs [Node.js](requirements.md) on your Mac; Codex needs
+nothing more. To also use `supertag` in a terminal, install it with the install script above.
+
+On Linux:
+
+1. Install the `supertag` command with the install script above. The Linux app uses it.
+2. Install `SuperTag-VERSION-linux-ARCH.deb` with `sudo apt install ./SuperTag-VERSION-linux-ARCH.deb`,
+   or make `SuperTag-VERSION-linux-ARCH.AppImage` executable (`chmod +x`) and run it.
+3. Open SuperTag from your applications menu, or run the AppImage.
+
+The Debian package needs WebKitGTK 4.1 and GTK 3, which `apt` installs with it; the AppImage
+carries them.
 
 On first launch the app's setup screen asks for your project folder and coding agent, then sets
 SuperTag up and opens your conversation with `lead`. On later launches it connects to your local

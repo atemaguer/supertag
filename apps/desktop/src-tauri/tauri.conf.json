@@ -36,6 +36,11 @@
     "active": true,
     "targets": ["app"],
     "icon": ["icons/1024x1024.png", "icons/icon.icns"],
+    "publisher": "SuperTag",
+    "category": "DeveloperTool",
+    "shortDescription": "Talk to your SuperTag Tags",
+    "longDescription": "The SuperTag desktop app: conversations with your Tags, which run on your coding agents.",
+    "homepage": "https://github.com/atemaguer/supertag",
     "macOS": { "minimumSystemVersion": "11.0" }
   }
 }

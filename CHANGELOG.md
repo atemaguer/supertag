@@ -13,6 +13,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Releases include the desktop app for Linux, as an AppImage and a Debian package for amd64 and
+  arm64 (`SuperTag-VERSION-linux-ARCH.AppImage`, `.deb`). It uses the `supertag` CLI from the
+  install script.
 - Releases include the desktop app for Macs with Apple silicon as a signed and notarized disk
   image, `SuperTag-VERSION-darwin-arm64.dmg`, beside the CLI archives. The app carries its own
   `supertag` CLI, terminal UI, and Node.js bridges, so it needs no separate install, and sets
