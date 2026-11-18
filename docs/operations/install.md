@@ -126,8 +126,8 @@ It sees that the services on this machine run another build and restarts them wi
 
 ```text
 SuperTag 0.3.0 runs in /Users/you/.supertag, a different build than this CLI, so it restarts with this one.
-Stopped SuperTag 0.3.0 services (protocol 2) without draining through the Control Plane, because this CLI speaks protocol 3. Their Worker Hosts stopped gracefully; Task Attempts they were running follow the recovery rules.
-Restarted SuperTag: 0.3.0 (protocol 2) → 0.3.1 (protocol 3).
+Stopped SuperTag 0.3.0 services (protocol 2) without draining through the Control Plane, because this CLI speaks protocol 5. Their Worker Hosts stopped gracefully; Task Attempts they were running follow the recovery rules.
+Restarted SuperTag: 0.3.0 (protocol 2) → 0.3.1 (protocol 5).
 Started SuperTag in the background (process 4242).
 Migrated the database schema from version 82 to 83.
 ```
@@ -153,7 +153,7 @@ hosted deployment, follow [Upgrade a deployment](control-plane.md#upgrade-a-depl
 
 Your CLI, the terminal UI, the desktop app, and Worker Hosts negotiate a protocol version with
 the Control Plane on every connection, and refuse a Control Plane that speaks none of theirs. The
-error names both releases and which to upgrade, such as `This CLI speaks SuperTag protocol 3, but
+error names both releases and which to upgrade, such as `This CLI speaks SuperTag protocol 5, but
 the Control Plane at http://127.0.0.1:3434 runs SuperTag 0.3.0 (protocol 2). Upgrade the Control
 Plane.`
 Check what is running:

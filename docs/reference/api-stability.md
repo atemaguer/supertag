@@ -75,7 +75,7 @@ Every client and service negotiates a protocol version when it connects: the CLI
 UI, the desktop app, applications, Worker Hosts, and Gateways. A pair that shares a version works;
 a pair that shares none is refused before any other call, with both sides' releases and protocol
 versions in the error and which one to upgrade. Before 1.0, a release that changes the protocol
-speaks only its new version: SuperTag 0.3.0 speaks protocol 2, and later releases speak protocol 3. `supertag version` prints this CLI's version and the running local services' versions.
+speaks only its new version: SuperTag 0.3.0 speaks protocol 2, and 0.3.1 speaks protocol 5. `supertag version` prints this CLI's version and the running local services' versions.
 Release the CLI and the Control Plane together, and upgrade them together.
 
 ## Contract changes

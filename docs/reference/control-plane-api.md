@@ -30,20 +30,20 @@ send the selected version in the `x-supertag-protocol` metadata header on every 
 call without it, or with a version the Control Plane does not speak, fails with
 `FAILED_PRECONDITION`. Only negotiation and the standard gRPC health service are exempt.
 
-SuperTag 0.3.0 speaks protocol 2, and later releases speak protocol 3. Before 1.0, each release
+SuperTag 0.3.0 speaks protocol 2, and 0.3.1 speaks protocol 5. Before 1.0, each release
 speaks only its own protocol version, so a client and a Control Plane from releases with different
 versions cannot connect. When you offer no version the Control Plane speaks, `Negotiate` fails
 with `FAILED_PRECONDITION` and a message of this form:
 
 ```text
 incompatible SuperTag protocol: this Control Plane (SuperTag 0.3.0) speaks protocol versions [2],
-but the connecting operator client (SuperTag BUILD) offered [3]; run the same SuperTag release on
+but the connecting operator client (SuperTag BUILD) offered [5]; run the same SuperTag release on
 both services
 ```
 
 The part `(SuperTag BUILD) speaks protocol versions [V, ...]` names the Control Plane's release and
 versions, and every release keeps that form. The CLI, terminal UI, desktop app, and Worker Hosts
-read it to show which release to upgrade, for example: `This app speaks SuperTag protocol 3, but
+read it to show which release to upgrade, for example: `This app speaks SuperTag protocol 5, but
 the Control Plane at http://127.0.0.1:3434 runs SuperTag 0.3.0 (protocol 2). Upgrade the Control
 Plane.`
 
