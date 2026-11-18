@@ -11,6 +11,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- GitHub review landings: a Workspace with `land: {review: {base}}` opens a draft pull request
+  for each work Session and updates it on later Tasks; merging it closes the work Session
+  (`pull request merged`). `supertag workspace credential add NAME --github-app` stores a GitHub
+  App whose per-operation tokens are narrowed to one repository and one permission.
 - The desktop app's Tag details open with **Activity**, and the terminal UI's command palette has
   **Activity**: how the Tag's unprompted messages landed over 30 days (posted, read, answered,
   stayed quiet) and its start rate with the starts in the current window.
