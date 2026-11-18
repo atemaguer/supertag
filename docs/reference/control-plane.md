@@ -61,6 +61,14 @@ resumes it:
   Worker Host takes the Task and starts it from the recap.
 - A holder whose file is missing or whose bytes no longer match its digest also starts fresh.
 
+A Tag that names a [Volume](resource-model.md#volumes) (`supertag tag put TAG --volume NAME`) keeps its
+checkpoints on that Volume instead, at `tags/<SHA-256 of TAG>/sessions/<SHA-256 of SESSION>/checkpoint/`.
+The turn's host writes it there, through its own `--volume` mapping for a file Volume or a
+presigned request for an S3 one, and keeps no copy. Any host that reaches the Volume resumes it,
+so the next Task waits for no particular host. The reader checks the checkpoint's size and SHA-256,
+and a missing or changed checkpoint starts the turn fresh. Checkpoints already on a Volume are
+not deleted from it yet when they are dropped.
+
 | Rule | When |
 | --- | --- |
 | A Session keeps only its newest checkpoint | A successful turn's checkpoint replaces the Session's earlier ones |

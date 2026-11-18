@@ -31,6 +31,64 @@ pub(crate) fn checkpoint_key(tag_id: &str, session_id: &str, sha256: &str) -> St
     )
 }
 
+/// Where one file of a Tag's native memory store lives on its Volume: the store's `current/` tree
+/// under `native-memory/<harness>/<scope>/`, as Worker Hosts keep it in their own storage.
+pub(crate) fn native_memory_key(tag_id: &str, harness: &str, scope: &str, path: &str) -> String {
+    format!(
+        "{}/native-memory/{harness}/{scope}/current/{path}",
+        tag_root(tag_id)
+    )
+}
+
+/// A native memory file's path inside its store: relative, `/`-separated, and without empty,
+/// `.`, or `..` segments or control characters.
+fn valid_memory_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 1024
+        && !path.chars().any(char::is_control)
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+/// The key and bytes of one native memory file in the store this turn was granted: its harness
+/// and audience scope come from the Attempt, never the request.
+async fn native_memory_object_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    input: &VolumeObjectGrantRequest,
+) -> Result<(String, BlobReference)> {
+    let file = input
+        .native_memory_file
+        .as_ref()
+        .ok_or_else(|| invalid("a native memory grant names its file"))?;
+    let blob = file
+        .blob
+        .clone()
+        .filter(|blob| {
+            supertag_protocol::valid_sha256(&blob.sha256)
+                && blob.byte_length <= supertag_protocol::MAX_CHECKPOINT_BYTES as u64
+        })
+        .ok_or_else(|| invalid("a native memory file needs a valid blob"))?;
+    if !valid_memory_path(&file.path) {
+        return Err(invalid("a native memory file needs a relative path"));
+    }
+    let grant = crate::native_memory::grant_in(tx, task)
+        .await?
+        .ok_or_else(|| StoreError::FailedPrecondition("this turn keeps no native memory".into()))?;
+    let harness = task
+        .attempt_execution
+        .as_ref()
+        .and_then(|execution| supertag_protocol::checkpoint_harness(execution.harness_kind()))
+        .ok_or_else(|| {
+            StoreError::FailedPrecondition("this turn's harness keeps no native memory".into())
+        })?;
+    Ok((
+        native_memory_key(&task.tag_id, harness, &grant.scope, &file.path),
+        blob,
+    ))
+}
+
 /// Two records of one Volume name the same storage: a new revision that only changed nothing
 /// about where it lives still holds the same objects.
 fn same_storage(left: &ArtifactVolume, right: &ArtifactVolume) -> bool {
@@ -458,7 +516,10 @@ impl Store {
             .attempt
             .as_ref()
             .ok_or_else(|| invalid("a Volume grant names its Attempt"))?;
-        if input.purpose() != VolumeObjectPurpose::SessionCheckpoint {
+        if !matches!(
+            input.purpose(),
+            VolumeObjectPurpose::SessionCheckpoint | VolumeObjectPurpose::NativeMemoryFile
+        ) {
             return Err(invalid("a Volume grant needs a purpose"));
         }
         let access = input.access();
@@ -480,6 +541,16 @@ impl Store {
             .await?
             .ok_or_else(|| StoreError::FailedPrecondition("the Tag names no Volume".into()))?;
         let volume = volume_in(&mut tx, &id).await?;
+        if input.purpose() == VolumeObjectPurpose::NativeMemoryFile {
+            let (key, blob) = native_memory_object_in(&mut tx, &task, input).await?;
+            tx.commit().await?;
+            return Ok(VolumeObjectGrant {
+                volume: Some(volume),
+                key,
+                blob: Some(blob),
+                presigned: None,
+            });
+        }
         let checkpoint = if access == VolumeAccess::Write {
             // The checkpoint this Attempt reserved, now marked as kept on the Volume.
             let reserved = crate::checkpoints::reservation_in(&mut tx, attempt)
@@ -489,8 +560,10 @@ impl Store {
                         "reserve the checkpoint before its Volume grant".into(),
                     )
                 })?;
+            // On the Volume, any host that reaches it resumes the checkpoint: it has no holder to
+            // wait for, and no host's reconcile deletes it.
             sqlx::query(
-                "UPDATE supertag_v2_checkpoints SET volume_id=$1 WHERE attempt_id=$2 AND task_id=$3",
+                "UPDATE supertag_v2_checkpoints SET volume_id=$1, holder_host_id=NULL WHERE attempt_id=$2 AND task_id=$3",
             )
             .bind(&id)
             .bind(&attempt.attempt_id)

@@ -36,6 +36,9 @@ impl Store {
                 holder_host_id: row
                     .try_get::<Option<String>, _>("holder_host_id")?
                     .unwrap_or_default(),
+                volume_id: row
+                    .try_get::<Option<String>, _>("volume_id")?
+                    .unwrap_or_default(),
             });
         }
         let (mut tx, _) = self.write().await?;

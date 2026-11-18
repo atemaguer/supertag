@@ -10,7 +10,7 @@ use std::{
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, MAX_RESUMED_CHECKPOINT_BYTES,
-    v2::{worker_host_client::WorkerHostClient, *},
+    v2::{volume_objects_client::VolumeObjectsClient, worker_host_client::WorkerHostClient, *},
     validate_checkpoint_reference,
 };
 use tonic::{Status, transport::Channel};
@@ -221,6 +221,8 @@ pub(crate) struct Transfers {
     pub(crate) storage: Option<crate::artifact_direct::SourceStorage>,
     /// The Session checkpoints this host holds.
     pub(crate) held: Option<Held>,
+    /// The file Volumes this host maps, for checkpoints of Tags that name a Volume.
+    pub(crate) volumes: crate::volume_objects::HostVolumes,
 }
 
 impl Transfers {
@@ -230,7 +232,43 @@ impl Transfers {
             headers,
             storage: None,
             held: None,
+            volumes: Default::default(),
         }
+    }
+
+    pub(crate) fn with_volumes(mut self, volumes: crate::volume_objects::HostVolumes) -> Self {
+        self.volumes = volumes;
+        self
+    }
+
+    fn volume_objects(
+        &self,
+    ) -> VolumeObjectsClient<tonic::service::interceptor::InterceptedService<Channel, HostHeaders>>
+    {
+        VolumeObjectsClient::with_interceptor(self.channel.clone(), self.headers.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
+    /// The Control Plane's grant to write this Attempt's reserved Session checkpoint to its Tag's
+    /// Volume, or to read the Session's current one. It names the bytes from its own records.
+    async fn volume_grant(
+        &self,
+        attempt: &Attempt,
+        token: &str,
+        access: VolumeAccess,
+    ) -> Result<VolumeObjectGrant, Status> {
+        let request = VolumeObjectGrantRequest {
+            attempt: Some(attempt.inspect()),
+            access: access.into(),
+            purpose: VolumeObjectPurpose::SessionCheckpoint.into(),
+            ..Default::default()
+        };
+        Ok(self
+            .volume_objects()
+            .grant(authorized(request, token)?)
+            .await?
+            .into_inner())
     }
 
     pub(crate) fn with_storage(mut self, storage: crate::artifact_direct::SourceStorage) -> Self {
@@ -269,18 +307,23 @@ impl Transfers {
         let held = self.held()?;
         let reference = checkpoint.reference();
         validate_checkpoint_reference(&reference)?;
+        // A Tag that names a Volume keeps its checkpoints there, so any host that reaches the
+        // Volume resumes them; otherwise this host keeps it.
+        let on_volume = attempt.volume.is_some();
         let task = self
             .host()
             .inspect_attempt(authorized(attempt.inspect(), token)?)
             .await?
             .into_inner();
-        held.save(&task.tag_id, &task.session_id, &checkpoint)
-            .map_err(|error| {
-                crate::failures::noted(
-                    Status::internal("checkpoint could not be kept on this host"),
-                    &error,
-                )
-            })?;
+        if !on_volume {
+            held.save(&task.tag_id, &task.session_id, &checkpoint)
+                .map_err(|error| {
+                    crate::failures::noted(
+                        Status::internal("checkpoint could not be kept on this host"),
+                        &error,
+                    )
+                })?;
+        }
         let record = CommitCheckpointRequest {
             attempt: Some(attempt.inspect()),
             reference: Some(reference.clone()),
@@ -290,6 +333,32 @@ impl Transfers {
             .reserve_checkpoint(authorized(record.clone(), token)?)
             .await?
             .into_inner();
+        // The reservation comes first: the Volume grant names the reserved checkpoint.
+        if on_volume {
+            let grant = self
+                .volume_grant(attempt, token, VolumeAccess::Write)
+                .await?;
+            let volume = grant
+                .volume
+                .as_ref()
+                .ok_or_else(|| Status::data_loss("Volume grant has no Volume"))?;
+            let blob = grant
+                .blob
+                .as_ref()
+                .ok_or_else(|| Status::data_loss("Volume grant has no object"))?;
+            crate::volume_objects::put(
+                &crate::volume_objects::ObjectGrant {
+                    volume_id: &volume.volume_id,
+                    source: &volume.source,
+                    key: &grant.key,
+                    blob,
+                    presigned: grant.presigned.as_ref(),
+                },
+                &checkpoint.payload,
+                &self.volumes,
+            )
+            .await?;
+        }
         let committed = self
             .host()
             .commit_checkpoint(authorized(record, token)?)
@@ -300,7 +369,9 @@ impl Transfers {
                 "Control Plane returned a different checkpoint receipt",
             ));
         }
-        held.supersede(&task.tag_id, &task.session_id, &reference.sha256);
+        if !on_volume {
+            held.supersede(&task.tag_id, &task.session_id, &reference.sha256);
+        }
         Ok(committed)
     }
 
@@ -320,6 +391,9 @@ impl Transfers {
             return Ok(None);
         };
         validate_checkpoint_reference(&reference)?;
+        if !response.volume_id.is_empty() {
+            return self.read_volume(attempt, token, reference).await;
+        }
         if response.holder_host_id != held.host_id {
             supertag_protocol::terminal_text::warn(&format!(
                 "Task {}: Worker Host {} holds the Session checkpoint, so this turn starts from the recap",
@@ -335,6 +409,58 @@ impl Transfers {
             ));
         }
         Ok(loaded)
+    }
+
+    /// The Session's checkpoint from its Tag's Volume. A checkpoint this host cannot reach, or
+    /// whose bytes do not match, starts the turn fresh from the recap.
+    async fn read_volume(
+        &self,
+        attempt: &Attempt,
+        token: &str,
+        reference: CheckpointReference,
+    ) -> Result<Option<SessionCheckpoint>, Status> {
+        let fresh = |why: &str| {
+            supertag_protocol::terminal_text::warn(&format!(
+                "Task {}: the Session checkpoint on its Volume {why}, so this turn starts from the recap",
+                attempt.task_id
+            ));
+            Ok(None)
+        };
+        let grant = match self.volume_grant(attempt, token, VolumeAccess::Read).await {
+            Ok(grant) => grant,
+            Err(error)
+                if matches!(
+                    error.code(),
+                    tonic::Code::NotFound | tonic::Code::FailedPrecondition
+                ) =>
+            {
+                return fresh("is no longer current");
+            }
+            Err(error) => return Err(error),
+        };
+        let (Some(volume), Some(blob)) = (grant.volume.as_ref(), grant.blob.as_ref()) else {
+            return Err(Status::data_loss("Volume grant is incomplete"));
+        };
+        let object = crate::volume_objects::ObjectGrant {
+            volume_id: &volume.volume_id,
+            source: &volume.source,
+            key: &grant.key,
+            blob,
+            presigned: grant.presigned.as_ref(),
+        };
+        match crate::volume_objects::get(&object, &self.volumes).await {
+            Ok(Some(payload)) => Ok(Some(SessionCheckpoint {
+                harness: reference.harness,
+                format: reference.format,
+                sha256: reference.sha256,
+                payload,
+            })),
+            Ok(None) => fresh("is missing or changed"),
+            Err(error) if error.code() == tonic::Code::FailedPrecondition => {
+                fresh("is out of this host's reach")
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Deletes the checkpoint files this host holds that no Session will resume.

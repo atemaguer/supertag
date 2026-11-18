@@ -3403,12 +3403,14 @@ class CheckpointReference(_message.Message):
     def __init__(self, harness: _Optional[str] = ..., format: _Optional[str] = ..., byte_length: _Optional[int] = ..., sha256: _Optional[str] = ...) -> None: ...
 
 class GetCheckpointResponse(_message.Message):
-    __slots__ = ("reference", "holder_host_id")
+    __slots__ = ("reference", "holder_host_id", "volume_id")
     REFERENCE_FIELD_NUMBER: _ClassVar[int]
     HOLDER_HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
     reference: CheckpointReference
     holder_host_id: str
-    def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., holder_host_id: _Optional[str] = ...) -> None: ...
+    volume_id: str
+    def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., holder_host_id: _Optional[str] = ..., volume_id: _Optional[str] = ...) -> None: ...
 
 class CommitCheckpointRequest(_message.Message):
     __slots__ = ("attempt", "reference")

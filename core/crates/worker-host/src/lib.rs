@@ -542,7 +542,8 @@ pub async fn run(
         .with_checkpoints(checkpoints::Held::new(
             serving.storage.root(),
             &registration.host_id,
-        ));
+        ))
+        .with_volumes(std::sync::Arc::new(options.volumes.clone()));
     // At start and every hour, delete the checkpoint files no Session will resume.
     {
         let transfers = transfers.clone();

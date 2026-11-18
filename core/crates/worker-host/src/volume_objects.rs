@@ -95,8 +95,6 @@ pub(crate) async fn put(
     }
 }
 
-// Volume-held Session checkpoints read through this (contributing/checkpoints-on-hosts-design.md).
-#[allow(dead_code)]
 /// Reads the object and verifies its length and SHA-256. `None` when it is missing or holds other
 /// bytes, which a reader treats alike.
 pub(crate) async fn get(

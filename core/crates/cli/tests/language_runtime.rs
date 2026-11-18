@@ -121,6 +121,9 @@ database_tests! {
     claude_code_sdk_resumes_on_its_holder_and_starts_fresh_elsewhere;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_code_sdk_resumes_from_its_tags_volume_on_any_host;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_keeps_native_memory_on_its_host_across_tasks;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
@@ -893,6 +896,98 @@ async fn python_agents_sdk_resumes_the_session_on_its_holder(database: String) -
         assert_eq!(usage["input_tokens"], 11);
         assert_eq!(usage["cached_input_tokens"], 2);
         assert_eq!(usage["output_tokens"], 5);
+    }
+    services.stop().await
+}
+
+/// A Tag that names a file Volume keeps its Session checkpoints on it: the first turn's host
+/// writes the checkpoint there, and another host that maps the Volume, with storage of its own,
+/// resumes the next turn from it. Neither host keeps a copy in its own storage.
+async fn claude_code_sdk_resumes_from_its_tags_volume_on_any_host(database: String) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().canonicalize()?;
+    let native = claude_fixture(&root)?;
+    let vault = root.join("vault");
+    std::fs::create_dir(&vault)?;
+    std::fs::set_permissions(&vault, std::fs::Permissions::from_mode(0o700))?;
+    let services = LanguageServices::start(&root, &database).await?;
+    services
+        .operator(&[
+            "volume",
+            "put",
+            "vault",
+            "--source",
+            &format!("file://{}", vault.display()),
+            "--operation-id",
+            "register-vault",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "claude",
+            "--instructions",
+            "Use the admitted tools.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--volume",
+            "vault",
+        ])
+        .await?;
+    for (state, expected) in [
+        ("first-host", "fixture first turn"),
+        ("second-host", "fixture resumed turn"),
+    ] {
+        let task = services
+            .operator(&[
+                "task",
+                "submit",
+                "--tag",
+                "claude",
+                "--session",
+                "same-session",
+                "Continue this Session",
+            ])
+            .await?;
+        let task_id = task["task_id"].as_str().context("Task ID missing")?;
+        let mut host = services.worker(
+            "claude-code",
+            &root.join(state),
+            Path::new(&interpreter),
+            &entry,
+        );
+        host.arg("--claude-path")
+            .arg(&native)
+            .arg("--volume")
+            .arg(format!("vault={}", vault.display()))
+            .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+        success(host).await?;
+        let task = services.operator(&["get", "task", task_id]).await?;
+        assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+        assert_eq!(task["result"], expected);
+    }
+    let tag = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(b"claude"));
+    let session = format!(
+        "{:x}",
+        <sha2::Sha256 as sha2::Digest>::digest(b"same-session")
+    );
+    let held = |base: &Path| base.join(format!("tags/{tag}/sessions/{session}/checkpoint"));
+    assert!(
+        std::fs::read_dir(held(&vault))?.next().is_some(),
+        "the checkpoint is on the Volume"
+    );
+    for state in ["first-host", "second-host"] {
+        assert!(
+            !held(&root.join(state).join("artifacts")).exists(),
+            "{state} keeps no copy of a Volume-held checkpoint"
+        );
     }
     services.stop().await
 }

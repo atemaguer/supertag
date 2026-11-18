@@ -2652,7 +2652,11 @@ message CheckpointReference {
 message GetCheckpointResponse {
   CheckpointReference reference = 1;
   // The Worker Host that holds the checkpoint's bytes. Another host starts the turn fresh.
+  // Empty when the checkpoint is on a Volume.
   string holder_host_id = 2;
+  // The Volume holding the checkpoint, when its Tag names one: any host that reaches the Volume
+  // resumes it, reading it through `VolumeObjects.Grant`.
+  string volume_id = 3;
 }
 
 message CommitCheckpointRequest {

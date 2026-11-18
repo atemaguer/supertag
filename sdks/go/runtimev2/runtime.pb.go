@@ -19445,7 +19445,11 @@ type GetCheckpointResponse struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Reference *CheckpointReference   `protobuf:"bytes,1,opt,name=reference,proto3" json:"reference,omitempty"`
 	// The Worker Host that holds the checkpoint's bytes. Another host starts the turn fresh.
-	HolderHostId  string `protobuf:"bytes,2,opt,name=holder_host_id,json=holderHostId,proto3" json:"holder_host_id,omitempty"`
+	// Empty when the checkpoint is on a Volume.
+	HolderHostId string `protobuf:"bytes,2,opt,name=holder_host_id,json=holderHostId,proto3" json:"holder_host_id,omitempty"`
+	// The Volume holding the checkpoint, when its Tag names one: any host that reaches the Volume
+	// resumes it, reading it through `VolumeObjects.Grant`.
+	VolumeId      string `protobuf:"bytes,3,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -19490,6 +19494,13 @@ func (x *GetCheckpointResponse) GetReference() *CheckpointReference {
 func (x *GetCheckpointResponse) GetHolderHostId() string {
 	if x != nil {
 		return x.HolderHostId
+	}
+	return ""
+}
+
+func (x *GetCheckpointResponse) GetVolumeId() string {
+	if x != nil {
+		return x.VolumeId
 	}
 	return ""
 }
@@ -26960,10 +26971,11 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x06format\x18\x02 \x01(\tR\x06format\x12\x1f\n" +
 	"\vbyte_length\x18\x03 \x01(\x04R\n" +
 	"byteLength\x12\x16\n" +
-	"\x06sha256\x18\x04 \x01(\tR\x06sha256\"\x85\x01\n" +
+	"\x06sha256\x18\x04 \x01(\tR\x06sha256\"\xa2\x01\n" +
 	"\x15GetCheckpointResponse\x12F\n" +
 	"\treference\x18\x01 \x01(\v2(.supertag.runtime.v2.CheckpointReferenceR\treference\x12$\n" +
-	"\x0eholder_host_id\x18\x02 \x01(\tR\fholderHostId\"\xa7\x01\n" +
+	"\x0eholder_host_id\x18\x02 \x01(\tR\fholderHostId\x12\x1b\n" +
+	"\tvolume_id\x18\x03 \x01(\tR\bvolumeId\"\xa7\x01\n" +
 	"\x17CommitCheckpointRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12F\n" +
 	"\treference\x18\x02 \x01(\v2(.supertag.runtime.v2.CheckpointReferenceR\treference\"\x8d\x03\n" +
