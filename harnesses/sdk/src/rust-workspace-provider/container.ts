@@ -39,7 +39,12 @@ import {
   EGRESS_RELAY_PROGRAM,
   type EgressRelayHost,
 } from "./egress-relay.js";
-import { createExecServer, EXEC_SERVER_PROGRAM, type ExecServer } from "./exec-server.js";
+import {
+  CAPABILITY_DROP_THEN_EXEC,
+  createExecServer,
+  EXEC_SERVER_PROGRAM,
+  type ExecServer,
+} from "./exec-server.js";
 import {
   BUILD_TIMEOUT_MS,
   createSandboxWorkspaceSession,
@@ -363,6 +368,18 @@ export function containerSandboxProvider(
 
   /** Each container's exec server, started on the first operation after allocation. */
   const servers = new Map<string, ExecServer>();
+  /** Each container's interpreter, checked at allocation. */
+  const interpreters = new Map<string, string>();
+
+  /**
+   * A Task command outside the exec server: it starts with every capability set empty, as one
+   * the server starts does, whatever the runtime handed the Workspace user.
+   */
+  function withoutCapabilities(id: string, argv: readonly string[]): string[] {
+    const interpreter = interpreters.get(id);
+    if (!interpreter) throw new Error("Container interpreter is unknown");
+    return [interpreter, "-I", "-S", "-c", CAPABILITY_DROP_THEN_EXEC, ...argv];
+  }
 
   /**
    * Runs `argv` as the Workspace user: through the container's exec server when one runs, so it
@@ -400,7 +417,7 @@ export function containerSandboxProvider(
         }
       }
     }
-    return exec(id, argv, rest);
+    return exec(id, withoutCapabilities(id, argv), rest);
   }
 
   /** The container's owner labels, or undefined when the runtime reports it absent. */
@@ -514,7 +531,7 @@ export function containerSandboxProvider(
             spec.cwd ?? "/tmp",
             ...(spec.replaceEnvironment ? [] : environment.flatMap((value) => ["-e", value])),
             id,
-            ...argv,
+            ...withoutCapabilities(id, argv),
           ],
           { stdio: ["pipe", "pipe", "pipe"] },
         );
@@ -881,6 +898,7 @@ export function containerSandboxProvider(
           throw new Error("Dependency cache could not be prepared");
         }
       }
+      interpreters.set(id, interpreter);
       const sandbox = instance(id);
       const relay = egress ? await startEgressRelay(id, egress, interpreter) : undefined;
       // The exec server starts on the first operation, after the session recorded the
@@ -966,6 +984,7 @@ export function containerSandboxProvider(
         relays.delete(sandboxId);
         servers.get(sandboxId)?.close();
         servers.delete(sandboxId);
+        interpreters.delete(sandboxId);
       }
       const owned = labels(owner, label);
       const matches = (found: Record<string, string>) =>

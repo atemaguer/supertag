@@ -13,6 +13,7 @@ export {
   type EgressRelayHost,
 } from "./egress-relay.js";
 export { WorkspaceConfigurationError } from "./errors.js";
+export { CAPABILITY_DROP_THEN_EXEC } from "./exec-server.js";
 export { createWorkspaceHandlers } from "./handlers.js";
 export {
   COMMAND_GRACE_MS,

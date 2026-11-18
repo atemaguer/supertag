@@ -19,7 +19,36 @@
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
-export const EXEC_SERVER_PROGRAM = String.raw`import base64, json, os, queue, signal, subprocess, sys, threading
+/**
+ * Empties every capability set of the process that runs it, ambient and inheritable included,
+ * so nothing it executes starts with a capability. A runtime may hand the Workspace user what
+ * the container grants root (rootless Podman puts it in the inheritable set). Dropping needs no
+ * privilege; a failure exits 126 before anything runs. Only Linux has these sets.
+ */
+export const CAPABILITY_DROP = `import ctypes as _ctypes, errno as _errno, sys as _sys
+if _sys.platform == "linux":
+    _libc = _ctypes.CDLL(None, use_errno=True)
+    # PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL; EINVAL only where the kernel has no ambient set.
+    if _libc.prctl(47, 4, 0, 0, 0) != 0 and _ctypes.get_errno() != _errno.EINVAL:
+        raise SystemExit(126)
+    # capset with _LINUX_CAPABILITY_VERSION_3 and every set empty.
+    if _libc.capset((_ctypes.c_uint32 * 2)(0x20080522, 0), (_ctypes.c_uint32 * 6)()) != 0:
+        raise SystemExit(126)
+`;
+
+/** Drops every capability, then executes its arguments: a Task command outside the server. */
+export const CAPABILITY_DROP_THEN_EXEC = String.raw`${CAPABILITY_DROP}
+import os, sys
+try:
+    os.execvp(sys.argv[1], sys.argv[1:])
+except OSError as error:
+    sys.stderr.write("%s: %s\n" % (sys.argv[1], error.strerror or error))
+    sys.exit(127 if isinstance(error, FileNotFoundError) else 126)
+`;
+
+// The server drops its capabilities first, so every process it starts begins with none.
+export const EXEC_SERVER_PROGRAM = String.raw`${CAPABILITY_DROP}
+import base64, json, os, queue, signal, subprocess, sys, threading
 lock = threading.Lock()
 procs = {}
 

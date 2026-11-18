@@ -179,8 +179,9 @@ jobs:
           key: local-vm-base-${{ matrix.runtime }}-${{ steps.base.outputs.tag }}
       - if: steps.cache.outputs.cache-hit == 'true'
         run: ${{ matrix.runtime }} load -i "$RUNNER_TEMP/local-vm-base.tar"
+      # The verbose reporter keeps what passing cases print, such as the Task capability sets.
       - run: >-
-          pnpm exec vitest run
+          pnpm exec vitest run --reporter=verbose
           harnesses/environments/local-vm
           harnesses/sdk/container-provider.container.test.ts
           harnesses/sdk/process-seal.container.test.ts

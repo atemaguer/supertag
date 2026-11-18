@@ -6,6 +6,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CAPABILITY_DROP_THEN_EXEC,
   CODEX_HOME,
   containerDockerfile,
   containerSandboxProvider,
@@ -84,6 +85,20 @@ describe.skipIf(!answers)("local-vm provider", () => {
     await provider.stop(first, workspace.sandboxId);
   }, BUILD_MS);
 
+  /**
+   * No capability in any set a Task process could use. The sets are reported before the
+   * assertion, so a runtime that hands the Workspace user capabilities shows which.
+   */
+  async function expectNoCapabilities(
+    run: (script: string) => Promise<{ stdout: string }>,
+    path: string,
+  ): Promise<void> {
+    const sets = (await run("grep -E '^Cap(Inh|Prm|Eff|Amb)' /proc/self/status")).stdout.trim();
+    console.error(`Task capability sets on ${runtime}, ${path}:\n${sets}`);
+    expect(sets.split("\n"), sets).toHaveLength(4);
+    for (const line of sets.split("\n")) expect(line, sets).toMatch(/\s0{16}$/u);
+  }
+
   it("runs Task processes as an unprivileged user with no capabilities and no network", async () => {
     const who = owner();
     const workspace = await provider.allocate(who, 60_000, AbortSignal.timeout(60_000));
@@ -91,10 +106,15 @@ describe.skipIf(!answers)("local-vm provider", () => {
       const run = (script: string) =>
         workspace.run(["sh", "-c", script], 30_000, AbortSignal.timeout(30_000));
       expect((await run("id -u")).stdout.trim()).toBe("1000");
-      // No capability in any set a Task process could use.
-      const sets = (await run("grep -E '^Cap(Inh|Prm|Eff|Amb)' /proc/self/status")).stdout;
-      expect(sets.trim().split("\n")).toHaveLength(4);
-      for (const line of sets.trim().split("\n")) expect(line).toMatch(/\s0{16}$/u);
+      // What the runtime itself gives its user, before the drop: reported only, to show a
+      // runtime's behaviour (rootless Podman's) in CI.
+      const raw = spawnSync(
+        runtime,
+        ["exec", workspace.sandboxId, "grep", "-E", "^Cap(Inh|Prm|Eff|Amb)", "/proc/self/status"],
+        { encoding: "utf8" },
+      );
+      console.error(`Runtime exec capability sets on ${runtime}, before the drop:\n${raw.stdout}`);
+      await expectNoCapabilities(run, "through the exec server");
       expect((await run("grep NoNewPrivs /proc/self/status")).stdout).toMatch(/1/u);
       expect((await run("ls /sys/class/net")).stdout.trim()).toBe("lo");
       expect((await run("uname -m")).stdout.trim()).toBe(
@@ -114,8 +134,54 @@ describe.skipIf(!answers)("local-vm provider", () => {
         AbortSignal.timeout(30_000),
       );
       expect(privileged?.stdout).toMatch(/^0\nCapEff:\s+000000000000002f\n$/u);
+      // The drop that starts every Task command empties even root's sets.
+      const dropped = await workspace.runPrivileged?.(
+        [
+          "python3",
+          "-I",
+          "-S",
+          "-c",
+          CAPABILITY_DROP_THEN_EXEC,
+          "grep",
+          "-E",
+          "^Cap(Inh|Prm|Eff|Amb)",
+          "/proc/self/status",
+        ],
+        30_000,
+        AbortSignal.timeout(30_000),
+      );
+      const rootSets = dropped?.stdout.trim() ?? "";
+      expect(rootSets.split("\n"), rootSets).toHaveLength(4);
+      for (const line of rootSets.split("\n")) expect(line, rootSets).toMatch(/\s0{16}$/u);
     } finally {
       await provider.stop(who, workspace.sandboxId);
+    }
+  }, 120_000);
+
+  it("starts a Task command with no capabilities without the exec server too", async () => {
+    // Without the server, each command is its own runtime exec, run as the container's user.
+    const direct = containerSandboxProvider({
+      name: "local-vm",
+      label: "supertag.local-vm",
+      runtime,
+      image: options.image,
+      user: options.user,
+      buildImages: true,
+      runFlags: ["--memory", options.memory],
+      execServer: false,
+    });
+    const who = owner();
+    const workspace = await direct.allocate(who, 60_000, AbortSignal.timeout(60_000));
+    try {
+      const run = (script: string) =>
+        workspace.run(["sh", "-c", script], 30_000, AbortSignal.timeout(30_000));
+      await expectNoCapabilities(run, "through a runtime exec");
+      // A missing command still exits as a runtime exec reports it.
+      expect(
+        (await workspace.run(["no-such-command"], 30_000, AbortSignal.timeout(30_000))).exitCode,
+      ).toBe(127);
+    } finally {
+      await direct.stop(who, workspace.sandboxId);
     }
   }, 120_000);
 
