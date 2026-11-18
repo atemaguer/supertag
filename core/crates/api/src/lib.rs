@@ -37,6 +37,7 @@ mod schedules;
 mod spend;
 mod surface_policy;
 mod tag_sessions;
+mod task_files;
 mod teams;
 pub mod transfers;
 mod watch;
@@ -222,6 +223,8 @@ impl Api {
             self.attempt_schedules_service(),
             self.memories_service(),
             self.network_logs_service(),
+            self.task_files_service(),
+            self.attempt_task_files_service(),
             self.attempt_memory_service(),
             self.attempt_mcp_effects_service(),
             self.attempt_changed_paths_service(),

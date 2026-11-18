@@ -124,6 +124,17 @@ export interface Gateway {
   deleteNote?(memoryId: string): Promise<Note>;
   /** How the Tag's unprompted messages landed lately, and its start rate. */
   tagActivity?(tagId: string): Promise<TagActivity>;
+  /** Where a Task's files are; a running Task's checkout on this machine is read here. */
+  locateTaskFiles?(taskId: string): Promise<TaskFilesPlace>;
+  /** One directory of a located Task's files. */
+  listTaskFiles?(taskId: string, path: string): Promise<TaskFileEntry[]>;
+  /** One text file of a located Task's files; binary files are refused. */
+  readTaskFile?(
+    taskId: string,
+    path: string,
+  ): Promise<{ path: string; text: string; size: number }>;
+  /** Shows one of a located Task's files in Finder. */
+  revealTaskFile?(taskId: string, path: string): Promise<void>;
   /** The Tag's newest Task Attempts with a network log, newest first. Operators only. */
   networkLogs?(tagId: string): Promise<NetworkLog[]>;
   /** The Tag's Schedules the caller can see. */
@@ -226,6 +237,27 @@ export interface TagActivity {
   idleObjectives?: { objectiveId: string; outcome: string; idleSinceMs: number }[];
 }
 
+/** Where a Task's files are: on this machine (listed and read here) or why they can't be read. */
+export interface TaskFilesPlace {
+  local: boolean;
+  /** The Task is running, so its files can still change. */
+  live: boolean;
+  hostId?: string;
+  reason?: string;
+}
+
+/** One entry of a Task's files: a directory, a file, or a link (listed, never followed). */
+export interface TaskFileEntry {
+  name: string;
+  /** Relative to the Task's checkout, with `/` separators. */
+  path: string;
+  kind: "directory" | "file" | "link";
+  size: number;
+  modifiedMs: number;
+  /** Opens in the viewer; binary files are listed only. */
+  text: boolean;
+}
+
 /** A Task Attempt's network log: its first requests and how many it allowed and refused. */
 export interface NetworkLog {
   taskId: string;
@@ -316,6 +348,10 @@ export function gatewaySession(connectionId: string, scope: string): Gateway {
     notes: (tagId) => invoke("list_notes", { connectionId, tagId }),
     deleteNote: (memoryId) => invoke("delete_note", { connectionId, memoryId }),
     networkLogs: (tagId) => invoke("list_network_logs", { connectionId, tagId }),
+    locateTaskFiles: (taskId) => invoke("locate_task_files", { connectionId, taskId }),
+    listTaskFiles: (taskId, path) => invoke("list_task_files", { connectionId, taskId, path }),
+    readTaskFile: (taskId, path) => invoke("read_task_file", { connectionId, taskId, path }),
+    revealTaskFile: (taskId, path) => invoke("reveal_task_file", { connectionId, taskId, path }),
     tagActivity: (tagId) => invoke("tag_activity", { connectionId, tagId }),
     schedules: (tagId) => invoke("list_schedules", { connectionId, tagId }),
     changeSchedule: (scheduleId, action) =>

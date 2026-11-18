@@ -158,6 +158,7 @@ impl SharedHost {
         let mut report = aggregate(sequence, harnesses, lanes, workspaces);
         report.labels = self.labels.clone();
         report.disk_space = self.disk_space.sample();
+        report.machine_id = crate::readiness::machine_id();
         let request = request(report, &self.token).map_err(|error| {
             crate::failures::noted(Status::internal("invalid Host presence request"), &error)
         })?;

@@ -45,6 +45,7 @@ import { clamp, ResizeHandle, useStoredWidth } from "./resize";
 import type { TagSummary } from "./sidebar";
 import { TagAvatar } from "./tag-avatar";
 import { TagDetails } from "./tag-details";
+import { TaskFiles } from "./task-files";
 import {
   conversationSummary,
   deliveryStatus,
@@ -625,6 +626,7 @@ function ActivityPane({
           <li key={event.sequence}>{eventLine(event)}</li>
         ))}
       </ol>
+      <TaskFiles gateway={gateway} taskId={taskId} />
     </aside>
   );
 }

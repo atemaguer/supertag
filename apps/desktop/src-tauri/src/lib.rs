@@ -135,6 +135,44 @@ async fn tag_activity(
 }
 
 #[tauri::command]
+async fn locate_task_files(
+    state: State<'_, GatewayState>,
+    connection_id: String,
+    task_id: String,
+) -> Result<gateway::task_files::TaskFilesPlace, String> {
+    state.locate_task_files(&connection_id, task_id).await
+}
+
+#[tauri::command]
+async fn list_task_files(
+    connection_id: String,
+    task_id: String,
+    path: String,
+) -> Result<Vec<gateway::task_files::TaskFileEntry>, String> {
+    tokio::task::spawn_blocking(move || gateway::task_files::list(&connection_id, &task_id, &path))
+        .await
+        .map_err(|_| "Listing the files failed.".to_owned())?
+}
+
+#[tauri::command]
+async fn read_task_file(
+    connection_id: String,
+    task_id: String,
+    path: String,
+) -> Result<gateway::task_files::TaskFileText, String> {
+    tokio::task::spawn_blocking(move || gateway::task_files::read(&connection_id, &task_id, &path))
+        .await
+        .map_err(|_| "Reading the file failed.".to_owned())?
+}
+
+#[tauri::command]
+fn reveal_task_file(connection_id: String, task_id: String, path: String) -> Result<(), String> {
+    let absolute = gateway::task_files::absolute(&connection_id, &task_id, &path)?;
+    tauri_plugin_opener::reveal_item_in_dir(absolute)
+        .map_err(|_| "Could not show the file in Finder.".to_owned())
+}
+
+#[tauri::command]
 async fn list_network_logs(
     state: State<'_, GatewayState>,
     connection_id: String,
@@ -340,6 +378,10 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             list_notes,
             delete_note,
             list_network_logs,
+            locate_task_files,
+            list_task_files,
+            read_task_file,
+            reveal_task_file,
             tag_activity,
             list_schedules,
             change_schedule,

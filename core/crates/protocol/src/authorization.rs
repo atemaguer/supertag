@@ -107,6 +107,8 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("Memories", "Delete", OC),
     // A network log names the origins and paths of other people's Tasks.
     ("NetworkLogs", "List", O),
+    ("TaskFiles", "Locate", OC),
+    ("AttemptTaskFiles", "*", HOST),
     ("ObjectiveOverviews", "*", O),
     ("ObjectiveOverviews", "GetObjectiveOverview", OC),
     ("OperatorEvents", "*", O),

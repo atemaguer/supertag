@@ -141,6 +141,15 @@ and answered, and how many checks stayed quiet, and its start rate, if it has on
 UI, choose **Activity** in the command palette. See
 [Quiet results](../reference/coordination.md#quiet-results).
 
+## See a Task's files
+
+While a Task runs on a Worker Host on your own machine, the desktop app shows its checkout under
+**Files** in the Task's activity panel: open folders, read text files in a read-only viewer, and
+show a file in Finder. Binary files are listed but don't open. The list refreshes while the Task
+runs. The app reads the files from your disk; they never pass through the Control Plane. A Task on
+another machine says "Files on Worker Host NAME are unreachable from here", and a finished Task's
+work is on its Session branch.
+
 ## See what a Tag fetched
 
 When a Tag's Permission Sets limit `web:fetch` to named hosts, each Task Attempt's web requests go

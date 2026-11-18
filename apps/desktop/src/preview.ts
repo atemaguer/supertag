@@ -102,7 +102,60 @@ let notes: Note[] = [
   },
 ];
 
+const previewFiles: Record<string, import("./gateway").TaskFileEntry[]> = {
+  "": [
+    { name: "src", path: "src", kind: "directory", size: 96, modifiedMs: Date.now(), text: false },
+    {
+      name: "README.md",
+      path: "README.md",
+      kind: "file",
+      size: 120,
+      modifiedMs: Date.now(),
+      text: true,
+    },
+    {
+      name: "logo.png",
+      path: "logo.png",
+      kind: "file",
+      size: 4096,
+      modifiedMs: Date.now(),
+      text: false,
+    },
+  ],
+  src: [
+    {
+      name: "deadline.ts",
+      path: "src/deadline.ts",
+      kind: "file",
+      size: 210,
+      modifiedMs: Date.now(),
+      text: true,
+    },
+  ],
+};
+
 export const previewGateway: Gateway = {
+  async locateTaskFiles(taskId) {
+    return taskId.startsWith("moss")
+      ? {
+          local: false,
+          live: true,
+          hostId: "build-1",
+          reason: "Files on Worker Host build-1 are unreachable from here.",
+        }
+      : { local: true, live: true, hostId: "laptop" };
+  },
+  async listTaskFiles(_taskId, path) {
+    return previewFiles[path] ?? [];
+  },
+  async readTaskFile(_taskId, path) {
+    const text =
+      path === "README.md"
+        ? "# Deadline fix\nCovers SQLite and PostgreSQL.\n"
+        : "export const grace = 5_000;\n";
+    return { path, text, size: text.length };
+  },
+  async revealTaskFile() {},
   async tagActivity(tagId) {
     return tagId === "finch"
       ? {

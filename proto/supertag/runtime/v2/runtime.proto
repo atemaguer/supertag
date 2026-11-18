@@ -907,6 +907,9 @@ message ReportHostRequest {
   // Per-harness execution slots on a Host that serves several harnesses or Attempts at once.
   // When present, capacity and available_slots above are the sums of these entries.
   repeated HostHarnessCapacity harnesses = 1500;
+  // A random identifier of the machine and user the host runs as, from ~/.supertag/machine-id.
+  // A client presenting the same identifier is on that machine and may read its Task files there.
+  string machine_id = 2100;
 }
 
 message HostDiskSpace {
@@ -2095,6 +2098,56 @@ message ReportNetworkLogRequest {
 }
 
 message ReportNetworkLogResponse {}
+
+// Where a client can read a Task's files itself. The Control Plane returns locations only, never
+// file content: today a running Attempt's local checkout, when the caller is on the Worker Host's
+// own machine (contributing/client-file-access-design.md, slice 1).
+service TaskFiles {
+  rpc Locate(LocateTaskFilesRequest) returns (TaskFileLocations);
+}
+
+message LocateTaskFilesRequest {
+  string task_id = 1;
+  // The caller's own ~/.supertag/machine-id; empty when it has none.
+  string machine_id = 2;
+}
+
+message TaskFileLocations {
+  repeated TaskFileLocation locations = 1;
+}
+
+message TaskFileLocation {
+  // Stable for the Attempt: the client keeps one view per location.
+  string id = 1;
+  oneof kind {
+    // An absolute directory on the caller's own machine, which it lists and reads itself.
+    TaskFilesLocalPath local_path = 2;
+  }
+  // The files can still change: the Attempt is running.
+  bool live = 6;
+  // Set instead of a location the caller can read, such as "Files on Worker Host laptop are
+  // unreachable from here".
+  string unavailable_reason = 7;
+  // The Worker Host that holds the files.
+  string host_id = 8;
+}
+
+message TaskFilesLocalPath {
+  string path = 1;
+}
+
+// A Worker Host says where a running Attempt's local checkout is, once it is prepared.
+service AttemptTaskFiles {
+  rpc ReportLocation(ReportTaskFilesLocationRequest) returns (ReportTaskFilesLocationResponse);
+}
+
+message ReportTaskFilesLocationRequest {
+  InspectAttemptRequest attempt = 1;
+  // The checkout's absolute path on the host.
+  string local_path = 2;
+}
+
+message ReportTaskFilesLocationResponse {}
 
 // A Tag's network logs for its Tag details view.
 service NetworkLogs {

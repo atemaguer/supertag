@@ -7552,6 +7552,162 @@ class HarnessWorkSessions:
             _registered_method=True)
 
 
+class TaskFilesStub:
+    """Where a client can read a Task's files itself. The Control Plane returns locations only, never
+    file content: today a running Attempt's local checkout, when the caller is on the Worker Host's
+    own machine (contributing/client-file-access-design.md, slice 1).
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Locate = channel.unary_unary(
+                '/supertag.runtime.v2.TaskFiles/Locate',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LocateTaskFilesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskFileLocations.FromString,
+                _registered_method=True)
+
+
+class TaskFilesServicer:
+    """Where a client can read a Task's files itself. The Control Plane returns locations only, never
+    file content: today a running Attempt's local checkout, when the caller is on the Worker Host's
+    own machine (contributing/client-file-access-design.md, slice 1).
+    """
+
+    def Locate(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_TaskFilesServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Locate': grpc.unary_unary_rpc_method_handler(
+                    servicer.Locate,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LocateTaskFilesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskFileLocations.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.TaskFiles', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.TaskFiles', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class TaskFiles:
+    """Where a client can read a Task's files itself. The Control Plane returns locations only, never
+    file content: today a running Attempt's local checkout, when the caller is on the Worker Host's
+    own machine (contributing/client-file-access-design.md, slice 1).
+    """
+
+    @staticmethod
+    def Locate(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.TaskFiles/Locate',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.LocateTaskFilesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskFileLocations.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class AttemptTaskFilesStub:
+    """A Worker Host says where a running Attempt's local checkout is, once it is prepared.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.ReportLocation = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptTaskFiles/ReportLocation',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportTaskFilesLocationRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportTaskFilesLocationResponse.FromString,
+                _registered_method=True)
+
+
+class AttemptTaskFilesServicer:
+    """A Worker Host says where a running Attempt's local checkout is, once it is prepared.
+    """
+
+    def ReportLocation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_AttemptTaskFilesServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'ReportLocation': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportLocation,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportTaskFilesLocationRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportTaskFilesLocationResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.AttemptTaskFiles', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.AttemptTaskFiles', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class AttemptTaskFiles:
+    """A Worker Host says where a running Attempt's local checkout is, once it is prepared.
+    """
+
+    @staticmethod
+    def ReportLocation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptTaskFiles/ReportLocation',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportTaskFilesLocationRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportTaskFilesLocationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class NetworkLogsStub:
     """A Tag's network logs for its Tag details view.
     """

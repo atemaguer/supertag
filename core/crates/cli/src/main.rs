@@ -1915,6 +1915,8 @@ async fn state_owner(
         .add_service(plane.attempt_schedules_service())
         .add_service(plane.memories_service())
         .add_service(plane.network_logs_service())
+        .add_service(plane.task_files_service())
+        .add_service(plane.attempt_task_files_service())
         .add_service(plane.attempt_memory_service())
         .add_service(plane.attempt_mcp_effects_service())
         .add_service(plane.attempt_changed_paths_service())

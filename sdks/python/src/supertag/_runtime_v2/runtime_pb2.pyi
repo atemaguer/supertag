@@ -1372,7 +1372,7 @@ class ListHeldCheckpointsResponse(_message.Message):
     def __init__(self, sha256: _Optional[_Iterable[str]] = ..., next_after_sha256: _Optional[str] = ...) -> None: ...
 
 class ReportHostRequest(_message.Message):
-    __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids", "execution_profile", "disk_space", "labels", "harnesses")
+    __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids", "execution_profile", "disk_space", "labels", "harnesses", "machine_id")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     CAPACITY_FIELD_NUMBER: _ClassVar[int]
     AVAILABLE_SLOTS_FIELD_NUMBER: _ClassVar[int]
@@ -1384,6 +1384,7 @@ class ReportHostRequest(_message.Message):
     DISK_SPACE_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
     HARNESSES_FIELD_NUMBER: _ClassVar[int]
+    MACHINE_ID_FIELD_NUMBER: _ClassVar[int]
     sequence: int
     capacity: int
     available_slots: int
@@ -1395,7 +1396,8 @@ class ReportHostRequest(_message.Message):
     disk_space: HostDiskSpace
     labels: _containers.RepeatedScalarFieldContainer[str]
     harnesses: _containers.RepeatedCompositeFieldContainer[HostHarnessCapacity]
-    def __init__(self, sequence: _Optional[int] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., readiness: _Optional[_Union[HostReadiness, str]] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ..., harnesses: _Optional[_Iterable[_Union[HostHarnessCapacity, _Mapping]]] = ...) -> None: ...
+    machine_id: str
+    def __init__(self, sequence: _Optional[int] = ..., capacity: _Optional[int] = ..., available_slots: _Optional[int] = ..., readiness: _Optional[_Union[HostReadiness, str]] = ..., reason: _Optional[_Union[HostReadinessReason, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., disk_space: _Optional[_Union[HostDiskSpace, _Mapping]] = ..., labels: _Optional[_Iterable[str]] = ..., harnesses: _Optional[_Iterable[_Union[HostHarnessCapacity, _Mapping]]] = ..., machine_id: _Optional[str] = ...) -> None: ...
 
 class HostDiskSpace(_message.Message):
     __slots__ = ("free_bytes", "total_bytes")
@@ -2648,6 +2650,52 @@ class ReportNetworkLogRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., log: _Optional[_Union[NetworkLog, _Mapping]] = ...) -> None: ...
 
 class ReportNetworkLogResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class LocateTaskFilesRequest(_message.Message):
+    __slots__ = ("task_id", "machine_id")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    MACHINE_ID_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    machine_id: str
+    def __init__(self, task_id: _Optional[str] = ..., machine_id: _Optional[str] = ...) -> None: ...
+
+class TaskFileLocations(_message.Message):
+    __slots__ = ("locations",)
+    LOCATIONS_FIELD_NUMBER: _ClassVar[int]
+    locations: _containers.RepeatedCompositeFieldContainer[TaskFileLocation]
+    def __init__(self, locations: _Optional[_Iterable[_Union[TaskFileLocation, _Mapping]]] = ...) -> None: ...
+
+class TaskFileLocation(_message.Message):
+    __slots__ = ("id", "local_path", "live", "unavailable_reason", "host_id")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    LOCAL_PATH_FIELD_NUMBER: _ClassVar[int]
+    LIVE_FIELD_NUMBER: _ClassVar[int]
+    UNAVAILABLE_REASON_FIELD_NUMBER: _ClassVar[int]
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    local_path: TaskFilesLocalPath
+    live: bool
+    unavailable_reason: str
+    host_id: str
+    def __init__(self, id: _Optional[str] = ..., local_path: _Optional[_Union[TaskFilesLocalPath, _Mapping]] = ..., live: _Optional[bool] = ..., unavailable_reason: _Optional[str] = ..., host_id: _Optional[str] = ...) -> None: ...
+
+class TaskFilesLocalPath(_message.Message):
+    __slots__ = ("path",)
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    def __init__(self, path: _Optional[str] = ...) -> None: ...
+
+class ReportTaskFilesLocationRequest(_message.Message):
+    __slots__ = ("attempt", "local_path")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    LOCAL_PATH_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    local_path: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., local_path: _Optional[str] = ...) -> None: ...
+
+class ReportTaskFilesLocationResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 

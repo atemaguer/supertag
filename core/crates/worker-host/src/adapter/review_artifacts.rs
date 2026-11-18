@@ -165,6 +165,10 @@ mod tests {
                     channel.clone(),
                     headers.clone(),
                 ),
+                task_files: supertag_protocol::v2::attempt_task_files_client::AttemptTaskFilesClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
                 effects: supertag_protocol::v2::attempt_effects_client::AttemptEffectsClient::with_interceptor(
                     channel.clone(),
                     headers.clone(),

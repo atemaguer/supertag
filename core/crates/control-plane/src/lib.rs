@@ -52,6 +52,7 @@ mod surface_policy;
 mod tag_sessions;
 mod tags;
 mod task_artifact_inputs;
+mod task_files;
 mod teams;
 mod usage;
 mod volume_garbage;

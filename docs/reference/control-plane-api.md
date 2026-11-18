@@ -88,6 +88,7 @@ name in `supertag audit`.
 | `Transfers.DownloadWorkspaceArtifact` | A Workspace delivery's bundle for `supertag fetch`, relayed from the Worker Host that holds it |
 | `Workspaces`, `WorkspaceCredentials`, `WorkspaceLandings` | Remote Workspaces, their Workspace Credentials and checks, and where Session changes landed |
 | `WorkspaceVolumes` | Workspace data Volumes |
+| `TaskFiles` | `Locate`: where a Task's files can be read, as locations only, never file content. A running Task's local checkout is returned only to a caller whose `machine_id` matches its Worker Host's (both read `supertag/machine-id` in the per-user configuration directory); others get "Files on Worker Host NAME are unreachable from here" |
 | `Spend`, `Metrics` | Spend reports and an operational snapshot |
 
 The other services in the package serve Worker Hosts, Gateways, and harness adapters.

@@ -67,6 +67,7 @@ use supertag_protocol::{
         attempt_memory_client::AttemptMemoryClient,
         attempt_schedules_client::AttemptSchedulesClient,
         attempt_tag_sessions_client::AttemptTagSessionsClient,
+        attempt_task_files_client::AttemptTaskFilesClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workspace_mounts_client::AttemptWorkspaceMountsClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, host_relay_client::HostRelayClient,
@@ -181,6 +182,7 @@ pub(crate) struct CoordinationClients {
     memory: AttemptMemoryClient<InterceptedService<Channel, HostHeaders>>,
     mcp_effects: AttemptMcpEffectsClient<InterceptedService<Channel, HostHeaders>>,
     changed_paths: AttemptChangedPathsClient<InterceptedService<Channel, HostHeaders>>,
+    task_files: AttemptTaskFilesClient<InterceptedService<Channel, HostHeaders>>,
     effects: AttemptEffectsClient<InterceptedService<Channel, HostHeaders>>,
 }
 
@@ -521,6 +523,9 @@ pub async fn run(
         )
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        task_files: AttemptTaskFilesClient::with_interceptor(channel.clone(), headers.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
         effects: AttemptEffectsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
@@ -2274,6 +2279,20 @@ async fn run_assignment(
         ));
     }
     let has_inputs = !task.input_artifacts.is_empty();
+    // A client on this machine reads a local checkout itself; the Control Plane only learns
+    // where it is. A failed report only means the client can't find it.
+    if let Some(prepared) = workspace.as_ref().filter(|_| adapter_workspace.is_some()) {
+        let mut task_files = coordination.task_files.clone();
+        let location = supertag_protocol::v2::ReportTaskFilesLocationRequest {
+            attempt: Some(attempt.inspect()),
+            local_path: prepared.checkout.path.to_string_lossy().into_owned(),
+        };
+        if let Ok(request) = request(location, token) {
+            tokio::spawn(async move {
+                let _ = task_files.report_location(request).await;
+            });
+        }
+    }
     // Overlap warnings compare the changed paths of local checkouts only.
     let stop_reports = shutdown.child_token();
     let reports = workspace

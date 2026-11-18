@@ -9,7 +9,7 @@ use std::{
     fs::{self, File, OpenOptions, TryLockError},
     io::{self, Read as _},
     net::SocketAddr,
-    os::unix::fs::{MetadataExt as _, OpenOptionsExt as _},
+    os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _},
     path::{Path, PathBuf},
 };
 
@@ -239,10 +239,82 @@ pub fn loopback_address(value: &str) -> Result<SocketAddr> {
     Ok(address)
 }
 
+/// The per-user configuration directory used by Go's `os.UserConfigDir` and Tauri's
+/// `app_config_dir` on this platform.
+fn user_config_directory() -> Result<PathBuf> {
+    let home = std::env::var_os("HOME").filter(|home| !home.is_empty());
+    if cfg!(target_os = "macos") {
+        let home = home.context("HOME is required to find this machine's identifier")?;
+        return Ok(PathBuf::from(home).join("Library/Application Support"));
+    }
+    if let Some(directory) = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    {
+        return Ok(directory);
+    }
+    let home =
+        home.context("HOME or XDG_CONFIG_HOME is required to find this machine's identifier")?;
+    Ok(PathBuf::from(home).join(".config"))
+}
+
+/// This machine and user's random identifier, created on first use in the per-user
+/// configuration directory (`supertag/machine-id`). Every state directory shares it, so a Worker
+/// Host and a client on the same machine present the same one. It proves nothing to anyone else:
+/// a Control Plane only uses it to tell a client that a host's files are on the client's disk.
+pub fn machine_id() -> Result<String> {
+    let directory = user_config_directory()?.join("supertag");
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&directory)
+        .context("create the per-user SuperTag configuration directory")?;
+    let path = directory.join("machine-id");
+    let valid =
+        |id: &str| id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    if let Ok(existing) = read_private(&path) {
+        let existing = existing.trim().to_owned();
+        ensure!(
+            valid(&existing),
+            "{} is not a machine identifier",
+            path.display()
+        );
+        return Ok(existing);
+    }
+    let mut random = [0u8; 16];
+    File::open("/dev/urandom")
+        .and_then(|mut source| std::io::Read::read_exact(&mut source, &mut random))
+        .context("read randomness for the machine identifier")?;
+    let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            std::io::Write::write_all(&mut file, format!("{id}\n").as_bytes())?;
+            Ok(id)
+        }
+        // Another process created it first: use theirs.
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let existing = read_private(&path)?.trim().to_owned();
+            ensure!(
+                valid(&existing),
+                "{} is not a machine identifier",
+                path.display()
+            );
+            Ok(existing)
+        }
+        Err(error) => Err(error).context("create this machine's identifier"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+    use std::os::unix::fs::PermissionsExt as _;
 
     // packages/store/paths.test.ts
     #[test]

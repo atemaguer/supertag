@@ -17,6 +17,11 @@ within the pre-1.0 compatibility policy described in
 - A Session checkpoint kept on a Tag's Volume is deleted from it once the Control Plane drops
   the checkpoint: by the Control Plane for an S3 Volume, whose credential now also needs
   `DeleteObject`, and every 10 minutes by a Worker Host that maps a file Volume.
+- The desktop app shows a running Task's files under **Files** in its activity panel when the Task
+  runs on a Worker Host on the same machine: folders, read-only text files, and Show in Finder;
+  binary files are listed only. The app reads them from disk after `TaskFiles.Locate`, which returns
+  only where the files are; a Task on another machine says "Files on Worker Host NAME are
+  unreachable from here".
 - A Tag can name a Volume (`supertag tag put --volume`, `spec.volume`). Its Tasks' captures go
   there, written by the Worker Host itself: S3 through 15-minute presigned uploads bound to the
   file's length and SHA-256 and checked with a HEAD, file Volumes only on hosts that map them

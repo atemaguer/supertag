@@ -139,6 +139,14 @@ impl Store {
             .bind(i64::from(input.reason)).bind(i64::from(input.harness_kind)).bind(workspaces).bind(now).bind(expires)
             .bind(execution_profile).bind(disk.map(|disk| disk.0)).bind(disk.map(|disk| disk.1)).bind(labels).bind(harnesses)
             .execute(&mut *transaction).await?;
+        // The machine a client must be on to read this host's Task files itself.
+        let machine =
+            Some(input.machine_id.as_str()).filter(|id| crate::task_files::valid_machine_id(id));
+        sqlx::query("UPDATE supertag_v2_host_readiness SET machine_id=$1 WHERE host_id=$2")
+            .bind(machine)
+            .bind(host.id())
+            .execute(&mut *transaction)
+            .await?;
         // When each lapsed login was first reported, so the Inbox item keeps its place.
         let lapsed = normalized_profile
             .as_ref()

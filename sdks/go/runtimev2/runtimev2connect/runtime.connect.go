@@ -73,6 +73,10 @@ const (
 	HarnessMailboxName = "supertag.runtime.v2.HarnessMailbox"
 	// HarnessWorkSessionsName is the fully-qualified name of the HarnessWorkSessions service.
 	HarnessWorkSessionsName = "supertag.runtime.v2.HarnessWorkSessions"
+	// TaskFilesName is the fully-qualified name of the TaskFiles service.
+	TaskFilesName = "supertag.runtime.v2.TaskFiles"
+	// AttemptTaskFilesName is the fully-qualified name of the AttemptTaskFiles service.
+	AttemptTaskFilesName = "supertag.runtime.v2.AttemptTaskFiles"
 	// NetworkLogsName is the fully-qualified name of the NetworkLogs service.
 	NetworkLogsName = "supertag.runtime.v2.NetworkLogs"
 	// AttemptMcpEffectsName is the fully-qualified name of the AttemptMcpEffects service.
@@ -485,6 +489,11 @@ const (
 	// HarnessWorkSessionsCloseProcedure is the fully-qualified name of the HarnessWorkSessions's Close
 	// RPC.
 	HarnessWorkSessionsCloseProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Close"
+	// TaskFilesLocateProcedure is the fully-qualified name of the TaskFiles's Locate RPC.
+	TaskFilesLocateProcedure = "/supertag.runtime.v2.TaskFiles/Locate"
+	// AttemptTaskFilesReportLocationProcedure is the fully-qualified name of the AttemptTaskFiles's
+	// ReportLocation RPC.
+	AttemptTaskFilesReportLocationProcedure = "/supertag.runtime.v2.AttemptTaskFiles/ReportLocation"
 	// NetworkLogsListProcedure is the fully-qualified name of the NetworkLogs's List RPC.
 	NetworkLogsListProcedure = "/supertag.runtime.v2.NetworkLogs/List"
 	// AttemptMcpEffectsReserveProcedure is the fully-qualified name of the AttemptMcpEffects's Reserve
@@ -5776,6 +5785,146 @@ func (UnimplementedHarnessWorkSessionsHandler) Ask(context.Context, *connect.Req
 
 func (UnimplementedHarnessWorkSessionsHandler) Close(context.Context, *connect.Request[runtimev2.HarnessCloseWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkSessions.Close is not implemented"))
+}
+
+// TaskFilesClient is a client for the supertag.runtime.v2.TaskFiles service.
+type TaskFilesClient interface {
+	Locate(context.Context, *connect.Request[runtimev2.LocateTaskFilesRequest]) (*connect.Response[runtimev2.TaskFileLocations], error)
+}
+
+// NewTaskFilesClient constructs a client for the supertag.runtime.v2.TaskFiles service. By default,
+// it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and
+// sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC()
+// or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewTaskFilesClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) TaskFilesClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	taskFilesMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("TaskFiles").Methods()
+	return &taskFilesClient{
+		locate: connect.NewClient[runtimev2.LocateTaskFilesRequest, runtimev2.TaskFileLocations](
+			httpClient,
+			baseURL+TaskFilesLocateProcedure,
+			connect.WithSchema(taskFilesMethods.ByName("Locate")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// taskFilesClient implements TaskFilesClient.
+type taskFilesClient struct {
+	locate *connect.Client[runtimev2.LocateTaskFilesRequest, runtimev2.TaskFileLocations]
+}
+
+// Locate calls supertag.runtime.v2.TaskFiles.Locate.
+func (c *taskFilesClient) Locate(ctx context.Context, req *connect.Request[runtimev2.LocateTaskFilesRequest]) (*connect.Response[runtimev2.TaskFileLocations], error) {
+	return c.locate.CallUnary(ctx, req)
+}
+
+// TaskFilesHandler is an implementation of the supertag.runtime.v2.TaskFiles service.
+type TaskFilesHandler interface {
+	Locate(context.Context, *connect.Request[runtimev2.LocateTaskFilesRequest]) (*connect.Response[runtimev2.TaskFileLocations], error)
+}
+
+// NewTaskFilesHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewTaskFilesHandler(svc TaskFilesHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	taskFilesMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("TaskFiles").Methods()
+	taskFilesLocateHandler := connect.NewUnaryHandler(
+		TaskFilesLocateProcedure,
+		svc.Locate,
+		connect.WithSchema(taskFilesMethods.ByName("Locate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.TaskFiles/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case TaskFilesLocateProcedure:
+			taskFilesLocateHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedTaskFilesHandler returns CodeUnimplemented from all methods.
+type UnimplementedTaskFilesHandler struct{}
+
+func (UnimplementedTaskFilesHandler) Locate(context.Context, *connect.Request[runtimev2.LocateTaskFilesRequest]) (*connect.Response[runtimev2.TaskFileLocations], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.TaskFiles.Locate is not implemented"))
+}
+
+// AttemptTaskFilesClient is a client for the supertag.runtime.v2.AttemptTaskFiles service.
+type AttemptTaskFilesClient interface {
+	ReportLocation(context.Context, *connect.Request[runtimev2.ReportTaskFilesLocationRequest]) (*connect.Response[runtimev2.ReportTaskFilesLocationResponse], error)
+}
+
+// NewAttemptTaskFilesClient constructs a client for the supertag.runtime.v2.AttemptTaskFiles
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewAttemptTaskFilesClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) AttemptTaskFilesClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	attemptTaskFilesMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptTaskFiles").Methods()
+	return &attemptTaskFilesClient{
+		reportLocation: connect.NewClient[runtimev2.ReportTaskFilesLocationRequest, runtimev2.ReportTaskFilesLocationResponse](
+			httpClient,
+			baseURL+AttemptTaskFilesReportLocationProcedure,
+			connect.WithSchema(attemptTaskFilesMethods.ByName("ReportLocation")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// attemptTaskFilesClient implements AttemptTaskFilesClient.
+type attemptTaskFilesClient struct {
+	reportLocation *connect.Client[runtimev2.ReportTaskFilesLocationRequest, runtimev2.ReportTaskFilesLocationResponse]
+}
+
+// ReportLocation calls supertag.runtime.v2.AttemptTaskFiles.ReportLocation.
+func (c *attemptTaskFilesClient) ReportLocation(ctx context.Context, req *connect.Request[runtimev2.ReportTaskFilesLocationRequest]) (*connect.Response[runtimev2.ReportTaskFilesLocationResponse], error) {
+	return c.reportLocation.CallUnary(ctx, req)
+}
+
+// AttemptTaskFilesHandler is an implementation of the supertag.runtime.v2.AttemptTaskFiles service.
+type AttemptTaskFilesHandler interface {
+	ReportLocation(context.Context, *connect.Request[runtimev2.ReportTaskFilesLocationRequest]) (*connect.Response[runtimev2.ReportTaskFilesLocationResponse], error)
+}
+
+// NewAttemptTaskFilesHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewAttemptTaskFilesHandler(svc AttemptTaskFilesHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	attemptTaskFilesMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptTaskFiles").Methods()
+	attemptTaskFilesReportLocationHandler := connect.NewUnaryHandler(
+		AttemptTaskFilesReportLocationProcedure,
+		svc.ReportLocation,
+		connect.WithSchema(attemptTaskFilesMethods.ByName("ReportLocation")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.AttemptTaskFiles/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case AttemptTaskFilesReportLocationProcedure:
+			attemptTaskFilesReportLocationHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedAttemptTaskFilesHandler returns CodeUnimplemented from all methods.
+type UnimplementedAttemptTaskFilesHandler struct{}
+
+func (UnimplementedAttemptTaskFilesHandler) ReportLocation(context.Context, *connect.Request[runtimev2.ReportTaskFilesLocationRequest]) (*connect.Response[runtimev2.ReportTaskFilesLocationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptTaskFiles.ReportLocation is not implemented"))
 }
 
 // NetworkLogsClient is a client for the supertag.runtime.v2.NetworkLogs service.

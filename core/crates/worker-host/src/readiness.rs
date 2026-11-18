@@ -77,8 +77,17 @@ impl State {
             disk_space: disk.sample(),
             labels: labels.to_vec(),
             harnesses: vec![],
+            machine_id: machine_id(),
         }
     }
+}
+
+/// This machine and user's identifier, read once. Empty when it can't be read or created, so
+/// clients simply can't read this host's Task files from its disk.
+pub(crate) fn machine_id() -> String {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| supertag_local_state::machine_id().unwrap_or_default())
+        .clone()
 }
 
 /// Receives a supervised lane's state changes in place of a direct presence report.
