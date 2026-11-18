@@ -666,8 +666,13 @@ async fn start_child(
 
 /// The last error a service logged, without its timestamp.
 fn last_error(log: &Path) -> Option<String> {
+    last_error_since(log, 0)
+}
+
+/// The last `Error: ` line written to `log` after its first `offset` bytes.
+fn last_error_since(log: &Path, offset: u64) -> Option<String> {
     let text = fs::read(log).ok()?;
-    let text = String::from_utf8_lossy(&text);
+    let text = String::from_utf8_lossy(text.get(usize::try_from(offset).ok()?..)?);
     text.lines().rev().take(50).find_map(|line| {
         line.split_once("Error: ")
             .map(|(_, error)| error.to_owned())
@@ -1238,6 +1243,9 @@ impl ManagedHost {
         // The lane presents the Host credential; the guardian clears it for harness children.
         host.env("SUPERTAG_HOST_TOKEN", token);
         let name = format!("Worker Host {} lane {index}", self.definition.name);
+        let log = lifecycle::log_path(&self.logs.state, &self.definition.name);
+        // Where this lane's output starts in the Host's log, so a failure names its own error.
+        let logged_before = fs::metadata(&log).map_or(0, |metadata| metadata.len());
         let mut process = host.spawn().with_context(|| format!("start {name}"))?;
         // Every lane of a Host writes to the Host's one log.
         capture_log(&mut process, &self.logs, &self.definition.name)?;
@@ -1292,11 +1300,19 @@ impl ManagedHost {
             // A stopped lane offers no capacity until its replacement reports.
             states.set(index, LaneState::Pending);
         });
-        time::timeout(START_TIMEOUT, started)
-            .await
-            .with_context(|| format!("{name} did not become ready"))?
-            .with_context(|| format!("{name} did not report readiness"))?;
-        Ok(())
+        match time::timeout(START_TIMEOUT, started).await {
+            Err(_) => bail!("{name} did not become ready"),
+            Ok(Err(_)) => {
+                // The lane exited: say why, from the error it logged, such as a harness it can't
+                // start. The copy into the log may lag the exit by a moment.
+                time::sleep(Duration::from_millis(200)).await;
+                let reason = last_error_since(&log, logged_before)
+                    .map(|reason| format!(": {reason}"))
+                    .unwrap_or_default();
+                bail!("{name} did not report readiness{reason}")
+            }
+            Ok(Ok(())) => Ok(()),
+        }
     }
 
     /// After a lane exits, report presence once more and wait for the answer, so a replaced or
@@ -2072,6 +2088,25 @@ async fn undrain(directory: &Path, endpoint: &str, operator: &str) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lane_failure_names_only_the_error_it_logged() {
+        let directory = tempfile::tempdir().unwrap();
+        let log = directory.path().join("host.log");
+        fs::write(&log, "host | Error: an earlier run's failure\n").unwrap();
+        let before = fs::metadata(&log).unwrap().len();
+        assert_eq!(last_error_since(&log, before), None);
+        let mut file = OpenOptions::new().append(true).open(&log).unwrap();
+        writeln!(file, "host | 2026-11-18T14:40:26Z Error: packaged Node bridge interpreter is unavailable on PATH").unwrap();
+        assert_eq!(
+            last_error_since(&log, before).as_deref(),
+            Some("packaged Node bridge interpreter is unavailable on PATH")
+        );
+        assert_eq!(
+            last_error(&log).as_deref(),
+            Some("packaged Node bridge interpreter is unavailable on PATH")
+        );
+    }
     #[test]
     fn the_local_gateway_comes_back_on_its_last_port_when_free() {
         let temp = tempfile::tempdir().unwrap();
