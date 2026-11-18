@@ -53,7 +53,7 @@ to find Claude Code and check its sign-in.
 
 | Harness | Command on PATH | Minimum version | Sign-in |
 | --- | --- | --- | --- |
-| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | None checked. Install with `npm install -g @anthropic-ai/claude-code`. | Run `claude` and follow its sign-in prompt. |
+| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | None checked. Install with `curl -fsSL https://claude.ai/install.sh \| bash`. | Run `claude` and follow its sign-in prompt. |
 | [Codex](https://developers.openai.com/codex/cli/) | `codex` | 0.163.0. Install or upgrade with `npm install -g @openai/codex`. | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
 | [Cursor](https://cursor.com/docs/sdk/typescript.md) | None | None | Generate an API key and set `CURSOR_API_KEY` for the host service; see [Cursor setup](#cursor-setup-and-limits). Signing in to the Cursor app or `cursor-agent` is not enough. |
 | [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the Worker Host, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |

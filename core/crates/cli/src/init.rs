@@ -410,7 +410,10 @@ pub async fn init(args: InitArgs) -> Result<()> {
     let installed = installed_harnesses();
     ensure!(
         !installed.is_empty(),
-        "SuperTag runs Tasks with an installed coding agent, and none was found. Install Claude Code or Codex:\n  Claude Code: npm install -g @anthropic-ai/claude-code\n  Codex: npm install -g @openai/codex\nSign in to it, then run supertag init again. (OpenCode, with opencode on PATH, and Cursor, with CURSOR_API_KEY set, also work.)"
+        "SuperTag runs Tasks with an installed coding agent, and none was found. Install Claude Code or Codex:
+  Claude Code: curl -fsSL https://claude.ai/install.sh | bash
+  Codex: npm install -g @openai/codex
+Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, and Cursor, with CURSOR_API_KEY set, also work.)"
     );
     if args.yes && installed == [Found::Opencode] {
         bail!(
