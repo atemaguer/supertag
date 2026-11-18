@@ -10,6 +10,15 @@
 //! The unprompted turns that had someone to reach are counted per Tag: each posted reply, whether
 //! a person read it in their conversation or answered it in the same Session within a day, and
 //! each check that stayed quiet. `describe tag` and the next Schedule fire's prompt show them.
+//!
+//! Pacing: at most one unprompted post reaches a person's conversation or a surface thread in
+//! [`PACE_MS`]. A later one is held: it stays out of the conversation, posts no reply, and counts
+//! as nothing unread. When the window ends, the held posts go out together: in a conversation
+//! each takes its place as the newest message, and in a surface thread they post as one reply,
+//! the newest in full under a list of the earlier ones' first lines. A person's message to the
+//! Tag there releases them at once, before the Tag answers. Only Schedule fires are paced in a
+//! conversation, since clients show no other unprompted turn before it finishes; on a surface
+//! every unprompted turn is. A reported Objective status or a wait for approvals never waits.
 use sqlx::{Any, Transaction};
 use supertag_protocol::v2::{AttentionSummary, FinishTaskRequest, ObjectiveSignal, Task};
 
@@ -20,6 +29,11 @@ pub(crate) const WINDOW_DAYS: u32 = 30;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 /// Prior fires of one Schedule its next prompt counts.
 const SCHEDULE_FIRES: i64 = 10;
+/// The least time between two unprompted posts to one person or thread.
+pub(crate) const PACE_MS: i64 = 30 * 60 * 1000;
+/// Held posts that have not gone out yet; `h` is the conversation history row.
+pub(crate) const NOT_HELD: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp
+    WHERE hp.task_id=h.task_id AND hp.held_until_ms IS NOT NULL AND hp.released_at_ms IS NULL)";
 
 /// Whether a finished turn's reply is delivered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,24 +136,50 @@ pub(crate) async fn quiet_finish_in(
 }
 
 /// Called once when a running turn finishes. A succeeded unprompted turn with someone to reach is
-/// counted, posted or quiet; a person's turn answers the Session's recent unprompted messages.
-pub(crate) async fn finish_in(tx: &mut Transaction<'_, Any>, task: &Task, now: i64) -> Result<()> {
+/// counted, posted, held, or quiet; a person's turn answers the Session's recent unprompted
+/// messages.
+pub(crate) async fn finish_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    input: &FinishTaskRequest,
+    now: i64,
+) -> Result<()> {
     match turn_in(tx, task).await? {
         Turn::Unprompted if task.state() == supertag_protocol::v2::TaskState::Succeeded => {
-            let conversation_order: Option<i64> = sqlx::query_scalar(
-                "SELECT accepted_order FROM supertag_v2_conversation_messages WHERE task_id=$1",
+            let conversation: Option<(i64, String)> = sqlx::query_as(
+                "SELECT accepted_order,principal FROM supertag_v2_conversation_messages WHERE task_id=$1",
             )
             .bind(&task.task_id)
             .fetch_optional(&mut **tx)
             .await?;
-            if conversation_order.is_none()
-                && crate::store::reply_route_in(tx, task).await?.is_none()
-            {
-                return Ok(());
-            }
-            sqlx::query("INSERT INTO supertag_v2_proactive_posts (task_id,tag_id,session_id,conversation_order,posted_at_ms,quiet) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(task_id) DO NOTHING")
+            let audience = match &conversation {
+                Some((_, principal)) => format!("conversation:{principal}"),
+                None => match crate::store::reply_route_in(tx, task).await? {
+                    Some(route) => thread_audience(&route)?,
+                    None => return Ok(()),
+                },
+            };
+            let fired: Option<i64> =
+                sqlx::query_scalar("SELECT 1 FROM supertag_v2_schedule_fires WHERE task_id=$1")
+                    .bind(&task.task_id)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            // A conversation shows only a Schedule's turn after it finishes, so only that one
+            // can wait there; a reported change or a wait for approvals always goes out.
+            let paced = !task.quiet
+                && (fired.is_some() || conversation.is_none())
+                && input.objective_signal == ObjectiveSignal::Progress as i32
+                && input.waiting_approval_ids.is_empty();
+            let held_until = if paced {
+                held_until_in(tx, &task.tag_id, &audience, now).await?
+            } else {
+                None
+            };
+            let delivered = (!task.quiet && held_until.is_none()).then_some(now);
+            sqlx::query("INSERT INTO supertag_v2_proactive_posts (task_id,tag_id,session_id,conversation_order,posted_at_ms,quiet,audience,held_until_ms,delivered_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(task_id) DO NOTHING")
                 .bind(&task.task_id).bind(&task.tag_id).bind(&task.session_id)
-                .bind(conversation_order).bind(now).bind(i64::from(task.quiet))
+                .bind(conversation.map(|(order, _)| order)).bind(now).bind(i64::from(task.quiet))
+                .bind(&audience).bind(held_until).bind(delivered)
                 .execute(&mut **tx).await?;
         }
         // A person's turn finishing answers what the Tag posted in its Session the day before.
@@ -152,6 +192,197 @@ pub(crate) async fn finish_in(tx: &mut Transaction<'_, Any>, task: &Task, now: i
         _ => {}
     }
     Ok(())
+}
+
+/// A surface thread as a pacing audience.
+fn thread_audience(route: &sqlx::any::AnyRow) -> Result<String> {
+    use sqlx::Row;
+    Ok(format!(
+        "thread:{} {} {}",
+        route.try_get::<String, _>("account_id")?,
+        route.try_get::<String, _>("conversation_id")?,
+        route
+            .try_get::<Option<String>, _>("thread_id")?
+            .unwrap_or_default()
+    ))
+}
+
+/// Until when a new unprompted post to `audience` waits: with the posts already waiting there, or
+/// until [`PACE_MS`] after the last one delivered; `None` when it may go out now.
+async fn held_until_in(
+    tx: &mut Transaction<'_, Any>,
+    tag: &str,
+    audience: &str,
+    now: i64,
+) -> Result<Option<i64>> {
+    let waiting: Option<i64> = sqlx::query_scalar(
+        "SELECT MIN(held_until_ms) FROM supertag_v2_proactive_posts
+         WHERE tag_id=$1 AND audience=$2 AND held_until_ms IS NOT NULL AND released_at_ms IS NULL",
+    )
+    .bind(tag)
+    .bind(audience)
+    .fetch_one(&mut **tx)
+    .await?;
+    if waiting.is_some() {
+        return Ok(waiting);
+    }
+    let last: Option<i64> = sqlx::query_scalar(
+        "SELECT MAX(delivered_at_ms) FROM supertag_v2_proactive_posts
+         WHERE tag_id=$1 AND audience=$2 AND quiet=0",
+    )
+    .bind(tag)
+    .bind(audience)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(last.map(|last| last + PACE_MS).filter(|until| *until > now))
+}
+
+/// Whether a finished turn's post is waiting for its window.
+pub(crate) async fn held_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<bool> {
+    Ok(sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM supertag_v2_proactive_posts WHERE task_id=$1 AND held_until_ms IS NOT NULL AND released_at_ms IS NULL",
+    )
+    .bind(task_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .is_some())
+}
+
+/// Delivers the posts waiting for `audience`, oldest first. In a conversation each becomes the
+/// newest message; in a surface thread they post as one reply. Returns whether any went out.
+pub(crate) async fn release_in(
+    tx: &mut Transaction<'_, Any>,
+    tag: &str,
+    audience: &str,
+    now: i64,
+) -> Result<bool> {
+    let held: Vec<String> = sqlx::query_scalar(
+        "SELECT task_id FROM supertag_v2_proactive_posts
+         WHERE tag_id=$1 AND audience=$2 AND held_until_ms IS NOT NULL AND released_at_ms IS NULL
+         ORDER BY posted_at_ms,task_id",
+    )
+    .bind(tag)
+    .bind(audience)
+    .fetch_all(&mut **tx)
+    .await?;
+    let Some(newest) = held.last() else {
+        return Ok(false);
+    };
+    sqlx::query("UPDATE supertag_v2_proactive_posts SET released_at_ms=$1, delivered_at_ms=$1 WHERE tag_id=$2 AND audience=$3 AND held_until_ms IS NOT NULL AND released_at_ms IS NULL")
+        .bind(now).bind(tag).bind(audience)
+        .execute(&mut **tx).await?;
+    if audience.starts_with("conversation:") {
+        for task_id in &held {
+            // It reaches the conversation now, so it takes the newest place and counts unread.
+            let order = crate::store::next_order(tx).await?;
+            sqlx::query(
+                "UPDATE supertag_v2_conversation_messages SET accepted_order=$1 WHERE task_id=$2",
+            )
+            .bind(order)
+            .bind(task_id)
+            .execute(&mut **tx)
+            .await?;
+            sqlx::query(
+                "UPDATE supertag_v2_proactive_posts SET conversation_order=$1 WHERE task_id=$2",
+            )
+            .bind(order)
+            .bind(task_id)
+            .execute(&mut **tx)
+            .await?;
+            sqlx::query("INSERT INTO supertag_v2_watch_append SELECT 3, 1, task_id, tag_id, session_id, objective_id, '', conversation, owner FROM supertag_v2_watch_tasks WHERE task_id=$1")
+                .bind(task_id).execute(&mut **tx).await?;
+        }
+    } else {
+        let mut earlier = Vec::with_capacity(held.len() - 1);
+        for task_id in &held[..held.len() - 1] {
+            let task = crate::store::task_in(tx, task_id).await?;
+            earlier.push(first_line(task.result.as_deref().unwrap_or_default()));
+        }
+        let task = crate::store::task_in(tx, newest).await?;
+        let name: Option<String> = sqlx::query_scalar(
+            "SELECT COALESCE(name, tag_id) FROM supertag_v2_tags WHERE tag_id=$1",
+        )
+        .bind(tag)
+        .fetch_optional(&mut **tx)
+        .await?;
+        let text = released_text(
+            name.as_deref().unwrap_or(tag),
+            &earlier,
+            task.result.as_deref().unwrap_or_default(),
+        );
+        let order = crate::store::next_order(tx).await?;
+        crate::store::enqueue_reply_text(tx, &task, order, &text).await?;
+    }
+    Ok(true)
+}
+
+/// Releases the posts waiting for a person who just wrote to the Tag in a surface thread, so
+/// they arrive before the Tag's answer. Called when the person's turn is claimed.
+pub(crate) async fn claimed_in(tx: &mut Transaction<'_, Any>, task: &Task, now: i64) -> Result<()> {
+    let waiting: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM supertag_v2_proactive_posts WHERE tag_id=$1 AND held_until_ms IS NOT NULL AND released_at_ms IS NULL LIMIT 1",
+    )
+    .bind(&task.tag_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if waiting.is_none() || turn_in(tx, task).await? != Turn::Person {
+        return Ok(());
+    }
+    if let Some(route) = crate::store::reply_route_in(tx, task).await? {
+        release_in(tx, &task.tag_id, &thread_audience(&route)?, now).await?;
+    }
+    Ok(())
+}
+
+/// Releases every group whose window has ended. Returns how many groups went out.
+pub(crate) async fn release_due_in(tx: &mut Transaction<'_, Any>, now: i64) -> Result<u64> {
+    let due: Vec<(String, String)> = sqlx::query_as(
+        "SELECT DISTINCT tag_id,audience FROM supertag_v2_proactive_posts
+         WHERE held_until_ms IS NOT NULL AND held_until_ms<=$1 AND released_at_ms IS NULL",
+    )
+    .bind(now)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut released = 0;
+    for (tag, audience) in due {
+        if release_in(tx, &tag, &audience, now).await? {
+            released += 1;
+        }
+    }
+    Ok(released)
+}
+
+fn first_line(text: &str) -> String {
+    let line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_default()
+        .trim();
+    let mut short: String = line.chars().take(200).collect();
+    if short.len() < line.len() {
+        short.push('…');
+    }
+    short
+}
+
+/// One reply for posts released together: the newest in full under the earlier ones' first lines.
+fn released_text(tag: &str, earlier: &[String], newest: &str) -> String {
+    if earlier.is_empty() {
+        return newest.to_owned();
+    }
+    let count = earlier.len();
+    let mut text = format!(
+        "{count} earlier update{} from {tag}:\n",
+        if count == 1 { "" } else { "s" }
+    );
+    for line in earlier {
+        text.push_str("• ");
+        text.push_str(line);
+        text.push('\n');
+    }
+    text.push('\n');
+    text.push_str(newest);
+    text
 }
 
 /// A person read their conversation with a Tag up to `order`.
@@ -242,4 +473,26 @@ pub(crate) async fn schedule_line_in(
         counts.answered,
         counts.quiet,
     )))
+}
+
+impl crate::Store {
+    /// Delivers the held posts whose window has ended.
+    pub async fn sweep_attention(&self) -> Result<u64> {
+        let now = self.execution_now_ms();
+        // Most passes find nothing to do; only take the write lock when they might.
+        let due: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM supertag_v2_proactive_posts WHERE held_until_ms IS NOT NULL AND held_until_ms<=$1 AND released_at_ms IS NULL LIMIT 1",
+        )
+        .bind(now)
+        .fetch_optional(&self.pool)
+        .await?;
+        if due.is_none() {
+            return Ok(0);
+        }
+        let _wake = self.wake_follows();
+        let (mut tx, _) = self.write().await?;
+        let released = release_due_in(&mut tx, now).await?;
+        tx.commit().await?;
+        Ok(released)
+    }
 }

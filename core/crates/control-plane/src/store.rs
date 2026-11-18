@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 98;
+        const SCHEMA_VERSION: i64 = 99;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -297,6 +297,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0096_schedule_watch.sql"),
                 include_str!("../migrations/sqlite/0097_git_delivery.sql"),
                 include_str!("../migrations/sqlite/0098_workspace_review_sessions.sql"),
+                include_str!("../migrations/sqlite/0099_attention_pacing.sql"),
             ]
         } else {
             [
@@ -400,6 +401,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0096_schedule_watch.sql"),
                 include_str!("../migrations/postgresql/0097_git_delivery.sql"),
                 include_str!("../migrations/postgresql/0098_workspace_review_sessions.sql"),
+                include_str!("../migrations/postgresql/0099_attention_pacing.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1112,6 +1114,8 @@ impl Store {
         let mut task = task_in(&mut transaction, &id).await?;
         crate::workspace_landings::with_author_in(&mut transaction, &mut task).await?;
         let joined = crate::inputs::join_at_claim_in(&mut transaction, &task, &attempt).await?;
+        // Posts held for this person's thread arrive before the Tag answers them.
+        crate::attention::claimed_in(&mut transaction, &task, now).await?;
         crate::reply_progress::claimed_in(&mut transaction, &task, !joined.is_empty()).await?;
         sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope, claimed_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
             .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).bind(gateway_workspace_scope).bind(now).execute(&mut *transaction).await?;
@@ -1423,7 +1427,7 @@ impl Store {
             crate::work_sessions::questions::finish_in(&mut transaction, &task, input, now).await?;
             crate::schedules::finish_in(&mut transaction, &task, now).await?;
             crate::memories::finish_in(&mut transaction, &task, now).await?;
-            crate::attention::finish_in(&mut transaction, &task, now).await?;
+            crate::attention::finish_in(&mut transaction, &task, input, now).await?;
         }
         if state == TaskState::Running && task.state() == TaskState::Succeeded {
             sqlx::query("UPDATE supertag_v2_tasks SET completed_at_ms=$1 WHERE task_id=$2")
@@ -2254,16 +2258,28 @@ pub(crate) async fn enqueue_reply(
     task: &Task,
     order: i64,
 ) -> Result<()> {
-    if crate::attention::attention(task) == crate::attention::Attention::Quiet {
+    if crate::attention::attention(task) == crate::attention::Attention::Quiet
+        || crate::attention::held_in(transaction, &task.task_id).await?
+    {
         return Ok(());
     }
-    let Some(route) = reply_route_in(transaction, task).await? else {
-        return Ok(());
-    };
     let result = task
         .result
         .as_deref()
         .ok_or_else(|| StoreError::FailedPrecondition("succeeded Task has no result".into()))?;
+    enqueue_reply_text(transaction, task, order, result).await
+}
+
+/// Queues `result` as the Task's reply in its surface thread, if it has one.
+pub(crate) async fn enqueue_reply_text(
+    transaction: &mut Transaction<'_, Any>,
+    task: &Task,
+    order: i64,
+    result: &str,
+) -> Result<()> {
+    let Some(route) = reply_route_in(transaction, task).await? else {
+        return Ok(());
+    };
     sqlx::query("INSERT INTO supertag_v2_replies (reply_id, task_id, account_id, conversation_id, thread_id, text, state, ready_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(task_id) DO NOTHING")
         .bind(Uuid::new_v4().to_string()).bind(&task.task_id).bind(route.try_get::<String, _>("account_id")?)
         .bind(route.try_get::<String, _>("conversation_id")?).bind(route.try_get::<Option<String>, _>("thread_id")?)

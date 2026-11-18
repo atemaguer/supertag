@@ -708,6 +708,15 @@ UI under **Activity** in its command palette.
 
 Nothing throttles a Tag on these numbers yet.
 
+**Pacing.** At most one unprompted message reaches a person's conversation or a surface thread in
+30 minutes. A later one is held: it posts nothing, stays out of the conversation, and counts as
+nothing unread. When the 30 minutes end, the held messages go out together. In a conversation each
+appears as the newest message. In a surface thread they post as one reply: the newest in full,
+under a list of the earlier ones' first lines ("2 earlier updates from lead:"). A message from the
+person releases them at once, before the Tag answers. In a conversation only a Schedule's turn is
+held, since the desktop app and the terminal UI show any other unprompted turn while it runs. A
+reported Objective status or a wait for approvals is never held.
+
 ### Identity and preconditions
 
 - Coordination calls are authenticated by a credential scoped to the active Task Attempt. The

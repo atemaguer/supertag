@@ -11,6 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Unprompted messages are paced: at most one reaches a person's conversation or a surface thread
+  in 30 minutes. Later ones wait and go out together when the window ends, or at once when the
+  person writes; in a surface thread they post as one reply listing the earlier updates.
 - GitHub review landings: a Workspace with `land: {review: {base}}` opens a draft pull request
   for each work Session and updates it on later Tasks; merging it closes the work Session
   (`pull request merged`). `supertag workspace credential add NAME --github-app` stores a GitHub

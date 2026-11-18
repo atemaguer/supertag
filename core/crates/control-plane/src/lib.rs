@@ -217,6 +217,7 @@ impl ControlPlane {
         self.store.sweep_replies().await?;
         self.store.sweep_ephemeral_hosts().await?;
         self.store.sweep_schedules().await?;
+        self.store.sweep_attention().await?;
         if self.slow_sweep_due() {
             self.store.sweep_checkpoints().await?;
             self.store.sweep_memory().await?;

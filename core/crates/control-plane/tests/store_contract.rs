@@ -354,7 +354,7 @@ async fn refuses_unknown_schema_without_modifying_it() {
         .await
         .unwrap();
     connection
-        .execute("INSERT INTO supertag_v2_schema (version) VALUES (99)")
+        .execute("INSERT INTO supertag_v2_schema (version) VALUES (9999)")
         .await
         .unwrap();
     assert!(Store::open(&url).await.is_err());
@@ -362,7 +362,7 @@ async fn refuses_unknown_schema_without_modifying_it() {
         .fetch_all(&mut connection)
         .await
         .unwrap();
-    assert_eq!(versions, [99]);
+    assert_eq!(versions, [9999]);
     let tables: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table'")
         .fetch_one(&mut connection)
         .await

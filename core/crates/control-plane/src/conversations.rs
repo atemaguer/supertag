@@ -220,6 +220,19 @@ impl Store {
                 .bind(order).execute(&mut *tx).await?;
         }
 
+        // Posts held for this person go out first, so the Tag's answer follows what they saw.
+        let order = if crate::attention::release_in(
+            &mut tx,
+            &input.tag_id,
+            &format!("conversation:{principal}"),
+            now,
+        )
+        .await?
+        {
+            next_order(&mut tx).await?
+        } else {
+            order
+        };
         // As recorded, so a replay of this send returns the same message.
         let sent_at: Option<i64> =
             sqlx::query_scalar("SELECT accepted_at_ms FROM supertag_v2_tasks WHERE task_id=$1")
@@ -300,12 +313,13 @@ impl Store {
              JOIN supertag_v2_conversation_history h ON h.session_id=c.session_id
              JOIN supertag_v2_tasks t ON t.task_id=h.task_id AND t.quiet=0
              LEFT JOIN supertag_v2_conversation_reads r ON r.principal=c.principal AND r.tag_id=c.tag_id
-             WHERE c.principal=$1
+             WHERE c.principal=$1 AND {not_held}
                AND NOT (t.state IN ({UNFINISHED})
                         AND EXISTS (SELECT 1 FROM supertag_v2_schedule_fires f WHERE f.task_id=t.task_id)
                         AND NOT EXISTS (SELECT 1 FROM supertag_v2_live_inputs i
                                         WHERE i.task_id=t.task_id AND i.state IN ({JOINING})))
-             GROUP BY c.tag_id"
+             GROUP BY c.tag_id",
+            not_held = crate::attention::NOT_HELD
         ))
         .bind(principal)
         .fetch_all(&mut *tx)
@@ -551,18 +565,24 @@ pub(crate) async fn task_access_in(
 }
 
 /// The conversation's history: the messages of every Session of `principal`'s conversation with
-/// the Tag in `$2`, without quiet turns. Callers add conditions from `$3`.
+/// the Tag in `$2`, without quiet turns or posts held for pacing (`attention`). Callers add
+/// conditions from `$3`.
 const HISTORY: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_id
      FROM supertag_v2_conversation_history h
      WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversations c
                             WHERE c.principal=$1 AND c.tag_id=$2)
-       AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks q WHERE q.task_id=h.task_id AND q.quiet=1)";
+       AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks q WHERE q.task_id=h.task_id AND q.quiet=1)
+       AND NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp WHERE hp.task_id=h.task_id
+                       AND hp.held_until_ms IS NOT NULL AND hp.released_at_ms IS NULL)";
 /// [`HISTORY`] with its quiet turns, for a client that holds one as unfinished or asks for it: it
-/// learns the turn ended quietly (`Task.quiet`) and drops it.
+/// learns the turn ended quietly (`Task.quiet`) and drops it. A held post stays out until it is
+/// delivered, when it arrives as the newest message.
 const HISTORY_WITH_QUIET: &str = "SELECT h.task_id,h.accepted_order,h.work_session_report_id
      FROM supertag_v2_conversation_history h
      WHERE h.session_id IN (SELECT c.session_id FROM supertag_v2_conversations c
-                            WHERE c.principal=$1 AND c.tag_id=$2)";
+                            WHERE c.principal=$1 AND c.tag_id=$2)
+       AND NOT EXISTS (SELECT 1 FROM supertag_v2_proactive_posts hp WHERE hp.task_id=h.task_id
+                       AND hp.held_until_ms IS NOT NULL AND hp.released_at_ms IS NULL)";
 const UNFINISHED: &str = "1,2,6";
 const FINISHED: &str = "3,4,5";
 /// Live input states of a person's message on its way into, or taken in by, a running turn.
