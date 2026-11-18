@@ -41,6 +41,9 @@ pub(crate) struct Attempt {
 pub(crate) struct NativeMemoryGrant {
     pub scope: String,
     pub reset_generation: u64,
+    /// The store's head on the Tag's Volume: revision, manifest SHA-256, and manifest length.
+    #[serde(default)]
+    pub volume_head: Option<(u64, String, u64)>,
 }
 
 /// The Tag's Volume as an Attempt's assignment carries it.

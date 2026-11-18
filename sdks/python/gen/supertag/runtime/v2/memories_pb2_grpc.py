@@ -281,6 +281,11 @@ class AttemptMemoryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryResponse.FromString,
                 _registered_method=True)
+        self.AdvanceNative = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptMemory/AdvanceNative',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryResponse.FromString,
+                _registered_method=True)
 
 
 class AttemptMemoryServicer:
@@ -308,6 +313,15 @@ class AttemptMemoryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AdvanceNative(self, request, context):
+        """Moves the turn's store on its Tag's Volume to a new manifest the host has written, when the
+        store is still at `expected_revision`; otherwise it changes nothing and returns the current
+        head, so the host merges again.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AttemptMemoryServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -325,6 +339,11 @@ def add_AttemptMemoryServicer_to_server(servicer, server):
                     servicer.ReportNative,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryResponse.SerializeToString,
+            ),
+            'AdvanceNative': grpc.unary_unary_rpc_method_handler(
+                    servicer.AdvanceNative,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -410,6 +429,33 @@ class AttemptMemory:
             '/supertag.runtime.v2.AttemptMemory/ReportNative',
             supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_memories__pb2.ReportNativeMemoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AdvanceNative(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptMemory/AdvanceNative',
+            supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_memories__pb2.AdvanceNativeMemoryResponse.FromString,
             options,
             channel_credentials,
             insecure,

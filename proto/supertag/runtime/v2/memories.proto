@@ -30,6 +30,10 @@ service AttemptMemory {
   // After a turn's harness stops, its Worker Host records what it now holds of the store the
   // turn was granted (Assignment.native_memory). Never file contents.
   rpc ReportNative(ReportNativeMemoryRequest) returns (ReportNativeMemoryResponse);
+  // Moves the turn's store on its Tag's Volume to a new manifest the host has written, when the
+  // store is still at `expected_revision`; otherwise it changes nothing and returns the current
+  // head, so the host merges again.
+  rpc AdvanceNative(AdvanceNativeMemoryRequest) returns (AdvanceNativeMemoryResponse);
 }
 
 // Served by a Worker Host to its harness adapter. The Worker Host sets `attempt` from the
@@ -124,3 +128,22 @@ message ReportNativeMemoryRequest {
 }
 
 message ReportNativeMemoryResponse {}
+
+message AdvanceNativeMemoryRequest {
+  InspectAttemptRequest attempt = 1;
+  // The head the host merged onto; 0 when the store on the Volume was empty.
+  uint64 expected_revision = 2;
+  // The new manifest, already written to the Volume.
+  BlobReference manifest = 3;
+  uint32 files = 4;
+  uint64 bytes = 5;
+  // The reset generation of the turn's grant. A store reset since then is not moved.
+  uint64 reset_generation = 6;
+}
+
+message AdvanceNativeMemoryResponse {
+  // Whether the head moved to `manifest`.
+  bool advanced = 1;
+  // The store's head now: the new one, or the one another turn moved it to. Unset while empty.
+  NativeMemoryVolumeHead head = 2;
+}

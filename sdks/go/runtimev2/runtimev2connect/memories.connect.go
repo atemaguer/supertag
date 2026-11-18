@@ -52,6 +52,9 @@ const (
 	// AttemptMemoryReportNativeProcedure is the fully-qualified name of the AttemptMemory's
 	// ReportNative RPC.
 	AttemptMemoryReportNativeProcedure = "/supertag.runtime.v2.AttemptMemory/ReportNative"
+	// AttemptMemoryAdvanceNativeProcedure is the fully-qualified name of the AttemptMemory's
+	// AdvanceNative RPC.
+	AttemptMemoryAdvanceNativeProcedure = "/supertag.runtime.v2.AttemptMemory/AdvanceNative"
 	// HarnessMemoryRememberProcedure is the fully-qualified name of the HarnessMemory's Remember RPC.
 	HarnessMemoryRememberProcedure = "/supertag.runtime.v2.HarnessMemory/Remember"
 	// HarnessMemoryForgetProcedure is the fully-qualified name of the HarnessMemory's Forget RPC.
@@ -217,6 +220,10 @@ type AttemptMemoryClient interface {
 	// After a turn's harness stops, its Worker Host records what it now holds of the store the
 	// turn was granted (Assignment.native_memory). Never file contents.
 	ReportNative(context.Context, *connect.Request[runtimev2.ReportNativeMemoryRequest]) (*connect.Response[runtimev2.ReportNativeMemoryResponse], error)
+	// Moves the turn's store on its Tag's Volume to a new manifest the host has written, when the
+	// store is still at `expected_revision`; otherwise it changes nothing and returns the current
+	// head, so the host merges again.
+	AdvanceNative(context.Context, *connect.Request[runtimev2.AdvanceNativeMemoryRequest]) (*connect.Response[runtimev2.AdvanceNativeMemoryResponse], error)
 }
 
 // NewAttemptMemoryClient constructs a client for the supertag.runtime.v2.AttemptMemory service. By
@@ -248,14 +255,21 @@ func NewAttemptMemoryClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(attemptMemoryMethods.ByName("ReportNative")),
 			connect.WithClientOptions(opts...),
 		),
+		advanceNative: connect.NewClient[runtimev2.AdvanceNativeMemoryRequest, runtimev2.AdvanceNativeMemoryResponse](
+			httpClient,
+			baseURL+AttemptMemoryAdvanceNativeProcedure,
+			connect.WithSchema(attemptMemoryMethods.ByName("AdvanceNative")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // attemptMemoryClient implements AttemptMemoryClient.
 type attemptMemoryClient struct {
-	remember     *connect.Client[runtimev2.AttemptRememberRequest, runtimev2.AttemptMemoryResponse]
-	forget       *connect.Client[runtimev2.AttemptForgetRequest, runtimev2.AttemptMemoryResponse]
-	reportNative *connect.Client[runtimev2.ReportNativeMemoryRequest, runtimev2.ReportNativeMemoryResponse]
+	remember      *connect.Client[runtimev2.AttemptRememberRequest, runtimev2.AttemptMemoryResponse]
+	forget        *connect.Client[runtimev2.AttemptForgetRequest, runtimev2.AttemptMemoryResponse]
+	reportNative  *connect.Client[runtimev2.ReportNativeMemoryRequest, runtimev2.ReportNativeMemoryResponse]
+	advanceNative *connect.Client[runtimev2.AdvanceNativeMemoryRequest, runtimev2.AdvanceNativeMemoryResponse]
 }
 
 // Remember calls supertag.runtime.v2.AttemptMemory.Remember.
@@ -273,6 +287,11 @@ func (c *attemptMemoryClient) ReportNative(ctx context.Context, req *connect.Req
 	return c.reportNative.CallUnary(ctx, req)
 }
 
+// AdvanceNative calls supertag.runtime.v2.AttemptMemory.AdvanceNative.
+func (c *attemptMemoryClient) AdvanceNative(ctx context.Context, req *connect.Request[runtimev2.AdvanceNativeMemoryRequest]) (*connect.Response[runtimev2.AdvanceNativeMemoryResponse], error) {
+	return c.advanceNative.CallUnary(ctx, req)
+}
+
 // AttemptMemoryHandler is an implementation of the supertag.runtime.v2.AttemptMemory service.
 type AttemptMemoryHandler interface {
 	Remember(context.Context, *connect.Request[runtimev2.AttemptRememberRequest]) (*connect.Response[runtimev2.AttemptMemoryResponse], error)
@@ -280,6 +299,10 @@ type AttemptMemoryHandler interface {
 	// After a turn's harness stops, its Worker Host records what it now holds of the store the
 	// turn was granted (Assignment.native_memory). Never file contents.
 	ReportNative(context.Context, *connect.Request[runtimev2.ReportNativeMemoryRequest]) (*connect.Response[runtimev2.ReportNativeMemoryResponse], error)
+	// Moves the turn's store on its Tag's Volume to a new manifest the host has written, when the
+	// store is still at `expected_revision`; otherwise it changes nothing and returns the current
+	// head, so the host merges again.
+	AdvanceNative(context.Context, *connect.Request[runtimev2.AdvanceNativeMemoryRequest]) (*connect.Response[runtimev2.AdvanceNativeMemoryResponse], error)
 }
 
 // NewAttemptMemoryHandler builds an HTTP handler from the service implementation. It returns the
@@ -307,6 +330,12 @@ func NewAttemptMemoryHandler(svc AttemptMemoryHandler, opts ...connect.HandlerOp
 		connect.WithSchema(attemptMemoryMethods.ByName("ReportNative")),
 		connect.WithHandlerOptions(opts...),
 	)
+	attemptMemoryAdvanceNativeHandler := connect.NewUnaryHandler(
+		AttemptMemoryAdvanceNativeProcedure,
+		svc.AdvanceNative,
+		connect.WithSchema(attemptMemoryMethods.ByName("AdvanceNative")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.AttemptMemory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AttemptMemoryRememberProcedure:
@@ -315,6 +344,8 @@ func NewAttemptMemoryHandler(svc AttemptMemoryHandler, opts ...connect.HandlerOp
 			attemptMemoryForgetHandler.ServeHTTP(w, r)
 		case AttemptMemoryReportNativeProcedure:
 			attemptMemoryReportNativeHandler.ServeHTTP(w, r)
+		case AttemptMemoryAdvanceNativeProcedure:
+			attemptMemoryAdvanceNativeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -334,6 +365,10 @@ func (UnimplementedAttemptMemoryHandler) Forget(context.Context, *connect.Reques
 
 func (UnimplementedAttemptMemoryHandler) ReportNative(context.Context, *connect.Request[runtimev2.ReportNativeMemoryRequest]) (*connect.Response[runtimev2.ReportNativeMemoryResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMemory.ReportNative is not implemented"))
+}
+
+func (UnimplementedAttemptMemoryHandler) AdvanceNative(context.Context, *connect.Request[runtimev2.AdvanceNativeMemoryRequest]) (*connect.Response[runtimev2.AdvanceNativeMemoryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMemory.AdvanceNative is not implemented"))
 }
 
 // HarnessMemoryClient is a client for the supertag.runtime.v2.HarnessMemory service.

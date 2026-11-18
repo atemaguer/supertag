@@ -42,7 +42,7 @@ pub(crate) fn harness_directory(harness: HarnessKind) -> Option<&'static str> {
     }
 }
 
-fn component(kind: &str, value: &str) -> Result<()> {
+pub(crate) fn component(kind: &str, value: &str) -> Result<()> {
     ensure!(
         !value.is_empty()
             && value.len() <= 128
@@ -71,7 +71,7 @@ pub(crate) struct Summary {
     pub(crate) generation: u64,
 }
 
-type Files = BTreeMap<String, Vec<u8>>;
+pub(crate) type Files = BTreeMap<String, Vec<u8>>;
 
 /// An Attempt's copy of its store.
 pub(crate) struct Prepared {
@@ -81,7 +81,7 @@ pub(crate) struct Prepared {
     generation: u64,
 }
 
-fn private_directory(path: &Path) -> Result<()> {
+pub(crate) fn private_directory(path: &Path) -> Result<()> {
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -91,7 +91,7 @@ fn private_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn remove(path: &Path) -> Result<()> {
+pub(crate) fn remove(path: &Path) -> Result<()> {
     match fs::remove_dir_all(path) {
         Err(error) if error.kind() != ErrorKind::NotFound => Err(error.into()),
         _ => Ok(()),
@@ -143,7 +143,7 @@ fn write_meta(store: &Path, meta: &Meta) -> Result<()> {
 
 /// Every memory file under `root`, by `/`-separated relative path. A link, a special file, or a
 /// file over its cap refuses the whole copy: nothing outside plain memory files ever merges.
-fn snapshot(root: &Path) -> Result<Files> {
+pub(crate) fn snapshot(root: &Path) -> Result<Files> {
     let mut files = Files::new();
     let mut pending = vec![PathBuf::new()];
     while let Some(relative) = pending.pop() {
@@ -196,7 +196,7 @@ fn snapshot(root: &Path) -> Result<Files> {
     Ok(files)
 }
 
-fn write_tree(root: &Path, files: &Files) -> Result<()> {
+pub(crate) fn write_tree(root: &Path, files: &Files) -> Result<()> {
     private_directory(root)?;
     for (path, contents) in files {
         let target = root.join(path);
@@ -296,7 +296,7 @@ pub(crate) fn merge(base: &Files, ours: &Files, theirs: &Files, label: &str) -> 
     merged
 }
 
-fn check_caps(files: &Files) -> Result<()> {
+pub(crate) fn check_caps(files: &Files) -> Result<()> {
     ensure!(
         files.len() <= MAX_FILES,
         "native memory would hold over {MAX_FILES} files"
@@ -424,6 +424,7 @@ mod tests {
         NativeMemoryGrant {
             scope: "shared".into(),
             reset_generation: generation,
+            volume_head: None,
         }
     }
 

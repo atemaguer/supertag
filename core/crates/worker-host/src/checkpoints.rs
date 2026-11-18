@@ -241,7 +241,7 @@ impl Transfers {
         self
     }
 
-    fn volume_objects(
+    pub(crate) fn volume_objects(
         &self,
     ) -> VolumeObjectsClient<tonic::service::interceptor::InterceptedService<Channel, HostHeaders>>
     {

@@ -2462,6 +2462,9 @@ message NativeMemoryStore {
   int64 updated_at_ms = 9;
   // The turn that last reported it.
   string task_id = 10;
+  // Set when this is the store on the Tag's Volume, which any host that reaches the Volume uses;
+  // `host_id` is then empty and `digest` is the SHA-256 of the store's manifest.
+  string volume_id = 11;
 }
 
 // The harness-native store a turn may use, sent with its Assignment. Absent when the Tag keeps
@@ -2472,6 +2475,20 @@ message NativeMemoryGrant {
   string scope = 1;
   // A host drops copies of this Tag's stores made before the Tag's latest reset.
   uint64 reset_generation = 2;
+  // When the Tag names a Volume, the store lives there instead of on the host: `volume_head` is
+  // its current manifest, unset while the store on this Volume is empty. A host reads the manifest
+  // and the files it names as NATIVE_MEMORY_BLOB objects, and after the turn writes the new ones
+  // and moves the head with AttemptMemory.AdvanceNative.
+  NativeMemoryVolumeHead volume_head = 3;
+}
+
+// A native memory store's current manifest on the Tag's Volume. The manifest is an immutable
+// blob: JSON `{"files": {PATH: {"sha256": HEX, "bytes": N}}}`, PATH relative to the store and
+// `/`-separated. Only this pointer changes, so no reader sees a half-written store.
+message NativeMemoryVolumeHead {
+  // Increases with every turn that changed the store.
+  uint64 revision = 1;
+  BlobReference manifest = 2;
 }
 
 message AssignedVolume {

@@ -16,6 +16,7 @@ mod guardian;
 mod journal;
 mod mcp;
 mod native_memory;
+mod native_memory_volume;
 mod prepared;
 mod readiness;
 mod remote;
@@ -227,6 +228,10 @@ impl Attempt {
                 .map(|grant| journal::NativeMemoryGrant {
                     scope: grant.scope,
                     reset_generation: grant.reset_generation,
+                    volume_head: grant.volume_head.and_then(|head| {
+                        head.manifest
+                            .map(|manifest| (head.revision, manifest.sha256, manifest.byte_length))
+                    }),
                 }),
             volume: assignment.volume.map(|volume| journal::AssignedVolume {
                 volume_id: volume.volume_id,
@@ -2336,6 +2341,15 @@ async fn run_assignment(
             supertag_protocol::v2::NativeMemoryGrant {
                 scope: grant.scope.clone(),
                 reset_generation: grant.reset_generation,
+                volume_head: grant.volume_head.as_ref().map(|(revision, sha256, bytes)| {
+                    supertag_protocol::v2::NativeMemoryVolumeHead {
+                        revision: *revision,
+                        manifest: Some(supertag_protocol::v2::BlobReference {
+                            sha256: sha256.clone(),
+                            byte_length: *bytes,
+                        }),
+                    }
+                }),
             }
         }),
         volume: attempt

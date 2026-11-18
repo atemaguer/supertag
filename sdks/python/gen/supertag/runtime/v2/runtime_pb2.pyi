@@ -3078,7 +3078,7 @@ class Assignment(_message.Message):
     def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., joined: _Optional[_Iterable[_Union[JoinedMessage, _Mapping]]] = ..., native_memory: _Optional[_Union[NativeMemoryGrant, _Mapping]] = ..., volume: _Optional[_Union[AssignedVolume, _Mapping]] = ...) -> None: ...
 
 class NativeMemoryStore(_message.Message):
-    __slots__ = ("tag_id", "harness", "audience", "host_id", "revision", "files", "bytes", "digest", "updated_at_ms", "task_id")
+    __slots__ = ("tag_id", "harness", "audience", "host_id", "revision", "files", "bytes", "digest", "updated_at_ms", "task_id", "volume_id")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     HARNESS_FIELD_NUMBER: _ClassVar[int]
     AUDIENCE_FIELD_NUMBER: _ClassVar[int]
@@ -3089,6 +3089,7 @@ class NativeMemoryStore(_message.Message):
     DIGEST_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     harness: str
     audience: str
@@ -3099,15 +3100,26 @@ class NativeMemoryStore(_message.Message):
     digest: str
     updated_at_ms: int
     task_id: str
-    def __init__(self, tag_id: _Optional[str] = ..., harness: _Optional[str] = ..., audience: _Optional[str] = ..., host_id: _Optional[str] = ..., revision: _Optional[int] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., digest: _Optional[str] = ..., updated_at_ms: _Optional[int] = ..., task_id: _Optional[str] = ...) -> None: ...
+    volume_id: str
+    def __init__(self, tag_id: _Optional[str] = ..., harness: _Optional[str] = ..., audience: _Optional[str] = ..., host_id: _Optional[str] = ..., revision: _Optional[int] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., digest: _Optional[str] = ..., updated_at_ms: _Optional[int] = ..., task_id: _Optional[str] = ..., volume_id: _Optional[str] = ...) -> None: ...
 
 class NativeMemoryGrant(_message.Message):
-    __slots__ = ("scope", "reset_generation")
+    __slots__ = ("scope", "reset_generation", "volume_head")
     SCOPE_FIELD_NUMBER: _ClassVar[int]
     RESET_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    VOLUME_HEAD_FIELD_NUMBER: _ClassVar[int]
     scope: str
     reset_generation: int
-    def __init__(self, scope: _Optional[str] = ..., reset_generation: _Optional[int] = ...) -> None: ...
+    volume_head: NativeMemoryVolumeHead
+    def __init__(self, scope: _Optional[str] = ..., reset_generation: _Optional[int] = ..., volume_head: _Optional[_Union[NativeMemoryVolumeHead, _Mapping]] = ...) -> None: ...
+
+class NativeMemoryVolumeHead(_message.Message):
+    __slots__ = ("revision", "manifest")
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    MANIFEST_FIELD_NUMBER: _ClassVar[int]
+    revision: int
+    manifest: BlobReference
+    def __init__(self, revision: _Optional[int] = ..., manifest: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
 
 class AssignedVolume(_message.Message):
     __slots__ = ("volume_id", "source", "revision")

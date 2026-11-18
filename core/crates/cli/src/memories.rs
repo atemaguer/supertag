@@ -143,7 +143,9 @@ pub(crate) fn native_store_json(store: &NativeMemoryStore) -> Value {
         "harness": store.harness,
         "shared": store.audience.is_none(),
         "audience": store.audience,
-        "host_id": store.host_id,
+        // A host's own copy names the host; the store on the Tag's Volume names the Volume.
+        "host_id": (!store.host_id.is_empty()).then_some(&store.host_id),
+        "volume_id": (!store.volume_id.is_empty()).then_some(&store.volume_id),
         "revision": store.revision,
         "files": store.files,
         "bytes": store.bytes,

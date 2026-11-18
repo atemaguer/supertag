@@ -94,4 +94,11 @@ impl attempt_memory_server::AttemptMemory for Api {
     ) -> Result<Response<ReportNativeMemoryResponse>, Status> {
         attempt_memory!(self, request, report_native)
     }
+
+    async fn advance_native(
+        &self,
+        request: Request<AdvanceNativeMemoryRequest>,
+    ) -> Result<Response<AdvanceNativeMemoryResponse>, Status> {
+        attempt_memory!(self, request, advance_native)
+    }
 }

@@ -130,6 +130,9 @@ database_tests! {
     claude_keeps_native_memory_on_its_host_across_tasks;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    claude_keeps_native_memory_on_its_tags_volume_across_hosts;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
@@ -1212,6 +1215,127 @@ async fn volume_journey_continues_a_session_on_another_host_after_the_first_is_g
         remaining[0], kept[0],
         "the superseded checkpoint was deleted"
     );
+    services.stop().await
+}
+
+/// A Tag that names a Volume keeps Claude Code's auto-memory there: one host's turn writes it,
+/// another host that maps the Volume reads it in a later Session, neither keeps a copy in its own
+/// storage, and an operator's reset drops it.
+async fn claude_keeps_native_memory_on_its_tags_volume_across_hosts(
+    database: String,
+) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().canonicalize()?;
+    let native = claude_fixture(&root)?;
+    let vault = root.join("vault");
+    std::fs::create_dir(&vault)?;
+    std::fs::set_permissions(&vault, std::fs::Permissions::from_mode(0o700))?;
+    let services = LanguageServices::start(&root, &database).await?;
+    services
+        .operator(&[
+            "volume",
+            "put",
+            "vault",
+            "--source",
+            &format!("file://{}", vault.display()),
+            "--operation-id",
+            "register-vault",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "keeper",
+            "--instructions",
+            "Keep what matters.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+            "--volume",
+            "vault",
+        ])
+        .await?;
+    let run = |state: &'static str, prompt: &'static str| {
+        let services = &services;
+        let (root, vault) = (root.clone(), vault.clone());
+        let (interpreter, entry, native) = (interpreter.clone(), entry.clone(), native.clone());
+        async move {
+            // Each turn is its own Session: native memory is the Tag's, not one Session's.
+            let session = Uuid::new_v4().to_string();
+            let task = services
+                .operator(&[
+                    "task",
+                    "submit",
+                    "--tag",
+                    "keeper",
+                    "--session",
+                    &session,
+                    prompt,
+                ])
+                .await?;
+            let task_id = task["task_id"].as_str().context("Task ID")?.to_owned();
+            let mut host = services.worker(
+                "claude-code",
+                &root.join(state),
+                Path::new(&interpreter),
+                &entry,
+            );
+            host.arg("--claude-path")
+                .arg(&native)
+                .arg("--volume")
+                .arg(format!("vault={}", vault.display()))
+                .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+            success(host).await?;
+            let task = services.operator(&["get", "task", &task_id]).await?;
+            assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+            anyhow::Ok(task["result"].as_str().unwrap_or_default().to_owned())
+        }
+    };
+    let written: Value = serde_json::from_str(&run("first-host", "remember-native").await?)?;
+    assert_eq!(written["memoryWrite"], true, "{written}");
+    assert!(
+        run("second-host", "recall-native")
+            .await?
+            .contains("- fixture memory"),
+        "another host that maps the Volume reads the memory"
+    );
+    let stores = services
+        .operator(&["describe", "tag", "keeper", "--output", "json"])
+        .await?["native_memory"]
+        .clone();
+    let on_volume = stores
+        .as_array()
+        .and_then(|stores| stores.iter().find(|store| store["volume_id"] == "vault"))
+        .context("the store on the Volume is listed")?;
+    assert_eq!(on_volume["revision"], 1, "{stores}");
+    assert_eq!(on_volume["files"], 1, "{stores}");
+    let tag = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(b"keeper"));
+    let objects = std::fs::read_dir(vault.join(format!("tags/{tag}/native-memory/claude-code")))?
+        .next()
+        .context("a store on the Volume")??
+        .path()
+        .join("objects");
+    // One memory file and one manifest.
+    assert_eq!(std::fs::read_dir(&objects)?.count(), 2);
+    for state in ["first-host", "second-host"] {
+        assert!(
+            !root
+                .join(state)
+                .join(format!("artifacts/tags/{tag}/native-memory"))
+                .exists(),
+            "{state} keeps no copy of the Volume's store"
+        );
+    }
+    services
+        .operator(&["delete", "memory", "--native", "keeper"])
+        .await?;
+    assert_eq!(run("third-host", "recall-native").await?, "no memory");
     services.stop().await
 }
 

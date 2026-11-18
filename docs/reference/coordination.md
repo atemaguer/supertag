@@ -699,6 +699,12 @@ memory too, beside its [notes](#memory), across Tasks:
 - **Another host.** Each Worker Host keeps its own copy. A Tag whose next turn runs on another
   host starts from that host's copy, or from none, and a host that is removed takes its copy with
   it. The Tag's notes and Sessions stay; harness memory is a convenience on top of them.
+- **On a Volume.** A Tag that names a Volume (`supertag tag put TAG --volume NAME`) keeps its
+  harness memory there instead, so every Worker Host that maps the Volume uses the same memory.
+  The Volume holds the files and a manifest of them as objects that never change, at
+  `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/objects/`; the Control Plane keeps only which
+  manifest is current. When two turns end at once, the second merges onto what the first kept, as
+  on one host.
 
 Claude Code and Codex keep harness memory this way:
 

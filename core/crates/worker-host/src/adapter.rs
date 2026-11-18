@@ -549,7 +549,7 @@ async fn run(
         options,
         &assignment,
         &coordination,
-        remote_workspace.is_some(),
+        (host_token, remote_workspace.is_some()),
     )
     .await;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -643,7 +643,7 @@ async fn run(
             output_directory,
             native_memory
                 .as_ref()
-                .map(crate::native_memory::Prepared::working_directory)
+                .map(NativeMemory::working_directory)
                 .as_deref(),
         ),
         (&processes, &egress_environment),
@@ -670,6 +670,25 @@ async fn run(
     result
 }
 
+/// An Attempt's copy of its Tag's native memory: from this host's store, or from the store on
+/// the Tag's Volume when it names one.
+enum NativeMemory {
+    Host(crate::native_memory::Prepared),
+    Volume(
+        crate::native_memory_volume::Prepared,
+        Box<crate::native_memory_volume::Access>,
+    ),
+}
+
+impl NativeMemory {
+    fn working_directory(&self) -> PathBuf {
+        match self {
+            Self::Host(prepared) => prepared.working_directory(),
+            Self::Volume(prepared, _) => prepared.working_directory(),
+        }
+    }
+}
+
 /// The Attempt's copy of its Tag's native memory, when the Control Plane granted one and this
 /// harness keeps one. Native memory is a convenience: a copy that cannot be made never stops
 /// the turn.
@@ -677,8 +696,8 @@ async fn prepare_native_memory(
     options: &HostOptions,
     assignment: &Assignment,
     coordination: &CoordinationClients,
-    remote: bool,
-) -> Option<crate::native_memory::Prepared> {
+    (host_token, remote): (&str, bool),
+) -> Option<NativeMemory> {
     // A remote Workspace keeps every file and command tool in its sandbox; the memory folder is
     // on this host, so a remote turn keeps no native memory.
     if remote {
@@ -686,20 +705,50 @@ async fn prepare_native_memory(
     }
     let grant = assignment.native_memory.clone()?;
     let harness = crate::native_memory::harness_directory(options.harness)?;
-    let tag = assignment.task.as_ref()?.tag_id.clone();
+    let task = assignment.task.as_ref()?;
     let state = options.state_directory.clone();
+    let attempt = assignment.attempt_id.clone();
+    if let Some(volume) = assignment.volume.clone() {
+        // The store lives on the Tag's Volume, so any host that reaches the Volume uses it.
+        let access = crate::native_memory_volume::Access {
+            objects: coordination.transfers.volume_objects(),
+            memory: coordination.memory.clone(),
+            token: host_token.to_owned(),
+            attempt: InspectAttemptRequest {
+                task_id: task.task_id.clone(),
+                attempt_id: attempt.clone(),
+                lease_token: assignment.lease_token.clone(),
+            },
+            volume,
+            volumes: coordination.volumes.clone(),
+        };
+        return match crate::native_memory_volume::Prepared::prepare(
+            &access, &state, &attempt, &grant,
+        )
+        .await
+        {
+            Ok(prepared) => Some(NativeMemory::Volume(prepared, Box::new(access))),
+            Err(error) => {
+                crate::failures::note(
+                    "Native memory could not be read from the Tag's Volume",
+                    &error,
+                );
+                None
+            }
+        };
+    }
+    let tag = task.tag_id.clone();
     // The store lives in the host's artifact storage, which every lane shares, so any lane of
     // the host finds the Tag's memory; the Attempt's copy stays in this lane's state directory.
     // The live storage the host serves from, which `run` opened from `--artifact-directory`;
     // `options.artifact_source` is taken before any turn runs.
     let storage = coordination.artifact_source.as_ref()?.root().to_owned();
-    let attempt = assignment.attempt_id.clone();
     match tokio::task::spawn_blocking(move || {
         crate::native_memory::Prepared::prepare((&storage, &state), &tag, harness, &attempt, &grant)
     })
     .await
     {
-        Ok(Ok(prepared)) => Some(prepared),
+        Ok(Ok(prepared)) => Some(NativeMemory::Host(prepared)),
         Ok(Err(error)) => {
             crate::failures::note("Native memory could not be prepared", &error);
             None
@@ -712,7 +761,20 @@ async fn prepare_native_memory(
 }
 
 /// Merges the Attempt's native memory back and records what this host now holds.
-async fn finish_native_memory(bridge: &Bridge, prepared: crate::native_memory::Prepared) {
+async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory) {
+    let prepared = match memory {
+        NativeMemory::Host(prepared) => prepared,
+        // The store on the Volume records itself: moving its head is the record.
+        NativeMemory::Volume(prepared, access) => {
+            if let Err(error) = prepared.finish(&access).await {
+                crate::failures::note(
+                    "Native memory changes were not kept on the Tag's Volume",
+                    &error,
+                );
+            }
+            return;
+        }
+    };
     let summary = match tokio::task::spawn_blocking(move || prepared.finish()).await {
         Ok(Ok(summary)) => summary,
         Ok(Err(error)) => {

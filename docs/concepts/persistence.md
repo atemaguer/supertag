@@ -30,6 +30,7 @@ dies.
 | Delivered git branches and pull requests | Yes, in the git remote |
 | The Control Plane's catalog, Tasks, and results | Yes, in its database |
 | Session checkpoints, which let a later Task resume the harness session | Yes, on the Worker Host that wrote them, until dropped; see [Session checkpoints](../reference/control-plane.md#session-checkpoints) |
+| A harness's own memory, such as Claude Code's auto-memory | Only on a Tag's Volume, per the Volume's durability; otherwise on the Worker Host that ran the turn, while its disk lasts; see [Harness memory](../reference/coordination.md#harness-memory) |
 
 ## Compared with Docker
 

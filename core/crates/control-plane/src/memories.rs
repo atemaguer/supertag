@@ -888,6 +888,18 @@ impl attempt_memory_server::AttemptMemory for ControlPlane {
             .await?;
         Ok(Response::new(ReportNativeMemoryResponse {}))
     }
+
+    async fn advance_native(
+        &self,
+        request: Request<AdvanceNativeMemoryRequest>,
+    ) -> std::result::Result<Response<AdvanceNativeMemoryResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .advance_native_memory(&host, request.get_ref())
+                .await?,
+        ))
+    }
 }
 
 #[cfg(test)]
