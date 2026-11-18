@@ -13,6 +13,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Claude Code Tasks run the Claude Code you installed, the `claude` on `PATH` (or `--claude-path`),
+  instead of a copy the release carried inside its Claude Code bridge. `supertag init` and the
+  desktop app's setup screen refuse a Claude Code older than 2.1.280 with `claude update`. The
+  release and the macOS app are about 200 MB smaller.
 - Releases include the desktop app for Linux, as an AppImage and a Debian package for amd64 and
   arm64 (`SuperTag-VERSION-linux-ARCH.AppImage`, `.deb`). It uses the `supertag` CLI from the
   install script.

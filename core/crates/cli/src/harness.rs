@@ -576,6 +576,9 @@ impl AdapterOptions {
                 let mut args = Vec::new();
                 let runtime = match harness {
                     Harness::ClaudeCode => {
+                        // An adapter named with --harness-entrypoint brings its own Claude Code,
+                        // if it needs one; the packaged bridge runs the one the user installed.
+                        let packaged = self.harness_entrypoint.is_none();
                         let (runtime, entrypoint) = node_adapter(
                             NodeBridge::ClaudeCode,
                             self.harness_entrypoint,
@@ -583,11 +586,14 @@ impl AdapterOptions {
                             installed_executable,
                         )?;
                         args.push(entrypoint.into_os_string());
-                        if let Some(path) = self.claude_path {
-                            args.extend([
-                                "--executable".into(),
-                                executable_path(path)?.into_os_string(),
-                            ]);
+                        // SuperTag runs the Claude Code the user installed, never one of its own.
+                        let claude = match self.claude_path {
+                            Some(path) => Some(executable_path(path)?),
+                            None if packaged => Some(claude_on_path()?),
+                            None => None,
+                        };
+                        if let Some(claude) = claude {
+                            args.extend(["--executable".into(), claude.into_os_string()]);
                         }
                         runtime
                     }
@@ -690,6 +696,25 @@ fn opencode_executable(configured: Option<PathBuf>) -> Result<PathBuf> {
 
 // Task execution changes cwd to its isolated checkout. Resolve explicit local
 // executable paths while the CLI still has the operator's original cwd.
+/// The `claude` on PATH, as an absolute path: the Agent SDK runs it as given.
+fn claude_on_path() -> Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let found = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .filter(|directory| directory.is_absolute())
+            .map(|directory| directory.join("claude"))
+            .find(|candidate| {
+                std::fs::metadata(candidate).is_ok_and(|metadata| {
+                    metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+                })
+            })
+    });
+    // Not canonicalized: `claude update` moves the link to a new version and removes the old one.
+    found.context(
+        "Claude Code isn't installed: no claude on PATH. Install it with curl -fsSL https://claude.ai/install.sh | bash, sign in with claude and /login, or pass --claude-path",
+    )
+}
+
 fn executable_path(path: PathBuf) -> Result<PathBuf> {
     if path.components().count() > 1 || path.is_absolute() || path.exists() {
         path.canonicalize()
@@ -908,7 +933,7 @@ mod tests {
 
     #[test]
     fn claude_code_command_opt_in_is_explicit_and_preserved_for_local_host() {
-        let (_d, _binary, entry, node) = fixture();
+        let (_d, binary, entry, node) = fixture();
         let claude = |opt_in: bool| {
             let mut args = vec![
                 OsString::from("test"),
@@ -918,6 +943,9 @@ mod tests {
                 node.clone().into_os_string(),
                 "--harness-entrypoint".into(),
                 entry.clone().into_os_string(),
+                // A stand-in for the user's own claude, which CI does not install.
+                "--claude-path".into(),
+                binary.clone().into_os_string(),
             ];
             if opt_in {
                 args.push("--allow-unsandboxed-commands".into());
@@ -944,6 +972,8 @@ mod tests {
             claude(true),
             vec![
                 entry.canonicalize().unwrap().into_os_string(),
+                "--executable".into(),
+                binary.canonicalize().unwrap().into_os_string(),
                 "--timeout-seconds".into(),
                 "42".into(),
                 "--allow-unsandboxed-commands".into()

@@ -47,13 +47,14 @@ check its version and stop with the upgrade command when it is older than the mi
 Codex may send notifications SuperTag doesn't know yet: one that only reports progress is logged
 on the Worker Host and ignored, and any other fails the turn with `Codex emitted an unsupported
 event type: NAME`. Claude Code
-Tasks run the Claude Code bundled with the release's Claude Code bridge, unless the Worker Host
-is started with `--claude-path`; `supertag init` and `supertag sign-in` use the `claude` on `PATH`
-to find Claude Code and check its sign-in.
+Tasks run the Claude Code you installed: the `claude` on the Worker Host's `PATH`, or the one
+`--claude-path` names. SuperTag ships no Claude Code of its own. `supertag init` checks that
+`claude` is installed, recent enough, and signed in, and stops with the step that fixes it when it
+isn't; the desktop app's setup screen shows the same checks.
 
 | Harness | Command on PATH | Minimum version | Sign-in |
 | --- | --- | --- | --- |
-| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | None checked. Install with `curl -fsSL https://claude.ai/install.sh \| bash`. | Run `claude` and follow its sign-in prompt. |
+| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | 2.1.280. Install with `curl -fsSL https://claude.ai/install.sh \| bash`; upgrade with `claude update`. | Run `claude` and follow its sign-in prompt. |
 | [Codex](https://developers.openai.com/codex/cli/) | `codex` | 0.163.0. Install or upgrade with `npm install -g @openai/codex`. | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
 | [Cursor](https://cursor.com/docs/sdk/typescript.md) | None | None | Generate an API key and set `CURSOR_API_KEY` for the host service; see [Cursor setup](#cursor-setup-and-limits). Signing in to the Cursor app or `cursor-agent` is not enough. |
 | [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the Worker Host, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |

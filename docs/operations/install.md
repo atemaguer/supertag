@@ -80,8 +80,10 @@ On a Mac:
 2. Open SuperTag from Applications.
 
 The Mac app carries its own `supertag` CLI, terminal UI, and Node.js bridges, so it needs no
-separate install. Claude Code still needs [Node.js](requirements.md) on your Mac; Codex needs
-nothing more. To also use `supertag` in a terminal, install it with the install script above.
+separate SuperTag install. It doesn't carry Claude Code or Codex: install the ones you want to use
+yourself, as in [Requirements](requirements.md). The setup screen checks that each is installed and
+signed in, and says how when it isn't. Claude Code also needs [Node.js](requirements.md). To use
+`supertag` in a terminal too, install it with the install script above.
 
 On Linux:
 

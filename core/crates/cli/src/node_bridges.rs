@@ -434,6 +434,10 @@ mod tests {
                     node.as_os_str().to_owned(),
                 ]);
             }
+            if bridge == NodeBridge::ClaudeCode {
+                // The packaged bridge runs the user's claude; CI installs none, so name a stand-in.
+                args.extend(["--claude-path".into(), node.as_os_str().to_owned()]);
+            }
             let (runtime, arguments) = TestCommand::try_parse_from(args)
                 .unwrap()
                 .adapter

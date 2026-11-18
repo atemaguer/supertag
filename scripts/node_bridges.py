@@ -120,10 +120,25 @@ def verify_cursor_assets(package, platform):
         require((package / "dist" / name).is_file(), f"Cursor {name} is unavailable")
 
 
-def verify_claude_asset(package, platform):
-    system, arch = platform.split("-")
-    vendor = f"claude-agent-sdk-{system}-{'x64' if arch == 'amd64' else arch}"
-    verify_native_asset(package, f"node_modules/.pnpm/*/node_modules/@anthropic-ai/{vendor}/claude", platform, "Claude native executable")
+def drop_claude_executable(package):
+    """Remove the Agent SDK's own copy of Claude Code: the bridge runs the user's installed claude.
+
+    The SDK pulls in a platform package, @anthropic-ai/claude-agent-sdk-PLATFORM, that holds a full
+    Claude Code executable. SuperTag passes the user's claude to the SDK instead, so the package
+    and the links pnpm made to it go.
+    """
+    store = package / "node_modules" / ".pnpm"
+    removed = [entry for entry in store.glob("@anthropic-ai+claude-agent-sdk-*") if entry.is_dir()]
+    for entry in removed:
+        shutil.rmtree(entry)
+    for parent, directories, files in os.walk(package):
+        for name in [*directories, *files]:
+            entry = Path(parent) / name
+            if entry.is_symlink() and name.startswith("claude-agent-sdk-") and not entry.exists():
+                entry.unlink()
+    leftover = [path for path in package.rglob("claude") if path.is_file() and "claude-agent-sdk-" in str(path)]
+    require(not leftover, "the Agent SDK's Claude Code executable is still bundled")
+    return len(removed)
 
 
 def verify_node(node):
@@ -215,7 +230,8 @@ def stage_workspace(output, kinds, repo, env=None):
             if kind == "cursor":
                 verify_cursor_assets(target, platform)
             if kind == "claude-code":
-                verify_claude_asset(target, platform)
+                drop_claude_executable(target)
+                verify_relocatable_tree(target)
             smoke_entry(node, kind, target)
         manifest = {"format": FORMAT, "version": version_from_repo(repo), "protocol": PROTOCOL,
                     "platform": platform, "node_major": NODE_MAJOR,

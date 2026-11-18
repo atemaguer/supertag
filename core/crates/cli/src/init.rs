@@ -144,6 +144,35 @@ fn installed_harnesses() -> Vec<Found> {
     found
 }
 
+/// The oldest Claude Code the Claude Code bridge's Agent SDK runs: the version it was built against.
+/// SuperTag runs the `claude` on PATH, so an older one is refused before anything is written.
+pub(crate) const CLAUDE_CODE_MINIMUM: (u64, u64, u64) = (2, 1, 280);
+
+/// Why the `claude` on PATH is too old to run, read from `claude --version`, if it is.
+fn claude_version_problem() -> Option<String> {
+    let output = Command::new("claude")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let found = claude_version(&String::from_utf8_lossy(&output.stdout))?;
+    let (major, minor, patch) = CLAUDE_CODE_MINIMUM;
+    (found < CLAUDE_CODE_MINIMUM).then(|| {
+        format!(
+            "Claude Code {}.{}.{} is older than {major}.{minor}.{patch}, the oldest SuperTag runs",
+            found.0, found.1, found.2
+        )
+    })
+}
+
+/// The version in `claude --version`'s output, such as "2.1.323 (Claude Code)".
+fn claude_version(output: &str) -> Option<(u64, u64, u64)> {
+    let word = output.split_whitespace().next()?;
+    let mut parts = word.split('.').map(|part| part.parse::<u64>().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
+}
+
 fn on_path(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|directory| {
@@ -707,6 +736,23 @@ Sign in to it, then run supertag init again. (OpenCode, with opencode on PATH, a
             }
             continue;
         }
+        if *harness == Found::ClaudeCode
+            && let Some(problem) = claude_version_problem()
+        {
+            outln!(
+                "  claude-code: can't run: {problem}. Update it with claude update, then run supertag init again."
+            );
+            without_node = true;
+            if named.is_some() {
+                bail!(Fixable {
+                    error: format!("{problem}."),
+                    fix: "Update Claude Code with claude update, then run supertag init again."
+                        .into(),
+                    command: Some("claude update"),
+                });
+            }
+            continue;
+        }
         let result = sign_ins.check(*harness, None).await?;
         report(*harness, result);
         if result {
@@ -1111,6 +1157,8 @@ struct HarnessFact {
     timed_out: bool,
     /// `None` for a harness without a Node bridge; otherwise why its Node can't run, if it can't.
     node: Option<Option<String>>,
+    /// Why the installed harness is too old to run, for Claude Code.
+    version: Option<String>,
 }
 
 /// `supertag init --check --json`: what `init` would find, without changing anything. The same
@@ -1168,6 +1216,9 @@ async fn check(
             signed_in: signed_in.filter(|_| !timed_out),
             timed_out,
             node: bridge(harness).map(crate::node_bridges::node_problem),
+            version: (is_installed && harness == Found::ClaudeCode)
+                .then(claude_version_problem)
+                .flatten(),
         });
     }
     let repository_mapped = match (&found, configured) {
@@ -1239,6 +1290,13 @@ fn check_report(
                     Some(install_line(fact.harness).to_owned()),
                     install_command(fact.harness),
                 )
+            } else if let Some(problem) = &fact.version {
+                (
+                    Some(format!(
+                        "{problem}: update it with claude update, then check again."
+                    )),
+                    Some("claude update"),
+                )
             } else if fact.timed_out || fact.signed_in == Some(false) {
                 let problem = sign_in_problem(fact.harness, fact.timed_out);
                 (Some(problem.fix), problem.command)
@@ -1250,7 +1308,8 @@ fn check_report(
                     None,
                 )
             };
-            ready_harness |= fact.signed_in == Some(true) && node_problem.is_none();
+            ready_harness |=
+                fact.signed_in == Some(true) && node_problem.is_none() && fact.version.is_none();
             json!({
                 "harness": fact.harness.harness(),
                 "installed": fact.installed,
@@ -1549,6 +1608,20 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn claude_code_versions_are_read_and_compared_with_the_minimum() {
+        assert_eq!(
+            super::claude_version("2.1.323 (Claude Code)\n"),
+            Some((2, 1, 323))
+        );
+        assert_eq!(super::claude_version("2.1.280"), Some((2, 1, 280)));
+        assert_eq!(super::claude_version("Claude Code"), None);
+        assert_eq!(super::claude_version(""), None);
+        assert!((2, 1, 279) < super::CLAUDE_CODE_MINIMUM);
+        assert!((2, 1, 280) >= super::CLAUDE_CODE_MINIMUM);
+        assert!((2, 2, 0) > super::CLAUDE_CODE_MINIMUM);
+    }
+
     use super::*;
 
     #[test]
@@ -1565,6 +1638,7 @@ mod tests {
                 signed_in: Some(false),
                 timed_out: false,
                 node: None,
+                version: None,
             },
             HarnessFact {
                 harness: Found::ClaudeCode,
@@ -1572,6 +1646,7 @@ mod tests {
                 signed_in: Some(true),
                 timed_out: false,
                 node: Some(None),
+                version: None,
             },
             HarnessFact {
                 harness: Found::Cursor,
@@ -1579,6 +1654,7 @@ mod tests {
                 signed_in: None,
                 timed_out: false,
                 node: Some(Some("Node.js is not on PATH".into())),
+                version: None,
             },
         ];
         let state = Path::new("/home/me/.supertag");
@@ -1621,6 +1697,7 @@ mod tests {
             signed_in: Some(true),
             timed_out: false,
             node: Some(Some("Node.js is not on PATH".into())),
+            version: None,
         }];
         let value = check_report(
             Path::new("/work/app"),
@@ -1642,6 +1719,7 @@ mod tests {
             signed_in: None,
             timed_out: true,
             node: Some(None),
+            version: None,
         }];
         let value = check_report(
             Path::new("/work/app"),
