@@ -67,6 +67,16 @@ fn bundled() -> Option<PathBuf> {
 pub async fn start(state: &Path) -> Result<(), String> {
     // The services find the coding agents (claude, codex, node) on the PATH they start with, so
     // they need the user's shell PATH, not the bare one an app opened from Finder gets.
+    let (cli, path) = environment().await;
+    let cli = cli.ok_or(
+        "Could not find the supertag command. Install it with the install script, then reopen the app.",
+    )?;
+    up(&cli, state, path.as_deref()).await
+}
+
+/// The `supertag` the app runs, if any, and the PATH to run it and anything it starts with: the
+/// user's login shell's, else the app's own. First-launch setup runs the CLI the same way.
+pub async fn environment() -> (Option<PathBuf>, Option<String>) {
     let path = login_path()
         .await
         .or_else(|| std::env::var_os("PATH").map(|path| path.to_string_lossy().into_owned()));
@@ -74,11 +84,8 @@ pub async fn start(state: &Path) -> Result<(), String> {
         bundled().as_deref(),
         path.as_deref().map(OsStr::new),
         &installer_directories(),
-    )
-    .ok_or(
-        "Could not find the supertag command. Install it with the install script, then reopen the app.",
-    )?;
-    up(&cli, state, path.as_deref()).await
+    );
+    (cli, path)
 }
 
 /// Marks the PATH a login shell prints, so what its startup files print around it is ignored.

@@ -361,6 +361,48 @@ export function gatewaySession(connectionId: string, scope: string): Gateway {
   };
 }
 
+/** One harness as `supertag init --check --json` reports it. */
+export interface SetupHarness {
+  harness: string;
+  installed: boolean;
+  /** Unknown when the harness isn't installed, or its check couldn't run. */
+  signed_in: boolean | null;
+  node: { ok: boolean; fix: string | null } | null;
+  /** One line saying what to do, when it isn't ready. */
+  fix: string | null;
+  /** The command in `fix`, to copy. */
+  fix_command?: string | null;
+  install_url?: string | null;
+}
+
+/** What `supertag init --check --json` says about setting SuperTag up here. */
+export interface SetupCheck {
+  /** The CLI the app runs, or null when there is none; then `install` says how to get it. */
+  cli?: string | null;
+  install?: string;
+  ready?: boolean;
+  repository?: {
+    directory: string;
+    git: boolean;
+    root: string | null;
+    name: string | null;
+    has_commits: boolean;
+    branch: string | null;
+    fix: string | null;
+  };
+  harnesses?: SetupHarness[];
+  state?: { directory: string; configured: boolean; repository_mapped: boolean };
+}
+
+/** Setting SuperTag up on this machine, through the supertag CLI. */
+export const nativeSetup = {
+  check: (directory?: string, harness?: string) =>
+    invoke<SetupCheck>("check_setup", { directory, harness }),
+  chooseFolder: () => invoke<string | null>("choose_project_folder"),
+  setUp: (directory: string, harness: string) =>
+    invoke<unknown>("set_up_supertag", { directory, harness }),
+};
+
 export const nativeGateway = {
   list: () => invoke<GatewayList>("list_gateways"),
   save: (gateway: string, name: string, token: string) =>

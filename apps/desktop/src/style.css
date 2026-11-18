@@ -1710,3 +1710,98 @@ button.identity-pill[aria-expanded="true"] {
   background: var(--panel);
   font-size: 11px;
 }
+
+/* First launch: set SuperTag up from the app. */
+.onboarding {
+  width: min(560px, calc(100% - 48px));
+  margin: auto;
+  display: grid;
+  gap: 10px;
+  padding: 28px 0;
+}
+.onboarding h2 {
+  font-size: 22px;
+  margin: 0;
+}
+.onboarding h3 {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.onboarding p {
+  margin: 0;
+  color: var(--muted);
+}
+.onboarding-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.onboarding-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.onboarding .onboarding-ok {
+  color: var(--text);
+}
+.onboarding .onboarding-fix {
+  color: #ffb7a9;
+}
+.onboarding-harnesses {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.onboarding-harnesses li {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+.onboarding-harnesses label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.onboarding-harness-name {
+  font-weight: 600;
+}
+.onboarding-harness-state {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.onboarding-harnesses li[data-ready="true"] .onboarding-harness-state {
+  color: var(--text);
+}
+.onboarding-fix-line {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.onboarding-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.onboarding-note {
+  font-size: 12px;
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

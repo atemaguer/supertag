@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConnectionDialog } from "./components/connection";
 import { GatewaySelector, gatewayActions } from "./components/gateway-selector";
+import { Onboarding } from "./components/onboarding";
 import type { SidebarMode } from "./components/sidebar";
 import { EmptyWorkspace, Workspace, WorkspaceShell } from "./components/workspace";
 import {
@@ -14,6 +15,8 @@ import {
   gatewaySession,
   LOCAL_GATEWAY,
   nativeGateway,
+  nativeSetup,
+  type SetupCheck,
   type Tag,
 } from "./gateway";
 import { useNotificationLevel } from "./lib/notifications";
@@ -50,6 +53,8 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const [notifications, setNotifications] = useNotificationLevel();
+  /** First launch, with no SuperTag set up here: the setup screen, from the first check. */
+  const [setup, setSetup] = useState<{ check: SetupCheck }>();
   /** The address of the local Gateway this window connected to, while it is connected to it. */
   const localAddress = useRef<string | undefined>(undefined);
 
@@ -97,6 +102,11 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
             ? await nativeGateway.connectLocal()
             : undefined;
         if (live && next) activate(next);
+        // No Gateway at all, and no SuperTag set up here to start: set it up.
+        if (live && !next && saved.profiles.length === 0) {
+          const check = await nativeSetup.check();
+          if (live && !check.state?.configured) setSetup({ check });
+        }
       } catch (error) {
         if (live) setError(describe(error));
       } finally {
@@ -249,17 +259,32 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
           switching={switching}
           error={editor ? "" : error}
         >
-          <EmptyWorkspace
-            switching={switching}
-            starting={starting}
-            onSettings={(event) => open(undefined, event.currentTarget)}
-            localProblem={gateways.local?.problem}
-            onLocal={
-              gateways.local?.origin
-                ? () => void change(async () => activate(await nativeGateway.connectLocal()))
-                : undefined
-            }
-          />
+          {setup ? (
+            <div className="work-area">
+              <Onboarding
+                api={nativeSetup}
+                initial={setup.check}
+                onReady={() =>
+                  void change(async () => {
+                    activate(await nativeGateway.connectLocal());
+                    setSetup(undefined);
+                  })
+                }
+              />
+            </div>
+          ) : (
+            <EmptyWorkspace
+              switching={switching}
+              starting={starting}
+              onSettings={(event) => open(undefined, event.currentTarget)}
+              localProblem={gateways.local?.problem}
+              onLocal={
+                gateways.local?.origin
+                  ? () => void change(async () => activate(await nativeGateway.connectLocal()))
+                  : undefined
+              }
+            />
+          )}
         </WorkspaceShell>
       )}
       {editor && (

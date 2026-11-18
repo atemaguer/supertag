@@ -1,5 +1,6 @@
 mod gateway;
 mod local_start;
+mod onboarding;
 
 use std::path::PathBuf;
 
@@ -66,6 +67,42 @@ async fn start_local_services() -> Result<bool, String> {
     }
     local_start::start(&state).await?;
     Ok(true)
+}
+
+/// Whether SuperTag can be set up for a project folder, from `supertag init --check --json`.
+#[tauri::command]
+async fn check_setup(
+    directory: Option<String>,
+    harness: Option<String>,
+) -> Result<serde_json::Value, String> {
+    onboarding::check(directory, harness).await
+}
+
+/// Asks for the project folder with the system's folder picker.
+#[tauri::command]
+async fn choose_project_folder<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Choose your project folder")
+        .pick_folder(move |folder| {
+            let _ = sender.send(folder);
+        });
+    let folder = receiver
+        .await
+        .map_err(|_| "The folder picker closed.".to_owned())?;
+    Ok(folder
+        .and_then(|folder| folder.into_path().ok())
+        .map(|path| path.display().to_string()))
+}
+
+/// Sets SuperTag up for the chosen project and harness, and starts it.
+#[tauri::command]
+async fn set_up_supertag(directory: String, harness: String) -> Result<serde_json::Value, String> {
+    onboarding::set_up(directory, harness).await
 }
 
 #[tauri::command]
@@ -372,6 +409,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         .plugin(tauri_plugin_notification::init())
         // Links in messages open in the system browser; the capability allows only http and https.
         .plugin(tauri_plugin_opener::init())
+        // The project folder picker on first launch; only the app's own command opens it.
+        .plugin(tauri_plugin_dialog::init())
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && payload.event() == PageLoadEvent::Started {
                 let app = webview.app_handle().clone();
@@ -432,7 +471,10 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             stop_conversation_follow,
             read_cache,
             write_cache,
-            mark_conversation_read
+            mark_conversation_read,
+            check_setup,
+            choose_project_folder,
+            set_up_supertag
         ])
 }
 
