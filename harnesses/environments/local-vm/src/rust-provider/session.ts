@@ -14,15 +14,23 @@ import {
 
 /**
  * The image a Workspace runs when the operator names none: a pinned Debian base with the tools
- * a coding agent expects, and an unprivileged `user` with no sudo. It is built once per host, on
- * the first allocation, for the host's own platform.
+ * a coding agent expects, and an unprivileged `user` with no sudo. Node and npm come from a pinned
+ * official Node 22 image: Debian's npm 9 never exits after an install through an HTTPS proxy,
+ * which is how a Task's commands reach the network here. It is built once per host, on the first
+ * allocation, for the host's own platform.
  */
-export const BASE_DOCKERFILE = `FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+export const BASE_DOCKERFILE = `FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS node
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 RUN apt-get update \\
  && apt-get install -y --no-install-recommends \\
-    ca-certificates curl git nodejs npm procps python3 python3-venv ripgrep \\
+    ca-certificates curl git procps python3 python3-venv ripgrep \\
  && rm -rf /var/lib/apt/lists/* \\
  && useradd --create-home --shell /bin/bash --uid 1000 user
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \\
+ && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \\
+ && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
 USER user
 WORKDIR /home/user
 `;

@@ -82,6 +82,9 @@ describe.skipIf(!answers)("local-vm provider", () => {
       for (const tool of ["git", "python3", "node", "rg", "curl", "ps"])
         expect((await run(`command -v ${tool}`)).exitCode, tool).toBe(0);
       expect((await run("command -v sudo")).exitCode).not.toBe(0);
+      // Node 22 with npm 10 or later: Debian's npm 9 never exits after an install through a proxy.
+      expect((await run("node --version")).stdout).toMatch(/^v22\./u);
+      expect((await run("npm --version")).stdout).toMatch(/^(1[0-9]|[2-9][0-9])\./u);
       // Root, for the seal and Capture, holds exactly CHOWN, DAC_OVERRIDE, DAC_READ_SEARCH,
       // FOWNER, and KILL, never a privileged container's full set.
       const privileged = await workspace.runPrivileged?.(
