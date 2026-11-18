@@ -98,15 +98,47 @@ fn advance(
     expected: u64,
     manifest: BlobReference,
     generation: u64,
+    objects: &[char],
 ) -> AdvanceNativeMemoryRequest {
     AdvanceNativeMemoryRequest {
         attempt: Some(attempt.clone()),
         expected_revision: expected,
         manifest: Some(manifest),
-        files: 2,
+        files: objects.len() as u32,
         bytes: 100,
         reset_generation: generation,
+        objects: objects.iter().map(|tag| file(*tag)).collect(),
     }
+}
+
+fn file(tag: char) -> BlobReference {
+    BlobReference {
+        sha256: tag.to_string().repeat(64),
+        byte_length: 7,
+    }
+}
+
+/// The objects queued for deletion from the vault, by SHA-256.
+async fn garbage(store: &Store, host: &HostAuthority) -> std::collections::BTreeSet<String> {
+    store
+        .list_volume_garbage(
+            host,
+            &ListVolumeGarbageRequest {
+                volume_id: "vault".into(),
+                source: "file:///srv/vault".into(),
+                limit: 0,
+            },
+        )
+        .await
+        .unwrap()
+        .objects
+        .into_iter()
+        .map(|object| object.blob.unwrap().sha256)
+        .collect()
+}
+
+fn shas(tags: &[char]) -> std::collections::BTreeSet<String> {
+    tags.iter().map(|tag| tag.to_string().repeat(64)).collect()
 }
 
 async fn exercise(url: &str) {
@@ -139,8 +171,15 @@ async fn exercise(url: &str) {
     let (first, grant) = turn(&store, &laptop).await;
     let grant = grant.expect("a Tag that keeps memory grants native memory");
     assert!(grant.volume_head.is_none());
+    // A head that has files but names no objects would let them be deleted: refused.
+    let mut unnamed = advance(&first, 0, manifest('a'), 0, &['1']);
+    unnamed.objects.clear();
+    assert!(matches!(
+        store.advance_native_memory(&laptop, &unnamed).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
     let moved = store
-        .advance_native_memory(&laptop, &advance(&first, 0, manifest('a'), 0))
+        .advance_native_memory(&laptop, &advance(&first, 0, manifest('a'), 0, &['1', '2']))
         .await
         .unwrap();
     assert!(moved.advanced);
@@ -148,7 +187,7 @@ async fn exercise(url: &str) {
 
     // A turn that merged onto the empty store after another moved it is told the head, not moved.
     let stale = store
-        .advance_native_memory(&laptop, &advance(&first, 0, manifest('b'), 0))
+        .advance_native_memory(&laptop, &advance(&first, 0, manifest('b'), 0, &['9']))
         .await
         .unwrap();
     assert!(!stale.advanced);
@@ -164,11 +203,22 @@ async fn exercise(url: &str) {
     assert_eq!(head.revision, 1);
     assert_eq!(head.manifest.as_ref().unwrap().sha256, manifest('a').sha256);
     let moved = store
-        .advance_native_memory(&server, &advance(&second, 1, manifest('c'), 0))
+        .advance_native_memory(&server, &advance(&second, 1, manifest('c'), 0, &['2', '3']))
         .await
         .unwrap();
     assert!(moved.advanced);
     assert_eq!(moved.head.as_ref().unwrap().revision, 2);
+
+    // The store no longer names the first manifest or file 1: both go to Volume garbage; file 2,
+    // which it still names, stays. A stale turn's objects were never named, so nothing queues them.
+    assert_eq!(garbage(&store, &server).await, shas(&['a', '1']));
+    // An object a later head names again leaves the queue.
+    let again = store
+        .advance_native_memory(&server, &advance(&second, 2, manifest('d'), 0, &['1', '3']))
+        .await
+        .unwrap();
+    assert!(again.advanced);
+    assert_eq!(garbage(&store, &server).await, shas(&['a', 'c', '2']));
 
     // The Tag's records list the store on the Volume, with no holding host.
     let stores = store.native_memory_stores(OP, "keeper").await.unwrap();
@@ -177,8 +227,8 @@ async fn exercise(url: &str) {
         .find(|store| store.volume_id == "vault")
         .expect("the Volume store is listed");
     assert_eq!(on_volume.host_id, "");
-    assert_eq!(on_volume.revision, 2);
-    assert_eq!(on_volume.digest, manifest('c').sha256);
+    assert_eq!(on_volume.revision, 3);
+    assert_eq!(on_volume.digest, manifest('d').sha256);
     assert_eq!(on_volume.audience.as_deref(), Some(OP));
     assert!(
         store
@@ -200,9 +250,14 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
     assert!(reset.stores.iter().any(|store| store.volume_id == "vault"));
+    // A reset sends every object the store named to Volume garbage.
+    assert_eq!(
+        garbage(&store, &server).await,
+        shas(&['a', 'c', '2', 'd', '1', '3'])
+    );
     assert!(matches!(
         store
-            .advance_native_memory(&server, &advance(&second, 2, manifest('d'), 0))
+            .advance_native_memory(&server, &advance(&second, 3, manifest('f'), 0, &['3']))
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
@@ -225,7 +280,7 @@ async fn exercise(url: &str) {
     assert!(grant.is_none());
     assert!(matches!(
         store
-            .advance_native_memory(&laptop, &advance(&off, 0, manifest('e'), 1))
+            .advance_native_memory(&laptop, &advance(&off, 0, manifest('e'), 1, &[]))
             .await,
         Err(StoreError::PermissionDenied)
     ));

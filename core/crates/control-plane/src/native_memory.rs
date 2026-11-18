@@ -181,10 +181,119 @@ async fn stores_in(tx: &mut Transaction<'_, Any>, tag: &str) -> Result<Vec<Nativ
     Ok(stores)
 }
 
+/// One object a store on a Volume names: its Volume, key, and bytes.
+struct NamedObject {
+    volume_id: String,
+    storage_key: String,
+    blob: BlobReference,
+}
+
+/// The objects the stores of `tag` name, or one store's when `store` gives its harness and
+/// audience.
+async fn named_objects_in(
+    tx: &mut Transaction<'_, Any>,
+    tag: &str,
+    store: Option<(&str, &str)>,
+) -> Result<Vec<NamedObject>> {
+    let rows = sqlx::query(
+        "SELECT volume_id,storage_key,sha256,byte_length FROM supertag_v2_native_memory_volume_objects
+         WHERE tag_id=$1 AND ($2='' OR (harness=$3 AND audience_principal=$4))",
+    )
+    .bind(tag)
+    .bind(if store.is_some() { "store" } else { "" })
+    .bind(store.map_or("", |(harness, _)| harness))
+    .bind(store.map_or("", |(_, audience)| audience))
+    .fetch_all(&mut **tx)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(NamedObject {
+                volume_id: row.try_get("volume_id")?,
+                storage_key: row.try_get("storage_key")?,
+                blob: BlobReference {
+                    sha256: row.try_get("sha256")?,
+                    byte_length: row.try_get::<i64, _>("byte_length")?.max(0) as u64,
+                },
+            })
+        })
+        .collect()
+}
+
+/// Makes `objects` the store's whole object set on `volume`: what it named before and no longer
+/// does goes to Volume garbage, and what it names again leaves the queue.
+async fn name_objects_in(
+    tx: &mut Transaction<'_, Any>,
+    (tag, harness, audience, scope): (&str, &str, &str, &str),
+    volume: &str,
+    objects: &[BlobReference],
+) -> Result<()> {
+    let keyed: Vec<(String, &BlobReference)> = objects
+        .iter()
+        .map(|blob| {
+            (
+                crate::artifact_volumes::native_memory_key(tag, harness, scope, &blob.sha256),
+                blob,
+            )
+        })
+        .collect();
+    for old in named_objects_in(tx, tag, Some((harness, audience))).await? {
+        let kept = old.volume_id == volume && keyed.iter().any(|(key, _)| key == &old.storage_key);
+        if !kept {
+            crate::volume_garbage::queue_native_object_in(
+                tx,
+                tag,
+                &old.volume_id,
+                &old.storage_key,
+                &old.blob,
+            )
+            .await?;
+        }
+    }
+    sqlx::query(
+        "DELETE FROM supertag_v2_native_memory_volume_objects
+         WHERE tag_id=$1 AND harness=$2 AND audience_principal=$3",
+    )
+    .bind(tag)
+    .bind(harness)
+    .bind(audience)
+    .execute(&mut **tx)
+    .await?;
+    for (key, blob) in keyed {
+        crate::volume_garbage::unqueue_native_object_in(tx, volume, &key).await?;
+        sqlx::query(
+            "INSERT INTO supertag_v2_native_memory_volume_objects
+             (tag_id,harness,audience_principal,volume_id,storage_key,sha256,byte_length)
+             VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",
+        )
+        .bind(tag)
+        .bind(harness)
+        .bind(audience)
+        .bind(volume)
+        .bind(&key)
+        .bind(&blob.sha256)
+        .bind(blob.byte_length as i64)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 /// Retiring a Tag drops its records. Its hosts' copies go when the hosts next see a reset or
 /// with their state.
 pub(crate) async fn retire_tag_in(tx: &mut Transaction<'_, Any>, tag: &str) -> Result<()> {
+    // Every object the Tag's stores named on a Volume goes to Volume garbage.
+    for object in named_objects_in(tx, tag, None).await? {
+        crate::volume_garbage::queue_native_object_in(
+            tx,
+            tag,
+            &object.volume_id,
+            &object.storage_key,
+            &object.blob,
+        )
+        .await?;
+    }
     for table in [
+        "supertag_v2_native_memory_volume_objects",
         "supertag_v2_native_memory_stores",
         "supertag_v2_native_memory_volume_heads",
     ] {
@@ -273,6 +382,16 @@ impl Store {
         if input.files > MAX_FILES || input.bytes > MAX_BYTES {
             return Err(invalid("native memory is over its size limit"));
         }
+        // Without its object list a store's files would be deleted as garbage.
+        if input.objects.len() > MAX_FILES as usize
+            || (input.files > 0 && input.objects.is_empty())
+            || input.objects.iter().any(|blob| {
+                !supertag_protocol::valid_sha256(&blob.sha256)
+                    || blob.byte_length > supertag_protocol::MAX_CHECKPOINT_BYTES as u64
+            })
+        {
+            return Err(invalid("a native memory head names its objects"));
+        }
         let now = self.execution_now_ms();
         let (mut tx, _) = self.write().await?;
         let row = owned(
@@ -342,6 +461,23 @@ impl Store {
         .bind(now)
         .bind(&task.task_id)
         .execute(&mut *tx)
+        .await?;
+        let mut objects = input.objects.clone();
+        objects.push(manifest.clone());
+        objects.sort_by(|left, right| left.sha256.cmp(&right.sha256));
+        objects.dedup_by(|left, right| left.sha256 == right.sha256);
+        let audience_key = audience.as_deref().unwrap_or("");
+        name_objects_in(
+            &mut tx,
+            (
+                &task.tag_id,
+                harness,
+                audience_key,
+                &scope(audience.as_deref()),
+            ),
+            &volume,
+            &objects,
+        )
         .await?;
         tx.commit().await?;
         Ok(AdvanceNativeMemoryResponse {

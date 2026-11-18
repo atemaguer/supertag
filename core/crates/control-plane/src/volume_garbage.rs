@@ -19,11 +19,68 @@ use tonic::{Request, Response, Status};
 const PAGE: u32 = 1000;
 const DEFAULT_PAGE: u32 = 100;
 
-/// Garbage no checkpoint row keeps: `g` is the garbage row.
-const UNKEPT: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_checkpoints c
+/// Garbage nothing keeps: `g` is the garbage row. A checkpoint stays while a checkpoint row of its
+/// Session still names the same bytes on the same Volume; a native memory object stays while a
+/// store on that Volume still names its key.
+const UNKEPT: &str = "((g.kind='checkpoint' AND NOT EXISTS (SELECT 1 FROM supertag_v2_checkpoints c
     JOIN supertag_v2_tasks t ON t.task_id=c.task_id
     WHERE c.volume_id=g.volume_id AND c.sha256=g.sha256
-      AND t.tag_id=g.tag_id AND t.session_id=g.session_id)";
+      AND t.tag_id=g.tag_id AND t.session_id=g.session_id))
+  OR (g.kind='native-memory' AND NOT EXISTS (SELECT 1 FROM supertag_v2_native_memory_volume_objects o
+    WHERE o.volume_id=g.volume_id AND o.storage_key=g.storage_key)))";
+
+/// Queues one native memory object a store no longer names, when its Volume is still registered.
+pub(crate) async fn queue_native_object_in(
+    tx: &mut Transaction<'_, Any>,
+    tag: &str,
+    volume_id: &str,
+    storage_key: &str,
+    blob: &BlobReference,
+) -> Result<()> {
+    let Some(source): Option<String> = sqlx::query_scalar(
+        "SELECT source FROM supertag_v2_artifact_volumes WHERE volume_id=$1 AND deleted=0",
+    )
+    .bind(volume_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO supertag_v2_volume_garbage
+         (volume_id,source,storage_key,sha256,byte_length,tag_id,session_id,queued_at_ms,kind)
+         VALUES ($1,$2,$3,$4,$5,$6,'',$7,'native-memory')
+         ON CONFLICT(volume_id,storage_key) DO UPDATE SET source=excluded.source,
+           queued_at_ms=excluded.queued_at_ms",
+    )
+    .bind(volume_id)
+    .bind(source)
+    .bind(storage_key)
+    .bind(&blob.sha256)
+    .bind(blob.byte_length as i64)
+    .bind(tag)
+    .bind(now_ms())
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// A native memory object a store names again leaves the queue.
+pub(crate) async fn unqueue_native_object_in(
+    tx: &mut Transaction<'_, Any>,
+    volume_id: &str,
+    storage_key: &str,
+) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM supertag_v2_volume_garbage
+         WHERE volume_id=$1 AND storage_key=$2 AND kind='native-memory'",
+    )
+    .bind(volume_id)
+    .bind(storage_key)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()

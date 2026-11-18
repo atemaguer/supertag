@@ -257,6 +257,18 @@ impl Prepared {
                 files: merged.len() as u32,
                 bytes: merged.values().map(|bytes| bytes.len() as u64).sum(),
                 reset_generation: self.generation,
+                // Each object once: the Control Plane deletes what the store no longer names.
+                objects: manifest
+                    .files
+                    .values()
+                    .map(|entry| (entry.sha256.clone(), entry.bytes))
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .map(|(sha256, byte_length)| BlobReference {
+                        sha256,
+                        byte_length,
+                    })
+                    .collect(),
             };
             let response = access
                 .memory

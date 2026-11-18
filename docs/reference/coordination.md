@@ -703,7 +703,8 @@ memory too, beside its [notes](#memory), across Tasks:
   The Volume holds the files and a manifest of them as objects that never change, at
   `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/objects/`; the Control Plane keeps only which
   manifest is current. When two turns end at once, the second merges onto what the first kept, as
-  on one host.
+  on one host. Objects the store no longer names, and all of them after
+  `supertag delete memory --native`, are deleted from the Volume like other Volume garbage.
 
 Claude Code and Codex keep harness memory this way:
 

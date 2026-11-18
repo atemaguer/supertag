@@ -139,6 +139,9 @@ message AdvanceNativeMemoryRequest {
   uint64 bytes = 5;
   // The reset generation of the turn's grant. A store reset since then is not moved.
   uint64 reset_generation = 6;
+  // Every object the new manifest names, each once. Objects the store no longer names, and the
+  // manifest it replaces, are deleted from the Volume.
+  repeated BlobReference objects = 7;
 }
 
 message AdvanceNativeMemoryResponse {

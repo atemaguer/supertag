@@ -126,20 +126,22 @@ class ReportNativeMemoryResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class AdvanceNativeMemoryRequest(_message.Message):
-    __slots__ = ("attempt", "expected_revision", "manifest", "files", "bytes", "reset_generation")
+    __slots__ = ("attempt", "expected_revision", "manifest", "files", "bytes", "reset_generation", "objects")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
     MANIFEST_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
     BYTES_FIELD_NUMBER: _ClassVar[int]
     RESET_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    OBJECTS_FIELD_NUMBER: _ClassVar[int]
     attempt: _runtime_pb2.InspectAttemptRequest
     expected_revision: int
     manifest: _runtime_pb2.BlobReference
     files: int
     bytes: int
     reset_generation: int
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., expected_revision: _Optional[int] = ..., manifest: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., reset_generation: _Optional[int] = ...) -> None: ...
+    objects: _containers.RepeatedCompositeFieldContainer[_runtime_pb2.BlobReference]
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., expected_revision: _Optional[int] = ..., manifest: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., files: _Optional[int] = ..., bytes: _Optional[int] = ..., reset_generation: _Optional[int] = ..., objects: _Optional[_Iterable[_Union[_runtime_pb2.BlobReference, _Mapping]]] = ...) -> None: ...
 
 class AdvanceNativeMemoryResponse(_message.Message):
     __slots__ = ("advanced", "head")

@@ -744,8 +744,11 @@ type AdvanceNativeMemoryRequest struct {
 	Bytes    uint64         `protobuf:"varint,5,opt,name=bytes,proto3" json:"bytes,omitempty"`
 	// The reset generation of the turn's grant. A store reset since then is not moved.
 	ResetGeneration uint64 `protobuf:"varint,6,opt,name=reset_generation,json=resetGeneration,proto3" json:"reset_generation,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Every object the new manifest names, each once. Objects the store no longer names, and the
+	// manifest it replaces, are deleted from the Volume.
+	Objects       []*BlobReference `protobuf:"bytes,7,rep,name=objects,proto3" json:"objects,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AdvanceNativeMemoryRequest) Reset() {
@@ -818,6 +821,13 @@ func (x *AdvanceNativeMemoryRequest) GetResetGeneration() uint64 {
 		return x.ResetGeneration
 	}
 	return 0
+}
+
+func (x *AdvanceNativeMemoryRequest) GetObjects() []*BlobReference {
+	if x != nil {
+		return x.Objects
+	}
+	return nil
 }
 
 type AdvanceNativeMemoryResponse struct {
@@ -927,14 +937,15 @@ const file_supertag_runtime_v2_memories_proto_rawDesc = "" +
 	"\x05bytes\x18\x04 \x01(\x04R\x05bytes\x12\x16\n" +
 	"\x06digest\x18\x05 \x01(\tR\x06digest\x12)\n" +
 	"\x10reset_generation\x18\x06 \x01(\x04R\x0fresetGeneration\"\x1c\n" +
-	"\x1aReportNativeMemoryResponse\"\xa6\x02\n" +
+	"\x1aReportNativeMemoryResponse\"\xe4\x02\n" +
 	"\x1aAdvanceNativeMemoryRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12+\n" +
 	"\x11expected_revision\x18\x02 \x01(\x04R\x10expectedRevision\x12>\n" +
 	"\bmanifest\x18\x03 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\bmanifest\x12\x14\n" +
 	"\x05files\x18\x04 \x01(\rR\x05files\x12\x14\n" +
 	"\x05bytes\x18\x05 \x01(\x04R\x05bytes\x12)\n" +
-	"\x10reset_generation\x18\x06 \x01(\x04R\x0fresetGeneration\"z\n" +
+	"\x10reset_generation\x18\x06 \x01(\x04R\x0fresetGeneration\x12<\n" +
+	"\aobjects\x18\a \x03(\v2\".supertag.runtime.v2.BlobReferenceR\aobjects\"z\n" +
 	"\x1bAdvanceNativeMemoryResponse\x12\x1a\n" +
 	"\badvanced\x18\x01 \x01(\bR\badvanced\x12?\n" +
 	"\x04head\x18\x02 \x01(\v2+.supertag.runtime.v2.NativeMemoryVolumeHeadR\x04head*z\n" +
@@ -1002,32 +1013,33 @@ var file_supertag_runtime_v2_memories_proto_depIdxs = []int32{
 	14, // 7: supertag.runtime.v2.ReportNativeMemoryRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	14, // 8: supertag.runtime.v2.AdvanceNativeMemoryRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	16, // 9: supertag.runtime.v2.AdvanceNativeMemoryRequest.manifest:type_name -> supertag.runtime.v2.BlobReference
-	17, // 10: supertag.runtime.v2.AdvanceNativeMemoryResponse.head:type_name -> supertag.runtime.v2.NativeMemoryVolumeHead
-	2,  // 11: supertag.runtime.v2.Memories.List:input_type -> supertag.runtime.v2.ListMemoriesRequest
-	4,  // 12: supertag.runtime.v2.Memories.Get:input_type -> supertag.runtime.v2.GetMemoryRequest
-	4,  // 13: supertag.runtime.v2.Memories.Delete:input_type -> supertag.runtime.v2.GetMemoryRequest
-	8,  // 14: supertag.runtime.v2.Memories.ResetNative:input_type -> supertag.runtime.v2.ResetNativeMemoryRequest
-	5,  // 15: supertag.runtime.v2.AttemptMemory.Remember:input_type -> supertag.runtime.v2.AttemptRememberRequest
-	6,  // 16: supertag.runtime.v2.AttemptMemory.Forget:input_type -> supertag.runtime.v2.AttemptForgetRequest
-	10, // 17: supertag.runtime.v2.AttemptMemory.ReportNative:input_type -> supertag.runtime.v2.ReportNativeMemoryRequest
-	12, // 18: supertag.runtime.v2.AttemptMemory.AdvanceNative:input_type -> supertag.runtime.v2.AdvanceNativeMemoryRequest
-	5,  // 19: supertag.runtime.v2.HarnessMemory.Remember:input_type -> supertag.runtime.v2.AttemptRememberRequest
-	6,  // 20: supertag.runtime.v2.HarnessMemory.Forget:input_type -> supertag.runtime.v2.AttemptForgetRequest
-	3,  // 21: supertag.runtime.v2.Memories.List:output_type -> supertag.runtime.v2.ListMemoriesResponse
-	1,  // 22: supertag.runtime.v2.Memories.Get:output_type -> supertag.runtime.v2.Memory
-	1,  // 23: supertag.runtime.v2.Memories.Delete:output_type -> supertag.runtime.v2.Memory
-	9,  // 24: supertag.runtime.v2.Memories.ResetNative:output_type -> supertag.runtime.v2.ResetNativeMemoryResponse
-	7,  // 25: supertag.runtime.v2.AttemptMemory.Remember:output_type -> supertag.runtime.v2.AttemptMemoryResponse
-	7,  // 26: supertag.runtime.v2.AttemptMemory.Forget:output_type -> supertag.runtime.v2.AttemptMemoryResponse
-	11, // 27: supertag.runtime.v2.AttemptMemory.ReportNative:output_type -> supertag.runtime.v2.ReportNativeMemoryResponse
-	13, // 28: supertag.runtime.v2.AttemptMemory.AdvanceNative:output_type -> supertag.runtime.v2.AdvanceNativeMemoryResponse
-	7,  // 29: supertag.runtime.v2.HarnessMemory.Remember:output_type -> supertag.runtime.v2.AttemptMemoryResponse
-	7,  // 30: supertag.runtime.v2.HarnessMemory.Forget:output_type -> supertag.runtime.v2.AttemptMemoryResponse
-	21, // [21:31] is the sub-list for method output_type
-	11, // [11:21] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	16, // 10: supertag.runtime.v2.AdvanceNativeMemoryRequest.objects:type_name -> supertag.runtime.v2.BlobReference
+	17, // 11: supertag.runtime.v2.AdvanceNativeMemoryResponse.head:type_name -> supertag.runtime.v2.NativeMemoryVolumeHead
+	2,  // 12: supertag.runtime.v2.Memories.List:input_type -> supertag.runtime.v2.ListMemoriesRequest
+	4,  // 13: supertag.runtime.v2.Memories.Get:input_type -> supertag.runtime.v2.GetMemoryRequest
+	4,  // 14: supertag.runtime.v2.Memories.Delete:input_type -> supertag.runtime.v2.GetMemoryRequest
+	8,  // 15: supertag.runtime.v2.Memories.ResetNative:input_type -> supertag.runtime.v2.ResetNativeMemoryRequest
+	5,  // 16: supertag.runtime.v2.AttemptMemory.Remember:input_type -> supertag.runtime.v2.AttemptRememberRequest
+	6,  // 17: supertag.runtime.v2.AttemptMemory.Forget:input_type -> supertag.runtime.v2.AttemptForgetRequest
+	10, // 18: supertag.runtime.v2.AttemptMemory.ReportNative:input_type -> supertag.runtime.v2.ReportNativeMemoryRequest
+	12, // 19: supertag.runtime.v2.AttemptMemory.AdvanceNative:input_type -> supertag.runtime.v2.AdvanceNativeMemoryRequest
+	5,  // 20: supertag.runtime.v2.HarnessMemory.Remember:input_type -> supertag.runtime.v2.AttemptRememberRequest
+	6,  // 21: supertag.runtime.v2.HarnessMemory.Forget:input_type -> supertag.runtime.v2.AttemptForgetRequest
+	3,  // 22: supertag.runtime.v2.Memories.List:output_type -> supertag.runtime.v2.ListMemoriesResponse
+	1,  // 23: supertag.runtime.v2.Memories.Get:output_type -> supertag.runtime.v2.Memory
+	1,  // 24: supertag.runtime.v2.Memories.Delete:output_type -> supertag.runtime.v2.Memory
+	9,  // 25: supertag.runtime.v2.Memories.ResetNative:output_type -> supertag.runtime.v2.ResetNativeMemoryResponse
+	7,  // 26: supertag.runtime.v2.AttemptMemory.Remember:output_type -> supertag.runtime.v2.AttemptMemoryResponse
+	7,  // 27: supertag.runtime.v2.AttemptMemory.Forget:output_type -> supertag.runtime.v2.AttemptMemoryResponse
+	11, // 28: supertag.runtime.v2.AttemptMemory.ReportNative:output_type -> supertag.runtime.v2.ReportNativeMemoryResponse
+	13, // 29: supertag.runtime.v2.AttemptMemory.AdvanceNative:output_type -> supertag.runtime.v2.AdvanceNativeMemoryResponse
+	7,  // 30: supertag.runtime.v2.HarnessMemory.Remember:output_type -> supertag.runtime.v2.AttemptMemoryResponse
+	7,  // 31: supertag.runtime.v2.HarnessMemory.Forget:output_type -> supertag.runtime.v2.AttemptMemoryResponse
+	22, // [22:32] is the sub-list for method output_type
+	12, // [12:22] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_memories_proto_init() }
