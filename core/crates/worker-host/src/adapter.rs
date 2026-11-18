@@ -681,6 +681,14 @@ async fn run(
         .await
         .context("artifact filesystem operation did not stop")?
         .context("artifact filesystem lane is closed")?;
+    // Codex cannot reconnect to a replacement sandbox mid-turn: whatever it reported, the turn's
+    // work is gone with its sandbox.
+    if codex_exec
+        .as_ref()
+        .is_some_and(crate::codex_exec::CodexExecBridge::sandbox_lost)
+    {
+        return Ok(failed(crate::codex_exec::SANDBOX_LOST));
+    }
     result
 }
 

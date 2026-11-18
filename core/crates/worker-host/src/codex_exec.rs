@@ -10,7 +10,10 @@
 use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use anyhow::{Context, Result, ensure};
@@ -39,10 +42,15 @@ const MAX_CONNECTIONS: usize = 4;
 /// The socket's file name in the bridge's private directory.
 const SOCKET: &str = "exec.sock";
 
+/// Why a Codex Attempt fails when its sandbox was lost mid-turn.
+pub(crate) const SANDBOX_LOST: &str = "The Task's sandbox stopped during the turn, and Codex cannot continue in a replacement sandbox, so the turn's changes are gone. Send the request again to run it in a new sandbox.";
+
 /// One Attempt's executor socket.
 pub(crate) struct CodexExecBridge {
     directory: tempfile::TempDir,
     accepting: JoinHandle<()>,
+    /// The provider confirmed the sandbox gone while an exec-server ran in it.
+    lost: Arc<AtomicBool>,
 }
 
 impl CodexExecBridge {
@@ -58,11 +66,18 @@ impl CodexExecBridge {
         let path = directory.path().join(SOCKET);
         let listener = UnixListener::bind(&path).context("bind the Codex executor socket")?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        let accepting = tokio::spawn(accept(listener, sandbox));
+        let lost = Arc::new(AtomicBool::new(false));
+        let accepting = tokio::spawn(accept(listener, sandbox, lost.clone()));
         Ok(Self {
             directory,
             accepting,
+            lost,
         })
+    }
+
+    /// Whether the provider confirmed the sandbox gone under a running exec-server.
+    pub(crate) fn sandbox_lost(&self) -> bool {
+        self.lost.load(Ordering::SeqCst)
     }
 
     /// The socket `supertag __codex-exec-bridge` connects to.
@@ -78,7 +93,7 @@ impl Drop for CodexExecBridge {
     }
 }
 
-async fn accept(listener: UnixListener, sandbox: SandboxSource) {
+async fn accept(listener: UnixListener, sandbox: SandboxSource, lost: Arc<AtomicBool>) {
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let mut connections = tokio::task::JoinSet::new();
     loop {
@@ -93,9 +108,16 @@ async fn accept(listener: UnixListener, sandbox: SandboxSource) {
             continue;
         };
         let sandbox = sandbox.clone();
+        let lost = lost.clone();
         connections.spawn(async move {
             let _slot = slot;
             if let Err(error) = serve(stream, sandbox).await {
+                if error.downcast_ref::<tonic::Status>().is_some_and(|status| {
+                    status.code() == tonic::Code::Unavailable
+                        && status.message() == supertag_protocol::SANDBOX_GONE
+                }) {
+                    lost.store(true, Ordering::SeqCst);
+                }
                 tracing::debug!("Codex executor connection ended: {error:#}");
             }
         });
@@ -204,8 +226,9 @@ mod tests {
     use tokio::io::AsyncBufReadExt;
     use tonic::{Request, Response, Status, Streaming};
 
-    /// A provider whose Codex exec-server answers each input line with `echo LINE`.
-    struct Provider(mpsc::UnboundedSender<String>);
+    /// A provider whose Codex exec-server answers each input line with `echo LINE`; with `lose`,
+    /// it then ends the call as when it confirmed the sandbox gone.
+    struct Provider(mpsc::UnboundedSender<String>, bool);
 
     #[tonic::async_trait]
     impl RemoteWorkspaceProvider for Provider {
@@ -278,6 +301,7 @@ mod tests {
                 return Err(Status::invalid_argument("expected the Codex exec-server"));
             };
             let _ = self.0.send(authorization);
+            let lose = self.1;
             let (sender, receiver) = mpsc::channel(4);
             tokio::spawn(async move {
                 let mut pending = Vec::new();
@@ -294,6 +318,12 @@ mod tests {
                             .await
                             .is_err()
                         {
+                            return;
+                        }
+                        if lose {
+                            let _ = sender
+                                .send(Err(Status::unavailable(supertag_protocol::SANDBOX_GONE)))
+                                .await;
                             return;
                         }
                     }
@@ -320,7 +350,7 @@ mod tests {
         let (opened, mut starts) = mpsc::unbounded_channel();
         tokio::spawn(
             tonic::transport::Server::builder()
-                .add_service(RemoteWorkspaceProviderServer::new(Provider(opened)))
+                .add_service(RemoteWorkspaceProviderServer::new(Provider(opened, false)))
                 .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
         );
         let channel =
@@ -340,6 +370,38 @@ mod tests {
         drop(bridge);
         tokio::task::yield_now().await;
         assert!(!directory.exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_sandbox_the_provider_confirms_gone_fails_the_turn() -> Result<()> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (opened, _starts) = mpsc::unbounded_channel();
+        tokio::spawn(
+            tonic::transport::Server::builder()
+                .add_service(RemoteWorkspaceProviderServer::new(Provider(opened, true)))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+        );
+        let channel =
+            tonic::transport::Endpoint::from_shared(format!("http://{address}"))?.connect_lazy();
+        let (_ready, source) =
+            tokio::sync::watch::channel(Some(Ok((channel, "provider-token".to_owned()))));
+        let bridge = CodexExecBridge::bind(source)?;
+        assert!(!bridge.sandbox_lost());
+        let (reader, mut writer) = UnixStream::connect(bridge.socket()).await?.into_split();
+        let mut lines = tokio::io::BufReader::new(reader).lines();
+        writer.write_all(b"{\"id\":1}\n").await?;
+        assert_eq!(lines.next_line().await?.as_deref(), Some("echo {\"id\":1}"));
+        // The connection ends with the provider's confirmation, and the Attempt learns of it.
+        assert_eq!(lines.next_line().await?, None);
+        for _ in 0..50 {
+            if bridge.sandbox_lost() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(bridge.sandbox_lost());
         Ok(())
     }
 }

@@ -41,6 +41,9 @@ pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// The variable naming a Codex Attempt's executor socket on a remote Workspace: Codex runs its
 /// commands and file operations in the sandbox through it.
 pub const CODEX_EXEC_SOCKET: &str = "SUPERTAG_CODEX_EXEC_SOCKET";
+/// How a provider's stdio-server call ends once it confirmed the Task's sandbox gone (the SDK's
+/// `SANDBOX_GONE`).
+pub const SANDBOX_GONE: &str = "the Task's sandbox no longer exists";
 /// How a Worker Host says its Attempt cannot continue its Session yet: the Session's last delivery
 /// is not where it can read it. It then reports that it waits for the host holding it.
 pub const WAITS_FOR_HOLDER: &str = "waits for the Worker Host holding this Session's last delivery";

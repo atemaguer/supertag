@@ -9,6 +9,9 @@ import {
 } from "./session.js";
 import type { RemoteWorkspaceHandlers } from "./transport.js";
 
+/** How a Codex exec-server's call ends when the provider confirmed its sandbox gone. */
+export const SANDBOX_GONE = "the Task's sandbox no longer exists";
+
 const CHUNK_SIZE = 256 * 1024;
 type Session = ReturnType<typeof createSandboxWorkspaceSession>;
 
@@ -269,6 +272,10 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
           // Ends its input, so its supervisor stops its process group, never the sandbox.
           await session.stopStdioServer(server);
         }
+        // Codex cannot reconnect to another sandbox mid-turn, so the Worker Host must learn that
+        // its executor ended because the sandbox is gone, not because it was stopped.
+        if (start.kind === "codexExecServer" && (await session.sandboxGone()))
+          throw new ConnectError(SANDBOX_GONE, Code.Unavailable);
       },
       async snapshot(_request, context) {
         return { artifact: await session.snapshot(context.signal) };

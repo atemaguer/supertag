@@ -1000,6 +1000,13 @@ export function createSandboxWorkspaceSession(
       if (result.isError && (await confirmedGone())) return lostResult();
       return result;
     },
+    /**
+     * Whether the provider confirms this session's sandbox no longer exists; asked after a stdio
+     * server's stream ended. Any doubt is false.
+     */
+    sandboxGone(): Promise<boolean> {
+      return confirmedGone();
+    },
     /** Stops a server startStdioServer returned; see stopStdioServer. */
     async stopStdioServer(server: ProcessHandle): Promise<void> {
       if (!(await stopStdioServer(server))) uncertain = true;

@@ -26,6 +26,7 @@ import {
 import {
   CODEX_HOME,
   createWorkspaceHandlers,
+  SANDBOX_GONE,
   startRemoteWorkspaceTransport,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { afterEach, expect, it, vi } from "vitest";
@@ -1566,3 +1567,36 @@ it("starts Codex's exec-server only in a sandbox allocated for Codex", async () 
   );
   await session.stop({ owner });
 });
+
+it("ends a Codex exec-server's call with SANDBOX_GONE only when the provider confirms the sandbox gone", async () => {
+  for (const lose of [false, true]) {
+    const { session, client } = await fixture();
+    reportCodex(client, "codex-cli 0.163.0");
+    const { header, bytes } = await bundle();
+    await session.allocate({
+      owner,
+      timeoutMs: 60_000,
+      allowedActions: ["files:read", "files:write", "commands:execute"],
+      codexVersion: "0.163.0",
+    });
+    await session.stage(header, bytes);
+    if (lose) await client.kill();
+    const handlers = createWorkspaceHandlers(session);
+    // No codex on the fixture's PATH: the server exits at once, as when its sandbox died.
+    const inputs = (async function* () {
+      yield create(RemoteStdioServerInputSchema, {
+        part: { case: "start", value: { server: { case: "codexExecServer", value: {} } } },
+      });
+    })();
+    const call = (async () => {
+      for await (const _ of handlers.provider.runStdioServer(inputs, {
+        signal: AbortSignal.timeout(30_000),
+      } as never)) {
+        /* drained */
+      }
+    })();
+    if (lose) await expect(call).rejects.toThrow(SANDBOX_GONE);
+    else await call;
+    await session.stop({ owner });
+  }
+}, 60_000);

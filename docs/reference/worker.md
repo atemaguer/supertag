@@ -215,7 +215,10 @@ commands and file operations run in the sandbox, through Codex's own exec-server
 - **Repository Skills:** Codex reads a repository's own Skills (`.agents/skills`) from the
   checkout, as it does on a local host. They are instructions only. Codex 0.163.0 has no switch
   that turns them off without hiding SuperTag's Skills too.
-- **Lost sandbox:** a lost sandbox is not replaced. Codex's tool calls fail, and nothing runs on the host instead.
+- **Lost sandbox:** Codex 0.163.0 can't continue a turn in a replacement sandbox: once its
+  executor's connection ends, every later tool call in the turn fails. When the provider confirms
+  the sandbox gone, the Task Attempt fails and says so, whatever Codex reported. Nothing runs on
+  the host instead; send the request again to run it in a new sandbox.
 
 A shared execution environment, served by `supertag-shared-execution`, holds one workspace that
 several Cursor Sessions use. The host connects with `--shared-execution-endpoint` and
