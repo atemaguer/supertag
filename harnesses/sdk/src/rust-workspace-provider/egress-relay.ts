@@ -138,6 +138,8 @@ const MAX_STREAMS = 64;
 /** A connection with no bytes either way for this long is closed. */
 const IDLE_MS = 300_000;
 const MAX_LINE = 1 << 20;
+/** How long a closed client's last bytes may take to reach the proxy. */
+const FINISH_MS = 5_000;
 /** Bytes either side may send on one connection before the other returns credit. */
 export const EGRESS_RELAY_WINDOW = 256 * 1024;
 /** Over this many bytes waiting for the sandbox's standard input, every proxy socket pauses. */
@@ -198,6 +200,8 @@ export function createEgressRelayHost(
   const openBurst = limits.openBurst ?? OPEN_BURST;
   const openRate = limits.openRate ?? OPEN_RATE;
   const streams = new Map<number, Stream>();
+  /** Sockets whose client closed, still sending the proxy their last bytes. */
+  const finishing = new Set<Socket>();
   let pending = "";
   let closed = false;
   /** Bytes of lines waiting for, or being written to, the relay's standard input. */
@@ -250,16 +254,25 @@ export function createEgressRelayHost(
     stream.socket.destroy();
     if (notify) send(`C ${id}`);
   }
-  /** The client closed: the proxy still gets the bytes it sent before, then the end. */
+  /**
+   * The client closed: the proxy still gets the bytes it sent before, then the end, for at most
+   * `FINISH_MS`. Until then the socket still counts toward the connection cap.
+   */
   function finish(id: number) {
     const stream = streams.get(id);
     if (!stream) return;
     streams.delete(id);
     clearTimeout(stream.idle);
     const { socket } = stream;
+    finishing.add(socket);
+    socket.once("close", () => finishing.delete(socket));
     socket.end();
-    setTimeout(() => socket.destroy(), 30_000).unref();
+    setTimeout(() => {
+      finishing.delete(socket);
+      socket.destroy();
+    }, FINISH_MS).unref();
   }
+
   function touch(id: number) {
     const stream = streams.get(id);
     if (!stream) return;
@@ -278,7 +291,7 @@ export function createEgressRelayHost(
     if (streams.has(id)) return;
     // Backed up, an open is dropped without a reply: replying would only add to the backlog.
     if (backedUp) return;
-    if (streams.size >= maxStreams || !admit()) {
+    if (streams.size + finishing.size >= maxStreams || !admit()) {
       send(`C ${id}`);
       return;
     }
@@ -348,6 +361,8 @@ export function createEgressRelayHost(
     closed = true;
     pending = "";
     for (const id of [...streams.keys()]) end(id, false);
+    for (const socket of finishing) socket.destroy();
+    finishing.clear();
     peer.abort?.();
   }
   return {

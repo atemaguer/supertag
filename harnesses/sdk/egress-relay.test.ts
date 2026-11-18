@@ -292,3 +292,34 @@ it("closes the relay when the Attempt's egress proxy is gone", async () => {
   expect(host.closed).toBe(true);
   expect(sandbox.aborted).toBe(1);
 });
+
+it("counts a closed client still finishing toward the cap, and destroys it on close", async () => {
+  // A proxy that never reads, so a finished socket lingers with its last bytes.
+  const sockets: Socket[] = [];
+  const server = createServer((socket) => {
+    sockets.push(socket);
+    socket.pause();
+  }).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  cleanups.push(() => {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+  });
+  const sandbox = stalledPeer();
+  sandbox.release();
+  const host = createEgressRelayHost(
+    sandbox.peer,
+    { host: "127.0.0.1", port: (server.address() as { port: number }).port },
+    { maxStreams: 2 },
+  );
+  host.receive("O 1\nO 2\n");
+  await settle(200);
+  host.receive("C 1\n");
+  expect(host.streams).toBe(1);
+  // Stream 1 still finishes, so a third open is refused.
+  host.receive("O 3\n");
+  await settle(50);
+  expect(host.streams).toBe(1);
+  expect(sandbox.lines).toContain("C 3\n");
+  host.close();
+});
