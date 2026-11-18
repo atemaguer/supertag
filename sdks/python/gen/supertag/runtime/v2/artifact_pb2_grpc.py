@@ -195,11 +195,6 @@ class ArtifactDirectoryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.SettleArtifactAcquisitionRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactAcquisition.FromString,
                 _registered_method=True)
-        self.GetAcquiredFile = channel.unary_unary(
-                '/supertag.runtime.v2.ArtifactDirectory/GetAcquiredFile',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactFile.FromString,
-                _registered_method=True)
         self.LocateCopies = channel.unary_unary(
                 '/supertag.runtime.v2.ArtifactDirectory/LocateCopies',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.LocateArtifactCopiesRequest.SerializeToString,
@@ -276,12 +271,6 @@ class ArtifactDirectoryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetAcquiredFile(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def LocateCopies(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -348,11 +337,6 @@ def add_ArtifactDirectoryServicer_to_server(servicer, server):
                     servicer.Settle,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.SettleArtifactAcquisitionRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactAcquisition.SerializeToString,
-            ),
-            'GetAcquiredFile': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAcquiredFile,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactFile.SerializeToString,
             ),
             'LocateCopies': grpc.unary_unary_rpc_method_handler(
                     servicer.LocateCopies,
@@ -594,33 +578,6 @@ class ArtifactDirectory:
             '/supertag.runtime.v2.ArtifactDirectory/Settle',
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.SettleArtifactAcquisitionRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactAcquisition.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetAcquiredFile(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.ArtifactDirectory/GetAcquiredFile',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactFile.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1155,84 +1112,6 @@ class AttemptArtifacts:
             '/supertag.runtime.v2.AttemptArtifacts/AuthorizeArtifactTransfer',
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizeArtifactTransferRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_artifact__pb2.AuthorizedArtifactTransfer.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-
-class ArtifactTransfersStub:
-    """A Worker Host's download of an artifact file its Attempt acquired, relayed from a Volume copy or
-    the holding Worker Host.
-    """
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.DownloadAcquiredFile = channel.unary_stream(
-                '/supertag.runtime.v2.ArtifactTransfers/DownloadAcquiredFile',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.FromString,
-                _registered_method=True)
-
-
-class ArtifactTransfersServicer:
-    """A Worker Host's download of an artifact file its Attempt acquired, relayed from a Volume copy or
-    the holding Worker Host.
-    """
-
-    def DownloadAcquiredFile(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-
-def add_ArtifactTransfersServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-            'DownloadAcquiredFile': grpc.unary_stream_rpc_method_handler(
-                    servicer.DownloadAcquiredFile,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.SerializeToString,
-            ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler(
-            'supertag.runtime.v2.ArtifactTransfers', rpc_method_handlers)
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('supertag.runtime.v2.ArtifactTransfers', rpc_method_handlers)
-
-
- # This class is part of an EXPERIMENTAL API.
-class ArtifactTransfers:
-    """A Worker Host's download of an artifact file its Attempt acquired, relayed from a Volume copy or
-    the holding Worker Host.
-    """
-
-    @staticmethod
-    def DownloadAcquiredFile(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_stream(
-            request,
-            target,
-            '/supertag.runtime.v2.ArtifactTransfers/DownloadAcquiredFile',
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetAcquiredArtifactFileRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactDownload.FromString,
             options,
             channel_credentials,
             insecure,

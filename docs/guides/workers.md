@@ -247,8 +247,8 @@ Tasks. A Task sees a catalog tool only when its Permission Sets grant it. See
 ## Keep artifacts on Worker Hosts
 
 Every artifact a Task captures, and every Workspace delivery's patch and bundle, stays on the
-Worker Host that produced it. The Control Plane stores none of them. It relays them to readers
-from the host while the host is connected. By default the host keeps them in
+Worker Host that produced it. The Control Plane stores none of them, and relays only deliveries,
+from the host while it is connected. By default the host keeps them in
 `STATE_DIRECTORY/artifacts`; `--artifact-directory` names another owner-only directory. Keep that
 directory on persistent storage: losing it loses those artifacts and deliveries, unless an
 artifact also has a Volume copy. On a host that does not last, such as a CI runner or one whose Tasks run
@@ -256,8 +256,8 @@ in Modal or E2B sandboxes, give its Tags a `volume`: every capture then gets a V
 by the host, before it succeeds. A file Volume also needs `--volume VOLUME_ID=DIRECTORY` on each
 host that writes it. See [Keep every capture on a Volume](../reference/artifacts.md#keep-every-capture-on-a-volume).
 
-A host can also serve its artifacts to Tasks on other hosts directly, without the Control Plane's
-relay. Give it a transfer listener:
+A Task on another host reads a host's artifacts directly from it; the Control Plane passes no
+files. Give the producing host a transfer listener:
 
 ```sh
 supertag worker-host --control-plane https://supertag.example.com \

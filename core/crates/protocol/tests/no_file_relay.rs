@@ -23,8 +23,6 @@ const REMAINING: &[(&str, &str, u8)] = &[
     ("Transfers", "DownloadReviewArtifact", 2),
     // Slice 3: hosts push Session branches, so `supertag fetch` reads the remote.
     ("Transfers", "DownloadWorkspaceArtifact", 3),
-    // Slice 4: acquired artifacts come from the producing host directly or a mapped Volume.
-    ("ArtifactTransfers", "DownloadAcquiredFile", 4),
     // Slice 6: the relay itself.
     ("HostRelay", "Deliver", 6),
 ];

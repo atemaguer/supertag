@@ -1,13 +1,7 @@
 use super::*;
-use supertag_protocol::artifacts::{
-    MAX_ARTIFACT_FILE_BYTES, artifact_source_unavailable, validate_artifact_path,
-    validate_capture_manifest,
-};
+use supertag_protocol::artifacts::validate_capture_manifest;
 
 const ARTIFACT_TRANSFER_TIMEOUT: Duration = Duration::from_secs(60);
-const HOLDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
-
-use locate_artifact_copies_request::Target;
 
 impl ApiTransfers {
     pub fn attempt_artifacts_service(
@@ -18,77 +12,8 @@ impl ApiTransfers {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    async fn acquired_file(
-        &self,
-        metadata: tonic::metadata::MetadataMap,
-        input: GetAcquiredArtifactFileRequest,
-    ) -> Result<ArtifactFile, Status> {
-        let mut request = Request::new(input);
-        *request.metadata_mut() = metadata;
-        Ok(self
-            .api
-            .forward_host(request, true, |channel, request| async move {
-                artifact_client(channel).get_acquired_file(request).await
-            })
-            .await?
-            .into_inner())
-    }
-
-    pub(super) async fn locate_copies(
-        &self,
-        metadata: tonic::metadata::MetadataMap,
-        target: Target,
-        ids: &[String],
-    ) -> Result<LocateArtifactCopiesResponse, Status> {
-        let attempt = matches!(target, Target::Attempt(_));
-        let mut request = Request::new(LocateArtifactCopiesRequest {
-            target: Some(target),
-            volume_ids: ids.to_vec(),
-        });
-        *request.metadata_mut() = metadata;
-        let call =
-            |channel, request| async move { artifact_client(channel).locate_copies(request).await };
-        let response = if attempt {
-            self.api.forward_host(request, true, call).await?
-        } else {
-            self.api.forward(request, call).await?
-        };
-        Ok(response.into_inner())
-    }
-
-    /// Opens the bytes of one authorized artifact file from the Worker Host holding the producing
-    /// Attempt's bytes, through the relay. A Volume copy is read by hosts that use the Volume.
-    async fn open_artifact(
-        &self,
-        metadata: &tonic::metadata::MetadataMap,
-        target: Target,
-        blob: &BlobReference,
-    ) -> Result<Source, Status> {
-        let holder = timeout(
-            HOLDER_LOOKUP_TIMEOUT,
-            self.locate_copies(metadata.clone(), target, &[]),
-        )
-        .await
-        .map_err(|_| Status::deadline_exceeded("artifact holder lookup timed out"))??
-        .holder;
-        let holder = holder.ok_or_else(|| artifact_source_unavailable(None))?;
-        match self.relay.open(&holder, blob).await {
-            Ok(incoming) => Ok(Source::Relay(incoming)),
-            Err(RelayError::Offline) => Err(artifact_source_unavailable(Some(&holder.host_id))),
-            Err(RelayError::Failed(status)) => Err(status),
-        }
-    }
-
     pub fn artifact_catalog_service(&self) -> artifact_catalog_server::ArtifactCatalogServer<Self> {
         artifact_catalog_server::ArtifactCatalogServer::new(self.clone())
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES)
-    }
-
-    pub fn artifact_transfer_service(
-        &self,
-    ) -> artifact_transfers_server::ArtifactTransfersServer<Self> {
-        artifact_transfers_server::ArtifactTransfersServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
@@ -292,62 +217,6 @@ impl attempt_artifacts_server::AttemptArtifacts for ApiTransfers {
                 artifact_client(channel).settle(request).await
             })
             .await
-    }
-}
-
-#[tonic::async_trait]
-impl artifact_transfers_server::ArtifactTransfers for ApiTransfers {
-    type DownloadAcquiredFileStream = super::Download<ArtifactDownload>;
-
-    async fn download_acquired_file(
-        &self,
-        request: Request<GetAcquiredArtifactFileRequest>,
-    ) -> Result<Response<Self::DownloadAcquiredFileStream>, Status> {
-        let (metadata, _, input) = request.into_parts();
-        validate_artifact_path(&input.path)?;
-        let entry = self.acquired_file(metadata.clone(), input.clone()).await?;
-        let blob = entry
-            .blob
-            .clone()
-            .filter(|blob| {
-                supertag_protocol::valid_sha256(&blob.sha256)
-                    && blob.byte_length <= MAX_ARTIFACT_FILE_BYTES
-            })
-            .ok_or_else(|| Status::data_loss("artifact selection has an invalid blob reference"))?;
-        let permit = self.acquire()?;
-        let file = self
-            .open_artifact(&metadata, Target::Attempt(input.clone()), &blob)
-            .await?;
-        let expected = entry.clone();
-        let transfer = self.clone();
-        let authorize = move || {
-            let transfer = transfer.clone();
-            let metadata = metadata.clone();
-            let input = input.clone();
-            let expected = expected.clone();
-            async move {
-                if transfer.acquired_file(metadata, input).await? != expected {
-                    return Err(Status::data_loss(
-                        "artifact selection changed during transfer",
-                    ));
-                }
-                Ok(())
-            }
-        };
-        authorize().await?;
-        Ok(Response::new(download_stream(
-            file,
-            permit,
-            blob,
-            ArtifactDownload {
-                part: Some(artifact_download::Part::File(entry)),
-            },
-            |data| ArtifactDownload {
-                part: Some(artifact_download::Part::Chunk(data)),
-            },
-            authorize,
-            ARTIFACT_TRANSFER_TIMEOUT,
-        )))
     }
 }
 

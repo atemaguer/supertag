@@ -22,7 +22,6 @@ service ArtifactDirectory {
   rpc GetForAttempt(InspectAttemptArtifactRequest) returns (CapturedArtifact);
   rpc Acquire(AcquireArtifactRequest) returns (ArtifactAcquisition);
   rpc Settle(SettleArtifactAcquisitionRequest) returns (ArtifactAcquisition);
-  rpc GetAcquiredFile(GetAcquiredArtifactFileRequest) returns (ArtifactFile);
   rpc LocateCopies(LocateArtifactCopiesRequest) returns (LocateArtifactCopiesResponse);
   rpc RegisterArtifactSource(RegisterArtifactSourceRequest) returns (RegisterArtifactSourceResponse);
   rpc IssueArtifactTransfer(GetAcquiredArtifactFileRequest) returns (ArtifactTransferGrant);
@@ -47,12 +46,6 @@ service AttemptArtifacts {
   rpc RegisterArtifactSource(RegisterArtifactSourceRequest) returns (RegisterArtifactSourceResponse);
   rpc IssueArtifactTransfer(GetAcquiredArtifactFileRequest) returns (ArtifactTransferGrant);
   rpc AuthorizeArtifactTransfer(AuthorizeArtifactTransferRequest) returns (AuthorizedArtifactTransfer);
-}
-
-// A Worker Host's download of an artifact file its Attempt acquired, relayed from a Volume copy or
-// the holding Worker Host.
-service ArtifactTransfers {
-  rpc DownloadAcquiredFile(GetAcquiredArtifactFileRequest) returns (stream ArtifactDownload);
 }
 
 // The local Worker Host binds the request to its running Attempt and workspace.
@@ -390,8 +383,9 @@ message ListArtifactVolumeCopiesResponse { repeated ArtifactVolumeCopy copies = 
 message LocateArtifactCopiesRequest {
   oneof target {
     DownloadArtifactFileRequest operator = 1;
-    GetAcquiredArtifactFileRequest attempt = 2;
   }
+  reserved 2;
+  reserved "attempt";
   repeated string volume_ids = 3;
 }
 message ArtifactVolumeLocation {

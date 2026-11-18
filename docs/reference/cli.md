@@ -2305,7 +2305,7 @@ Options:
           Listen for authorized artifact reads from other Worker Hosts
 
       --artifact-directory <ARTIFACT_DIRECTORY>
-          Owner-only absolute directory holding the artifacts and Workspace deliveries this host produces (default: STATE_DIRECTORY/artifacts). The Control Plane stores neither and relays them from here to readers
+          Owner-only absolute directory holding the artifacts and Workspace deliveries this host produces (default: STATE_DIRECTORY/artifacts). The Control Plane stores neither
 
       --artifact-transfer-tls-cert <ARTIFACT_TRANSFER_TLS_CERT>
           TLS certificate for the artifact transfer listener

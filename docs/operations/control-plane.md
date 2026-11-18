@@ -161,15 +161,15 @@ replica counts only the events it served.
 
 An artifact is saved output from a Task, such as a report or a file. The Control Plane keeps its
 catalog in the database and never stores its files. The Worker Host whose Task captured them keeps
-them, and the Control Plane relays them to Worker Hosts while that host is connected. A read of an
-offline host's files fails with an error naming the host. For copies that outlive the host, give a
+them. A Task on the same host, or on a host sharing its artifact storage, reads them there; a Task
+on another host reads them directly from a host run with `--artifact-transfer-listen`. Clients
+can't download artifacts. For copies that outlive the host, give a
 Tag a `volume`: the capturing host writes each copy there itself. The Control Plane maps no
 Volume; for an S3 Volume it only signs, with the credential `supertag volume credential set`
 stores in its credential vault on this machine. See
 [Keep every capture on a Volume](../reference/artifacts.md#keep-every-capture-on-a-volume).
-Worker Hosts run
-with `--artifact-transfer-listen` also serve each other directly. Workspace deliveries, the patch
-and bundle behind `supertag fetch`, follow the same rule without Volume copies. See
+Workspace deliveries, the patch and bundle behind `supertag fetch`, stay on the host that ran the
+Task and are relayed while it is connected. See
 [Artifacts](../reference/artifacts.md).
 
 ## Replicas

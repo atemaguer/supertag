@@ -108,8 +108,9 @@ checkout of the Tag's Workspace. The host resolves the Task's Skills, starts the
 and supervises its processes. The adapter drives the agent and reports progress, usage, and the
 result through the harness protocol. When the Task changes the Workspace, the host delivers a
 verified Git bundle, which your machine imports as a `supertag/session/...` branch. Deliveries
-stay on the Worker Host that produced them, and artifacts stay there or on a Volume; the Control
-Plane relays them to readers and stores only their records.
+stay on the Worker Host that produced them, and artifacts stay there or on a Volume. The Control
+Plane stores only their records: other Tasks read artifacts from the host directly, and the
+Control Plane still relays deliveries to whoever imports them.
 
 ## What survives a failure
 

@@ -17,10 +17,11 @@ Other terms on this page are defined in the glossary: [Role](glossary.md#role),
 
 The Control Plane never stores artifact bytes, on disk or in its database. The Worker Host that
 captures an artifact keeps the files in its own artifact storage and registers only the manifest.
-A reader, such as another Task's Worker Host or an operator, asks the Control Plane for a file. The
-Control Plane checks access, asks the holding Worker Host for those exact bytes, and relays them
-to the reader in flight. It verifies their size and SHA-256 digest on the way. An operator can copy
-a file to a Volume for a copy that stays readable while its Worker Host is offline.
+Another Task reads a file on its own Worker Host. It asks the Control Plane, which checks access
+and issues a short-lived grant for that one file. The consuming Worker Host then reads the bytes
+from its own storage, when it shares the producer's, or straight from the producing Worker Host,
+and verifies their size and SHA-256 digest. Clients list artifacts but don't download them. A Tag
+can keep a copy of every capture on its Volume.
 
 ```mermaid
 sequenceDiagram
@@ -31,11 +32,13 @@ sequenceDiagram
     Producer->>Producer: Freeze, verify, and keep the bytes
     Producer->>Control: Register the manifest and holding storage
     Consumer->>Control: Request an admitted artifact file
-    Control->>Producer: Ask for the exact bytes over its relay stream
-    Producer-->>Control: Stream the bytes
-    Control-->>Consumer: Relay them without storing, verifying size and digest
+    Control-->>Consumer: A short-lived grant for that file
+    Consumer->>Producer: Read the file with the grant
+    Producer->>Control: Check the grant
+    Producer-->>Consumer: Stream the bytes
     Consumer->>Consumer: Verify size and digest
 ```
+
 
 ## Save and reuse work
 
@@ -331,23 +334,19 @@ directory on persistent storage, and back it up with the database.
 
 ### How readers reach the bytes
 
-Every Worker Host keeps one relay stream open to the Control Plane while it runs. When a consuming
-Task's Worker Host asks for a file, the Control Plane asks the holding Worker Host for the exact
-bytes over that stream, then relays them without writing them to disk. It checks their size and
-digest against the catalog, and fails the read when they differ.
+The Control Plane passes no artifact files. A Task reads another Task's artifact on its own
+Worker Host: the Control Plane checks the read and issues a short-lived transfer grant for that
+one file. The consuming Worker Host then reads the file from its own artifact storage when it
+holds it, because the producing Task ran there or shares its storage. Otherwise it reads it
+straight from the producing Worker Host; see the next section. Either way it checks the file's size
+and SHA-256 digest against the catalog, and fails the read when they differ. A read fails when
+neither copy is reachable: the producing Worker Host is not connected, or the consumer has no
+artifact peer for it. A Volume copy outlives the producing Worker Host, for the hosts and people
+who use the Volume.
 
 Git delivery writes a delivery's bundle and the repository made from it into its private
 `--git-delivery-directory` while it lands them on a remote Workspace; a Control Plane that stopped
 during one removes what it left when it starts again.
-
-When the holding Worker Host is not connected, the read fails, and the error names it, for example:
-
-```text
-no reachable copy of these artifact bytes: their Worker Host is not connected to the Control Plane
-(held by Worker Host laptop)
-```
-
-Restart that Worker Host. A Volume copy outlives it, for the hosts and people who use the Volume.
 
 ### Direct transfer between Worker Hosts
 
@@ -357,8 +356,8 @@ storage directly to other Worker Hosts. Its TLS certificate and key come from
 producer's origin with `--artifact-peer HOST_ID=ORIGIN`, and its CA with `--artifact-peer-ca-file`.
 The consumer asks the Control Plane for a short-lived transfer grant scoped to one file, producer,
 consumer, and expiry. It then downloads the file from the producer and checks its size and SHA-256
-digest. The bytes skip the Control Plane's relay entirely. When the peer cannot serve the file,
-the consumer falls back to the relay. A retried transfer never reruns the producer.
+digest. The bytes never pass through the Control Plane. A retried transfer never reruns the
+producer.
 
 ### Keep every capture on a Volume
 

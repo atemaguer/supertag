@@ -407,18 +407,17 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
         acquisition_id: acquired.acquisition_id,
         path: "report.txt".into(),
     };
-    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel);
-    let mut stream = transfers
-        .download_acquired_file(credentials.host(download.clone(), registered.generation))
+    // The consumer reads the bytes from the producing Worker Host, never through the Control
+    // Plane, under a transfer grant for exactly the acquired file.
+    let grant = acquisitions
+        .issue_artifact_transfer(credentials.host(download.clone(), registered.generation))
         .await?
         .into_inner();
-    let mut received = Vec::new();
-    while let Some(part) = stream.message().await? {
-        if let Some(artifact_download::Part::Chunk(chunk)) = part.part {
-            received.extend(chunk)
-        }
-    }
-    assert_eq!(received, bytes);
+    assert_eq!(grant.file.as_ref(), acquired.files.first());
+    assert_eq!(
+        grant.file.as_ref().and_then(|file| file.blob.as_ref()),
+        Some(&blob)
+    );
     let delivered = acquisitions
         .settle(credentials.host(
             SettleArtifactAcquisitionRequest {
@@ -440,8 +439,8 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     .await?;
     assert_eq!(withdrawn["revision"], 2);
     assert!(
-        transfers
-            .download_acquired_file(credentials.host(download, registered.generation))
+        acquisitions
+            .issue_artifact_transfer(credentials.host(download, registered.generation))
             .await
             .is_err()
     );

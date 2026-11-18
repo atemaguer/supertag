@@ -512,18 +512,6 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
         ))
     }
 
-    async fn get_acquired_file(
-        &self,
-        request: Request<GetAcquiredArtifactFileRequest>,
-    ) -> std::result::Result<Response<ArtifactFile>, Status> {
-        let host = self.host_authority(&request)?;
-        Ok(Response::new(
-            self.store
-                .get_acquired_artifact_file(&host, request.get_ref())
-                .await?,
-        ))
-    }
-
     async fn register_artifact_source(
         &self,
         request: Request<RegisterArtifactSourceRequest>,
@@ -562,13 +550,6 @@ impl artifact_directory_server::ArtifactDirectory for ControlPlane {
                     &input.volume_ids,
                 )
                 .await?
-            }
-            Some(Target::Attempt(file)) => {
-                let host = self.host_authority(&request)?;
-                let mut tx = self.store.pool.begin().await.map_err(StoreError::from)?;
-                let (capture, file) = self.store.acquired_source_in(&mut tx, &host, file).await?;
-                crate::artifact_volumes::locations_in(&mut tx, &capture, file, &input.volume_ids)
-                    .await?
             }
             None => {
                 return Err(Status::invalid_argument(

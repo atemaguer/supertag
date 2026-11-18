@@ -198,7 +198,6 @@ impl Api {
             self.auth_keys_service(),
             self.attempt_workspace_mounts_service(),
             transfers.attempt_artifacts_service(),
-            transfers.artifact_transfer_service(),
             transfers.host_relay_service(),
             transfers.clone().service(),
             self.objectives_service(),

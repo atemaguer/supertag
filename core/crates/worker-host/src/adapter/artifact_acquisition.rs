@@ -271,29 +271,8 @@ impl AcquisitionClient<'_> {
             acquisition_id: acquisition.acquisition_id.clone(),
             path: file.path.clone(),
         };
-        // A configured peer serves the bytes directly, keeping them off the Control Plane's
-        // relay; otherwise, or when the peer cannot, the Control Plane relays them from the
-        // holding Worker Host or a Volume.
-        if !self.coordination.artifact_peers.is_empty()
-            && let Ok(bytes) = self.read_peer(acquisition, input.clone(), file).await
-        {
-            return Ok(bytes);
-        }
-        let response = self
-            .coordination
-            .artifacts
-            .clone()
-            .download_acquired_file(authenticated_request(input, self.host_token, None)?)
-            .await?;
-        verified_file(file, response.into_inner()).await
-    }
-
-    async fn read_peer(
-        &self,
-        acquisition: &ArtifactAcquisition,
-        input: GetAcquiredArtifactFileRequest,
-        file: &ArtifactFile,
-    ) -> Result<Vec<u8>, Status> {
+        // The Control Plane passes no files. The bytes come from this host's own artifact storage
+        // when it holds them, otherwise straight from the producing Worker Host.
         let sent = tokio::time::Instant::now();
         let grant = self
             .coordination
@@ -311,6 +290,9 @@ impl AcquisitionClient<'_> {
             ));
         }
         let deadline = sent + Duration::from_millis(grant.valid_for_ms);
+        if let Some(bytes) = self.read_held(acquisition, &grant, file, deadline).await? {
+            return Ok(bytes);
+        }
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
             return Err(Status::deadline_exceeded("direct artifact grant expired"));
@@ -335,6 +317,72 @@ impl AcquisitionClient<'_> {
         })
         .await
         .map_err(|_| Status::deadline_exceeded("direct artifact grant expired"))?
+    }
+}
+
+impl AcquisitionClient<'_> {
+    /// The file's bytes from this host's own artifact storage, when the grant names this host as
+    /// their source: only that host can redeem the grant with the Control Plane, which then
+    /// names the producing Attempt whose storage holds them.
+    async fn read_held(
+        &self,
+        acquisition: &ArtifactAcquisition,
+        grant: &ArtifactTransferGrant,
+        file: &ArtifactFile,
+        deadline: tokio::time::Instant,
+    ) -> Result<Option<Vec<u8>>, Status> {
+        let Some(storage) = self.coordination.artifact_source.clone() else {
+            return Ok(None);
+        };
+        let blob = file
+            .blob
+            .clone()
+            .ok_or_else(|| Status::data_loss("artifact blob is missing"))?;
+        let request = authenticated_request(
+            AuthorizeArtifactTransferRequest {
+                token: grant.token.clone(),
+                file: Some(WorkerArtifactDownloadRequest {
+                    artifact_id: acquisition.artifact_id.clone(),
+                    path: file.path.clone(),
+                    blob: Some(blob.clone()),
+                }),
+            },
+            self.host_token,
+            None,
+        )?;
+        let authorized = match tokio::time::timeout_at(
+            deadline,
+            self.coordination
+                .acquisitions
+                .clone()
+                .authorize_artifact_transfer(request),
+        )
+        .await
+        {
+            Ok(Ok(authorized)) => authorized.into_inner(),
+            // Another Worker Host holds the bytes.
+            Ok(Err(status)) if status.code() == tonic::Code::PermissionDenied => return Ok(None),
+            Ok(Err(status)) => return Err(status),
+            Err(_) => return Err(Status::deadline_exceeded("direct artifact grant expired")),
+        };
+        if authorized.file.as_ref() != Some(file) {
+            return Err(Status::data_loss(
+                "artifact authorization differs from the selected file",
+            ));
+        }
+        let producer = authorized.producer_attempt_id;
+        tokio::task::spawn_blocking(move || storage.read(&producer, &blob))
+            .await
+            .map_err(|error| {
+                crate::failures::noted(Status::internal("artifact read failed"), &error)
+            })?
+            .map(Some)
+            .map_err(|error| {
+                crate::failures::noted(
+                    Status::data_loss("this Worker Host has no exact verified artifact bytes"),
+                    &error,
+                )
+            })
     }
 }
 

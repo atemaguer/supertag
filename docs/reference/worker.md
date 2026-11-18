@@ -204,10 +204,11 @@ Control Plane or a sandbox.
 
 A Task captures files as artifacts. The host keeps their bytes in its artifact storage
 (`STATE_DIRECTORY/artifacts`, or `--artifact-directory`), and the Control Plane records only the
-catalog. The host does the same with each Workspace delivery's patch and bundle. It keeps a relay
-stream open to the Control Plane, which asks it for exact bytes when an authorized reader needs
-them and relays them without storing them. A host run with `--artifact-transfer-listen` also
-serves other hosts directly; they pin it with `--artifact-peer HOST_ID=ORIGIN`. See
+catalog. The host does the same with each Workspace delivery's patch and bundle, which the Control
+Plane relays over the host's relay stream to whoever imports the delivery. Artifacts never pass
+through the Control Plane: a Task on the same host reads them from its storage, and a host run
+with `--artifact-transfer-listen` serves other hosts directly; they pin it with
+`--artifact-peer HOST_ID=ORIGIN`. See
 [Artifacts](artifacts.md).
 
 ## Next

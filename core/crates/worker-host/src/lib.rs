@@ -59,7 +59,6 @@ use supertag_protocol::{
         HostRecord, InspectAttemptRequest, ReclaimAttemptRequest, RecordWorkspaceMcpRequest,
         RecordWorkspaceMountWritesRequest, RegisterHostRequest, ResolveWorkspaceRefRequest,
         ResolvedSkill, ServiceRole, StartTaskRequest, Task, TaskState, WorkspaceMountWriteStatus,
-        artifact_transfers_client::ArtifactTransfersClient,
         attempt_artifacts_client::AttemptArtifactsClient,
         attempt_changed_paths_client::AttemptChangedPathsClient,
         attempt_effects_client::AttemptEffectsClient, attempt_inputs_client::AttemptInputsClient,
@@ -173,7 +172,6 @@ pub(crate) struct CoordinationClients {
     artifact_peers: ArtifactPeers,
     volumes: volume_objects::HostVolumes,
     workspace_mounts: AttemptWorkspaceMountsClient<InterceptedService<Channel, HostHeaders>>,
-    artifacts: ArtifactTransfersClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
     work_sessions: AttemptWorkSessionsClient<InterceptedService<Channel, HostHeaders>>,
@@ -485,16 +483,6 @@ pub async fn run(
         volumes: std::sync::Arc::new(options.volumes.clone()),
         transfers: checkpoints::Transfers::new(channel.clone(), headers.clone())
             .with_storage(serving.storage.clone()),
-        artifacts: ArtifactTransfersClient::with_interceptor(
-            options
-                .control_plane
-                .clone()
-                .timeout(Duration::from_secs(65))
-                .connect_lazy(),
-            headers.clone(),
-        )
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES),
         workstreams: AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),

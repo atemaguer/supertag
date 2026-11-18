@@ -525,14 +525,12 @@ class ListArtifactVolumeCopiesResponse(_message.Message):
     def __init__(self, copies: _Optional[_Iterable[_Union[ArtifactVolumeCopy, _Mapping]]] = ..., next_before_order: _Optional[int] = ...) -> None: ...
 
 class LocateArtifactCopiesRequest(_message.Message):
-    __slots__ = ("operator", "attempt", "volume_ids")
+    __slots__ = ("operator", "volume_ids")
     OPERATOR_FIELD_NUMBER: _ClassVar[int]
-    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     VOLUME_IDS_FIELD_NUMBER: _ClassVar[int]
     operator: DownloadArtifactFileRequest
-    attempt: GetAcquiredArtifactFileRequest
     volume_ids: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, operator: _Optional[_Union[DownloadArtifactFileRequest, _Mapping]] = ..., attempt: _Optional[_Union[GetAcquiredArtifactFileRequest, _Mapping]] = ..., volume_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+    def __init__(self, operator: _Optional[_Union[DownloadArtifactFileRequest, _Mapping]] = ..., volume_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ArtifactVolumeLocation(_message.Message):
     __slots__ = ("volume", "storage_key")

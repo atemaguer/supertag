@@ -2999,7 +2999,6 @@ type LocateArtifactCopiesRequest struct {
 	// Types that are valid to be assigned to Target:
 	//
 	//	*LocateArtifactCopiesRequest_Operator
-	//	*LocateArtifactCopiesRequest_Attempt
 	Target        isLocateArtifactCopiesRequest_Target `protobuf_oneof:"target"`
 	VolumeIds     []string                             `protobuf:"bytes,3,rep,name=volume_ids,json=volumeIds,proto3" json:"volume_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -3052,15 +3051,6 @@ func (x *LocateArtifactCopiesRequest) GetOperator() *DownloadArtifactFileRequest
 	return nil
 }
 
-func (x *LocateArtifactCopiesRequest) GetAttempt() *GetAcquiredArtifactFileRequest {
-	if x != nil {
-		if x, ok := x.Target.(*LocateArtifactCopiesRequest_Attempt); ok {
-			return x.Attempt
-		}
-	}
-	return nil
-}
-
 func (x *LocateArtifactCopiesRequest) GetVolumeIds() []string {
 	if x != nil {
 		return x.VolumeIds
@@ -3076,13 +3066,7 @@ type LocateArtifactCopiesRequest_Operator struct {
 	Operator *DownloadArtifactFileRequest `protobuf:"bytes,1,opt,name=operator,proto3,oneof"`
 }
 
-type LocateArtifactCopiesRequest_Attempt struct {
-	Attempt *GetAcquiredArtifactFileRequest `protobuf:"bytes,2,opt,name=attempt,proto3,oneof"`
-}
-
 func (*LocateArtifactCopiesRequest_Operator) isLocateArtifactCopiesRequest_Target() {}
-
-func (*LocateArtifactCopiesRequest_Attempt) isLocateArtifactCopiesRequest_Target() {}
 
 type ArtifactVolumeLocation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -4685,13 +4669,12 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\fbefore_order\x18\x03 \x01(\x04R\vbeforeOrder\"\x8f\x01\n" +
 	" ListArtifactVolumeCopiesResponse\x12?\n" +
 	"\x06copies\x18\x01 \x03(\v2'.supertag.runtime.v2.ArtifactVolumeCopyR\x06copies\x12*\n" +
-	"\x11next_before_order\x18\x02 \x01(\x04R\x0fnextBeforeOrder\"\xe7\x01\n" +
+	"\x11next_before_order\x18\x02 \x01(\x04R\x0fnextBeforeOrder\"\xa5\x01\n" +
 	"\x1bLocateArtifactCopiesRequest\x12N\n" +
-	"\boperator\x18\x01 \x01(\v20.supertag.runtime.v2.DownloadArtifactFileRequestH\x00R\boperator\x12O\n" +
-	"\aattempt\x18\x02 \x01(\v23.supertag.runtime.v2.GetAcquiredArtifactFileRequestH\x00R\aattempt\x12\x1d\n" +
+	"\boperator\x18\x01 \x01(\v20.supertag.runtime.v2.DownloadArtifactFileRequestH\x00R\boperator\x12\x1d\n" +
 	"\n" +
 	"volume_ids\x18\x03 \x03(\tR\tvolumeIdsB\b\n" +
-	"\x06target\"v\n" +
+	"\x06targetJ\x04\b\x02\x10\x03R\aattempt\"v\n" +
 	"\x16ArtifactVolumeLocation\x12;\n" +
 	"\x06volume\x18\x01 \x01(\v2#.supertag.runtime.v2.ArtifactVolumeR\x06volume\x12\x1f\n" +
 	"\vstorage_key\x18\x02 \x01(\tR\n" +
@@ -4843,7 +4826,8 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\"ARTIFACT_APPROVAL_STATUS_WITHDRAWN\x10\x022\xdf\x01\n" +
 	"\x0fArtifactCatalog\x12]\n" +
 	"\x03Get\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12m\n" +
-	"\x04List\x121.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse2\xcd\v\n" +
+	"\x04List\x121.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse2\xe2\n" +
+	"\n" +
 	"\x11ArtifactDirectory\x12j\n" +
 	"\x0eReserveCapture\x121.supertag.runtime.v2.CommitArtifactCaptureRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12i\n" +
 	"\rCommitCapture\x121.supertag.runtime.v2.CommitArtifactCaptureRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12]\n" +
@@ -4852,8 +4836,7 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\x0eFindForAttempt\x120.supertag.runtime.v2.FindAttemptArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse\x12j\n" +
 	"\rGetForAttempt\x122.supertag.runtime.v2.InspectAttemptArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12`\n" +
 	"\aAcquire\x12+.supertag.runtime.v2.AcquireArtifactRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12i\n" +
-	"\x06Settle\x125.supertag.runtime.v2.SettleArtifactAcquisitionRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12i\n" +
-	"\x0fGetAcquiredFile\x123.supertag.runtime.v2.GetAcquiredArtifactFileRequest\x1a!.supertag.runtime.v2.ArtifactFile\x12s\n" +
+	"\x06Settle\x125.supertag.runtime.v2.SettleArtifactAcquisitionRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12s\n" +
 	"\fLocateCopies\x120.supertag.runtime.v2.LocateArtifactCopiesRequest\x1a1.supertag.runtime.v2.LocateArtifactCopiesResponse\x12\x81\x01\n" +
 	"\x16RegisterArtifactSource\x122.supertag.runtime.v2.RegisterArtifactSourceRequest\x1a3.supertag.runtime.v2.RegisterArtifactSourceResponse\x12x\n" +
 	"\x15IssueArtifactTransfer\x123.supertag.runtime.v2.GetAcquiredArtifactFileRequest\x1a*.supertag.runtime.v2.ArtifactTransferGrant\x12\x83\x01\n" +
@@ -4867,9 +4850,7 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\x06Settle\x125.supertag.runtime.v2.SettleArtifactAcquisitionRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12\x81\x01\n" +
 	"\x16RegisterArtifactSource\x122.supertag.runtime.v2.RegisterArtifactSourceRequest\x1a3.supertag.runtime.v2.RegisterArtifactSourceResponse\x12x\n" +
 	"\x15IssueArtifactTransfer\x123.supertag.runtime.v2.GetAcquiredArtifactFileRequest\x1a*.supertag.runtime.v2.ArtifactTransferGrant\x12\x83\x01\n" +
-	"\x19AuthorizeArtifactTransfer\x125.supertag.runtime.v2.AuthorizeArtifactTransferRequest\x1a/.supertag.runtime.v2.AuthorizedArtifactTransfer2\x89\x01\n" +
-	"\x11ArtifactTransfers\x12t\n" +
-	"\x14DownloadAcquiredFile\x123.supertag.runtime.v2.GetAcquiredArtifactFileRequest\x1a%.supertag.runtime.v2.ArtifactDownload0\x012\x97\x04\n" +
+	"\x19AuthorizeArtifactTransfer\x125.supertag.runtime.v2.AuthorizeArtifactTransferRequest\x1a/.supertag.runtime.v2.AuthorizedArtifactTransfer2\x97\x04\n" +
 	"\x10HarnessArtifacts\x12d\n" +
 	"\aCapture\x122.supertag.runtime.v2.HarnessCaptureArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12l\n" +
 	"\x04Find\x120.supertag.runtime.v2.HarnessFindArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse\x12a\n" +
@@ -5039,136 +5020,131 @@ var file_supertag_runtime_v2_artifact_proto_depIdxs = []int32{
 	41,  // 39: supertag.runtime.v2.ArtifactVolumeUpload.headers:type_name -> supertag.runtime.v2.ArtifactVolumeUploadHeader
 	37,  // 40: supertag.runtime.v2.ListArtifactVolumeCopiesResponse.copies:type_name -> supertag.runtime.v2.ArtifactVolumeCopy
 	28,  // 41: supertag.runtime.v2.LocateArtifactCopiesRequest.operator:type_name -> supertag.runtime.v2.DownloadArtifactFileRequest
-	17,  // 42: supertag.runtime.v2.LocateArtifactCopiesRequest.attempt:type_name -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	30,  // 43: supertag.runtime.v2.ArtifactVolumeLocation.volume:type_name -> supertag.runtime.v2.ArtifactVolume
-	46,  // 44: supertag.runtime.v2.LocateArtifactCopiesResponse.locations:type_name -> supertag.runtime.v2.ArtifactVolumeLocation
-	71,  // 45: supertag.runtime.v2.LocateArtifactCopiesResponse.holder:type_name -> supertag.runtime.v2.BlobHolder
-	7,   // 46: supertag.runtime.v2.ArtifactTransferGrant.file:type_name -> supertag.runtime.v2.ArtifactFile
-	67,  // 47: supertag.runtime.v2.WorkerArtifactDownloadRequest.blob:type_name -> supertag.runtime.v2.BlobReference
-	51,  // 48: supertag.runtime.v2.AuthorizeArtifactTransferRequest.file:type_name -> supertag.runtime.v2.WorkerArtifactDownloadRequest
-	7,   // 49: supertag.runtime.v2.AuthorizedArtifactTransfer.file:type_name -> supertag.runtime.v2.ArtifactFile
-	9,   // 50: supertag.runtime.v2.ArtifactPublication.producer:type_name -> supertag.runtime.v2.ArtifactProducer
-	7,   // 51: supertag.runtime.v2.ArtifactPublication.files:type_name -> supertag.runtime.v2.ArtifactFile
-	5,   // 52: supertag.runtime.v2.ArtifactPublication.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
-	7,   // 53: supertag.runtime.v2.ArtifactPublicationView.files:type_name -> supertag.runtime.v2.ArtifactFile
-	5,   // 54: supertag.runtime.v2.ArtifactPublicationView.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
-	5,   // 55: supertag.runtime.v2.ArtifactConsumptionApproval.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
-	55,  // 56: supertag.runtime.v2.ListArtifactPublicationsResponse.publications:type_name -> supertag.runtime.v2.ArtifactPublicationView
-	56,  // 57: supertag.runtime.v2.ListArtifactConsumptionsResponse.consumptions:type_name -> supertag.runtime.v2.ArtifactConsumptionApproval
-	64,  // 58: supertag.runtime.v2.ListArtifactApprovalAuditResponse.events:type_name -> supertag.runtime.v2.ArtifactApprovalAuditEvent
-	25,  // 59: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	26,  // 60: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	24,  // 61: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	24,  // 62: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	25,  // 63: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	26,  // 64: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	13,  // 65: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
-	14,  // 66: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
-	15,  // 67: supertag.runtime.v2.ArtifactDirectory.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
-	16,  // 68: supertag.runtime.v2.ArtifactDirectory.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	17,  // 69: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	45,  // 70: supertag.runtime.v2.ArtifactDirectory.LocateCopies:input_type -> supertag.runtime.v2.LocateArtifactCopiesRequest
-	48,  // 71: supertag.runtime.v2.ArtifactDirectory.RegisterArtifactSource:input_type -> supertag.runtime.v2.RegisterArtifactSourceRequest
-	17,  // 72: supertag.runtime.v2.ArtifactDirectory.IssueArtifactTransfer:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	52,  // 73: supertag.runtime.v2.ArtifactDirectory.AuthorizeArtifactTransfer:input_type -> supertag.runtime.v2.AuthorizeArtifactTransferRequest
-	24,  // 74: supertag.runtime.v2.AttemptArtifacts.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	24,  // 75: supertag.runtime.v2.AttemptArtifacts.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	13,  // 76: supertag.runtime.v2.AttemptArtifacts.Find:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
-	14,  // 77: supertag.runtime.v2.AttemptArtifacts.Inspect:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
-	15,  // 78: supertag.runtime.v2.AttemptArtifacts.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
-	16,  // 79: supertag.runtime.v2.AttemptArtifacts.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	48,  // 80: supertag.runtime.v2.AttemptArtifacts.RegisterArtifactSource:input_type -> supertag.runtime.v2.RegisterArtifactSourceRequest
-	17,  // 81: supertag.runtime.v2.AttemptArtifacts.IssueArtifactTransfer:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	52,  // 82: supertag.runtime.v2.AttemptArtifacts.AuthorizeArtifactTransfer:input_type -> supertag.runtime.v2.AuthorizeArtifactTransferRequest
-	17,  // 83: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	23,  // 84: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
-	18,  // 85: supertag.runtime.v2.HarnessArtifacts.Find:input_type -> supertag.runtime.v2.HarnessFindArtifactsRequest
-	25,  // 86: supertag.runtime.v2.HarnessArtifacts.Inspect:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	19,  // 87: supertag.runtime.v2.HarnessArtifacts.Read:input_type -> supertag.runtime.v2.HarnessReadArtifactRequest
-	21,  // 88: supertag.runtime.v2.HarnessArtifacts.Attach:input_type -> supertag.runtime.v2.HarnessAttachArtifactRequest
-	31,  // 89: supertag.runtime.v2.ArtifactVolumes.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
-	32,  // 90: supertag.runtime.v2.ArtifactVolumes.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
-	33,  // 91: supertag.runtime.v2.ArtifactVolumes.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
-	35,  // 92: supertag.runtime.v2.ArtifactVolumes.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
-	42,  // 93: supertag.runtime.v2.ArtifactVolumes.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
-	43,  // 94: supertag.runtime.v2.ArtifactVolumes.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
-	31,  // 95: supertag.runtime.v2.ArtifactVolumeDirectory.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
-	32,  // 96: supertag.runtime.v2.ArtifactVolumeDirectory.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
-	33,  // 97: supertag.runtime.v2.ArtifactVolumeDirectory.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
-	35,  // 98: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
-	38,  // 99: supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject:input_type -> supertag.runtime.v2.VolumeObjectGrantRequest
-	42,  // 100: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
-	43,  // 101: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
-	38,  // 102: supertag.runtime.v2.VolumeObjects.Grant:input_type -> supertag.runtime.v2.VolumeObjectGrantRequest
-	51,  // 103: supertag.runtime.v2.WorkerArtifactTransfers.Download:input_type -> supertag.runtime.v2.WorkerArtifactDownloadRequest
-	57,  // 104: supertag.runtime.v2.ArtifactPublications.Publish:input_type -> supertag.runtime.v2.PublishArtifactRequest
-	58,  // 105: supertag.runtime.v2.ArtifactPublications.Consume:input_type -> supertag.runtime.v2.ConsumeArtifactPublicationRequest
-	59,  // 106: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
-	59,  // 107: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
-	60,  // 108: supertag.runtime.v2.ArtifactPublications.GetPublication:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
-	60,  // 109: supertag.runtime.v2.ArtifactPublications.GetConsumption:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
-	61,  // 110: supertag.runtime.v2.ArtifactPublications.ListPublications:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
-	61,  // 111: supertag.runtime.v2.ArtifactPublications.ListConsumptions:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
-	65,  // 112: supertag.runtime.v2.ArtifactPublications.ListAudit:input_type -> supertag.runtime.v2.ListArtifactApprovalAuditRequest
-	11,  // 113: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	27,  // 114: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	11,  // 115: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	11,  // 116: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	11,  // 117: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	27,  // 118: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	27,  // 119: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	11,  // 120: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:output_type -> supertag.runtime.v2.CapturedArtifact
-	12,  // 121: supertag.runtime.v2.ArtifactDirectory.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	12,  // 122: supertag.runtime.v2.ArtifactDirectory.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	7,   // 123: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:output_type -> supertag.runtime.v2.ArtifactFile
-	47,  // 124: supertag.runtime.v2.ArtifactDirectory.LocateCopies:output_type -> supertag.runtime.v2.LocateArtifactCopiesResponse
-	49,  // 125: supertag.runtime.v2.ArtifactDirectory.RegisterArtifactSource:output_type -> supertag.runtime.v2.RegisterArtifactSourceResponse
-	50,  // 126: supertag.runtime.v2.ArtifactDirectory.IssueArtifactTransfer:output_type -> supertag.runtime.v2.ArtifactTransferGrant
-	53,  // 127: supertag.runtime.v2.ArtifactDirectory.AuthorizeArtifactTransfer:output_type -> supertag.runtime.v2.AuthorizedArtifactTransfer
-	11,  // 128: supertag.runtime.v2.AttemptArtifacts.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	11,  // 129: supertag.runtime.v2.AttemptArtifacts.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	27,  // 130: supertag.runtime.v2.AttemptArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	11,  // 131: supertag.runtime.v2.AttemptArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
-	12,  // 132: supertag.runtime.v2.AttemptArtifacts.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	12,  // 133: supertag.runtime.v2.AttemptArtifacts.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	49,  // 134: supertag.runtime.v2.AttemptArtifacts.RegisterArtifactSource:output_type -> supertag.runtime.v2.RegisterArtifactSourceResponse
-	50,  // 135: supertag.runtime.v2.AttemptArtifacts.IssueArtifactTransfer:output_type -> supertag.runtime.v2.ArtifactTransferGrant
-	53,  // 136: supertag.runtime.v2.AttemptArtifacts.AuthorizeArtifactTransfer:output_type -> supertag.runtime.v2.AuthorizedArtifactTransfer
-	29,  // 137: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:output_type -> supertag.runtime.v2.ArtifactDownload
-	11,  // 138: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
-	27,  // 139: supertag.runtime.v2.HarnessArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	11,  // 140: supertag.runtime.v2.HarnessArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
-	20,  // 141: supertag.runtime.v2.HarnessArtifacts.Read:output_type -> supertag.runtime.v2.HarnessArtifactPage
-	22,  // 142: supertag.runtime.v2.HarnessArtifacts.Attach:output_type -> supertag.runtime.v2.HarnessAttachedArtifact
-	30,  // 143: supertag.runtime.v2.ArtifactVolumes.Put:output_type -> supertag.runtime.v2.ArtifactVolume
-	30,  // 144: supertag.runtime.v2.ArtifactVolumes.Get:output_type -> supertag.runtime.v2.ArtifactVolume
-	34,  // 145: supertag.runtime.v2.ArtifactVolumes.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
-	36,  // 146: supertag.runtime.v2.ArtifactVolumes.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
-	37,  // 147: supertag.runtime.v2.ArtifactVolumes.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
-	44,  // 148: supertag.runtime.v2.ArtifactVolumes.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
-	30,  // 149: supertag.runtime.v2.ArtifactVolumeDirectory.Put:output_type -> supertag.runtime.v2.ArtifactVolume
-	30,  // 150: supertag.runtime.v2.ArtifactVolumeDirectory.Get:output_type -> supertag.runtime.v2.ArtifactVolume
-	34,  // 151: supertag.runtime.v2.ArtifactVolumeDirectory.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
-	36,  // 152: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
-	39,  // 153: supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject:output_type -> supertag.runtime.v2.VolumeObjectGrant
-	37,  // 154: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
-	44,  // 155: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
-	39,  // 156: supertag.runtime.v2.VolumeObjects.Grant:output_type -> supertag.runtime.v2.VolumeObjectGrant
-	29,  // 157: supertag.runtime.v2.WorkerArtifactTransfers.Download:output_type -> supertag.runtime.v2.ArtifactDownload
-	54,  // 158: supertag.runtime.v2.ArtifactPublications.Publish:output_type -> supertag.runtime.v2.ArtifactPublication
-	56,  // 159: supertag.runtime.v2.ArtifactPublications.Consume:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
-	54,  // 160: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:output_type -> supertag.runtime.v2.ArtifactPublication
-	56,  // 161: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
-	54,  // 162: supertag.runtime.v2.ArtifactPublications.GetPublication:output_type -> supertag.runtime.v2.ArtifactPublication
-	56,  // 163: supertag.runtime.v2.ArtifactPublications.GetConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
-	62,  // 164: supertag.runtime.v2.ArtifactPublications.ListPublications:output_type -> supertag.runtime.v2.ListArtifactPublicationsResponse
-	63,  // 165: supertag.runtime.v2.ArtifactPublications.ListConsumptions:output_type -> supertag.runtime.v2.ListArtifactConsumptionsResponse
-	66,  // 166: supertag.runtime.v2.ArtifactPublications.ListAudit:output_type -> supertag.runtime.v2.ListArtifactApprovalAuditResponse
-	113, // [113:167] is the sub-list for method output_type
-	59,  // [59:113] is the sub-list for method input_type
-	59,  // [59:59] is the sub-list for extension type_name
-	59,  // [59:59] is the sub-list for extension extendee
-	0,   // [0:59] is the sub-list for field type_name
+	30,  // 42: supertag.runtime.v2.ArtifactVolumeLocation.volume:type_name -> supertag.runtime.v2.ArtifactVolume
+	46,  // 43: supertag.runtime.v2.LocateArtifactCopiesResponse.locations:type_name -> supertag.runtime.v2.ArtifactVolumeLocation
+	71,  // 44: supertag.runtime.v2.LocateArtifactCopiesResponse.holder:type_name -> supertag.runtime.v2.BlobHolder
+	7,   // 45: supertag.runtime.v2.ArtifactTransferGrant.file:type_name -> supertag.runtime.v2.ArtifactFile
+	67,  // 46: supertag.runtime.v2.WorkerArtifactDownloadRequest.blob:type_name -> supertag.runtime.v2.BlobReference
+	51,  // 47: supertag.runtime.v2.AuthorizeArtifactTransferRequest.file:type_name -> supertag.runtime.v2.WorkerArtifactDownloadRequest
+	7,   // 48: supertag.runtime.v2.AuthorizedArtifactTransfer.file:type_name -> supertag.runtime.v2.ArtifactFile
+	9,   // 49: supertag.runtime.v2.ArtifactPublication.producer:type_name -> supertag.runtime.v2.ArtifactProducer
+	7,   // 50: supertag.runtime.v2.ArtifactPublication.files:type_name -> supertag.runtime.v2.ArtifactFile
+	5,   // 51: supertag.runtime.v2.ArtifactPublication.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
+	7,   // 52: supertag.runtime.v2.ArtifactPublicationView.files:type_name -> supertag.runtime.v2.ArtifactFile
+	5,   // 53: supertag.runtime.v2.ArtifactPublicationView.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
+	5,   // 54: supertag.runtime.v2.ArtifactConsumptionApproval.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
+	55,  // 55: supertag.runtime.v2.ListArtifactPublicationsResponse.publications:type_name -> supertag.runtime.v2.ArtifactPublicationView
+	56,  // 56: supertag.runtime.v2.ListArtifactConsumptionsResponse.consumptions:type_name -> supertag.runtime.v2.ArtifactConsumptionApproval
+	64,  // 57: supertag.runtime.v2.ListArtifactApprovalAuditResponse.events:type_name -> supertag.runtime.v2.ArtifactApprovalAuditEvent
+	25,  // 58: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	26,  // 59: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	24,  // 60: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	24,  // 61: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	25,  // 62: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	26,  // 63: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	13,  // 64: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	14,  // 65: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	15,  // 66: supertag.runtime.v2.ArtifactDirectory.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	16,  // 67: supertag.runtime.v2.ArtifactDirectory.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	45,  // 68: supertag.runtime.v2.ArtifactDirectory.LocateCopies:input_type -> supertag.runtime.v2.LocateArtifactCopiesRequest
+	48,  // 69: supertag.runtime.v2.ArtifactDirectory.RegisterArtifactSource:input_type -> supertag.runtime.v2.RegisterArtifactSourceRequest
+	17,  // 70: supertag.runtime.v2.ArtifactDirectory.IssueArtifactTransfer:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	52,  // 71: supertag.runtime.v2.ArtifactDirectory.AuthorizeArtifactTransfer:input_type -> supertag.runtime.v2.AuthorizeArtifactTransferRequest
+	24,  // 72: supertag.runtime.v2.AttemptArtifacts.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	24,  // 73: supertag.runtime.v2.AttemptArtifacts.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	13,  // 74: supertag.runtime.v2.AttemptArtifacts.Find:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	14,  // 75: supertag.runtime.v2.AttemptArtifacts.Inspect:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	15,  // 76: supertag.runtime.v2.AttemptArtifacts.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	16,  // 77: supertag.runtime.v2.AttemptArtifacts.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	48,  // 78: supertag.runtime.v2.AttemptArtifacts.RegisterArtifactSource:input_type -> supertag.runtime.v2.RegisterArtifactSourceRequest
+	17,  // 79: supertag.runtime.v2.AttemptArtifacts.IssueArtifactTransfer:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	52,  // 80: supertag.runtime.v2.AttemptArtifacts.AuthorizeArtifactTransfer:input_type -> supertag.runtime.v2.AuthorizeArtifactTransferRequest
+	23,  // 81: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
+	18,  // 82: supertag.runtime.v2.HarnessArtifacts.Find:input_type -> supertag.runtime.v2.HarnessFindArtifactsRequest
+	25,  // 83: supertag.runtime.v2.HarnessArtifacts.Inspect:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	19,  // 84: supertag.runtime.v2.HarnessArtifacts.Read:input_type -> supertag.runtime.v2.HarnessReadArtifactRequest
+	21,  // 85: supertag.runtime.v2.HarnessArtifacts.Attach:input_type -> supertag.runtime.v2.HarnessAttachArtifactRequest
+	31,  // 86: supertag.runtime.v2.ArtifactVolumes.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
+	32,  // 87: supertag.runtime.v2.ArtifactVolumes.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
+	33,  // 88: supertag.runtime.v2.ArtifactVolumes.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
+	35,  // 89: supertag.runtime.v2.ArtifactVolumes.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
+	42,  // 90: supertag.runtime.v2.ArtifactVolumes.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	43,  // 91: supertag.runtime.v2.ArtifactVolumes.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	31,  // 92: supertag.runtime.v2.ArtifactVolumeDirectory.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
+	32,  // 93: supertag.runtime.v2.ArtifactVolumeDirectory.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
+	33,  // 94: supertag.runtime.v2.ArtifactVolumeDirectory.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
+	35,  // 95: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
+	38,  // 96: supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject:input_type -> supertag.runtime.v2.VolumeObjectGrantRequest
+	42,  // 97: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	43,  // 98: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	38,  // 99: supertag.runtime.v2.VolumeObjects.Grant:input_type -> supertag.runtime.v2.VolumeObjectGrantRequest
+	51,  // 100: supertag.runtime.v2.WorkerArtifactTransfers.Download:input_type -> supertag.runtime.v2.WorkerArtifactDownloadRequest
+	57,  // 101: supertag.runtime.v2.ArtifactPublications.Publish:input_type -> supertag.runtime.v2.PublishArtifactRequest
+	58,  // 102: supertag.runtime.v2.ArtifactPublications.Consume:input_type -> supertag.runtime.v2.ConsumeArtifactPublicationRequest
+	59,  // 103: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
+	59,  // 104: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
+	60,  // 105: supertag.runtime.v2.ArtifactPublications.GetPublication:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
+	60,  // 106: supertag.runtime.v2.ArtifactPublications.GetConsumption:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
+	61,  // 107: supertag.runtime.v2.ArtifactPublications.ListPublications:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
+	61,  // 108: supertag.runtime.v2.ArtifactPublications.ListConsumptions:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
+	65,  // 109: supertag.runtime.v2.ArtifactPublications.ListAudit:input_type -> supertag.runtime.v2.ListArtifactApprovalAuditRequest
+	11,  // 110: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	27,  // 111: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	11,  // 112: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	11,  // 113: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	11,  // 114: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	27,  // 115: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	27,  // 116: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	11,  // 117: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:output_type -> supertag.runtime.v2.CapturedArtifact
+	12,  // 118: supertag.runtime.v2.ArtifactDirectory.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	12,  // 119: supertag.runtime.v2.ArtifactDirectory.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	47,  // 120: supertag.runtime.v2.ArtifactDirectory.LocateCopies:output_type -> supertag.runtime.v2.LocateArtifactCopiesResponse
+	49,  // 121: supertag.runtime.v2.ArtifactDirectory.RegisterArtifactSource:output_type -> supertag.runtime.v2.RegisterArtifactSourceResponse
+	50,  // 122: supertag.runtime.v2.ArtifactDirectory.IssueArtifactTransfer:output_type -> supertag.runtime.v2.ArtifactTransferGrant
+	53,  // 123: supertag.runtime.v2.ArtifactDirectory.AuthorizeArtifactTransfer:output_type -> supertag.runtime.v2.AuthorizedArtifactTransfer
+	11,  // 124: supertag.runtime.v2.AttemptArtifacts.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	11,  // 125: supertag.runtime.v2.AttemptArtifacts.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	27,  // 126: supertag.runtime.v2.AttemptArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	11,  // 127: supertag.runtime.v2.AttemptArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	12,  // 128: supertag.runtime.v2.AttemptArtifacts.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	12,  // 129: supertag.runtime.v2.AttemptArtifacts.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	49,  // 130: supertag.runtime.v2.AttemptArtifacts.RegisterArtifactSource:output_type -> supertag.runtime.v2.RegisterArtifactSourceResponse
+	50,  // 131: supertag.runtime.v2.AttemptArtifacts.IssueArtifactTransfer:output_type -> supertag.runtime.v2.ArtifactTransferGrant
+	53,  // 132: supertag.runtime.v2.AttemptArtifacts.AuthorizeArtifactTransfer:output_type -> supertag.runtime.v2.AuthorizedArtifactTransfer
+	11,  // 133: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
+	27,  // 134: supertag.runtime.v2.HarnessArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	11,  // 135: supertag.runtime.v2.HarnessArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	20,  // 136: supertag.runtime.v2.HarnessArtifacts.Read:output_type -> supertag.runtime.v2.HarnessArtifactPage
+	22,  // 137: supertag.runtime.v2.HarnessArtifacts.Attach:output_type -> supertag.runtime.v2.HarnessAttachedArtifact
+	30,  // 138: supertag.runtime.v2.ArtifactVolumes.Put:output_type -> supertag.runtime.v2.ArtifactVolume
+	30,  // 139: supertag.runtime.v2.ArtifactVolumes.Get:output_type -> supertag.runtime.v2.ArtifactVolume
+	34,  // 140: supertag.runtime.v2.ArtifactVolumes.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
+	36,  // 141: supertag.runtime.v2.ArtifactVolumes.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
+	37,  // 142: supertag.runtime.v2.ArtifactVolumes.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	44,  // 143: supertag.runtime.v2.ArtifactVolumes.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	30,  // 144: supertag.runtime.v2.ArtifactVolumeDirectory.Put:output_type -> supertag.runtime.v2.ArtifactVolume
+	30,  // 145: supertag.runtime.v2.ArtifactVolumeDirectory.Get:output_type -> supertag.runtime.v2.ArtifactVolume
+	34,  // 146: supertag.runtime.v2.ArtifactVolumeDirectory.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
+	36,  // 147: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
+	39,  // 148: supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject:output_type -> supertag.runtime.v2.VolumeObjectGrant
+	37,  // 149: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	44,  // 150: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	39,  // 151: supertag.runtime.v2.VolumeObjects.Grant:output_type -> supertag.runtime.v2.VolumeObjectGrant
+	29,  // 152: supertag.runtime.v2.WorkerArtifactTransfers.Download:output_type -> supertag.runtime.v2.ArtifactDownload
+	54,  // 153: supertag.runtime.v2.ArtifactPublications.Publish:output_type -> supertag.runtime.v2.ArtifactPublication
+	56,  // 154: supertag.runtime.v2.ArtifactPublications.Consume:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
+	54,  // 155: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:output_type -> supertag.runtime.v2.ArtifactPublication
+	56,  // 156: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
+	54,  // 157: supertag.runtime.v2.ArtifactPublications.GetPublication:output_type -> supertag.runtime.v2.ArtifactPublication
+	56,  // 158: supertag.runtime.v2.ArtifactPublications.GetConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
+	62,  // 159: supertag.runtime.v2.ArtifactPublications.ListPublications:output_type -> supertag.runtime.v2.ListArtifactPublicationsResponse
+	63,  // 160: supertag.runtime.v2.ArtifactPublications.ListConsumptions:output_type -> supertag.runtime.v2.ListArtifactConsumptionsResponse
+	66,  // 161: supertag.runtime.v2.ArtifactPublications.ListAudit:output_type -> supertag.runtime.v2.ListArtifactApprovalAuditResponse
+	110, // [110:162] is the sub-list for method output_type
+	58,  // [58:110] is the sub-list for method input_type
+	58,  // [58:58] is the sub-list for extension type_name
+	58,  // [58:58] is the sub-list for extension extendee
+	0,   // [0:58] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_artifact_proto_init() }
@@ -5191,7 +5167,6 @@ func file_supertag_runtime_v2_artifact_proto_init() {
 	file_supertag_runtime_v2_artifact_proto_msgTypes[31].OneofWrappers = []any{}
 	file_supertag_runtime_v2_artifact_proto_msgTypes[39].OneofWrappers = []any{
 		(*LocateArtifactCopiesRequest_Operator)(nil),
-		(*LocateArtifactCopiesRequest_Attempt)(nil),
 	}
 	file_supertag_runtime_v2_artifact_proto_msgTypes[48].OneofWrappers = []any{}
 	file_supertag_runtime_v2_artifact_proto_msgTypes[49].OneofWrappers = []any{}
@@ -5205,7 +5180,7 @@ func file_supertag_runtime_v2_artifact_proto_init() {
 			NumEnums:      6,
 			NumMessages:   61,
 			NumExtensions: 0,
-			NumServices:   10,
+			NumServices:   9,
 		},
 		GoTypes:           file_supertag_runtime_v2_artifact_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_artifact_proto_depIdxs,

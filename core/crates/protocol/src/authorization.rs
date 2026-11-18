@@ -154,7 +154,6 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("AttemptArtifacts", "*", HOST),
     // One object on the Tag's Volume, for a live Attempt of the calling Worker Host.
     ("VolumeObjects", "*", HOST),
-    ("ArtifactTransfers", "*", HOST),
     ("Transfers", "*", HOST),
     ("Transfers", "DownloadWorkspaceArtifact", OC),
     // A Worker Host serving the artifact and Workspace bytes it holds to the Control Plane's

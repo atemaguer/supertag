@@ -1174,7 +1174,6 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
         registered.generation,
     )?)
     .await?;
-    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(channel.clone());
     let mut acquisitions = attempt_artifacts_client::AttemptArtifactsClient::new(channel);
     let acquired = acquisitions
         .acquire(host_request(
@@ -1191,11 +1190,13 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
         )?)
         .await?
         .into_inner();
-    let mut stream = transfers
-        .download_acquired_file(host_request(
+    // The consumer reads the bytes from the producing Worker Host under a transfer grant for
+    // exactly the acquired file; the Control Plane passes none.
+    let grant = acquisitions
+        .issue_artifact_transfer(host_request(
             GetAcquiredArtifactFileRequest {
                 attempt: Some(attempt),
-                acquisition_id: acquired.acquisition_id,
+                acquisition_id: acquired.acquisition_id.clone(),
                 path: "report.txt".into(),
             },
             &credentials,
@@ -1203,13 +1204,15 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
         )?)
         .await?
         .into_inner();
-    let mut received = Vec::new();
-    while let Some(part) = stream.message().await? {
-        if let Some(artifact_download::Part::Chunk(chunk)) = part.part {
-            received.extend(chunk)
-        }
-    }
-    assert_eq!(received, bytes);
+    assert_eq!(grant.file.as_ref(), acquired.files.first());
+    assert_eq!(
+        grant
+            .file
+            .as_ref()
+            .and_then(|file| file.blob.as_ref())
+            .map(|blob| blob.byte_length),
+        Some(bytes.len() as u64)
+    );
     gateway.stop().await?;
     cp.stop().await?;
     Ok(())

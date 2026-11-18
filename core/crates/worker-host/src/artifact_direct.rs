@@ -115,10 +115,6 @@ impl ArtifactPeers {
         Ok(Self(mapped))
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     pub(crate) fn peer(&self, id: &str) -> Result<WorkerArtifactTransfersClient<Channel>, Status> {
         let endpoint = self.0.get(id).ok_or_else(|| {
             Status::failed_precondition("producing Worker Host has no configured artifact peer")
@@ -537,7 +533,8 @@ impl SourceStorage {
         Ok(bytes)
     }
 
-    fn read(&self, attempt: &str, blob: &BlobReference) -> Result<Vec<u8>> {
+    /// The verified bytes of one artifact file captured by `attempt`.
+    pub(crate) fn read(&self, attempt: &str, blob: &BlobReference) -> Result<Vec<u8>> {
         self.current()?;
         let parent = self.root.join(attempt_dir(attempt));
         check_directory(&parent.symlink_metadata()?)?;

@@ -484,8 +484,7 @@ enum Command {
         #[arg(long)]
         artifact_transfer_listen: Option<SocketAddr>,
         /// Owner-only absolute directory holding the artifacts and Workspace deliveries this
-        /// host produces (default: STATE_DIRECTORY/artifacts). The Control Plane stores neither
-        /// and relays them from here to readers.
+        /// host produces (default: STATE_DIRECTORY/artifacts). The Control Plane stores neither.
         #[arg(long)]
         artifact_directory: Option<PathBuf>,
         /// TLS certificate for the artifact transfer listener.

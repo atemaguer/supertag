@@ -239,9 +239,8 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     );
     assert_eq!(services.operator(&args).await?, queued);
 
-    // The producing `--once` host exited; a host with no Workspace mapping, which claims no
-    // Task, relays the held bytes to the consuming host.
-    let holding = crate::holding_host::serve(host(&services.public, "claude-holder")).await?;
+    // The consuming host shares the producer's artifact storage, so it reads the input there; the
+    // Control Plane passes no artifact bytes.
     // The accepted Objective Session's harness remains pinned. Verify delivery from
     // Claude's actual manager with the input path supplied before native launch.
     let attempt = interrupt_input_receipt(&services, root.path(), worker).await?;
@@ -253,6 +252,5 @@ async fn accepted_inputs_reach_an_exclusive_workspace_before_native_launch(
     assert_eq!(result["result"], "verified supplied Task artifact input");
     assert_eq!(result["workspace_delivery"]["changed_files"], 0);
     assert!(!source.join("inputs").exists());
-    drop(holding);
     services.stop().await
 }
