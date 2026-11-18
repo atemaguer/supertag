@@ -197,8 +197,12 @@ esac
 node_version=$(node --version 2>/dev/null || true)
 case "$node_version" in
   v22.1[3-9].* | v22.[2-9][0-9].*) ;;
+  v2[3-9].* | v[3-9][0-9].*)
+    printf 'Claude Code runs on this Node.js (%s). Cursor, OpenCode, E2B, and Modal need Node.js 22.13 or a later 22.x on PATH.\n' \
+      "$node_version"
+    ;;
   *)
-    printf 'Claude Code, Cursor, OpenCode, E2B, and Modal need Node.js 22.13 or a later 22.x on PATH%s.\n' \
+    printf 'Claude Code needs Node.js 22.13 or later on PATH, and Cursor, OpenCode, E2B, and Modal a 22.x release from 22.13%s.\n' \
       "${node_version:+; this is $node_version}"
     ;;
 esac

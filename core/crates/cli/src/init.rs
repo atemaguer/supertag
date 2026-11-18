@@ -499,10 +499,11 @@ pub async fn init(args: InitArgs) -> Result<()> {
         // SuperTag runs Claude Code through its Node bridge: without a Node it can use, the
         // Worker Host could not start, so say so now rather than after writing supertag.yaml.
         if *harness == Found::ClaudeCode
-            && let Some(problem) = crate::node_bridges::node_problem()
+            && let Some(problem) =
+                crate::node_bridges::node_problem(crate::node_bridges::NodeBridge::ClaudeCode)
         {
             outln!(
-                "  claude-code: can't run: {problem}. SuperTag runs Claude Code through Node.js 22.13 or a later 22.x release. Install it from https://nodejs.org/en/download (or brew install node@22 and put it on PATH), then run supertag init again."
+                "  claude-code: can't run: {problem}. SuperTag runs Claude Code through Node.js 22.13 or later. Install it from https://nodejs.org/en/download (or brew install node), then run supertag init again."
             );
             without_node = true;
             continue;
@@ -522,7 +523,7 @@ pub async fn init(args: InitArgs) -> Result<()> {
         .collect();
     ensure!(
         !installed.is_empty(),
-        "Claude Code is the only harness on this machine, and it needs Node.js 22.13 or a later 22.x release on PATH. Install that, or install Codex (npm install -g @openai/codex), then run supertag init again."
+        "Claude Code is the only harness on this machine, and it needs Node.js 22.13 or later on PATH. Install that, or install Codex (npm install -g @openai/codex), then run supertag init again."
     );
     if prompter.is_none() && signed_in.is_empty() {
         return Err(no_sign_in(&installed));

@@ -11,8 +11,9 @@ Check this page before [installing SuperTag](install.md).
 
 ## System and tools
 
-- **Node.js 22.13.0 or a later 22.x release** on `PATH` for Claude Code, Cursor, OpenCode, E2B,
-  and Modal Tasks, which run through bridges in the release. Codex Tasks don't need it. The
+- **Node.js 22.13.0 or later** on `PATH` for Claude Code Tasks, and **Node.js 22.13.0 or a later
+  22.x release** for Cursor, OpenCode, E2B, and Modal Tasks: all run through bridges in the
+  release, and Cursor's has native modules built for the 22 line. Codex Tasks don't need it. The
   TypeScript SDK's [package](../../sdks/typescript/package.json) states its own supported
   runtime in `engines.node`.
 - **npm**, included with Node.js, to install the TypeScript SDK. Source-development tools are

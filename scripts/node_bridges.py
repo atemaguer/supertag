@@ -32,6 +32,9 @@ PACKAGES = {
     "local-vm": "@supertag/worker-environment-local-vm",
 }
 HARNESS_BRIDGES = {"claude-code", "cursor", "opencode"}
+# Bridges that also run on Node majors after NODE_MAJOR: no native module tied to a Node ABI.
+# Cursor's SDK ships native modules built for Node 22, so it stays on that line.
+LATER_NODE_BRIDGES = {"claude-code"}
 # The installed CLI starts these itself, so the manifest names them; the others need a path.
 MANIFEST_BRIDGES = HARNESS_BRIDGES | {"local-vm"}
 STARTUP_ERRORS = {
@@ -216,6 +219,7 @@ def stage_workspace(output, kinds, repo, env=None):
             smoke_entry(node, kind, target)
         manifest = {"format": FORMAT, "version": version_from_repo(repo), "protocol": PROTOCOL,
                     "platform": platform, "node_major": NODE_MAJOR,
+                    "node_later": [kind for kind in selected if kind in LATER_NODE_BRIDGES],
                     "bridges": [kind for kind in selected if kind in MANIFEST_BRIDGES]}
         (staging / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         require(not output.exists(), "Node bridge output already exists")

@@ -11,7 +11,8 @@ and permissions, on your repositories. One installation holds everything a machi
 | Node bridges | The harness adapters for Claude Code, Cursor, and OpenCode, run with your Node.js |
 
 Codex runs through an adapter built into `supertag` and needs no Node.js. The installer prints a
-notice when Node.js 22.13.0 or a later 22.x release is not on `PATH`.
+notice when the Node.js on `PATH` can't run them: Claude Code needs Node.js 22.13.0 or later, and
+Cursor, OpenCode, E2B, and Modal a 22.x release from 22.13.0.
 
 ## Before you start
 

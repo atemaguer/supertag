@@ -37,7 +37,7 @@ supertag init
 and stops without changing anything when none is available. It checks each harness's sign-in with
 the credentials the Worker Host will have and labels it `signed in` or not, with sign-in
 instructions. OpenCode prints `sign-in not checked (choose a model)` until you choose a model.
-Claude Code also needs Node.js 22.13.0 or a later 22.x release on `PATH`; without it, `init` says
+Claude Code also needs Node.js 22.13.0 or later on `PATH`; without it, `init` says
 so and doesn't offer Claude Code.
 It then asks for the Control Plane port, the harness (and a `provider/model` for OpenCode), the
 Workspace name, and the Tag's name, with defaults in brackets. Codex sandboxes its own commands.

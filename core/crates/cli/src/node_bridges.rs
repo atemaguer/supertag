@@ -36,6 +36,22 @@ pub enum NodeBridge {
 }
 
 impl NodeBridge {
+    /// Whether this bridge runs on Node majors after [`NODE_MAJOR`] too. Claude Code's has no
+    /// native module tied to a Node ABI (the Claude executable is its own binary); Cursor's
+    /// ships ones built for Node 22.
+    fn runs_on_later_node(self) -> bool {
+        matches!(self, Self::ClaudeCode)
+    }
+
+    /// The Node this bridge needs, as people read it.
+    pub fn node_requirement(self) -> &'static str {
+        if self.runs_on_later_node() {
+            "Node.js 22.13 or later"
+        } else {
+            "Node.js 22.13 or a later 22.x release"
+        }
+    }
+
     fn entry(self) -> &'static str {
         match self {
             Self::ClaudeCode => {
@@ -57,7 +73,12 @@ struct Manifest {
     version: String,
     protocol: String,
     platform: String,
+    /// The Node line the bridges were built and checked with.
     node_major: u32,
+    /// Bridges that also run on any later Node major: those with no native module tied to a
+    /// Node ABI, such as Claude Code's.
+    #[serde(default)]
+    node_later: Vec<NodeBridge>,
     bridges: Vec<NodeBridge>,
 }
 
@@ -135,6 +156,13 @@ fn installed_entry(executable: &Path, bridge: NodeBridge) -> Result<PathBuf> {
         manifest.bridges.contains(&bridge),
         "the selected Node bridge is not installed"
     );
+    ensure!(
+        manifest
+            .node_later
+            .iter()
+            .all(|later| later.runs_on_later_node()),
+        "packaged Node bridges do not match this SuperTag release"
+    );
     let mut path = root.clone();
     let components = Path::new(bridge.entry()).components();
     for component in components {
@@ -191,17 +219,20 @@ fn resolve_node(runtime: PathBuf) -> Result<PathBuf> {
 
 /// Why the Node on PATH can't run the packaged Node bridges, for `supertag init` to say before it
 /// picks a harness that needs one; `None` when it can.
-pub fn node_problem() -> Option<String> {
+pub fn node_problem(bridge: NodeBridge) -> Option<String> {
     let runtime = match resolve_node("node".into()) {
         Ok(runtime) => runtime,
         Err(_) => return Some("Node.js is not on PATH".to_owned()),
     };
-    check_node_version(&runtime, PROBE_TIMEOUT).err().map(|_| {
-        format!(
-            "the Node.js on PATH ({}) is not 22.13 or a later 22.x release",
-            runtime.display()
-        )
-    })
+    check_node_version(&runtime, bridge, PROBE_TIMEOUT)
+        .err()
+        .map(|_| {
+            format!(
+                "the Node.js on PATH ({}) is not {}",
+                runtime.display(),
+                bridge.node_requirement()
+            )
+        })
 }
 
 pub fn launch(
@@ -212,7 +243,7 @@ pub fn launch(
     let entry = installed_entry(executable, bridge)
         .context("install the matching Node bridges or supply an explicit harness entrypoint")?;
     let runtime = resolve_node(runtime)?;
-    check_node_version(&runtime, PROBE_TIMEOUT)?;
+    check_node_version(&runtime, bridge, PROBE_TIMEOUT)?;
     Ok((runtime, entry))
 }
 
@@ -230,7 +261,7 @@ fn collect_output(stdout: &mut ChildStdout, bytes: &mut Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-fn check_node_version(runtime: &Path, timeout: Duration) -> Result<()> {
+fn check_node_version(runtime: &Path, bridge: NodeBridge, timeout: Duration) -> Result<()> {
     let mut child = Command::new(runtime)
         .arg("--version")
         .env_clear()
@@ -274,9 +305,12 @@ fn check_node_version(runtime: &Path, timeout: Duration) -> Result<()> {
                 .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())),
             "invalid Node version"
         );
+        let (major, minor) = (major.parse::<u32>()?, minor.parse::<u32>()?);
         ensure!(
-            major.parse::<u32>()? == NODE_MAJOR && minor.parse::<u32>()? >= NODE_MINIMUM_MINOR,
-            "packaged Node bridges require Node 22.13 or a later Node 22 version"
+            (major == NODE_MAJOR && minor >= NODE_MINIMUM_MINOR)
+                || (major > NODE_MAJOR && bridge.runs_on_later_node()),
+            "this packaged Node bridge needs {}",
+            bridge.node_requirement()
         );
         Ok(())
     })();
@@ -328,6 +362,7 @@ mod tests {
                 "protocol": PROTOCOL,
                 "platform": platform().unwrap(),
                 "node_major": NODE_MAJOR,
+                "node_later": ["claude-code"],
                 "bridges": ["claude-code", "cursor", "opencode"]
             }));
             result
@@ -439,6 +474,7 @@ mod tests {
             ("protocol", json!("supertag.runtime.v1")),
             ("platform", json!("unsupported")),
             ("node_major", json!(23)),
+            ("node_later", json!(["cursor"])),
             ("bridges", json!(["opencode"])),
             ("bridges", json!(["cursor", "cursor"])),
         ] {
@@ -508,14 +544,27 @@ mod tests {
             "exec /bin/sleep 3",
         ] {
             assert!(
-                check_node_version(&install.node(script), Duration::from_millis(100)).is_err(),
+                check_node_version(
+                    &install.node(script),
+                    NodeBridge::Cursor,
+                    Duration::from_millis(100)
+                )
+                .is_err(),
                 "{script}"
             );
         }
+        // Claude Code's bridge also runs on later Node majors; Cursor's doesn't.
+        let later = install.node("printf 'v24.11.0\\n'");
+        check_node_version(&later, NodeBridge::ClaudeCode, Duration::from_secs(10)).unwrap();
+        assert!(check_node_version(&later, NodeBridge::Cursor, Duration::from_secs(10)).is_err());
+        let older = install.node("printf 'v22.12.0\\n'");
+        assert!(
+            check_node_version(&older, NodeBridge::ClaudeCode, Duration::from_secs(10)).is_err()
+        );
         let node = install.node(
             "test \"$#\" = 1 && test \"$1\" = --version && test -z \"$NODE_OPTIONS\" && printf 'v22.13.0\\n'",
         );
         // Generous: a parallel test run can delay the fake shell well past a second.
-        check_node_version(&node, Duration::from_secs(10)).unwrap();
+        check_node_version(&node, NodeBridge::Cursor, Duration::from_secs(10)).unwrap();
     }
 }
