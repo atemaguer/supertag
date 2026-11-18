@@ -937,12 +937,19 @@ export function containerSandboxProvider(
             throw new Error("Container could not be committed");
           return image;
         },
-        runPrivileged: (argv, privilegedTimeoutMs, privilegedSignal) =>
-          exec(id, argv, {
-            privileged: true,
-            signal: privilegedSignal,
-            timeoutMs: privilegedTimeoutMs,
-          }),
+        async runPrivileged(argv, privilegedTimeoutMs, privilegedSignal) {
+          try {
+            return await exec(id, argv, {
+              privileged: true,
+              signal: privilegedSignal,
+              timeoutMs: privilegedTimeoutMs,
+            });
+          } finally {
+            // A seal stops the exec server with every other Task process: the next operation
+            // starts a new one rather than finding the old one gone.
+            servers.get(id)?.reset();
+          }
+        },
       };
       return workspace;
     },

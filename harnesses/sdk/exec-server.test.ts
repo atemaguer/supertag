@@ -108,6 +108,18 @@ it("starts another server after one stops, fails what was running then, and neve
   await rm(marks, { recursive: true, force: true });
 });
 
+it("starts another server after a reset, as after a seal stopped the last", async () => {
+  const { server, starts } = local();
+  expect(await (await run(server, { argv: ["echo", "one"] })).done).toMatchObject({
+    stdout: "one\n",
+  });
+  server.reset();
+  expect(await (await run(server, { argv: ["echo", "two"] })).done).toMatchObject({
+    stdout: "two\n",
+  });
+  expect(starts()).toBe(2);
+});
+
 it("resolves undefined when no server can start, so the caller runs the command itself", async () => {
   const server = createExecServer(() =>
     spawn("python3", ["-I", "-S", "-c", "import sys; sys.exit(1)"], { stdio: "pipe" }),

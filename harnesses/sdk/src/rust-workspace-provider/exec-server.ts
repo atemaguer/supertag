@@ -320,6 +320,15 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
         };
       }
     },
+    /**
+     * Forgets the running server, which something else stopped or is about to stop, so the next
+     * call starts another. What ran through it ends without an exit code.
+     */
+    reset() {
+      server?.child.stdin.end();
+      server?.child.kill("SIGKILL");
+      server = undefined;
+    },
     /** Stops the server; its processes stop with it. */
     close() {
       closed = true;
