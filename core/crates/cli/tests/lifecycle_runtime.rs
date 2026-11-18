@@ -688,7 +688,7 @@ fn init_checks_for_a_harness_first_then_writes_configuration_and_starts_services
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(
-        stderr.contains("No selected harness could complete the sign-in check"),
+        stderr.contains("No harness on this machine is signed in"),
         "{stderr}"
     );
     assert!(

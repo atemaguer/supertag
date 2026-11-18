@@ -188,6 +188,16 @@ pub async fn codex(
     completed && !response.trim().is_empty()
 }
 
+/// How Claude Code's sign-in check ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClaudeSignIn {
+    SignedIn,
+    /// Claude Code answered that it isn't logged in.
+    LoggedOut,
+    /// The check turn failed for another reason, such as the network or account access.
+    Failed,
+}
+
 /// Claude Code: one tool-free turn with no settings, Skills, plugins or MCP servers, in a private
 /// directory and configuration home. The stored login comes from CLAUDE_SECURESTORAGE_CONFIG_DIR,
 /// as for Tasks, or an API key or OAuth token in the environment.
@@ -195,12 +205,12 @@ pub async fn claude_code(
     variables: &Variables,
     model: Option<&str>,
     stop: impl Future<Output = ()>,
-) -> bool {
+) -> ClaudeSignIn {
     let Some(executable) = executable("claude", variables) else {
-        return false;
+        return ClaudeSignIn::Failed;
     };
     let Some(directory) = private_directory("supertag-claude-signin-") else {
-        return false;
+        return ClaudeSignIn::Failed;
     };
     let mut environment = process_variables(variables);
     for name in [
@@ -246,7 +256,7 @@ pub async fn claude_code(
         args.extend(["--model".into(), model.into()]);
     }
     let Ok(probe) = Probe::start(&executable, &args, &environment, Some(directory.path())) else {
-        return false;
+        return ClaudeSignIn::Failed;
     };
     probe::bounded(probe, stop, async |probe| {
         probe
@@ -263,13 +273,32 @@ pub async fn claude_code(
             .await?;
         while let Some(event) = probe.object(MAX_MESSAGE).await? {
             if event["type"] == "result" {
-                return Ok(event["subtype"] == "success" && event["is_error"] == false);
+                return Ok(
+                    if event["subtype"] == "success" && event["is_error"] == false {
+                        ClaudeSignIn::SignedIn
+                    } else if event["result"]
+                        .as_str()
+                        .is_some_and(|result| result.starts_with("Not logged in"))
+                    {
+                        ClaudeSignIn::LoggedOut
+                    } else {
+                        ClaudeSignIn::Failed
+                    },
+                );
             }
         }
-        Ok(false)
+        Ok(ClaudeSignIn::Failed)
     })
     .await
-    .unwrap_or(false)
+    .unwrap_or(ClaudeSignIn::Failed)
+}
+
+/// Whether a Codex Task would find any credential: CODEX_API_KEY, the auth.json it copies, or
+/// OPENAI_API_KEY.
+pub fn codex_has_credential(variables: &Variables) -> bool {
+    probe::text(variables, "CODEX_API_KEY").is_some()
+        || codex_auth_file(variables).is_some_and(|path| path.is_file())
+        || probe::text(variables, "OPENAI_API_KEY").is_some()
 }
 
 /// OpenCode: one tool-free `opencode run` turn with only the selected provider's key, in an
@@ -590,7 +619,10 @@ done"#,
                 ("UNRELATED_SECRET", "never-pass"),
             ],
         );
-        assert!(claude_code(&variables, None, std::future::pending()).await);
+        assert_eq!(
+            claude_code(&variables, None, std::future::pending()).await,
+            ClaudeSignIn::SignedIn
+        );
         let environment = read(temporary.path(), "claude.env");
         assert!(environment.contains("ANTHROPIC_API_KEY=test-secret"));
         assert!(environment.contains("CLAUDE_SECURESTORAGE_CONFIG_DIR=/selected-store"));
@@ -618,10 +650,28 @@ done"#,
             r#"{"type":"result","subtype":"error_during_execution","errors":["Please run /login test-secret"]}"#,
         ] {
             script(temporary.path(), "claude", &answer(failed));
-            assert!(!claude_code(&variables, None, std::future::pending()).await);
+            assert_eq!(
+                claude_code(&variables, None, std::future::pending()).await,
+                ClaudeSignIn::Failed
+            );
         }
+        // Claude Code's own answer when no login is stored.
+        script(
+            temporary.path(),
+            "claude",
+            &answer(
+                r#"{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}"#,
+            ),
+        );
+        assert_eq!(
+            claude_code(&variables, None, std::future::pending()).await,
+            ClaudeSignIn::LoggedOut
+        );
         script(temporary.path(), "claude", "exit 0");
-        assert!(!claude_code(&variables, None, std::future::pending()).await);
+        assert_eq!(
+            claude_code(&variables, None, std::future::pending()).await,
+            ClaudeSignIn::Failed
+        );
     }
 
     #[tokio::test]

@@ -410,7 +410,7 @@ fn a_service_unit_host_is_checked_with_env_file_credentials_only() -> Result<()>
     }
     let init = machine.fails(&["init", "--yes"], &[("CODEX_API_KEY", "env-file-key")])?;
     assert!(
-        init.contains("No selected harness could complete the sign-in check"),
+        init.contains("No harness on this machine is signed in"),
         "{init}"
     );
     assert!(!machine.home.join("codex.env").exists(), "{init}");

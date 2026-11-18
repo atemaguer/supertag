@@ -67,7 +67,7 @@ pub fn instructions(harness: Harness) -> &'static str {
             "Claude Code: run claude and sign in with /login, then run this again.\n    Or set ANTHROPIC_API_KEY in ~/.supertag/.env. A background host also inherits it from the shell; a service unit does not. Tasks read the secure sign-in store selected by CLAUDE_SECURESTORAGE_CONFIG_DIR, otherwise ~/.claude (macOS Keychain on macOS; .credentials.json on Linux). Task sessions and settings stay in a separate temporary directory."
         }
         Harness::Codex => {
-            "Codex: run codex -c 'cli_auth_credentials_store=\"file\"' login, then run this again.\n    Or set CODEX_API_KEY or OPENAI_API_KEY in ~/.supertag/.env. On macOS, a Keychain-only login is not copied to Task Attempts. A background host also inherits environment credentials from the shell; a service unit does not. Tasks use CODEX_API_KEY first, then copy $CODEX_HOME/auth.json (default ~/.codex/auth.json), then fall back to OPENAI_API_KEY if that file is missing. The file-backed sign-in check only verifies credential structure; it cannot verify account access without rotating a refresh token."
+            "Codex: run codex login, then run this again.\n    Or set CODEX_API_KEY or OPENAI_API_KEY in ~/.supertag/.env. Tasks copy $CODEX_HOME/auth.json (default ~/.codex/auth.json), so on macOS a login kept only in the Keychain doesn't reach them: sign in with codex -c 'cli_auth_credentials_store=\"file\"' login then. A background host also inherits environment credentials from the shell; a service unit does not. Tasks use CODEX_API_KEY first, then that file, then OPENAI_API_KEY. The file-backed sign-in check only verifies credential structure; it cannot verify account access without rotating a refresh token."
         }
         Harness::Cursor => {
             "Cursor: generate an API key at https://cursor.com/dashboard/api and set CURSOR_API_KEY in ~/.supertag/.env.\n    The Cursor app and cursor-agent logins do not authenticate the Cursor SDK runner."
@@ -167,8 +167,32 @@ async fn sign_in_once(
 ) -> SignInResult {
     let deadline = || probe::interactive_deadline(SIGN_IN_TIMEOUT);
     let signed_in = match harness {
-        Harness::Codex => sign_in::codex(variables, model, deadline()).await,
-        Harness::ClaudeCode => sign_in::claude_code(variables, model, deadline()).await,
+        Harness::Codex => {
+            if !sign_in::codex_has_credential(variables) {
+                return SignInResult {
+                    signed_in: false,
+                    detail: Some(
+                        "No Codex sign-in found: no ~/.codex/auth.json (or under CODEX_HOME), CODEX_API_KEY, or OPENAI_API_KEY.".into(),
+                    ),
+                };
+            }
+            sign_in::codex(variables, model, deadline()).await
+        }
+        Harness::ClaudeCode => {
+            let outcome = sign_in::claude_code(variables, model, deadline()).await;
+            return SignInResult {
+                signed_in: outcome == sign_in::ClaudeSignIn::SignedIn,
+                detail: match outcome {
+                    sign_in::ClaudeSignIn::SignedIn => None,
+                    sign_in::ClaudeSignIn::LoggedOut => {
+                        Some("Claude Code says it isn't logged in.".into())
+                    }
+                    sign_in::ClaudeSignIn::Failed => Some(
+                        "Claude Code's one-turn check didn't succeed: check your network, and that your account can use Claude Code.".into(),
+                    ),
+                },
+            };
+        }
         Harness::Opencode => match model {
             Some(model) => sign_in::opencode(variables, model, deadline()).await,
             None => {
@@ -266,7 +290,7 @@ pub async fn sign_in(args: SignInArgs) -> Result<()> {
         return Ok(());
     }
     bail!(
-        "{}: not signed in (the credential check did not succeed). Check your sign-in, model access, and network connection.\n{}",
+        "{}: not signed in.\n{}",
         args.harness.name(),
         instructions(args.harness)
     )

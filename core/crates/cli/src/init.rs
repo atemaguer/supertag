@@ -160,7 +160,9 @@ impl SignIns {
 }
 
 fn no_sign_in(harnesses: &[Found]) -> anyhow::Error {
-    let mut message = "No selected harness could complete the sign-in check. Check your sign-in, model access, and network connection, then run supertag init again.".to_owned();
+    let mut message =
+        "No harness on this machine is signed in. Sign in to one, then run supertag init again:"
+            .to_owned();
     for harness in harnesses {
         message.push('\n');
         message.push_str(harness_checks::instructions(harness.check()));
@@ -766,7 +768,7 @@ fn report(harness: Found, signed_in: bool) {
         if signed_in {
             "signed in"
         } else {
-            "not signed in (the credential check did not succeed)"
+            "not signed in"
         }
     );
 }
