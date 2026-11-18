@@ -1880,6 +1880,42 @@ async fn native_plan_updates_become_redacted_progress_events() -> Result<()> {
     Ok(())
 }
 
+/// A notification a newer Codex adds degrades by its shape: progress is ignored and the turn
+/// succeeds; anything that could carry a result or an approval fails the turn.
+#[tokio::test]
+async fn unknown_codex_notifications_degrade_by_shape() -> Result<()> {
+    for (method, succeeds) in [
+        ("turn/summary/updated", true),
+        ("item/webSearch/progress", true),
+        ("turn/finished", false),
+        ("item/approval/updated", false),
+    ] {
+        let fixture = NativeFixture::new(
+            &event_lines(&[
+                json!({"type":"thread.started","thread_id":"native-thread"}),
+                json!({"type":"turn.started"}),
+                json!({"type":"notification.raw","method":method,"params":{"summary":"later"}}),
+                json!({"type":"item.completed","item":{"id":"answer","type":"agent_message","text":"Done"}}),
+                json!({"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}),
+            ]),
+            "exit 0",
+        )?;
+        let server = HarnessProcess::start(&["files:read"]).await?;
+        let _ = run(fixture.options(), server.bootstrap.clone()).await;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("no native outcome")?;
+        assert_eq!(outcome.succeeded, succeeds, "{method}: {}", outcome.result);
+        if !succeeds {
+            assert!(
+                outcome.result.contains("unsupported event type"),
+                "{method}: {}",
+                outcome.result
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Progress is cosmetic: an unreadable plan, an unknown step status, a very long plan, or a plan
 /// after the turn completed never fails the Task. (A plan naming another turn is still a protocol
 /// violation, rejected for every turn notification before the plan is read.)

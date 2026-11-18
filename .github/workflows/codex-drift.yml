@@ -1,0 +1,48 @@
+name: Codex protocol drift
+
+# Checks the codex adapter's notification classification (core/crates/codex-adapter/src/
+# notifications.rs) against the latest published Codex app server, so a method a new Codex
+# release adds or drops shows up before hosts upgrade. Core checks the pinned Codex on every push.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - core/crates/codex-adapter/src/notifications.rs
+      - .github/workflows/codex-drift.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-drift
+  cancel-in-progress: true
+
+jobs:
+  latest-codex:
+    if: github.repository == 'atemaguer/supertag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: codex-drift
+          workspaces: core -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install the latest Codex
+        run: |
+          npm install --prefix "$RUNNER_TEMP/codex-latest" --no-audit --no-fund @openai/codex@latest
+          native_codex="$RUNNER_TEMP/codex-latest/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
+          test -x "$native_codex"
+          "$native_codex" --version
+          printf 'SUPERTAG_TEST_CODEX_BINARY=%s\n' "$native_codex" >> "$GITHUB_ENV"
+      - name: Compare the classification with its app server schema
+        run: cargo test --locked -p supertag-codex-adapter --lib codex_schema_has_no_unclassified_methods -- --ignored

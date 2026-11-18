@@ -9,6 +9,7 @@ mod events;
 pub mod launcher;
 mod memory;
 mod native_memory;
+mod notifications;
 mod pricing;
 mod questions;
 mod recap;

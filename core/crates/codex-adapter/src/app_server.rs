@@ -211,6 +211,8 @@ struct Stream {
     inventory: crate::questions::Tools,
     /// Commands are admitted, but the code-mode host stays off; see `config::code_mode_host`.
     commands_without_code_mode: bool,
+    /// Unknown progress notifications already logged, so each is logged once.
+    unknown_progress: std::collections::HashSet<String>,
 }
 
 impl Stream {
@@ -246,6 +248,7 @@ impl Stream {
             resumed,
             inventory,
             commands_without_code_mode,
+            unknown_progress: Default::default(),
         })
     }
 
@@ -627,28 +630,26 @@ impl Stream {
                         .context("could not show Codex's reply as it is written")?;
                 }
             }
-            // Other output deltas are represented by the authoritative completed item.
-            method if streamed_item_delta(method) => {}
-            method if informational(method) => {}
-            method
-                if method.starts_with("codex/")
-                    || method.starts_with("thread/")
-                    || method.starts_with("account/")
-                    || method.starts_with("model/")
-                    || method.starts_with("config/")
-                    || method == "sessionConfigured"
-                    || method == "warning" => {}
-            _ if method.len() <= 128
-                && method
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_')) =>
-            {
-                bail!(
+            method => match crate::notifications::classify(method) {
+                // A handled method whose arm above didn't apply, such as an ordinary `warning`.
+                crate::notifications::Kind::Handled | crate::notifications::Kind::Ignored => {}
+                // An unknown notification shaped like progress: a newer Codex's update about
+                // work the completed item restates. Logged once per method, never shown.
+                crate::notifications::Kind::Progress => {
+                    if self.unknown_progress.insert(method.to_owned()) {
+                        // terminal-safe: read only by the redacting Worker Host log.
+                        eprintln!(
+                            "Ignoring Codex notification {}, which this adapter doesn't know",
+                            auth::redact(method.to_owned(), secrets)
+                        );
+                    }
+                }
+                _ if crate::notifications::plain(method) => bail!(
                     "Codex emitted an unsupported event type: {}",
                     auth::redact(method.to_owned(), secrets)
-                )
-            }
-            _ => bail!("Codex emitted an unsupported event type"),
+                ),
+                _ => bail!("Codex emitted an unsupported event type"),
+            },
         }
         Ok(())
     }
@@ -1131,85 +1132,11 @@ fn plan_progress(params: &Value) -> Option<String> {
 #[path = "../../../test-support/prerequisites.rs"]
 mod prerequisites;
 
-/// A streamed fragment of an item, such as `item/agentMessage/delta` or
-/// `item/commandExecution/outputDelta`. The completed item is authoritative.
-fn streamed_item_delta(method: &str) -> bool {
-    method.starts_with("item/") && (method.ends_with("/delta") || method.ends_with("Delta"))
-}
-
-/// Progress Codex reports alongside a turn that SuperTag doesn't show: each is restated by an
-/// authoritative completed item or by the turn's own result, and none asks for a reply. Codex
-/// 0.163.0 sends `turn/diff/updated` with the turn's running diff whenever a file changes; the
-/// Worker Host computes the delivered diff from the checkout itself. An unknown method still
-/// fails the turn, so a new kind of work can't pass unseen.
-fn informational(method: &str) -> bool {
-    matches!(
-        method,
-        "turn/diff/updated"
-            | "item/fileChange/patchUpdated"
-            | "item/commandExecution/terminalInteraction"
-            | "item/reasoning/summaryPartAdded"
-            | "item/mcpToolCall/progress"
-            | "item/autoApprovalReview/started"
-            | "item/autoApprovalReview/completed"
-            | "serverRequest/resolved"
-            | "hook/started"
-            | "hook/completed"
-            | "mcpServer/startupStatus/updated"
-            | "skills/changed"
-            | "app/list/updated"
-            | "deprecationNotice"
-            | "configWarning"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{os::unix::fs::PermissionsExt, process::Stdio};
     use tokio::process::Command;
-
-    #[test]
-    fn streamed_item_deltas_are_ignored_in_both_spellings() {
-        // Codex 0.163.0 streams command output as `item/commandExecution/outputDelta`; the
-        // completed `commandExecution` item carries the output, so a delta must not fail the turn.
-        for method in [
-            "item/commandExecution/outputDelta",
-            "item/reasoning/summaryTextDelta",
-            "item/reasoning/delta",
-            "item/plan/delta",
-        ] {
-            assert!(streamed_item_delta(method), "{method}");
-        }
-        for method in [
-            "item/completed",
-            "item/started",
-            "turn/delta",
-            "item/Delta/completed",
-        ] {
-            assert!(!streamed_item_delta(method), "{method}");
-        }
-    }
-
-    #[test]
-    fn progress_codex_restates_elsewhere_is_ignored_and_unknown_work_is_not() {
-        // Codex 0.163.0 sends the turn's running diff after each file change.
-        for method in [
-            "turn/diff/updated",
-            "item/fileChange/patchUpdated",
-            "serverRequest/resolved",
-        ] {
-            assert!(informational(method), "{method}");
-        }
-        for method in [
-            "turn/completed",
-            "item/completed",
-            "item/tool/call",
-            "turn/new/kind",
-        ] {
-            assert!(!informational(method), "{method}");
-        }
-    }
 
     #[tokio::test]
     #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native Skill inventory probe"]

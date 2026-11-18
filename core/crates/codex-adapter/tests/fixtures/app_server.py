@@ -162,6 +162,9 @@ def finish_events():
         elif kind == "agent_message.delta":
             # Reply text as Codex writes it, before the completed item.
             notify("item/agentMessage/delta", {"threadId": thread, "turnId": event.get("turnId", turn), "itemId": event.get("item_id", "answer"), "delta": event["delta"]})
+        elif kind == "notification.raw":
+            # A notification by name, as a newer Codex might send it.
+            notify(event["method"], {"threadId": thread, "turnId": turn, **event.get("params", {})})
         elif kind == "plan.raw":
             # A plan notification exactly as given, for plans the adapter must tolerate.
             notify("turn/plan/updated", {"threadId": thread, "turnId": event.get("turnId", turn), "explanation": None, "plan": event["plan"]})

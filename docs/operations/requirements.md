@@ -41,7 +41,10 @@ and `supertag init` finds Claude Code by its `claude` CLI; Cursor uses its bundl
 need `cursor-agent`. Sign in as the same OS user that runs the host.
 
 SuperTag runs the Codex CLI you install, so keep it current: `supertag init` and `supertag up`
-check its version and stop with the upgrade command when it is older than the minimum. Claude Code
+check its version and stop with the upgrade command when it is older than the minimum. A newer
+Codex may send notifications SuperTag doesn't know yet: one that only reports progress is logged
+on the Worker Host and ignored, and any other fails the turn with `Codex emitted an unsupported
+event type: NAME`. Claude Code
 Tasks run the Claude Code bundled with the release's Claude Code bridge, unless the Worker Host
 is started with `--claude-path`; `supertag init` and `supertag sign-in` use the `claude` on `PATH`
 to find Claude Code and check its sign-in.

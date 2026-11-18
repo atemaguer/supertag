@@ -368,7 +368,10 @@ within the pre-1.0 compatibility policy described in
 - A Modal Workspace whose `SUPERTAG_MODAL_WORKSPACE_APP` names no existing app, or that is missing
   its configuration, now fails naming it, instead of "Remote workspace operation failed".
 - A Codex turn no longer fails with `Codex emitted an unsupported event type: turn/diff/updated`
-  when Codex 0.163.0 reports its running diff, or other progress it restates elsewhere.
+  when Codex 0.163.0 reports its running diff, or other progress it restates elsewhere. A
+  notification a newer Codex adds that only reports progress (an update, change, delta, or
+  progress report) is logged on the Worker Host and ignored; one that could carry a result or an
+  approval still fails the turn.
 - The first commit of a Session that follows a branch is authored by its Tag, with the person who
   asked as co-author, instead of by `SuperTag <supertag@localhost>`. Commits and merges of a
   Work Session credit the person who asked in the Session that started it.
