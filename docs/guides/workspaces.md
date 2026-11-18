@@ -341,7 +341,9 @@ harness stays on the host. A repository's `.devcontainer` settings choose the sa
 - Git LFS is refused with a clear error: keep large files in a Volume.
 - `merge` lands only a Work Session, when its work is reported done; a conversation's own Session
   never merges, so use `branch` for it.
-- A remote Workspace lands branches and merges; it does not open pull requests yet.
+- A remote Workspace lands branches and merges; it does not open pull requests yet, a merged
+  pull request does not close its Work Session, and a message naming a repository does not
+  choose a Workspace: a Tag works in the Workspace it is bound to.
 
 ## Next
 

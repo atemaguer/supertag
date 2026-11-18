@@ -546,20 +546,33 @@ async fn branch_contract(url: String) {
     assert_eq!(landing.remote, REMOTE);
     assert_eq!(claimed.credential, "handbook");
     assert_eq!(claimed.holder.as_ref().unwrap().host_id, "docs-host");
-    // A landing put back waits before it is claimed again.
+    // A landing put back because its holding Worker Host was away waits, and retries as soon as
+    // that host reports Ready instead of waiting out its retry.
     record(
         &store,
         &claimed,
         RecordWorkspaceLandingRequest {
             state: WorkspaceLandingState::Queued as i32,
-            reason: "the remote did not answer".into(),
+            reason: supertag_protocol::git_remote::LANDING_HOLDER_OFFLINE.into(),
             retry_after_ms: 60_000,
             ..Default::default()
         },
     )
     .await;
     assert!(claim_landing(&store).await.landing.is_none());
-    now.fetch_add(61_000, std::sync::atomic::Ordering::SeqCst);
+    store
+        .report_host(
+            &host,
+            &ReportHostRequest {
+                sequence: 1,
+                capacity: 1,
+                available_slots: 1,
+                readiness: HostReadiness::Ready.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     let claimed = claim_landing(&store).await;
     let landed = record(
         &store,
