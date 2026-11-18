@@ -810,8 +810,8 @@ async fn finish_native_memory(bridge: &Bridge, memory: NativeMemory) {
     }
 }
 
-/// The variable the Claude Code adapter reads the provider proxy's URL from; it gives it to
-/// Claude Code as `ANTHROPIC_BASE_URL`.
+/// The variable a harness adapter reads the provider proxy's URL from; Claude Code gets it as
+/// `ANTHROPIC_BASE_URL`, OpenCode as its provider's `baseURL`.
 const PROVIDER_PROXY_URL: &str = "SUPERTAG_PROVIDER_BASE_URL";
 /// The Anthropic credentials Claude Code reads from its environment.
 pub(crate) const ANTHROPIC_CREDENTIALS: [&str; 3] = [
@@ -820,40 +820,123 @@ pub(crate) const ANTHROPIC_CREDENTIALS: [&str; 3] = [
     "CLAUDE_CODE_OAUTH_TOKEN",
 ];
 
-/// The Anthropic origin a provider proxy forwards to. Test builds may point it at a fixture.
-fn anthropic_origin() -> String {
+/// The origin a provider proxy forwards to for a provider, as OpenCode names it: only those
+/// whose API SuperTag knows. Test builds may point it at a fixture.
+fn provider_origin(provider: &str) -> Option<String> {
+    let (fixture, origin) = match provider {
+        "anthropic" => (
+            "SUPERTAG_TEST_ANTHROPIC_ORIGIN",
+            "https://api.anthropic.com",
+        ),
+        "openai" => ("SUPERTAG_TEST_OPENAI_ORIGIN", "https://api.openai.com"),
+        _ => return None,
+    };
     #[cfg(feature = "test-fixtures")]
-    if let Ok(origin) = std::env::var("SUPERTAG_TEST_ANTHROPIC_ORIGIN") {
-        return origin;
+    if let Ok(origin) = std::env::var(fixture) {
+        return Some(origin);
     }
-    "https://api.anthropic.com".to_owned()
+    let _ = fixture;
+    Some(origin.to_owned())
 }
 
-/// On a host that runs commands unsandboxed, a Claude Code Attempt's credentials stay in this
-/// process: the harness talks to the provider through a proxy that holds them (see
-/// `provider_proxy`). `None` elsewhere, and when the host has no credential in its environment
-/// (a sign-in kept in the macOS Keychain), which the harness then reads itself.
+/// A credential from the host's environment, when it holds one.
+fn environment_credential(variable: &str) -> Option<crate::provider_proxy::Swap> {
+    std::env::var(variable)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(|value| crate::provider_proxy::Swap::new(variable, value))
+}
+
+/// OpenCode's API key for `provider` from the auth file the host gives its adapter (its
+/// `--auth-file`, from the host's `--opencode-auth-file`): `{ PROVIDER: { "type": "api", "key": KEY } }`. A sign-in of another
+/// kind can't go behind the proxy.
+fn opencode_file_key(options: &HostOptions, provider: &str) -> Option<String> {
+    let path = options
+        .adapter_args
+        .windows(2)
+        .find(|pair| pair[0] == "--auth-file")
+        .map(|pair| std::path::PathBuf::from(&pair[1]))?;
+    let file: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let entry = file.get(provider)?;
+    (entry.get("type")?.as_str()? == "api")
+        .then(|| entry.get("key")?.as_str().map(str::to_owned))
+        .flatten()
+        .filter(|key| !key.is_empty())
+}
+
+/// Why this unsandboxed host's model key can't go behind the provider proxy, so the commands its
+/// harness runs can reach it; `None` when it can, or when the host runs no command unsandboxed.
+pub(crate) fn unproxied_key_warning(options: &HostOptions) -> Option<String> {
+    if !options.execution_profile.allow_unsandboxed_commands {
+        return None;
+    }
+    match options.harness {
+        HarnessKind::ClaudeCode
+            if !ANTHROPIC_CREDENTIALS
+                .iter()
+                .any(|&variable| environment_credential(variable).is_some()) =>
+        {
+            Some("Claude Code uses its own sign-in on this host, which the commands it runs without a sandbox can read. Set ANTHROPIC_API_KEY in the host's env_file (default ~/.supertag/.env) to keep the key in the Worker Host.".to_owned())
+        }
+        HarnessKind::Opencode => {
+            let model = options.provider_model.as_deref()?;
+            let provider = crate::credentials::validate_opencode_model(model).ok()?;
+            let variable = *crate::provider_environment_for(HarnessKind::Opencode, Some(model))
+                .ok()?
+                .first()?;
+            let held = provider_origin(provider).is_some()
+                && (environment_credential(variable).is_some()
+                    || opencode_file_key(options, provider).is_some());
+            (!held).then(|| format!("OpenCode's {provider} sign-in on this host can't be kept in the Worker Host, so the commands it runs without a sandbox can read it. SuperTag keeps an anthropic or openai API key there, from {variable} in the host's env_file or an api key in the OpenCode auth file."))
+        }
+        _ => None,
+    }
+}
+
+/// On a host that runs commands unsandboxed, a Claude Code or OpenCode Attempt's model key stays
+/// in this process: the harness talks to its provider through a proxy that holds it (see
+/// `provider_proxy`). `None` elsewhere, and when the host has no key it can hold (a sign-in kept
+/// in the macOS Keychain, an OpenCode OAuth sign-in, or a provider SuperTag doesn't proxy), which
+/// the harness then reads itself.
 async fn start_provider_proxy(
     options: &HostOptions,
 ) -> Result<Option<crate::provider_proxy::ProviderProxy>> {
-    if options.harness != HarnessKind::ClaudeCode
-        || !options.execution_profile.allow_unsandboxed_commands
-    {
+    if !options.execution_profile.allow_unsandboxed_commands {
         return Ok(None);
     }
-    let swaps: Vec<_> = ANTHROPIC_CREDENTIALS
-        .iter()
-        .filter_map(|&variable| {
-            std::env::var(variable)
-                .ok()
-                .filter(|value| !value.is_empty())
-                .map(|value| crate::provider_proxy::Swap::new(variable, value))
-        })
-        .collect();
+    let (origin, swaps) = match options.harness {
+        HarnessKind::ClaudeCode => (
+            provider_origin("anthropic"),
+            ANTHROPIC_CREDENTIALS
+                .iter()
+                .filter_map(|&variable| environment_credential(variable))
+                .collect::<Vec<_>>(),
+        ),
+        HarnessKind::Opencode => {
+            let Some(model) = options.provider_model.as_deref() else {
+                return Ok(None);
+            };
+            let Some(&variable) =
+                crate::provider_environment_for(HarnessKind::Opencode, Some(model))?.first()
+            else {
+                return Ok(None);
+            };
+            let provider = crate::credentials::validate_opencode_model(model)?;
+            let swap = environment_credential(variable).or_else(|| {
+                opencode_file_key(options, provider)
+                    .map(|key| crate::provider_proxy::Swap::new(variable, key))
+            });
+            (provider_origin(provider), swap.into_iter().collect())
+        }
+        _ => return Ok(None),
+    };
+    let Some(origin) = origin else {
+        return Ok(None);
+    };
     if swaps.is_empty() {
         return Ok(None);
     }
-    crate::provider_proxy::ProviderProxy::start(&anthropic_origin(), swaps)
+    crate::provider_proxy::ProviderProxy::start(&origin, swaps)
         .await
         .map(Some)
 }

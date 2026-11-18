@@ -17,7 +17,12 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import * as rustHarness from "@supertag/worker-sdk/internal/rust-harness";
 import { afterEach, expect, it, vi } from "vitest";
 import { openCodePatterns, openCodePermissions, runOpenCode } from "./src/index.js";
-import { failureResult, nativeRequest, taskModel } from "./src/rust-adapter/adapter.js";
+import {
+  failureResult,
+  nativeRequest,
+  taskModel,
+  withProviderBaseUrl,
+} from "./src/rust-adapter/adapter.js";
 import { verifiedCompletionParts } from "./src/rust-adapter/completion.js";
 import { verifyWorkspaceLinks } from "./src/rust-adapter/workspace.js";
 
@@ -749,4 +754,17 @@ it("names a failed Worker Host call in the result, redacted with the Attempt's v
     "OpenCode execution failed.",
   );
   expect(failureResult(refused, true, true, [secret])).toBe("OpenCode execution stopped.");
+});
+
+it("points only the Task's provider at the Worker Host's provider proxy", () => {
+  const base = {
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: "anthropic/m", share: "disabled" }),
+  };
+  expect(withProviderBaseUrl(base, "anthropic", undefined)).toBe(base);
+  const proxied = withProviderBaseUrl(base, "anthropic", "http://127.0.0.1:4100/abc");
+  expect(JSON.parse(proxied["OPENCODE_CONFIG_CONTENT"] ?? "{}")).toEqual({
+    model: "anthropic/m",
+    share: "disabled",
+    provider: { anthropic: { options: { baseURL: "http://127.0.0.1:4100/abc/v1" } } },
+  });
 });

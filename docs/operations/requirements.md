@@ -211,9 +211,18 @@ Host. Each Task's Claude Code gets a stand-in value and the address of a proxy o
 puts the real key on its requests to `api.anthropic.com`, and on nothing else. Claude Code also
 removes its credentials from the environment of the commands it runs. A command can still call
 Anthropic through that proxy while its Task runs, but it can't read the key from Claude Code or
-the adapter. This isn't a boundary against a command set on stealing it: such a command runs as the
-Worker Host's user and can read the host's own environment and its `env_file`. Only a sandbox,
-such as `environment: local-vm`, keeps the key out of reach.
+the adapter.
+
+OpenCode works the same way on such a host for its `anthropic` and `openai` providers: the
+provider's API key, from the host's environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) or an
+`api` entry in the OpenCode auth file, stays in the Worker Host, and OpenCode's provider `baseURL`
+points at the proxy, which forwards only to `api.anthropic.com` or `api.openai.com`. Other
+providers, and an OpenCode sign-in that isn't an API key, stay readable to the commands OpenCode
+runs; the Worker Host warns about that when it starts.
+
+Neither is a boundary against a command set on stealing the key: such a command runs as the Worker
+Host's user and can read the host's own environment, its `env_file`, and the OpenCode auth file.
+Only a sandbox, such as `environment: local-vm`, keeps the key out of reach.
 
 A sign-in made with `/login` lives in the system's secure store (the macOS Keychain) and can't go
 behind the proxy, so commands Claude Code runs without a sandbox can reach it. The Worker Host

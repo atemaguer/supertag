@@ -164,6 +164,32 @@ async function hasExecutableProjectConfig(workspace: string, scratch: string): P
   }
 }
 
+/** The Worker Host's provider proxy, which holds the real key, when it started one. */
+const PROVIDER_PROXY_URL = "SUPERTAG_PROVIDER_BASE_URL";
+
+function providerProxyUrl(environment: NodeJS.ProcessEnv): string | undefined {
+  const base = environment[PROVIDER_PROXY_URL];
+  if (!base) return undefined;
+  const url = new URL(base);
+  if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.search || url.hash)
+    throw new SafeOpenCodeFailure(
+      "The Worker Host's provider proxy address is invalid. Native execution did not start.",
+    );
+  return base;
+}
+
+/** Points OpenCode's provider at the Worker Host's proxy, which serves the provider's `/v1`. */
+export function withProviderBaseUrl(
+  environment: Readonly<Record<string, string>>,
+  provider: string,
+  proxyUrl: string | undefined,
+): Readonly<Record<string, string>> {
+  if (proxyUrl === undefined) return environment;
+  const config = JSON.parse(environment["OPENCODE_CONFIG_CONTENT"] ?? "{}");
+  config.provider = { [provider]: { options: { baseURL: `${proxyUrl}/v1` } } };
+  return { ...environment, OPENCODE_CONFIG_CONTENT: JSON.stringify(config) };
+}
+
 function privateEnvironment(home: string, temporary: string) {
   return {
     PATH: [dirname(process.execPath), "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
@@ -295,8 +321,11 @@ export async function nativeRequest(
   const provider = model.split("/")[0] ?? "";
   const keyName = PROVIDER_KEYS.get(provider);
   const envKey = keyName === undefined ? undefined : environment[keyName];
+  // On a host that runs commands unsandboxed, the Worker Host holds the real key in a loopback
+  // proxy: the key variable is a placeholder, and OpenCode sends its requests to the proxy.
+  const proxyUrl = providerProxyUrl(environment);
   const fileKey =
-    configuration.authFile === undefined
+    configuration.authFile === undefined || proxyUrl !== undefined
       ? undefined
       : await readProviderApiKey(configuration.authFile, provider, true);
   const home = join(scratch, "opencode-home");
@@ -364,14 +393,18 @@ export async function nativeRequest(
           ...(keyName && envKey ? { [keyName]: envKey } : {}),
           ...(remote
             ? openCodeRemoteConfigurationEnvironment(model, tools)
-            : openCodeConfigurationEnvironment(
-                model,
-                task.allowedActions,
-                tools,
-                true,
-                copies,
-                workspace,
-                scope,
+            : withProviderBaseUrl(
+                openCodeConfigurationEnvironment(
+                  model,
+                  task.allowedActions,
+                  tools,
+                  true,
+                  copies,
+                  workspace,
+                  scope,
+                ),
+                provider,
+                proxyUrl,
               )),
         },
       };

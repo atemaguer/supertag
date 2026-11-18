@@ -1,5 +1,6 @@
 // Executed only by Rust split-service tests, with synthetic provider credentials.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { access, appendFile, readFile, stat } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
@@ -64,8 +65,37 @@ assert.deepEqual(args, [
   "build",
   "--pure",
 ]);
-const credentialSource = process.env.OPENAI_API_KEY === undefined ? "file" : "environment";
-if (credentialSource === "file") {
+// On an unsandboxed host the Worker Host keeps the key in a loopback proxy: the provider's
+// baseURL names it, and the key variable is a placeholder.
+const proxyBase = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? "{}").provider?.openai?.options
+  ?.baseURL;
+const credentialSource = proxyBase
+  ? "proxy"
+  : process.env.OPENAI_API_KEY === undefined
+    ? "file"
+    : "environment";
+let proxyAnswer = null;
+let leaked = null;
+if (credentialSource === "proxy") {
+  assert.match(process.env.OPENAI_API_KEY ?? "", /^supertag-provider-/u);
+  await assert.rejects(readFile(join(process.env.XDG_DATA_HOME, "opencode", "auth.json")), {
+    code: "ENOENT",
+  });
+  const parent = spawnSync("ps", ["eww", "-o", "command=", "-p", String(process.ppid)], {
+    encoding: "utf8",
+  }).stdout;
+  const own = Object.entries(process.env)
+    .map(([name, value]) => `${name}=${value}`)
+    .join("\n");
+  leaked = `${own}\n${parent}`.includes("synthetic-opencode-provider-key");
+  proxyAnswer = await (
+    await fetch(`${proxyBase}/chat/completions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: "{}",
+    })
+  ).text();
+} else if (credentialSource === "file") {
   const authPath = join(process.env.XDG_DATA_HOME, "opencode", "auth.json");
   const auth = JSON.parse(await readFile(authPath, "utf8"));
   assert.deepEqual(auth, { openai: { type: "api", key: "synthetic-opencode-provider-key" } });
@@ -123,7 +153,7 @@ const currentPrompt = prompt.replace(/<supertag-history>[\s\S]*?<\/supertag-hist
 const mode = /fixture:([a-z-]+)/u.exec(currentPrompt)?.[1];
 await appendFile(
   join(root, "calls.jsonl"),
-  `${JSON.stringify({ pid: process.pid, args, cwd: process.cwd(), home: process.env.HOME, credentialSource, xdg: [process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME, process.env.XDG_CACHE_HOME], mode, priorPrompt: prompt.includes("fixture:stream"), priorResult: prompt.includes("native-complete:"), permissions: config.permission, agents: config.agent, mcpNames: Object.keys(config.mcp ?? {}) })}\n`,
+  `${JSON.stringify({ pid: process.pid, args, cwd: process.cwd(), home: process.env.HOME, credentialSource, proxyAnswer, leaked, xdg: [process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME, process.env.XDG_CACHE_HOME], mode, priorPrompt: prompt.includes("fixture:stream"), priorResult: prompt.includes("native-complete:"), permissions: config.permission, agents: config.agent, mcpNames: Object.keys(config.mcp ?? {}) })}\n`,
   { mode: 0o600 },
 );
 const emit = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);

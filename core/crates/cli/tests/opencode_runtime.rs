@@ -317,6 +317,48 @@ impl Runtime {
         }
         Process::spawn(host, directory, "host", false)
     }
+    /// A host that runs OpenCode's commands unsandboxed, with its key from the environment or
+    /// `auth_file`, and the OpenAI origin at `origin`.
+    fn host_behind_proxy(
+        &self,
+        directory: &Path,
+        auth_file: Option<&Path>,
+        origin: &str,
+    ) -> Result<Process> {
+        let home = directory.join("operator-home");
+        std::fs::create_dir_all(&home)?;
+        let mut host = self.credentials.command();
+        host.args([
+            "worker-host",
+            "--control-plane",
+            &self.endpoint,
+            "--once",
+            "--harness",
+            "opencode",
+            "--harness-model",
+            FIXTURE_MODEL,
+            "--allow-unsandboxed-commands",
+        ])
+        .arg("--opencode-node")
+        .arg(&self.node)
+        .arg("--opencode-adapter")
+        .arg(&self.entry)
+        .arg("--opencode-path")
+        .arg(&self.native)
+        .arg("--state-directory")
+        .arg(directory.join("host"))
+        .env("HOME", &home)
+        .env("SUPERTAG_TEST_OPENAI_ORIGIN", origin);
+        match auth_file {
+            Some(path) => {
+                host.arg("--opencode-auth-file").arg(path);
+            }
+            None => {
+                host.env("OPENAI_API_KEY", "synthetic-opencode-provider-key");
+            }
+        }
+        Process::spawn(host, directory, "host", false)
+    }
     async fn task(&mut self, id: &str) -> Result<Task> {
         let mut task = self
             .operator
@@ -386,6 +428,8 @@ impl Runtime {
 }
 
 database_tests! {
+    #[tokio::test]
+    opencode_holds_only_a_placeholder_key_on_an_unsandboxed_host;
     #[tokio::test]
     opencode_stages_only_selected_provider_from_explicit_auth_file;
     #[tokio::test]
@@ -590,6 +634,83 @@ async fn opencode_runs_commands_in_a_local_vm_container(database: String) -> Res
         left.stdout.is_empty(),
         "the Task's container was left running"
     );
+    Ok(())
+}
+
+/// On a host that runs commands unsandboxed, OpenCode's API key stays in the Worker Host, whether
+/// it came from the environment or the OpenCode auth file: OpenCode and its adapter hold a
+/// placeholder and the provider proxy's URL, and the proxy puts the real key on the request it
+/// forwards to the provider.
+async fn opencode_holds_only_a_placeholder_key_on_an_unsandboxed_host(
+    database: String,
+) -> Result<()> {
+    // The provider: answers whether a request carried the real key.
+    let provider = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let origin = format!("http://{}", provider.local_addr()?);
+    let provider = tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        while let Ok((mut stream, _)) = provider.accept().await {
+            let mut head = Vec::new();
+            let mut byte = [0_u8; 1];
+            while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).await.unwrap_or(0) == 1 {
+                head.push(byte[0]);
+            }
+            let head = String::from_utf8_lossy(&head).to_lowercase();
+            let answer = if head.starts_with("post /v1/chat/completions ")
+                && head.contains("authorization: bearer synthetic-opencode-provider-key")
+            {
+                "real key"
+            } else {
+                "no key"
+            };
+            let _ = stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
+                        answer.len()
+                    )
+                    .as_bytes(),
+                )
+                .await;
+        }
+    });
+    let directory = tempfile::tempdir()?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
+    runtime
+        .tag("native", HarnessKind::Opencode, &["files:read"])
+        .await?;
+    let auth_file = directory.path().join("operator-auth.json");
+    std::fs::write(
+        &auth_file,
+        br#"{"openai":{"type":"api","key":"synthetic-opencode-provider-key"}}"#,
+    )?;
+    std::fs::set_permissions(&auth_file, std::fs::Permissions::from_mode(0o600))?;
+    for (index, source) in [None, Some(auth_file.as_path())].into_iter().enumerate() {
+        let session = format!("proxied-{index}");
+        let task = runtime.submit("native", &session, "fresh", None).await?;
+        let state = directory.path().join(format!("proxied-host-{index}"));
+        std::fs::create_dir_all(&state)?;
+        runtime
+            .host_behind_proxy(&state, source, &origin)?
+            .success()
+            .await?;
+        let result = runtime.task(&task.task_id).await?;
+        ensure!(
+            result.state() == TaskState::Succeeded,
+            "proxied run failed: {:?}; fixture: {}",
+            result.result,
+            runtime.native_errors()
+        );
+        let calls = runtime.calls()?;
+        let call = calls.last().context("no native call")?;
+        ensure!(call["credentialSource"] == "proxy", "{call}");
+        ensure!(
+            call["leaked"] == false,
+            "the key reached OpenCode or its adapter: {call}"
+        );
+        ensure!(call["proxyAnswer"] == "real key", "{call}");
+    }
+    provider.abort();
     Ok(())
 }
 

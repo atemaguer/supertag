@@ -608,17 +608,9 @@ pub async fn run(
     if let Some(warning) = environment::low_disk_warning(options.disk_space.sample().as_ref()) {
         supertag_protocol::terminal_text::warn(&warning);
     }
-    // A Claude Code sign-in from the system's secure store (the macOS Keychain) can't go behind
-    // the provider proxy, so commands this host runs unsandboxed can read it.
-    if options.harness == HarnessKind::ClaudeCode
-        && options.execution_profile.allow_unsandboxed_commands
-        && !adapter::ANTHROPIC_CREDENTIALS
-            .iter()
-            .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
-    {
-        supertag_protocol::terminal_text::warn(
-            "Claude Code uses its own sign-in on this host, which the commands it runs without a sandbox can read. Set ANTHROPIC_API_KEY in the host's env_file (default ~/.supertag/.env) to keep the key in the Worker Host.",
-        );
+    // A sign-in the provider proxy can't hold stays readable to commands run unsandboxed.
+    if let Some(warning) = adapter::unproxied_key_warning(&options) {
+        supertag_protocol::terminal_text::warn(&warning);
     }
     let keep_awake = environment::KeepAwake::start(options.keep_awake.clone(), shutdown.clone());
     let presence = match &options.lane {
