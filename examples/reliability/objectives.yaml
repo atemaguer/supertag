@@ -1,0 +1,77 @@
+# The four responsibilities `reliability` owns, each an ongoing Objective, and a weekly summary.
+# Applying this file starts the Tag: each Objective takes a first turn in its own conversation,
+# then rests until a report arrives. Apply organization.yaml first.
+#
+# Reports reach an Objective as messages. Forward them from Sentry, PagerDuty, Datadog, your CI,
+# or Dependabot with a small webhook relay that calls the Control Plane API's
+# Conversations.SendMessage: `tag_id` reliability, `conversation` the Objective's `session_id`
+# (from `supertag get objective NAME`), and the alert's own ID as `operation_id`, so a retried
+# delivery never arrives twice. See docs/guides/ongoing-responsibilities.md.
+#
+# Each budget is the most an Objective may spend in total; raise it as you learn its cost.
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: triage-production-errors }
+spec:
+  ownerTagId: reliability
+  outcome: >-
+    Every new or regressed Sentry issue is triaged within the hour. For each one that affects
+    users, a branch holds a fix with a test that fails before it and passes after, and the report
+    names the change that caused it. Duplicates and known noise get a one-line note. Nothing is
+    merged or deployed without a person.
+  ongoing: true
+  budgetLimitMinor: 30000
+  budgetCurrency: USD
+---
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: watch-the-service }
+spec:
+  ownerTagId: reliability
+  outcome: >-
+    For each PagerDuty, Datadog, or health-check alert, report within 15 minutes a timeline built
+    from the logs, the recent deploys, and the error rate, the most likely cause, and a prepared
+    revert branch when a deploy is to blame. Rolling back and escalating stay with the on-call
+    person.
+  ongoing: true
+  budgetLimitMinor: 30000
+  budgetCurrency: USD
+---
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: keep-main-green }
+spec:
+  ownerTagId: reliability
+  outcome: >-
+    When CI fails on main, find the commit that broke it and say whether the failure is a flaky
+    test or a real one, with the reruns as evidence. Prepare a fix or a revert on a branch for a
+    real failure, and name the test to quarantine for a flaky one. Merging and quarantining stay
+    with people.
+  ongoing: true
+  budgetLimitMinor: 20000
+  budgetCurrency: USD
+---
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: keep-dependencies-safe }
+spec:
+  ownerTagId: reliability
+  outcome: >-
+    For each Dependabot or Snyk advisory, say whether this project is affected and why. For an
+    affected dependency, prepare the smallest upgrade that fixes it on a branch, with the
+    project's tests passing. Leave major-version upgrades and merging to people.
+  ongoing: true
+  budgetLimitMinor: 20000
+  budgetCurrency: USD
+---
+# Monday morning, reliability summarizes the week in your conversation with it.
+apiVersion: supertag/v1
+kind: Schedule
+metadata: { name: reliability-weekly }
+spec:
+  tag: reliability
+  every: "0 9 * * MON"
+  timeZone: UTC
+  note: >-
+    Summarize last week: what broke, what you prepared, what is still waiting on a person, and
+    any pattern worth fixing at its root, such as a test that keeps flaking.

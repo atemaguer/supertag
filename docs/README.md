@@ -50,7 +50,7 @@ Follow this order on your first visit:
 | Understand progress, blockers, and results | [Check an Objective's progress](guides/objective-overview.md) |
 | Answer a question, decide an approval, or review a result | [Respond to an Objective](guides/objective-decisions.md) |
 | Get alerts for inbox decisions | [Set up operator notifications](guides/notifications.md) |
-| Start from a ready-made team definition | [Example organizations](../examples/organizations/README.md) |
+| Start from a ready-made proactive Tag, teammates' Tags, or review team | [Example organizations](../examples/README.md) |
 | Connect Slack, GitHub, Lark/Feishu, Linear, or Teams | [Connection guides](surfaces/README.md) |
 | Run Codex, Claude Code, Cursor, OpenCode, or OpenAI Agents | [Run Worker Hosts](guides/workers.md) |
 | Let Tags change a repository on their own branches | [Work in a repository with Workspaces](guides/workspaces.md) |

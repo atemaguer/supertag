@@ -194,6 +194,13 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- The examples, now directly under `examples/`, follow SuperTag's positioning. `reliability` shows a proactive Tag
+  that owns four ongoing Objectives (production errors, alerts, a red main, dependency
+  advisories) with scoped network access to Sentry and GitHub, plus a read-only `support` Tag.
+  `multiplayer` shows two teammates' Tags on their own machines and coding agents settling details
+  with each other. `review-team` now uses `environment: local-vm`. Each example's outcomes live in
+  its own `objectives.yaml`, applied when you're ready to start the work. `solo` and
+  `mixed-harnesses` are removed.
 - An Objective whose owner's turn ends idle twice stays `working` instead of becoming `blocked`:
   only the owner's `report_objective` changes an Objective's status from a turn. It shows "Idle
   since …" in `supertag describe objective`, the terminal UI's Objective view, and its owner Tag's

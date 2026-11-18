@@ -1,0 +1,113 @@
+# Multiplayer: two teammates on one shared Control Plane, each directing their own Tag on their own
+# machine and coding agent, plus a shared reviewer.
+#   web       Alex directs it. Claude Code on Alex's laptop. Owns the web app.
+#   api       Sam directs it. Codex on Sam's laptop. Owns the API.
+#   reviewer  Shared by the team. Cursor on an always-on server.
+# The three share the Team `checkout`, so they message each other directly and record what they
+# agree in its Workstream. Alex and Sam hear about it only when a decision is theirs.
+#
+# Each machine joins with a host Auth Key limited to its own Tag, which also places that Tag there:
+#   supertag auth-key create alex-laptop --role host --tag web
+#   supertag auth-key create sam-laptop --role host --tag api
+#   supertag auth-key create review-server --role host --tag reviewer
+# Each host service in its own supertag.yaml serves the repository as the Workspace `app` and
+# lists the models its Tag uses; a Task that names a model runs only on a host that lists it:
+#   Alex:   harnesses: [claude-code]  models: { claude-code: [claude-sonnet-5-5] }
+#           environment: local-vm     workspaces: { app: ~/code/app }
+#   Sam:    harnesses: [codex]        models: { codex: [gpt-6-sol] }
+#           workspaces: { app: ~/code/app }
+#   server: harnesses: [cursor]       models: { cursor: [claude-opus-5-5] }
+#           environment: local-vm     workspaces: { app: ~/code/app }
+# The server also needs CURSOR_API_KEY in ~/.supertag/.env. Alex and Sam each connect their own
+# terminal or desktop app with a client Auth Key; see docs/guides/self-hosting.md.
+#
+# Before applying, replace `app` with your Workspace name and `main` with the branch new Sessions
+# start from. Then run:
+#   supertag apply -f organization.yaml
+# and, when you're ready for the work to start, objectives.yaml.
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: build-tools }
+spec:
+  permissions:
+    - { target: runtime, action: files:write }
+    - { target: runtime, action: commands:execute }
+---
+# Codex runs commands on code-mode-only models such as gpt-6-sol only with web:fetch. Narrow it to
+# the registries your build installs from.
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: registries }
+spec:
+  permissions:
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://registry.npmjs.org"]
+      methods: [GET, HEAD]
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Area Owner }
+spec:
+  purpose: Own one area of the product and deliver the outcomes your person gives you, working out the details with the Tags that own the other areas.
+  instructions: >-
+    Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) first. Change only
+    your own area. When an outcome needs a change in another area, send the Tag that owns it a
+    message with send_message saying exactly what you need and why, such as an endpoint's request
+    and response, and settle the details with it directly. Post each agreement to the Team's
+    Workstream before building on it. Bring your person only what is theirs to decide: scope,
+    product trade-offs, and anything the outcome's constraints don't settle. Before reporting
+    work done, give the change to the reviewer and fix what it finds. Report the branch and the
+    exact checks you ran. Never change the repository's git configuration.
+  permissionSets: [build-tools]
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Codex Commands }
+spec:
+  purpose: Let Codex run commands on code-mode-only models such as gpt-6-sol.
+  permissionSets: [registries]
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Reviewer }
+spec:
+  purpose: Review changes from any area for correctness, test coverage, and whether both sides of a contract agree.
+  instructions: >-
+    Read the diff and run the tests yourself. When a change touches a contract between areas,
+    check both sides against what the Workstream records. Report each defect as a finding with a
+    severity and a file and line, to the Tag that asked. Say plainly when a change is ready.
+    Don't rewrite the change yourself.
+  permissionSets: [build-tools]
+  execution: { harness: cursor, models: [claude-opus-5-5] }
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: web }
+spec:
+  roles: [Area Owner]
+  workspace: { id: app, ref: main }
+  execution: { harness: claude-code, models: [claude-sonnet-5-5], efforts: [low, medium, high] }
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: api }
+spec:
+  roles: [Area Owner, Codex Commands]
+  workspace: { id: app, ref: main }
+  execution: { harness: codex, models: [gpt-6-sol], efforts: [low, medium, high] }
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: reviewer }
+spec:
+  roles: [Reviewer]
+  workspace: { id: app, ref: main }
+---
+# Tags in one Team message each other without Mailbox grants and share its Workstream. Name it in
+# an Objective's `team` so the owner may also start work Sessions of the others.
+apiVersion: supertag/v1
+kind: Team
+metadata: { name: checkout }
+spec:
+  members: [web, api, reviewer]

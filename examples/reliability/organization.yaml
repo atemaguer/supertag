@@ -1,0 +1,105 @@
+# Proactive: one Tag, `reliability`, keeps the service healthy without being asked. It owns four
+# ongoing Objectives, declared in objectives.yaml. A second Tag, `support`, triages bug reports
+# with read-only access, because that work needs different permissions.
+#
+# Run the hosts somewhere always on, so the Tags keep their responsibilities while your laptop is
+# off. Two host services in its supertag.yaml serve the repository as the Workspace `app`:
+#   reliability-host:            # Codex runs in its own sandbox
+#     type: host
+#     harnesses: [codex]
+#     models: { codex: [gpt-6-sol] }
+#     network-credentials:
+#       sentry: { secret: sentry-token, environment: SENTRY_AUTH_TOKEN }
+#       github: { secret: github-token, environment: GITHUB_TOKEN }
+#     workspaces: { app: ~/code/app }
+#   support-host:                # Claude Code's tools run in a container
+#     type: host
+#     harnesses: [claude-code]
+#     models: { claude-code: [claude-sonnet-5-5] }
+#     environment: local-vm
+#     workspaces: { app: ~/code/app }
+# with `sentry-token` and `github-token` under `secrets:`. The Tasks see only placeholders; the
+# host's egress proxy adds the real tokens to requests the `reliability-tools` grants allow.
+#
+# Before applying, replace `app` with your Workspace name, `main` with the branch new Sessions
+# start from, and `acme/app` with your repository. Then run:
+#   supertag apply -f organization.yaml
+# and, when you're ready for the Tags to start, objectives.yaml.
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: reliability-tools }
+spec:
+  permissions:
+    - { target: runtime, action: files:write }
+    - { target: runtime, action: commands:execute }
+    # Read Sentry issues and events with the host's Sentry token.
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://sentry.io"]
+      methods: [GET]
+      credential: sentry
+    # Read CI runs, commits, and advisories for the repository with the host's GitHub token.
+    - target: runtime
+      action: web:fetch
+      hosts: ["https://api.github.com"]
+      methods: [GET]
+      paths: [/repos/acme/app]
+      credential: github
+    # Add the package registries your build installs from, GET and HEAD only.
+---
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: read-only }
+spec:
+  permissions:
+    - { target: runtime, action: files:read }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Reliability Owner }
+spec:
+  purpose: Keep production healthy and main green. Act on each error report, alert, failed CI run, and dependency advisory as it arrives, and bring people only the decisions that are theirs.
+  instructions: >-
+    Each report arrives as a message in the conversation of the ongoing Objective it belongs to.
+    Decide first whether it matters: a duplicate, a known flake, or an unaffected dependency gets a
+    one-line note and nothing more. For one that matters, reproduce it, find the change that caused
+    it, and prepare the fix or revert on a branch with a test that fails before and passes after.
+    Report the branch, the test, the evidence, and exactly what a person must decide. Never merge,
+    deploy, roll back, or close an alert yourself. Recall what you learned under your other
+    Objectives: an alert and a failed deploy an hour apart are often one problem. When nothing
+    needs doing, end the turn. Never change the repository's git configuration.
+  permissionSets: [reliability-tools]
+  # Codex runs commands on code-mode-only models such as gpt-6-sol only with web:fetch, which
+  # reliability-tools grants.
+  execution: { harness: codex, models: [gpt-6-sol], efforts: [medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Support Triage }
+spec:
+  purpose: Triage bug reports from users. Find where in the code a reported problem comes from, answer the reporter, and hand production errors to reliability.
+  instructions: >-
+    Read the code to find where a reported problem comes from, and answer the reporter in plain
+    language: what is happening, whether it is known, and what to try meanwhile. When a report
+    looks like a production error or a regression, send it to the reliability Tag with
+    send_message, including the reporter's steps and anything you found, and tell the reporter
+    it has been passed on. You cannot change code or run commands; don't promise a fix.
+  permissionSets: [read-only]
+  execution: { harness: claude-code, models: [claude-sonnet-5-5], efforts: [low, medium] }
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: reliability }
+spec:
+  roles: [Reliability Owner]
+  workspace: { id: app, ref: main }
+  acceptsMessagesFrom: [support]
+---
+# Add this Tag to the Slack channel or Linear team where users report bugs:
+#   supertag tag update support --add-location slack --channel-id C0123456789
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: support }
+spec:
+  roles: [Support Triage]
+  workspace: { id: app, ref: main }

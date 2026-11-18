@@ -1,25 +1,30 @@
-# A lead, two builders, a reviewer, a security reviewer, and a verifier.
-# The verifier has its own Worker Host so long test runs don't take the other Tags' slots.
+# Outcomes with evidence: a lead owns the outcome and delivers it with builders, a reviewer, a
+# security reviewer, and a verifier. Nothing is reported done until the evidence says so. The
+# verifier has its own Worker Host so long test runs don't take the other Tags' slots.
 #
 # Two host services in supertag.yaml serve the repository as the Workspace `app`, and their labels
 # keep the verifier apart from the rest of the team:
 #   my-laptop:
 #     type: host
 #     harnesses: [claude-code]
-#     allow-unsandboxed-commands: [claude-code]
+#     models: { claude-code: [claude-opus-5-5, claude-sonnet-5-5] }
+#     environment: local-vm
 #     labels: [team]
-#     workspaces: { app: { path: ~/code/app, delivery: branch } }
+#     workspaces: { app: ~/code/app }
 #   my-laptop-verify:
 #     type: host
 #     harnesses: [claude-code]
-#     allow-unsandboxed-commands: [claude-code]
+#     models: { claude-code: [claude-opus-5-5, claude-sonnet-5-5] }
+#     environment: local-vm
 #     labels: [verify]
-#     workspaces: { app: { path: ~/code/app, delivery: branch } }
+#     workspaces: { app: ~/code/app }
 # To share one host instead, give it both labels.
 #
 # Before applying, replace `app` with your Workspace name and `main` with the branch new Sessions
-# start from. Name the checks your project runs in each Objective statement; the Verifier runs those.
-# Then run: supertag apply -f organization.yaml
+# start from. Then run:
+#   supertag apply -f organization.yaml
+# and give the lead an outcome, such as the one in objectives.yaml. Name the checks your project
+# runs in each outcome; the verifier runs those.
 apiVersion: supertag/v1
 kind: PermissionSet
 metadata: { name: local-tools }

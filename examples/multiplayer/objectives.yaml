@@ -1,0 +1,17 @@
+# One outcome that crosses both areas. Alex gives it to `web`; `web` asks `api` for the endpoint it
+# needs, and the two settle the contract between themselves. Applying this file starts `web`.
+# Apply organization.yaml first.
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: saved-payment-methods }
+spec:
+  ownerTagId: web
+  outcome: >-
+    Signed-in customers can save a card at checkout and pay with it next time. Done when the
+    checkout end-to-end tests cover saving, reusing, and removing a card, the API's tests cover
+    the new endpoints, and the reviewer has no open high or medium findings. Card numbers never
+    touch our servers: only the payment provider's token is stored. Guest checkout is unchanged.
+  team: checkout
+  budgetLimitMinor: 40000
+  budgetCurrency: USD
+  deadline: "2027-03-31T00:00:00Z"
