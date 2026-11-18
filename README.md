@@ -9,9 +9,9 @@
 
 Open source and self-hosted, on the coding agents you already use.
 
-**Give them jobs, not tasks.** A Tag is a persistent AI actor with its own identity, permissions, and work history. Give it a job, the responsibilities it keeps up and the outcomes it delivers, and it keeps the work going, acts without being asked, and works alongside your teammates and their Tags, on Claude Code, Codex, Cursor, or OpenCode and on machines you choose.
+**Give them jobs, not tasks.** A Tag is an AI actor with its own identity, permissions, and memory. Give it a job: the responsibilities it keeps up and the outcomes it delivers. It keeps the work going between sessions, acts without being asked, and works with your teammates' Tags. Your coding agents, Claude Code, Codex, Cursor, or OpenCode, still write the code.
 
-[Jobs, not tasks](#give-them-jobs-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [Run your first Tag](#run-your-first-tag) · [Documentation](docs/README.md)
+[Jobs, not tasks](#give-them-jobs-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [Run it yourself](#run-it-yourself) · [Run your first Tag](#run-your-first-tag) · [Documentation](docs/README.md)
 
 <p>
   <img src="assets/images/supertag-meet-the-tags.png" alt="Meet the Tags — nine SuperTag mascots with round and elongated builds, colorful jackets, hats, and glasses" width="900" height="360">
@@ -55,13 +55,15 @@ permission to edit the repository, and give a reviewer read-only access.
 
 [Write an Objective](docs/guides/write-an-objective.md) · [How you direct work](docs/concepts/interaction-model.md)
 
-## What makes a Tag different
+## What a job needs
+
+A job outlasts any one session, includes work nobody asked for yet, and involves other people.
+Tags are built for all three.
 
 ### Persistent
 
-A **Tag** is a persistent AI actor with its own identity, responsibilities, permissions, and work
-history. Your coding agents do its work one piece at a time, and the Tag is what persists between
-the pieces. The same Tag can investigate today's issue, review the results tomorrow, and answer
+A job outlasts the session that started it. Your coding agents do a Tag's work one piece at a
+time, and the Tag is what persists between the pieces. The same Tag can investigate today's issue, review the results tomorrow, and answer
 questions about both next week, even when the next piece of work runs on another coding agent or
 machine. It can recall its earlier work and Objectives on its own.
 
@@ -73,7 +75,8 @@ same Tag keeps the responsibilities you assigned it. [Connect a work tool](docs/
 
 ### Proactive
 
-Give a Tag an enduring responsibility, and it works to fulfill it without waiting to be asked.
+Part of every job is noticing what needs doing. Give a Tag an enduring responsibility, and it
+works to fulfill it without waiting to be asked.
 Each responsibility is an ongoing Objective, and related responsibilities belong to the same Tag.
 Say `reliability` keeps your service healthy. It owns four ongoing Objectives:
 
@@ -101,7 +104,8 @@ to an Objective through the Control Plane API, or mention the Tag in Slack, GitH
 
 ### Multiplayer
 
-Self-host one shared Control Plane, and your team works with Tags together. Each teammate directs
+Jobs on a team overlap. Self-host one shared Control Plane, and your team works with Tags
+together. Each teammate directs
 Tags from their own terminal or connected tools, and private terminal conversations stay private
 to each person. One person can ask `reliability` about an error in Slack, and another can follow up on
 the same findings on GitHub.
@@ -142,7 +146,7 @@ opens the terminal UI. Select `lead` and ask:
 
 > Read this repository and tell me what you would improve first.
 
-Follow up in the same conversation. When you’re ready to hand over an outcome, try an Objective
+Follow up in the same conversation. When you’re ready to give it part of a job, try an Objective
 like this.
 
 ```text
@@ -169,18 +173,26 @@ too: it uses the same `supertag` and talks to the same Tags.
 
 [Installation options](docs/operations/install.md) · [Talk to a Tag](docs/guides/talk-to-a-tag.md) · [Run your first Team](docs/guides/first-team.md) · [Direct SuperTag from your coding agent](docs/guides/coding-agent-operator.md)
 
-## From one laptop to your whole team
+## Run it yourself
 
-`supertag init` starts a local **Control Plane**, the service that stores your Tags and schedules
-their work, and connects your computer as a **Worker Host**, a machine or sandbox that runs the
-work. When your team joins, deploy the Control Plane where everyone can reach it.
+SuperTag is open source under Apache 2.0, and every part of it runs where you choose. A job
+needs access to your code, your services, and your accounts, so you decide where that access
+lives.
 
-Connect teammates' laptops, servers, CI runners, or supported sandboxes as Worker Hosts. You can
-choose a different coding agent and model for each Tag. Keep a Tag with an enduring
-responsibility, such as `reliability`, on an always-on host so it can act while everyone's laptop is
-off.
+- **Your machines.** `supertag init` starts a local **Control Plane**, the service that stores
+  your Tags and schedules their work, and connects your computer as a **Worker Host**, a machine
+  or sandbox that runs the work. When your team joins, deploy the Control Plane where everyone can
+  reach it, and connect laptops, servers, CI runners, or Modal and E2B sandboxes as Worker Hosts.
+  Keep a Tag with an enduring responsibility, such as `reliability`, on an always-on host.
+- **Your coding agents and models.** Each Tag runs on the coding agent and model you choose,
+  signed in with your own account or key.
+- **Your limits.** Each Tag can do only what its permissions allow, and you choose which actions
+  wait for your approval. Codex runs commands in its own sandbox, and Claude Code, Cursor, and
+  OpenCode can run theirs in local containers. A Tag reaches only the network addresses you
+  allow. On Codex and in containers, its host adds credentials such as a Sentry token to allowed
+  requests, so the Tag's commands never see them.
 
-[Self-host SuperTag](docs/guides/self-hosting.md) · [Connect a Worker Host](docs/guides/workers.md) · [See how the parts fit together](docs/concepts/how-it-works.md)
+[Self-host SuperTag](docs/guides/self-hosting.md) · [Connect a Worker Host](docs/guides/workers.md) · [Set permissions and approvals](docs/concepts/context-and-permissions.md) · [See how the parts fit together](docs/concepts/how-it-works.md)
 
 ## Works with
 
