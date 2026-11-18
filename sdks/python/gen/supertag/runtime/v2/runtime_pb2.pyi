@@ -2707,7 +2707,7 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts", "mcp_login_servers", "network_credentials", "network_sandbox")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts", "mcp_login_servers", "network_credentials", "network_sandbox", "unverified_workspace_provider")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
@@ -2720,6 +2720,7 @@ class HarnessExecutionProfile(_message.Message):
     MCP_LOGIN_SERVERS_FIELD_NUMBER: _ClassVar[int]
     NETWORK_CREDENTIALS_FIELD_NUMBER: _ClassVar[int]
     NETWORK_SANDBOX_FIELD_NUMBER: _ClassVar[int]
+    UNVERIFIED_WORKSPACE_PROVIDER_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
     allow_unsandboxed_commands: bool
@@ -2732,7 +2733,8 @@ class HarnessExecutionProfile(_message.Message):
     mcp_login_servers: _containers.RepeatedScalarFieldContainer[str]
     network_credentials: _containers.RepeatedScalarFieldContainer[str]
     network_sandbox: bool
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ..., mcp_login_servers: _Optional[_Iterable[str]] = ..., network_credentials: _Optional[_Iterable[str]] = ..., network_sandbox: _Optional[bool] = ...) -> None: ...
+    unverified_workspace_provider: bool
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ..., mcp_login_servers: _Optional[_Iterable[str]] = ..., network_credentials: _Optional[_Iterable[str]] = ..., network_sandbox: _Optional[bool] = ..., unverified_workspace_provider: _Optional[bool] = ...) -> None: ...
 
 class SharedExecutionCapability(_message.Message):
     __slots__ = ("environment_id", "tools", "incarnation_id")

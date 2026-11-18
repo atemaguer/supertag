@@ -198,6 +198,30 @@ them.
   tunnels to the Worker Host's egress proxy. The proxy applies the Task's
   [network scope](iam.md#network-scopes). The sandbox will deny every other connection.
 
+## Run your own provider
+
+A Worker Host runs your provider's helper with `--workspace-provider`:
+
+```sh
+supertag worker-host --harness claude-code --workspace-id repository \
+  --workspace-source ~/src/repository \
+  --workspace-provider /usr/local/bin/node \
+  --workspace-provider-arg /opt/fly-provider/main.js \
+  --workspace-provider-env FLY_API_TOKEN --workspace-provider-env FLY_APP
+```
+
+- `--workspace-provider-env NAME` names one Worker Host variable to pass to the helper. The named
+  variables are the only ones it gets, besides `PATH`, `LANG`, and `TMPDIR`. A variable that is
+  not set stops the Worker Host at start.
+- The helper's executable, its arguments, and every passed name and value bind the sandboxes it
+  allocates. A host restarted with another value, such as a rotated key, never stops or recovers
+  a sandbox the earlier one made.
+- SuperTag has not verified your provider's network rules, so placement never gives such a host
+  a Task with a [network scope](iam.md#network-scopes). `supertag placement explain` names this
+  as `network-scope`. This holds even after the egress relay ships for E2B and Modal.
+- Your provider must pass the [conformance suite](#conformance-suite) with `isolated` set before
+  a Worker Host runs it. SuperTag does not check this at start.
+
 ## Conformance suite
 
 `sandboxProviderConformance` in `@supertag/worker-sdk/internal/rust-workspace-provider/conformance`

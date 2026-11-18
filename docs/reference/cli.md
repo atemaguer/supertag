@@ -2326,6 +2326,15 @@ Options:
       --modal-workspace-provider-arg <MODAL_WORKSPACE_PROVIDER_ARG>
           Argument to the Modal provider, such as the compiled helper entrypoint
 
+      --workspace-provider <WORKSPACE_PROVIDER>
+          Executable for your own sandbox provider, which must pass the conformance suite in docs/reference/sandbox-providers.md
+
+      --workspace-provider-arg <WORKSPACE_PROVIDER_ARG>
+          Argument to your own sandbox provider, such as its entrypoint
+
+      --workspace-provider-env <NAME>
+          A Worker Host variable passed to your own sandbox provider, such as its API key. Repeat for more; no other variable reaches it
+
       --mcp-catalog <MCP_CATALOG>
           Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
           

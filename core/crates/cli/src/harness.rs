@@ -243,6 +243,7 @@ impl AdapterOptions {
             default_model,
             allow_unsandboxed_commands: self.allow_unsandboxed_commands,
             remote_file_workspace: false,
+            unverified_workspace_provider: false,
             mcp_servers: vec![],
             shared_execution: None,
             declared_task_outputs: matches!(

@@ -17,6 +17,7 @@ fn profile(models: &[&str], default: Option<&str>, commands: bool) -> HarnessExe
         mcp_login_servers: vec![],
         network_credentials: vec![],
         network_sandbox: false,
+        unverified_workspace_provider: false,
         workspace_mounts: vec![],
         declared_task_outputs: false,
         model_ids: models.iter().map(|model| (*model).into()).collect(),

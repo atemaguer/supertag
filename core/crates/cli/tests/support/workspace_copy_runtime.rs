@@ -144,6 +144,9 @@ async fn contract(
             match provider {
                 RemoteWorkspace::E2b => "e2b",
                 RemoteWorkspace::Modal => "modal",
+                RemoteWorkspace::Generic => {
+                    unreachable!("only the round trip runs your own provider")
+                }
             },
         )?;
     }
@@ -277,6 +280,9 @@ async fn contract(
                     "--modal-workspace-provider",
                     "--modal-workspace-provider-arg",
                 ),
+                RemoteWorkspace::Generic => {
+                    unreachable!("only the round trip runs your own provider")
+                }
             };
             worker
                 .arg(provider_flag)

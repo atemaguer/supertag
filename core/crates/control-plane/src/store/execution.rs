@@ -34,6 +34,11 @@ pub(super) fn normalize_profile(
     {
         return Err(invalid("invalid shared execution Worker Host capabilities"));
     }
+    if profile.unverified_workspace_provider && !profile.remote_file_workspace {
+        return Err(invalid(
+            "an unverified Workspace provider needs a remote file workspace",
+        ));
+    }
     if profile.remote_file_workspace && profile.allow_unsandboxed_commands {
         return Err(invalid(
             "remote file workspace cannot run unsandboxed commands",

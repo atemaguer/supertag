@@ -839,6 +839,7 @@ async fn opencode_claims_and_runs_the_accepted_role_model(database: String) -> R
             mcp_login_servers: vec![],
             network_credentials: vec![],
             network_sandbox: false,
+            unverified_workspace_provider: false,
             workspace_mounts: vec![],
             declared_task_outputs: false,
             model_ids: vec![FIXTURE_MODEL.into()],

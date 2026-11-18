@@ -67,10 +67,12 @@ mod workspace_copy_runtime;
 #[path = "support/shared_command_runtime.rs"]
 mod shared_command_runtime;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum RemoteWorkspace {
     E2b,
     Modal,
+    /// An operator's own provider, through `--workspace-provider`.
+    Generic,
 }
 
 struct Fixture {
@@ -446,6 +448,15 @@ impl<'a> Runtime<'a> {
                     "--modal-workspace-provider",
                     "--modal-workspace-provider-arg",
                 ),
+                RemoteWorkspace::Generic => {
+                    // Only the named variable reaches the provider, never the decoy beside it.
+                    command
+                        .arg("--workspace-provider-env")
+                        .arg("FIXTURE_PROVIDER_TOKEN")
+                        .env("FIXTURE_PROVIDER_TOKEN", "synthetic-generic-provider-token")
+                        .env("FIXTURE_PROVIDER_DECOY_SECRET", "must-not-pass");
+                    ("--workspace-provider", "--workspace-provider-arg")
+                }
             };
             command
                 .arg(provider_flag)
@@ -659,6 +670,8 @@ database_tests! {
     cursor_remote_workspace_delivers_and_resumes_from_the_approved_head;
     #[tokio::test]
     cursor_modal_workspace_delivers_and_resumes_with_isolated_provider_credentials;
+    #[tokio::test]
+    cursor_own_workspace_provider_delivers_and_resumes_with_only_named_variables;
     #[tokio::test]
     cursor_streams_scoped_tools_and_resumes_after_services_restart;
     #[tokio::test]
@@ -921,6 +934,14 @@ async fn cursor_modal_workspace_delivers_and_resumes_with_isolated_provider_cred
     remote_workspace_round_trip(RemoteWorkspace::Modal, &database).await
 }
 
+/// An operator's own provider (`--workspace-provider`) gets only the variable it names (the
+/// fixture provider refuses any other), and its host advertises it as unverified.
+async fn cursor_own_workspace_provider_delivers_and_resumes_with_only_named_variables(
+    database: String,
+) -> Result<()> {
+    remote_workspace_round_trip(RemoteWorkspace::Generic, &database).await
+}
+
 async fn cursor_e2b_workspace_runs_stdio_mcp_in_the_sandbox_from_the_trusted_copy(
     database: String,
 ) -> Result<()> {
@@ -1003,6 +1024,7 @@ async fn sandbox_mcp(provider: RemoteWorkspace, database: &str) -> Result<()> {
         match provider {
             RemoteWorkspace::E2b => "e2b",
             RemoteWorkspace::Modal => "modal",
+            RemoteWorkspace::Generic => unreachable!("only the round trip runs your own provider"),
         },
     )?;
     let credentials = Credentials::new();
@@ -1036,11 +1058,13 @@ async fn sandbox_mcp(provider: RemoteWorkspace, database: &str) -> Result<()> {
         .arg(match provider {
             RemoteWorkspace::E2b => "--e2b-workspace-provider",
             RemoteWorkspace::Modal => "--modal-workspace-provider",
+            RemoteWorkspace::Generic => unreachable!("only the round trip runs your own provider"),
         })
         .arg(&fixture.node)
         .arg(match provider {
             RemoteWorkspace::E2b => "--e2b-workspace-provider-arg",
             RemoteWorkspace::Modal => "--modal-workspace-provider-arg",
+            RemoteWorkspace::Generic => unreachable!("only the round trip runs your own provider"),
         })
         .arg(fixture.root.join("remote-provider.mjs"))
         .env("E2B_API_KEY", "synthetic-e2b-provider-key")
@@ -1244,6 +1268,7 @@ async fn remote_devcontainer(provider: RemoteWorkspace, database: &str) -> Resul
         match provider {
             RemoteWorkspace::E2b => "e2b",
             RemoteWorkspace::Modal => "modal",
+            RemoteWorkspace::Generic => unreachable!("only the round trip runs your own provider"),
         },
     )?;
     let credentials = Credentials::new();
@@ -1663,6 +1688,7 @@ async fn remote_workspace_round_trip(provider: RemoteWorkspace, database: &str) 
     let provider_name = match provider {
         RemoteWorkspace::E2b => "e2b",
         RemoteWorkspace::Modal => "modal",
+        RemoteWorkspace::Generic => "generic",
     };
     std::fs::write(fixture.root.join("provider-kind"), provider_name)?;
     let credentials = Credentials::new();
@@ -1720,6 +1746,23 @@ async fn remote_workspace_round_trip(provider: RemoteWorkspace, database: &str) 
             "execution lease did not renew during remote Stop"
         );
         sleep(Duration::from_millis(30)).await;
+    }
+    // The host advertises its provider: only an operator's own is unverified.
+    let profiles: Vec<Vec<u8>> = sqlx::query_scalar(
+        "SELECT execution_profile FROM supertag_v2_claims WHERE execution_profile IS NOT NULL",
+    )
+    .fetch_all(&mut connection)
+    .await?;
+    ensure!(
+        !profiles.is_empty(),
+        "no claim recorded its execution profile"
+    );
+    for bytes in profiles {
+        let profile = <supertag_protocol::v2::HarnessExecutionProfile as prost::Message>::decode(
+            bytes.as_slice(),
+        )?;
+        ensure!(profile.remote_file_workspace);
+        ensure!(profile.unverified_workspace_provider == (provider == RemoteWorkspace::Generic));
     }
     let during_stop = runtime.task(&first.task_id).await?;
     assert_eq!(during_stop.state(), TaskState::Running);

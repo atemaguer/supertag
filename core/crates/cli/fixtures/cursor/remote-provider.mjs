@@ -21,12 +21,13 @@ import { promisify } from "node:util";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const provider = await readFile(join(root, "provider-kind"), "utf8").catch(() => "e2b");
-assert.ok(["e2b", "modal"].includes(provider));
+assert.ok(["e2b", "modal", "generic"].includes(provider));
 const redact = (message) =>
   String(message)
     .replaceAll("synthetic-e2b-provider-key", "[REDACTED]")
     .replaceAll("synthetic-modal-token-id", "[REDACTED]")
-    .replaceAll("synthetic-modal-token-secret", "[REDACTED]");
+    .replaceAll("synthetic-modal-token-secret", "[REDACTED]")
+    .replaceAll("synthetic-generic-provider-token", "[REDACTED]");
 await appendFile(
   join(root, "provider-calls.jsonl"),
   `${JSON.stringify({ type: "boot", pid: process.pid, environment: Object.keys(process.env).sort() })}\n`,
@@ -47,22 +48,25 @@ const { runRemoteWorkspaceTransport } = await import(pathToFileURL(providerTrans
 const { createWorkspaceCopies } = await import(
   new URL("./copies.js", pathToFileURL(providerTransport)).href
 );
+// An operator's own provider (`--workspace-provider`) gets exactly the variables it names.
 const expected =
-  provider === "modal"
-    ? {
-        MODAL_TOKEN_ID: "synthetic-modal-token-id",
-        MODAL_TOKEN_SECRET: "synthetic-modal-token-secret",
-        MODAL_SERVER_URL: "https://fixture.modal.invalid:443",
-        MODAL_CONFIG_PATH: "/dev/null",
-        SUPERTAG_MODAL_WORKSPACE_APP: "fixture-modal-app",
-        SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT: "fixture-modal-environment",
-        SUPERTAG_MODAL_WORKSPACE_IMAGE: "fixture-modal-image",
-      }
-    : {
-        E2B_API_KEY: "synthetic-e2b-provider-key",
-        E2B_DOMAIN: "fixture.e2b.invalid",
-        SUPERTAG_E2B_TEMPLATE: "fixture-template",
-      };
+  provider === "generic"
+    ? { FIXTURE_PROVIDER_TOKEN: "synthetic-generic-provider-token" }
+    : provider === "modal"
+      ? {
+          MODAL_TOKEN_ID: "synthetic-modal-token-id",
+          MODAL_TOKEN_SECRET: "synthetic-modal-token-secret",
+          MODAL_SERVER_URL: "https://fixture.modal.invalid:443",
+          MODAL_CONFIG_PATH: "/dev/null",
+          SUPERTAG_MODAL_WORKSPACE_APP: "fixture-modal-app",
+          SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT: "fixture-modal-environment",
+          SUPERTAG_MODAL_WORKSPACE_IMAGE: "fixture-modal-image",
+        }
+      : {
+          E2B_API_KEY: "synthetic-e2b-provider-key",
+          E2B_DOMAIN: "fixture.e2b.invalid",
+          SUPERTAG_E2B_TEMPLATE: "fixture-template",
+        };
 for (const [key, value] of Object.entries(expected))
   assert.equal(process.env[key], value, `provider is missing expected ${key}`);
 for (const key of Object.keys(process.env))

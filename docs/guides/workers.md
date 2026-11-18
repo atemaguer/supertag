@@ -204,6 +204,7 @@ has no built-in tool that could run on the host:
 | --- | --- |
 | `--e2b-workspace-provider` | An E2B sandbox per Task Attempt |
 | `--modal-workspace-provider` | A Modal sandbox per Task Attempt, with `SUPERTAG_MODAL_WORKSPACE_APP` and optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` |
+| `--workspace-provider` | Your own provider's sandbox per Task Attempt, given only the variables you name with `--workspace-provider-env`; see [Run your own provider](../reference/sandbox-providers.md#run-your-own-provider) |
 | `--shared-execution-endpoint` | A long-lived shared execution environment, served by `supertag-shared-execution`, that several Cursor Sessions share (Cursor only) |
 
 A Task that may run commands (`commands:execute`) runs them in its sandbox, so such a host needs

@@ -561,6 +561,11 @@ pub fn reason(
             "this Worker Host cannot run Claude Code's sandbox, which keeps commands to the Task's network scope; on Linux install bubblewrap and socat, or run the Tag on Codex".to_owned(),
         );
     }
+    if profile.unverified_workspace_provider {
+        return Some(
+            "this Worker Host's own sandbox provider is not verified to keep a network scope; run the Tag on a local Codex Worker Host".to_owned(),
+        );
+    }
     if profile.remote_file_workspace || profile.shared_execution.is_some() {
         return Some(
             "a remote or shared execution environment cannot send its traffic through SuperTag's egress proxy yet; run the Tag on a local Codex Worker Host".to_owned(),
@@ -623,6 +628,35 @@ pub fn summary(scope: &NetworkScope) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unverified_sandbox_provider_never_gets_a_network_scope() {
+        let task = Task {
+            allowed_actions: strings(&["files:read", WEB_FETCH]),
+            policy_snapshot: Some(crate::v2::TaskPolicySnapshot {
+                runtime_authority: Some(crate::v2::TaskRuntimeAuthority {
+                    network: Some(NetworkScope {
+                        any_origin: false,
+                        rules: vec![NetworkRule {
+                            origins: strings(&["https://pypi.org"]),
+                            ..Default::default()
+                        }],
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let profile = HarnessExecutionProfile {
+            remote_file_workspace: true,
+            unverified_workspace_provider: true,
+            ..Default::default()
+        };
+        let reason = reason(&task, HarnessKind::ClaudeCode, &profile).unwrap();
+        assert!(reason.contains("not verified"), "{reason}");
+        assert!(!supports(&task, HarnessKind::ClaudeCode, &profile));
+    }
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()

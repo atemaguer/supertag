@@ -364,6 +364,7 @@ async fn contract(url: &str) {
         mcp_login_servers: vec![],
         network_credentials: vec![],
         network_sandbox: false,
+        unverified_workspace_provider: false,
         workspace_mounts: vec![],
         declared_task_outputs: false,
         model_ids: vec!["fixture-model".into()],

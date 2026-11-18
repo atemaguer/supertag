@@ -34,6 +34,7 @@ fn report(sequence: u64) -> ReportHostRequest {
             mcp_login_servers: vec![],
             network_credentials: vec![],
             network_sandbox: false,
+            unverified_workspace_provider: false,
             workspace_mounts: vec![],
             declared_task_outputs: false,
             model_ids: vec!["codex-alpha".into(), "codex-beta".into()],

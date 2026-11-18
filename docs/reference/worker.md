@@ -156,8 +156,9 @@ the only form: read-only provider-native Modal Volume mounts are on the backlog.
 ## Remote sandboxes and shared execution
 
 A Cursor or Claude Code Task can keep its Workspace in an E2B or Modal sandbox
-(`--e2b-workspace-provider`, `--modal-workspace-provider`) while the harness and its credentials
-stay on the host. Only the checkout moves into the sandbox; keys never do. A Task with
+(`--e2b-workspace-provider`, `--modal-workspace-provider`), or in your own provider's
+(`--workspace-provider`; see [Run your own provider](sandbox-providers.md#run-your-own-provider)),
+while the harness and its credentials stay on the host. Only the checkout moves into the sandbox; keys never do. A Task with
 `commands:execute` runs its commands in the sandbox, which has no network access, so the host
 needs no `--allow-unsandboxed-commands` (and cannot take it). Each command runs in its own process
 group with its own time limit, enforced inside the sandbox. After a Task ran commands or a

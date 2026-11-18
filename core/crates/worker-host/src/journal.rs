@@ -1087,6 +1087,7 @@ mod tests {
                 mcp_login_servers: vec![],
                 network_credentials: vec![],
                 network_sandbox: false,
+                unverified_workspace_provider: false,
             }),
             ..Default::default()
         };

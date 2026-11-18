@@ -15393,8 +15393,12 @@ type HarnessExecutionProfile struct {
 	// This Claude Code lane can run Claude Code's own sandbox (macOS, or Linux with bubblewrap and
 	// socat), which sends sandboxed commands' traffic only to the egress proxy.
 	NetworkSandbox bool `protobuf:"varint,1901,opt,name=network_sandbox,json=networkSandbox,proto3" json:"network_sandbox,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// With `remote_file_workspace`: the sandbox provider is an operator's own
+	// (`--workspace-provider`), not E2B or Modal. SuperTag has not verified that it keeps a
+	// network scope, so placement never gives it a Task with one.
+	UnverifiedWorkspaceProvider bool `protobuf:"varint,2000,opt,name=unverified_workspace_provider,json=unverifiedWorkspaceProvider,proto3" json:"unverified_workspace_provider,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
 }
 
 func (x *HarnessExecutionProfile) Reset() {
@@ -15507,6 +15511,13 @@ func (x *HarnessExecutionProfile) GetNetworkCredentials() []string {
 func (x *HarnessExecutionProfile) GetNetworkSandbox() bool {
 	if x != nil {
 		return x.NetworkSandbox
+	}
+	return false
+}
+
+func (x *HarnessExecutionProfile) GetUnverifiedWorkspaceProvider() bool {
+	if x != nil {
+		return x.UnverifiedWorkspaceProvider
 	}
 	return false
 }
@@ -26214,7 +26225,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x05model\x18\x01 \x01(\tH\x00R\x05model\x88\x01\x01\x12\x1b\n" +
 	"\x06effort\x18\x02 \x01(\tH\x01R\x06effort\x88\x01\x01B\b\n" +
 	"\x06_modelB\t\n" +
-	"\a_effort\"\xd3\x05\n" +
+	"\a_effort\"\x98\x06\n" +
 	"\x17HarnessExecutionProfile\x12\x1b\n" +
 	"\tmodel_ids\x18\x01 \x03(\tR\bmodelIds\x12(\n" +
 	"\rdefault_model\x18\x02 \x01(\tH\x00R\fdefaultModel\x88\x01\x01\x12<\n" +
@@ -26228,7 +26239,8 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x10workspace_mounts\x18\t \x03(\v2-.supertag.runtime.v2.WorkspaceMountCapabilityR\x0fworkspaceMounts\x12+\n" +
 	"\x11mcp_login_servers\x18\x88\x0e \x03(\tR\x0fmcpLoginServers\x120\n" +
 	"\x13network_credentials\x18\xec\x0e \x03(\tR\x12networkCredentials\x12(\n" +
-	"\x0fnetwork_sandbox\x18\xed\x0e \x01(\bR\x0enetworkSandboxB\x10\n" +
+	"\x0fnetwork_sandbox\x18\xed\x0e \x01(\bR\x0enetworkSandbox\x12C\n" +
+	"\x1dunverified_workspace_provider\x18\xd0\x0f \x01(\bR\x1bunverifiedWorkspaceProviderB\x10\n" +
 	"\x0e_default_model\"\xa9\x01\n" +
 	"\x19SharedExecutionCapability\x12%\n" +
 	"\x0eenvironment_id\x18\x01 \x01(\tR\renvironmentId\x12>\n" +

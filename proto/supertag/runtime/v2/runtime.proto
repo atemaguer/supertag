@@ -2153,6 +2153,10 @@ message HarnessExecutionProfile {
   // This Claude Code lane can run Claude Code's own sandbox (macOS, or Linux with bubblewrap and
   // socat), which sends sandboxed commands' traffic only to the egress proxy.
   bool network_sandbox = 1901;
+  // With `remote_file_workspace`: the sandbox provider is an operator's own
+  // (`--workspace-provider`), not E2B or Modal. SuperTag has not verified that it keeps a
+  // network scope, so placement never gives it a Task with one.
+  bool unverified_workspace_provider = 2000;
 }
 
 enum SharedExecutionTool {

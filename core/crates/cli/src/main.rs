@@ -521,10 +521,22 @@ enum Command {
             allow_hyphen_values = true
         )]
         modal_workspace_provider_arg: Vec<std::ffi::OsString>,
+        /// Executable for your own sandbox provider, which must pass the conformance suite in docs/reference/sandbox-providers.md.
+        #[arg(
+            long,
+            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider"]
+        )]
+        workspace_provider: Option<PathBuf>,
+        /// Argument to your own sandbox provider, such as its entrypoint.
+        #[arg(long, requires = "workspace_provider", allow_hyphen_values = true)]
+        workspace_provider_arg: Vec<std::ffi::OsString>,
+        /// A Worker Host variable passed to your own sandbox provider, such as its API key. Repeat for more; no other variable reaches it.
+        #[arg(long, requires = "workspace_provider", value_name = "NAME")]
+        workspace_provider_env: Vec<String>,
         /// Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
         #[arg(
             long,
-            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider"],
+            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider"],
             long_help = r#"Owner-only JSON catalog of HTTP and stdio MCP tools for Claude Code Tasks.
 
 Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment, or use "headerFile":{"Authorization":"/PATH"} to read it from a file. An HTTP server with "oauth":true instead uses the login `supertag mcp login NAME --mcp-catalog PATH` stores on this host.
@@ -543,7 +555,7 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         )]
         mcp_catalog: Option<PathBuf>,
         /// gRPC origin of a standalone shared execution provider for Cursor.
-        #[arg(long, requires = "shared_execution_environment", conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "mcp_catalog", "workspace_id", "allow_unsandboxed_commands"])]
+        #[arg(long, requires = "shared_execution_environment", conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "workspace_provider", "mcp_catalog", "workspace_id", "allow_unsandboxed_commands"])]
         shared_execution_endpoint: Option<String>,
         /// Environment ID expected from the provider. Set SUPERTAG_EXECUTION_ADMIN_TOKEN separately.
         #[arg(long, requires = "shared_execution_endpoint")]
@@ -1116,6 +1128,9 @@ async fn run(command: Command) -> Result<()> {
             e2b_workspace_provider_arg,
             modal_workspace_provider,
             modal_workspace_provider_arg,
+            workspace_provider,
+            workspace_provider_arg,
+            workspace_provider_env,
             mcp_catalog,
             shared_execution_endpoint,
             shared_execution_environment,
@@ -1195,6 +1210,12 @@ async fn run(command: Command) -> Result<()> {
                         image: std::env::var("SUPERTAG_MODAL_WORKSPACE_IMAGE").ok(),
                     },
                 })
+            } else if let Some(executable) = workspace_provider {
+                Some(ProviderConfig {
+                    executable,
+                    arguments: workspace_provider_arg,
+                    authority: ProviderAuthority::generic(&workspace_provider_env)?,
+                })
             } else {
                 None
             };
@@ -1212,6 +1233,9 @@ async fn run(command: Command) -> Result<()> {
                 );
                 execution_profile.remote_file_workspace = true;
                 execution_profile.declared_task_outputs = true;
+                execution_profile.unverified_workspace_provider = remote_provider
+                    .as_ref()
+                    .is_some_and(|provider| !provider.verified());
             }
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let mcp_catalog = supertag_worker_host::McpCatalog::load(

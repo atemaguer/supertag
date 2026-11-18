@@ -77,14 +77,59 @@ pub enum ProviderAuthority {
         environment: String,
         image: Option<String>,
     },
+    /// An operator's own provider (`--workspace-provider`): exactly the named Worker Host
+    /// variables pass through, as `(name, value)`, and nothing else.
+    Generic { variables: Vec<(String, String)> },
+}
+
+impl ProviderAuthority {
+    /// An operator's own provider, given exactly the Worker Host variables `names`, read now. A
+    /// name the host sets for every provider (`PATH`, `LANG`, `TMPDIR`), a repeated name, or an
+    /// unset variable is refused.
+    pub fn generic(names: &[String]) -> Result<Self> {
+        ensure!(
+            names.len() <= 64,
+            "a Workspace provider takes at most 64 variables"
+        );
+        let mut variables: Vec<(String, String)> = Vec::with_capacity(names.len());
+        for name in names {
+            ensure!(
+                !name.is_empty()
+                    && name.len() <= 128
+                    && name.bytes().all(|byte| byte.is_ascii_uppercase()
+                        || byte.is_ascii_digit()
+                        || byte == b'_')
+                    && !name.as_bytes()[0].is_ascii_digit(),
+                "Workspace provider variable {name:?} must be an upper-case environment variable name"
+            );
+            ensure!(
+                !matches!(name.as_str(), "PATH" | "LANG" | "TMPDIR"),
+                "the Worker Host sets {name} for every provider; pass another variable"
+            );
+            ensure!(
+                variables.iter().all(|(seen, _)| seen != name),
+                "Workspace provider variable {name} is named twice"
+            );
+            let value = std::env::var(name)
+                .with_context(|| format!("set {name} for the Workspace provider"))?;
+            variables.push((name.clone(), value));
+        }
+        Ok(Self::Generic { variables })
+    }
 }
 
 impl ProviderConfig {
+    /// Whether SuperTag has verified this provider: E2B and Modal are, an operator's own is not.
+    pub fn verified(&self) -> bool {
+        !matches!(self.authority, ProviderAuthority::Generic { .. })
+    }
+
     /// The provider's name in operator-facing messages.
     pub(crate) fn label(&self) -> &'static str {
         match self.authority {
             ProviderAuthority::E2b { .. } => "E2B",
             ProviderAuthority::Modal { .. } => "Modal",
+            ProviderAuthority::Generic { .. } => "Workspace provider",
         }
     }
 
@@ -95,6 +140,9 @@ impl ProviderConfig {
         hash.update(match &self.authority {
             ProviderAuthority::E2b { .. } => b"supertag-e2b-authority-v1\0".as_slice(),
             ProviderAuthority::Modal { .. } => b"supertag-modal-authority-v1\0".as_slice(),
+            ProviderAuthority::Generic { .. } => {
+                b"supertag-workspace-provider-authority-v1\0".as_slice()
+            }
         });
         let mut add = |value: &[u8]| {
             hash.update((value.len() as u64).to_be_bytes());
@@ -120,6 +168,14 @@ impl ProviderConfig {
                 ..
             } => {
                 for value in [endpoint, token_id, token_secret, app, environment] {
+                    add(value.as_bytes());
+                }
+            }
+            // The passed variables are the provider's authority, credentials included.
+            ProviderAuthority::Generic { variables } => {
+                add(&(variables.len() as u64).to_be_bytes());
+                for (name, value) in variables {
+                    add(name.as_bytes());
                     add(value.as_bytes());
                 }
             }
@@ -167,6 +223,9 @@ impl ProviderConfig {
                 if let Some(image) = image {
                     command.env("SUPERTAG_MODAL_WORKSPACE_IMAGE", image);
                 }
+            }
+            ProviderAuthority::Generic { variables } => {
+                command.envs(variables.iter().map(|(name, value)| (name, value)));
             }
         }
     }
@@ -1013,6 +1072,66 @@ async fn open_artifact(artifact: &TransferArtifact) -> Result<tokio::fs::File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_generic_provider_gets_exactly_its_named_variables_and_binds_them() {
+        // SAFETY: the variables are unique to this test.
+        unsafe {
+            std::env::set_var("SUPERTAG_TEST_GENERIC_PROVIDER_KEY", "secret-one");
+            std::env::set_var("SUPERTAG_TEST_GENERIC_PROVIDER_REGION", "eu");
+        }
+        let names = [
+            "SUPERTAG_TEST_GENERIC_PROVIDER_KEY".to_owned(),
+            "SUPERTAG_TEST_GENERIC_PROVIDER_REGION".to_owned(),
+        ];
+        let config = |authority| ProviderConfig {
+            executable: "/bin/true".into(),
+            arguments: Vec::new(),
+            authority,
+        };
+        let generic = config(ProviderAuthority::generic(&names).unwrap());
+        assert!(!generic.verified());
+        assert_eq!(generic.label(), "Workspace provider");
+        let mut command = Command::new("/bin/true");
+        command.env_clear();
+        generic.configure_environment(&mut command);
+        let passed: Vec<_> = command
+            .as_std()
+            .get_envs()
+            .map(|(name, value)| (name.to_owned(), value.map(ToOwned::to_owned)))
+            .collect();
+        assert_eq!(
+            passed,
+            [
+                (
+                    "SUPERTAG_TEST_GENERIC_PROVIDER_KEY".into(),
+                    Some("secret-one".into())
+                ),
+                (
+                    "SUPERTAG_TEST_GENERIC_PROVIDER_REGION".into(),
+                    Some("eu".into())
+                ),
+            ]
+        );
+        // A changed value is another authority, so recovery never crosses it.
+        let before = generic.authority_fingerprint();
+        unsafe { std::env::set_var("SUPERTAG_TEST_GENERIC_PROVIDER_KEY", "secret-two") };
+        let after = config(ProviderAuthority::generic(&names).unwrap()).authority_fingerprint();
+        assert_ne!(before, after);
+        assert_ne!(
+            config(ProviderAuthority::generic(&[]).unwrap()).authority_fingerprint(),
+            after
+        );
+        for refused in [
+            vec!["PATH".to_owned()],
+            vec!["lower".to_owned()],
+            vec!["1ST".to_owned()],
+            vec!["SUPERTAG_TEST_GENERIC_PROVIDER_KEY".to_owned(); 2],
+            vec!["SUPERTAG_TEST_GENERIC_PROVIDER_UNSET".to_owned()],
+        ] {
+            assert!(ProviderAuthority::generic(&refused).is_err(), "{refused:?}");
+        }
+    }
 
     #[test]
     fn provider_authority_binds_credentials_endpoint_and_helper() {
