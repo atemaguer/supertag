@@ -96,7 +96,7 @@ func (n fakeNetworkLogs) List(_ context.Context, req *connect.Request[v2.ListNet
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.networkRefusal {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("permission denied"))
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("caller is not allowed to use this method"))
 	}
 	return connect.NewResponse(&v2.ListNetworkLogsResponse{Logs: f.networkLogs}), nil
 }

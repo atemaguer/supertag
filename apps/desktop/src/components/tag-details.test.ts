@@ -176,7 +176,7 @@ it("tells a person who is not an operator that only operators see the network lo
   const gateway = {
     notes: async () => [],
     networkLogs: async () => {
-      throw new Error("permission denied: the call needs an operator");
+      throw new Error("This connection cannot access that resource.");
     },
   } as unknown as Gateway;
   act(() => root.render(createElement(TagDetails, { gateway, tag, onClose() {} })));

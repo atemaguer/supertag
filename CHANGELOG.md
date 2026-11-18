@@ -272,6 +272,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A client device that opens a Tag's network log is told that only operators can see it, in the
+  desktop app and the terminal UI, instead of a raw refusal.
 - The terminal UI shows a Schedule's reply as soon as the turn finishes, and updates the Tag list
   and sends its notification then, instead of only after a restart. A client device's Tag list
   also updates when its own turn finishes.

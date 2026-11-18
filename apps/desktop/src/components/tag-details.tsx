@@ -228,7 +228,8 @@ export function NetworkSection({
         if (signal.aborted) return false;
         const text = describe(error);
         setError(
-          /permission|denied|operator/i.test(text)
+          // The desktop words a permission-denied refusal as "cannot access".
+          /cannot access|permission|denied|operator/i.test(text)
             ? "Only operators can see the network log."
             : text,
         );

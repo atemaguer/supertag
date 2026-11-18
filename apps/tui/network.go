@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	"connectrpc.com/connect"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -91,7 +94,9 @@ func (a *app) networkMessage(msg tea.Msg) bool {
 		d.read = true
 		if loaded.err != nil {
 			d.note = terminalText(loaded.err.Error())
-			if strings.Contains(strings.ToLower(d.note), "permission") {
+			// The Gateway refuses a client the log as permission denied, in its own words.
+			var refused *client.APIError
+			if errors.As(loaded.err, &refused) && refused.Code == connect.CodePermissionDenied {
 				d.note = "Only operators can see the network log."
 			}
 		} else {
