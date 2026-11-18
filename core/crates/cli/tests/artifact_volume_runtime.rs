@@ -377,7 +377,7 @@ async fn a_tag_volume_keeps_each_capture_written_by_the_host_that_maps_it(
         "{unplaced:#}"
     );
     // The host that maps it writes the copy and attests it; the Control Plane never opens it.
-    let (artifact_id, bytes, blob, mut held) =
+    let (artifact_id, bytes, blob, held) =
         capture(&credentials, &public, Some("durable"), Some(&volume_path)).await?;
     let copies = json(resource(
         &credentials,
@@ -395,7 +395,6 @@ async fn a_tag_volume_keeps_each_capture_written_by_the_host_that_maps_it(
         "{key}"
     );
     // The bytes outlive the host: they are on the Volume, for any host that maps it.
-    held.disconnect();
     drop(held);
     ensure!(std::fs::read(volume_path.join(key))? == bytes);
     ensure!(format!("{:x}", Sha256::digest(&bytes)) == blob.sha256);

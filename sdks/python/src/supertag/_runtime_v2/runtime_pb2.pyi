@@ -1542,36 +1542,6 @@ class BlobHolder(_message.Message):
     attempt_id: str
     def __init__(self, host_id: _Optional[str] = ..., attempt_id: _Optional[str] = ...) -> None: ...
 
-class AwaitRelayRequest(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
-
-class RelayRequest(_message.Message):
-    __slots__ = ("relay_id", "attempt_id", "blob", "complete_bundle")
-    RELAY_ID_FIELD_NUMBER: _ClassVar[int]
-    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
-    BLOB_FIELD_NUMBER: _ClassVar[int]
-    COMPLETE_BUNDLE_FIELD_NUMBER: _ClassVar[int]
-    relay_id: str
-    attempt_id: str
-    blob: BlobReference
-    complete_bundle: WorkspaceDeliveryReference
-    def __init__(self, relay_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., blob: _Optional[_Union[BlobReference, _Mapping]] = ..., complete_bundle: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
-
-class RelayFrame(_message.Message):
-    __slots__ = ("relay_id", "chunk", "failure")
-    RELAY_ID_FIELD_NUMBER: _ClassVar[int]
-    CHUNK_FIELD_NUMBER: _ClassVar[int]
-    FAILURE_FIELD_NUMBER: _ClassVar[int]
-    relay_id: str
-    chunk: bytes
-    failure: str
-    def __init__(self, relay_id: _Optional[str] = ..., chunk: _Optional[bytes] = ..., failure: _Optional[str] = ...) -> None: ...
-
-class RelayDelivered(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
-
 class HeldWorkspaceDelivery(_message.Message):
     __slots__ = ("delivery", "holder", "workspace", "session_branch")
     DELIVERY_FIELD_NUMBER: _ClassVar[int]

@@ -244,7 +244,7 @@ impl Drop for Staged {
         unsafe { libc::unlinkat(self.parent.as_raw_fd(), self.name.as_ptr(), 0) };
     }
 }
-/// Writes `bytes` (relayed from the holding Worker Host) to the Volume, unless the exact object is
+/// Writes `bytes` (from this Worker Host's own storage) to the Volume, unless the exact object is
 /// already there. Without `bytes`, only an existing verified object succeeds.
 impl FileVolume {
     /// Writes `bytes` to `key` unless the exact object is already there, then reopens it from the

@@ -58,10 +58,9 @@ Audited 2026-11-13 against `core/crates/control-plane`. "Fixed" rows changed in 
   a TCP load balancer or a private DNS name.
 - No replica stores Session checkpoints: they stay on the Worker Host that wrote them, and every
   replica reads the same holder records from the database.
-- The Control Plane stores no artifact or Workspace delivery bytes. A replica relays them from the
-  holding Worker Host over that host's `HostRelay.Await` stream, which is held in that replica's
-  memory. A read through a replica the host's stream did not reach fails as if the host were
-  offline. Routing relay requests between replicas is not implemented.
+- No replica stores or relays artifact or Workspace delivery bytes. They stay on the Worker Host
+  that produced them, a Volume, or the Workspace's git remote, and readers fetch them from there,
+  so no replica holds per-host streams.
 - Gateway replicas are not covered here: a Gateway keeps its file credential vault on its own
   volume.
 

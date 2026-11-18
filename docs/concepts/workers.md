@@ -80,8 +80,9 @@ Either way, the harness and its credentials stay on the host. See [Run a harness
 
 A host's state directory holds its credential, its execution journal, Workspace checkouts, and
 the artifacts and Workspace deliveries its Tasks produce. The Control Plane stores none of those
-files. Other Worker Hosts read artifacts from the host directly, and the Control Plane relays a
-delivery to whoever imports it. The journal lets a restarted host recover an
+files and passes none of them on. Other Worker Hosts read artifacts from the host directly or
+from a Volume, and the host pushes each delivery to its Session branch in the Workspace's git
+remote, or writes it into a local Workspace's repository. The journal lets a restarted host recover an
 interrupted Task Attempt without running it twice. See [Persistence](persistence.md).
 
 ## Next

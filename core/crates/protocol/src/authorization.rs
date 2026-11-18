@@ -160,10 +160,6 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("VolumeObjects", "*", HOST),
     ("Transfers", "*", HOST),
     ("WorkspaceGitAccess", "*", HOST),
-    // A Worker Host serving the artifact and Workspace bytes it holds to the Control Plane's
-    // relay: only the host the relay asked.
-    ("HostRelay", "Await", HOST),
-    ("HostRelay", "Deliver", HOST),
     // Surfaces.
     ("Connector", "*", GATEWAY),
     ("ReplyProgress", "*", GATEWAY),
@@ -315,8 +311,6 @@ mod tests {
         );
         assert_eq!(roles("WorkerHost/GetCheckpoint"), ["host"]);
         assert_eq!(roles("HostLandings/Claim"), ["host"]);
-        assert_eq!(roles("HostRelay/Await"), ["host"]);
-        assert_eq!(roles("HostRelay/Deliver"), ["host"]);
         assert_eq!(roles("AttemptArtifacts/CommitCapture"), ["host"]);
         assert_eq!(roles("Transfers/CommitWorkspace"), ["host"]);
         assert_eq!(roles("Connector/AcceptEvent"), ["gateway"]);
@@ -355,7 +349,6 @@ mod tests {
         assert!(gateway_forwards("/grpc.health.v1.Health/Check"));
         for path in [
             "WorkerHost/ClaimTask",
-            "HostRelay/Await",
             "WorkerHost/GetCheckpoint",
             "Connector/ClaimConnector",
             "ReplyProgress/Claim",

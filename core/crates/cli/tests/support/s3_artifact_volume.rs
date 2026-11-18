@@ -330,7 +330,7 @@ async fn s3_capture_copy_is_uploaded_by_the_host_with_a_presigned_put(
     ))
     .await?;
     // An S3 Volume needs no host mapping: the reservation carries a presigned PUT.
-    let (artifact_id, bytes, _blob, mut held) =
+    let (artifact_id, bytes, _blob, held) =
         capture(&credentials, &public, Some("object"), None).await?;
     {
         let bucket = state.lock().unwrap();
@@ -351,7 +351,6 @@ async fn s3_capture_copy_is_uploaded_by_the_host_with_a_presigned_put(
         );
         assert!(bucket.heads >= 1);
     }
-    held.disconnect();
     drop(held);
     after_the_producer(&credentials, &public, &state, &artifact_id, &bytes).await?;
     stop(&mut control).await?;

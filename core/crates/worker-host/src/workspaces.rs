@@ -880,7 +880,7 @@ impl Transfers {
     }
 
     /// Keeps the delivery's patch and bundle in this host's artifact storage, then records the
-    /// delivery. The Control Plane stores neither: it relays them from this host to readers.
+    /// delivery. The Control Plane stores and relays neither.
     pub(crate) async fn upload_workspace(
         &self,
         attempt: &Attempt,

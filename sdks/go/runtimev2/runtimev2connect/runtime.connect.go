@@ -59,8 +59,6 @@ const (
 	WorkspaceGitAccessName = "supertag.runtime.v2.WorkspaceGitAccess"
 	// WorkspaceDirectoryName is the fully-qualified name of the WorkspaceDirectory service.
 	WorkspaceDirectoryName = "supertag.runtime.v2.WorkspaceDirectory"
-	// HostRelayName is the fully-qualified name of the HostRelay service.
-	HostRelayName = "supertag.runtime.v2.HostRelay"
 	// HarnessName is the fully-qualified name of the Harness service.
 	HarnessName = "supertag.runtime.v2.Harness"
 	// HarnessWorkspaceName is the fully-qualified name of the HarnessWorkspace service.
@@ -404,10 +402,6 @@ const (
 	// WorkspaceDirectoryGetReviewArtifactProcedure is the fully-qualified name of the
 	// WorkspaceDirectory's GetReviewArtifact RPC.
 	WorkspaceDirectoryGetReviewArtifactProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetReviewArtifact"
-	// HostRelayAwaitProcedure is the fully-qualified name of the HostRelay's Await RPC.
-	HostRelayAwaitProcedure = "/supertag.runtime.v2.HostRelay/Await"
-	// HostRelayDeliverProcedure is the fully-qualified name of the HostRelay's Deliver RPC.
-	HostRelayDeliverProcedure = "/supertag.runtime.v2.HostRelay/Deliver"
 	// HarnessAttachProcedure is the fully-qualified name of the Harness's Attach RPC.
 	HarnessAttachProcedure = "/supertag.runtime.v2.Harness/Attach"
 	// HarnessConfirmExecutionLimitsProcedure is the fully-qualified name of the Harness's
@@ -4581,102 +4575,6 @@ func (UnimplementedWorkspaceDirectoryHandler) CommitDelivery(context.Context, *c
 
 func (UnimplementedWorkspaceDirectoryHandler) GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.HeldWorkspaceDelivery], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact is not implemented"))
-}
-
-// HostRelayClient is a client for the supertag.runtime.v2.HostRelay service.
-type HostRelayClient interface {
-	Await(context.Context, *connect.Request[runtimev2.AwaitRelayRequest]) (*connect.ServerStreamForClient[runtimev2.RelayRequest], error)
-	Deliver(context.Context) *connect.ClientStreamForClient[runtimev2.RelayFrame, runtimev2.RelayDelivered]
-}
-
-// NewHostRelayClient constructs a client for the supertag.runtime.v2.HostRelay service. By default,
-// it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and
-// sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC()
-// or connect.WithGRPCWeb() options.
-//
-// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
-// http://api.acme.com or https://acme.com/grpc).
-func NewHostRelayClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HostRelayClient {
-	baseURL = strings.TrimRight(baseURL, "/")
-	hostRelayMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostRelay").Methods()
-	return &hostRelayClient{
-		await: connect.NewClient[runtimev2.AwaitRelayRequest, runtimev2.RelayRequest](
-			httpClient,
-			baseURL+HostRelayAwaitProcedure,
-			connect.WithSchema(hostRelayMethods.ByName("Await")),
-			connect.WithClientOptions(opts...),
-		),
-		deliver: connect.NewClient[runtimev2.RelayFrame, runtimev2.RelayDelivered](
-			httpClient,
-			baseURL+HostRelayDeliverProcedure,
-			connect.WithSchema(hostRelayMethods.ByName("Deliver")),
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-// hostRelayClient implements HostRelayClient.
-type hostRelayClient struct {
-	await   *connect.Client[runtimev2.AwaitRelayRequest, runtimev2.RelayRequest]
-	deliver *connect.Client[runtimev2.RelayFrame, runtimev2.RelayDelivered]
-}
-
-// Await calls supertag.runtime.v2.HostRelay.Await.
-func (c *hostRelayClient) Await(ctx context.Context, req *connect.Request[runtimev2.AwaitRelayRequest]) (*connect.ServerStreamForClient[runtimev2.RelayRequest], error) {
-	return c.await.CallServerStream(ctx, req)
-}
-
-// Deliver calls supertag.runtime.v2.HostRelay.Deliver.
-func (c *hostRelayClient) Deliver(ctx context.Context) *connect.ClientStreamForClient[runtimev2.RelayFrame, runtimev2.RelayDelivered] {
-	return c.deliver.CallClientStream(ctx)
-}
-
-// HostRelayHandler is an implementation of the supertag.runtime.v2.HostRelay service.
-type HostRelayHandler interface {
-	Await(context.Context, *connect.Request[runtimev2.AwaitRelayRequest], *connect.ServerStream[runtimev2.RelayRequest]) error
-	Deliver(context.Context, *connect.ClientStream[runtimev2.RelayFrame]) (*connect.Response[runtimev2.RelayDelivered], error)
-}
-
-// NewHostRelayHandler builds an HTTP handler from the service implementation. It returns the path
-// on which to mount the handler and the handler itself.
-//
-// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
-// and JSON codecs. They also support gzip compression.
-func NewHostRelayHandler(svc HostRelayHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	hostRelayMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostRelay").Methods()
-	hostRelayAwaitHandler := connect.NewServerStreamHandler(
-		HostRelayAwaitProcedure,
-		svc.Await,
-		connect.WithSchema(hostRelayMethods.ByName("Await")),
-		connect.WithHandlerOptions(opts...),
-	)
-	hostRelayDeliverHandler := connect.NewClientStreamHandler(
-		HostRelayDeliverProcedure,
-		svc.Deliver,
-		connect.WithSchema(hostRelayMethods.ByName("Deliver")),
-		connect.WithHandlerOptions(opts...),
-	)
-	return "/supertag.runtime.v2.HostRelay/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case HostRelayAwaitProcedure:
-			hostRelayAwaitHandler.ServeHTTP(w, r)
-		case HostRelayDeliverProcedure:
-			hostRelayDeliverHandler.ServeHTTP(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-}
-
-// UnimplementedHostRelayHandler returns CodeUnimplemented from all methods.
-type UnimplementedHostRelayHandler struct{}
-
-func (UnimplementedHostRelayHandler) Await(context.Context, *connect.Request[runtimev2.AwaitRelayRequest], *connect.ServerStream[runtimev2.RelayRequest]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostRelay.Await is not implemented"))
-}
-
-func (UnimplementedHostRelayHandler) Deliver(context.Context, *connect.ClientStream[runtimev2.RelayFrame]) (*connect.Response[runtimev2.RelayDelivered], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostRelay.Deliver is not implemented"))
 }
 
 // HarnessClient is a client for the supertag.runtime.v2.Harness service.

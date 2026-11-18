@@ -1,9 +1,8 @@
 //! This Worker Host's artifact storage, and the transports that read from it.
 //!
 //! Every artifact a Task captures and every Workspace delivery's patch and bundle stay here, on the
-//! producing Worker Host: the Control Plane stores none of their bytes. It relays them to readers
-//! by asking this host over the `HostRelay` stream ([`relay`]). An opt-in peer listener also lets
-//! other Worker Hosts read artifacts directly under a Control Plane grant.
+//! producing Worker Host: the Control Plane stores and relays none of their bytes. An opt-in peer
+//! listener lets other Worker Hosts read artifacts directly under a Control Plane grant.
 use std::{
     collections::BTreeMap,
     fs::{self, DirBuilder, File, OpenOptions},
@@ -24,7 +23,6 @@ use supertag_protocol::{
     v2::{
         artifact_download::Part,
         attempt_artifacts_client::AttemptArtifactsClient,
-        host_relay_client::HostRelayClient,
         worker_artifact_transfers_client::WorkerArtifactTransfersClient,
         worker_artifact_transfers_server::{
             WorkerArtifactTransfers, WorkerArtifactTransfersServer,
@@ -206,12 +204,11 @@ pub(crate) struct BoundSource {
 }
 
 impl BoundSource {
-    /// Registers this storage with the Control Plane, then answers its relay requests and, when
-    /// configured, direct reads from peer Worker Hosts until `shutdown`.
+    /// Registers this storage with the Control Plane, then, when configured, answers direct reads
+    /// from peer Worker Hosts until `shutdown`.
     pub(crate) async fn serve(
         self,
         mut authority: Authority,
-        relay: HostRelayClient<InterceptedService<Channel, HostHeaders>>,
         token: &str,
         shutdown: &CancellationToken,
     ) -> Result<Serving> {
@@ -239,16 +236,7 @@ impl BoundSource {
             "artifact source registration changed"
         );
         let stop = shutdown.child_token();
-        // Open the relay stream before reporting ready, so the host's bytes are reachable as soon
-        // as it is; a failure here is retried in the background.
-        let first = relay::open(&relay, token).await.ok();
-        let mut tasks = vec![tokio::spawn(relay::serve(
-            relay,
-            token.to_owned(),
-            self.storage.clone(),
-            stop.clone(),
-            first,
-        ))];
+        let mut tasks = vec![];
         if let Some((mut server, listener)) = self.peers {
             let source = SourceServer {
                 authority,
@@ -786,174 +774,6 @@ impl WorkerArtifactTransfers for SourceServer {
     }
 }
 
-mod relay {
-    //! Answers the Control Plane's relay requests from this host's artifact storage.
-    use super::*;
-    use supertag_protocol::v2::relay_frame::Part as Frame;
-
-    type Requests = tonic::Streaming<RelayRequest>;
-
-    /// Opens one `HostRelay.Await` stream.
-    pub(super) async fn open(
-        client: &HostRelayClient<InterceptedService<Channel, HostHeaders>>,
-        token: &str,
-    ) -> Result<Requests, Status> {
-        let request = authenticated_request(AwaitRelayRequest {}, token, None)?;
-        Ok(client.clone().r#await(request).await?.into_inner())
-    }
-
-    /// Keeps one `HostRelay.Await` stream open, reconnecting after failures, until `stop`.
-    pub(super) async fn serve(
-        client: HostRelayClient<InterceptedService<Channel, HostHeaders>>,
-        token: String,
-        storage: SourceStorage,
-        stop: CancellationToken,
-        mut first: Option<Requests>,
-    ) {
-        let capacity = Arc::new(Semaphore::new(8));
-        loop {
-            let session = async {
-                let mut requests = match first.take() {
-                    Some(requests) => requests,
-                    None => open(&client, &token).await?,
-                };
-                while let Some(request) = requests.message().await? {
-                    // Every request is answered; the Control Plane bounds how many wait.
-                    tokio::spawn(answer(
-                        client.clone(),
-                        token.clone(),
-                        storage.clone(),
-                        capacity.clone(),
-                        request,
-                    ));
-                }
-                Ok::<_, Status>(())
-            };
-            tokio::select! {
-                _ = stop.cancelled() => return,
-                _ = session => {}
-            }
-            tokio::select! {
-                _ = stop.cancelled() => return,
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
-            }
-        }
-    }
-
-    /// How long an acknowledged request may wait for one of this host's read slots.
-    const QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
-    /// How long one answer may take to stream once it has a slot.
-    const DELIVERY_TIMEOUT: Duration = Duration::from_secs(120);
-
-    /// Acknowledges the request at once, so the Control Plane knows this host holds the bytes and
-    /// is answering, then reads them once one of the host's few read slots is free.
-    pub(super) async fn answer(
-        mut client: HostRelayClient<InterceptedService<Channel, HostHeaders>>,
-        token: String,
-        storage: SourceStorage,
-        capacity: Arc<Semaphore>,
-        request: RelayRequest,
-    ) {
-        let (frames, receive) = mpsc::channel(2);
-        let Ok(mut call) = authenticated_request(ReceiverStream::new(receive), &token, None) else {
-            return;
-        };
-        call.set_timeout(QUEUE_TIMEOUT + DELIVERY_TIMEOUT);
-        let call = client.deliver(call);
-        tokio::pin!(call);
-        let produce = async {
-            if frames
-                .send(RelayFrame {
-                    part: Some(Frame::RelayId(request.relay_id)),
-                })
-                .await
-                .is_err()
-            {
-                return false;
-            }
-            let Ok(Ok(_permit)) =
-                tokio::time::timeout(QUEUE_TIMEOUT, capacity.acquire_owned()).await
-            else {
-                return false;
-            };
-            let attempt = request.attempt_id;
-            let read = match (request.blob, request.complete_bundle) {
-                (Some(blob), None) => {
-                    tokio::task::spawn_blocking(move || storage.read_held(&attempt, &blob))
-                        .await
-                        .map_err(anyhow::Error::from)
-                        .and_then(|result| result)
-                }
-                // A complete bundle of a delivered commit, built from the Workspace that holds
-                // it, which may belong to another lane of this host. Only read there.
-                (None, Some(delivery)) => async {
-                    let state = storage.workspace_of(&attempt)?;
-                    supertag_workspaces::complete_delivery_bundle(
-                        &state,
-                        &delivery.head_commit,
-                        &delivery.delivery_id,
-                        &CancellationToken::new(),
-                    )
-                    .await
-                }
-                .await
-                .inspect_err(|error| {
-                    crate::failures::note_unrecorded(
-                        "could not build a complete Workspace bundle",
-                        error,
-                    )
-                }),
-                _ => Err(anyhow::anyhow!("relay request names no blob")),
-            };
-            let deliver = async {
-                match read {
-                    Ok(bytes) => {
-                        for chunk in bytes.chunks(CHECKPOINT_CHUNK_BYTES) {
-                            if frames
-                                .send(RelayFrame {
-                                    part: Some(Frame::Chunk(chunk.to_vec())),
-                                })
-                                .await
-                                .is_err()
-                            {
-                                return false;
-                            }
-                        }
-                        true
-                    }
-                    Err(_) => frames
-                        .send(RelayFrame {
-                            part: Some(Frame::Failure("held bytes are missing or changed".into())),
-                        })
-                        .await
-                        .is_ok(),
-                }
-            };
-            tokio::time::timeout(DELIVERY_TIMEOUT, deliver)
-                .await
-                .unwrap_or(false)
-        };
-        let finished = tokio::select! {
-            result = &mut call => {
-                if let Err(error) = result {
-                    tracing::debug!("relay delivery ended: {error}");
-                }
-                return;
-            }
-            finished = produce => finished,
-        };
-        if !finished {
-            // Returning drops the call before `frames`, so the Control Plane sees the stream
-            // reset rather than a short file that ended cleanly.
-            return;
-        }
-        drop(frames);
-        if let Err(error) = call.await {
-            tracing::debug!("relay delivery ended: {error}");
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1014,105 +834,6 @@ mod tests {
         assert!(restarted.read("attempt", &blob).is_err());
         assert!(restarted.retain(&mut replay, &exact).is_err());
         assert_eq!(fs::read(object)?, b"wrong output");
-        Ok(())
-    }
-
-    /// Records each Deliver call's relay ID as it arrives and whether the call then ended with
-    /// the host's answer.
-    struct FakeRelay(mpsc::UnboundedSender<(String, bool)>);
-
-    #[tonic::async_trait]
-    impl supertag_protocol::v2::host_relay_server::HostRelay for FakeRelay {
-        type AwaitStream = ReceiverStream<Result<RelayRequest, Status>>;
-
-        async fn r#await(
-            &self,
-            _: Request<AwaitRelayRequest>,
-        ) -> Result<Response<Self::AwaitStream>, Status> {
-            Err(Status::unimplemented("not used"))
-        }
-
-        async fn deliver(
-            &self,
-            request: Request<tonic::Streaming<RelayFrame>>,
-        ) -> Result<Response<RelayDelivered>, Status> {
-            use supertag_protocol::v2::relay_frame::Part as Frame;
-            let mut frames = request.into_inner();
-            let Some(Frame::RelayId(id)) = frames.message().await?.and_then(|frame| frame.part)
-            else {
-                return Err(Status::invalid_argument("no relay ID"));
-            };
-            let _ = self.0.send((id.clone(), false));
-            let mut answered = false;
-            while let Some(frame) = frames.message().await? {
-                answered |= matches!(frame.part, Some(Frame::Failure(_)));
-            }
-            let _ = self.0.send((id, answered));
-            Ok(Response::new(RelayDelivered {}))
-        }
-    }
-
-    #[tokio::test]
-    async fn a_busy_host_acknowledges_and_queues_relay_requests() -> Result<()> {
-        let temp = tempfile::tempdir()?;
-        let storage = SourceStorage::open(&temp.path().canonicalize()?.join("held"))?;
-        let (events, mut seen) = mpsc::unbounded_channel();
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
-        let address = listener.local_addr()?;
-        tokio::spawn(
-            Server::builder()
-                .add_service(
-                    supertag_protocol::v2::host_relay_server::HostRelayServer::new(FakeRelay(
-                        events,
-                    )),
-                )
-                .serve_with_incoming(TcpListenerStream::new(listener)),
-        );
-        let channel = Endpoint::from_shared(format!("http://{address}"))?
-            .connect()
-            .await?;
-        let client = HostRelayClient::with_interceptor(channel, HostHeaders::new(1, 2));
-        // Every read slot is taken, as by slow readers.
-        let capacity = Arc::new(Semaphore::new(1));
-        let held = capacity.clone().acquire_owned().await?;
-        let requests = 12;
-        for index in 0..requests {
-            tokio::spawn(relay::answer(
-                client.clone(),
-                "token".into(),
-                storage.clone(),
-                capacity.clone(),
-                RelayRequest {
-                    relay_id: format!("relay-{index}"),
-                    attempt_id: "attempt".into(),
-                    blob: Some(BlobReference {
-                        sha256: "0".repeat(64),
-                        byte_length: 1,
-                    }),
-                    complete_bundle: None,
-                },
-            ));
-        }
-        // Each request is acknowledged at once, though none can be read yet.
-        let mut acknowledged = std::collections::BTreeSet::new();
-        while acknowledged.len() < requests {
-            let (id, answered) = tokio::time::timeout(Duration::from_secs(5), seen.recv())
-                .await?
-                .context("relay server stopped")?;
-            assert!(!answered, "{id} was answered while every slot was taken");
-            acknowledged.insert(id);
-        }
-        // Once a slot frees, every queued request is answered, none dropped.
-        drop(held);
-        let mut answered = std::collections::BTreeSet::new();
-        while answered.len() < requests {
-            let (id, done) = tokio::time::timeout(Duration::from_secs(5), seen.recv())
-                .await?
-                .context("relay server stopped")?;
-            assert!(done);
-            answered.insert(id);
-        }
-        assert_eq!(answered, acknowledged);
         Ok(())
     }
 

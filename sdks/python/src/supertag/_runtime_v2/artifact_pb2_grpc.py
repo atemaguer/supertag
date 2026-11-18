@@ -145,8 +145,8 @@ class ArtifactCatalog:
 
 class ArtifactDirectoryStub:
     """Internal to the Control Plane. The state owner verifies authority and records
-    provenance, metadata, and which Worker Host holds each capture's bytes. Its API
-    tier relays bytes from that host or a Volume and stores none.
+    provenance, metadata, and which Worker Host holds each capture's bytes. It stores and
+    relays none of them.
     """
 
     def __init__(self, channel):
@@ -219,8 +219,8 @@ class ArtifactDirectoryStub:
 
 class ArtifactDirectoryServicer:
     """Internal to the Control Plane. The state owner verifies authority and records
-    provenance, metadata, and which Worker Host holds each capture's bytes. Its API
-    tier relays bytes from that host or a Volume and stores none.
+    provenance, metadata, and which Worker Host holds each capture's bytes. It stores and
+    relays none of them.
     """
 
     def ReserveCapture(self, request, context):
@@ -368,8 +368,8 @@ def add_ArtifactDirectoryServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class ArtifactDirectory:
     """Internal to the Control Plane. The state owner verifies authority and records
-    provenance, metadata, and which Worker Host holds each capture's bytes. Its API
-    tier relays bytes from that host or a Volume and stores none.
+    provenance, metadata, and which Worker Host holds each capture's bytes. It stores and
+    relays none of them.
     """
 
     @staticmethod

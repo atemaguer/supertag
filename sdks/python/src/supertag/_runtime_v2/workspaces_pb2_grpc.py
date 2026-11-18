@@ -28,8 +28,8 @@ if _version_not_supported:
 class WorkspacesStub:
     """A Workspace kept in a git remote: where its files come from, the Workspace Credentials that
     read and push them, and where a Session's changes land. It names credentials, never secrets.
-    Every Worker Host that serves it receives its source relayed through the Control Plane, so no
-    host holds a source credential.
+    A Worker Host reads and pushes it itself, with a credential the Control Plane grants for one
+    operation and the host keeps in memory, never in the sandbox.
     """
 
     def __init__(self, channel):
@@ -68,8 +68,8 @@ class WorkspacesStub:
 class WorkspacesServicer:
     """A Workspace kept in a git remote: where its files come from, the Workspace Credentials that
     read and push them, and where a Session's changes land. It names credentials, never secrets.
-    Every Worker Host that serves it receives its source relayed through the Control Plane, so no
-    host holds a source credential.
+    A Worker Host reads and pushes it itself, with a credential the Control Plane grants for one
+    operation and the host keeps in memory, never in the sandbox.
     """
 
     def Put(self, request, context):
@@ -143,8 +143,8 @@ def add_WorkspacesServicer_to_server(servicer, server):
 class Workspaces:
     """A Workspace kept in a git remote: where its files come from, the Workspace Credentials that
     read and push them, and where a Session's changes land. It names credentials, never secrets.
-    Every Worker Host that serves it receives its source relayed through the Control Plane, so no
-    host holds a source credential.
+    A Worker Host reads and pushes it itself, with a credential the Control Plane grants for one
+    operation and the host keeps in memory, never in the sandbox.
     """
 
     @staticmethod

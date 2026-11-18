@@ -1166,7 +1166,7 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
     )?)
     .await?;
     let bytes = b"source evidence\n".to_vec();
-    // The capturing host holds the bytes and relays them while it stays connected.
+    // The capturing host holds the bytes; the Control Plane records only the capture.
     let held = held_artifacts::HeldArtifacts::register(
         channel.clone(),
         &credentials.host,

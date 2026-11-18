@@ -38,10 +38,6 @@ pub const FILE_DESCRIPTOR_SET: &[u8] =
 /// Codex. The sentence it asks for reaches the person at once as its own message, before the work.
 pub const TURN_GUIDANCE: &str = "When a turn will take more than a moment, open it with one short sentence saying what you are about to do, as its own message, then do it. Answer a quick question directly.";
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
-/// How a relayed read says the Worker Host holding the bytes is not connected. A Worker Host whose
-/// continuation fails this way reports that it waits for that host.
-pub const HOLDER_NOT_CONNECTED: &str = "which is not connected to the Control Plane";
-
 /// How a Worker Host says its Attempt cannot continue its Session yet: the Session's last delivery
 /// is not where it can read it. It then reports that it waits for the host holding it.
 pub const WAITS_FOR_HOLDER: &str = "waits for the Worker Host holding this Session's last delivery";

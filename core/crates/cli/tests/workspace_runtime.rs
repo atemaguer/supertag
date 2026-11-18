@@ -85,8 +85,8 @@ impl Credentials {
             ADAPTER,
         ]);
         // Every host process of a test presents the same credential, so, like the lanes of one
-        // Worker Host, they share one artifact directory: the Control Plane stores no
-        // delivery or artifact bytes and relays them from whichever process is connected.
+        // Worker Host, they share one artifact directory: the Control Plane stores and relays no
+        // delivery or artifact bytes, so each process reads what another produced from it.
         command
             .arg(format!("--adapter-arg={mode}"))
             .arg("--state-directory")

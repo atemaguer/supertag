@@ -325,8 +325,7 @@ async fn cross_objective_publication_is_explicit_and_durable(database: String) -
     stop(&mut control).await?;
     // The Control Plane restarts; the producing Worker Host reconnects and still holds the bytes.
     let (mut control, public) = service(plane(&credentials, &database, "127.0.0.1:0")).await?;
-    held.reconnect(protocol::dial(public.clone()).await?)
-        .await?;
+    held.reconnect(protocol::dial(public.clone()).await?);
     let replay = json(publication(
         &credentials,
         &public,

@@ -17,8 +17,7 @@ pub fn artifact_directory(root: &Path) -> std::path::PathBuf {
     root.join("host-artifacts")
 }
 
-/// Starts `command`, a Worker Host without `--once`, and returns once it reports ready, by which
-/// time its relay stream is open.
+/// Starts `command`, a Worker Host without `--once`, and returns once it reports ready.
 pub async fn serve(mut command: Command) -> Result<Child> {
     command.stdout(Stdio::piped()).kill_on_drop(true);
     let mut child = command.spawn().context("start the holding Worker Host")?;

@@ -1,24 +1,16 @@
-//! The Control Plane relays no files (contributing/no-file-relay-plan.md): file bytes go from the
-//! Worker Host that holds them to whoever reads them, through a Volume or a direct peer request,
+//! The Control Plane relays no files: file bytes go from the Worker Host that holds them to
+//! whoever reads them, through a Volume, the Workspace's git remote, or a direct peer request,
 //! never through the Control Plane or its API tier.
 //!
 //! This test finds every RPC the Control Plane serves (on its public listener, or internally to
-//! its API tier) that streams messages carrying `bytes` fields, which is how a file crosses the
-//! wire. Each one still in the protocol must be on [`REMAINING`], with the slice that removes it.
-//! A new one fails the test, and so does a listed one that is gone, so each slice deletes its
-//! entries as it deletes its handlers. When the plan is done, [`REMAINING`] is empty.
+//! its API tier) or a Gateway serves or forwards that streams messages carrying `bytes` fields,
+//! which is how a file crosses the wire, and fails if there is any. Byte streams are allowed only
+//! on services a Worker Host serves to its own harness, sandbox provider, or peers.
 use std::collections::{BTreeMap, BTreeSet};
 
 use prost::Message as _;
 use prost_types::{DescriptorProto, FileDescriptorSet, field_descriptor_proto::Type};
 use supertag_protocol::authorization::{PEER_LOCAL, access};
-
-/// The byte-carrying RPCs the Control Plane still serves, and the no-file-relay slice that
-/// removes each. Unary RPCs are not checked: the only ones carrying `bytes` carry credentials.
-const REMAINING: &[(&str, &str, u8)] = &[
-    // Slice 6: the relay itself.
-    ("HostRelay", "Deliver", 6),
-];
 
 /// Every message type by its fully qualified name, such as `.supertag.runtime.v2.Task`.
 fn messages(set: &FileDescriptorSet) -> BTreeMap<String, &DescriptorProto> {
@@ -61,7 +53,8 @@ fn carries_bytes(
     })
 }
 
-/// The streaming RPCs whose messages carry bytes, as `(service, method)`: the Control Plane's,
+/// The streaming RPCs whose messages carry bytes (unary RPCs are not checked: the only ones
+/// carrying `bytes` carry credentials), as `(service, method)`: the Control Plane's,
 /// or with `peer_local` also those a Worker Host or Gateway serves itself.
 fn byte_streams(peer_local: bool) -> BTreeSet<(String, String)> {
     let set = FileDescriptorSet::decode(supertag_protocol::FILE_DESCRIPTOR_SET)
@@ -90,28 +83,36 @@ fn byte_streams(peer_local: bool) -> BTreeSet<(String, String)> {
     found
 }
 
+/// Services a Worker Host serves itself, to its harness, its sandbox provider, or peer hosts.
+fn served_by_a_worker_host(service: &str) -> bool {
+    service.starts_with("Harness")
+        || matches!(
+            service,
+            "RemoteWorkspaceProvider" | "WorkerArtifactTransfers"
+        )
+}
+
 #[test]
-fn the_control_plane_streams_no_file_bytes_beyond_the_listed_relays() {
+fn the_control_plane_and_gateways_stream_no_file_bytes() {
     let found = byte_streams(false);
-    let listed: BTreeSet<(String, String)> = REMAINING
-        .iter()
-        .map(|(service, method, _)| ((*service).to_owned(), (*method).to_owned()))
-        .collect();
-    let new: Vec<_> = found.difference(&listed).collect();
     assert!(
-        new.is_empty(),
-        "the Control Plane must not relay files; these RPCs stream bytes: {new:?}"
+        found.is_empty(),
+        "the Control Plane must not relay files; these RPCs stream bytes: {found:?}"
     );
-    let gone: Vec<_> = listed.difference(&found).collect();
+    // Every other byte stream is a Worker Host's own, never a Gateway's.
+    let elsewhere: Vec<_> = byte_streams(true)
+        .into_iter()
+        .filter(|(service, _)| !served_by_a_worker_host(service))
+        .collect();
     assert!(
-        gone.is_empty(),
-        "these relays are gone; delete them from REMAINING: {gone:?}"
+        elsewhere.is_empty(),
+        "only Worker Hosts serve file bytes; these RPCs stream bytes: {elsewhere:?}"
     );
 }
 
 /// The scan still finds byte streams where they belong: a Worker Host stages a Workspace bundle
-/// into its own sandbox provider, peer to peer. So an empty [`REMAINING`] means no relay is left,
-/// not that the scan stopped seeing any.
+/// into its own sandbox provider, peer to peer. So finding none on the Control Plane means no
+/// relay is left, not that the scan stopped seeing any.
 #[test]
 fn the_scan_finds_byte_streams_that_stay_between_peers() {
     let peers = byte_streams(true);

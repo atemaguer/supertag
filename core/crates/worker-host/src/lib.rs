@@ -72,8 +72,7 @@ use supertag_protocol::{
         attempt_task_files_client::AttemptTaskFilesClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workspace_mounts_client::AttemptWorkspaceMountsClient,
-        attempt_workstreams_client::AttemptWorkstreamsClient, host_relay_client::HostRelayClient,
-        worker_host_client::WorkerHostClient,
+        attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
     },
 };
 use tokio::time::{self, Instant};
@@ -471,21 +470,14 @@ pub async fn run(
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     // This host holds every artifact and Workspace delivery it produces; the Control Plane relays
-    // them to readers through this host's relay stream.
+    // none of them.
     let serving = options
         .artifact_source
         .take()
         .unwrap_or_else(|| ArtifactSourceConfig::in_state(&options.state_directory))
         .bind(&options.state_directory, &local_roots)
         .await?
-        .serve(
-            acquisitions.clone(),
-            HostRelayClient::with_interceptor(channel.clone(), headers.clone())
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES),
-            &token,
-            &shutdown,
-        )
+        .serve(acquisitions.clone(), &token, &shutdown)
         .await?;
     let coordination = CoordinationClients {
         review_git: supertag_git_delivery::GitDelivery::for_host(

@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES,
+    MAX_MESSAGE_BYTES,
     v2::{
         transfers_server::{Transfers, TransfersServer},
         workspace_directory_client::WorkspaceDirectoryClient,
@@ -11,23 +11,13 @@ use supertag_protocol::{
     },
     validate_workspace_delivery,
 };
-use tokio::{
-    sync::{Semaphore, mpsc},
-    time::timeout,
-};
-use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status, Streaming};
+use tokio::{sync::Semaphore, time::timeout};
+use tonic::{Request, Response, Status};
 
 use crate::Api;
 
 mod artifacts;
-// Nothing reads through the relay any more; the HostRelay service and this hub go with it in
-// the no-file-relay plan's slice 6.
-#[allow(dead_code)]
-mod relay;
 pub mod volumes;
-
-pub(crate) use relay::RelayHub;
 
 #[cfg(test)]
 #[path = "transfers_review_tests.rs"]
@@ -65,16 +55,15 @@ pub trait WorkspaceGit: Send + Sync + 'static {
     ) -> Result<WorkspaceCheck>;
 }
 
-/// Serves the Control Plane's byte transfers. It stores nothing: artifact and Workspace delivery
-/// bytes stay on the Worker Host that produced them (or a Volume), and reach readers through
-/// [`RelayHub`] without being written here. Session checkpoints stay on the host that wrote them.
+/// Serves Worker Hosts' Workspace and artifact coordination. It stores and relays no file bytes:
+/// artifact and Workspace delivery bytes stay on the Worker Host that produced them, a Volume, or
+/// the Workspace's git remote, and readers fetch them from there.
 #[derive(Clone)]
 pub struct ApiTransfers {
     api: Api,
     capacity: Arc<Semaphore>,
     git: Option<Arc<dyn WorkspaceGit>>,
     signers: volumes::VolumeSigners,
-    relay: Arc<RelayHub>,
 }
 
 impl ApiTransfers {
@@ -84,24 +73,7 @@ impl ApiTransfers {
             capacity: Arc::new(Semaphore::new(16)),
             git: None,
             signers: volumes::VolumeSigners::default(),
-            relay: Arc::default(),
         }
-    }
-
-    /// Ends every Worker Host relay stream once `shutdown` is cancelled.
-    pub(crate) fn close_relays_on(&self, shutdown: tokio_util::sync::CancellationToken) {
-        let relay = self.relay.clone();
-        tokio::spawn(async move {
-            shutdown.cancelled().await;
-            relay.close();
-        });
-    }
-
-    /// The `HostRelay` service Worker Hosts answer relay requests through.
-    pub fn host_relay_service(&self) -> host_relay_server::HostRelayServer<Self> {
-        host_relay_server::HostRelayServer::new(self.clone())
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
     pub fn with_workspace_git(mut self, git: Arc<dyn WorkspaceGit>) -> Self {
@@ -282,40 +254,6 @@ impl Transfers for ApiTransfers {
     ) -> Result<Response<HeldWorkspaceDelivery>, Status> {
         Ok(Response::new(self.review_delivery(request).await?))
     }
-}
-
-#[tonic::async_trait]
-impl host_relay_server::HostRelay for ApiTransfers {
-    type AwaitStream = ReceiverStream<Result<RelayRequest, Status>>;
-
-    async fn r#await(
-        &self,
-        request: Request<AwaitRelayRequest>,
-    ) -> Result<Response<Self::AwaitStream>, Status> {
-        let host = self.api.registered_host(&request).await?;
-        let host_id = host_id(&host)?;
-        Ok(Response::new(self.relay.connect(host_id, host.generation)))
-    }
-
-    async fn deliver(
-        &self,
-        request: Request<Streaming<RelayFrame>>,
-    ) -> Result<Response<RelayDelivered>, Status> {
-        let host = self.api.registered_host(&request).await?;
-        let host_id = host_id(&host)?;
-        self.relay
-            .deliver(&host_id, host.generation, request.into_inner())
-            .await
-            .map(Response::new)
-    }
-}
-
-fn host_id(caller: &crate::Caller) -> Result<String, Status> {
-    caller
-        .principal
-        .strip_prefix("host:")
-        .map(str::to_owned)
-        .ok_or_else(|| Status::permission_denied("caller is not a Worker Host"))
 }
 
 #[tonic::async_trait]

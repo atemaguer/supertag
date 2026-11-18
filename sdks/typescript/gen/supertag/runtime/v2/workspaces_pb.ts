@@ -660,8 +660,8 @@ export const WorkspaceCredentialKindSchema: GenEnum<WorkspaceCredentialKind> = /
 /**
  * A Workspace kept in a git remote: where its files come from, the Workspace Credentials that
  * read and push them, and where a Session's changes land. It names credentials, never secrets.
- * Every Worker Host that serves it receives its source relayed through the Control Plane, so no
- * host holds a source credential.
+ * A Worker Host reads and pushes it itself, with a credential the Control Plane grants for one
+ * operation and the host keeps in memory, never in the sandbox.
  *
  * @generated from service supertag.runtime.v2.Workspaces
  */

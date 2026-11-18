@@ -39,8 +39,9 @@ The Control Plane owns:
 
 It stores no files. Session checkpoints stay on the Worker Host that wrote them, and the Control
 Plane records only which host holds each one. Artifact and Workspace delivery bytes stay on the
-Worker Host that produced them. Other Worker Hosts read artifacts from that host directly, and the
-Control Plane relays deliveries to authorized readers over that host's relay stream. Several Control Plane processes can share one PostgreSQL database; a SQLite
+Worker Host that produced them, and no file passes through the Control Plane. Other Worker Hosts
+read artifacts from that host directly or from a Volume, and read deliveries from their Session
+branches in the Workspace's git remote. Several Control Plane processes can share one PostgreSQL database; a SQLite
 database serves one process.
 
 ### Session checkpoints

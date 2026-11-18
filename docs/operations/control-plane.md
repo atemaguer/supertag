@@ -20,8 +20,9 @@ machine's, or `SUPERTAG_TIME_ZONE` for a hosted Control Plane. Each is an IANA n
 `Europe/Berlin`. Without either, it uses the machine's time zone, or UTC when that is unknown.
 
 The Control Plane creates and migrates its schema when it starts. It stores no files: Session
-checkpoints stay on the Worker Host that wrote them, and artifact and Workspace delivery bytes on
-the Worker Host that produced them, which the Control Plane relays to readers.
+checkpoints stay on the Worker Host that wrote them, artifacts on the Worker Host that produced
+them or a Volume, and Workspace deliveries in the Workspace's git remote or the host's
+repository. No file passes through the Control Plane.
 
 ### Listeners
 

@@ -90,9 +90,9 @@ with the deployment's owner.
 - A persistent volume for the Gateway's state, or Vault for the Gateway's credentials where the
   platform has no persistent disk.
 - Persistent state directories for Worker Hosts. The Control Plane stores no artifact or
-  Workspace delivery bytes: each Worker Host keeps what its Tasks produce, or writes it to a
-  shared Volume, and the Control Plane relays a host's files to readers only while that host is
-  connected.
+  Workspace delivery bytes and relays none: each Worker Host keeps what its Tasks produce, writes
+  it to a shared Volume, or pushes deliveries to the Workspace's git remote. Files on an
+  ephemeral host without a Volume or a remote Workspace are lost with it.
 
 ## Health
 

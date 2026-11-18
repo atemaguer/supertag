@@ -358,7 +358,7 @@ async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
         .into_inner();
     assert_eq!(restored.files, captured.files);
     // The bytes stay with the Worker Host: a reconnected host's repeated commit is the same capture.
-    held.reconnect(channel(&endpoint).await?).await?;
+    held.reconnect(channel(&endpoint).await?);
     assert_eq!(held.commit(capture).await?, captured);
     control.kill().await?;
     Ok(())

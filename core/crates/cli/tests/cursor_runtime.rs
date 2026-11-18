@@ -491,8 +491,8 @@ impl<'a> Runtime<'a> {
             .arg("--state-directory")
             .arg(fixture.root.join(format!("host-{label}")))
             // Every host process presents the same credential, so they share one artifact
-            // directory, as the lanes of one Worker Host do: the Control Plane relays deliveries
-            // and artifacts from it and stores none.
+            // directory, as the lanes of one Worker Host do: the Control Plane stores and relays
+            // no deliveries or artifacts.
             .arg("--artifact-directory")
             .arg(fixture.root.join("host-artifacts"))
             .env("HOME", fixture.root.join("operator-home"))

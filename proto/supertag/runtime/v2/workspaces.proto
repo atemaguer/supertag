@@ -3,8 +3,8 @@ package supertag.runtime.v2;
 
 // A Workspace kept in a git remote: where its files come from, the Workspace Credentials that
 // read and push them, and where a Session's changes land. It names credentials, never secrets.
-// Every Worker Host that serves it receives its source relayed through the Control Plane, so no
-// host holds a source credential.
+// A Worker Host reads and pushes it itself, with a credential the Control Plane grants for one
+// operation and the host keeps in memory, never in the sandbox.
 service Workspaces {
   rpc Put(PutWorkspaceRequest) returns (Workspace);
   rpc Get(GetWorkspaceRequest) returns (Workspace);

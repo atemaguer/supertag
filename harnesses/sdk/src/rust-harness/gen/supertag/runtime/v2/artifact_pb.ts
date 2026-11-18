@@ -2294,8 +2294,8 @@ export const ArtifactCatalog: GenService<{
 
 /**
  * Internal to the Control Plane. The state owner verifies authority and records
- * provenance, metadata, and which Worker Host holds each capture's bytes. Its API
- * tier relays bytes from that host or a Volume and stores none.
+ * provenance, metadata, and which Worker Host holds each capture's bytes. It stores and
+ * relays none of them.
  *
  * @generated from service supertag.runtime.v2.ArtifactDirectory
  */

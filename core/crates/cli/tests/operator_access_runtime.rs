@@ -458,8 +458,8 @@ async fn revoked_token_is_refused_by_a_running_control_plane(database: &str) -> 
     Ok(())
 }
 
-/// A Control Plane as a separate process. It has no checkpoint directory: artifact bytes it
-/// serves are relayed from the Worker Host holding them.
+/// A Control Plane as a separate process. It has no checkpoint directory: artifact bytes stay on
+/// the Worker Host holding them.
 struct Services {
     _directory: tempfile::TempDir,
     _control: Process,
