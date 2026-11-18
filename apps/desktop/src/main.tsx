@@ -33,6 +33,9 @@ interface Connection {
   tagAdmin?: TagAdmin;
 }
 
+/** How often a window connected to the local Gateway checks that it still runs where it did. */
+const LOCAL_CHECK_MS = 3_000;
+
 function App({ initialConnection }: { initialConnection?: Connection }) {
   const [connection, setConnection] = useState(initialConnection);
   const [gateways, setGateways] = useState<GatewayList>({ profiles: [] });
@@ -47,9 +50,12 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const [notifications, setNotifications] = useNotificationLevel();
+  /** The address of the local Gateway this window connected to, while it is connected to it. */
+  const localAddress = useRef<string | undefined>(undefined);
 
   const activate = useCallback(
     ({ gateways, origin, connectionId, tags, principal }: GatewayActivation) => {
+      localAddress.current = origin === LOCAL_GATEWAY ? gateways.local?.origin : undefined;
       setGateways(gateways);
       setConnection({
         gateway: gatewaySession(connectionId, cacheScope(origin, principal)),
@@ -105,6 +111,36 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
       live = false;
     };
   }, [activate, initialConnection]);
+
+  // `supertag up` starts the local Gateway on a new address each time, so a window connected to
+  // it follows it: it checks the state directory every few seconds, shows when the Gateway is
+  // stopped, and reconnects to the one running now.
+  const connectedOrigin = connection?.origin;
+  useEffect(() => {
+    if (connectedOrigin !== LOCAL_GATEWAY) return;
+    const timer = setInterval(() => {
+      if (pendingSwitch.current || pendingWrites.current > 0) return;
+      nativeGateway.list().then(
+        (list) => {
+          setGateways(list);
+          const running = list.local?.origin;
+          if (!running || running === localAddress.current || pendingSwitch.current) return;
+          // As `change` does, but quietly: a failed attempt is tried again on the next check.
+          pendingSwitch.current = true;
+          setSwitching(true);
+          nativeGateway
+            .connectLocal()
+            .then(activate, () => {})
+            .finally(() => {
+              pendingSwitch.current = false;
+              setSwitching(false);
+            });
+        },
+        () => {},
+      );
+    }, LOCAL_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [connectedOrigin, activate]);
 
   const updateWrites = useCallback((delta: 1 | -1) => {
     pendingWrites.current += delta;

@@ -172,7 +172,10 @@ export function GatewaySelector({
   const { localChoice, choices } = gatewayChoices(active, profiles, local);
   const selected = choices.find((choice) => choice.origin === active);
   const [notifications, setNotifications] = useNotificationLevel();
-  const connected = Boolean(selected || preview);
+  // The local Gateway counts as connected only while it runs.
+  const connected = Boolean(
+    (selected && (selected.origin !== LOCAL_GATEWAY || local?.origin)) || preview,
+  );
   const client = selected && principal?.startsWith("client:") ? principal : undefined;
   const name = switching
     ? "Connecting…"
