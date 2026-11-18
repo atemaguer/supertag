@@ -43,7 +43,7 @@ use crate::{
 
 pub(crate) async fn run(
     mut options: WorkletOptions,
-    mut worker: WorkerOptions,
+    worker: WorkerOptions,
     shutdown: CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
@@ -52,7 +52,7 @@ pub(crate) async fn run(
     }
     remote::validate_time_limit(worker.attempt_timeout, worker.remote_provider.is_some())?;
     ensure!(
-        worker.execution_profile.mcp_servers == worker.mcp_catalog.capabilities()
+        worker.execution_profile.mcp_servers == options.mcp_catalog.capabilities()
             && (worker.execution_profile.mcp_servers.is_empty()
                 || (worker.harness == HarnessKind::ClaudeCode && worker.remote_provider.is_none())),
         "MCP tools require a local Claude Code Worker Host with the matching catalog"
@@ -102,7 +102,7 @@ pub(crate) async fn run(
         .map(std::path::Path::to_path_buf)
         .collect();
     let local_roots: Vec<&std::path::Path> = local_roots.iter().map(PathBuf::as_path).collect();
-    if !worker.workspace_mounts.is_empty() {
+    if !options.workspace_mounts.is_empty() {
         ensure!(
             supertag_protocol::workspace_mounts::mount_harness(worker.harness)
                 && !options.workspaces.is_empty()
@@ -116,7 +116,7 @@ pub(crate) async fn run(
             .as_ref()
             .map(|source| source.directory.clone())
             .unwrap_or_else(|| state_directory.join("artifacts"));
-        worker.workspace_mounts.protect(
+        options.workspace_mounts.protect(
             &state_directory,
             &local_roots,
             Some(artifact_storage.as_path()),
@@ -189,7 +189,7 @@ pub(crate) async fn run(
         .await?
         .serve(acquisitions.clone(), &token, &shutdown)
         .await?;
-    let coordination = registration::coordination(
+    let (coordination, storage) = registration::coordination(
         &channel,
         &headers,
         acquisitions,
@@ -224,7 +224,7 @@ pub(crate) async fn run(
     if !options.volumes.is_empty() {
         background::collect_volume_garbage(
             &options.volumes,
-            &coordination.volume_objects,
+            &storage.volume_objects,
             &token,
             &shutdown,
         );
@@ -267,7 +267,7 @@ pub(crate) async fn run(
             (
                 {
                     let profile = worker.execution_profile.clone();
-                    let catalog = worker.mcp_catalog.clone();
+                    let catalog = options.mcp_catalog.clone();
                     Arc::new(move || McpCatalog::advertised(&profile, &catalog.lapsed_logins()))
                 },
                 labels,
@@ -390,11 +390,15 @@ pub(crate) async fn run(
                     options: Settings {
                         options: &worker,
                         state_directory: &options.state_directory,
+                        mcp_catalog: &options.mcp_catalog,
+                        network_credentials: &options.network_credentials,
+                        workspace_mounts: &options.workspace_mounts,
                     },
-                    journal: &journal,
+                    journal: journal.for_attempt(),
                     workspaces: &workspaces,
                     inputs: &inputs,
                     coordination: &coordination,
+                    storage: &storage,
                     transfers: &transfers,
                     shutdown: &shutdown,
                     authority: Authority::new(
@@ -515,11 +519,11 @@ pub(crate) async fn run(
                     }
                     continue;
                 }
-                if succeeded && !worker.workspace_mounts.is_empty() {
+                if succeeded && !options.workspace_mounts.is_empty() {
                     // Read-write copies are written back directly to their
                     // Volumes; the Control Plane records only the summary.
                     let cancellation = shutdown.child_token();
-                    let mounts = worker.workspace_mounts.clone();
+                    let mounts = options.workspace_mounts.clone();
                     let state = options.state_directory.clone();
                     let attempt_id = attempt.attempt_id.clone();
                     let copy_cancel = cancellation.clone();
@@ -795,7 +799,7 @@ pub(crate) async fn run(
                     let cancellation = shutdown.child_token();
                     let upload = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
                         tokio::select! {
-                            result = pending.publish(&options.state_directory, &attempt, &coordination, &token) => result,
+                            result = pending.publish(&options.state_directory, &attempt, (&coordination, &storage), &token) => result,
                             _ = cancellation.cancelled() => Err(Status::cancelled("Task output transfer cancelled")),
                         }
                     }).await;

@@ -34,7 +34,7 @@ use tonic::{
 use uuid::Uuid;
 
 use crate::worker::WorkerOptions;
-use crate::worklet::journal::{Attempt, Journal};
+use crate::worklet::journal::{Attempt, AttemptJournal};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_FILE_BYTES: usize = 256 * 1024;
@@ -258,7 +258,7 @@ impl AccessRecord {
 
 pub(crate) async fn prepare(
     config: &SharedExecutionConfig,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     attempt: &Attempt,
     task: &Task,
     registration: &HostRecord,
@@ -318,7 +318,7 @@ pub(crate) async fn prepare(
 
 pub(crate) async fn ensure_released(
     options: &WorkerOptions,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     attempt: &Attempt,
     registration: &HostRecord,
 ) -> Result<()> {

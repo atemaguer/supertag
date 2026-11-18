@@ -26,8 +26,9 @@ use tonic::Status;
 use uuid::Uuid;
 
 use crate::{
-    Attempt, CoordinationClients,
+    Attempt, AttemptClients,
     artifact_snapshots::{Capture, CollectedOutput, Snapshots},
+    worklet::HostStorage,
     worklet::checkpoints::Transfers,
     worklet::workspaces::{PreparedWorkspace, Workspaces},
 };
@@ -286,13 +287,13 @@ impl PendingOutputs {
         &mut self,
         state: &Path,
         attempt: &Attempt,
-        coordination: &CoordinationClients,
+        (coordination, storage): (&AttemptClients, &HostStorage),
         token: &str,
     ) -> Result<(), Status> {
         let state = state.to_owned();
         let identity = attempt.inspect();
         let input = self.request();
-        let artifact_source = coordination.artifact_source.clone();
+        let artifact_source = storage.artifact_source.clone();
         let policy = self.policy().map_err(|error| {
             crate::failures::noted(
                 Status::data_loss("accepted output policy could not be restored"),
@@ -336,7 +337,7 @@ impl PendingOutputs {
                     token,
                     &manifest,
                     &selected,
-                    &coordination.volumes,
+                    &storage.volumes,
                     Duration::from_secs(60),
                 )
                 .await?;

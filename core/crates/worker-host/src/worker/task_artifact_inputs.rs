@@ -12,16 +12,17 @@ use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
 use crate::{
-    Attempt, CoordinationClients,
+    Attempt, AttemptClients,
     artifact_inputs::Inputs,
     worker::adapter::artifact_acquisition::{AcquisitionClient, materialize},
+    worklet::HostStorage,
 };
 
 pub(crate) async fn prepare(
     (state, checkout): (&Path, &Path),
     task: &Task,
     attempt: &Attempt,
-    clients: &CoordinationClients,
+    (clients, storage): (&AttemptClients, &HostStorage),
     token: &str,
     cancel: &CancellationToken,
 ) -> Result<String, Status> {
@@ -47,6 +48,7 @@ pub(crate) async fn prepare(
     })??;
     let client = AcquisitionClient {
         coordination: clients,
+        storage,
         host_token: token,
         attempt: attempt.inspect(),
     };

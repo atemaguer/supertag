@@ -1,6 +1,6 @@
 //! Accepted path receipts are the only authority for fetching artifact bytes.
 use super::Bridge;
-use crate::{CoordinationClients, artifact_inputs::Inputs};
+use crate::{AttemptClients, artifact_inputs::Inputs, worklet::HostStorage};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 use supertag_protocol::{
@@ -78,6 +78,7 @@ impl Bridge {
     fn acquisition_client(&self) -> AcquisitionClient<'_> {
         AcquisitionClient {
             coordination: &self.coordination,
+            storage: &self.storage,
             host_token: &self.host_token,
             attempt: self.attempt(),
         }
@@ -181,7 +182,9 @@ fn reject_reserved(operation: &str) -> Result<(), Status> {
 }
 
 pub(crate) struct AcquisitionClient<'a> {
-    pub(crate) coordination: &'a CoordinationClients,
+    pub(crate) coordination: &'a AttemptClients,
+    /// The host storage the Worklet lends: where held artifacts and Volumes are read.
+    pub(crate) storage: &'a HostStorage,
     pub(crate) host_token: &'a str,
     pub(crate) attempt: InspectAttemptRequest,
 }
@@ -278,11 +281,11 @@ impl AcquisitionClient<'_> {
         match self.read_from_hosts(acquisition, input, file).await {
             Ok(bytes) => Ok(bytes),
             Err(status) => match crate::worklet::volume_objects::acquired(
-                self.coordination.volume_objects.clone(),
+                self.storage.volume_objects.clone(),
                 self.host_token,
                 &self.attempt,
                 (&acquisition.acquisition_id, &file.path),
-                &self.coordination.volumes,
+                &self.storage.volumes,
             )
             .await
             {
@@ -322,10 +325,7 @@ impl AcquisitionClient<'_> {
         if remaining.is_zero() {
             return Err(Status::deadline_exceeded("direct artifact grant expired"));
         }
-        let mut client = self
-            .coordination
-            .artifact_peers
-            .peer(&grant.source_host_id)?;
+        let mut client = self.storage.artifact_peers.peer(&grant.source_host_id)?;
         let mut request = authenticated_request(
             WorkerArtifactDownloadRequest {
                 artifact_id: acquisition.artifact_id.clone(),
@@ -356,7 +356,7 @@ impl AcquisitionClient<'_> {
         file: &ArtifactFile,
         deadline: tokio::time::Instant,
     ) -> Result<Option<Vec<u8>>, Status> {
-        let Some(storage) = self.coordination.artifact_source.clone() else {
+        let Some(storage) = self.storage.artifact_source.clone() else {
             return Ok(None);
         };
         let blob = file

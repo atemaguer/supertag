@@ -11,7 +11,7 @@ host" means the Worklet acting for its Worker Host. For the ideas, read
 
 | The Worklet owns, on its Worker Host | The Control Plane owns |
 | --- | --- |
-| Harness sign-ins, MCP credentials, and Volume keys on this machine | Tags, policy, admission, and the accepted Task |
+| Harness sign-ins, MCP credentials, network credentials, and Volume keys on this machine | Tags, policy, admission, and the accepted Task |
 | Workspace checkouts and the Task Attempt's files | Scheduling, leases, and recovery decisions |
 | The execution journal and captured artifact bytes | The artifact catalog, events, results, and audit |
 | Starting and supervising Workers, the adapter processes | Which hosts may run which Tags |

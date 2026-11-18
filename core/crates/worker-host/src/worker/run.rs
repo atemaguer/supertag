@@ -14,15 +14,15 @@ use crate::worker::milestones::{WORKSPACE_READY, report_harness_finished, report
 use crate::worker::setup::{prepare_context, workspace_mcp};
 use crate::worklet::authority::{AUTHORITY_EXPIRED, Authority};
 use crate::{
-    CoordinationClients, ProviderConfig, RegisteredInputs, ensure_attempt, failures,
-    lost_ownership, request, retryable, wait_for_work,
+    AttemptClients, ProviderConfig, RegisteredInputs, ensure_attempt, failures, lost_ownership,
+    request, retryable, wait_for_work,
     worker::{
         adapter, changed_paths, egress, mcp, remote, remote_provider, shared_execution,
         task_artifact_inputs, task_outputs,
     },
     worklet::{
-        checkpoints,
-        journal::{self, Attempt, Entry, Journal},
+        HostStorage, checkpoints,
+        journal::{self, Attempt, AttemptJournal},
         workspaces,
     },
 };
@@ -38,10 +38,11 @@ pub(crate) const DEVCONTAINER_REFUSAL: &str = "Remote Workspace devcontainer: ";
 /// `Authority` it takes lease-bound actions through.
 pub(crate) struct Worker<'a> {
     pub(crate) options: Settings<'a>,
-    pub(crate) journal: &'a Journal,
+    pub(crate) journal: AttemptJournal<'a>,
     pub(crate) workspaces: &'a workspaces::Workspaces,
     pub(crate) inputs: &'a RegisteredInputs,
-    pub(crate) coordination: &'a CoordinationClients,
+    pub(crate) coordination: &'a AttemptClients,
+    pub(crate) storage: &'a HostStorage,
     pub(crate) transfers: &'a checkpoints::Transfers,
     pub(crate) shutdown: &'a CancellationToken,
     pub(crate) authority: Authority<'a>,
@@ -57,6 +58,7 @@ impl Worker<'_> {
             workspaces,
             inputs,
             coordination,
+            storage,
             transfers,
             shutdown,
             mut authority,
@@ -103,9 +105,8 @@ impl Worker<'_> {
         if !can_launch {
             ready();
             if task.state() == TaskState::Claimed {
-                // Starting never launched an adapter. Leave an unstarted reservation
-                // for the Control Plane's lease expiry to put back in the queue.
-                return journal.clear();
+                // Starting never launched an adapter.
+                return authority.release_unstarted();
             }
             return authority.finish(
                 attempt,
@@ -398,10 +399,7 @@ impl Worker<'_> {
             let prepared = workspace
                 .as_ref()
                 .context("Task artifact input Workspace is missing")?;
-            journal.save(&Entry::PreparingInputs {
-                attempt: attempt.clone(),
-                prepared: Box::new(prepared.clone()),
-            })?;
+            journal.preparing_inputs(&attempt, prepared)?;
             let cancel = shutdown.child_token();
             let staged = Box::pin(authority.keep(
                 &attempt,
@@ -410,7 +408,7 @@ impl Worker<'_> {
                     (options.state_directory, &prepared.checkout.path),
                     &task,
                     &attempt,
-                    coordination,
+                    (coordination, storage),
                     token,
                     &cancel,
                 ),
@@ -444,10 +442,7 @@ impl Worker<'_> {
             let checkout = workspace
                 .as_ref()
                 .context("Workspace mount checkout is missing")?;
-            journal.save(&Entry::PreparingInputs {
-                attempt: attempt.clone(),
-                prepared: Box::new(checkout.clone()),
-            })?;
+            journal.preparing_inputs(&attempt, checkout)?;
             let state = options.state_directory.clone();
             let checkout = checkout.checkout.path.clone();
             let attempt_id = attempt.attempt_id.clone();
@@ -515,12 +510,7 @@ impl Worker<'_> {
         };
         let processes = journal.processes(&attempt);
         processes.begin(options.remote_provider.is_none() && options.shared_execution.is_none())?;
-        journal.save(&Entry::Executing {
-            attempt: attempt.clone(),
-            prepared: workspace
-                .as_ref()
-                .map(|prepared| Box::new(prepared.clone())),
-        })?;
+        journal.executing(&attempt, workspace.as_ref())?;
         supertag_protocol::crash_point("worker-host.execute", "journaled");
         let workspace_mcp = if supertag_protocol::mcp::workspace_servers(&task).is_empty() {
             None
@@ -593,7 +583,7 @@ impl Worker<'_> {
             Some(scope) => Some(
                 egress::start_for_attempt(
                     scope,
-                    &options.network_credentials,
+                    options.network_credentials,
                     options.state_directory,
                     &attempt.attempt_id,
                     options.harness,
@@ -632,7 +622,7 @@ impl Worker<'_> {
                             remote::download_inputs(
                                 &attempt,
                                 &task,
-                                (coordination, token),
+                                (coordination, storage, token),
                                 &cancel,
                             ),
                         ))
@@ -710,7 +700,7 @@ impl Worker<'_> {
                         mounted.as_ref(),
                         None,
                     ),
-                    (registration, coordination, token),
+                    (registration, (coordination, storage), token),
                     (egress.as_ref(), &cancel),
                 )
                 .await
@@ -767,7 +757,7 @@ impl Worker<'_> {
                     &attempt,
                     &cancel,
                     mcp::AttemptMcp::prepare(
-                        &options.mcp_catalog,
+                        options.mcp_catalog,
                         (workspace_mcp.as_ref(), sandbox.as_ref()),
                         &task,
                         &processes,
@@ -1016,7 +1006,13 @@ impl Worker<'_> {
                         .map(|egress| egress.environment.clone())
                         .unwrap_or_default(),
                 },
-                (authority.client(), inputs.clone(), coordination.clone()),
+                (
+                    authority.client(),
+                    authority.lease(&attempt),
+                    inputs.clone(),
+                    coordination.clone(),
+                    storage.clone(),
+                ),
                 token,
                 valid_until,
                 shutdown,
@@ -1043,7 +1039,7 @@ impl Worker<'_> {
                     mounted.as_ref(),
                     deferred_inputs.take(),
                 ),
-                (registration, coordination, token),
+                (registration, (coordination, storage), token),
                 (egress.as_ref(), &sandbox_cancel),
             )
             .await;
@@ -1206,7 +1202,7 @@ impl Worker<'_> {
                                     options.state_directory,
                                     mounted
                                         .as_ref()
-                                        .map(|mounted| (mounted, &options.workspace_mounts)),
+                                        .map(|mounted| (mounted, options.workspace_mounts)),
                                 ),
                                 (transfers, &attempt, token),
                                 &cancel,
@@ -1235,23 +1231,16 @@ impl Worker<'_> {
                     None
                 };
             if let Some(workspace) = workspace {
-                let checkpoint = outcome
-                    .checkpoint
-                    .map(|checkpoint| journal.stage_checkpoint(checkpoint))
-                    .transpose()?;
-                journal.save(&Entry::Finalizing {
-                    attempt: attempt.clone(),
-                    result: outcome.result,
-                    succeeded: outcome.succeeded,
-                    objective_signal: outcome.objective_signal,
-                    waiting_approval_ids: outcome.waiting_approval_ids,
-                    quiet: outcome.quiet,
-                    checkpoint,
-                    workspace: Box::new(workspace),
-                    remote_tree,
-                    outputs,
-                    file_scope,
-                })
+                journal.finalizing(
+                    &attempt,
+                    outcome,
+                    journal::Captured {
+                        workspace,
+                        remote_tree,
+                        outputs,
+                        file_scope,
+                    },
+                )
             } else {
                 authority.record_finish(attempt.clone(), outcome)
             }

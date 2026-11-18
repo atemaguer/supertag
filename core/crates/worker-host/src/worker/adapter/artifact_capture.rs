@@ -97,9 +97,7 @@ impl HarnessArtifacts for Bridge {
             if self.state.lock().await.outcome.is_some() {
                 return Err(Status::failed_precondition("execution is complete"));
             }
-            let mut check = authenticated_request(self.attempt(), &self.host_token, None)?;
-            check.set_timeout(Duration::from_secs(5));
-            let task = self.host.clone().inspect_attempt(check).await?.into_inner();
+            let task = self.lease.inspect(Duration::from_secs(5)).await?;
             if task.state() != TaskState::Running
                 || task.task_id != accepted.task_id
                 || task.attempt_id.as_deref() != Some(self.assignment.attempt_id.as_str())
@@ -109,8 +107,7 @@ impl HarnessArtifacts for Bridge {
                 ));
             }
             let attempt = self.attempt();
-            let snapshots =
-                snapshots.with_artifact_source(self.coordination.artifact_source.clone());
+            let snapshots = snapshots.with_artifact_source(self.storage.artifact_source.clone());
             let (permit, snapshots, capture) = tokio::task::spawn_blocking(move || {
                 let capture = snapshots.freeze(&checkout, attempt, input)?;
                 Ok::<_, Status>((permit, snapshots, capture))
@@ -131,7 +128,7 @@ impl HarnessArtifacts for Bridge {
                 &self.host_token,
                 &manifest,
                 &selected,
-                &self.coordination.volumes,
+                &self.storage.volumes,
                 operation_deadline.saturating_duration_since(Instant::now()),
             )
             .await?;

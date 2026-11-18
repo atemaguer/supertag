@@ -70,8 +70,8 @@ pub(crate) async fn ensure_providers_stopped(
     attempt: &Attempt,
     registration: &HostRecord,
 ) -> Result<()> {
-    remote::ensure_stopped(options, journal, attempt, registration).await?;
-    shared_execution::ensure_released(options, journal, attempt, registration).await
+    remote::ensure_stopped(options, journal.for_attempt(), attempt, registration).await?;
+    shared_execution::ensure_released(options, journal.for_attempt(), attempt, registration).await
 }
 
 /// Writes `pending`'s Session branch into its local Workspace's repository, noting a failure.

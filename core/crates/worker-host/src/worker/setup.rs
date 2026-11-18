@@ -11,9 +11,9 @@ use tonic::{Status, service::interceptor::InterceptedService, transport::Channel
 
 use crate::worker::Settings;
 use crate::{
-    HostHeaders, RegisteredHost, request,
+    HostHeaders, request,
     worker::mcp,
-    worklet::{journal::Attempt, workspaces},
+    worklet::{authority::AttemptClient, journal::Attempt, workspaces},
 };
 
 /// Snapshots the Task's base commit, resolves its Workspace MCP servers there, and records
@@ -68,7 +68,7 @@ pub(crate) async fn prepare_context(
     options: &Settings<'_>,
     task: &Task,
     attempt: &Attempt,
-    mut host: RegisteredHost,
+    mut host: AttemptClient,
     token: &str,
     cancel: &CancellationToken,
 ) -> Result<Vec<ResolvedSkill>, Status> {

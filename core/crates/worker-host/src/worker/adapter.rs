@@ -62,9 +62,13 @@ use uuid::Uuid;
 
 use crate::worker::{Settings, WorkerOptions};
 use crate::{
-    CoordinationClients, RegisteredHost, RegisteredInputs,
+    AttemptClients, RegisteredInputs,
     artifact_snapshots::Snapshots,
     worker::guardian::{MAX_BOOTSTRAP_BYTES, monotonic_now_ns},
+    worklet::{
+        HostStorage,
+        authority::{AttemptClient, Lease},
+    },
 };
 
 #[derive(Clone)]
@@ -74,9 +78,14 @@ struct Bridge {
     checkpoint: Option<SessionCheckpoint>,
     resolved_skills: Vec<ResolvedSkill>,
     host_token: String,
-    host: RegisteredHost,
+    host: AttemptClient,
+    /// The Attempt's lease, which the Worklet lends: every renewal and lease check goes through
+    /// it.
+    lease: Lease,
     harness: HarnessKind,
-    coordination: CoordinationClients,
+    coordination: AttemptClients,
+    /// The host storage the Worklet lends for what the Attempt reads, captures, or reviews.
+    storage: HostStorage,
     state: Arc<Mutex<RunState>>,
     attached: Arc<AtomicBool>,
     inputs: inputs::InputLane,
@@ -128,7 +137,7 @@ impl Bridge {
     async fn retry_upstream<M, R, F, Fut>(&self, message: M, mut call: F) -> Result<R, Status>
     where
         M: Clone,
-        F: FnMut(RegisteredHost, Request<M>) -> Fut,
+        F: FnMut(AttemptClient, Request<M>) -> Fut,
         Fut: std::future::Future<Output = Result<Response<R>, Status>>,
     {
         self.retry(message, |request| call(self.host.clone(), request))
@@ -267,8 +276,9 @@ impl Harness for Bridge {
             }),
             applied: Some(applied.clone()),
         };
-        self.retry_upstream(report, |mut host, request| async move {
-            host.report_applied_limits(request).await
+        self.retry(report, |request| {
+            let lease = self.lease.clone();
+            async move { lease.report_applied_limits(request).await }
         })
         .await?;
         let mut state = self.state.lock().await;
@@ -495,7 +505,13 @@ pub(crate) async fn execute(
     options: &Settings<'_>,
     assignment: Assignment,
     inputs: ExecutionInputs<'_>,
-    clients: (RegisteredHost, RegisteredInputs, CoordinationClients),
+    clients: (
+        AttemptClient,
+        Lease,
+        RegisteredInputs,
+        AttemptClients,
+        HostStorage,
+    ),
     host_token: &str,
     valid_until: Instant,
     shutdown: &CancellationToken,
@@ -542,7 +558,13 @@ async fn run(
         sandbox_execution_ends,
         egress_environment,
     }: ExecutionInputs<'_>,
-    (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
+    (host, lease, inputs, coordination, storage): (
+        AttemptClient,
+        Lease,
+        RegisteredInputs,
+        AttemptClients,
+        HostStorage,
+    ),
     (host_token, bootstrap_token, secrets): (&str, String, Arc<Vec<SensitiveValue>>),
     valid_until: Instant,
     shutdown: &CancellationToken,
@@ -564,7 +586,7 @@ async fn run(
         ));
     }
     let native_memory =
-        prepare_native_memory(options, &assignment, &coordination, host_token).await;
+        prepare_native_memory(options, &assignment, (&coordination, &storage), host_token).await;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let bootstrap = AdapterBootstrap {
         endpoint: format!("http://{}", listener.local_addr()?),
@@ -604,8 +626,10 @@ async fn run(
         resolved_skills,
         host_token: host_token.to_owned(),
         host,
+        lease,
         harness: options.harness,
         coordination,
+        storage,
         state: Arc::default(),
         attached: Arc::default(),
         inputs: inputs::InputLane::new(inputs, valid_until, shutdown),
@@ -720,7 +744,7 @@ impl NativeMemory {
 async fn prepare_native_memory(
     options: &Settings<'_>,
     assignment: &Assignment,
-    coordination: &CoordinationClients,
+    (coordination, host_storage): (&AttemptClients, &HostStorage),
     host_token: &str,
 ) -> Option<NativeMemory> {
     // A remote Workspace keeps the Task's file and command tools in its sandbox, but the harness
@@ -734,7 +758,7 @@ async fn prepare_native_memory(
     if let Some(volume) = assignment.volume.clone() {
         // The store lives on the Tag's Volume, so any host that reaches the Volume uses it.
         let access = crate::worker::native_memory_volume::Access {
-            objects: coordination.transfers.volume_objects(),
+            objects: host_storage.transfers.volume_objects(),
             memory: coordination.memory.clone(),
             token: host_token.to_owned(),
             attempt: InspectAttemptRequest {
@@ -743,7 +767,7 @@ async fn prepare_native_memory(
                 lease_token: assignment.lease_token.clone(),
             },
             volume,
-            volumes: coordination.volumes.clone(),
+            volumes: host_storage.volumes.clone(),
         };
         return match crate::worker::native_memory_volume::Prepared::prepare(
             &access, &state, &attempt, &grant,
@@ -765,7 +789,7 @@ async fn prepare_native_memory(
     // the host finds the Tag's memory; the Attempt's copy stays in this lane's state directory.
     // The live storage the host serves from, which `run` opened from `--artifact-directory`;
     // `options.artifact_source` is taken before any turn runs.
-    let storage = coordination.artifact_source.as_ref()?.root().to_owned();
+    let storage = host_storage.artifact_source.as_ref()?.root().to_owned();
     match tokio::task::spawn_blocking(move || {
         crate::worker::native_memory::Prepared::prepare(
             (&storage, &state),
@@ -1364,17 +1388,16 @@ async fn monitor(
 
 async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result<()> {
     const POLL: Duration = Duration::from_millis(250);
-    let mut host = bridge.host.clone();
+    let lease = &bridge.lease;
     let mut poll_at = Instant::now();
     let mut renew_at = renewal_time(*valid_until);
     loop {
         time::sleep_until(poll_at.min(renew_at).min(*valid_until)).await;
         let sent = Instant::now();
         ensure!(sent < *valid_until, "execution authority expired");
-        let mut request = authenticated_request(bridge.attempt(), &bridge.host_token, None)?;
-        request.set_timeout(Duration::from_secs(2));
+        let call = Duration::from_secs(2);
         let observed = if sent >= renew_at {
-            let renewed = time::timeout_at(*valid_until, host.renew_attempt(request))
+            let renewed = time::timeout_at(*valid_until, lease.renew(call))
                 .await
                 .context("execution authority expired during renewal")?;
             ensure!(
@@ -1382,8 +1405,7 @@ async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result
                 "execution authority expired during renewal"
             );
             match renewed {
-                Ok(response) => {
-                    let authority = response.into_inner();
+                Ok(authority) => {
                     let deadline = sent
                         .checked_add(Duration::from_millis(authority.valid_for_ms))
                         .context("invalid execution authority duration")?;
@@ -1401,10 +1423,9 @@ async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result
                 }
             }
         } else {
-            time::timeout_at(*valid_until, host.inspect_attempt(request))
+            time::timeout_at(*valid_until, lease.inspect(call))
                 .await
                 .context("execution authority expired during inspection")?
-                .map(Response::into_inner)
         };
         match observed {
             Ok(task) => {

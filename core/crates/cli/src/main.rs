@@ -1441,6 +1441,9 @@ async fn run(command: Command) -> Result<()> {
                 artifact_source,
                 artifact_peers,
                 volumes: host_volumes,
+                workspace_mounts,
+                mcp_catalog,
+                network_credentials,
                 disk_space,
                 keep_awake,
                 labels,
@@ -1465,9 +1468,6 @@ async fn run(command: Command) -> Result<()> {
                 context_catalog: supertag_worker_host::context::ContextCatalog::load(
                     skill_catalog.as_deref(),
                 )?,
-                mcp_catalog,
-                workspace_mounts,
-                network_credentials,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();

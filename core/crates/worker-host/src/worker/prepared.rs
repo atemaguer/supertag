@@ -30,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 use crate::worker::{Settings, WorkerOptions};
 use crate::{
     worker::remote_provider::{ProviderConfig, RemoteProvider, Start, validate_artifact},
-    worklet::journal::{Attempt, Journal},
+    worklet::journal::{Attempt, AttemptJournal},
     worklet::workspaces::{PreparedWorkspace, Workspaces},
 };
 
@@ -160,7 +160,7 @@ fn list(directory: &Path, workspace_id: &str, provider_scope: &str) -> Vec<Recor
 /// new one from a preparation sandbox, warm when an ancestor's artifact exists.
 pub(crate) async fn artifact(
     options: &Settings<'_>,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     workspaces: &Workspaces,
     (attempt, workspace): (&Attempt, &PreparedWorkspace),
     environment: &RemoteDevcontainer,
@@ -253,7 +253,7 @@ pub(crate) async fn artifact(
 /// Stops a preparation sandbox journaled under the Attempt and forgets it.
 async fn stop_preparation(
     options: &WorkerOptions,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     attempt: &Attempt,
     registration: &HostRecord,
 ) -> Result<()> {
@@ -267,7 +267,7 @@ async fn stop_preparation(
 /// One preparation sandbox: the trusted commit alone, its setup, then a snapshot.
 async fn build(
     (journal, workspaces, registration, config): (
-        &Journal,
+        AttemptJournal<'_>,
         &Workspaces,
         &HostRecord,
         &ProviderConfig,
@@ -341,7 +341,7 @@ async fn build(
 /// reach: a Worker Host has one.
 async fn evict(
     config: &ProviderConfig,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     records: &Path,
     workspace_id: &str,
     scope: &str,

@@ -10,8 +10,6 @@ mod worker;
 mod worklet;
 mod workspace_mounts;
 
-use worklet::{artifact_direct, checkpoints, volume_objects};
-
 pub use credentials::{
     is_provider_secret, load_provider_credentials, provider_environment, provider_environment_for,
     provider_variable, validate_opencode_model,
@@ -40,13 +38,12 @@ pub use workspace_mounts::WorkspaceMounts;
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use prost::Message;
 use supertag_protocol::{
     HOST_GENERATION_HEADER, authenticated_request, negotiation,
     v2::{
-        Assignment, AttemptExecutionSelection, HarnessKind, InspectAttemptRequest, Task,
-        attempt_artifacts_client::AttemptArtifactsClient,
+        InspectAttemptRequest, Task, attempt_artifacts_client::AttemptArtifactsClient,
         attempt_changed_paths_client::AttemptChangedPathsClient,
         attempt_effects_client::AttemptEffectsClient, attempt_inputs_client::AttemptInputsClient,
         attempt_mailbox_client::AttemptMailboxClient,
@@ -68,7 +65,7 @@ use tonic::{
     service::{Interceptor, interceptor::InterceptedService},
     transport::Channel,
 };
-use worklet::journal::{self, Attempt};
+use worklet::journal::Attempt;
 
 /// Runs this Worker Host's Worklet until `shutdown`, calling `ready` once it can take work. The
 /// Worklet runs each Attempt it claims in a Worker made from `worker`.
@@ -109,14 +106,13 @@ impl Interceptor for HostHeaders {
 
 pub(crate) type RegisteredHost = WorkerHostClient<InterceptedService<Channel, HostHeaders>>;
 pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channel, HostHeaders>>;
+/// The Attempt-scoped data clients a Worker's harness bridge and setup relay its calls through:
+/// Mailbox, Workstreams, Memory, Tag and Work Sessions, Schedules, Effects, Task files, artifact
+/// acquisition, and Workspace mounts. The Worklet builds them on its channel and also records
+/// its Volume write-back through `workspace_mounts`. The host's own storage is `HostStorage`.
 #[derive(Clone)]
-pub(crate) struct CoordinationClients {
-    transfers: checkpoints::Transfers,
+pub(crate) struct AttemptClients {
     acquisitions: AttemptArtifactsClient<InterceptedService<Channel, HostHeaders>>,
-    artifact_source: Option<artifact_direct::SourceStorage>,
-    artifact_peers: ArtifactPeers,
-    volumes: volume_objects::HostVolumes,
-    volume_objects: volume_objects::VolumeObjects,
     workspace_mounts: AttemptWorkspaceMountsClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
@@ -128,87 +124,9 @@ pub(crate) struct CoordinationClients {
     changed_paths: AttemptChangedPathsClient<InterceptedService<Channel, HostHeaders>>,
     task_files: AttemptTaskFilesClient<InterceptedService<Channel, HostHeaders>>,
     effects: AttemptEffectsClient<InterceptedService<Channel, HostHeaders>>,
-    /// Git for reading a reviewed delivery from its remote Workspace's Session branch.
-    review_git: Option<supertag_git_delivery::GitDelivery>,
 }
 
 impl Attempt {
-    fn from_assignment(assignment: Assignment) -> Result<Self> {
-        let task = assignment.task.context("assignment has no Task")?;
-        ensure!(
-            task.attempt_id.as_deref() == Some(assignment.attempt_id.as_str()),
-            "assignment has mismatched Attempt identity"
-        );
-        let requires_unsandboxed_commands =
-            task.attempt_execution.as_ref().is_some_and(|attempt| {
-                matches!(
-                    attempt.harness_kind(),
-                    HarnessKind::ClaudeCode | HarnessKind::Opencode | HarnessKind::Cursor
-                ) && attempt.shared_execution.is_none()
-                    && !attempt.remote_file_workspace
-                    && task
-                        .allowed_actions
-                        .iter()
-                        .any(|action| action == "commands:execute")
-            });
-        Ok(Self {
-            task_id: task.task_id,
-            attempt_id: assignment.attempt_id,
-            lease_token: assignment.lease_token,
-            execution_selection: task
-                .attempt_execution
-                .map(|selection| selection.encode_to_vec()),
-            requires_unsandboxed_commands,
-            joined: assignment
-                .joined
-                .into_iter()
-                .map(|message| journal::JoinedMessage {
-                    task_id: message.task_id,
-                    text: message.text,
-                    sent_at_ms: message.sent_at_ms,
-                })
-                .collect(),
-            native_memory: assignment
-                .native_memory
-                .map(|grant| journal::NativeMemoryGrant {
-                    scope: grant.scope,
-                    reset_generation: grant.reset_generation,
-                    volume_head: grant.volume_head.and_then(|head| {
-                        head.manifest
-                            .map(|manifest| (head.revision, manifest.sha256, manifest.byte_length))
-                    }),
-                }),
-            volume: assignment.volume.map(|volume| journal::AssignedVolume {
-                volume_id: volume.volume_id,
-                source: volume.source,
-                revision: volume.revision,
-            }),
-        })
-    }
-
-    fn can_launch(&self, options: &WorkerOptions) -> Result<bool> {
-        let Some(selection) = &self.execution_selection else {
-            return Ok(false);
-        };
-        let execution = AttemptExecutionSelection::decode(selection.as_slice())
-            .context("stored Attempt execution selection is invalid")?;
-        let model = execution
-            .selection
-            .as_ref()
-            .and_then(|selection| selection.model.as_ref());
-        Ok(execution.harness_kind == options.harness as i32
-            && execution.remote_file_workspace == options.execution_profile.remote_file_workspace
-            && execution.shared_execution == options.execution_profile.shared_execution
-            && (!execution.task_artifact_inputs || options.execution_profile.task_artifact_inputs)
-            && execution
-                .mcp_servers
-                .iter()
-                .all(|server| options.execution_profile.mcp_servers.contains(server))
-            && model.is_none_or(|model| options.execution_profile.model_ids.contains(model))
-            && (!self.requires_unsandboxed_commands
-                || options.execution_profile.allow_unsandboxed_commands))
-    }
-
     fn inspect(&self) -> InspectAttemptRequest {
         InspectAttemptRequest {
             task_id: self.task_id.clone(),

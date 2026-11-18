@@ -13,12 +13,13 @@ use tonic::Status;
 
 use crate::worker::{Settings, WorkerOptions};
 use crate::{
-    CoordinationClients,
+    AttemptClients,
     worker::adapter::artifact_acquisition::AcquisitionClient,
     worker::remote_provider::{RemoteProvider, Start},
     worker::task_artifact_inputs::RemoteInputs,
     worker::task_outputs::PendingOutputs,
-    worklet::journal::{Attempt, Journal, RemoteSandboxState},
+    worklet::HostStorage,
+    worklet::journal::{Attempt, AttemptJournal, RemoteSandboxState},
     worklet::workspaces::{PreparedWorkspace, Workspaces},
     workspace_mounts::{Mounted, WorkspaceMounts, record_remote, remote_writer},
 };
@@ -114,11 +115,12 @@ pub(crate) fn launch_instructions(
 pub(crate) async fn download_inputs(
     attempt: &Attempt,
     task: &Task,
-    (coordination, token): (&CoordinationClients, &str),
+    (coordination, storage, token): (&AttemptClients, &HostStorage, &str),
     cancel: &CancellationToken,
 ) -> Result<RemoteInputs, Status> {
     let acquisition = AcquisitionClient {
         coordination,
+        storage,
         host_token: token,
         attempt: attempt.inspect(),
     };
@@ -127,7 +129,7 @@ pub(crate) async fn download_inputs(
 
 pub(crate) async fn prepare(
     options: &Settings<'_>,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     workspaces: &Workspaces,
     (attempt, workspace, task): (&Attempt, &PreparedWorkspace, &Task),
     (mcp_commit, environment, mounted, downloaded): (
@@ -136,7 +138,11 @@ pub(crate) async fn prepare(
         Option<&Mounted>,
         Option<RemoteInputs>,
     ),
-    (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
+    (registration, (coordination, storage), token): (
+        &HostRecord,
+        (&AttemptClients, &HostStorage),
+        &str,
+    ),
     (egress, cancel): (
         Option<&crate::worker::egress::AttemptEgress>,
         &CancellationToken,
@@ -178,6 +184,7 @@ pub(crate) async fn prepare(
     let export = workspaces.export_remote(workspace, cancel).await?;
     let acquisition = AcquisitionClient {
         coordination,
+        storage,
         host_token: token,
         attempt: attempt.inspect(),
     };
@@ -318,7 +325,7 @@ pub(crate) const SANDBOX_REPLACED: &str = "The sandbox stopped and was replaced.
 #[allow(clippy::too_many_arguments)]
 async fn start_sandbox(
     options: &Settings<'_>,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     (attempt, export): (&Attempt, &supertag_workspaces::PreparedExport),
     mounted: Option<&Mounted>,
     registration: &HostRecord,
@@ -382,7 +389,7 @@ async fn start_sandbox(
 /// after `MAX_REPLACEMENTS`, or when the Harness has no time left.
 pub(crate) async fn replace(
     options: &Settings<'_>,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     workspaces: &Workspaces,
     (attempt, workspace): (&Attempt, &PreparedWorkspace),
     (mounted, registration): (Option<&Mounted>, &HostRecord),
@@ -425,7 +432,7 @@ pub(crate) async fn replace(
 
 pub(crate) async fn capture(
     provider: &RemoteProvider,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     (workspace, workspaces, has_inputs): (&PreparedWorkspace, &Workspaces, bool),
     outputs: Option<Box<PendingOutputs>>,
     (state, copies): (&std::path::Path, Option<(&Mounted, &WorkspaceMounts)>),
@@ -528,7 +535,7 @@ pub(crate) async fn capture(
 
 pub(crate) async fn ensure_stopped(
     options: &WorkerOptions,
-    journal: &Journal,
+    journal: AttemptJournal<'_>,
     attempt: &Attempt,
     registration: &HostRecord,
 ) -> Result<()> {

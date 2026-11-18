@@ -27,8 +27,8 @@ use tokio_util::sync::CancellationToken;
 use tonic::{service::interceptor::InterceptedService, transport::Channel};
 
 use crate::{
-    ArtifactPeers, CoordinationClients, HostHeaders, request, retryable, wait_for_work,
-    worklet::{artifact_direct::SourceStorage, checkpoints},
+    ArtifactPeers, AttemptClients, HostHeaders, request, retryable, wait_for_work,
+    worklet::{HostStorage, artifact_direct::SourceStorage, checkpoints},
 };
 
 /// Negotiates the protocol with the Control Plane and registers this host's incarnation, waiting
@@ -84,7 +84,8 @@ pub(crate) async fn register(
     }
 }
 
-/// The Attempt-scoped clients a registered host's Workers and finalization call.
+/// The Attempt-scoped clients a registered host's Workers and finalization call, and the host
+/// storage the Worklet lends them.
 pub(crate) fn coordination(
     channel: &Channel,
     headers: &HostHeaders,
@@ -93,13 +94,12 @@ pub(crate) fn coordination(
     artifact_peers: &ArtifactPeers,
     volumes: &BTreeMap<String, FileVolume>,
     state_directory: &Path,
-) -> CoordinationClients {
-    CoordinationClients {
+) -> (AttemptClients, HostStorage) {
+    let host_storage = HostStorage {
         review_git: supertag_git_delivery::GitDelivery::for_host(
             &state_directory.join("review-git"),
         )
         .ok(),
-        acquisitions,
         artifact_source: Some(storage.clone()),
         artifact_peers: artifact_peers.clone(),
         volumes: std::sync::Arc::new(volumes.clone()),
@@ -112,6 +112,9 @@ pub(crate) fn coordination(
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
         transfers: checkpoints::Transfers::new(channel.clone(), headers.clone())
             .with_storage(storage.clone()),
+    };
+    let clients = AttemptClients {
+        acquisitions,
         workstreams: AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
@@ -154,5 +157,6 @@ pub(crate) fn coordination(
         )
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES),
-    }
+    };
+    (clients, host_storage)
 }

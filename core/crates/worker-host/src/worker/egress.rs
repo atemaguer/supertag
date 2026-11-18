@@ -1093,7 +1093,7 @@ impl AttemptEgress {
     /// Attempt. Best effort: a lost report leaves the Task without its network log.
     pub(crate) async fn finish(
         self,
-        host: &mut crate::RegisteredHost,
+        host: &mut crate::worklet::authority::AttemptClient,
         attempt: &crate::worklet::journal::Attempt,
         token: &str,
     ) {

@@ -26,12 +26,17 @@ pub(crate) mod task_outputs;
 
 use std::{ffi::OsString, path::PathBuf, time::Duration};
 
-use supertag_protocol::v2::{HarnessExecutionProfile, HarnessKind};
+use anyhow::{Context, Result};
+use prost::Message;
+use supertag_protocol::v2::{AttemptExecutionSelection, HarnessExecutionProfile, HarnessKind};
 
-use crate::{McpCatalog, ProviderConfig, SharedExecutionConfig, WorkspaceMounts};
+use crate::{
+    McpCatalog, ProviderConfig, SharedExecutionConfig, WorkspaceMounts, worklet::journal::Attempt,
+};
 
 /// What a Worker reads to run one Task Attempt: its harness and adapter, the execution profile
-/// it enforces, where its Workspace runs, and the catalogs and credentials it may use.
+/// it enforces, where its Workspace runs, and its Context Item catalog. The host's secrets and
+/// Volume mounts are the Worklet's (`WorkletOptions`), which lends them through `Settings`.
 pub struct WorkerOptions {
     pub adapter_guardian: PathBuf,
     pub adapter: PathBuf,
@@ -43,18 +48,20 @@ pub struct WorkerOptions {
     pub remote_provider: Option<ProviderConfig>,
     pub shared_execution: Option<SharedExecutionConfig>,
     pub context_catalog: context::ContextCatalog,
-    pub mcp_catalog: McpCatalog,
-    pub workspace_mounts: WorkspaceMounts,
-    /// Credentials the egress proxy injects for Tasks whose network scope names them.
-    pub network_credentials: Vec<egress::HostCredential>,
 }
 
-/// What a Worker reads: its options, and the host state directory the Worklet keeps the
-/// Attempt's files under.
+/// What a Worker reads: its options, the host state directory the Worklet keeps the Attempt's
+/// files under, and what the Worklet lends it of the host's secrets and Volume mounts.
 #[derive(Clone, Copy)]
 pub(crate) struct Settings<'a> {
     pub(crate) options: &'a WorkerOptions,
     pub(crate) state_directory: &'a PathBuf,
+    /// The MCP servers this host offers, with their logins.
+    pub(crate) mcp_catalog: &'a McpCatalog,
+    /// The credentials the Attempt's egress proxy injects when its network scope names them.
+    pub(crate) network_credentials: &'a [egress::HostCredential],
+    /// The Volume mounts the Attempt's Workspace copies stage from.
+    pub(crate) workspace_mounts: &'a WorkspaceMounts,
 }
 
 impl std::ops::Deref for Settings<'_> {
@@ -62,5 +69,32 @@ impl std::ops::Deref for Settings<'_> {
 
     fn deref(&self) -> &WorkerOptions {
         self.options
+    }
+}
+
+impl Attempt {
+    /// Whether this Worker can still run the Attempt: its harness, execution profile, models,
+    /// and MCP servers still match what the Attempt was claimed under.
+    pub(crate) fn can_launch(&self, options: &WorkerOptions) -> Result<bool> {
+        let Some(selection) = &self.execution_selection else {
+            return Ok(false);
+        };
+        let execution = AttemptExecutionSelection::decode(selection.as_slice())
+            .context("stored Attempt execution selection is invalid")?;
+        let model = execution
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.model.as_ref());
+        Ok(execution.harness_kind == options.harness as i32
+            && execution.remote_file_workspace == options.execution_profile.remote_file_workspace
+            && execution.shared_execution == options.execution_profile.shared_execution
+            && (!execution.task_artifact_inputs || options.execution_profile.task_artifact_inputs)
+            && execution
+                .mcp_servers
+                .iter()
+                .all(|server| options.execution_profile.mcp_servers.contains(server))
+            && model.is_none_or(|model| options.execution_profile.model_ids.contains(model))
+            && (!self.requires_unsandboxed_commands
+                || options.execution_profile.allow_unsandboxed_commands))
     }
 }

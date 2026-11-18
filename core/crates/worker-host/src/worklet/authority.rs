@@ -1,17 +1,23 @@
 //! The Attempt's execution lease, which the Worklet holds and renews while a Worker or its own
-//! finalization works under it, and the `Authority` handle through which a Worker takes every
-//! lease-bound action.
+//! finalization works under it; the `Authority` handle through which a Worker takes every
+//! lease-bound action, and the `Lease` it lends the harness bridge; and the `AttemptClient` a
+//! Worker's Attempt-scoped data calls go through.
 
 use std::{path::Path, time::Duration};
 
 use anyhow::{Context, Result};
 use supertag_protocol::v2::{
-    AttemptAuthority, HarnessCompleteRequest, HostRecord, ResolveWorkspaceRefRequest,
-    StartTaskRequest, Task, TaskState,
+    AppendEventRequest, AskQuestionRequest, AttemptAuthority, AttemptCapabilities, AttemptHistory,
+    CommitContextResolutionRequest, ContextResolutionManifest, HarnessCompleteRequest, HostRecord,
+    InspectAttemptRequest, ObjectiveQuestion, PublishTaskTextRequest, PublishTaskTextResponse,
+    ReportAppliedLimitsRequest, ReportAppliedLimitsResponse, ReportAttemptMilestoneRequest,
+    ReportAttemptMilestoneResponse, ReportAttemptUsageRequest, ReportAttemptUsageResponse,
+    ReportNetworkLogRequest, ReportNetworkLogResponse, ResolveWorkspaceRefRequest,
+    StartTaskRequest, Task, TaskEvent, TaskState,
 };
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
-use tonic::Status;
+use tonic::{Request, Response, Status};
 
 use crate::{
     RegisteredHost, ensure_attempt, request, retryable,
@@ -25,9 +31,11 @@ use crate::{
 };
 
 /// The lease-bound actions a Worker takes for its Attempt: start it, renew its lease, keep the
-/// lease while an operation or a cleanup runs, report what it waits for, hand its outcome to the
-/// Worklet for Finish, and give the Attempt back before launch. The Worklet's registration, host
-/// credential, journal, and checkouts stay behind this handle.
+/// lease while an operation or a cleanup runs, lend the harness bridge a `Lease`, report what it
+/// waits for, hand its outcome to the Worklet for Finish, and give the Attempt back before
+/// launch. The Worklet's registration, Control Plane client, journal, and checkouts stay behind
+/// this handle. The host credential still signs the Worker's data calls until those move to an
+/// Attempt credential.
 pub(crate) struct Authority<'a> {
     host: &'a mut RegisteredHost,
     token: &'a str,
@@ -68,10 +76,20 @@ impl<'a> Authority<'a> {
         self.registration
     }
 
-    /// A client for the Attempt-scoped calls the Worker's harness bridge, Context Item setup,
-    /// milestone reports, and egress log make.
-    pub(crate) fn client(&self) -> RegisteredHost {
-        self.host.clone()
+    /// A client for the Attempt-scoped data calls the Worker's harness bridge, Context Item
+    /// setup, milestone reports, and egress log make. It reaches none of the Worklet's calls.
+    pub(crate) fn client(&self) -> AttemptClient {
+        AttemptClient(self.host.clone())
+    }
+
+    /// The handle the Worker's harness bridge renews and checks the Attempt's lease through
+    /// while the harness runs.
+    pub(crate) fn lease(&self, attempt: &Attempt) -> Lease {
+        Lease {
+            host: self.host.clone(),
+            token: self.token.to_owned(),
+            attempt: attempt.inspect(),
+        }
     }
 
     /// Asks the Control Plane to start the claimed Attempt.
@@ -180,6 +198,12 @@ impl<'a> Authority<'a> {
         record_finish(self.journal, attempt, outcome)
     }
 
+    /// Leaves an unstarted reservation, which never launched anything, for the Control Plane's
+    /// lease expiry to put back in the queue, and ends its local state.
+    pub(crate) fn release_unstarted(&self) -> Result<()> {
+        self.journal.clear()
+    }
+
     /// Gives back an Attempt whose lease ended before anything launched, and ends its local
     /// state.
     pub(crate) fn discard_prelaunch(&self, attempt: &Attempt) -> Result<()> {
@@ -198,6 +222,102 @@ impl<'a> Authority<'a> {
         )?;
         purge_discarded(discarded, self.once);
         Ok(())
+    }
+}
+
+/// The Attempt-scoped data calls a Worker makes to the Control Plane: events, text, questions,
+/// usage, milestones, its network log, its history and capabilities, and its Context Item pins.
+/// It exposes none of the Worklet's calls (register, claim, start, finish, reclaim, checkpoints)
+/// and none of the lease's.
+#[derive(Clone)]
+pub(crate) struct AttemptClient(RegisteredHost);
+
+#[cfg(test)]
+impl From<RegisteredHost> for AttemptClient {
+    fn from(host: RegisteredHost) -> Self {
+        Self(host)
+    }
+}
+
+macro_rules! relay {
+    ($($(#[$doc:meta])* $name:ident($input:ty) -> $output:ty;)*) => {
+        impl AttemptClient {
+            $(
+                $(#[$doc])*
+                pub(crate) async fn $name(
+                    &mut self,
+                    request: Request<$input>,
+                ) -> Result<Response<$output>, Status> {
+                    self.0.$name(request).await
+                }
+            )*
+        }
+    };
+}
+
+relay! {
+    get_attempt_capabilities(InspectAttemptRequest) -> AttemptCapabilities;
+    get_attempt_history(InspectAttemptRequest) -> AttemptHistory;
+    get_context_pins(InspectAttemptRequest) -> ContextResolutionManifest;
+    commit_context_resolution(CommitContextResolutionRequest) -> ContextResolutionManifest;
+    append_event(AppendEventRequest) -> TaskEvent;
+    publish_text(PublishTaskTextRequest) -> PublishTaskTextResponse;
+    ask_question(AskQuestionRequest) -> ObjectiveQuestion;
+    report_attempt_usage(ReportAttemptUsageRequest) -> ReportAttemptUsageResponse;
+    report_attempt_milestone(ReportAttemptMilestoneRequest) -> ReportAttemptMilestoneResponse;
+    report_network_log(ReportNetworkLogRequest) -> ReportNetworkLogResponse;
+}
+
+/// The lease-bound calls a Worker's harness bridge makes while the harness runs: renew the
+/// Attempt's lease, check it is still held, and report the execution limits the adapter
+/// applied. Cloneable and `Send`, so the bridge's services each hold one.
+#[derive(Clone)]
+pub(crate) struct Lease {
+    host: RegisteredHost,
+    token: String,
+    attempt: InspectAttemptRequest,
+}
+
+impl Lease {
+    #[cfg(test)]
+    pub(crate) fn unconnected(host: RegisteredHost, attempt: InspectAttemptRequest) -> Self {
+        Self {
+            host,
+            token: "host-token".into(),
+            attempt,
+        }
+    }
+
+    fn request(&self, timeout: Duration) -> Result<Request<InspectAttemptRequest>, Status> {
+        let mut request =
+            supertag_protocol::authenticated_request(self.attempt.clone(), &self.token, None)?;
+        request.set_timeout(timeout);
+        Ok(request)
+    }
+
+    /// Renews the Attempt's lease once; the call carries `timeout`.
+    pub(crate) async fn renew(&self, timeout: Duration) -> Result<AttemptAuthority, Status> {
+        let request = self.request(timeout)?;
+        Ok(self.host.clone().renew_attempt(request).await?.into_inner())
+    }
+
+    /// Reads the Attempt's Task to check the lease is still held; the call carries `timeout`.
+    pub(crate) async fn inspect(&self, timeout: Duration) -> Result<Task, Status> {
+        let request = self.request(timeout)?;
+        Ok(self
+            .host
+            .clone()
+            .inspect_attempt(request)
+            .await?
+            .into_inner())
+    }
+
+    /// Reports the execution limits the adapter applied.
+    pub(crate) async fn report_applied_limits(
+        &self,
+        request: Request<ReportAppliedLimitsRequest>,
+    ) -> Result<Response<ReportAppliedLimitsResponse>, Status> {
+        self.host.clone().report_applied_limits(request).await
     }
 }
 

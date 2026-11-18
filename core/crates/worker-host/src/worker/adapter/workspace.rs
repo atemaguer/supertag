@@ -246,9 +246,7 @@ impl Bridge {
     async fn fresh_command_authority(&self) -> Result<u64, Status> {
         let sent = Instant::now();
         let timeout = Duration::from_millis(1_500);
-        let mut authority = authenticated_request(self.attempt(), &self.host_token, None)?;
-        authority.set_timeout(timeout);
-        let authority = time::timeout(timeout, self.host.clone().renew_attempt(authority))
+        let authority = time::timeout(timeout, self.lease.renew(timeout))
             .await
             .map_err(|_| Status::deadline_exceeded("Task authority renewal timed out"))?
             .map_err(|error| {
@@ -256,8 +254,7 @@ impl Bridge {
                     Status::failed_precondition("Task authority renewal was refused"),
                     &error,
                 )
-            })?
-            .into_inner();
+            })?;
         if !authority.task.is_some_and(|task| {
             task.state() == TaskState::Running
                 && task.task_id == self.task_id()
@@ -305,14 +302,7 @@ impl HarnessWorkspace for Bridge {
         let operation = async {
             // Serialize tools so a command cannot race a scoped file operation.
             let _permit = workspace.operation.lock().await;
-            let mut authority = authenticated_request(self.attempt(), &self.host_token, None)?;
-            authority.set_timeout(CONTROL_TIMEOUT);
-            let live = self
-                .host
-                .clone()
-                .inspect_attempt(authority)
-                .await?
-                .into_inner();
+            let live = self.lease.inspect(CONTROL_TIMEOUT).await?;
             if live.state() != TaskState::Running
                 || live.task_id != accepted.task_id
                 || live.attempt_id.as_deref() != Some(self.assignment.attempt_id.as_str())

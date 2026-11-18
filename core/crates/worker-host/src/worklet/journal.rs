@@ -694,6 +694,139 @@ impl Journal {
     }
 }
 
+/// What a Worker captured when its harness turn ended: the checkout it ran in, a remote Workspace's tree, its Task outputs, and its path scope.
+pub(crate) struct Captured {
+    pub(crate) workspace: PreparedWorkspace,
+    pub(crate) remote_tree: Option<TransferArtifact>,
+    pub(crate) outputs: Option<Box<crate::worker::task_outputs::PendingOutputs>>,
+    pub(crate) file_scope: Option<supertag_protocol::file_scope::Rules>,
+}
+
+/// The Worker's view of the Worklet's journal for its one Attempt. It records the milestones
+/// the Worker reaches (preparing inputs, executing, finalizing with a staged checkpoint), the
+/// Attempt's harness processes, and its sandbox and shared-access records, which the Worklet
+/// reads to recover them. The Worklet's own transitions (Claim, Starting, Finish, Terminal, and
+/// clearing the Attempt) are not reachable through it.
+#[derive(Clone, Copy)]
+pub(crate) struct AttemptJournal<'a>(&'a Journal);
+
+impl Journal {
+    /// Lends the journal to a Worker, or to the Worklet's own recovery of a Worker's sandbox and
+    /// shared access, as the view a Worker writes through.
+    pub(crate) fn for_attempt(&self) -> AttemptJournal<'_> {
+        AttemptJournal(self)
+    }
+}
+
+impl AttemptJournal<'_> {
+    /// The Worker is staging the Attempt's inputs into `prepared`.
+    pub(crate) fn preparing_inputs(
+        &self,
+        attempt: &Attempt,
+        prepared: &PreparedWorkspace,
+    ) -> Result<()> {
+        self.0.save(&Entry::PreparingInputs {
+            attempt: attempt.clone(),
+            prepared: Box::new(prepared.clone()),
+        })
+    }
+
+    /// The Worker is about to start the harness.
+    pub(crate) fn executing(
+        &self,
+        attempt: &Attempt,
+        prepared: Option<&PreparedWorkspace>,
+    ) -> Result<()> {
+        self.0.save(&Entry::Executing {
+            attempt: attempt.clone(),
+            prepared: prepared.map(|prepared| Box::new(prepared.clone())),
+        })
+    }
+
+    /// The harness turn ended with `outcome` and the Worker captured what it produced; stages
+    /// the turn's checkpoint, then leaves the Attempt for the Worklet to land and finish.
+    pub(crate) fn finalizing(
+        &self,
+        attempt: &Attempt,
+        outcome: supertag_protocol::v2::HarnessCompleteRequest,
+        captured: Captured,
+    ) -> Result<()> {
+        let checkpoint = outcome
+            .checkpoint
+            .map(|checkpoint| self.0.stage_checkpoint(checkpoint))
+            .transpose()?;
+        self.0.save(&Entry::Finalizing {
+            attempt: attempt.clone(),
+            result: outcome.result,
+            succeeded: outcome.succeeded,
+            objective_signal: outcome.objective_signal,
+            waiting_approval_ids: outcome.waiting_approval_ids,
+            quiet: outcome.quiet,
+            checkpoint,
+            workspace: Box::new(captured.workspace),
+            remote_tree: captured.remote_tree,
+            outputs: captured.outputs,
+            file_scope: captured.file_scope,
+        })
+    }
+
+    pub(crate) fn processes(&self, attempt: &Attempt) -> Processes {
+        self.0.processes(attempt)
+    }
+
+    pub(crate) fn shared_access(
+        &self,
+    ) -> Result<Option<crate::worker::shared_execution::AccessRecord>> {
+        self.0.shared_access()
+    }
+
+    pub(crate) fn save_shared_access(
+        &self,
+        record: &crate::worker::shared_execution::AccessRecord,
+    ) -> Result<()> {
+        self.0.save_shared_access(record)
+    }
+
+    pub(crate) fn remote_scratch(&self) -> Result<PathBuf> {
+        self.0.remote_scratch()
+    }
+
+    pub(crate) fn remote_sandbox(&self) -> Result<Option<RemoteSandbox>> {
+        self.0.remote_sandbox()
+    }
+
+    pub(crate) fn begin_remote_sandbox(
+        &self,
+        attempt: &Attempt,
+        host_id: &str,
+        host_generation: u64,
+        provider_scope: String,
+    ) -> Result<RemoteSandbox> {
+        self.0
+            .begin_remote_sandbox(attempt, host_id, host_generation, provider_scope)
+    }
+
+    pub(crate) fn record_sandbox_active(
+        &self,
+        record: &RemoteSandbox,
+        sandbox_id: String,
+    ) -> Result<RemoteSandbox> {
+        self.0.record_sandbox_active(record, sandbox_id)
+    }
+
+    pub(crate) fn record_sandbox_stopped(
+        &self,
+        record: &RemoteSandbox,
+        sandbox_id: String,
+    ) -> Result<RemoteSandbox> {
+        self.0.record_sandbox_stopped(record, sandbox_id)
+    }
+
+    pub(crate) fn retire_stopped_sandbox(&self, record: &RemoteSandbox) -> Result<()> {
+        self.0.retire_stopped_sandbox(record)
+    }
+}
+
 /// Where the host records each process group it starts while an Attempt executes.
 const PROCESSES: &str = "attempt-processes";
 const MAX_PROCESS_RECORDS: usize = 256;

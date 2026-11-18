@@ -48,7 +48,7 @@ impl Bridge {
         &self,
         review_id: &str,
     ) -> Result<(WorkspaceDeliveryReference, Vec<u8>), Status> {
-        let transfers = &self.coordination.transfers;
+        let transfers = &self.storage.transfers;
         let review = GetReviewArtifactRequest {
             attempt: Some(self.attempt()),
             review_id: review_id.into(),
@@ -84,7 +84,7 @@ impl Bridge {
             ));
         }
         let git =
-            self.coordination.review_git.as_ref().ok_or_else(|| {
+            self.storage.review_git.as_ref().ok_or_else(|| {
                 Status::unavailable("this Worker Host cannot read remote Workspaces")
             })?;
         let grant = WorkspaceGitAccessClient::with_interceptor(
@@ -203,8 +203,27 @@ mod tests {
             host: worker_host_client::WorkerHostClient::with_interceptor(
                 channel.clone(),
                 headers.clone(),
+            )
+            .into(),
+            lease: crate::worklet::authority::Lease::unconnected(
+                worker_host_client::WorkerHostClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
+                InspectAttemptRequest::default(),
             ),
-            coordination: crate::CoordinationClients {
+            storage: crate::worklet::HostStorage {
+                transfers: crate::worklet::checkpoints::Transfers::new(channel.clone(), headers.clone()),
+                artifact_source: None,
+                review_git: None,
+                artifact_peers: crate::ArtifactPeers::default(),
+                volumes: Default::default(),
+                volume_objects: supertag_protocol::v2::volume_objects_client::VolumeObjectsClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
+            },
+            coordination: crate::AttemptClients {
                 acquisitions: attempt_artifacts_client::AttemptArtifactsClient::with_interceptor(channel.clone(), headers.clone()),
                 mcp_effects: supertag_protocol::v2::attempt_mcp_effects_client::AttemptMcpEffectsClient::with_interceptor(
                     channel.clone(),
@@ -219,15 +238,6 @@ mod tests {
                     headers.clone(),
                 ),
                 effects: supertag_protocol::v2::attempt_effects_client::AttemptEffectsClient::with_interceptor(
-                    channel.clone(),
-                    headers.clone(),
-                ),
-                transfers: crate::worklet::checkpoints::Transfers::new(channel.clone(), headers.clone()),
-                artifact_source: None,
-                review_git: None,
-                artifact_peers: crate::ArtifactPeers::default(),
-                volumes: Default::default(),
-                volume_objects: supertag_protocol::v2::volume_objects_client::VolumeObjectsClient::with_interceptor(
                     channel.clone(),
                     headers.clone(),
                 ),

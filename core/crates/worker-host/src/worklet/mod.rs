@@ -26,10 +26,28 @@ use std::{collections::BTreeMap, path::PathBuf};
 use supertag_workspaces::artifact_volumes::FileVolume;
 use tokio_util::sync::CancellationToken;
 
-use crate::{ArtifactPeers, ArtifactSourceConfig, LaneObserver, WorkspaceMapping, environment};
+use crate::{
+    ArtifactPeers, ArtifactSourceConfig, LaneObserver, McpCatalog, WorkspaceMapping,
+    WorkspaceMounts, environment, worker::egress,
+};
+
+/// The host's own storage, which the Worklet owns and lends a Worker for what its Attempt reads,
+/// delivers, or checkpoints: the artifact and delivery bytes this host holds, its artifact
+/// peers, its mapped Volumes and their object transfers, checkpoint transfers, and the Git
+/// cache a reviewed delivery is read through.
+#[derive(Clone)]
+pub(crate) struct HostStorage {
+    pub(crate) transfers: checkpoints::Transfers,
+    pub(crate) artifact_source: Option<artifact_direct::SourceStorage>,
+    pub(crate) artifact_peers: ArtifactPeers,
+    pub(crate) volumes: volume_objects::HostVolumes,
+    pub(crate) volume_objects: volume_objects::VolumeObjects,
+    /// Git for reading a reviewed delivery from its remote Workspace's Session branch.
+    pub(crate) review_git: Option<supertag_git_delivery::GitDelivery>,
+}
 
 /// What the Worklet reads: this host's identity and connection, its state, the Workspaces and
-/// Volumes it maps, and how it claims and recovers.
+/// Volumes it maps, its secrets, and how it claims and recovers.
 pub struct WorkletOptions {
     pub control_plane: supertag_transport::Target,
     pub token: Option<String>,
@@ -45,6 +63,13 @@ pub struct WorkletOptions {
     /// File Volumes this host maps, by Volume ID. The work of a Tag that keeps it on one, such as
     /// its captures, is written there directly.
     pub volumes: BTreeMap<String, FileVolume>,
+    /// The Volume mounts this host copies into Workspaces and writes back after a successful
+    /// Attempt.
+    pub workspace_mounts: WorkspaceMounts,
+    /// The MCP servers this host offers, with the logins it keeps for them.
+    pub mcp_catalog: McpCatalog,
+    /// Credentials the egress proxy injects for Tasks whose network scope names them.
+    pub network_credentials: Vec<egress::HostCredential>,
     /// Where reports sample free disk space, normally the state directory's filesystem.
     pub disk_space: environment::DiskSpaceSource,
     /// The OS command that keeps the machine awake while an Attempt runs, if any.

@@ -1,11 +1,11 @@
 //! The Attempt milestones a Worker reports, best effort, for `supertag metrics`.
 
-use crate::{RegisteredHost, request};
+use crate::{request, worklet::authority::AttemptClient};
 
 /// Tells the Control Plane, in the background and best-effort, that the Attempt reached
 /// `milestone`, for `supertag metrics`. The run never waits on it.
 pub(crate) fn report_milestone(
-    host: &RegisteredHost,
+    host: &AttemptClient,
     attempt: &supertag_protocol::v2::InspectAttemptRequest,
     token: &str,
     milestone: supertag_protocol::v2::AttemptMilestone,
@@ -24,7 +24,7 @@ pub(crate) fn report_milestone(
 /// The harness finished the turn, with its reply, quiet flag and Objective signal when it
 /// succeeded and waits for no approval.
 pub(crate) fn report_harness_finished(
-    host: &RegisteredHost,
+    host: &AttemptClient,
     attempt: &supertag_protocol::v2::InspectAttemptRequest,
     token: &str,
     reply: Option<(String, bool, i32)>,
@@ -47,7 +47,7 @@ pub(crate) fn report_harness_finished(
 }
 
 pub(crate) fn send_milestone(
-    host: &RegisteredHost,
+    host: &AttemptClient,
     token: &str,
     input: supertag_protocol::v2::ReportAttemptMilestoneRequest,
 ) {
