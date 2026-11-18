@@ -154,9 +154,10 @@ supertag describe task TASK_ID
   sequence numbers.
 - When a Task Attempt fails, the Worker Host log shows the last lines the adapter wrote to standard
   error, with secrets hidden. Write diagnostics there, never to standard output.
-- Send a checkpoint with `Complete` if your agent can resume a conversation; the next Task in the
-  Session receives it, possibly on another host. A checkpoint over 8 MiB is not kept, and the turn
-  still succeeds. Name your harness in the checkpoint's `harness` field.
+- Send a checkpoint with `Complete` if your agent can resume a conversation. The Worker Host keeps
+  it, and the Session's next Task receives it when it runs on that host; on another host it starts
+  fresh. A checkpoint over 8 MiB is not kept, and the turn still succeeds. Name your harness in
+  the checkpoint's `harness` field.
 - When `Attach` brings no checkpoint, or one your agent cannot resume, start a fresh session with
   the `history` recap in its first message, marked as untrusted history. Never send the recap
   alongside a resumed session.

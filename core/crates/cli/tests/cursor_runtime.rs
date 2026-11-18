@@ -258,12 +258,9 @@ struct Runtime<'a> {
 }
 
 impl<'a> Runtime<'a> {
-    async fn start(root: &Path, credentials: &'a Credentials, database: &str) -> Result<Self> {
+    async fn start(_root: &Path, credentials: &'a Credentials, database: &str) -> Result<Self> {
         let mut control = credentials.command(&["control-plane"]);
-        control
-            .env("SUPERTAG_DATABASE_URL", database)
-            .arg("--checkpoint-directory")
-            .arg(root.join("blobs"));
+        control.env("SUPERTAG_DATABASE_URL", database);
         let (control, endpoint) = service(control).await?;
         let channel = protocol::negotiated(
             Channel::from_shared(endpoint.clone())?

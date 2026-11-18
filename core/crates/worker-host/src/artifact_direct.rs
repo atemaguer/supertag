@@ -309,6 +309,11 @@ pub(crate) struct SourceStorage {
 }
 
 impl SourceStorage {
+    /// This host's storage directory, which every lane of the host shares.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
     fn open(path: &Path) -> Result<Self> {
         ensure!(
             path.is_absolute(),

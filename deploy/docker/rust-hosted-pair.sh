@@ -62,8 +62,7 @@ pause() {
 # shellcheck disable=SC2086 # each -u NAME is two words
 env -u SUPERTAG_CLIENT_CERT_FILE -u SUPERTAG_CLIENT_KEY_FILE -u SUPERTAG_SERVER_CA_FILE \
   -u SUPERTAG_GATEWAY_CREDENTIAL $surface_settings \
-  "$supertag" control-plane --listen 127.0.0.1:3434 --websocket-listen "$tunnel" \
-  --checkpoint-directory /var/lib/supertag/checkpoints &
+  "$supertag" control-plane --listen 127.0.0.1:3434 --websocket-listen "$tunnel" &
 control=$!
 
 # A Gateway exits when it cannot reach the Control Plane at startup, so wait until the Control

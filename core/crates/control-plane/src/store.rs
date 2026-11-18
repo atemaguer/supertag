@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 100;
+        const SCHEMA_VERSION: i64 = 101;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -299,6 +299,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0098_workspace_review_sessions.sql"),
                 include_str!("../migrations/sqlite/0099_attention_pacing.sql"),
                 include_str!("../migrations/sqlite/0100_native_memory.sql"),
+                include_str!("../migrations/sqlite/0101_checkpoints_on_hosts.sql"),
             ]
         } else {
             [
@@ -404,6 +405,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0098_workspace_review_sessions.sql"),
                 include_str!("../migrations/postgresql/0099_attention_pacing.sql"),
                 include_str!("../migrations/postgresql/0100_native_memory.sql"),
+                include_str!("../migrations/postgresql/0101_checkpoints_on_hosts.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1442,7 +1444,7 @@ impl Store {
                 .bind(&task.task_id)
                 .execute(&mut *transaction)
                 .await?;
-            crate::checkpoints::finish_in(&mut transaction, &task, input, now).await?;
+            crate::checkpoints::finish_in(&mut transaction, &task, input).await?;
             crate::inbox::finish_in(&mut transaction, &task, input.objective_signal, now).await?;
         }
         crate::work_sessions::reports::settle_in(&mut transaction, &task, now).await?;

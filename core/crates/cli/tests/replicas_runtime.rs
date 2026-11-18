@@ -224,13 +224,7 @@ fn control_plane(
     let mut command = credentials.command();
     // Replicas share one checkpoint directory, as they would share a volume.
     command
-        .args([
-            "control-plane",
-            "--listen",
-            listen,
-            "--checkpoint-directory",
-        ])
-        .arg(directory.join("transfers"))
+        .args(["control-plane", "--listen", listen])
         .env("SUPERTAG_DATABASE_URL", database);
     Process::spawn(command, directory, "control-plane", true)
 }

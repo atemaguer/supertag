@@ -129,10 +129,7 @@ async fn delivered_commit_review_survives_restart_and_notifies_owner_once(
     let credentials = Credentials::new();
     let plane_command = |listen: &str| {
         let mut plane = credentials.command(&["control-plane", "--listen", listen]);
-        plane
-            .env("SUPERTAG_DATABASE_URL", &database)
-            .arg("--checkpoint-directory")
-            .arg(root.join("transfers"));
+        plane.env("SUPERTAG_DATABASE_URL", &database);
         plane
     };
     let (mut plane, public) = service(plane_command("127.0.0.1:0")).await?;
@@ -356,10 +353,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let artifact_store = directory.join("transfers");
     let plane_command = |listen: Option<&str>| {
         let mut command = credentials.command(&["control-plane"]);
-        command
-            .env("SUPERTAG_DATABASE_URL", database)
-            .arg("--checkpoint-directory")
-            .arg(&artifact_store);
+        command.env("SUPERTAG_DATABASE_URL", database);
         if let Some(listen) = listen {
             command.args(["--listen", listen]);
         }
@@ -607,10 +601,7 @@ async fn artifact_inputs_survive_control_plane_restart_and_do_not_enter_workspac
     let credentials = Credentials::new();
     let plane_command = |listen: Option<&str>| {
         let mut command = credentials.command(&["control-plane"]);
-        command
-            .env("SUPERTAG_DATABASE_URL", &database)
-            .arg("--checkpoint-directory")
-            .arg(root.join("artifacts"));
+        command.env("SUPERTAG_DATABASE_URL", &database);
         if let Some(listen) = listen {
             command.args(["--listen", listen]);
         }

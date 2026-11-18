@@ -115,10 +115,10 @@ database_tests! {
     claude_sdk_calls_only_the_frozen_scoped_stdio_mcp_tool;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_AGENTS_PYTHON with the Python SDK runtime and agents extras installed"]
-    python_agents_sdk_restores_session_on_a_fresh_host;
+    python_agents_sdk_resumes_the_session_on_its_holder;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
-    claude_code_sdk_restores_session_on_a_fresh_host;
+    claude_code_sdk_resumes_on_its_holder_and_starts_fresh_elsewhere;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_keeps_native_memory_on_its_host_across_tasks;
@@ -264,7 +264,7 @@ impl LanguageServices {
     }
 
     async fn start_with_volume(
-        directory: &Path,
+        _directory: &Path,
         database: &str,
         volume: Option<&Path>,
     ) -> Result<Self> {
@@ -274,8 +274,6 @@ impl LanguageServices {
         let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let mut control = command(&["control-plane"]);
         control
-            .arg("--checkpoint-directory")
-            .arg(directory.join("blobs"))
             .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway_token)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
@@ -850,7 +848,7 @@ async fn wait_for_state(services: &LanguageServices, task_id: &str, state: &str)
     }
 }
 
-async fn python_agents_sdk_restores_session_on_a_fresh_host(database: String) -> Result<()> {
+async fn python_agents_sdk_resumes_the_session_on_its_holder(database: String) -> Result<()> {
     let Some(interpreter) =
         crate::prerequisites::env("agents-python", "SUPERTAG_RUST_TEST_AGENTS_PYTHON")?
     else {
@@ -873,13 +871,10 @@ async fn python_agents_sdk_restores_session_on_a_fresh_host(database: String) ->
         ])
         .await?;
 
-    for (index, expected) in [
+    for expected in [
         "SDK fixture completed first Task.",
         "SDK fixture resumed the Session.",
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    ] {
         let task = services
             .operator(&[
                 "task",
@@ -892,9 +887,10 @@ async fn python_agents_sdk_restores_session_on_a_fresh_host(database: String) ->
             ])
             .await?;
         let task_id = task["task_id"].as_str().context("Task ID missing")?;
+        // The host that ran the first turn holds the Session checkpoint, so it resumes it.
         let mut host = services.worker(
             "openai-agents",
-            &directory.path().join(format!("host-{index}")),
+            &directory.path().join("host"),
             Path::new(&interpreter),
             &fixture,
         );
@@ -911,7 +907,9 @@ async fn python_agents_sdk_restores_session_on_a_fresh_host(database: String) ->
     services.stop().await
 }
 
-async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> Result<()> {
+async fn claude_code_sdk_resumes_on_its_holder_and_starts_fresh_elsewhere(
+    database: String,
+) -> Result<()> {
     let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
         return Ok(());
     };
@@ -933,10 +931,14 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> R
         ])
         .await?;
 
-    for (index, expected) in ["fixture first turn", "fixture resumed turn"]
-        .into_iter()
-        .enumerate()
-    {
+    // The host that ran the first turn holds the Session checkpoint and resumes it. A host without
+    // the checkpoint's file (here a fresh state directory) starts the next turn fresh from the
+    // recap: the Control Plane never holds checkpoint bytes.
+    for (state, expected) in [
+        ("host", "fixture first turn"),
+        ("host", "fixture resumed turn"),
+        ("fresh-host", "fixture first turn"),
+    ] {
         let task = services
             .operator(&[
                 "task",
@@ -951,7 +953,7 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host(database: String) -> R
         let task_id = task["task_id"].as_str().context("Task ID missing")?;
         let mut host = services.worker(
             "claude-code",
-            &directory.path().join(format!("host-{index}")),
+            &directory.path().join(state),
             Path::new(&interpreter),
             &entry,
         );

@@ -8,8 +8,7 @@
 #   fly deploy --config deploy/native/fly/control-plane.toml --image IMAGE@sha256:DIGEST
 # Secrets: control-plane.env from `supertag setup deployment fly`, plus SUPERTAG_TLS_CERT_PEM and
 # SUPERTAG_TLS_KEY_PEM, and optionally SUPERTAG_TLS_CLIENT_CA_PEM to require client certificates
-# from every caller. Run exactly one Machine: its volume holds Session checkpoints, and every
-# Control Plane process runs the controllers.
+# from every caller. Run exactly one Machine: every Control Plane process runs the controllers.
 app = "supertag-control-plane"
 primary_region = "iad"
 kill_signal = "SIGTERM"
@@ -19,7 +18,7 @@ kill_timeout = "30s"
   strategy = "immediate"
 
 [processes]
-  app = "control-plane --listen [::]:3434 --checkpoint-directory /var/lib/supertag/checkpoints"
+  app = "control-plane --listen [::]:3434"
 
 [[mounts]]
   source = "supertag_control_plane_state"

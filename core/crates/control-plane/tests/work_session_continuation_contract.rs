@@ -271,10 +271,10 @@ async fn contract(url: String) {
     );
     finish(&store, &host, &later_attempt, None).await;
     let next_child = run(&store, &other, &continued.latest_task_id).await;
-    assert_eq!(
-        store.get_checkpoint(&other, &next_child).await.unwrap(),
-        Some(checkpoint)
-    );
+    // The host that wrote the Work Session's checkpoint holds it and resumes it.
+    let resumed = store.get_checkpoint(&other, &next_child).await.unwrap();
+    assert_eq!(resumed.reference, Some(checkpoint));
+    assert_eq!(resumed.holder_host_id, other.id());
     finish(&store, &other, &next_child, None).await;
     let next_report = report(&store, &started.work_session_id).await;
     let report_task = store.get_task(&next_report).await.unwrap();

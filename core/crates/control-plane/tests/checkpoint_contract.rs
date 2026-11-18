@@ -16,6 +16,43 @@ use uuid::Uuid;
 const BASE: i64 = 1_893_456_000_000;
 const OPERATOR: &str = "operator:checkpoint-test";
 
+/// The checkpoint `attempt` may resume. Its holder is always the host that recorded it, the only
+/// host here that records checkpoints.
+async fn got(
+    store: &Store,
+    host: &HostAuthority,
+    attempt: &InspectAttemptRequest,
+) -> Option<CheckpointReference> {
+    let response = store.get_checkpoint(host, attempt).await.unwrap();
+    if response.reference.is_some() {
+        assert_eq!(response.holder_host_id, host.id());
+    }
+    response.reference
+}
+
+/// Every checkpoint digest `host` still holds for a Session, across pages of one.
+async fn held(store: &Store, host: &HostAuthority) -> Vec<String> {
+    let mut digests = Vec::new();
+    let mut after = String::new();
+    loop {
+        let page = store
+            .list_held_checkpoints(
+                host,
+                &ListHeldCheckpointsRequest {
+                    after_sha256: after.clone(),
+                    limit: 1,
+                },
+            )
+            .await
+            .unwrap();
+        digests.extend(page.sha256);
+        match page.next_after_sha256 {
+            Some(next) => after = next,
+            None => return digests,
+        }
+    }
+}
+
 async fn claim(store: &Store, host: &HostAuthority, expected: &str) -> InspectAttemptRequest {
     let assigned = store
         .claim_task(host, &Uuid::new_v4().to_string())
@@ -147,7 +184,7 @@ async fn checkpoint_contract(url: &str) {
     let accepted = reference("accepted initial transcript");
     let discarded = reference("failed or cancelled transcript");
     let first = turn(&store, &host, "owner", "shared-session").await;
-    assert!(store.get_checkpoint(&host, &first).await.unwrap().is_none());
+    assert!(got(&store, &host, &first).await.is_none());
     assert!(matches!(
         store.get_checkpoint(&intruder, &first).await,
         Err(StoreError::PermissionDenied)
@@ -184,7 +221,7 @@ async fn checkpoint_contract(url: &str) {
     store.commit_checkpoint(&host, &request).await.unwrap();
     store.commit_checkpoint(&host, &request).await.unwrap();
     assert!(
-        store.get_checkpoint(&host, &first).await.unwrap().is_none(),
+        got(&store, &host, &first).await.is_none(),
         "commit alone does not promote the pointer"
     );
     assert!(matches!(
@@ -211,10 +248,7 @@ async fn checkpoint_contract(url: &str) {
     ));
 
     let failed = turn(&store, &host, "owner", "shared-session").await;
-    assert_eq!(
-        store.get_checkpoint(&host, &failed).await.unwrap(),
-        Some(accepted.clone())
-    );
+    assert_eq!(got(&store, &host, &failed).await, Some(accepted.clone()));
     stage(&store, &host, &failed, &discarded).await;
     let mut failure = finish(&failed, Some(&discarded));
     failure.succeeded = false;
@@ -229,10 +263,7 @@ async fn checkpoint_contract(url: &str) {
     );
 
     let cancelled = turn(&store, &host, "owner", "shared-session").await;
-    assert_eq!(
-        store.get_checkpoint(&host, &cancelled).await.unwrap(),
-        Some(accepted.clone())
-    );
+    assert_eq!(got(&store, &host, &cancelled).await, Some(accepted.clone()));
     stage(&store, &host, &cancelled, &discarded).await;
     store.cancel_task(&cancelled.task_id).await.unwrap();
     assert_eq!(
@@ -248,13 +279,7 @@ async fn checkpoint_contract(url: &str) {
     // native history; another Session under the same Tag is also independent.
     for (tag, session) in [("other", "shared-session"), ("owner", "other-session")] {
         let isolated = turn(&store, &host, tag, session).await;
-        assert!(
-            store
-                .get_checkpoint(&host, &isolated)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(got(&store, &host, &isolated).await.is_none());
         stage(&store, &host, &isolated, &discarded).await;
         store
             .finish_task(&host, &finish(&isolated, Some(&discarded)))
@@ -263,10 +288,7 @@ async fn checkpoint_contract(url: &str) {
     }
 
     let expired = turn(&store, &host, "owner", "shared-session").await;
-    assert_eq!(
-        store.get_checkpoint(&host, &expired).await.unwrap(),
-        Some(accepted.clone())
-    );
+    assert_eq!(got(&store, &host, &expired).await, Some(accepted.clone()));
     stage(&store, &host, &expired, &discarded).await;
     clock.store(BASE + 30_001, Ordering::SeqCst);
     assert!(matches!(
@@ -297,10 +319,7 @@ async fn checkpoint_contract(url: &str) {
         .unwrap();
     let retried = claim(&store, &host, &expired.task_id).await;
     assert_ne!(retried.attempt_id, expired.attempt_id);
-    assert_eq!(
-        store.get_checkpoint(&host, &retried).await.unwrap(),
-        Some(accepted.clone())
-    );
+    assert_eq!(got(&store, &host, &retried).await, Some(accepted.clone()));
     assert!(matches!(
         store
             .commit_checkpoint(&host, &commit(&expired, &discarded))
@@ -320,7 +339,7 @@ async fn checkpoint_contract(url: &str) {
         .await
         .unwrap();
     let fresh = turn(&store, &host, "owner", "shared-session").await;
-    assert!(store.get_checkpoint(&host, &fresh).await.unwrap().is_none());
+    assert!(got(&store, &host, &fresh).await.is_none());
     store
         .finish_task(&host, &finish(&fresh, None))
         .await
@@ -380,21 +399,17 @@ async fn hygiene_contract(url: &str) {
         )
     };
 
-    // Promoting a checkpoint deletes the Session's older rows and queues their files.
+    // Promoting a checkpoint deletes the Session's older rows, so its holder deletes the file.
     let old = reference("first transcript");
     let new = reference("second transcript, longer");
     promoted(&store, &host, "one", &old).await;
     promoted(&store, &host, "one", &new).await;
     assert_eq!(count(url, &rows("one")).await, 1);
-    assert_eq!(
-        store.take_checkpoint_garbage(10).await.unwrap(),
-        [old.sha256.as_str()]
-    );
-    store
-        .forget_checkpoint_garbage(std::slice::from_ref(&old.sha256))
-        .await
-        .unwrap();
-    assert!(store.take_checkpoint_garbage(10).await.unwrap().is_empty());
+    assert!(held(&store, &host).await.contains(&new.sha256));
+    assert!(!held(&store, &host).await.contains(&old.sha256));
+    // Another host holds none of them.
+    let other = support::register_host(&store, "hygiene-other").await;
+    assert!(held(&store, &other).await.is_empty());
 
     // A file two Sessions share stays while either names it.
     let shared = reference("identical transcript bytes");
@@ -402,7 +417,7 @@ async fn hygiene_contract(url: &str) {
     promoted(&store, &host, "right", &shared).await;
     promoted(&store, &host, "left", &reference("left moves on")).await;
     assert!(
-        store.take_checkpoint_garbage(10).await.unwrap().is_empty(),
+        held(&store, &host).await.contains(&shared.sha256),
         "the right Session still names the shared file"
     );
 
@@ -418,9 +433,11 @@ async fn hygiene_contract(url: &str) {
     store.finish_task(&host, &failure).await.unwrap();
     store.sweep_checkpoints().await.unwrap();
     assert_eq!(count(url, &rows("failed")).await, 0);
-    assert_eq!(
-        store.take_checkpoint_garbage(10).await.unwrap(),
-        [abandoned.sha256.as_str()]
+    let still = held(&store, &host).await;
+    assert!(!still.contains(&abandoned.sha256));
+    assert!(
+        still.contains(&staged.sha256),
+        "a running Attempt's reservation is held"
     );
     store
         .finish_task(&host, &finish(&running, Some(&staged)))
@@ -433,7 +450,7 @@ async fn hygiene_contract(url: &str) {
     big.byte_length = supertag_protocol::MAX_RESUMED_CHECKPOINT_BYTES as u64 + 1;
     promoted(&store, &host, "big", &big).await;
     let next = turn(&store, &host, "owner", "big").await;
-    assert!(store.get_checkpoint(&host, &next).await.unwrap().is_none());
+    assert!(got(&store, &host, &next).await.is_none());
     assert_eq!(count(url, &rows("big")).await, 0);
     store
         .finish_task(&host, &finish(&next, None))
@@ -461,7 +478,7 @@ async fn hygiene_contract(url: &str) {
     promoted(&store, &host, "swept", &swept).await;
     let resumed = turn(&store, &host, "owner", "idle").await;
     assert_eq!(
-        store.get_checkpoint(&host, &resumed).await.unwrap(),
+        got(&store, &host, &resumed).await,
         Some(idle.clone()),
         "a fresh checkpoint resumes"
     );
@@ -472,15 +489,15 @@ async fn hygiene_contract(url: &str) {
         .unwrap();
     clock.store(BASE + 15 * DAY, Ordering::SeqCst);
     let late = turn(&store, &host, "owner", "idle").await;
-    assert!(store.get_checkpoint(&host, &late).await.unwrap().is_none());
+    assert!(got(&store, &host, &late).await.is_none());
     store
         .finish_task(&host, &finish(&late, None))
         .await
         .unwrap();
     store.sweep_checkpoints().await.unwrap();
     assert_eq!(count(url, &rows("swept")).await, 0);
-    let garbage = store.take_checkpoint_garbage(100).await.unwrap();
-    assert!(garbage.contains(&idle.sha256) && garbage.contains(&swept.sha256));
+    let still = held(&store, &host).await;
+    assert!(!still.contains(&idle.sha256) && !still.contains(&swept.sha256));
 
     // An Objective's Sessions lose their checkpoints 3 days after it ends, long before an
     // ordinary Session finished at the same time goes idle.
@@ -505,11 +522,7 @@ async fn hygiene_contract(url: &str) {
     store.finish_task(&host, &completion).await.unwrap();
     store.sweep_checkpoints().await.unwrap();
     assert!(
-        !store
-            .take_checkpoint_garbage(100)
-            .await
-            .unwrap()
-            .contains(&ended.sha256),
+        held(&store, &host).await.contains(&ended.sha256),
         "a just-ended Objective keeps its checkpoint"
     );
     let ordinary = reference("ordinary transcript");
@@ -517,19 +530,15 @@ async fn hygiene_contract(url: &str) {
     clock.store(BASE + 17 * DAY, Ordering::SeqCst);
     store.sweep_checkpoints().await.unwrap();
     assert!(
-        !store
-            .take_checkpoint_garbage(100)
-            .await
-            .unwrap()
-            .contains(&ended.sha256),
+        held(&store, &host).await.contains(&ended.sha256),
         "two days after it ended, the Objective keeps its checkpoint"
     );
     clock.store(BASE + 19 * DAY, Ordering::SeqCst);
     store.sweep_checkpoints().await.unwrap();
-    let garbage = store.take_checkpoint_garbage(100).await.unwrap();
-    assert!(garbage.contains(&ended.sha256));
+    let still = held(&store, &host).await;
+    assert!(!still.contains(&ended.sha256));
     assert!(
-        !garbage.contains(&ordinary.sha256),
+        still.contains(&ordinary.sha256),
         "an ordinary Session four days idle keeps its checkpoint"
     );
     store.close().await;

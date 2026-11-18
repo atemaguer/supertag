@@ -581,6 +581,13 @@ pub(super) async fn claim_candidate(
             if left_for_warm_host(transaction, now, &task, accepted_order, sticky).await? {
                 continue;
             }
+            // The host holding the Session's checkpoint resumes it; others leave it for a while.
+            if crate::checkpoints::holder_wait_in(transaction, &task, Some(&scope.host_id), now)
+                .await?
+                .is_some()
+            {
+                continue;
+            }
             return Ok(Some((id, attempt_execution)));
         }
         if last_page {

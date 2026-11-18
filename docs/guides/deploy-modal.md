@@ -23,7 +23,7 @@ operators, Worker Hosts ── wss://WORKSPACE--supertag.modal.run ──> web e
 
 [`app.py`](../../deploy/modal/app.py) runs one container (`min_containers=1`,
 `max_containers=1`, non-preemptible) from the hosted image. A Modal Volume at
-`/var/lib/supertag` holds Session checkpoints. With the Gateway on, it runs in the same container and
+`/var/lib/supertag` holds the Gateway's connector state. With the Gateway on, it runs in the same container and
 reaches the Control Plane on `https://127.0.0.1:3434`. The Gateway is not given the database URL,
 the operator token, or the Control Plane's TLS settings, and the Control Plane is not given the
 surface settings. Both run as one user in one container, though, so either could read the other's
@@ -188,8 +188,6 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 ## Limits
 
 - One container. Every Control Plane runs the controllers, so do not raise `max_containers`.
-- Modal commits Volume writes in the background; Session checkpoints written just before a
-  container replacement may be lost, and work whose upload was in progress must be retried.
 - Native gRPC (`https://`) does not reach this deployment; clients use the `wss://` URL. The
   terminal UI uses your CA when you save the Control Plane with `supertag connect
   --server-ca-file`; the desktop app trusts only the system roots, so it cannot connect to a

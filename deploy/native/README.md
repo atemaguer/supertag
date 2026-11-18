@@ -8,7 +8,7 @@ A deployment runs these roles:
 
 | Role | Reachability | State |
 | --- | --- | --- |
-| Control Plane | Public native gRPC with its own TLS certificate, container port 3434 | PostgreSQL, and a volume at `/var/lib/supertag` for Session checkpoints |
+| Control Plane | Public native gRPC with its own TLS certificate, container port 3434 | PostgreSQL, or SQLite on a volume at `/var/lib/supertag` |
 | Gateway (optional) | No public listener: connects to the Control Plane as a client | Volume at `/var/lib/supertag`: the file credential vault and connector state |
 | Worker Hosts | Outbound only: each connects to the Control Plane | The host's own state directory |
 
@@ -18,7 +18,8 @@ passthrough). A platform whose ingress terminates TLS and forwards only HTTP/1.1
 through the [WebSocket tunnel](#websocket-tunnel-for-http-only-platforms) instead.
 
 Inside, the Control Plane is a stateless API tier in front of the state owner and its controllers,
-in one process. The API tier keeps only Session checkpoints, in `--checkpoint-directory`. Every Control Plane
+in one process. The API tier stores no files: Session checkpoints stay on the Worker Host that
+wrote them. Every Control Plane
 process also runs the controllers; API replicas without them are not supported yet. Several
 processes can share one PostgreSQL database (see [Control Plane replicas](#control-plane-replicas));
 a SQLite database serves one process. The Control Plane never stores artifact or Workspace
@@ -262,8 +263,7 @@ loses its network during a write stalls every write for up to 15 seconds, until 
 session; connect replicas to PostgreSQL directly or through a session-mode pooler, because a
 transaction-mode pooler drops those session limits. Operators, Worker Hosts, and Gateways connect
 to one Control Plane address, so put the replicas behind a TCP load balancer or private DNS name.
-Give every replica the same `--checkpoint-directory` on a shared volume: a checkpoint uploaded
-through one replica is downloaded through another. A Worker Host's relay stream reaches one replica,
+A Worker Host's relay stream reaches one replica,
 so only that replica relays the host's artifacts and Workspace deliveries; a read through another
 replica fails as if the host were offline. A SQLite
 database serves one Control Plane process; a second one on the same file refuses to start. See
@@ -272,8 +272,8 @@ database serves one Control Plane process; a second one on the same file refuses
 ## Render
 
 [`../render/render.yaml`](../render/render.yaml) is a Blueprint: a web service running the Control
-Plane with `--websocket-listen` on port 8080 (its `PORT`), a disk at `/var/lib/supertag` for
-Session checkpoints, Render PostgreSQL supplying `SUPERTAG_DATABASE_URL`, and an optional background worker
+Plane with `--websocket-listen` on port 8080 (its `PORT`), a disk at `/var/lib/supertag`, Render
+PostgreSQL supplying `SUPERTAG_DATABASE_URL`, and an optional background worker
 running the Gateway, which dials `wss://supertag-control-plane.onrender.com`; append its connector
 flags to its `dockerCommand`, and change that URL if Render assigns the Control Plane another
 hostname. Render's health check probes `/healthz` on the tunnel listener. See the [Render guide](../../docs/guides/deploy-render.md).
@@ -285,14 +285,14 @@ hostname. Render's health check probes `/healthz` on the tunnel listener. See th
 any client choice of container port. The Container is the hosted image, built by `wrangler deploy`
 from `supertag-hosted:local`. Worker secrets become the container's environment. A cron trigger
 starts the container after a deploy and keeps it awake. Cloudflare Containers have no persistent
-disk, so Session checkpoints do not survive a restart and the Gateway needs Vault. See the
+disk, so the Gateway needs Vault. See the
 [Cloudflare guide](../../docs/guides/deploy-cloudflare.md).
 
 ## Modal
 
 [`../modal/app.py`](../modal/app.py) runs one always-on, non-preemptible container behind a
 labelled web endpoint, which gives the stable URL `wss://WORKSPACE--LABEL.modal.run`. A Modal
-Volume at `/var/lib/supertag` holds Session checkpoints. PostgreSQL is external. See the
+Volume at `/var/lib/supertag` holds the Gateway's connector state. PostgreSQL is external. See the
 [Modal guide](../../docs/guides/deploy-modal.md).
 
 ## One container: Cloudflare and Modal

@@ -55,8 +55,6 @@ const (
 	ConnectorName = "supertag.runtime.v2.Connector"
 	// TransfersName is the fully-qualified name of the Transfers service.
 	TransfersName = "supertag.runtime.v2.Transfers"
-	// CheckpointDirectoryName is the fully-qualified name of the CheckpointDirectory service.
-	CheckpointDirectoryName = "supertag.runtime.v2.CheckpointDirectory"
 	// WorkspaceDirectoryName is the fully-qualified name of the WorkspaceDirectory service.
 	WorkspaceDirectoryName = "supertag.runtime.v2.WorkspaceDirectory"
 	// HostRelayName is the fully-qualified name of the HostRelay service.
@@ -310,6 +308,18 @@ const (
 	// WorkerHostReportWaitingForHolderProcedure is the fully-qualified name of the WorkerHost's
 	// ReportWaitingForHolder RPC.
 	WorkerHostReportWaitingForHolderProcedure = "/supertag.runtime.v2.WorkerHost/ReportWaitingForHolder"
+	// WorkerHostGetCheckpointProcedure is the fully-qualified name of the WorkerHost's GetCheckpoint
+	// RPC.
+	WorkerHostGetCheckpointProcedure = "/supertag.runtime.v2.WorkerHost/GetCheckpoint"
+	// WorkerHostReserveCheckpointProcedure is the fully-qualified name of the WorkerHost's
+	// ReserveCheckpoint RPC.
+	WorkerHostReserveCheckpointProcedure = "/supertag.runtime.v2.WorkerHost/ReserveCheckpoint"
+	// WorkerHostCommitCheckpointProcedure is the fully-qualified name of the WorkerHost's
+	// CommitCheckpoint RPC.
+	WorkerHostCommitCheckpointProcedure = "/supertag.runtime.v2.WorkerHost/CommitCheckpoint"
+	// WorkerHostListHeldCheckpointsProcedure is the fully-qualified name of the WorkerHost's
+	// ListHeldCheckpoints RPC.
+	WorkerHostListHeldCheckpointsProcedure = "/supertag.runtime.v2.WorkerHost/ListHeldCheckpoints"
 	// LiveInputsQueueInputProcedure is the fully-qualified name of the LiveInputs's QueueInput RPC.
 	LiveInputsQueueInputProcedure = "/supertag.runtime.v2.LiveInputs/QueueInput"
 	// LiveInputsGetInputProcedure is the fully-qualified name of the LiveInputs's GetInput RPC.
@@ -356,12 +366,6 @@ const (
 	// ConnectorReleaseConnectorProcedure is the fully-qualified name of the Connector's
 	// ReleaseConnector RPC.
 	ConnectorReleaseConnectorProcedure = "/supertag.runtime.v2.Connector/ReleaseConnector"
-	// TransfersUploadCheckpointProcedure is the fully-qualified name of the Transfers's
-	// UploadCheckpoint RPC.
-	TransfersUploadCheckpointProcedure = "/supertag.runtime.v2.Transfers/UploadCheckpoint"
-	// TransfersDownloadCheckpointProcedure is the fully-qualified name of the Transfers's
-	// DownloadCheckpoint RPC.
-	TransfersDownloadCheckpointProcedure = "/supertag.runtime.v2.Transfers/DownloadCheckpoint"
 	// TransfersCommitWorkspaceProcedure is the fully-qualified name of the Transfers's CommitWorkspace
 	// RPC.
 	TransfersCommitWorkspaceProcedure = "/supertag.runtime.v2.Transfers/CommitWorkspace"
@@ -383,15 +387,6 @@ const (
 	// TransfersVerifyWorkspaceOutputRemoteProcedure is the fully-qualified name of the Transfers's
 	// VerifyWorkspaceOutputRemote RPC.
 	TransfersVerifyWorkspaceOutputRemoteProcedure = "/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote"
-	// CheckpointDirectoryGetCheckpointProcedure is the fully-qualified name of the
-	// CheckpointDirectory's GetCheckpoint RPC.
-	CheckpointDirectoryGetCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint"
-	// CheckpointDirectoryReserveCheckpointProcedure is the fully-qualified name of the
-	// CheckpointDirectory's ReserveCheckpoint RPC.
-	CheckpointDirectoryReserveCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/ReserveCheckpoint"
-	// CheckpointDirectoryCommitCheckpointProcedure is the fully-qualified name of the
-	// CheckpointDirectory's CommitCheckpoint RPC.
-	CheckpointDirectoryCommitCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/CommitCheckpoint"
 	// WorkspaceDirectoryGetSourceProcedure is the fully-qualified name of the WorkspaceDirectory's
 	// GetSource RPC.
 	WorkspaceDirectoryGetSourceProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetSource"
@@ -2818,6 +2813,16 @@ type WorkerHostClient interface {
 	// The running Attempt waits for the Worker Host holding its Session's last delivery, which is
 	// not connected, or no longer waits. The Control Plane names that host from the delivery.
 	ReportWaitingForHolder(context.Context, *connect.Request[runtimev2.ReportWaitingForHolderRequest]) (*connect.Response[runtimev2.Task], error)
+	// The Session checkpoint this Attempt may resume, and the Worker Host holding its bytes. The
+	// Control Plane keeps only this metadata; the bytes stay with the host that wrote them.
+	GetCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error)
+	// Records the checkpoint the calling host now holds for this Attempt, then commits it. The
+	// holder is always the caller.
+	ReserveCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
+	CommitCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
+	// The digests of the checkpoints the calling host holds that a Session still resumes, so it
+	// deletes every other file it holds. Paged by digest.
+	ListHeldCheckpoints(context.Context, *connect.Request[runtimev2.ListHeldCheckpointsRequest]) (*connect.Response[runtimev2.ListHeldCheckpointsResponse], error)
 }
 
 // NewWorkerHostClient constructs a client for the supertag.runtime.v2.WorkerHost service. By
@@ -2963,6 +2968,30 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("ReportWaitingForHolder")),
 			connect.WithClientOptions(opts...),
 		),
+		getCheckpoint: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.GetCheckpointResponse](
+			httpClient,
+			baseURL+WorkerHostGetCheckpointProcedure,
+			connect.WithSchema(workerHostMethods.ByName("GetCheckpoint")),
+			connect.WithClientOptions(opts...),
+		),
+		reserveCheckpoint: connect.NewClient[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference](
+			httpClient,
+			baseURL+WorkerHostReserveCheckpointProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ReserveCheckpoint")),
+			connect.WithClientOptions(opts...),
+		),
+		commitCheckpoint: connect.NewClient[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference](
+			httpClient,
+			baseURL+WorkerHostCommitCheckpointProcedure,
+			connect.WithSchema(workerHostMethods.ByName("CommitCheckpoint")),
+			connect.WithClientOptions(opts...),
+		),
+		listHeldCheckpoints: connect.NewClient[runtimev2.ListHeldCheckpointsRequest, runtimev2.ListHeldCheckpointsResponse](
+			httpClient,
+			baseURL+WorkerHostListHeldCheckpointsProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ListHeldCheckpoints")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -2990,6 +3019,10 @@ type workerHostClient struct {
 	reportNetworkLog        *connect.Client[runtimev2.ReportNetworkLogRequest, runtimev2.ReportNetworkLogResponse]
 	resolveWorkspaceRef     *connect.Client[runtimev2.ResolveWorkspaceRefRequest, runtimev2.Task]
 	reportWaitingForHolder  *connect.Client[runtimev2.ReportWaitingForHolderRequest, runtimev2.Task]
+	getCheckpoint           *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GetCheckpointResponse]
+	reserveCheckpoint       *connect.Client[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference]
+	commitCheckpoint        *connect.Client[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference]
+	listHeldCheckpoints     *connect.Client[runtimev2.ListHeldCheckpointsRequest, runtimev2.ListHeldCheckpointsResponse]
 }
 
 // RegisterHost calls supertag.runtime.v2.WorkerHost.RegisterHost.
@@ -3102,6 +3135,26 @@ func (c *workerHostClient) ReportWaitingForHolder(ctx context.Context, req *conn
 	return c.reportWaitingForHolder.CallUnary(ctx, req)
 }
 
+// GetCheckpoint calls supertag.runtime.v2.WorkerHost.GetCheckpoint.
+func (c *workerHostClient) GetCheckpoint(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error) {
+	return c.getCheckpoint.CallUnary(ctx, req)
+}
+
+// ReserveCheckpoint calls supertag.runtime.v2.WorkerHost.ReserveCheckpoint.
+func (c *workerHostClient) ReserveCheckpoint(ctx context.Context, req *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
+	return c.reserveCheckpoint.CallUnary(ctx, req)
+}
+
+// CommitCheckpoint calls supertag.runtime.v2.WorkerHost.CommitCheckpoint.
+func (c *workerHostClient) CommitCheckpoint(ctx context.Context, req *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
+	return c.commitCheckpoint.CallUnary(ctx, req)
+}
+
+// ListHeldCheckpoints calls supertag.runtime.v2.WorkerHost.ListHeldCheckpoints.
+func (c *workerHostClient) ListHeldCheckpoints(ctx context.Context, req *connect.Request[runtimev2.ListHeldCheckpointsRequest]) (*connect.Response[runtimev2.ListHeldCheckpointsResponse], error) {
+	return c.listHeldCheckpoints.CallUnary(ctx, req)
+}
+
 // WorkerHostHandler is an implementation of the supertag.runtime.v2.WorkerHost service.
 type WorkerHostHandler interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
@@ -3140,6 +3193,16 @@ type WorkerHostHandler interface {
 	// The running Attempt waits for the Worker Host holding its Session's last delivery, which is
 	// not connected, or no longer waits. The Control Plane names that host from the delivery.
 	ReportWaitingForHolder(context.Context, *connect.Request[runtimev2.ReportWaitingForHolderRequest]) (*connect.Response[runtimev2.Task], error)
+	// The Session checkpoint this Attempt may resume, and the Worker Host holding its bytes. The
+	// Control Plane keeps only this metadata; the bytes stay with the host that wrote them.
+	GetCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error)
+	// Records the checkpoint the calling host now holds for this Attempt, then commits it. The
+	// holder is always the caller.
+	ReserveCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
+	CommitCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
+	// The digests of the checkpoints the calling host holds that a Session still resumes, so it
+	// deletes every other file it holds. Paged by digest.
+	ListHeldCheckpoints(context.Context, *connect.Request[runtimev2.ListHeldCheckpointsRequest]) (*connect.Response[runtimev2.ListHeldCheckpointsResponse], error)
 }
 
 // NewWorkerHostHandler builds an HTTP handler from the service implementation. It returns the path
@@ -3281,6 +3344,30 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("ReportWaitingForHolder")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostGetCheckpointHandler := connect.NewUnaryHandler(
+		WorkerHostGetCheckpointProcedure,
+		svc.GetCheckpoint,
+		connect.WithSchema(workerHostMethods.ByName("GetCheckpoint")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostReserveCheckpointHandler := connect.NewUnaryHandler(
+		WorkerHostReserveCheckpointProcedure,
+		svc.ReserveCheckpoint,
+		connect.WithSchema(workerHostMethods.ByName("ReserveCheckpoint")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostCommitCheckpointHandler := connect.NewUnaryHandler(
+		WorkerHostCommitCheckpointProcedure,
+		svc.CommitCheckpoint,
+		connect.WithSchema(workerHostMethods.ByName("CommitCheckpoint")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostListHeldCheckpointsHandler := connect.NewUnaryHandler(
+		WorkerHostListHeldCheckpointsProcedure,
+		svc.ListHeldCheckpoints,
+		connect.WithSchema(workerHostMethods.ByName("ListHeldCheckpoints")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.WorkerHost/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkerHostRegisterHostProcedure:
@@ -3327,6 +3414,14 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostResolveWorkspaceRefHandler.ServeHTTP(w, r)
 		case WorkerHostReportWaitingForHolderProcedure:
 			workerHostReportWaitingForHolderHandler.ServeHTTP(w, r)
+		case WorkerHostGetCheckpointProcedure:
+			workerHostGetCheckpointHandler.ServeHTTP(w, r)
+		case WorkerHostReserveCheckpointProcedure:
+			workerHostReserveCheckpointHandler.ServeHTTP(w, r)
+		case WorkerHostCommitCheckpointProcedure:
+			workerHostCommitCheckpointHandler.ServeHTTP(w, r)
+		case WorkerHostListHeldCheckpointsProcedure:
+			workerHostListHeldCheckpointsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3422,6 +3517,22 @@ func (UnimplementedWorkerHostHandler) ResolveWorkspaceRef(context.Context, *conn
 
 func (UnimplementedWorkerHostHandler) ReportWaitingForHolder(context.Context, *connect.Request[runtimev2.ReportWaitingForHolderRequest]) (*connect.Response[runtimev2.Task], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportWaitingForHolder is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) GetCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.GetCheckpoint is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ReserveCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReserveCheckpoint is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) CommitCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.CommitCheckpoint is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ListHeldCheckpoints(context.Context, *connect.Request[runtimev2.ListHeldCheckpointsRequest]) (*connect.Response[runtimev2.ListHeldCheckpointsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ListHeldCheckpoints is not implemented"))
 }
 
 // LiveInputsClient is a client for the supertag.runtime.v2.LiveInputs service.
@@ -4030,8 +4141,6 @@ func (UnimplementedConnectorHandler) ReleaseConnector(context.Context, *connect.
 
 // TransfersClient is a client for the supertag.runtime.v2.Transfers service.
 type TransfersClient interface {
-	UploadCheckpoint(context.Context) *connect.ClientStreamForClient[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
-	DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.CheckpointDownload], error)
 	// Records a delivery whose patch and bundle the calling Worker Host already holds.
 	CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
@@ -4057,18 +4166,6 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 	baseURL = strings.TrimRight(baseURL, "/")
 	transfersMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Transfers").Methods()
 	return &transfersClient{
-		uploadCheckpoint: connect.NewClient[runtimev2.CheckpointUpload, runtimev2.CheckpointReference](
-			httpClient,
-			baseURL+TransfersUploadCheckpointProcedure,
-			connect.WithSchema(transfersMethods.ByName("UploadCheckpoint")),
-			connect.WithClientOptions(opts...),
-		),
-		downloadCheckpoint: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload](
-			httpClient,
-			baseURL+TransfersDownloadCheckpointProcedure,
-			connect.WithSchema(transfersMethods.ByName("DownloadCheckpoint")),
-			connect.WithClientOptions(opts...),
-		),
 		commitWorkspace: connect.NewClient[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference](
 			httpClient,
 			baseURL+TransfersCommitWorkspaceProcedure,
@@ -4116,8 +4213,6 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 
 // transfersClient implements TransfersClient.
 type transfersClient struct {
-	uploadCheckpoint            *connect.Client[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
-	downloadCheckpoint          *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload]
 	commitWorkspace             *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
 	downloadWorkspace           *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
 	downloadCompleteWorkspace   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
@@ -4125,16 +4220,6 @@ type transfersClient struct {
 	downloadReviewArtifact      *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
 	downloadWorkspaceSource     *connect.Client[runtimev2.DownloadWorkspaceSourceRequest, runtimev2.WorkspaceSourceDownload]
 	verifyWorkspaceOutputRemote *connect.Client[runtimev2.VerifyWorkspaceOutputRemoteRequest, runtimev2.VerifyWorkspaceOutputRemoteResponse]
-}
-
-// UploadCheckpoint calls supertag.runtime.v2.Transfers.UploadCheckpoint.
-func (c *transfersClient) UploadCheckpoint(ctx context.Context) *connect.ClientStreamForClient[runtimev2.CheckpointUpload, runtimev2.CheckpointReference] {
-	return c.uploadCheckpoint.CallClientStream(ctx)
-}
-
-// DownloadCheckpoint calls supertag.runtime.v2.Transfers.DownloadCheckpoint.
-func (c *transfersClient) DownloadCheckpoint(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.CheckpointDownload], error) {
-	return c.downloadCheckpoint.CallServerStream(ctx, req)
 }
 
 // CommitWorkspace calls supertag.runtime.v2.Transfers.CommitWorkspace.
@@ -4174,8 +4259,6 @@ func (c *transfersClient) VerifyWorkspaceOutputRemote(ctx context.Context, req *
 
 // TransfersHandler is an implementation of the supertag.runtime.v2.Transfers service.
 type TransfersHandler interface {
-	UploadCheckpoint(context.Context, *connect.ClientStream[runtimev2.CheckpointUpload]) (*connect.Response[runtimev2.CheckpointReference], error)
-	DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.CheckpointDownload]) error
 	// Records a delivery whose patch and bundle the calling Worker Host already holds.
 	CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
@@ -4197,18 +4280,6 @@ type TransfersHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	transfersMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Transfers").Methods()
-	transfersUploadCheckpointHandler := connect.NewClientStreamHandler(
-		TransfersUploadCheckpointProcedure,
-		svc.UploadCheckpoint,
-		connect.WithSchema(transfersMethods.ByName("UploadCheckpoint")),
-		connect.WithHandlerOptions(opts...),
-	)
-	transfersDownloadCheckpointHandler := connect.NewServerStreamHandler(
-		TransfersDownloadCheckpointProcedure,
-		svc.DownloadCheckpoint,
-		connect.WithSchema(transfersMethods.ByName("DownloadCheckpoint")),
-		connect.WithHandlerOptions(opts...),
-	)
 	transfersCommitWorkspaceHandler := connect.NewUnaryHandler(
 		TransfersCommitWorkspaceProcedure,
 		svc.CommitWorkspace,
@@ -4253,10 +4324,6 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 	)
 	return "/supertag.runtime.v2.Transfers/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case TransfersUploadCheckpointProcedure:
-			transfersUploadCheckpointHandler.ServeHTTP(w, r)
-		case TransfersDownloadCheckpointProcedure:
-			transfersDownloadCheckpointHandler.ServeHTTP(w, r)
 		case TransfersCommitWorkspaceProcedure:
 			transfersCommitWorkspaceHandler.ServeHTTP(w, r)
 		case TransfersDownloadWorkspaceProcedure:
@@ -4279,14 +4346,6 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 
 // UnimplementedTransfersHandler returns CodeUnimplemented from all methods.
 type UnimplementedTransfersHandler struct{}
-
-func (UnimplementedTransfersHandler) UploadCheckpoint(context.Context, *connect.ClientStream[runtimev2.CheckpointUpload]) (*connect.Response[runtimev2.CheckpointReference], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.UploadCheckpoint is not implemented"))
-}
-
-func (UnimplementedTransfersHandler) DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.CheckpointDownload]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadCheckpoint is not implemented"))
-}
 
 func (UnimplementedTransfersHandler) CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.CommitWorkspace is not implemented"))
@@ -4314,129 +4373,6 @@ func (UnimplementedTransfersHandler) DownloadWorkspaceSource(context.Context, *c
 
 func (UnimplementedTransfersHandler) VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.VerifyWorkspaceOutputRemote is not implemented"))
-}
-
-// CheckpointDirectoryClient is a client for the supertag.runtime.v2.CheckpointDirectory service.
-type CheckpointDirectoryClient interface {
-	GetCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error)
-	ReserveCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
-	CommitCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
-}
-
-// NewCheckpointDirectoryClient constructs a client for the supertag.runtime.v2.CheckpointDirectory
-// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
-// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
-// the connect.WithGRPC() or connect.WithGRPCWeb() options.
-//
-// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
-// http://api.acme.com or https://acme.com/grpc).
-func NewCheckpointDirectoryClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) CheckpointDirectoryClient {
-	baseURL = strings.TrimRight(baseURL, "/")
-	checkpointDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("CheckpointDirectory").Methods()
-	return &checkpointDirectoryClient{
-		getCheckpoint: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.GetCheckpointResponse](
-			httpClient,
-			baseURL+CheckpointDirectoryGetCheckpointProcedure,
-			connect.WithSchema(checkpointDirectoryMethods.ByName("GetCheckpoint")),
-			connect.WithClientOptions(opts...),
-		),
-		reserveCheckpoint: connect.NewClient[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference](
-			httpClient,
-			baseURL+CheckpointDirectoryReserveCheckpointProcedure,
-			connect.WithSchema(checkpointDirectoryMethods.ByName("ReserveCheckpoint")),
-			connect.WithClientOptions(opts...),
-		),
-		commitCheckpoint: connect.NewClient[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference](
-			httpClient,
-			baseURL+CheckpointDirectoryCommitCheckpointProcedure,
-			connect.WithSchema(checkpointDirectoryMethods.ByName("CommitCheckpoint")),
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-// checkpointDirectoryClient implements CheckpointDirectoryClient.
-type checkpointDirectoryClient struct {
-	getCheckpoint     *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GetCheckpointResponse]
-	reserveCheckpoint *connect.Client[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference]
-	commitCheckpoint  *connect.Client[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference]
-}
-
-// GetCheckpoint calls supertag.runtime.v2.CheckpointDirectory.GetCheckpoint.
-func (c *checkpointDirectoryClient) GetCheckpoint(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error) {
-	return c.getCheckpoint.CallUnary(ctx, req)
-}
-
-// ReserveCheckpoint calls supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint.
-func (c *checkpointDirectoryClient) ReserveCheckpoint(ctx context.Context, req *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
-	return c.reserveCheckpoint.CallUnary(ctx, req)
-}
-
-// CommitCheckpoint calls supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint.
-func (c *checkpointDirectoryClient) CommitCheckpoint(ctx context.Context, req *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
-	return c.commitCheckpoint.CallUnary(ctx, req)
-}
-
-// CheckpointDirectoryHandler is an implementation of the supertag.runtime.v2.CheckpointDirectory
-// service.
-type CheckpointDirectoryHandler interface {
-	GetCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error)
-	ReserveCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
-	CommitCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
-}
-
-// NewCheckpointDirectoryHandler builds an HTTP handler from the service implementation. It returns
-// the path on which to mount the handler and the handler itself.
-//
-// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
-// and JSON codecs. They also support gzip compression.
-func NewCheckpointDirectoryHandler(svc CheckpointDirectoryHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	checkpointDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("CheckpointDirectory").Methods()
-	checkpointDirectoryGetCheckpointHandler := connect.NewUnaryHandler(
-		CheckpointDirectoryGetCheckpointProcedure,
-		svc.GetCheckpoint,
-		connect.WithSchema(checkpointDirectoryMethods.ByName("GetCheckpoint")),
-		connect.WithHandlerOptions(opts...),
-	)
-	checkpointDirectoryReserveCheckpointHandler := connect.NewUnaryHandler(
-		CheckpointDirectoryReserveCheckpointProcedure,
-		svc.ReserveCheckpoint,
-		connect.WithSchema(checkpointDirectoryMethods.ByName("ReserveCheckpoint")),
-		connect.WithHandlerOptions(opts...),
-	)
-	checkpointDirectoryCommitCheckpointHandler := connect.NewUnaryHandler(
-		CheckpointDirectoryCommitCheckpointProcedure,
-		svc.CommitCheckpoint,
-		connect.WithSchema(checkpointDirectoryMethods.ByName("CommitCheckpoint")),
-		connect.WithHandlerOptions(opts...),
-	)
-	return "/supertag.runtime.v2.CheckpointDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case CheckpointDirectoryGetCheckpointProcedure:
-			checkpointDirectoryGetCheckpointHandler.ServeHTTP(w, r)
-		case CheckpointDirectoryReserveCheckpointProcedure:
-			checkpointDirectoryReserveCheckpointHandler.ServeHTTP(w, r)
-		case CheckpointDirectoryCommitCheckpointProcedure:
-			checkpointDirectoryCommitCheckpointHandler.ServeHTTP(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-}
-
-// UnimplementedCheckpointDirectoryHandler returns CodeUnimplemented from all methods.
-type UnimplementedCheckpointDirectoryHandler struct{}
-
-func (UnimplementedCheckpointDirectoryHandler) GetCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.CheckpointDirectory.GetCheckpoint is not implemented"))
-}
-
-func (UnimplementedCheckpointDirectoryHandler) ReserveCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint is not implemented"))
-}
-
-func (UnimplementedCheckpointDirectoryHandler) CommitCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint is not implemented"))
 }
 
 // WorkspaceDirectoryClient is a client for the supertag.runtime.v2.WorkspaceDirectory service.

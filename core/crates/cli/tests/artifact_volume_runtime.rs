@@ -88,9 +88,7 @@ async fn stop(child: &mut Child) -> Result<()> {
 }
 fn plane(credentials: &Credentials, root: &Path, database: &str, mapped: bool) -> Command {
     let mut c = credentials.command(&["control-plane", "--listen", "127.0.0.1:0"]);
-    c.env("SUPERTAG_DATABASE_URL", database)
-        .arg("--checkpoint-directory")
-        .arg(root.join("cas"));
+    c.env("SUPERTAG_DATABASE_URL", database);
     if mapped {
         c.arg("--artifact-volume")
             .arg(format!("durable={}", root.join("volume").display()));

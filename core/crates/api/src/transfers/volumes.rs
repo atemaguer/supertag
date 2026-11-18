@@ -455,18 +455,9 @@ impl ApiTransfers {
             .await
     }
 
-    pub fn with_artifact_volumes(mut self, mappings: ArtifactVolumeMappings) -> Result<Self> {
-        if let Some(directory) = &self.checkpoints {
-            let directory = directory.canonicalize()?;
-            for mapping in mappings.files.values() {
-                ensure!(
-                    !mapping.root.starts_with(&directory) && !directory.starts_with(&mapping.root),
-                    "artifact Volume must not overlap Control Plane state"
-                );
-            }
-        }
+    pub fn with_artifact_volumes(mut self, mappings: ArtifactVolumeMappings) -> Self {
         self.volumes = mappings;
-        Ok(self)
+        self
     }
     pub fn artifact_volumes_service(&self) -> artifact_volumes_server::ArtifactVolumesServer<Self> {
         artifact_volumes_server::ArtifactVolumesServer::new(self.clone())

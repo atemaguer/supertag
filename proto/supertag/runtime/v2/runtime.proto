@@ -823,6 +823,29 @@ service WorkerHost {
   // The running Attempt waits for the Worker Host holding its Session's last delivery, which is
   // not connected, or no longer waits. The Control Plane names that host from the delivery.
   rpc ReportWaitingForHolder(ReportWaitingForHolderRequest) returns (Task);
+  // The Session checkpoint this Attempt may resume, and the Worker Host holding its bytes. The
+  // Control Plane keeps only this metadata; the bytes stay with the host that wrote them.
+  rpc GetCheckpoint(InspectAttemptRequest) returns (GetCheckpointResponse);
+  // Records the checkpoint the calling host now holds for this Attempt, then commits it. The
+  // holder is always the caller.
+  rpc ReserveCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
+  rpc CommitCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
+  // The digests of the checkpoints the calling host holds that a Session still resumes, so it
+  // deletes every other file it holds. Paged by digest.
+  rpc ListHeldCheckpoints(ListHeldCheckpointsRequest) returns (ListHeldCheckpointsResponse);
+}
+
+message ListHeldCheckpointsRequest {
+  // Digests after this one; empty for the first page.
+  string after_sha256 = 1;
+  // At most this many, 1 to 1000; 0 means 1000.
+  uint32 limit = 2;
+}
+
+message ListHeldCheckpointsResponse {
+  repeated string sha256 = 1;
+  // Present when more follow: the next request's `after_sha256`.
+  optional string next_after_sha256 = 2;
 }
 
 enum HostPhase {
@@ -987,10 +1010,8 @@ service Connector {
   rpc ReleaseConnector(ReleaseConnectorRequest) returns (ReleaseConnectorResponse);
 }
 
-// Public, attempt-authorized transfer of native Session checkpoints.
+// Attempt-authorized Workspace deliveries and their reads.
 service Transfers {
-  rpc UploadCheckpoint(stream CheckpointUpload) returns (CheckpointReference);
-  rpc DownloadCheckpoint(InspectAttemptRequest) returns (stream CheckpointDownload);
   // Records a delivery whose patch and bundle the calling Worker Host already holds.
   rpc CommitWorkspace(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
   rpc DownloadWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
@@ -1003,13 +1024,6 @@ service Transfers {
   // read from the remote by the Control Plane and relayed as a bundle.
   rpc DownloadWorkspaceSource(DownloadWorkspaceSourceRequest) returns (stream WorkspaceSourceDownload);
   rpc VerifyWorkspaceOutputRemote(VerifyWorkspaceOutputRemoteRequest) returns (VerifyWorkspaceOutputRemoteResponse);
-}
-
-// Internal authorization and commit for bytes the API tier stores.
-service CheckpointDirectory {
-  rpc GetCheckpoint(InspectAttemptRequest) returns (GetCheckpointResponse);
-  rpc ReserveCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
-  rpc CommitCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
 }
 
 // Internal authorization and commit for work product the API tier stores.
@@ -2602,25 +2616,13 @@ message CheckpointReference {
 
 message GetCheckpointResponse {
   CheckpointReference reference = 1;
+  // The Worker Host that holds the checkpoint's bytes. Another host starts the turn fresh.
+  string holder_host_id = 2;
 }
 
 message CommitCheckpointRequest {
   InspectAttemptRequest attempt = 1;
   CheckpointReference reference = 2;
-}
-
-message CheckpointUpload {
-  oneof part {
-    CommitCheckpointRequest begin = 1;
-    bytes chunk = 2;
-  }
-}
-
-message CheckpointDownload {
-  oneof part {
-    CheckpointReference reference = 1;
-    bytes chunk = 2;
-  }
 }
 
 message WorkspaceSpec {

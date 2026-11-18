@@ -445,17 +445,7 @@ async fn deploys_and_verifies_split_roles(database: String) -> Result<()> {
     let state = root.join("control-state");
     std::fs::create_dir(&state)?;
     std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))?;
-    let mut control = command(
-        &home,
-        &[
-            "control-plane",
-            "--listen",
-            "127.0.0.1:0",
-            "--checkpoint-directory",
-            &path("control-state/transfers"),
-        ],
-        &[],
-    );
+    let mut control = command(&home, &["control-plane", "--listen", "127.0.0.1:0"], &[]);
     control.envs(&control_env);
     control
         .env("SUPERTAG_DATABASE_URL", &database)
@@ -995,8 +985,6 @@ async fn deploys_and_verifies_behind_an_http_only_edge(database: String) -> Resu
             "127.0.0.1:0",
             "--websocket-listen",
             "127.0.0.1:0",
-            "--checkpoint-directory",
-            state.join("transfers").to_str().expect("utf-8 path"),
         ],
         &[],
     );

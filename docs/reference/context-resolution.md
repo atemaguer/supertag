@@ -37,11 +37,13 @@ inputs with the claim, without database access. Policy changes affect later Task
 ## Same-Session continuity
 
 Each Session maps to one native harness session. When a Task Attempt finishes, its harness may
-save the native session as a checkpoint. The Control Plane keeps the latest checkpoint for each Tag
-and Session in its private `--checkpoint-directory`; a Task Attempt that finishes without one,
-such as a failed one, clears it, so the Session's next Task starts a new native session.
+save the native session as a checkpoint. The Worker Host that ran it keeps the latest checkpoint for
+each Tag and Session, and the Control Plane records which host holds it; a Task Attempt that
+finishes without one, such as a failed one, clears it, so the Session's next Task starts a new
+native session.
 
-The Session's next Task receives the checkpoint, and its harness resumes it. A harness refuses a
+The Session's next Task receives the checkpoint when it runs on the holding host, and its harness
+resumes it; elsewhere it starts a new native session from the recap. A harness refuses a
 checkpoint that another harness, Tag, or Session produced, and the refusal fails the Task Attempt.
 Authorization, Role instructions, the Context Plan, the workspace plan, and execution settings do
 not gate a resume: each Task Attempt is authorized for its own Task. Earlier tool output stays in a

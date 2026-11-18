@@ -38,7 +38,7 @@ impl HostAuthority {
         })
     }
 
-    pub(crate) fn id(&self) -> &str {
+    pub fn id(&self) -> &str {
         &self.principal["host:".len()..]
     }
 }

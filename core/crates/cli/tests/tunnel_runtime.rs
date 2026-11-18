@@ -476,8 +476,6 @@ impl Deployment {
 
         let mut command = binary(&["control-plane", "--websocket-listen", "127.0.0.1:0"]);
         command
-            .arg("--checkpoint-directory")
-            .arg(root.join("transfers"))
             .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &tokens.gateway)
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &tokens.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &tokens.operator)

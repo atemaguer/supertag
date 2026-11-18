@@ -3370,6 +3370,26 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportWaitingForHolderRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
                 _registered_method=True)
+        self.GetCheckpoint = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/GetCheckpoint',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetCheckpointResponse.FromString,
+                _registered_method=True)
+        self.ReserveCheckpoint = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ReserveCheckpoint',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+                _registered_method=True)
+        self.CommitCheckpoint = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/CommitCheckpoint',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+                _registered_method=True)
+        self.ListHeldCheckpoints = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ListHeldCheckpoints',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsResponse.FromString,
+                _registered_method=True)
 
 
 class WorkerHostServicer:
@@ -3521,6 +3541,36 @@ class WorkerHostServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetCheckpoint(self, request, context):
+        """The Session checkpoint this Attempt may resume, and the Worker Host holding its bytes. The
+        Control Plane keeps only this metadata; the bytes stay with the host that wrote them.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReserveCheckpoint(self, request, context):
+        """Records the checkpoint the calling host now holds for this Attempt, then commits it. The
+        holder is always the caller.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CommitCheckpoint(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListHeldCheckpoints(self, request, context):
+        """The digests of the checkpoints the calling host holds that a Session still resumes, so it
+        deletes every other file it holds. Paged by digest.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerHostServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -3633,6 +3683,26 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.ReportWaitingForHolder,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportWaitingForHolderRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'GetCheckpoint': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetCheckpoint,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetCheckpointResponse.SerializeToString,
+            ),
+            'ReserveCheckpoint': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReserveCheckpoint,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.SerializeToString,
+            ),
+            'CommitCheckpoint': grpc.unary_unary_rpc_method_handler(
+                    servicer.CommitCheckpoint,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.SerializeToString,
+            ),
+            'ListHeldCheckpoints': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListHeldCheckpoints,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -4229,6 +4299,114 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/ReportWaitingForHolder',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportWaitingForHolderRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetCheckpoint(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/GetCheckpoint',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetCheckpointResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReserveCheckpoint(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ReserveCheckpoint',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CommitCheckpoint(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/CommitCheckpoint',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListHeldCheckpoints(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ListHeldCheckpoints',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -5125,7 +5303,7 @@ class Connector:
 
 
 class TransfersStub:
-    """Public, attempt-authorized transfer of native Session checkpoints.
+    """Attempt-authorized Workspace deliveries and their reads.
     """
 
     def __init__(self, channel):
@@ -5134,16 +5312,6 @@ class TransfersStub:
         Args:
             channel: A grpc.Channel.
         """
-        self.UploadCheckpoint = channel.stream_unary(
-                '/supertag.runtime.v2.Transfers/UploadCheckpoint',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointUpload.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
-                _registered_method=True)
-        self.DownloadCheckpoint = channel.unary_stream(
-                '/supertag.runtime.v2.Transfers/DownloadCheckpoint',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.FromString,
-                _registered_method=True)
         self.CommitWorkspace = channel.unary_unary(
                 '/supertag.runtime.v2.Transfers/CommitWorkspace',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
@@ -5182,20 +5350,8 @@ class TransfersStub:
 
 
 class TransfersServicer:
-    """Public, attempt-authorized transfer of native Session checkpoints.
+    """Attempt-authorized Workspace deliveries and their reads.
     """
-
-    def UploadCheckpoint(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def DownloadCheckpoint(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
 
     def CommitWorkspace(self, request, context):
         """Records a delivery whose patch and bundle the calling Worker Host already holds.
@@ -5247,16 +5403,6 @@ class TransfersServicer:
 
 def add_TransfersServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'UploadCheckpoint': grpc.stream_unary_rpc_method_handler(
-                    servicer.UploadCheckpoint,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointUpload.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.SerializeToString,
-            ),
-            'DownloadCheckpoint': grpc.unary_stream_rpc_method_handler(
-                    servicer.DownloadCheckpoint,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.SerializeToString,
-            ),
             'CommitWorkspace': grpc.unary_unary_rpc_method_handler(
                     servicer.CommitWorkspace,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.FromString,
@@ -5301,62 +5447,8 @@ def add_TransfersServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Transfers:
-    """Public, attempt-authorized transfer of native Session checkpoints.
+    """Attempt-authorized Workspace deliveries and their reads.
     """
-
-    @staticmethod
-    def UploadCheckpoint(request_iterator,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.stream_unary(
-            request_iterator,
-            target,
-            '/supertag.runtime.v2.Transfers/UploadCheckpoint',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointUpload.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def DownloadCheckpoint(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_stream(
-            request,
-            target,
-            '/supertag.runtime.v2.Transfers/DownloadCheckpoint',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
 
     @staticmethod
     def CommitWorkspace(request,
@@ -5537,167 +5629,6 @@ class Transfers:
             '/supertag.runtime.v2.Transfers/VerifyWorkspaceOutputRemote',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.VerifyWorkspaceOutputRemoteResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-
-class CheckpointDirectoryStub:
-    """Internal authorization and commit for bytes the API tier stores.
-    """
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.GetCheckpoint = channel.unary_unary(
-                '/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetCheckpointResponse.FromString,
-                _registered_method=True)
-        self.ReserveCheckpoint = channel.unary_unary(
-                '/supertag.runtime.v2.CheckpointDirectory/ReserveCheckpoint',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
-                _registered_method=True)
-        self.CommitCheckpoint = channel.unary_unary(
-                '/supertag.runtime.v2.CheckpointDirectory/CommitCheckpoint',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
-                _registered_method=True)
-
-
-class CheckpointDirectoryServicer:
-    """Internal authorization and commit for bytes the API tier stores.
-    """
-
-    def GetCheckpoint(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ReserveCheckpoint(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CommitCheckpoint(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-
-def add_CheckpointDirectoryServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-            'GetCheckpoint': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetCheckpoint,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetCheckpointResponse.SerializeToString,
-            ),
-            'ReserveCheckpoint': grpc.unary_unary_rpc_method_handler(
-                    servicer.ReserveCheckpoint,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.SerializeToString,
-            ),
-            'CommitCheckpoint': grpc.unary_unary_rpc_method_handler(
-                    servicer.CommitCheckpoint,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.SerializeToString,
-            ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler(
-            'supertag.runtime.v2.CheckpointDirectory', rpc_method_handlers)
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('supertag.runtime.v2.CheckpointDirectory', rpc_method_handlers)
-
-
- # This class is part of an EXPERIMENTAL API.
-class CheckpointDirectory:
-    """Internal authorization and commit for bytes the API tier stores.
-    """
-
-    @staticmethod
-    def GetCheckpoint(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetCheckpointResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ReserveCheckpoint(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.CheckpointDirectory/ReserveCheckpoint',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CommitCheckpoint(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.CheckpointDirectory/CommitCheckpoint',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
             options,
             channel_credentials,
             insecure,

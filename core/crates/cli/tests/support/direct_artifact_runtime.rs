@@ -78,10 +78,7 @@ async fn enrolled_worker_hosts_transfer_exact_artifacts_directly_across_producer
     let credentials = Credentials::new();
     let cas = root.join("cas");
     let mut control = credentials.command(&["control-plane"]);
-    control
-        .env("SUPERTAG_DATABASE_URL", &database)
-        .arg("--checkpoint-directory")
-        .arg(&cas);
+    control.env("SUPERTAG_DATABASE_URL", &database);
     let (mut control, public) = service(control).await?;
     json(credentials.operator(
         &[

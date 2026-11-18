@@ -9,7 +9,7 @@ A deployment has up to three roles:
 
 | Role | Reachability | State |
 | --- | --- | --- |
-| Control Plane | The one public endpoint, for operators, Worker Hosts, and Gateways. It terminates its own TLS and speaks gRPC | PostgreSQL, and a volume for Session checkpoints |
+| Control Plane | The one public endpoint, for operators, Worker Hosts, and Gateways. It terminates its own TLS and speaks gRPC | PostgreSQL |
 | **Gateway** (optional) | No public API: it connects to the Control Plane as a client. It receives collaboration surface webhooks through your reverse proxy, delivers replies, and sends operator notifications | A volume for connector state and the file credential vault, or HashiCorp Vault |
 | Worker Hosts | Outbound only | Each host's own state directory |
 

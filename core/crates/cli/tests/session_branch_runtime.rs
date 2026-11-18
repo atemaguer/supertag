@@ -145,10 +145,7 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
     let credentials = Credentials::new();
     let blobs = root.join("transfers");
     let mut plane = credentials.command(&["control-plane"]);
-    plane
-        .env("SUPERTAG_DATABASE_URL", &database)
-        .arg("--checkpoint-directory")
-        .arg(&blobs);
+    plane.env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, public) = service(plane).await?;
     json(credentials.operator(
         &[
@@ -444,10 +441,7 @@ async fn fetching_a_work_session_delivery_closes_the_work_session(database: Stri
     .await?;
     let credentials = Credentials::new();
     let mut plane = credentials.command(&["control-plane"]);
-    plane
-        .env("SUPERTAG_DATABASE_URL", &database)
-        .arg("--checkpoint-directory")
-        .arg(root.join("transfers"));
+    plane.env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, public) = service(plane).await?;
     json(credentials.operator(
         &[

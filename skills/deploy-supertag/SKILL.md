@@ -87,8 +87,8 @@ with the deployment's owner.
 - PostgreSQL for every shared deployment. SQLite serves one local process.
 - One Control Plane process per platform service unless you follow
   [Control Plane replicas](../../deploy/native/README.md#control-plane-replicas).
-- Persistent volumes for the Control Plane's Session checkpoints and the Gateway's state, or Vault
-  for the Gateway's credentials where the platform has no persistent disk.
+- A persistent volume for the Gateway's state, or Vault for the Gateway's credentials where the
+  platform has no persistent disk.
 - Persistent state directories for Worker Hosts. The Control Plane stores no artifact or
   Workspace delivery bytes: each Worker Host keeps what its Tasks produce, or writes it to a
   shared Volume, and the Control Plane relays a host's files to readers only while that host is
@@ -105,8 +105,8 @@ supertag get host --gateway team
 ## Ongoing
 
 - Upgrade per [Upgrade a deployment](../../docs/operations/control-plane.md#upgrade-a-deployment).
-- Back up PostgreSQL, the checkpoint volume, each Worker Host's artifact storage, and the Gateway's
-  volume.
+- Back up PostgreSQL, each Worker Host's artifact storage (artifacts, deliveries, and Session
+  checkpoints), and the Gateway's volume.
 - Rotate Operator Tokens before their 90-day expiry; revoke departed teammates' tokens, clients,
   and hosts.
 - `supertag audit --gateway team` lists operator changes with their actor.

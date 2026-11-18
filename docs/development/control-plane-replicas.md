@@ -56,9 +56,8 @@ Audited 2026-11-13 against `core/crates/control-plane`. "Fixed" rows changed in 
   replicas to PostgreSQL directly or through a session-mode pooler.
 - Operators, Worker Hosts, and Gateways connect to one Control Plane address. Put replicas behind
   a TCP load balancer or a private DNS name.
-- Every replica serves Session checkpoints from its `--checkpoint-directory`. Give all replicas
-  the same directory on a shared volume; checkpoints are content-addressed and published without
-  overwriting, so replicas can write it at once.
+- No replica stores Session checkpoints: they stay on the Worker Host that wrote them, and every
+  replica reads the same holder records from the database.
 - The Control Plane stores no artifact or Workspace delivery bytes. A replica relays them from the
   holding Worker Host over that host's `HostRelay.Await` stream, which is held in that replica's
   memory. A read through a replica the host's stream did not reach fails as if the host were
@@ -78,7 +77,7 @@ Audited 2026-11-13 against `core/crates/control-plane`. "Fixed" rows changed in 
   after the idle-in-transaction limit.
 - `cli/tests/replicas_runtime.rs`:
   `replicas_share_one_postgresql_database_and_survive_killed_replicas` runs three Control Plane
-  processes on one PostgreSQL database and one checkpoint directory, each with a Gateway delivering
+  processes on one PostgreSQL database, each with a Gateway delivering
   operator notifications, submits Tasks and creates Objectives through every replica, kills one
   replica while its Worker Host holds a running Attempt and another while Attempts finish and
   notifications are claimed, and asserts one adapter launch per Task, gap-free events, one

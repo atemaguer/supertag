@@ -89,8 +89,7 @@ use supertag_protocol::{
         artifact_directory_server::ArtifactDirectoryServer,
         artifact_publications_server::ArtifactPublicationsServer,
         artifact_volume_directory_server::ArtifactVolumeDirectoryServer,
-        attempt_inputs_server::AttemptInputsServer,
-        checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
+        attempt_inputs_server::AttemptInputsServer, connector_server::ConnectorServer,
         conversations_server::ConversationsServer, live_inputs_server::LiveInputsServer,
         objectives_server::ObjectivesServer, operator_client::OperatorClient,
         operator_server::OperatorServer, worker_host_server::WorkerHostServer,
@@ -356,11 +355,6 @@ enum Command {
         /// is reported after the gRPC address.
         #[arg(long)]
         websocket_listen: Option<SocketAddr>,
-        /// Private directory for Session checkpoints, the only bytes the Control Plane stores.
-        /// Artifacts and Workspace deliveries stay on the Worker Host that produced them, or on a
-        /// Volume, and the Control Plane relays them to readers without storing them.
-        #[arg(long)]
-        checkpoint_directory: Option<PathBuf>,
         /// Explicit storage-host consent: VOLUME_ID=/absolute/private/directory.
         #[arg(long = "artifact-volume")]
         artifact_volumes: Vec<String>,
@@ -1029,7 +1023,6 @@ async fn run(command: Command) -> Result<()> {
         Command::ControlPlane {
             listen,
             websocket_listen,
-            checkpoint_directory,
             artifact_volumes,
             artifact_s3_volumes,
             git_delivery_directory,
@@ -1039,7 +1032,6 @@ async fn run(command: Command) -> Result<()> {
                 listen,
                 websocket_listen,
                 ControlPlaneOptions {
-                    checkpoint_directory,
                     artifact_volumes,
                     artifact_s3_volumes,
                     git_delivery: git_delivery_directory,
@@ -1441,7 +1433,6 @@ async fn run(command: Command) -> Result<()> {
 
 /// What the Control Plane serves beyond its listeners.
 struct ControlPlaneOptions {
-    checkpoint_directory: Option<PathBuf>,
     artifact_volumes: Vec<String>,
     artifact_s3_volumes: Option<PathBuf>,
     git_delivery: Option<PathBuf>,
@@ -1548,11 +1539,10 @@ async fn control_plane(
         required_env("SUPERTAG_OPERATOR_TOKEN")?,
         operator_principal,
     )?;
-    let mut transfers = ApiTransfers::new(api.clone(), options.checkpoint_directory.clone())?
-        .with_artifact_volumes(volumes::mappings(
-            options.artifact_volumes,
-            options.artifact_s3_volumes,
-        )?)?;
+    let mut transfers = ApiTransfers::new(api.clone()).with_artifact_volumes(volumes::mappings(
+        options.artifact_volumes,
+        options.artifact_s3_volumes,
+    )?);
     let delivery = git_delivery(options.git_delivery)?;
     if let Some(delivery) = &delivery {
         transfers =
@@ -1562,23 +1552,13 @@ async fn control_plane(
     outln!("{}", listener.local_addr()?);
     let tunnel = bind_websocket(websocket).await?;
     let maintenance = plane.clone();
-    let checkpoint_files = transfers.clone();
     let sweep = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let garbage = CheckpointGarbage(maintenance.clone());
-        let mut tick = 0u64;
         loop {
             interval.tick().await;
             if let Err(error) = maintenance.maintain(Duration::from_secs(1)).await {
                 errln!("Control Plane maintenance failed: {error}");
-            }
-            // Dropped checkpoints' files go once a minute, after the sweep dropped their rows.
-            tick += 1;
-            if tick.is_multiple_of(60)
-                && let Err(error) = checkpoint_files.collect_checkpoint_garbage(&garbage).await
-            {
-                errln!("Control Plane checkpoint cleanup failed: {error}");
             }
         }
     });
@@ -1672,20 +1652,6 @@ async fn control_plane(
     sweep.abort();
     let _ = sweep.await;
     result
-}
-
-/// The state owner's queue of dropped checkpoint files, for the API tier that stores them.
-struct CheckpointGarbage(ControlPlane);
-
-#[tonic::async_trait]
-impl supertag_api::transfers::CheckpointGarbage for CheckpointGarbage {
-    async fn take(&self, limit: u32) -> Result<Vec<String>> {
-        Ok(self.0.take_checkpoint_garbage(limit).await?)
-    }
-
-    async fn forget(&self, digests: &[String]) -> Result<()> {
-        Ok(self.0.forget_checkpoint_garbage(digests).await?)
-    }
 }
 
 /// Git delivery for the API tier: remote Workspace sources and checks.
@@ -1793,11 +1759,6 @@ async fn state_owner(
         )
         .add_service(
             WorkerHostServer::new(plane.clone())
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES),
-        )
-        .add_service(
-            CheckpointDirectoryServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )

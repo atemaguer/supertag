@@ -944,10 +944,7 @@ async fn signed_slack_artifact_context_pins_catalog_and_bytes_across_threads(
     let credentials = Credentials::new();
     let mock = MockSlack::start().await?;
     let mut command = credentials.command(&["control-plane"]);
-    command
-        .env("SUPERTAG_DATABASE_URL", &database)
-        .arg("--checkpoint-directory")
-        .arg(directory.path().join("cas"));
+    command.env("SUPERTAG_DATABASE_URL", &database);
     let mut cp = Process::spawn(command, directory.path(), "context-cp")?;
     let private = cp.endpoints(1).await?.remove(0);
     let mut command = credentials.command(&[

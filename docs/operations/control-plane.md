@@ -19,9 +19,9 @@ The Control Plane reads Schedule times that name no time zone in its own time zo
 machine's, or `SUPERTAG_TIME_ZONE` for a hosted Control Plane. Each is an IANA name such as
 `Europe/Berlin`. Without either, it uses the machine's time zone, or UTC when that is unknown.
 
-The Control Plane creates and migrates its schema when it starts. It keeps Session checkpoints in
-`--checkpoint-directory`, outside the database. It stores no artifact or Workspace delivery
-bytes: the Worker Host that produced them keeps them, and the Control Plane relays them to readers.
+The Control Plane creates and migrates its schema when it starts. It stores no files: Session
+checkpoints stay on the Worker Host that wrote them, and artifact and Workspace delivery bytes on
+the Worker Host that produced them, which the Control Plane relays to readers.
 
 ### Listeners
 
@@ -169,8 +169,7 @@ and bundle behind `supertag fetch`, follow the same rule without Volume copies. 
 
 ## Replicas
 
-Several Control Plane processes can share one PostgreSQL database and one checkpoint directory on a
-shared volume. Put them behind one TCP load balancer or private DNS name, keep their clocks in
+Several Control Plane processes can share one PostgreSQL database. Put them behind one TCP load balancer or private DNS name, keep their clocks in
 sync, and run the same release on all of them. Each Worker Host's relay stream reaches one
 replica, so only that replica can relay its artifacts and Workspace deliveries. A read through
 another replica fails with the offline error; Volume copies are readable through every replica
@@ -179,8 +178,8 @@ that maps the Volume. A SQLite database serves one process. See
 
 ## Back up
 
-- **PostgreSQL**: back it up with your provider's backups or `pg_dump`, and back up the checkpoint
-  directory's volume with it. Back up each Worker Host's artifact storage too.
+- **PostgreSQL**: back it up with your provider's backups or `pg_dump`. Back up each Worker Host's
+  artifact storage too: it holds the host's artifacts, deliveries, and Session checkpoints.
 - **Local SQLite**: stop the services with `supertag down`, then copy `~/.supertag`. Copying a
   running database can capture a torn write.
 - **Gateway**: back up its volume, which holds the file credential vault and connector state, or

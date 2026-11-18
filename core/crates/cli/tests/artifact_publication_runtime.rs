@@ -92,8 +92,6 @@ async fn stop(child: &mut Child) -> Result<()> {
 fn plane(credentials: &Credentials, root: &Path, database: &str, listen: &str) -> Command {
     let mut c = credentials.command(&["control-plane", "--listen", listen]);
     c.env("SUPERTAG_DATABASE_URL", database)
-        .arg("--checkpoint-directory")
-        .arg(root.join("cas"))
         .arg("--artifact-volume")
         .arg(format!("published={}", root.join("volume").display()));
     c

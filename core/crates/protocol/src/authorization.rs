@@ -164,7 +164,6 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("ReplyProgress", "*", GATEWAY),
     ("OperatorNotifications", "*", GATEWAY),
     // The state owner's directories, behind the API tier.
-    ("CheckpointDirectory", "*", INTERNAL),
     ("WorkspaceDirectory", "*", INTERNAL),
     ("ArtifactDirectory", "*", INTERNAL),
     ("ArtifactVolumeDirectory", "*", INTERNAL),
@@ -309,7 +308,7 @@ mod tests {
             roles("ManifestRelationships/ReconcileManifestFields"),
             ["operator"]
         );
-        assert_eq!(roles("Transfers/UploadCheckpoint"), ["host"]);
+        assert_eq!(roles("WorkerHost/GetCheckpoint"), ["host"]);
         assert_eq!(
             roles("Transfers/DownloadWorkspaceArtifact"),
             ["operator", "client"]
@@ -329,7 +328,6 @@ mod tests {
         assert_eq!(roles("ProtocolNegotiation/Negotiate"), ["unauthenticated"]);
         for internal in [
             "CredentialDirectory/Resolve",
-            "CheckpointDirectory/GetCheckpoint",
             "GitDelivery/Claim",
             "Harness/Attach",
             "NoSuchService/Call",
@@ -357,12 +355,11 @@ mod tests {
         for path in [
             "WorkerHost/ClaimTask",
             "HostRelay/Await",
-            "Transfers/UploadCheckpoint",
+            "WorkerHost/GetCheckpoint",
             "Connector/ClaimConnector",
             "ReplyProgress/Claim",
             "OperatorNotifications/Claim",
             "CredentialDirectory/Resolve",
-            "CheckpointDirectory/GetCheckpoint",
             "Harness/Attach",
             "NoSuchService/Call",
         ] {

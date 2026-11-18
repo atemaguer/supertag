@@ -37,11 +37,11 @@ The Control Plane owns:
 - scheduling, leases, recovery decisions, cancellation, and reconciliation; and
 - events and audit history.
 
-It keeps Session checkpoints in its checkpoint directory, never in its database. It stores no
-artifact or Workspace delivery bytes: the Worker Host that produced them keeps them, and the
-Control Plane relays them to authorized readers over that host's relay stream. Several Control
-Plane processes can share one PostgreSQL database and one checkpoint directory; a SQLite database
-serves one process.
+It stores no files. Session checkpoints stay on the Worker Host that wrote them, and the Control
+Plane records only which host holds each one. Artifact and Workspace delivery bytes stay on the
+Worker Host that produced them, and the Control Plane relays them to authorized readers over that
+host's relay stream. Several Control Plane processes can share one PostgreSQL database; a SQLite
+database serves one process.
 
 ### Session checkpoints
 
@@ -50,17 +50,28 @@ Session can resume it. It is a cache: the Session's Tasks and their events are t
 turn without a checkpoint starts from a recap of them (see
 [Continuity and recaps](../concepts/tasks.md#continuity-and-recaps)).
 
+The Worker Host that ran the turn keeps the checkpoint in its artifact storage, which every lane of
+the host shares. The Control Plane records only its holder, size, and digest. Only the holder
+resumes it:
+
+- The Session's next Task waits up to 10 minutes for the holder while the holder is ready, bound
+  to the Tag, and runs the Task's harness. `supertag placement explain` reports the requirement
+  `checkpoint-holder`, and the conversation shows the same reason.
+- When the holder is offline, draining, or no longer eligible, or the 10 minutes pass, another
+  Worker Host takes the Task and starts it from the recap.
+- A holder whose file is missing or whose bytes no longer match its digest also starts fresh.
+
 | Rule | When |
 | --- | --- |
 | A Session keeps only its newest checkpoint | A successful turn's checkpoint replaces the Session's earlier ones |
-| A checkpoint over 8 MiB is never kept or resumed | Half the 16 MiB transfer limit, leaving room for one more long turn |
+| A checkpoint over 8 MiB is never kept or resumed | Half the 16 MiB limit, leaving room for one more long turn |
 | An idle Session's checkpoint is dropped | 14 days after the Session's last finished turn |
 | An ended Objective's checkpoints are dropped | 3 days after the Objective completes or is cancelled, before its Sessions would go idle |
 | A failed or cancelled Task Attempt's checkpoint is dropped | At the next maintenance pass |
 
-A dropped checkpoint's file leaves the checkpoint directory within about a minute, once no
-checkpoint names it. Two Sessions with byte-identical checkpoints share one file. These periods
-are fixed; there is no setting.
+A Worker Host deletes a checkpoint file when a newer one replaces it, when the Control Plane no
+longer names it (checked at start and every hour), and when it has not been written for 14 days.
+These periods are fixed; there is no setting.
 
 The Gateway terminates collaboration surface connections, turns their events into Tasks through
 the `Connector` service, and delivers replies and operator notifications. It does not decide

@@ -256,8 +256,6 @@ async fn a_remote_workspace_lands_through_git_delivery(database: String) -> Resu
     plane
         .env("SUPERTAG_DATABASE_URL", &database)
         .env("SUPERTAG_STATE_DIR", &credentials.state)
-        .arg("--checkpoint-directory")
-        .arg(root.join("checkpoints"))
         .arg("--git-delivery-directory")
         .arg(root.join("git-delivery"));
     let (mut plane, public) = service(plane).await?;
@@ -683,8 +681,6 @@ async fn a_review_workspace_opens_a_pull_request_that_closes_its_work_session(
     plane
         .env("SUPERTAG_DATABASE_URL", &database)
         .env("SUPERTAG_STATE_DIR", &credentials.state)
-        .arg("--checkpoint-directory")
-        .arg(root.join("checkpoints"))
         .arg("--git-delivery-directory")
         .arg(root.join("git-delivery"));
     let (mut plane, public) = service(plane).await?;

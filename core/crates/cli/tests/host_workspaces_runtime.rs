@@ -46,7 +46,7 @@ struct Services {
 }
 
 impl Services {
-    async fn start(database: &str, directory: &Path) -> Result<Self> {
+    async fn start(database: &str, _directory: &Path) -> Result<Self> {
         let gateway = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
         let operator = Uuid::new_v4().to_string();
         let host = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
@@ -56,9 +56,7 @@ impl Services {
             .env("SUPERTAG_GATEWAY_CREDENTIAL", &gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &operator)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host)
-            .env("SUPERTAG_DATABASE_URL", database)
-            .arg("--checkpoint-directory")
-            .arg(directory.join("transfers"));
+            .env("SUPERTAG_DATABASE_URL", database);
         let (plane, public) = service(plane).await?;
         Ok(Self {
             operator,

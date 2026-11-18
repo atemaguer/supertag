@@ -191,18 +191,12 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity(database: Str
 async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
     database: String,
 ) -> Result<()> {
-    let directory = tempfile::Builder::new()
-        .prefix("files-tui-")
-        .tempdir_in("/tmp")?;
-    let blobs = directory.path().join("blobs");
     let secret = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let token = Uuid::new_v4().to_string();
     let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let create_control = || {
         let mut control = control_plane(&secret, &token, "operator:alice");
         control
-            .arg("--checkpoint-directory")
-            .arg(&blobs)
             .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
             .env("SUPERTAG_DATABASE_URL", &database);
         control
@@ -334,7 +328,6 @@ async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
     let captured = held.commit(capture.clone()).await?;
     assert_eq!(captured.files.len(), 2);
     control_plane_holds_no_artifact_bytes(&database, bytes).await?;
-    control_plane_state_holds_no_artifact_bytes(&blobs, bytes)?;
 
     control.kill().await?;
     let (mut control, endpoint) = service(create_control()).await?;
@@ -365,29 +358,9 @@ async fn captured_artifact_survives_control_plane_restart_with_private_metadata(
         .into_inner();
     assert_eq!(restored.files, captured.files);
     // The bytes stay with the Worker Host: a reconnected host's repeated commit is the same capture.
-    control_plane_state_holds_no_artifact_bytes(&blobs, bytes)?;
     held.reconnect(channel(&endpoint).await?).await?;
     assert_eq!(held.commit(capture).await?, captured);
     control.kill().await?;
-    Ok(())
-}
-
-/// No file under the Control Plane's checkpoint directory holds artifact bytes.
-fn control_plane_state_holds_no_artifact_bytes(directory: &Path, bytes: &[u8]) -> Result<()> {
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return Ok(());
-    };
-    for entry in entries {
-        let path = entry?.path();
-        if path.is_file() {
-            let content = std::fs::read(&path)?;
-            ensure!(
-                !content.windows(bytes.len()).any(|window| window == bytes),
-                "Control Plane state holds artifact bytes in {}",
-                path.display()
-            );
-        }
-    }
     Ok(())
 }
 

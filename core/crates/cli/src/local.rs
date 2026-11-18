@@ -335,8 +335,6 @@ impl Children {
         plane
             .envs(self.proxy.iter().cloned())
             .args(["--listen", &listen.to_string()])
-            .arg("--checkpoint-directory")
-            .arg(directory.join("checkpoints"))
             .env(
                 "SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL",
                 &credentials.gateway,

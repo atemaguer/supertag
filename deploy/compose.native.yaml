@@ -8,7 +8,7 @@
 services:
   control-plane:
     image: ${SUPERTAG_CONTROL_IMAGE:?provide the verified native Control Plane image}
-    command: ["control-plane", "--listen", "0.0.0.0:3434", "--checkpoint-directory", "/var/lib/supertag/checkpoints"]
+    command: ["control-plane", "--listen", "0.0.0.0:3434"]
     env_file: ${SUPERTAG_CONTROL_ENV_FILE:?provide the private Control Plane env file}
     volumes:
       - control-state:/var/lib/supertag

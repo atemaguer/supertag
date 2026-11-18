@@ -131,14 +131,11 @@ async fn oversized_checkpoint_is_dropped_and_the_next_turn_starts_from_the_recap
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let checkpoints = directory.path().join("checkpoints");
     let service_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let operator_token = Uuid::new_v4().to_string();
     let host_token = supertag_protocol::new_secret(supertag_protocol::CREDENTIAL_SECRET_PREFIX);
     let mut plane = command(&["control-plane"]);
     plane
-        .arg("--checkpoint-directory")
-        .arg(&checkpoints)
         .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &service_token)
         .env("SUPERTAG_GATEWAY_CREDENTIAL", &service_token)
         .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)

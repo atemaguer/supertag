@@ -4,11 +4,11 @@
 //! Gateways and clients) in one authorization layer ([`authorize`]), serves Watch fan-out and
 //! transfers, and forwards every call to the state owner over a [`ProtocolChannel`]. The state
 //! owner and its controllers live in `supertag-control-plane`. One process serves both, over an
-//! in-process channel ([`in_process`]). Transfers store Session checkpoints only: artifact and
-//! Workspace delivery bytes stay on the Worker Host that produced them or on a Volume, and this
-//! tier relays them to authorized readers without writing them ([`transfers`]). It could later run
-//! as replicas in front of one state owner that share the checkpoint directory; no process runs it
-//! alone yet.
+//! in-process channel ([`in_process`]). Transfers store nothing: artifact and Workspace delivery
+//! bytes stay on the Worker Host that produced them or on a Volume, and this tier relays them to
+//! authorized readers without writing them ([`transfers`]). Session checkpoints stay on the Worker
+//! Host that wrote them. It could later run as replicas in front of one state owner; no process
+//! runs it alone yet.
 //!
 //! [`Api::routes`] lists every public service. The process serving them puts the protocol fence
 //! and then [`Api::authorize`] in front of all of them at once.
@@ -929,6 +929,50 @@ impl WorkerHost for Api {
         self.forward_host(request, true, |channel, request| async {
             worker_host_client(channel)
                 .report_waiting_for_holder(request)
+                .await
+        })
+        .await
+    }
+
+    async fn get_checkpoint(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<GetCheckpointResponse>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).get_checkpoint(request).await
+        })
+        .await
+    }
+
+    async fn reserve_checkpoint(
+        &self,
+        request: Request<CommitCheckpointRequest>,
+    ) -> Result<Response<CheckpointReference>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .reserve_checkpoint(request)
+                .await
+        })
+        .await
+    }
+
+    async fn commit_checkpoint(
+        &self,
+        request: Request<CommitCheckpointRequest>,
+    ) -> Result<Response<CheckpointReference>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).commit_checkpoint(request).await
+        })
+        .await
+    }
+
+    async fn list_held_checkpoints(
+        &self,
+        request: Request<ListHeldCheckpointsRequest>,
+    ) -> Result<Response<ListHeldCheckpointsResponse>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .list_held_checkpoints(request)
                 .await
         })
         .await

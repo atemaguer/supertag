@@ -186,9 +186,6 @@ spec:
     let credentials = Credentials::new();
     let mut plane = credentials.command(&["control-plane"]);
     plane.env("SUPERTAG_DATABASE_URL", database);
-    plane
-        .arg("--checkpoint-directory")
-        .arg(directory.join("transfers"));
     let (mut plane, public) = service(plane).await?;
     let manifest = manifest.to_str().context("path is not UTF-8")?;
     success(credentials.operator(&["apply", "-f", manifest], &public)).await?;

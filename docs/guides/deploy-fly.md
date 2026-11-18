@@ -57,8 +57,7 @@ fly secrets set --app supertag-control-plane \
 fly deploy --config deploy/native/fly/control-plane.toml --image IMAGE@sha256:DIGEST
 ```
 
-Run exactly one Machine. Its volume holds Session checkpoints, and every Control Plane process
-runs the controllers. The Control Plane migrates PostgreSQL when it starts.
+Run exactly one Machine: every Control Plane process runs the controllers. The Control Plane migrates PostgreSQL when it starts.
 
 ## 4. Verify and connect
 
@@ -100,8 +99,8 @@ supertag verify deployment https://supertag-control-plane.fly.dev \
 ## Limits
 
 - One Machine per app. Back up PostgreSQL and both volumes; they hold different state.
-- The volume holds Session checkpoints. Losing it loses checkpoints that are not yet consumed.
-  Artifacts and Workspace deliveries stay on the Worker Hosts that produced them.
+- Session checkpoints, artifacts, and Workspace deliveries stay on the Worker Hosts that produced
+  them, not on this volume.
 
 ## Remove the deployment
 

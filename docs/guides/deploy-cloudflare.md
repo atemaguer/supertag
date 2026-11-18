@@ -191,8 +191,8 @@ With the Gateway connected to Lark, mention the Tag in the Lark chat and confirm
 ## Limits
 
 - One container. Every Control Plane runs the controllers, so do not raise `max_instances`.
-- Session checkpoints live on the container's temporary disk and are lost on restart. Artifacts
-  and Workspace deliveries stay on the Worker Hosts that produced them.
+- Session checkpoints, artifacts, and Workspace deliveries stay on the Worker Hosts that produced
+  them, so a container restart loses none of them.
 - Native gRPC (`https://`) does not reach this deployment; clients use the `wss://` URL. The
   terminal UI uses your CA when you save the Control Plane with `supertag connect
   --server-ca-file`; the desktop app trusts only the system roots, so it cannot connect to a

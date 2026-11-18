@@ -119,8 +119,9 @@ or a collaboration surface failure does not erase accepted work. See
 [Scheduling and interrupted execution](../reference/scheduling-and-recovery.md).
 
 Each Task stores its request and result. A later Task in the same Session resumes that Session's
-native harness session from its checkpoint, possibly on another host. When no usable checkpoint
-exists, it starts fresh from a recap of the Session's earlier turns instead. Reusable outputs are
+native harness session from its checkpoint, which stays on the Worker Host that wrote it, so the
+next Task prefers that host. When no usable checkpoint is at hand, such as on another host, it
+starts fresh from a recap of the Session's earlier turns instead. Reusable outputs are
 explicitly captured as artifacts.
 
 ## Extension points

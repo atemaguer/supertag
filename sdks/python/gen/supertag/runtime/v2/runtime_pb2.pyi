@@ -1334,6 +1334,22 @@ class ReadMailboxRequest(_message.Message):
     cursor: str
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
 
+class ListHeldCheckpointsRequest(_message.Message):
+    __slots__ = ("after_sha256", "limit")
+    AFTER_SHA256_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    after_sha256: str
+    limit: int
+    def __init__(self, after_sha256: _Optional[str] = ..., limit: _Optional[int] = ...) -> None: ...
+
+class ListHeldCheckpointsResponse(_message.Message):
+    __slots__ = ("sha256", "next_after_sha256")
+    SHA256_FIELD_NUMBER: _ClassVar[int]
+    NEXT_AFTER_SHA256_FIELD_NUMBER: _ClassVar[int]
+    sha256: _containers.RepeatedScalarFieldContainer[str]
+    next_after_sha256: str
+    def __init__(self, sha256: _Optional[_Iterable[str]] = ..., next_after_sha256: _Optional[str] = ...) -> None: ...
+
 class ReportHostRequest(_message.Message):
     __slots__ = ("sequence", "capacity", "available_slots", "readiness", "reason", "harness_kind", "workspace_ids", "execution_profile", "disk_space", "labels", "harnesses")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
@@ -3349,10 +3365,12 @@ class CheckpointReference(_message.Message):
     def __init__(self, harness: _Optional[str] = ..., format: _Optional[str] = ..., byte_length: _Optional[int] = ..., sha256: _Optional[str] = ...) -> None: ...
 
 class GetCheckpointResponse(_message.Message):
-    __slots__ = ("reference",)
+    __slots__ = ("reference", "holder_host_id")
     REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    HOLDER_HOST_ID_FIELD_NUMBER: _ClassVar[int]
     reference: CheckpointReference
-    def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ...) -> None: ...
+    holder_host_id: str
+    def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., holder_host_id: _Optional[str] = ...) -> None: ...
 
 class CommitCheckpointRequest(_message.Message):
     __slots__ = ("attempt", "reference")
@@ -3361,22 +3379,6 @@ class CommitCheckpointRequest(_message.Message):
     attempt: InspectAttemptRequest
     reference: CheckpointReference
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., reference: _Optional[_Union[CheckpointReference, _Mapping]] = ...) -> None: ...
-
-class CheckpointUpload(_message.Message):
-    __slots__ = ("begin", "chunk")
-    BEGIN_FIELD_NUMBER: _ClassVar[int]
-    CHUNK_FIELD_NUMBER: _ClassVar[int]
-    begin: CommitCheckpointRequest
-    chunk: bytes
-    def __init__(self, begin: _Optional[_Union[CommitCheckpointRequest, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
-
-class CheckpointDownload(_message.Message):
-    __slots__ = ("reference", "chunk")
-    REFERENCE_FIELD_NUMBER: _ClassVar[int]
-    CHUNK_FIELD_NUMBER: _ClassVar[int]
-    reference: CheckpointReference
-    chunk: bytes
-    def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
 
 class WorkspaceSpec(_message.Message):
     __slots__ = ("workspace_id", "base_commit", "remote", "mounts", "mcp_servers", "base_ref", "merge_commit", "author_name", "author_email", "co_author")

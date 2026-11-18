@@ -195,17 +195,6 @@ impl ControlPlane {
         Ok(true)
     }
 
-    /// Up to `limit` digests of checkpoint files no checkpoint row names, for the API tier that
-    /// stores the files to delete.
-    pub async fn take_checkpoint_garbage(&self, limit: u32) -> anyhow::Result<Vec<String>> {
-        Ok(self.store.take_checkpoint_garbage(limit).await?)
-    }
-
-    /// Forgets checkpoint digests whose files the API tier deleted.
-    pub async fn forget_checkpoint_garbage(&self, digests: &[String]) -> anyhow::Result<()> {
-        Ok(self.store.forget_checkpoint_garbage(digests).await?)
-    }
-
     pub async fn sweep(&self) -> anyhow::Result<()> {
         self.store.sweep_objectives().await?;
         self.store.sweep_expired_attempts().await?;
@@ -733,6 +722,54 @@ impl worker_host_server::WorkerHost for ControlPlane {
         Ok(Response::new(
             self.store
                 .report_waiting_for_holder(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn get_checkpoint(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<GetCheckpointResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .get_checkpoint(&host, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn reserve_checkpoint(
+        &self,
+        request: Request<CommitCheckpointRequest>,
+    ) -> Result<Response<CheckpointReference>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .reserve_checkpoint(&host, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn commit_checkpoint(
+        &self,
+        request: Request<CommitCheckpointRequest>,
+    ) -> Result<Response<CheckpointReference>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .commit_checkpoint(&host, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn list_held_checkpoints(
+        &self,
+        request: Request<ListHeldCheckpointsRequest>,
+    ) -> Result<Response<ListHeldCheckpointsResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .list_held_checkpoints(&host, &request.into_inner())
                 .await?,
         ))
     }

@@ -192,9 +192,6 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let credentials = Credentials::new();
     let mut plane = credentials.command(&["control-plane"]);
     plane.env("SUPERTAG_DATABASE_URL", database);
-    plane
-        .arg("--checkpoint-directory")
-        .arg(directory.join("transfers"));
     let (mut plane, public) = service(plane).await?;
 
     let volume = json_output(credentials.command(&[

@@ -547,11 +547,7 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
     let root = directory.path();
     let (source, base) = repository(root).await?;
     let credentials = Credentials::new();
-    let artifacts = root.join("transfers");
-    let services = Services::start(&credentials, &database, |plane| {
-        plane.arg("--checkpoint-directory").arg(&artifacts);
-    })
-    .await?;
+    let services = Services::start(&credentials, &database, |_| {}).await?;
     let cli = |args: &[&str]| services.cli(&credentials, args);
     json(cli(&[
         "tag",

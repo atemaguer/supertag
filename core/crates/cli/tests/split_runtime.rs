@@ -2444,10 +2444,26 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     assert_eq!(usage["cached_input_tokens"], 1);
     assert_eq!(usage["output_tokens"], 3);
     assert!(usage["observed_model"].is_null());
-    let checkpoints: Vec<_> =
-        std::fs::read_dir(state.join("checkpoints"))?.collect::<std::io::Result<_>>()?;
-    assert_eq!(checkpoints.len(), 1);
-    let archive = &checkpoints[0].path();
+    // The Session checkpoint stays on the Worker Host that wrote it, under its storage's
+    // tags/<tag>/sessions/<session>/checkpoint/, never with the Control Plane.
+    fn held(directory: &Path, found: &mut Vec<PathBuf>) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(directory)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                held(&path, found)?;
+            } else if path.extension().is_some_and(|extension| extension == "bin")
+                && path.parent().and_then(Path::file_name) == Some("checkpoint".as_ref())
+            {
+                found.push(path);
+            }
+        }
+        Ok(())
+    }
+    let mut checkpoints = Vec::new();
+    held(&state, &mut checkpoints)?;
+    assert_eq!(checkpoints.len(), 1, "{checkpoints:?}");
+    let archive = &checkpoints[0];
+    assert!(archive.to_string_lossy().contains("/tags/"), "{archive:?}");
     assert_eq!(archive.metadata()?.permissions().mode() & 0o077, 0);
     let original = std::fs::read(archive)?;
     assert!(!String::from_utf8_lossy(&original).contains("fixture-native-sign-in"));
@@ -2476,20 +2492,23 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
             input_artifacts: vec![],
         })
     };
-    // Same-size corruption must fail before another adapter receives the bytes.
+    // Same-size corruption never reaches the adapter: the host finds the bytes changed and the
+    // turn starts fresh from the recap instead of resuming.
     let mut corrupted = original.clone();
     corrupted[0] ^= 1;
     std::fs::write(archive, corrupted)?;
-    let bad = operator
+    let fresh = operator
         .submit_task(resume("resume-corrupt")?)
         .await?
         .into_inner();
-    let bad = wait_for_state(&mut operator, &credentials, &bad.task_id, TaskState::Failed).await?;
-    assert_eq!(
-        bad.result.as_deref(),
-        Some("Session checkpoint could not be restored")
-    );
-    std::fs::write(archive, original)?;
+    let fresh = wait_for_state(
+        &mut operator,
+        &credentials,
+        &fresh.task_id,
+        TaskState::Succeeded,
+    )
+    .await?;
+    assert_eq!(fresh.result.as_deref(), Some("Native adapter verified"));
     let next = operator
         .submit_task(resume("resume-clean")?)
         .await?
@@ -3217,8 +3236,6 @@ async fn native_codex_plan_replaces_the_slack_acknowledgement_in_place(
     command
         .arg("control-plane")
         // Codex Session checkpoints are stored through the Control Plane.
-        .arg("--checkpoint-directory")
-        .arg(directory.join("checkpoints"))
         .env("SUPERTAG_DATABASE_URL", &database);
     let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
     let private = control_plane.endpoint().await?;
@@ -3357,8 +3374,6 @@ async fn native_codex_takes_a_folded_slack_message_into_its_running_turn(
     let mut command = credentials.command();
     command
         .arg("control-plane")
-        .arg("--checkpoint-directory")
-        .arg(directory.join("checkpoints"))
         .env("SUPERTAG_DATABASE_URL", &database);
     let mut control_plane = Process::spawn(command, directory, "control-plane", true)?;
     let private = control_plane.endpoint().await?;

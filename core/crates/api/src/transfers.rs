@@ -1,7 +1,7 @@
 use std::{
-    fs::{DirBuilder, File, OpenOptions},
+    fs::{File, OpenOptions},
     io::ErrorKind,
-    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -13,13 +13,11 @@ use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES,
     v2::{
-        checkpoint_directory_client::CheckpointDirectoryClient,
-        checkpoint_download, checkpoint_upload,
         transfers_server::{Transfers, TransfersServer},
         workspace_directory_client::WorkspaceDirectoryClient,
         workspace_download, *,
     },
-    validate_checkpoint_reference, validate_workspace_delivery,
+    validate_workspace_delivery,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -38,7 +36,6 @@ pub mod volumes;
 pub(crate) use relay::RelayHub;
 use relay::{Incoming, RelayError};
 
-const TRANSFER_TIMEOUT: Duration = Duration::from_secs(25);
 const WORKSPACE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[cfg(test)]
@@ -80,86 +77,27 @@ pub struct FetchedSource {
     pub keep: Box<dyn std::any::Any + Send + Sync>,
 }
 
-/// The Control Plane's queue of checkpoint files no checkpoint row names any more. The process
-/// that runs this tier supplies it from the state owner.
-#[tonic::async_trait]
-pub trait CheckpointGarbage: Send + Sync + 'static {
-    /// Up to `limit` digests whose files may be deleted.
-    async fn take(&self, limit: u32) -> Result<Vec<String>>;
-    /// Forgets digests whose files are gone.
-    async fn forget(&self, digests: &[String]) -> Result<()>;
-}
-
-/// Serves the Control Plane's byte transfers. It stores Session checkpoints in an optional private
-/// directory and nothing else: artifact and Workspace delivery bytes stay on the Worker Host that
-/// produced them (or a Volume), and reach readers through [`RelayHub`] without being written here.
+/// Serves the Control Plane's byte transfers. It stores nothing: artifact and Workspace delivery
+/// bytes stay on the Worker Host that produced them (or a Volume), and reach readers through
+/// [`RelayHub`] without being written here. Session checkpoints stay on the host that wrote them.
 #[derive(Clone)]
 pub struct ApiTransfers {
     api: Api,
-    checkpoints: Option<PathBuf>,
     capacity: Arc<Semaphore>,
     git: Option<Arc<dyn WorkspaceGit>>,
     volumes: volumes::ArtifactVolumeMappings,
     relay: Arc<RelayHub>,
-    /// Uploads hold it shared and garbage collection exclusively, so a file is never deleted
-    /// while an upload of the same digest is between its reservation and its commit.
-    checkpoint_files: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl ApiTransfers {
-    pub fn new(api: Api, checkpoints: Option<PathBuf>) -> Result<Self> {
-        if let Some(directory) = &checkpoints {
-            DirBuilder::new()
-                .mode(0o700)
-                .recursive(true)
-                .create(directory)
-                .context("create Control Plane checkpoint directory")?;
-            let metadata = directory.symlink_metadata()?;
-            ensure!(
-                metadata.is_dir()
-                    && metadata.mode() & 0o077 == 0
-                    && metadata.uid() == unsafe { libc::geteuid() },
-                "Control Plane checkpoint directory must be private"
-            );
-        }
-        Ok(Self {
+    pub fn new(api: Api) -> Self {
+        Self {
             api,
-            checkpoints,
             capacity: Arc::new(Semaphore::new(16)),
             git: None,
             volumes: volumes::ArtifactVolumeMappings::default(),
             relay: Arc::default(),
-            checkpoint_files: Arc::default(),
-        })
-    }
-
-    /// Deletes the files of checkpoints no row names any more, and returns how many. A missing
-    /// file counts as deleted.
-    pub async fn collect_checkpoint_garbage(
-        &self,
-        garbage: &dyn CheckpointGarbage,
-    ) -> Result<usize> {
-        let Some(directory) = &self.checkpoints else {
-            return Ok(0);
-        };
-        let _exclusive = self.checkpoint_files.write().await;
-        let digests = garbage.take(256).await?;
-        let mut deleted = Vec::with_capacity(digests.len());
-        for digest in digests {
-            if !supertag_protocol::valid_sha256(&digest) {
-                continue;
-            }
-            match tokio::fs::remove_file(directory.join(&digest)).await {
-                Ok(()) => deleted.push(digest),
-                Err(error) if error.kind() == ErrorKind::NotFound => deleted.push(digest),
-                Err(error) => return Err(error).context("delete a dropped checkpoint file"),
-            }
         }
-        if !deleted.is_empty() {
-            sync_directory(directory).await?;
-            garbage.forget(&deleted).await?;
-        }
-        Ok(deleted.len())
     }
 
     /// Ends every Worker Host relay stream once `shutdown` is cancelled.
@@ -295,67 +233,6 @@ impl ApiTransfers {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    async fn upload(
-        &self,
-        request: Request<Streaming<CheckpointUpload>>,
-    ) -> Result<Response<CheckpointReference>, Status> {
-        let directory = self.checkpoint_directory()?;
-        let _shared = self.checkpoint_files.read().await;
-        let (metadata, _, mut stream) = request.into_parts();
-        let begin = match stream.message().await?.and_then(|message| message.part) {
-            Some(checkpoint_upload::Part::Begin(begin)) => begin,
-            _ => {
-                return Err(Status::invalid_argument(
-                    "checkpoint upload requires an opening record",
-                ));
-            }
-        };
-        let reference = begin
-            .reference
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("checkpoint reference required"))?;
-        validate_checkpoint_reference(reference)?;
-        let mut reservation = Request::new(begin.clone());
-        *reservation.metadata_mut() = metadata.clone();
-        let reserved = self
-            .api
-            .forward_host(reservation, true, |channel, request| async move {
-                checkpoint_client(channel).reserve_checkpoint(request).await
-            })
-            .await?
-            .into_inner();
-        if &reserved != reference {
-            return Err(Status::data_loss(
-                "Control Plane returned a different checkpoint reservation",
-            ));
-        }
-
-        let mut file = StagedBlob::new(
-            directory,
-            BlobReference {
-                sha256: reference.sha256.clone(),
-                byte_length: reference.byte_length,
-            },
-        )?;
-        while let Some(message) = stream.message().await? {
-            let Some(checkpoint_upload::Part::Chunk(chunk)) = message.part else {
-                return Err(Status::invalid_argument("expected a checkpoint chunk"));
-            };
-            file.append(&chunk).await?;
-        }
-        file.verify().await?;
-        file.persist(directory).await?;
-        sync_directory(directory).await?;
-
-        let mut commit = Request::new(begin);
-        *commit.metadata_mut() = metadata;
-        self.api
-            .forward_host(commit, true, |channel, request| async move {
-                checkpoint_client(channel).commit_checkpoint(request).await
-            })
-            .await
-    }
-
     /// Records a delivery whose bytes the calling host already holds. No bytes reach this tier.
     async fn commit_workspace_delivery(
         &self,
@@ -431,12 +308,6 @@ impl ApiTransfers {
         Ok(())
     }
 
-    fn checkpoint_directory(&self) -> Result<&Path, Status> {
-        self.checkpoints.as_deref().ok_or_else(|| {
-            Status::failed_precondition("Control Plane checkpoint storage is not configured")
-        })
-    }
-
     fn acquire(&self) -> Result<tokio::sync::OwnedSemaphorePermit, Status> {
         self.capacity
             .clone()
@@ -497,18 +368,6 @@ impl ApiTransfers {
             authorize,
             WORKSPACE_TRANSFER_TIMEOUT,
         )))
-    }
-
-    async fn get_reference(
-        &self,
-        request: Request<InspectAttemptRequest>,
-    ) -> Result<Option<CheckpointReference>, Status> {
-        self.api
-            .forward_host(request, true, |channel, request| async move {
-                checkpoint_client(channel).get_checkpoint(request).await
-            })
-            .await
-            .map(|response| response.into_inner().reference)
     }
 }
 
@@ -631,68 +490,6 @@ impl Transfers for ApiTransfers {
             },
             authorize,
             WORKSPACE_TRANSFER_TIMEOUT,
-        )))
-    }
-
-    async fn upload_checkpoint(
-        &self,
-        request: Request<Streaming<CheckpointUpload>>,
-    ) -> Result<Response<CheckpointReference>, Status> {
-        self.authorize_upload(&request).await?;
-        let _permit = self.acquire()?;
-        timeout(TRANSFER_TIMEOUT, self.upload(request))
-            .await
-            .map_err(|_| Status::deadline_exceeded("checkpoint upload timed out"))?
-    }
-
-    type DownloadCheckpointStream = ReceiverStream<Result<CheckpointDownload, Status>>;
-
-    async fn download_checkpoint(
-        &self,
-        request: Request<InspectAttemptRequest>,
-    ) -> Result<Response<Self::DownloadCheckpointStream>, Status> {
-        let attempt = request.get_ref().clone();
-        let metadata = request.metadata().clone();
-        let Some(reference) = self.get_reference(request).await? else {
-            return Ok(Response::new(empty_stream()));
-        };
-        validate_checkpoint_reference(&reference)?;
-        let permit = self.acquire()?;
-        let file =
-            Source::File(open_blob(&self.checkpoint_directory()?.join(&reference.sha256)).await?);
-        let blob = BlobReference {
-            sha256: reference.sha256.clone(),
-            byte_length: reference.byte_length,
-        };
-        let header = CheckpointDownload {
-            part: Some(checkpoint_download::Part::Reference(reference.clone())),
-        };
-        let service = self.clone();
-        let authorize = move || {
-            let service = service.clone();
-            let reference = reference.clone();
-            let mut request = Request::new(attempt.clone());
-            *request.metadata_mut() = metadata.clone();
-            async move {
-                if service.get_reference(request).await?.as_ref() == Some(&reference) {
-                    Ok(())
-                } else {
-                    Err(Status::permission_denied(
-                        "Session checkpoint is no longer authorized",
-                    ))
-                }
-            }
-        };
-        Ok(Response::new(download_stream(
-            file,
-            permit,
-            blob,
-            header,
-            |bytes| CheckpointDownload {
-                part: Some(checkpoint_download::Part::Chunk(bytes)),
-            },
-            authorize,
-            TRANSFER_TIMEOUT,
         )))
     }
 
@@ -899,8 +696,8 @@ fn relay_status(error: RelayError, host: &str, what: &str) -> Status {
     }
 }
 
-/// Where a download's bytes come from: a local file this process reads (a checkpoint, a GitHub
-/// source bundle, or a transient Volume snapshot), or the Worker Host relaying them.
+/// Where a download's bytes come from: a local file this process reads (a GitHub source bundle,
+/// or a transient Volume snapshot), or the Worker Host relaying them.
 pub(crate) enum Source {
     File(tokio::fs::File),
     Relay(Incoming),
@@ -915,69 +712,6 @@ impl Source {
             }
             Self::Relay(incoming) => incoming.next().await,
         }
-    }
-}
-
-struct StagedBlob {
-    staged: tempfile::NamedTempFile,
-    handle: tokio::fs::File,
-    length: u64,
-    digest: Sha256,
-    expected: BlobReference,
-}
-
-impl StagedBlob {
-    fn new(directory: &Path, expected: BlobReference) -> Result<Self, Status> {
-        Self::staged(
-            tempfile::NamedTempFile::new_in(directory).map_err(storage_error)?,
-            expected,
-        )
-    }
-
-    fn staged(staged: tempfile::NamedTempFile, expected: BlobReference) -> Result<Self, Status> {
-        let handle =
-            tokio::fs::File::from_std(staged.as_file().try_clone().map_err(storage_error)?);
-        Ok(Self {
-            staged,
-            handle,
-            expected,
-            length: 0,
-            digest: Sha256::new(),
-        })
-    }
-
-    async fn append(&mut self, bytes: &[u8]) -> Result<(), Status> {
-        self.length += bytes.len() as u64;
-        if bytes.is_empty()
-            || bytes.len() > CHECKPOINT_CHUNK_BYTES
-            || self.length > self.expected.byte_length
-        {
-            return Err(Status::invalid_argument("invalid blob chunk size"));
-        }
-        self.digest.update(bytes);
-        self.handle.write_all(bytes).await.map_err(storage_error)
-    }
-
-    async fn verify(&mut self) -> Result<(), Status> {
-        if self.length != self.expected.byte_length
-            || format!("{:x}", self.digest.clone().finalize()) != self.expected.sha256
-        {
-            return Err(Status::invalid_argument("blob length or digest mismatch"));
-        }
-        self.handle.flush().await.map_err(storage_error)?;
-        self.handle.sync_all().await.map_err(storage_error)
-    }
-
-    async fn persist(self, directory: &Path) -> Result<(), Status> {
-        drop(self.handle);
-        let path = directory.join(&self.expected.sha256);
-        if let Err(error) = self.staged.persist_noclobber(&path) {
-            if error.error.kind() != ErrorKind::AlreadyExists {
-                return Err(storage_error(error.error));
-            }
-            verify_existing(&path, &self.expected).await?;
-        }
-        Ok(())
     }
 }
 
@@ -1078,36 +812,6 @@ where
     ReceiverStream::new(receive)
 }
 
-async fn verify_existing(path: &Path, reference: &BlobReference) -> Result<(), Status> {
-    let mut file = open_blob(path).await?;
-    let mut digest = Sha256::new();
-    let mut length = 0u64;
-    let mut buffer = vec![0u8; CHECKPOINT_CHUNK_BYTES];
-    loop {
-        let count = file.read(&mut buffer).await.map_err(storage_error)?;
-        if count == 0 {
-            break;
-        }
-        length += count as u64;
-        if length > reference.byte_length {
-            return Err(Status::data_loss("stored blob exceeds its receipt"));
-        }
-        digest.update(&buffer[..count]);
-    }
-    if length != reference.byte_length || format!("{:x}", digest.finalize()) != reference.sha256 {
-        return Err(Status::data_loss("stored blob conflicts with upload"));
-    }
-    Ok(())
-}
-
-async fn sync_directory(directory: &Path) -> Result<(), Status> {
-    let path = directory.to_owned();
-    tokio::task::spawn_blocking(move || File::open(path)?.sync_all())
-        .await
-        .map_err(|_| Status::internal("blob durability check failed"))?
-        .map_err(storage_error)
-}
-
 async fn open_blob(path: &Path) -> Result<tokio::fs::File, Status> {
     open_optional_blob(path)
         .await?
@@ -1135,12 +839,6 @@ async fn open_optional_blob(path: &Path) -> Result<Option<tokio::fs::File>, Stat
     .map_err(|_| Status::internal("blob file open failed"))?
 }
 
-fn checkpoint_client(channel: ProtocolChannel) -> CheckpointDirectoryClient<ProtocolChannel> {
-    CheckpointDirectoryClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES)
-}
-
 fn workspace_client(channel: ProtocolChannel) -> WorkspaceDirectoryClient<ProtocolChannel> {
     WorkspaceDirectoryClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -1149,7 +847,7 @@ fn workspace_client(channel: ProtocolChannel) -> WorkspaceDirectoryClient<Protoc
 
 fn storage_error(error: std::io::Error) -> Status {
     supertag_protocol::terminal_text::warn(&format!(
-        "Control Plane checkpoint or Volume storage error: {}",
+        "Control Plane Volume storage error: {}",
         error.kind()
     ));
     Status::internal("blob storage operation failed")

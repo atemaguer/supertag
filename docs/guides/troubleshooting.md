@@ -83,6 +83,7 @@ and serves its harness and model. `placement explain` names which is missing:
 | `unsandboxed-commands`: no host lets the harness run commands | Add the harness to a host's `allow-unsandboxed-commands`, or remove `commands:execute` |
 | `file-scope`: the harness cannot enforce the Task's path scope | Run the Tag on a harness that can, or change the scope; see [Path scopes](../reference/iam.md#path-scopes) |
 | `workspace-holder`: a running Task waits for the Worker Host holding its Session's last delivery | Start the host it names, or cancel the Task |
+| `checkpoint-holder`: a queued Task waits up to 10 minutes for the Worker Host holding its Session's checkpoint | Nothing: the holder resumes it, or after the wait another host starts it from the recap |
 | `network-scope`: the harness or host cannot enforce the Task's network scope, or no host offers its credential | Run the Tag on Codex, or on a Claude Code host that can run its sandbox (on Linux, install bubblewrap and socat); add the credential to a host's `network-credentials`; or change the scope; see [Network scopes](../reference/iam.md#network-scopes) |
 
 Each entry under `hosts` also gives that Worker Host's own `requirement` and `reason` when none

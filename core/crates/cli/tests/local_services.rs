@@ -1110,8 +1110,6 @@ impl Central {
         };
         let mut plane = reaped(Command::new(BIN))
             .args(["control-plane", "--listen", "127.0.0.1:0"])
-            .arg("--checkpoint-directory")
-            .arg(checkpoints.path().join("checkpoints"))
             .env_clear()
             .env("SUPERTAG_DATABASE_URL", database)
             .env("SUPERTAG_BOOTSTRAP_GATEWAY_CREDENTIAL", &gateway_token)

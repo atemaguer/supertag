@@ -649,6 +649,11 @@ impl Store {
         } else {
             None
         };
+        let holder = if task.state() == TaskState::Queued {
+            crate::checkpoints::holder_wait_in(&mut transaction, &task, None, now).await?
+        } else {
+            None
+        };
         transaction.commit().await?;
         let missing = missing_labels(&required, &carried);
         let (requirement, summary) = if let Some(holder) = &task.waiting_for_holder {
@@ -680,6 +685,14 @@ impl Store {
                         .split_once('/')
                         .map_or("", |(_, per)| per),
                     crate::start_rates::clock(next, self.time_zone()),
+                ),
+            )
+        } else if let Some((holder, until)) = holder {
+            (
+                "checkpoint-holder".to_owned(),
+                format!(
+                    "Waiting until {} for Worker Host {holder}, which holds this Session's checkpoint; after that another Worker Host starts it from the recap",
+                    crate::start_rates::clock(until, self.time_zone()),
                 ),
             )
         } else if missing.is_empty() {

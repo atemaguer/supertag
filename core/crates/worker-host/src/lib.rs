@@ -522,9 +522,31 @@ pub async fn run(
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES),
     };
-    // Workspace deliveries stay in this host's artifact storage; only their digests go upstream.
+    // Workspace deliveries and Session checkpoints stay in this host's artifact storage, which
+    // every lane of the host shares; only their digests go upstream.
     let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone())
-        .with_storage(serving.storage.clone());
+        .with_storage(serving.storage.clone())
+        .with_checkpoints(checkpoints::Held::new(
+            serving.storage.root(),
+            &registration.host_id,
+        ));
+    // At start and every hour, delete the checkpoint files no Session will resume.
+    {
+        let transfers = transfers.clone();
+        let token = token.clone();
+        let shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) = transfers.reconcile(&token).await {
+                    crate::failures::note("held checkpoints could not be reconciled", &error);
+                }
+                tokio::select! {
+                    () = shutdown.cancelled() => break,
+                    () = tokio::time::sleep(Duration::from_secs(60 * 60)) => {}
+                }
+            }
+        });
+    }
     let mut host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
@@ -1624,7 +1646,11 @@ async fn run_assignment(
             );
         }
     }
-    let checkpoint = match time::timeout_at(valid_until, transfers.download(&attempt, token)).await
+    let checkpoint = match time::timeout_at(
+        valid_until,
+        transfers.download(&attempt, token, (&task.tag_id, &task.session_id)),
+    )
+    .await
     {
         Ok(Ok(checkpoint)) => {
             checkpoint.filter(|checkpoint| checkpoints::resumable(options.harness, checkpoint))

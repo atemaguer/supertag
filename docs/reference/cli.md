@@ -2013,9 +2013,6 @@ Options:
       --websocket-listen <WEBSOCKET_LISTEN>
           Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
 
-      --checkpoint-directory <CHECKPOINT_DIRECTORY>
-          Private directory for Session checkpoints, the only bytes the Control Plane stores. Artifacts and Workspace deliveries stay on the Worker Host that produced them, or on a Volume, and the Control Plane relays them to readers without storing them
-
       --artifact-volume <ARTIFACT_VOLUMES>
           Explicit storage-host consent: VOLUME_ID=/absolute/private/directory
 
