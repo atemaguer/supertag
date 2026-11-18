@@ -148,6 +148,66 @@ enum SetupCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Set up SuperTag on this machine for the git repository in the current directory.
+    Init(init::InitArgs),
+    /// Start local services or configured Worker Hosts in the background and return when ready.
+    ///
+    /// With --foreground, supervise them in this terminal until interrupted. A service with
+    /// restart: unless-stopped makes up install a per-user service unit (launchd on macOS,
+    /// systemd on Linux) that runs the supervisor and starts it again after a failure or login.
+    ///
+    /// Running services are left alone when nothing changed. Changed settings restart them; so
+    /// does another build of SuperTag, such as the release before an upgrade, which up stops
+    /// and starts again with this CLI's executable.
+    Up {
+        /// Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present.
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
+        #[arg(long)]
+        state_directory: Option<PathBuf>,
+        /// Run in this terminal with each service's logs here until interrupted.
+        #[arg(long)]
+        foreground: bool,
+        /// When restarting changed services, do not wait for running Task Attempts.
+        #[arg(long, conflicts_with = "foreground")]
+        force: bool,
+        #[command(flatten)]
+        adapter: AdapterOptions,
+        /// Private host allowlist of Skill packages.
+        #[arg(long, long_help = SKILL_CATALOG_HELP)]
+        skill_catalog: Option<PathBuf>,
+        /// Address the local Control Plane listens on. Port 0 picks a free port.
+        #[arg(long, default_value = "127.0.0.1:0")]
+        control_plane_listen: SocketAddr,
+    },
+    /// Open the terminal UI; plain supertag opens it for this machine's services.
+    Tui {
+        /// Gateway URL or the name of a saved Gateway.
+        #[arg(long, conflicts_with = "state_directory")]
+        gateway: Option<String>,
+        /// Use the local services in this state directory instead of a Gateway URL.
+        #[arg(long)]
+        state_directory: Option<PathBuf>,
+        /// Terminal UI executable. Also reads SUPERTAG_TUI_BINARY.
+        #[arg(long)]
+        binary: Option<PathBuf>,
+        /// Workspace ID the terminal UI starts in.
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+    /// Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox.
+    Status(status::StatusArgs),
+    /// List this machine's SuperTag services.
+    Ps(lifecycle::PsArgs),
+    /// Print this machine's service logs.
+    Logs(lifecycle::LogsArgs),
+    /// Stop this machine's SuperTag services, draining local Worker Hosts first.
+    ///
+    /// When the Control Plane cannot be reached or speaks another protocol, as after an
+    /// upgrade, down stops the services without draining. Worker Hosts still stop gracefully,
+    /// and their running Task Attempts follow the recovery rules.
+    Down(lifecycle::DownArgs),
     /// Check a public or private gRPC service using the configured TLS trust.
     Health(health::HealthArgs),
     /// Prepare a deployment of the Control Plane and Gateway, or connect a collaboration
@@ -283,53 +343,8 @@ enum Command {
         #[command(subcommand)]
         command: teams::TeamCommand,
     },
-    /// Set up SuperTag on this machine for the git repository in the current directory.
-    Init(init::InitArgs),
     /// Check that a harness's Worker Host credentials work, and say how to sign in when not.
     SignIn(harness_checks::SignInArgs),
-    /// Start local services or configured Worker Hosts in the background and return when ready.
-    ///
-    /// With --foreground, supervise them in this terminal until interrupted. A service with
-    /// restart: unless-stopped makes up install a per-user service unit (launchd on macOS,
-    /// systemd on Linux) that runs the supervisor and starts it again after a failure or login.
-    ///
-    /// Running services are left alone when nothing changed. Changed settings restart them; so
-    /// does another build of SuperTag, such as the release before an upgrade, which up stops
-    /// and starts again with this CLI's executable.
-    Up {
-        /// Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present.
-        #[arg(short = 'f', long = "file")]
-        file: Option<PathBuf>,
-        /// Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR).
-        #[arg(long)]
-        state_directory: Option<PathBuf>,
-        /// Run in this terminal with each service's logs here until interrupted.
-        #[arg(long)]
-        foreground: bool,
-        /// When restarting changed services, do not wait for running Task Attempts.
-        #[arg(long, conflicts_with = "foreground")]
-        force: bool,
-        #[command(flatten)]
-        adapter: AdapterOptions,
-        /// Private host allowlist of Skill packages.
-        #[arg(long, long_help = SKILL_CATALOG_HELP)]
-        skill_catalog: Option<PathBuf>,
-        /// Address the local Control Plane listens on. Port 0 picks a free port.
-        #[arg(long, default_value = "127.0.0.1:0")]
-        control_plane_listen: SocketAddr,
-    },
-    /// Stop this machine's SuperTag services, draining local Worker Hosts first.
-    ///
-    /// When the Control Plane cannot be reached or speaks another protocol, as after an
-    /// upgrade, down stops the services without draining. Worker Hosts still stop gracefully,
-    /// and their running Task Attempts follow the recovery rules.
-    Down(lifecycle::DownArgs),
-    /// Print this machine's service logs.
-    Logs(lifecycle::LogsArgs),
-    /// List this machine's SuperTag services.
-    Ps(lifecycle::PsArgs),
-    /// Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox.
-    Status(status::StatusArgs),
     /// Print this CLI's version and the version of the running local services.
     Version(status::VersionArgs),
     /// Print the resolved supertag.yaml that supertag up runs.
@@ -438,21 +453,6 @@ enum Command {
             long_help = "Tell the operator about Inbox items here: webhook:HTTPS_URL[#SECRET_NAME], slack:CHANNEL_OR_USER_ID, or slack:WORKSPACE_ID/CHANNEL_OR_USER_ID. Repeatable. A webhook's SECRET_NAME is read from SUPERTAG_NOTIFY_SECRET_<NAME> (uppercase, - as _) and sent as a bearer token. Slack destinations post with this Gateway's Slack connector or, without one, as the Slack workspace in SUPERTAG_NOTIFY_SLACK_TEAM_ID, whose bot token is read from SUPERTAG_NOTIFY_SLACK_BOT_TOKEN or the credential vault entry SUPERTAG_NOTIFY_SLACK_CREDENTIAL_ID."
         )]
         notify: Vec<String>,
-    },
-    /// Open the terminal UI for a saved or explicitly configured Gateway.
-    Tui {
-        /// Gateway URL or the name of a saved Gateway.
-        #[arg(long, conflicts_with = "state_directory")]
-        gateway: Option<String>,
-        /// Use the local services in this state directory instead of a Gateway URL.
-        #[arg(long)]
-        state_directory: Option<PathBuf>,
-        /// Terminal UI executable. Also reads SUPERTAG_TUI_BINARY.
-        #[arg(long)]
-        binary: Option<PathBuf>,
-        /// Workspace ID the terminal UI starts in.
-        #[arg(long)]
-        workspace: Option<String>,
     },
     /// Connect a Worker Host and run accepted Tasks through an adapter.
     WorkerHost {

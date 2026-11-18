@@ -13,6 +13,13 @@ edit by hand: change the command's help, then rerun that test with
 Usage: supertag [OPTIONS] [COMMAND]
 
 Commands:
+  init                  Set up SuperTag on this machine for the git repository in the current directory
+  up                    Start local services or configured Worker Hosts in the background and return when ready
+  tui                   Open the terminal UI; plain supertag opens it for this machine's services
+  status                Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
+  ps                    List this machine's SuperTag services
+  logs                  Print this machine's service logs
+  down                  Stop this machine's SuperTag services, draining local Worker Hosts first
   health                Check a public or private gRPC service using the configured TLS trust
   setup                 Prepare a deployment of the Control Plane and Gateway, or connect a collaboration surface account
   check                 Validate a deployment's configuration without connecting
@@ -36,18 +43,11 @@ Commands:
   operator-token        Issue, rotate, and revoke named Operator Tokens. Admin operator token only
   audit                 List recorded operator changes, newest first, with actor, action, target, and outcome
   team                  Manage Teams and read their Workstream posts
-  init                  Set up SuperTag on this machine for the git repository in the current directory
   sign-in               Check that a harness's Worker Host credentials work, and say how to sign in when not
-  up                    Start local services or configured Worker Hosts in the background and return when ready
-  down                  Stop this machine's SuperTag services, draining local Worker Hosts first
-  logs                  Print this machine's service logs
-  ps                    List this machine's SuperTag services
-  status                Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
   version               Print this CLI's version and the version of the running local services
   config                Print the resolved supertag.yaml that supertag up runs
   control-plane         Run the Control Plane: the public API for operator clients, Worker Hosts, and Gateways, and the service that stores work and schedules execution
   gateway               Run a Gateway: the endpoint clients and operators connect to, which forwards their calls to the Control Plane, and collaboration surface webhooks and connections, reply delivery, and operator notifications as gateway:NAME. Or enroll, revoke, and rotate the credentials of Gateways
-  tui                   Open the terminal UI for a saved or explicitly configured Gateway
   worker-host           Connect a Worker Host and run accepted Tasks through an adapter
   client                Revoke client devices and rotate their credentials
   auth-key              Create and revoke Auth Keys that enroll Worker Hosts, Gateways, and clients
@@ -75,6 +75,237 @@ Options:
       --gateway <URL|NAME>  Gateway URL or the name of a Gateway saved in the terminal UI or desktop app, for the operator command that follows
   -h, --help                Print help
   -V, --version             Print version
+```
+
+## `supertag init`
+
+```text
+Set up SuperTag on this machine for the git repository in the current directory
+
+Usage: supertag init [OPTIONS]
+
+Options:
+  -y, --yes
+          Accept every default without asking
+      --state-directory <STATE_DIRECTORY>
+          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
+  -h, --help
+          Print help
+```
+
+## `supertag up`
+
+```text
+Start local services or configured Worker Hosts in the background and return when ready.
+
+With --foreground, supervise them in this terminal until interrupted. A service with restart: unless-stopped makes up install a per-user service unit (launchd on macOS, systemd on Linux) that runs the supervisor and starts it again after a failure or login.
+
+Running services are left alone when nothing changed. Changed settings restart them; so does another build of SuperTag, such as the release before an upgrade, which up stops and starts again with this CLI's executable.
+
+Usage: supertag up [OPTIONS]
+
+Options:
+  -f, --file <FILE>
+          Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present
+
+      --state-directory <STATE_DIRECTORY>
+          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
+
+      --foreground
+          Run in this terminal with each service's logs here until interrupted
+
+      --force
+          When restarting changed services, do not wait for running Task Attempts
+
+      --adapter <ADAPTER>
+          Executable that implements the SuperTag harness protocol
+
+      --adapter-arg <ADAPTER_ARG>
+          Argument passed to the --adapter executable. Repeat for more arguments
+
+      --harness <HARNESS>
+          Built-in harness to use for Tasks on this host
+          
+          [possible values: codex, claude-code, openai-agents, opencode, cursor]
+
+      --harness-runtime <HARNESS_RUNTIME>
+          Node or Python interpreter used by a language adapter
+
+      --harness-entrypoint <HARNESS_ENTRYPOINT>
+          Override the JavaScript or Python application entrypoint
+
+      --harness-model <HARNESS_MODEL>
+          Default model ID for the built-in harness
+
+      --harness-models <HARNESS_MODELS>
+          Additional model IDs this Worker Host can run
+
+      --cursor-node <CURSOR_NODE>
+          Node interpreter for the Cursor SDK adapter application
+
+      --cursor-adapter <CURSOR_ADAPTER>
+          Override the compiled Cursor SDK adapter entrypoint
+
+      --opencode-node <OPENCODE_NODE>
+          Node interpreter for the OpenCode adapter application
+
+      --opencode-adapter <OPENCODE_ADAPTER>
+          Override the compiled OpenCode adapter entrypoint
+
+      --opencode-path <OPENCODE_PATH>
+          Absolute OpenCode executable path. Otherwise resolve opencode on PATH
+
+      --opencode-auth-file <OPENCODE_AUTH_FILE>
+          Owner-only API credential file. Also accepts SUPERTAG_OPENCODE_AUTH_FILE
+
+      --allow-unsandboxed-commands
+          Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
+
+      --network-credential <NAME=VARIABLE>
+          NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials
+
+      --claude-path <CLAUDE_PATH>
+          Claude executable used by the Agent SDK
+
+      --codex-path <CODEX_PATH>
+          Codex executable. Otherwise resolve codex on PATH
+
+      --codex-model <CODEX_MODEL>
+          Default Codex model ID
+
+      --codex-workspace <CODEX_WORKSPACE>
+          Existing directory for read-only Tasks. Otherwise each Task gets its own directory
+
+      --workspace-id <WORKSPACE_ID>
+          Local Workspace that this host can prepare for accepted Tasks. Repeat it, each followed by its --workspace-source, to map several Workspaces
+
+      --workspace-source <WORKSPACE_SOURCE>
+          Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
+
+      --workspace-setup <ID=COMMAND>
+          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a local Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
+
+      --workspace-patch <ID>
+          ID: deliver a local Workspace as patches only; this host writes no Session branch into its repository
+
+      --remote-workspace <ID>
+          ID of a remote Workspace this host serves, read from and pushed to its git server with a credential the Control Plane grants for each operation. Repeat it for several; it may be combined with local Workspaces
+
+      --skill-catalog <SKILL_CATALOG>
+          Private host allowlist of Skill packages.
+          
+          A directory holds one directory per Skill. A JSON file lists them: {"version":1,"skills":[{"id":"review","path":"skills/review","version":"1"}]}. Its "github" list names Skills in a GitHub repository, fetched at an exact commit when a Task needs one: {"repository":"acme/skills","path":"catalog","revision":"main","skills":["review"]}. A new Task pins the revision's current commit and its retries keep it, on this host or another. Git on this host must be able to read the repository.
+
+      --control-plane-listen <CONTROL_PLANE_LISTEN>
+          Address the local Control Plane listens on. Port 0 picks a free port
+          
+          [default: 127.0.0.1:0]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `supertag tui`
+
+```text
+Open the terminal UI; plain supertag opens it for this machine's services
+
+Usage: supertag tui [OPTIONS]
+
+Options:
+      --gateway <GATEWAY>
+          Gateway URL or the name of a saved Gateway
+      --state-directory <STATE_DIRECTORY>
+          Use the local services in this state directory instead of a Gateway URL
+      --binary <BINARY>
+          Terminal UI executable. Also reads SUPERTAG_TUI_BINARY
+      --workspace <WORKSPACE>
+          Workspace ID the terminal UI starts in
+  -h, --help
+          Print help
+```
+
+## `supertag status`
+
+```text
+Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
+
+Usage: supertag status [OPTIONS]
+
+Options:
+      --gateway <GATEWAY>
+          Remote Gateway URL or saved name; a URL reads SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
+      --output <OUTPUT>
+          Print readable text, or JSON for scripts [default: text] [possible values: text, json]
+  -h, --help
+          Print help
+```
+
+## `supertag ps`
+
+```text
+List this machine's SuperTag services
+
+Usage: supertag ps [OPTIONS]
+
+Options:
+      --state-directory <STATE_DIRECTORY>
+          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
+  -f, --file <FILE>
+          supertag.yaml, or a directory that holds one
+      --output <OUTPUT>
+          Print readable text, or JSON for scripts [default: text] [possible values: text, json]
+  -h, --help
+          Print help
+```
+
+## `supertag logs`
+
+```text
+Print this machine's service logs
+
+Usage: supertag logs [OPTIONS] [SERVICES]...
+
+Arguments:
+  [SERVICES]...  Services to show: supervisor, control-plane, gateway, or a host (default: all)
+
+Options:
+      --state-directory <STATE_DIRECTORY>
+          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
+  -f, --follow
+          Keep printing new lines until interrupted
+      --file <FILE>
+          supertag.yaml, or a directory that holds one
+  -h, --help
+          Print help
+```
+
+## `supertag down`
+
+```text
+Stop this machine's SuperTag services, draining local Worker Hosts first.
+
+When the Control Plane cannot be reached or speaks another protocol, as after an upgrade, down stops the services without draining. Worker Hosts still stop gracefully, and their running Task Attempts follow the recovery rules.
+
+Usage: supertag down [OPTIONS]
+
+Options:
+      --state-directory <STATE_DIRECTORY>
+          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
+
+  -f, --file <FILE>
+          supertag.yaml, or a directory that holds one, naming the service unit to remove
+
+      --remove-services
+          Also uninstall the per-user service unit
+
+      --force
+          Do not wait for running Task Attempts
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `supertag health`
@@ -1732,22 +1963,6 @@ Options:
           Print help
 ```
 
-## `supertag init`
-
-```text
-Set up SuperTag on this machine for the git repository in the current directory
-
-Usage: supertag init [OPTIONS]
-
-Options:
-  -y, --yes
-          Accept every default without asking
-      --state-directory <STATE_DIRECTORY>
-          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
-  -h, --help
-          Print help
-```
-
 ## `supertag sign-in`
 
 ```text
@@ -1765,201 +1980,6 @@ Options:
           Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
   -f, --file <FILE>
           Service configuration whose env_file supplies credentials; otherwise STATE_DIRECTORY/supertag.yaml when present
-  -h, --help
-          Print help
-```
-
-## `supertag up`
-
-```text
-Start local services or configured Worker Hosts in the background and return when ready.
-
-With --foreground, supervise them in this terminal until interrupted. A service with restart: unless-stopped makes up install a per-user service unit (launchd on macOS, systemd on Linux) that runs the supervisor and starts it again after a failure or login.
-
-Running services are left alone when nothing changed. Changed settings restart them; so does another build of SuperTag, such as the release before an upgrade, which up stops and starts again with this CLI's executable.
-
-Usage: supertag up [OPTIONS]
-
-Options:
-  -f, --file <FILE>
-          Service configuration, otherwise STATE_DIRECTORY/supertag.yaml when present
-
-      --state-directory <STATE_DIRECTORY>
-          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
-
-      --foreground
-          Run in this terminal with each service's logs here until interrupted
-
-      --force
-          When restarting changed services, do not wait for running Task Attempts
-
-      --adapter <ADAPTER>
-          Executable that implements the SuperTag harness protocol
-
-      --adapter-arg <ADAPTER_ARG>
-          Argument passed to the --adapter executable. Repeat for more arguments
-
-      --harness <HARNESS>
-          Built-in harness to use for Tasks on this host
-          
-          [possible values: codex, claude-code, openai-agents, opencode, cursor]
-
-      --harness-runtime <HARNESS_RUNTIME>
-          Node or Python interpreter used by a language adapter
-
-      --harness-entrypoint <HARNESS_ENTRYPOINT>
-          Override the JavaScript or Python application entrypoint
-
-      --harness-model <HARNESS_MODEL>
-          Default model ID for the built-in harness
-
-      --harness-models <HARNESS_MODELS>
-          Additional model IDs this Worker Host can run
-
-      --cursor-node <CURSOR_NODE>
-          Node interpreter for the Cursor SDK adapter application
-
-      --cursor-adapter <CURSOR_ADAPTER>
-          Override the compiled Cursor SDK adapter entrypoint
-
-      --opencode-node <OPENCODE_NODE>
-          Node interpreter for the OpenCode adapter application
-
-      --opencode-adapter <OPENCODE_ADAPTER>
-          Override the compiled OpenCode adapter entrypoint
-
-      --opencode-path <OPENCODE_PATH>
-          Absolute OpenCode executable path. Otherwise resolve opencode on PATH
-
-      --opencode-auth-file <OPENCODE_AUTH_FILE>
-          Owner-only API credential file. Also accepts SUPERTAG_OPENCODE_AUTH_FILE
-
-      --allow-unsandboxed-commands
-          Allow Claude Code, OpenCode, or Cursor commands without an operating-system sandbox
-
-      --network-credential <NAME=VARIABLE>
-          NAME=VARIABLE: a network credential the egress proxy injects for Tasks whose network scope names NAME. The sandbox sees VARIABLE holding a placeholder; the value comes from this host's SUPERTAG_NETWORK_CREDENTIAL_NAME variable. Repeat for more credentials
-
-      --claude-path <CLAUDE_PATH>
-          Claude executable used by the Agent SDK
-
-      --codex-path <CODEX_PATH>
-          Codex executable. Otherwise resolve codex on PATH
-
-      --codex-model <CODEX_MODEL>
-          Default Codex model ID
-
-      --codex-workspace <CODEX_WORKSPACE>
-          Existing directory for read-only Tasks. Otherwise each Task gets its own directory
-
-      --workspace-id <WORKSPACE_ID>
-          Local Workspace that this host can prepare for accepted Tasks. Repeat it, each followed by its --workspace-source, to map several Workspaces
-
-      --workspace-source <WORKSPACE_SOURCE>
-          Trusted local Git source for the preceding --workspace-id; Tasks run in separate pinned checkouts. Several Workspace IDs may name the same source
-
-      --workspace-setup <ID=COMMAND>
-          ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a local Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
-
-      --workspace-patch <ID>
-          ID: deliver a local Workspace as patches only; this host writes no Session branch into its repository
-
-      --remote-workspace <ID>
-          ID of a remote Workspace this host serves, read from and pushed to its git server with a credential the Control Plane grants for each operation. Repeat it for several; it may be combined with local Workspaces
-
-      --skill-catalog <SKILL_CATALOG>
-          Private host allowlist of Skill packages.
-          
-          A directory holds one directory per Skill. A JSON file lists them: {"version":1,"skills":[{"id":"review","path":"skills/review","version":"1"}]}. Its "github" list names Skills in a GitHub repository, fetched at an exact commit when a Task needs one: {"repository":"acme/skills","path":"catalog","revision":"main","skills":["review"]}. A new Task pins the revision's current commit and its retries keep it, on this host or another. Git on this host must be able to read the repository.
-
-      --control-plane-listen <CONTROL_PLANE_LISTEN>
-          Address the local Control Plane listens on. Port 0 picks a free port
-          
-          [default: 127.0.0.1:0]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## `supertag down`
-
-```text
-Stop this machine's SuperTag services, draining local Worker Hosts first.
-
-When the Control Plane cannot be reached or speaks another protocol, as after an upgrade, down stops the services without draining. Worker Hosts still stop gracefully, and their running Task Attempts follow the recovery rules.
-
-Usage: supertag down [OPTIONS]
-
-Options:
-      --state-directory <STATE_DIRECTORY>
-          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
-
-  -f, --file <FILE>
-          supertag.yaml, or a directory that holds one, naming the service unit to remove
-
-      --remove-services
-          Also uninstall the per-user service unit
-
-      --force
-          Do not wait for running Task Attempts
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## `supertag logs`
-
-```text
-Print this machine's service logs
-
-Usage: supertag logs [OPTIONS] [SERVICES]...
-
-Arguments:
-  [SERVICES]...  Services to show: supervisor, control-plane, gateway, or a host (default: all)
-
-Options:
-      --state-directory <STATE_DIRECTORY>
-          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
-  -f, --follow
-          Keep printing new lines until interrupted
-      --file <FILE>
-          supertag.yaml, or a directory that holds one
-  -h, --help
-          Print help
-```
-
-## `supertag ps`
-
-```text
-List this machine's SuperTag services
-
-Usage: supertag ps [OPTIONS]
-
-Options:
-      --state-directory <STATE_DIRECTORY>
-          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
-  -f, --file <FILE>
-          supertag.yaml, or a directory that holds one
-      --output <OUTPUT>
-          Print readable text, or JSON for scripts [default: text] [possible values: text, json]
-  -h, --help
-          Print help
-```
-
-## `supertag status`
-
-```text
-Show Worker Hosts, Tags, unfinished Objectives, and the operator inbox
-
-Usage: supertag status [OPTIONS]
-
-Options:
-      --gateway <GATEWAY>
-          Remote Gateway URL or saved name; a URL reads SUPERTAG_OPERATOR_TOKEN
-      --state-directory <STATE_DIRECTORY>
-          Local state directory (default: ~/.supertag or SUPERTAG_STATE_DIR)
-      --output <OUTPUT>
-          Print readable text, or JSON for scripts [default: text] [possible values: text, json]
   -h, --help
           Print help
 ```
@@ -2184,26 +2204,6 @@ Options:
           Write the new credential to this new owner-only file, for a Gateway that reads SUPERTAG_GATEWAY_CREDENTIAL from its own secret manager
       --gateway-state-directory <GATEWAY_STATE_DIRECTORY>
           Install the new credential in the state directory of this machine's stopped, enrolled Gateway. It uses the credential when it next starts
-  -h, --help
-          Print help
-```
-
-## `supertag tui`
-
-```text
-Open the terminal UI for a saved or explicitly configured Gateway
-
-Usage: supertag tui [OPTIONS]
-
-Options:
-      --gateway <GATEWAY>
-          Gateway URL or the name of a saved Gateway
-      --state-directory <STATE_DIRECTORY>
-          Use the local services in this state directory instead of a Gateway URL
-      --binary <BINARY>
-          Terminal UI executable. Also reads SUPERTAG_TUI_BINARY
-      --workspace <WORKSPACE>
-          Workspace ID the terminal UI starts in
   -h, --help
           Print help
 ```
