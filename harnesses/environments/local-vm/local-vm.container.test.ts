@@ -431,6 +431,26 @@ describe.skipIf(!answers)("local-vm provider", () => {
   );
 
   it(
+    "refuses an image with a setuid program its Workspace user can run",
+    async () => {
+      const who = owner();
+      await expect(
+        provider.allocate(who, 60_000, AbortSignal.timeout(BUILD_MS), {
+          dockerfileCommands: [
+            "USER root",
+            "RUN cp /bin/sh /usr/local/bin/rootsh && chmod 4755 /usr/local/bin/rootsh",
+            "USER user",
+          ],
+          user: "user",
+          setupCommands: [],
+        }),
+      ).rejects.toThrow(/setuid or setgid programs its user can run.*\/usr\/local\/bin\/rootsh/u);
+      expect(ownedContainers()).toEqual([]);
+    },
+    BUILD_MS,
+  );
+
+  it(
     "refuses a Workspace user that is root",
     async () => {
       const who = owner();

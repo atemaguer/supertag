@@ -11,7 +11,8 @@
  *
  * Root runs only programs the Workspace user cannot change: at allocation the provider refuses
  * the container when that user can write the interpreter root runs, anything it maps or imports,
- * or a directory on the way to them. With that, the seal is a boundary here: the Task can neither
+ * or a directory on the way to them. It also refuses one holding a setuid or setgid program that
+ * user can run, which would hand a Task another identity even without new privileges. With that, the seal is a boundary here: the Task can neither
  * replace the program that stops it nor hide from it. Snapshots are `<runtime> commit` images. A
  * devcontainer's image and layers are built with an empty context, on the host's native platform.
  *
@@ -176,7 +177,30 @@ if git:
         finally:
             running.stdin.close()
 for path in found[:20]:
-    print("writable " + path)`;
+    print("writable " + path)
+# A setuid or setgid program the Workspace user can run would give a Task process another user's
+# identity, root's above all, and with it the power to stop the seal. The container's own
+# filesystem is walked; /proc, /sys, /dev, and other mounts, such as a cache volume, are not.
+import stat
+root_device = os.lstat("/").st_dev
+privileged = []
+for directory, names, files in os.walk("/", onerror=lambda error: None):
+    if directory in ("/proc", "/sys", "/dev"):
+        names[:] = []
+        continue
+    names[:] = [name for name in names
+                if os.lstat(os.path.join(directory, name)).st_dev == root_device]
+    for name in files:
+        path = os.path.join(directory, name)
+        try:
+            info = os.lstat(path)
+        except OSError:
+            continue
+        if (stat.S_ISREG(info.st_mode) and info.st_mode & (stat.S_ISUID | stat.S_ISGID)
+                and os.access(path, os.X_OK)):
+            privileged.append(path)
+for path in privileged[:20]:
+    print("setuid " + path)`;
 
 /** The host's own Linux platform, so a container never runs under emulation. */
 export function nativePlatform(): string {
@@ -782,21 +806,28 @@ export function containerSandboxProvider(
       const programs = await exec(id, ["python3", "-I", "-S", "-c", WRITABLE_ROOT_PROGRAMS], {
         signal,
       });
-      const [interpreter, ...writable] = programs.stdout.trim().split("\n");
+      const [interpreter, ...flagged] = programs.stdout.trim().split("\n");
+      const listed = (prefix: string) =>
+        flagged
+          .filter((line) => line.startsWith(prefix))
+          .map((line) => line.slice(prefix.length))
+          .slice(0, 3)
+          .join(", ");
+      const writable = listed("writable ");
+      const setuid = listed("setuid ");
       if (
         programs.exitCode !== 0 ||
         !interpreter ||
         !/^\/[A-Za-z0-9._/+-]{1,255}$/u.test(interpreter) ||
-        writable.length > 0
+        flagged.length > 0
       ) {
         await cli(runtime, ["rm", "-f", id]);
         throw new Error(
-          writable.length > 0
-            ? `The Workspace user can change what the sandbox runs as root: ${writable
-                .map((line) => line.replace(/^writable /u, ""))
-                .slice(0, 3)
-                .join(", ")}`
-            : "The Workspace image has no usable python3",
+          writable
+            ? `The Workspace user can change what the sandbox runs as root: ${writable}`
+            : setuid
+              ? `The Workspace image has setuid or setgid programs its user can run, which could give a Task root and let it stop the seal; remove their setuid and setgid bits (chmod u-s,g-s): ${setuid}`
+              : "The Workspace image has no usable python3",
         );
       }
       // A new cache volume belongs to root; the Workspace user gets its top directory.

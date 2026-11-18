@@ -15,6 +15,10 @@ describe("local-vm options", () => {
     expect(stages[0]).toMatch(/^FROM node:22-/u);
     // The Workspace user has no sudo, so the seal stays a boundary.
     expect(BASE_DOCKERFILE).not.toMatch(/sudo/u);
+    // Nor any setuid or setgid program, which would hand a Task process another identity.
+    expect(BASE_DOCKERFILE).toMatch(
+      /find \/ -xdev -type f -perm \/6000 -exec chmod u-s,g-s \{\} \+\nUSER user\n/u,
+    );
     expect(BASE_DOCKERFILE).toMatch(/\nUSER user\n/u);
   });
 

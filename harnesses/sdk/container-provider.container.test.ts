@@ -18,7 +18,10 @@ if (!available && process.env["SUPERTAG_TEST_REQUIRE_CONTAINER"] === "1")
 for (const check of sandboxProviderConformance(
   async () => {
     const session = createContainerWorkspaceSession({
-      image: IMAGE,
+      // The provider refuses an image with setuid programs its user can run, as node's has.
+      image: {
+        dockerfile: `FROM ${IMAGE}\nUSER root\nRUN find / -xdev -type f -perm /6000 -exec chmod u-s,g-s {} +\nUSER ${USER}\n`,
+      },
       user: USER,
       runtime,
       label: "supertag.reference",
