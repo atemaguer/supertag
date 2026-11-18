@@ -154,10 +154,13 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
     | {
         readonly child: ChildProcessWithoutNullStreams;
         readonly ready: Promise<boolean>;
+        /** The requests this server took; a server's end fails only its own. */
+        readonly pending: Map<number, Pending>;
         alive: boolean;
+        /** Marks the server gone and ends what it took, at most once. */
+        gone(): void;
       }
     | undefined;
-  const pending = new Map<number, Pending>();
   let next = 0;
   let closed = false;
 
@@ -169,7 +172,7 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
       markReady = resolve;
     });
     const timer = setTimeout(() => markReady(false), READY_MS);
-    const current = { child, ready, alive: true };
+    const pending = new Map<number, Pending>();
     const gone = () => {
       if (!current.alive) return;
       current.alive = false;
@@ -224,10 +227,24 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
         }
       }
     });
+    const current = { child, ready, pending, alive: true, gone };
     child.once("close", gone);
     child.once("error", gone);
     return current;
   }
+
+  /**
+   * Ends the running server now rather than when its process closes, which can be after the
+   * next server took requests: the old one's close then finds nothing of the new one's to fail.
+   */
+  const stop = () => {
+    const current = server;
+    server = undefined;
+    if (!current) return;
+    current.gone();
+    current.child.stdin.end();
+    current.child.kill("SIGKILL");
+  };
 
   const send = (value: unknown) =>
     new Promise<void>((resolve, reject) => {
@@ -271,6 +288,7 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
       const exit = new Promise<number | null>((resolve) => {
         exited = resolve;
       });
+      const { pending } = current;
       const started = new Promise<number | undefined>((resolve, reject) => {
         pending.set(id, { started: resolve, failed: reject, exited, output });
       });
@@ -325,16 +343,12 @@ export function createExecServer(open: () => ChildProcessWithoutNullStreams) {
      * call starts another. What ran through it ends without an exit code.
      */
     reset() {
-      server?.child.stdin.end();
-      server?.child.kill("SIGKILL");
-      server = undefined;
+      stop();
     },
     /** Stops the server; its processes stop with it. */
     close() {
       closed = true;
-      server?.child.stdin.end();
-      server?.child.kill("SIGKILL");
-      server = undefined;
+      stop();
     },
   };
 }

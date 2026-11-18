@@ -120,6 +120,34 @@ it("starts another server after a reset, as after a seal stopped the last", asyn
   expect(starts()).toBe(2);
 });
 
+it("ends a reset server's requests at once, and its late close never fails its successor's", async () => {
+  // The first server's close is held back, as when its process is still being killed after a
+  // seal while the next server already took a request.
+  let lateClose: (() => void) | undefined;
+  let starts = 0;
+  const server = createExecServer(() => {
+    starts += 1;
+    const child = spawn("python3", ["-I", "-S", "-c", EXEC_SERVER_PROGRAM], { stdio: "pipe" });
+    if (starts === 1) {
+      const once = child.once.bind(child);
+      child.once = ((event: string, listener: (...args: unknown[]) => void) => {
+        if (event !== "close") return once(event, listener);
+        lateClose = () => listener();
+        return child;
+      }) as typeof child.once;
+    }
+    return child;
+  });
+  servers.push(server);
+  const taken = await run(server, { argv: ["sleep", "30"] });
+  server.reset();
+  expect((await taken.done).exitCode).toBeNull();
+  const next = await run(server, { argv: ["sh", "-c", "sleep 0.3; echo two"] });
+  lateClose?.();
+  expect(await next.done).toMatchObject({ exitCode: 0, stdout: "two\n" });
+  expect(starts).toBe(2);
+});
+
 it("resolves undefined when no server can start, so the caller runs the command itself", async () => {
   const server = createExecServer(() =>
     spawn("python3", ["-I", "-S", "-c", "import sys; sys.exit(1)"], { stdio: "pipe" }),
