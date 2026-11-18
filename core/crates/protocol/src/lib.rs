@@ -33,8 +33,9 @@ pub mod v2 {
 pub const FILE_DESCRIPTOR_SET: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/supertag_descriptors.bin"));
 
-/// What SuperTag tells every Tag about its turn, beside the Tag's own instructions. The sentence
-/// it asks for reaches the person at once as its own message, before the work that follows.
+/// What SuperTag tells a Tag about its turn, beside the Tag's own instructions, on harnesses that
+/// do not open a longer turn with a message on their own: Claude Code, Cursor and OpenCode, not
+/// Codex. The sentence it asks for reaches the person at once as its own message, before the work.
 pub const TURN_GUIDANCE: &str = "When a turn will take more than a moment, open it with one short sentence saying what you are about to do, as its own message, then do it. Answer a quick question directly.";
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// How a relayed read says the Worker Host holding the bytes is not connected. A Worker Host whose

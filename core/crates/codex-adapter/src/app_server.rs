@@ -922,8 +922,9 @@ pub(crate) async fn execute(
     );
     stream.turn_requested = true;
     let portfolio = questions.portfolio();
-    let guidance = supertag_protocol::TURN_GUIDANCE;
-    let mut prompt = format!("Tag instructions:\n{}\n\n{guidance}\n\n", task.instructions);
+    // No turn guidance: Codex opens a longer turn with a short message on its own (measured
+    // 2026-11-18: 10 of 10 turns with and without it), unlike Claude Code.
+    let mut prompt = format!("Tag instructions:\n{}\n\n", task.instructions);
     if !portfolio.is_empty() {
         prompt.push_str(&format!("SuperTag context:\n{portfolio}\n\n"));
     }

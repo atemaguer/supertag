@@ -1984,10 +1984,7 @@ async fn native_app_server_uses_exact_model_read_only_sandbox_scoped_env_and_red
     );
     assert_eq!(
         fixture.read("prompt")?,
-        format!(
-            "Tag instructions:\nReview carefully\n\n{}\n\nTask:\nInspect this fixture\n",
-            supertag_protocol::TURN_GUIDANCE
-        )
+        "Tag instructions:\nReview carefully\n\nTask:\nInspect this fixture\n"
     );
     let environment = fixture.read("env")?;
     // `codex app-server` reads only auth.json, so the key is staged there, never in the env.
