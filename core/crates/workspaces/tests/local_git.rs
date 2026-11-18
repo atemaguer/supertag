@@ -1192,3 +1192,84 @@ async fn a_delivery_leaves_out_untracked_caches_but_keeps_tracked_ones() {
     }
     assert_eq!(delivery.changed_files, 2);
 }
+
+#[tokio::test]
+async fn deliveries_exclude_caches_like_a_gitignore_and_keep_look_alikes() {
+    let fixture = Fixture::new();
+    // The repository tracks one cache file, which stays delivered when it changes.
+    let tracked = fixture.source.join("legacy/__pycache__");
+    fs::create_dir_all(&tracked).unwrap();
+    fs::write(tracked.join("kept.pyc"), "tracked\n").unwrap();
+    git(
+        &fixture.source,
+        &["add", "-f", "legacy/__pycache__/kept.pyc"],
+    );
+    git(
+        &fixture.source,
+        &["commit", "--quiet", "-m", "Track a cache"],
+    );
+    let base = git(&fixture.source, &["rev-parse", "HEAD"]);
+    let workspace = Workspace::open(WorkspaceConfig {
+        state_dir: fixture.state.clone(),
+        source: fixture.source.clone(),
+        base_commit: base,
+    })
+    .unwrap();
+    let checkout = prepare(&workspace, "task-1", "attempt-1", None).await;
+    let write = |path: &str, text: &str| {
+        let path = checkout.path.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    };
+    write("calc.py", "def add(a, b):\n    return a + b\n");
+    write("legacy/__pycache__/kept.pyc", "changed\n");
+    write("legacy/__pycache__/new.pyc", "untracked\n");
+    write("__pycache__/calc.cpython-311.pyc", "bytecode\n");
+    write("module.pyc", "bytecode\n");
+    write(".pytest_cache/v/cache/lastfailed", "{}\n");
+    write(".venv/lib/site.py", "venv\n");
+    write("web/node_modules/left-pad/index.js", "pad\n");
+    write(".DS_Store", "finder\n");
+    write("docs/.DS_Store", "finder\n");
+    // Without a Cargo.toml, a new `target/` is source like any other directory.
+    write("target/notes.md", "kept\n");
+    // Names that only look like caches are source.
+    write("node_modules.md", "kept\n");
+    write("src/pycache.md", "kept\n");
+    write("docs/venv-setup.md", "kept\n");
+    write("notes/.DS_Store.md", "kept\n");
+    write("pkg.egg-info/PKG-INFO", "metadata\n");
+    let delivery = workspace
+        .finalize(&checkout, complete(), &CancellationToken::new())
+        .await
+        .unwrap();
+    let patch = fs::read_to_string(&delivery.patch_path).unwrap();
+    for kept in [
+        "calc.py",
+        "legacy/__pycache__/kept.pyc",
+        "target/notes.md",
+        "node_modules.md",
+        "src/pycache.md",
+        "docs/venv-setup.md",
+        "notes/.DS_Store.md",
+    ] {
+        assert!(
+            patch.contains(&format!("b/{kept}")),
+            "{kept} missing:\n{patch}"
+        );
+    }
+    for left_out in [
+        "new.pyc",
+        "calc.cpython-311.pyc",
+        "module.pyc",
+        ".pytest_cache",
+        ".venv",
+        "node_modules/",
+        "b/.DS_Store",
+        "b/docs/.DS_Store\n",
+        "PKG-INFO",
+    ] {
+        assert!(!patch.contains(left_out), "{left_out} delivered:\n{patch}");
+    }
+    assert_eq!(delivery.changed_files, 7);
+}

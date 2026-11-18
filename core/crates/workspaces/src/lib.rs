@@ -567,7 +567,7 @@ impl Workspace {
                 // Only what Git ignores at the Task's commit stays, so setup never changes a
                 // delivery.
                 let ignored = repository
-                    .ignored(&checkout.path, &start, &copied, cancel)
+                    .ignored(&checkout.path, &start, &copied, None, cancel)
                     .await?;
                 for output in copied.iter().filter(|output| !ignored.contains(*output)) {
                     let path = checkout.path.join(output);
@@ -634,8 +634,19 @@ impl Workspace {
             .filter(|name| !base_tree.contains_key(*name))
             .cloned()
             .collect();
+        // Caches a harness's checks leave behind, such as `__pycache__/`, are not delivered
+        // unless the repository tracks them: only new files are checked against these.
+        let excludes = tempfile::tempdir_in(self.inner.root.join("temporary"))?;
+        let excludes_file = excludes.path().join("exclude");
+        fs::write(&excludes_file, delivery_excludes(&base_tree))?;
         let ignored = repository
-            .ignored(&checkout.path, &checkout.start_commit, &untracked, cancel)
+            .ignored(
+                &checkout.path,
+                &checkout.start_commit,
+                &untracked,
+                Some(&excludes_file),
+                cancel,
+            )
             .await?;
         let scope = request
             .file_scope
@@ -648,15 +659,13 @@ impl Workspace {
         let captured: Vec<String> = all_files
             .keys()
             .filter(|path| {
-                // Ignored files, new files in the output directory, and untracked caches are not
-                // delivered.
-                let untracked = !base_tree.contains_key(*path);
+                // Ignored files, including untracked caches, and new files in the output directory
+                // are not delivered.
                 let new_output = output_prefix
                     .as_ref()
                     .is_some_and(|prefix| path.starts_with(prefix))
-                    && untracked;
-                let cache = untracked && cache_path(path);
-                !(ignored.contains(*path) || new_output || cache)
+                    && !base_tree.contains_key(*path);
+                !ignored.contains(*path) && !new_output
             })
             .cloned()
             .collect();
@@ -1435,42 +1444,44 @@ fn check_cancelled(cancel: &CancellationToken) -> Result<()> {
     Ok(())
 }
 
-/// Directories tools fill with caches and dependencies that a repository almost never means to
-/// track. A delivery leaves out an untracked path under one of them, as if a `.gitignore` named
-/// it; a repository that tracks such a path keeps it.
-const CACHE_DIRECTORIES: [&str; 13] = [
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".tox",
-    ".venv",
-    "venv",
-    "node_modules",
-    ".next",
-    ".turbo",
-    ".gradle",
-    ".parcel-cache",
-    ".eggs",
-];
-/// Files tools write beside sources that a repository almost never means to track.
-const CACHE_FILES: [&str; 3] = [".DS_Store", "Thumbs.db", ".coverage"];
-/// Extensions of compiled or temporary files a repository almost never means to track.
-const CACHE_EXTENSIONS: [&str; 4] = ["pyc", "pyo", "swp", "egg-info"];
+/// Well-known caches, dependencies, and editor files a delivery leaves out when the repository
+/// doesn't track them, read like `core.excludesFile`, so the repository's own `.gitignore` can
+/// re-include a path with `!`.
+const DELIVERY_EXCLUDES: &str = "\
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.venv/
+venv/
+.coverage
+htmlcov/
+node_modules/
+.next/
+.turbo/
+.parcel-cache/
+.gradle/
+.DS_Store
+Thumbs.db
+*.swp
+";
 
-/// Whether a delivery leaves this untracked path out as a well-known cache.
-fn cache_path(path: &str) -> bool {
-    let parts: Vec<&str> = path.split('/').collect();
-    let (name, directories) = parts.split_last().expect("split yields one part");
-    directories.iter().any(|part| {
-        CACHE_DIRECTORIES.contains(part)
-            || part
-                .rsplit_once('.')
-                .is_some_and(|(_, extension)| CACHE_EXTENSIONS.contains(&extension))
-    }) || CACHE_FILES.contains(name)
-        || name.rsplit_once('.').is_some_and(|(stem, extension)| {
-            !stem.is_empty() && CACHE_EXTENSIONS.contains(&extension)
-        })
+/// [`DELIVERY_EXCLUDES`], and Cargo's `target/` when the repository has a `Cargo.toml`, where a
+/// new `target/` is a build directory rather than source.
+fn delivery_excludes<T>(base_tree: &BTreeMap<String, T>) -> String {
+    let cargo = base_tree
+        .keys()
+        .any(|path| path == "Cargo.toml" || path.ends_with("/Cargo.toml"));
+    if cargo {
+        format!("{DELIVERY_EXCLUDES}target/\n")
+    } else {
+        DELIVERY_EXCLUDES.to_owned()
+    }
 }
 
 /// The commit message: the subject, the whole first line when the subject had to shorten it,
@@ -1690,6 +1701,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cargo_target_is_left_out_only_in_a_cargo_repository() {
+        let tree = |paths: &[&str]| -> BTreeMap<String, ()> {
+            paths.iter().map(|path| ((*path).to_owned(), ())).collect()
+        };
+        assert!(!delivery_excludes(&tree(&["README.md"])).contains("target/"));
+        assert!(delivery_excludes(&tree(&["Cargo.toml"])).contains("target/\n"));
+        assert!(delivery_excludes(&tree(&["core/crates/a/Cargo.toml"])).contains("target/"));
+        assert!(delivery_excludes(&tree(&[])).contains("__pycache__/\n"));
+    }
+
+    #[test]
     fn commit_subjects_keep_link_text_and_drop_checkout_paths() {
         assert_eq!(
             commit_subject(
@@ -1699,33 +1721,6 @@ mod tests {
         );
         assert_eq!(commit_subject("Fix a[0] and [b]"), "Fix a[0] and [b]");
         assert_eq!(commit_subject("[x](y"), "[x](y");
-    }
-
-    #[test]
-    fn well_known_caches_are_recognized_by_directory_file_and_extension() {
-        for cached in [
-            "__pycache__/calc.cpython-312.pyc",
-            "src/__pycache__/x.pyc",
-            "calc.pyc",
-            "web/node_modules/left-pad/index.js",
-            ".venv/bin/python",
-            ".pytest_cache/v/cache/lastfailed",
-            ".DS_Store",
-            "docs/.DS_Store",
-            "pkg.egg-info/PKG-INFO",
-        ] {
-            assert!(cache_path(cached), "{cached}");
-        }
-        for kept in [
-            "calc.py",
-            "src/pycache.md",
-            "node_modules.md",
-            "docs/venv-setup.md",
-            ".pyc",
-            "notes/.DS_Store.md",
-        ] {
-            assert!(!cache_path(kept), "{kept}");
-        }
     }
 
     #[test]

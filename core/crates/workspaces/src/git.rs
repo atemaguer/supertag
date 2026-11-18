@@ -722,11 +722,15 @@ impl Repository {
         Ok(checkout)
     }
 
+    /// The `names` Git ignores at `start`. With `excludes`, a file of patterns read like
+    /// `core.excludesFile` also applies, below the repository's own ignore files, so its
+    /// `.gitignore` can still re-include a path.
     pub(crate) async fn ignored(
         &self,
         checkout: &Path,
         start: &str,
         names: &[String],
+        excludes: Option<&Path>,
         cancel: &CancellationToken,
     ) -> Result<BTreeSet<String>> {
         if names.is_empty() {
@@ -748,20 +752,19 @@ impl Repository {
             input.extend_from_slice(name.as_bytes());
             input.push(0);
         }
-        let bytes = self
-            .command(
-                &[
-                    "check-ignore",
-                    "--stdin",
-                    "-z",
-                    "--verbose",
-                    "--non-matching",
-                ],
-                &input,
-                &environment,
-                cancel,
-            )
-            .await;
+        let setting = excludes.map(|path| format!("core.excludesFile={}", path.display()));
+        let mut args: Vec<&str> = Vec::new();
+        if let Some(setting) = &setting {
+            args.extend(["-c", setting.as_str()]);
+        }
+        args.extend([
+            "check-ignore",
+            "--stdin",
+            "-z",
+            "--verbose",
+            "--non-matching",
+        ]);
+        let bytes = self.command(&args, &input, &environment, cancel).await;
         let bytes = match bytes {
             Ok(value) => value,
             Err(error)

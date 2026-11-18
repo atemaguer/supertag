@@ -431,6 +431,10 @@ within the pre-1.0 compatibility policy described in
   directory", and a Codex Objective saved a requested repository file there instead, so nothing
   was committed. The output directory is now described as only for files that aren't part of the
   repository, such as reports.
+- A delivery leaves out new files in well-known cache and editor locations the repository doesn't
+  track, such as `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.venv/`, `node_modules/`, and
+  `.DS_Store` (and `target/` in a Cargo repository), so a harness's test run no longer adds
+  them to the Session branch. A tracked file there is delivered as before.
 - `supertag placement explain` names a `model` requirement when no bound Worker Host lists the
   model a Task names, instead of calling those hosts eligible.
 - A supertag.yaml Worker Host reports the execution profile its lanes claim with. A local-vm host

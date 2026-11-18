@@ -134,11 +134,14 @@ fails: the app shows the error beside the reply, and the thread gets the error a
 own after the reply. A turn no person waits
 on, such as a Schedule's, shows its reply only when it finishes, since it may stay quiet.
 
-After the harness finishes, the host commits the Task's changes and verifies them. The commit
-leaves out what the checkout's `.gitignore` files match, and untracked caches that a repository
-almost never means to track even without a `.gitignore`: directories such as `__pycache__`,
-`.pytest_cache`, `.venv`, and `node_modules`, files such as `.DS_Store` and `*.pyc`. A repository
-that tracks such a path keeps it delivered. It records the
+After the harness finishes, the host commits the Task's changes and verifies them. A new file the
+repository's `.gitignore` files match is left out, and so is a new file in a well-known cache,
+dependency, or editor location the repository doesn't track: `__pycache__/`, `*.pyc`,
+`*.egg-info/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.tox/`, `.venv/`, `venv/`,
+`.coverage`, `htmlcov/`, `node_modules/`, `.next/`, `.turbo/`, `.parcel-cache/`, `.gradle/`,
+`.DS_Store`, and editor swap files, plus `target/` in a repository with a `Cargo.toml`. The
+repository's `.gitignore` can re-include any of them with `!`, and a file the repository already
+tracks is delivered as usual. It records the
 result as a Git bundle, with the ref `refs/heads/supertag-deliveries/DELIVERY_ID`, and a patch. The
 bundle carries only what the Task added to its start commit: the Session's previous delivery, or
 the Workspace base for its first Task. The host keeps the bundle and patch in its artifact storage

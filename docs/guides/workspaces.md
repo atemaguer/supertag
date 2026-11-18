@@ -23,7 +23,9 @@ your repository  <──  branch supertag/session/HASH  <── delivery
 3. Each Task Attempt gets a separate checkout at the pinned commit. Later Tasks of the same
    Session continue on the Session's own branch, on top of the earlier ones.
 4. After the harness finishes, the host commits the changes, verifies them, and delivers a Git
-   bundle and a patch.
+   bundle and a patch. New files your `.gitignore` matches, and untracked caches such as
+   `__pycache__/` and `node_modules/`, are left out; see
+   [Worker Host reference](../reference/worker.md#workspaces).
 5. The delivery **lands**: the Worker Host writes it into the repository it maps as the branch
    `supertag/session/HASH`, one branch per Session, or pushes it to the Workspace's git server. `HASH` is a SHA-256
    digest of the Tag and Session IDs, and the Session's report names the branch.
