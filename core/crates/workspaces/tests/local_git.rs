@@ -90,7 +90,7 @@ fn complete() -> FinalizeRequest {
     FinalizeRequest {
         output_directory: None,
         file_scope: None,
-        summary: "Review complete\nChange: Add the requested behavior".into(),
+        summary: "Add the requested behavior\n\nReview complete".into(),
         outcome: Outcome::Completed,
     }
 }

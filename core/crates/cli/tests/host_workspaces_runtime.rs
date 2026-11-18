@@ -222,7 +222,7 @@ async fn one_host_serves_several_named_workspaces(database: String) -> Result<()
         assert_eq!(
             task["result"],
             format!(
-                "Change: {}\nWorkspace before:\n{before}",
+                "{}\nWorkspace before:\n{before}",
                 ["app-builder", "alias-builder", "docs-writer"][index]
             )
         );
@@ -367,7 +367,7 @@ async fn workspace_setup_prepares_checkouts_and_a_failure_fails_the_task(
     ensure!(result.starts_with("Workspace setup failed"), "{result}");
     ensure!(result.contains("registry unreachable"), "{result}");
     ensure!(
-        !result.contains("Change:"),
+        !result.contains("Workspace before:"),
         "the harness never ran: {result}"
     );
     Ok(())
@@ -558,10 +558,7 @@ async fn a_tag_following_a_branch_starts_each_session_at_its_current_commit(
     success(worker()).await?;
     let alpha = json(get(&alpha)).await?;
     assert_eq!(alpha["state"], "TASK_STATE_SUCCEEDED", "{alpha}");
-    assert_eq!(
-        alpha["result"],
-        "Change: alpha\nWorkspace before:\napp source\n"
-    );
+    assert_eq!(alpha["result"], "alpha\nWorkspace before:\napp source\n");
     assert_eq!(alpha["workspace"]["base_commit"], first.as_str(), "{alpha}");
     assert_eq!(alpha["workspace_delivery"]["base_commit"], first.as_str());
 
@@ -583,10 +580,7 @@ async fn a_tag_following_a_branch_starts_each_session_at_its_current_commit(
     success(worker()).await?;
     let beta = json(get(&beta)).await?;
     assert_eq!(beta["state"], "TASK_STATE_SUCCEEDED", "{beta}");
-    assert_eq!(
-        beta["result"],
-        "Change: beta\nWorkspace before:\napp source v2\n"
-    );
+    assert_eq!(beta["result"], "beta\nWorkspace before:\napp source v2\n");
     assert_eq!(beta["workspace"]["base_commit"], second.as_str(), "{beta}");
     assert_eq!(beta["workspace_delivery"]["base_commit"], second.as_str());
 

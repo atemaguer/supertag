@@ -1632,7 +1632,7 @@ async fn tunnel_carries_every_service_role_and_call_shape_with_mutual_tls(
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     assert_eq!(
         task["result"],
-        "Change: through the tunnel\nWorkspace before:\nbase\n"
+        "through the tunnel\nWorkspace before:\nbase\n"
     );
     watched_change(&mut events, &task_id).await?;
 

@@ -406,7 +406,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     success(credentials.worker(&public, &directory.join("first-host"), Some(&source))).await?;
     let first = json(get(first_id)).await?;
     assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
-    assert_eq!(first["result"], "Change: first\nWorkspace before:\nbase\n");
+    assert_eq!(first["result"], "first\nWorkspace before:\nbase\n");
     let delivery = &first["workspace_delivery"];
     assert_eq!(delivery["workspace_id"], "project");
     assert_eq!(delivery["base_commit"], base);
@@ -508,10 +508,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     let second = json(get(second_id)).await?;
     assert_eq!(second["state"], "TASK_STATE_SUCCEEDED", "{second}");
     assert_eq!(second["workspace_delivery"]["start_commit"], first_head);
-    assert_eq!(
-        second["result"],
-        "Change: second\nWorkspace before:\nbase\nfirst\n"
-    );
+    assert_eq!(second["result"], "second\nWorkspace before:\nbase\nfirst\n");
     let second_head = field(&second["workspace_delivery"], "head_commit")?.to_owned();
 
     let cancelled = json(submit("cancelled-edit")).await?;
@@ -568,7 +565,7 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
     assert_eq!(third["workspace_delivery"]["start_commit"], second_head);
     assert_eq!(
         third["result"],
-        "Change: third\nWorkspace before:\nbase\nfirst\nsecond\n"
+        "third\nWorkspace before:\nbase\nfirst\nsecond\n"
     );
 
     assert_eq!(git(&source, &["rev-parse", "HEAD"]).await?, base);

@@ -84,7 +84,7 @@ pub async fn exercise(
             Err(error) => return Err(error.into()),
         };
         std::fs::write(&path, format!("{before}{line}\n"))?;
-        return Ok(format!("Change: {line}"));
+        return Ok(line.to_owned());
     }
     if task.prompt.contains("These files have conflict markers:") {
         let workspace = std::env::var_os(supertag_worker_host::WORKSPACE_DIRECTORY)

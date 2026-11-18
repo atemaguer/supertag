@@ -688,7 +688,7 @@ async fn main() -> Result<()> {
             format!("{before}{}\n", task.prompt),
         )?;
         std::fs::write(workspace.join("artifact.bin"), [0_u8, 1, 2, 0, 255])?;
-        result = format!("Change: {}\nWorkspace before:\n{before}", task.prompt);
+        result = format!("{}\nWorkspace before:\n{before}", task.prompt);
     }
     if std::env::args().any(|arg| arg == "--wait-for-cancel") {
         if workspace_fixture {

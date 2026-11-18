@@ -1443,13 +1443,12 @@ fn commit_message(summary: &str, author: Option<&CommitAuthor>) -> String {
     }
 }
 
+/// The result's first non-empty line, as the commit's subject.
 fn commit_subject(summary: &str) -> String {
     let line = summary
         .lines()
-        .rev()
-        .find_map(|line| line.trim().strip_prefix("Change:"))
         .map(str::trim)
-        .or_else(|| summary.lines().map(str::trim).find(|line| !line.is_empty()))
+        .find(|line| !line.is_empty())
         .unwrap_or("Capture workspace changes");
     without_link_targets(line)
         .chars()

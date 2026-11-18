@@ -198,7 +198,7 @@ async fn delivery_bundle_refusals_import_nothing_and_borrow_nothing_from_the_hos
             FinalizeRequest {
                 output_directory: None,
                 file_scope: None,
-                summary: "Change: deliver".into(),
+                summary: "Deliver".into(),
                 outcome: Outcome::Completed,
             },
             &CancellationToken::new(),
@@ -383,7 +383,7 @@ async fn incremental_delivery_bundles_build_on_a_start_commit_the_host_holds() {
                     FinalizeRequest {
                         output_directory: None,
                         file_scope: None,
-                        summary: format!("Change: {name}"),
+                        summary: name.to_string(),
                         outcome: Outcome::Completed,
                     },
                     &CancellationToken::new(),

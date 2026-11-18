@@ -433,10 +433,7 @@ async fn a_remote_workspace_lands_through_git_delivery(database: String) -> Resu
     .await?;
     ensure!(second["state"] == "TASK_STATE_SUCCEEDED", "{second}");
     assert_eq!(second["workspace_delivery"]["start_commit"], head.as_str());
-    assert_eq!(
-        second["result"],
-        "Change: second\nWorkspace before:\nbase\nfirst\n"
-    );
+    assert_eq!(second["result"], "second\nWorkspace before:\nbase\nfirst\n");
 
     fresh.kill().await?;
     plane.kill().await?;

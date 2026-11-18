@@ -1152,7 +1152,7 @@ mod tests {
                 joined: vec![],
                 volume: None,
             },
-            result: "Change: Capture a checked result".into(),
+            result: "Capture a checked result".into(),
             succeeded: true,
             objective_signal: 0,
             waiting_approval_ids: vec!["test-approval".into()],
