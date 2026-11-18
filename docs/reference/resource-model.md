@@ -415,7 +415,7 @@ spec:
   remote: ssh://git@git.acme.internal/handbook.git   # https://, ssh://, user@host:path, or file://
   ref: main                     # optional: the branch new Sessions start from; default branch if omitted
   credential: handbook-rw       # or credentials: { read: NAME, push: NAME }; omit for none
-  land: { merge: drafts }       # optional: branch, { merge: TARGET }, or { review: { base: BRANCH } }
+  land: { merge: drafts }       # optional: { merge: TARGET } or { review: { base: BRANCH } }
   forge: github                 # optional: a self-hosted GitHub; github.com needs no forge
 ```
 
@@ -424,7 +424,7 @@ spec:
 | `remote` | `https://` or `ssh://` URL, scp-style `user@host:path`, `file:///absolute/path` for a bare repository on the Control Plane's machine (readable only by hosts that share its filesystem), or `http://` to a loopback address. Never a password, token, or `ext::` helper |
 | `ref` | A branch name. Each new Session pins the commit it names once; every Task of the Session starts there |
 | `credential`, `credentials` | Names of [Workspace Credentials](#workspace-credentials) that must exist. `read` reads the source; `push` lands changes |
-| `land` | `branch` updates the Session's branch `supertag/session/HASH` on every delivered Task. `{merge: TARGET}` pushes a Session's branch only once the Session is finished, and merges it into `TARGET`, a branch outside `supertag/`. `{review: {base: BRANCH}}` also opens or updates the Session's draft pull request against `BRANCH`; it needs a GitHub forge and a GitHub App or HTTPS token push credential. Omit it to keep changes with SuperTag |
+| `land` | Every delivered Task updates the Session's branch `supertag/session/HASH`, with or without `land`. `{merge: TARGET}` also merges a finished Session into `TARGET`, a branch outside `supertag/`. `{review: {base: BRANCH}}` also opens or updates the Session's draft pull request against `BRANCH`; it needs a GitHub forge and a GitHub App or HTTPS token push credential. |
 | `forge` | `github` for GitHub Enterprise Server, whose API is `/api/v3/` on the remote's host. A github.com remote is GitHub without it; any other remote is a plain git server, which has no review |
 
 A Tag names its Workspace in `spec.workspace`:
@@ -477,21 +477,24 @@ remembers it, on the Control Plane and on each Worker Host separately. `supertag
 
 ### Landing
 
-Git delivery lands a delivered Task's verified commits on a remote Workspace's server, after the
-Task finished: the harness never pushes. It pushes only `supertag/session/...` branches and the
-Workspace's merge target, fast-forward only, whatever the credential could do. A Landing's state:
+The Worker Host that ran a Task lands its verified commits on a remote Workspace's server, from
+its own copy of them, right after the Task finished: the harness never pushes. Every delivered
+Task updates the Session's branch; `land` adds a merge or a review. The host pushes only
+`supertag/session/...` branches and the Workspace's merge target, fast-forward only, whatever the
+credential could do. A review's pull request is opened by the Control Plane's git delivery once the
+branch is pushed. A Landing's state:
 
 | State | Meaning |
 | --- | --- |
-| `queued` | Waiting for git delivery, or for the Worker Host that holds the delivery to reconnect |
-| `claimed` | Git delivery is pushing |
+| `queued` | Waiting for the Worker Host that holds the delivery, or, for a pushed review branch, for git delivery to open its pull request |
+| `claimed` | A Worker Host is pushing, or git delivery is opening the pull request |
 | `landed` | The branch or target names `landed_commit`; in review mode, `pull_request` is open from the branch |
 | `conflict` | The Session's changes conflict with the target in `conflicts`; nothing was merged, and `follow_up_task_id` merges `target_commit` into the Session |
 | `held` | Refused until someone acts, such as a branch changed outside SuperTag, a missing credential, or Git LFS |
 | `superseded` | A newer delivery of the same Session replaced it before it landed |
 
 `merge` lands a Work Session when its Tag or an operator closes it or its Objective closes, and
-again when a merge follow-up Task succeeds. `review` lands every delivered Task like `branch`, then
+again when a merge follow-up Task succeeds. `review` pushes every delivered Task's branch, then
 opens the Session's draft pull request or updates its title and description; it never merges,
 closes, reopens, or marks it ready, and holds the landing when the pull request was closed or the
 branch has another one. The pull request's merge, reported by the GitHub surface's webhook, closes

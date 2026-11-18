@@ -790,10 +790,15 @@ pub(crate) fn parse(
                     })
                 }
             };
-            if let Some(landing) = landing
-                && remote.is_none()
-            {
-                session_branches.insert(id.clone(), landing);
+            match landing {
+                Some(landing) if remote.is_none() => {
+                    session_branches.insert(id.clone(), landing);
+                }
+                // `land: patch`: the host writes no Session branch into the repository.
+                None => {
+                    setups.push(OsString::from(format!("--workspace-patch={id}")));
+                }
+                _ => {}
             }
             mapping.extend([
                 OsString::from("--workspace-id"),

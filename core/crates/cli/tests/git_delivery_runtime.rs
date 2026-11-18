@@ -288,11 +288,9 @@ async fn a_remote_workspace_lands_through_git_delivery(database: String) -> Resu
         "main",
         "--credential",
         "handbook",
-        "--land",
-        "branch",
     ]))
     .await?;
-    assert_eq!(workspace["land"], "branch");
+    assert!(workspace["land"].is_null(), "{workspace}");
     let check = json(cli(&["workspace", "check", "handbook"])).await?;
     let status = |step: &str| {
         check["steps"]

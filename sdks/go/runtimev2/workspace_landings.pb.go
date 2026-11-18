@@ -1062,10 +1062,14 @@ type ClaimWorkspaceLandingResponse struct {
 	Landing    *WorkspaceLanding      `protobuf:"bytes,1,opt,name=landing,proto3" json:"landing,omitempty"`
 	LeaseToken string                 `protobuf:"bytes,2,opt,name=lease_token,json=leaseToken,proto3" json:"lease_token,omitempty"`
 	ValidForMs uint64                 `protobuf:"varint,3,opt,name=valid_for_ms,json=validForMs,proto3" json:"valid_for_ms,omitempty"`
-	// The Worker Host holding the delivery's bundle, which git delivery reads through the relay.
+	// A Worker Host's claims only: the Attempt whose Workspace state on the claiming host holds
+	// the delivered commit.
 	Holder *BlobHolder `protobuf:"bytes,4,opt,name=holder,proto3" json:"holder,omitempty"`
-	// The push credential's name; empty when the remote needs none.
-	Credential    string `protobuf:"bytes,5,opt,name=credential,proto3" json:"credential,omitempty"`
+	// Git delivery's claims only: the push credential's name, which its review adapter uses.
+	Credential string `protobuf:"bytes,5,opt,name=credential,proto3" json:"credential,omitempty"`
+	// A Worker Host's claims and renewals only: the remote Workspace as the landing's Task
+	// recorded it, whose push credential `WorkspaceGitAccess.Mint` grants for the lease.
+	Workspace     *Workspace `protobuf:"bytes,6,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1133,6 +1137,13 @@ func (x *ClaimWorkspaceLandingResponse) GetCredential() string {
 		return x.Credential
 	}
 	return ""
+}
+
+func (x *ClaimWorkspaceLandingResponse) GetWorkspace() *Workspace {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
 }
 
 type RecordWorkspaceLandingRequest struct {
@@ -1335,7 +1346,7 @@ const file_supertag_runtime_v2_workspace_landings_proto_rawDesc = "" +
 	"\n" +
 	"landing_id\x18\x01 \x01(\tR\tlandingId\x12\x1f\n" +
 	"\vlease_token\x18\x02 \x01(\tR\n" +
-	"leaseToken\"\xfc\x01\n" +
+	"leaseToken\"\xba\x02\n" +
 	"\x1dClaimWorkspaceLandingResponse\x12?\n" +
 	"\alanding\x18\x01 \x01(\v2%.supertag.runtime.v2.WorkspaceLandingR\alanding\x12\x1f\n" +
 	"\vlease_token\x18\x02 \x01(\tR\n" +
@@ -1345,7 +1356,8 @@ const file_supertag_runtime_v2_workspace_landings_proto_rawDesc = "" +
 	"\x06holder\x18\x04 \x01(\v2\x1f.supertag.runtime.v2.BlobHolderR\x06holder\x12\x1e\n" +
 	"\n" +
 	"credential\x18\x05 \x01(\tR\n" +
-	"credential\"\xba\x03\n" +
+	"credential\x12<\n" +
+	"\tworkspace\x18\x06 \x01(\v2\x1e.supertag.runtime.v2.WorkspaceR\tworkspace\"\xba\x03\n" +
 	"\x1dRecordWorkspaceLandingRequest\x12@\n" +
 	"\x05lease\x18\x01 \x01(\v2*.supertag.runtime.v2.WorkspaceLandingLeaseR\x05lease\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12@\n" +
@@ -1372,7 +1384,11 @@ const file_supertag_runtime_v2_workspace_landings_proto_rawDesc = "" +
 	"\x11WorkspaceLandings\x12]\n" +
 	"\x03Get\x12/.supertag.runtime.v2.GetWorkspaceLandingRequest\x1a%.supertag.runtime.v2.WorkspaceLanding\x12m\n" +
 	"\x04List\x121.supertag.runtime.v2.ListWorkspaceLandingsRequest\x1a2.supertag.runtime.v2.ListWorkspaceLandingsResponse\x12^\n" +
-	"\x0eReturnConflict\x121.supertag.runtime.v2.ReturnLandingConflictRequest\x1a\x19.supertag.runtime.v2.Task2\xbb\x04\n" +
+	"\x0eReturnConflict\x121.supertag.runtime.v2.ReturnLandingConflictRequest\x1a\x19.supertag.runtime.v2.Task2\xcc\x02\n" +
+	"\fHostLandings\x12n\n" +
+	"\x05Claim\x121.supertag.runtime.v2.ClaimWorkspaceLandingRequest\x1a2.supertag.runtime.v2.ClaimWorkspaceLandingResponse\x12g\n" +
+	"\x05Renew\x12*.supertag.runtime.v2.WorkspaceLandingLease\x1a2.supertag.runtime.v2.ClaimWorkspaceLandingResponse\x12c\n" +
+	"\x06Record\x122.supertag.runtime.v2.RecordWorkspaceLandingRequest\x1a%.supertag.runtime.v2.WorkspaceLanding2\xbb\x04\n" +
 	"\vGitDelivery\x12\x87\x01\n" +
 	"\x12ListPendingSources\x127.supertag.runtime.v2.ListPendingWorkspaceSourcesRequest\x1a8.supertag.runtime.v2.ListPendingWorkspaceSourcesResponse\x12d\n" +
 	"\tPinSource\x12..supertag.runtime.v2.PinWorkspaceSourceRequest\x1a'.supertag.runtime.v2.WorkspaceSourcePin\x12n\n" +
@@ -1427,30 +1443,37 @@ var file_supertag_runtime_v2_workspace_landings_proto_depIdxs = []int32{
 	8,  // 7: supertag.runtime.v2.ListPendingWorkspaceSourcesResponse.pins:type_name -> supertag.runtime.v2.WorkspaceSourcePin
 	2,  // 8: supertag.runtime.v2.ClaimWorkspaceLandingResponse.landing:type_name -> supertag.runtime.v2.WorkspaceLanding
 	18, // 9: supertag.runtime.v2.ClaimWorkspaceLandingResponse.holder:type_name -> supertag.runtime.v2.BlobHolder
-	13, // 10: supertag.runtime.v2.RecordWorkspaceLandingRequest.lease:type_name -> supertag.runtime.v2.WorkspaceLandingLease
-	1,  // 11: supertag.runtime.v2.RecordWorkspaceLandingRequest.state:type_name -> supertag.runtime.v2.WorkspaceLandingState
-	3,  // 12: supertag.runtime.v2.RecordWorkspaceLandingRequest.pull_request:type_name -> supertag.runtime.v2.WorkspacePullRequest
-	4,  // 13: supertag.runtime.v2.WorkspaceLandings.Get:input_type -> supertag.runtime.v2.GetWorkspaceLandingRequest
-	6,  // 14: supertag.runtime.v2.WorkspaceLandings.List:input_type -> supertag.runtime.v2.ListWorkspaceLandingsRequest
-	5,  // 15: supertag.runtime.v2.WorkspaceLandings.ReturnConflict:input_type -> supertag.runtime.v2.ReturnLandingConflictRequest
-	9,  // 16: supertag.runtime.v2.GitDelivery.ListPendingSources:input_type -> supertag.runtime.v2.ListPendingWorkspaceSourcesRequest
-	11, // 17: supertag.runtime.v2.GitDelivery.PinSource:input_type -> supertag.runtime.v2.PinWorkspaceSourceRequest
-	12, // 18: supertag.runtime.v2.GitDelivery.Claim:input_type -> supertag.runtime.v2.ClaimWorkspaceLandingRequest
-	13, // 19: supertag.runtime.v2.GitDelivery.Renew:input_type -> supertag.runtime.v2.WorkspaceLandingLease
-	15, // 20: supertag.runtime.v2.GitDelivery.Record:input_type -> supertag.runtime.v2.RecordWorkspaceLandingRequest
-	2,  // 21: supertag.runtime.v2.WorkspaceLandings.Get:output_type -> supertag.runtime.v2.WorkspaceLanding
-	7,  // 22: supertag.runtime.v2.WorkspaceLandings.List:output_type -> supertag.runtime.v2.ListWorkspaceLandingsResponse
-	19, // 23: supertag.runtime.v2.WorkspaceLandings.ReturnConflict:output_type -> supertag.runtime.v2.Task
-	10, // 24: supertag.runtime.v2.GitDelivery.ListPendingSources:output_type -> supertag.runtime.v2.ListPendingWorkspaceSourcesResponse
-	8,  // 25: supertag.runtime.v2.GitDelivery.PinSource:output_type -> supertag.runtime.v2.WorkspaceSourcePin
-	14, // 26: supertag.runtime.v2.GitDelivery.Claim:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
-	14, // 27: supertag.runtime.v2.GitDelivery.Renew:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
-	2,  // 28: supertag.runtime.v2.GitDelivery.Record:output_type -> supertag.runtime.v2.WorkspaceLanding
-	21, // [21:29] is the sub-list for method output_type
-	13, // [13:21] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	17, // 10: supertag.runtime.v2.ClaimWorkspaceLandingResponse.workspace:type_name -> supertag.runtime.v2.Workspace
+	13, // 11: supertag.runtime.v2.RecordWorkspaceLandingRequest.lease:type_name -> supertag.runtime.v2.WorkspaceLandingLease
+	1,  // 12: supertag.runtime.v2.RecordWorkspaceLandingRequest.state:type_name -> supertag.runtime.v2.WorkspaceLandingState
+	3,  // 13: supertag.runtime.v2.RecordWorkspaceLandingRequest.pull_request:type_name -> supertag.runtime.v2.WorkspacePullRequest
+	4,  // 14: supertag.runtime.v2.WorkspaceLandings.Get:input_type -> supertag.runtime.v2.GetWorkspaceLandingRequest
+	6,  // 15: supertag.runtime.v2.WorkspaceLandings.List:input_type -> supertag.runtime.v2.ListWorkspaceLandingsRequest
+	5,  // 16: supertag.runtime.v2.WorkspaceLandings.ReturnConflict:input_type -> supertag.runtime.v2.ReturnLandingConflictRequest
+	12, // 17: supertag.runtime.v2.HostLandings.Claim:input_type -> supertag.runtime.v2.ClaimWorkspaceLandingRequest
+	13, // 18: supertag.runtime.v2.HostLandings.Renew:input_type -> supertag.runtime.v2.WorkspaceLandingLease
+	15, // 19: supertag.runtime.v2.HostLandings.Record:input_type -> supertag.runtime.v2.RecordWorkspaceLandingRequest
+	9,  // 20: supertag.runtime.v2.GitDelivery.ListPendingSources:input_type -> supertag.runtime.v2.ListPendingWorkspaceSourcesRequest
+	11, // 21: supertag.runtime.v2.GitDelivery.PinSource:input_type -> supertag.runtime.v2.PinWorkspaceSourceRequest
+	12, // 22: supertag.runtime.v2.GitDelivery.Claim:input_type -> supertag.runtime.v2.ClaimWorkspaceLandingRequest
+	13, // 23: supertag.runtime.v2.GitDelivery.Renew:input_type -> supertag.runtime.v2.WorkspaceLandingLease
+	15, // 24: supertag.runtime.v2.GitDelivery.Record:input_type -> supertag.runtime.v2.RecordWorkspaceLandingRequest
+	2,  // 25: supertag.runtime.v2.WorkspaceLandings.Get:output_type -> supertag.runtime.v2.WorkspaceLanding
+	7,  // 26: supertag.runtime.v2.WorkspaceLandings.List:output_type -> supertag.runtime.v2.ListWorkspaceLandingsResponse
+	19, // 27: supertag.runtime.v2.WorkspaceLandings.ReturnConflict:output_type -> supertag.runtime.v2.Task
+	14, // 28: supertag.runtime.v2.HostLandings.Claim:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
+	14, // 29: supertag.runtime.v2.HostLandings.Renew:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
+	2,  // 30: supertag.runtime.v2.HostLandings.Record:output_type -> supertag.runtime.v2.WorkspaceLanding
+	10, // 31: supertag.runtime.v2.GitDelivery.ListPendingSources:output_type -> supertag.runtime.v2.ListPendingWorkspaceSourcesResponse
+	8,  // 32: supertag.runtime.v2.GitDelivery.PinSource:output_type -> supertag.runtime.v2.WorkspaceSourcePin
+	14, // 33: supertag.runtime.v2.GitDelivery.Claim:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
+	14, // 34: supertag.runtime.v2.GitDelivery.Renew:output_type -> supertag.runtime.v2.ClaimWorkspaceLandingResponse
+	2,  // 35: supertag.runtime.v2.GitDelivery.Record:output_type -> supertag.runtime.v2.WorkspaceLanding
+	25, // [25:36] is the sub-list for method output_type
+	14, // [14:25] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_workspace_landings_proto_init() }
@@ -1469,7 +1492,7 @@ func file_supertag_runtime_v2_workspace_landings_proto_init() {
 			NumEnums:      2,
 			NumMessages:   14,
 			NumExtensions: 0,
-			NumServices:   2,
+			NumServices:   3,
 		},
 		GoTypes:           file_supertag_runtime_v2_workspace_landings_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_workspace_landings_proto_depIdxs,

@@ -106,12 +106,6 @@ impl WorkspaceDirectory for Directory {
     ) -> Result<Response<WorkspaceDeliveryReference>, Status> {
         Err(Status::unimplemented("not used"))
     }
-    async fn get_artifact(
-        &self,
-        _: Request<GetWorkspaceArtifactRequest>,
-    ) -> Result<Response<HeldWorkspaceDelivery>, Status> {
-        panic!("review transfer must not use operator Task-ID artifact access")
-    }
 }
 
 struct ServerTask(tokio::task::JoinHandle<Result<(), tonic::transport::Error>>);

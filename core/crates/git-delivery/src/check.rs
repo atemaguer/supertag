@@ -143,11 +143,6 @@ impl GitDelivery {
                 WorkspaceCheckStatus::Ok,
                 format!("finished Sessions merge into {}", merge.target),
             ),
-            Some(workspace_land::Mode::Branch(_)) => step(
-                "land",
-                WorkspaceCheckStatus::Ok,
-                "each delivered Task updates its Session's branch supertag/session/...",
-            ),
             Some(workspace_land::Mode::Review(review)) => step(
                 "land",
                 WorkspaceCheckStatus::Ok,
@@ -158,8 +153,8 @@ impl GitDelivery {
             ),
             None => step(
                 "land",
-                WorkspaceCheckStatus::NotApplicable,
-                "changes stay with SuperTag; download them with supertag fetch",
+                WorkspaceCheckStatus::Ok,
+                "each delivered Task updates its Session's branch supertag/session/...",
             ),
         });
         let github = workspace.forge() == WorkspaceForge::Github;

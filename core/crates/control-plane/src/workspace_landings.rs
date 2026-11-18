@@ -1,17 +1,20 @@
 //! Landing is a separate durable effect of an accepted Workspace delivery: a Task succeeds
-//! whether or not its changes reached the remote. Git delivery claims each landing, pushes
-//! fast-forward only, and records what the remote now names.
+//! whether or not its changes reached the remote. The Worker Host holding the delivery claims
+//! each landing, pushes fast-forward only from its own copy of the commit, and records what the
+//! remote now names. No delivery bytes reach the Control Plane.
 //!
-//! - `branch`: every delivered Task queues a landing of the Session's branch. A newer delivery
-//!   of the same Session supersedes one not yet claimed, since its commit contains the older.
-//! - `review`: like `branch`, and git delivery then opens or updates the branch's draft pull
-//!   request; the landing records it, and its merge closes the Work Session.
+//! - Every delivered Task queues a landing of the Session's branch, whatever `land` says. A newer
+//!   delivery of the same Session supersedes one not yet claimed, since its commit contains the
+//!   older.
+//! - `review`: like `branch`; once the host pushed the branch, the Control Plane's git delivery
+//!   claims the landing and opens or updates the branch's draft pull request. The landing records
+//!   it, and its merge closes the Work Session.
 //! - `merge`: a Session lands once its work is reported done (its Work Session closes for its
 //!   Tag, an operator, or its Objective), and again after a merge follow-up Task succeeds. A
 //!   conflict is never resolved here: the landing ends in Conflict and the Session receives a
 //!   follow-up Task that merges the target and resolves it.
 use crate::{
-    ControlPlane, Store, StoreError, policy,
+    ControlPlane, HostAuthority, Store, StoreError, policy,
     remote_workspaces::pins::{DELIVERY, delivery},
     store::{Result, invalid, name, next_order, task_in},
 };
@@ -25,6 +28,29 @@ const LEASE_MS: i64 = 60_000;
 const DEFAULT_RETRY_MS: i64 = 60_000;
 const MIN_RETRY_MS: i64 = 1_000;
 const MAX_CONFLICTS: usize = 100;
+
+/// Who claims landings: the Worker Host holding their deliveries, or the Control Plane's git
+/// delivery for a review landing's pull request once its host pushed the branch.
+#[derive(Clone, Copy)]
+pub enum LandingClaimer<'a> {
+    Host(&'a HostAuthority),
+    Delivery(&'a str),
+}
+
+impl LandingClaimer<'_> {
+    async fn check_in(&self, tx: &mut Transaction<'_, Any>) -> Result<String> {
+        match self {
+            Self::Host(host) => {
+                crate::store::current_scope_in(tx, host).await?;
+                Ok(host.principal.clone())
+            }
+            Self::Delivery(principal) => {
+                delivery(principal)?;
+                Ok((*principal).to_owned())
+            }
+        }
+    }
+}
 
 fn decode(row: &AnyRow) -> Result<WorkspaceLanding> {
     policy::decode(&row.try_get::<Vec<u8>, _>("payload")?)
@@ -143,9 +169,14 @@ async fn insert_in(
         body,
         ..Default::default()
     };
-    sqlx::query("INSERT INTO supertag_v2_workspace_landings(landing_id,task_id,tag_id,session_id,created_order,state,payload) VALUES($1,$2,$3,$4,$5,$6,$7)")
+    // The host holding the delivered commit lands it; a delivery no host holds waits.
+    let holder = crate::workspaces::delivery_holder_in(tx, delivery)
+        .await
+        .map(|holder| holder.host_id)
+        .unwrap_or_default();
+    sqlx::query("INSERT INTO supertag_v2_workspace_landings(landing_id,task_id,tag_id,session_id,created_order,state,payload,holder_host_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
         .bind(&value.landing_id).bind(&value.task_id).bind(&value.tag_id).bind(&value.session_id)
-        .bind(value.created_order).bind(i64::from(value.state)).bind(value.encode_to_vec())
+        .bind(value.created_order).bind(i64::from(value.state)).bind(value.encode_to_vec()).bind(holder)
         .execute(&mut **tx).await?;
     Ok(())
 }
@@ -204,59 +235,58 @@ pub(crate) async fn finish_in(tx: &mut Transaction<'_, Any>, task: &Task) -> Res
         return Ok(());
     };
     let mode = remote.land.as_ref().and_then(|land| land.mode.as_ref());
-    match mode {
-        Some(workspace_land::Mode::Branch(_) | workspace_land::Mode::Review(_)) => {
-            let (mode, target) = match mode {
-                Some(workspace_land::Mode::Review(review)) => {
-                    (WorkspaceLandingMode::Review, review.base.as_str())
-                }
-                _ => (WorkspaceLandingMode::Branch, ""),
-            };
-            // A newer delivery contains the older one: an unclaimed landing of it is superseded.
-            let pending = sqlx::query("SELECT * FROM supertag_v2_workspace_landings WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND lease_token IS NULL")
-                .bind(&task.tag_id).bind(&task.session_id).bind(WorkspaceLandingState::Queued as i64)
-                .fetch_all(&mut **tx).await?;
-            for row in pending {
-                let mut prior = decode(&row)?;
-                if prior.mode() == mode {
-                    prior.state = WorkspaceLandingState::Superseded as i32;
-                    prior.reason = format!("Task {} delivered a newer commit", task.task_id);
-                    save(tx, &prior).await?;
-                }
-            }
-            insert_in(tx, task, remote, delivery, mode, target).await
-        }
-        // A merge follow-up resolved its conflicts: the Session lands again at once.
-        Some(workspace_land::Mode::Merge(merge)) if !spec.merge_commit.is_empty() => {
-            insert_in(
-                tx,
-                task,
-                remote,
-                delivery,
-                WorkspaceLandingMode::Merge,
-                &merge.target,
-            )
-            .await
-        }
-        // A turn that finishes after its Work Session was reported done lands it then.
-        Some(workspace_land::Mode::Merge(_)) => {
-            let done: Option<i64> = sqlx::query_scalar("SELECT close_reason FROM supertag_v2_work_sessions WHERE work_session_id=$1 AND closed_at_ms IS NOT NULL")
-                .bind(&task.session_id).fetch_optional(&mut **tx).await?;
-            if done.is_some_and(|reason| {
-                [
-                    WorkSessionCloseReason::Tag,
-                    WorkSessionCloseReason::Operator,
-                    WorkSessionCloseReason::ObjectiveClosed,
-                ]
-                .iter()
-                .any(|done| *done as i64 == reason)
-            }) {
-                session_done_in(tx, &task.session_id).await?;
-            }
-            Ok(())
-        }
-        None => Ok(()),
+    // A merge follow-up resolved its conflicts: the Session lands again at once.
+    if let Some(workspace_land::Mode::Merge(merge)) = mode
+        && !spec.merge_commit.is_empty()
+    {
+        return insert_in(
+            tx,
+            task,
+            remote,
+            delivery,
+            WorkspaceLandingMode::Merge,
+            &merge.target,
+        )
+        .await;
     }
+    // Every delivery pushes the Session's branch `supertag/session/ID`; `land` only adds a
+    // review's pull request, or a merge once the work is reported done.
+    let (landing_mode, target) = match mode {
+        Some(workspace_land::Mode::Review(review)) => {
+            (WorkspaceLandingMode::Review, review.base.as_str())
+        }
+        _ => (WorkspaceLandingMode::Branch, ""),
+    };
+    // A newer delivery contains the older one: an unclaimed landing of it is superseded.
+    let pending = sqlx::query("SELECT * FROM supertag_v2_workspace_landings WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND lease_token IS NULL")
+        .bind(&task.tag_id).bind(&task.session_id).bind(WorkspaceLandingState::Queued as i64)
+        .fetch_all(&mut **tx).await?;
+    for row in pending {
+        let mut prior = decode(&row)?;
+        if prior.mode() == landing_mode {
+            prior.state = WorkspaceLandingState::Superseded as i32;
+            prior.reason = format!("Task {} delivered a newer commit", task.task_id);
+            save(tx, &prior).await?;
+        }
+    }
+    insert_in(tx, task, remote, delivery, landing_mode, target).await?;
+    // A turn that finishes after its Work Session was reported done lands it then.
+    if let Some(workspace_land::Mode::Merge(_)) = mode {
+        let done: Option<i64> = sqlx::query_scalar("SELECT close_reason FROM supertag_v2_work_sessions WHERE work_session_id=$1 AND closed_at_ms IS NOT NULL")
+            .bind(&task.session_id).fetch_optional(&mut **tx).await?;
+        if done.is_some_and(|reason| {
+            [
+                WorkSessionCloseReason::Tag,
+                WorkSessionCloseReason::Operator,
+                WorkSessionCloseReason::ObjectiveClosed,
+            ]
+            .iter()
+            .any(|done| *done as i64 == reason)
+        }) {
+            session_done_in(tx, &task.session_id).await?;
+        }
+    }
+    Ok(())
 }
 
 /// A Work Session's work was reported done: in `merge` mode its latest delivery lands.
@@ -294,11 +324,13 @@ pub(crate) async fn session_done_in(
     if task.state() != TaskState::Succeeded || delivery.head_commit == delivery.base_commit {
         return Ok(());
     }
-    // Closing twice, or after the same delivery already landed or is landing, changes nothing.
+    // Closing twice, or after the same delivery already merged or is merging, changes nothing.
     let rows = sqlx::query("SELECT payload,state FROM supertag_v2_workspace_landings WHERE tag_id=$1 AND session_id=$2 AND state IN (1,2,3)")
         .bind(&task.tag_id).bind(&task.session_id).fetch_all(&mut **tx).await?;
     for row in rows {
-        if decode(&row)?.delivery.as_ref() == Some(delivery) {
+        let prior = decode(&row)?;
+        if prior.mode() == WorkspaceLandingMode::Merge && prior.delivery.as_ref() == Some(delivery)
+        {
             return Ok(());
         }
     }
@@ -353,9 +385,8 @@ pub(crate) async fn wake_held_by_in(
     now: i64,
 ) -> Result<()> {
     sqlx::query(
-        "UPDATE supertag_v2_workspace_landings SET retry_after_ms=$1 WHERE state=$2 AND retry_after_ms>$1
-         AND EXISTS (SELECT 1 FROM supertag_v2_workspace_deliveries d
-         WHERE d.task_id=supertag_v2_workspace_landings.task_id AND d.holder_host_id=$3 AND d.committed_at_ms IS NOT NULL)",
+        "UPDATE supertag_v2_workspace_landings SET retry_after_ms=$1
+         WHERE state=$2 AND retry_after_ms>$1 AND holder_host_id=$3",
     )
     .bind(now)
     .bind(WorkspaceLandingState::Queued as i64)
@@ -475,23 +506,38 @@ async fn receipt_in(
 
 async fn claim_response_in(
     tx: &mut Transaction<'_, Any>,
+    claimer: LandingClaimer<'_>,
     value: WorkspaceLanding,
     token: String,
     valid_for_ms: u64,
 ) -> Result<ClaimWorkspaceLandingResponse> {
-    let task = task_in(tx, &value.task_id).await?;
-    let credential = task
-        .workspace
-        .as_ref()
-        .and_then(|spec| spec.remote.as_ref())
-        .and_then(|remote| remote.credentials.as_ref())
-        .map(|names| names.push.clone())
-        .unwrap_or_default();
-    let holder = match &value.delivery {
-        Some(delivery) => crate::workspaces::delivery_holder_in(tx, delivery)
-            .await
-            .ok(),
-        None => None,
+    // A host mints its push credential for the landing; only git delivery's review adapter
+    // uses the credential by name.
+    let credential = match claimer {
+        LandingClaimer::Host(_) => String::new(),
+        LandingClaimer::Delivery(_) => task_in(tx, &value.task_id)
+            .await?
+            .workspace
+            .as_ref()
+            .and_then(|spec| spec.remote.as_ref())
+            .and_then(|remote| remote.credentials.as_ref())
+            .map(|names| names.push.clone())
+            .unwrap_or_default(),
+    };
+    let workspace = match claimer {
+        LandingClaimer::Host(_) => task_in(tx, &value.task_id)
+            .await?
+            .workspace
+            .and_then(|spec| spec.remote),
+        LandingClaimer::Delivery(_) => None,
+    };
+    let holder = match (claimer, &value.delivery) {
+        (LandingClaimer::Host(_), Some(delivery)) => {
+            crate::workspaces::delivery_holder_in(tx, delivery)
+                .await
+                .ok()
+        }
+        _ => None,
     };
     Ok(ClaimWorkspaceLandingResponse {
         landing: Some(value),
@@ -499,16 +545,20 @@ async fn claim_response_in(
         valid_for_ms,
         holder,
         credential,
+        workspace,
     })
 }
 
-async fn owned_in(
+/// The landing `lease` names, if `principal` holds its live lease.
+pub(crate) async fn owned_in(
     tx: &mut Transaction<'_, Any>,
+    principal: &str,
     lease: &WorkspaceLandingLease,
     now: i64,
 ) -> Result<WorkspaceLanding> {
     let row = row_in(tx, &lease.landing_id).await?;
-    if row.try_get::<Option<String>, _>("lease_token")?.as_deref() != Some(&lease.lease_token)
+    if row.try_get::<Option<String>, _>("claimed_by")?.as_deref() != Some(principal)
+        || row.try_get::<Option<String>, _>("lease_token")?.as_deref() != Some(&lease.lease_token)
         || row
             .try_get::<Option<i64>, _>("lease_expires_at_ms")?
             .is_none_or(|until| until <= now)
@@ -524,11 +574,12 @@ async fn owned_in(
 impl Store {
     pub async fn claim_workspace_landing(
         &self,
-        principal: &str,
+        claimer: LandingClaimer<'_>,
         input: &ClaimWorkspaceLandingRequest,
     ) -> Result<ClaimWorkspaceLandingResponse> {
-        delivery(principal)?;
         let (mut tx, _) = self.write().await?;
+        let principal = claimer.check_in(&mut tx).await?;
+        let principal = principal.as_str();
         let (digest, prior) =
             operation_in(&mut tx, principal, &input.operation_id, "claim", input).await?;
         if let Some(prior) = prior {
@@ -537,15 +588,22 @@ impl Store {
         }
         let now = self.execution_now_ms();
         // One landing per Session at a time, oldest first; an expired claim is claimable again.
-        let row = sqlx::query(
+        // A host claims what it holds and has not pushed; git delivery, pushed review branches.
+        let (mine, holder) = match claimer {
+            LandingClaimer::Host(host) => ("l.holder_host_id=$2 AND l.pushed_commit=''", host.id()),
+            LandingClaimer::Delivery(_) => ("l.pushed_commit<>'' AND $2=''", ""),
+        };
+        let row = sqlx::query(&format!(
             "SELECT l.* FROM supertag_v2_workspace_landings l
              WHERE ((l.state=1 AND l.retry_after_ms<=$1) OR (l.state=2 AND l.lease_expires_at_ms<=$1))
+               AND {mine}
                AND NOT EXISTS (SELECT 1 FROM supertag_v2_workspace_landings older
                    WHERE older.tag_id=l.tag_id AND older.session_id=l.session_id
                      AND older.created_order<l.created_order AND older.state IN (1,2))
-             ORDER BY l.created_order LIMIT 1",
-        )
+             ORDER BY l.created_order LIMIT 1"
+        ))
         .bind(now)
+        .bind(holder)
         .fetch_optional(&mut *tx)
         .await?;
         let response = match row {
@@ -555,9 +613,9 @@ impl Store {
                 value.state = WorkspaceLandingState::Claimed as i32;
                 let token = Uuid::new_v4().to_string();
                 save(&mut tx, &value).await?;
-                sqlx::query("UPDATE supertag_v2_workspace_landings SET lease_token=$1,lease_expires_at_ms=$2 WHERE landing_id=$3")
-                    .bind(&token).bind(now.saturating_add(LEASE_MS)).bind(&value.landing_id).execute(&mut *tx).await?;
-                claim_response_in(&mut tx, value, token, LEASE_MS as u64).await?
+                sqlx::query("UPDATE supertag_v2_workspace_landings SET lease_token=$1,lease_expires_at_ms=$2,claimed_by=$3 WHERE landing_id=$4")
+                    .bind(&token).bind(now.saturating_add(LEASE_MS)).bind(principal).bind(&value.landing_id).execute(&mut *tx).await?;
+                claim_response_in(&mut tx, claimer, value, token, LEASE_MS as u64).await?
             }
         };
         receipt_in(&mut tx, principal, &input.operation_id, &digest, &response).await?;
@@ -567,13 +625,13 @@ impl Store {
 
     pub async fn renew_workspace_landing(
         &self,
-        principal: &str,
+        claimer: LandingClaimer<'_>,
         input: &WorkspaceLandingLease,
     ) -> Result<ClaimWorkspaceLandingResponse> {
-        delivery(principal)?;
         let (mut tx, _) = self.write().await?;
+        let principal = claimer.check_in(&mut tx).await?;
         let now = self.execution_now_ms();
-        let value = owned_in(&mut tx, input, now).await?;
+        let value = owned_in(&mut tx, &principal, input, now).await?;
         sqlx::query(
             "UPDATE supertag_v2_workspace_landings SET lease_expires_at_ms=$1 WHERE landing_id=$2",
         )
@@ -581,18 +639,23 @@ impl Store {
         .bind(&value.landing_id)
         .execute(&mut *tx)
         .await?;
-        let response =
-            claim_response_in(&mut tx, value, input.lease_token.clone(), LEASE_MS as u64).await?;
+        let response = claim_response_in(
+            &mut tx,
+            claimer,
+            value,
+            input.lease_token.clone(),
+            LEASE_MS as u64,
+        )
+        .await?;
         tx.commit().await?;
         Ok(response)
     }
 
     pub async fn record_workspace_landing(
         &self,
-        principal: &str,
+        claimer: LandingClaimer<'_>,
         input: &RecordWorkspaceLandingRequest,
     ) -> Result<WorkspaceLanding> {
-        delivery(principal)?;
         let lease = input
             .lease
             .as_ref()
@@ -601,6 +664,8 @@ impl Store {
             return Err(invalid("landing record exceeds its limits"));
         }
         let (mut tx, _) = self.write().await?;
+        let principal = claimer.check_in(&mut tx).await?;
+        let principal = principal.as_str();
         let (digest, prior) =
             operation_in(&mut tx, principal, &input.operation_id, "record", input).await?;
         if let Some(prior) = prior {
@@ -608,9 +673,10 @@ impl Store {
             return policy::decode(&prior);
         }
         let now = self.execution_now_ms();
-        let mut value = owned_in(&mut tx, lease, now).await?;
-        let desired = WorkspaceLandingState::try_from(input.state)
+        let mut value = owned_in(&mut tx, principal, lease, now).await?;
+        let mut desired = WorkspaceLandingState::try_from(input.state)
             .map_err(|_| invalid("unknown landing state"))?;
+        let mut pushed = None;
         let mut retry_after = 0;
         value.reason = input.reason.trim().to_owned();
         match desired {
@@ -633,6 +699,22 @@ impl Store {
                 }
                 value.landed_commit = input.landed_commit.clone();
                 match (value.mode(), &input.pull_request) {
+                    // The host pushed a review landing's branch: git delivery opens its pull
+                    // request next.
+                    (WorkspaceLandingMode::Review, None)
+                        if matches!(claimer, LandingClaimer::Host(_)) =>
+                    {
+                        pushed = Some(input.landed_commit.clone());
+                        desired = WorkspaceLandingState::Queued;
+                        value.reason =
+                            "the Session's branch was pushed; its pull request is opened next"
+                                .into();
+                    }
+                    (WorkspaceLandingMode::Review, Some(_))
+                        if matches!(claimer, LandingClaimer::Host(_)) =>
+                    {
+                        return Err(invalid("a Worker Host does not open pull requests"));
+                    }
                     (WorkspaceLandingMode::Review, Some(pull_request)) => {
                         review_session_in(&mut tx, &value, pull_request).await?;
                         value.pull_request = Some(pull_request.clone());
@@ -685,8 +767,17 @@ impl Store {
         }
         value.state = desired as i32;
         save(&mut tx, &value).await?;
-        sqlx::query("UPDATE supertag_v2_workspace_landings SET lease_token=NULL,lease_expires_at_ms=NULL,retry_after_ms=$1 WHERE landing_id=$2")
+        sqlx::query("UPDATE supertag_v2_workspace_landings SET lease_token=NULL,lease_expires_at_ms=NULL,claimed_by=NULL,retry_after_ms=$1 WHERE landing_id=$2")
             .bind(retry_after).bind(&value.landing_id).execute(&mut *tx).await?;
+        if let Some(commit) = pushed {
+            sqlx::query(
+                "UPDATE supertag_v2_workspace_landings SET pushed_commit=$1 WHERE landing_id=$2",
+            )
+            .bind(commit)
+            .bind(&value.landing_id)
+            .execute(&mut *tx)
+            .await?;
+        }
         receipt_in(&mut tx, principal, &input.operation_id, &digest, &value).await?;
         tx.commit().await?;
         Ok(value)
@@ -803,6 +894,12 @@ impl ControlPlane {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
+    pub fn host_landings_service(&self) -> host_landings_server::HostLandingsServer<Self> {
+        host_landings_server::HostLandingsServer::new(self.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
     pub fn git_delivery_service(&self) -> git_delivery_server::GitDeliveryServer<Self> {
         git_delivery_server::GitDeliveryServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -848,6 +945,43 @@ impl workspace_landings_server::WorkspaceLandings for ControlPlane {
 }
 
 #[tonic::async_trait]
+impl host_landings_server::HostLandings for ControlPlane {
+    async fn claim(
+        &self,
+        request: Request<ClaimWorkspaceLandingRequest>,
+    ) -> std::result::Result<Response<ClaimWorkspaceLandingResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .claim_workspace_landing(LandingClaimer::Host(&host), request.get_ref())
+                .await?,
+        ))
+    }
+    async fn renew(
+        &self,
+        request: Request<WorkspaceLandingLease>,
+    ) -> std::result::Result<Response<ClaimWorkspaceLandingResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .renew_workspace_landing(LandingClaimer::Host(&host), request.get_ref())
+                .await?,
+        ))
+    }
+    async fn record(
+        &self,
+        request: Request<RecordWorkspaceLandingRequest>,
+    ) -> std::result::Result<Response<WorkspaceLanding>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .record_workspace_landing(LandingClaimer::Host(&host), request.get_ref())
+                .await?,
+        ))
+    }
+}
+
+#[tonic::async_trait]
 impl git_delivery_server::GitDelivery for ControlPlane {
     async fn list_pending_sources(
         &self,
@@ -878,7 +1012,7 @@ impl git_delivery_server::GitDelivery for ControlPlane {
         let principal = self.principal(&request, "delivery:")?;
         Ok(Response::new(
             self.store
-                .claim_workspace_landing(&principal, request.get_ref())
+                .claim_workspace_landing(LandingClaimer::Delivery(&principal), request.get_ref())
                 .await?,
         ))
     }
@@ -889,7 +1023,7 @@ impl git_delivery_server::GitDelivery for ControlPlane {
         let principal = self.principal(&request, "delivery:")?;
         Ok(Response::new(
             self.store
-                .renew_workspace_landing(&principal, request.get_ref())
+                .renew_workspace_landing(LandingClaimer::Delivery(&principal), request.get_ref())
                 .await?,
         ))
     }
@@ -900,7 +1034,7 @@ impl git_delivery_server::GitDelivery for ControlPlane {
         let principal = self.principal(&request, "delivery:")?;
         Ok(Response::new(
             self.store
-                .record_workspace_landing(&principal, request.get_ref())
+                .record_workspace_landing(LandingClaimer::Delivery(&principal), request.get_ref())
                 .await?,
         ))
     }

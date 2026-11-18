@@ -267,6 +267,7 @@ class WorkspaceGitPermission(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     WORKSPACE_GIT_PERMISSION_UNSPECIFIED: _ClassVar[WorkspaceGitPermission]
     WORKSPACE_GIT_PERMISSION_READ: _ClassVar[WorkspaceGitPermission]
+    WORKSPACE_GIT_PERMISSION_PUSH: _ClassVar[WorkspaceGitPermission]
 
 class WorkspaceArtifactKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -492,6 +493,7 @@ WORKSPACE_MOUNT_WRITE_STATUS_PARTIAL: WorkspaceMountWriteStatus
 WORKSPACE_MOUNT_WRITE_STATUS_REFUSED: WorkspaceMountWriteStatus
 WORKSPACE_GIT_PERMISSION_UNSPECIFIED: WorkspaceGitPermission
 WORKSPACE_GIT_PERMISSION_READ: WorkspaceGitPermission
+WORKSPACE_GIT_PERMISSION_PUSH: WorkspaceGitPermission
 WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_PATCH: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_BUNDLE: WorkspaceArtifactKind
@@ -3662,14 +3664,18 @@ class VerifyWorkspaceOutputRemoteResponse(_message.Message):
     def __init__(self, remote: _Optional[str] = ...) -> None: ...
 
 class MintWorkspaceGitAccessRequest(_message.Message):
-    __slots__ = ("attempt", "merge", "permission")
+    __slots__ = ("attempt", "merge", "permission", "landing_id", "landing_lease_token")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     MERGE_FIELD_NUMBER: _ClassVar[int]
     PERMISSION_FIELD_NUMBER: _ClassVar[int]
+    LANDING_ID_FIELD_NUMBER: _ClassVar[int]
+    LANDING_LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     attempt: InspectAttemptRequest
     merge: bool
     permission: WorkspaceGitPermission
-    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., merge: _Optional[bool] = ..., permission: _Optional[_Union[WorkspaceGitPermission, str]] = ...) -> None: ...
+    landing_id: str
+    landing_lease_token: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., merge: _Optional[bool] = ..., permission: _Optional[_Union[WorkspaceGitPermission, str]] = ..., landing_id: _Optional[str] = ..., landing_lease_token: _Optional[str] = ...) -> None: ...
 
 class WorkspaceGitGrant(_message.Message):
     __slots__ = ("workspace", "commit", "https", "ssh", "expires_at_ms")
@@ -3754,14 +3760,6 @@ class WorkspaceDownload(_message.Message):
     reference: WorkspaceDeliveryReference
     chunk: bytes
     def __init__(self, reference: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
-
-class GetWorkspaceArtifactRequest(_message.Message):
-    __slots__ = ("task_id", "kind")
-    TASK_ID_FIELD_NUMBER: _ClassVar[int]
-    KIND_FIELD_NUMBER: _ClassVar[int]
-    task_id: str
-    kind: WorkspaceArtifactKind
-    def __init__(self, task_id: _Optional[str] = ..., kind: _Optional[_Union[WorkspaceArtifactKind, str]] = ...) -> None: ...
 
 class GetReviewArtifactRequest(_message.Message):
     __slots__ = ("attempt", "review_id")

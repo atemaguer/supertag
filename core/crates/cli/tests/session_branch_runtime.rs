@@ -1,5 +1,5 @@
-//! Delivered Workspace commits reach the operator's repository as one branch per Session:
-//! `supertag fetch` imports them on demand, and the local supervisor imports them on its own.
+//! Delivered Workspace commits reach a local Workspace's repository as one branch per Session,
+//! written by the Worker Host that maps it as each Task delivers.
 #[path = "support/children.rs"]
 mod children;
 use children::reaped;
@@ -17,7 +17,7 @@ use std::{
     fs,
     io::{BufRead as _, BufReader as StdBufReader},
     net::SocketAddr,
-    path::{Path, PathBuf},
+    path::Path,
     process::Stdio,
     time::Duration,
 };
@@ -37,11 +37,9 @@ const WAIT: Duration = Duration::from_secs(30);
 
 database_tests! {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branches;
+    the_host_writes_each_session_delivery_to_its_branch_and_leaves_moved_branches;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     local_supervisor_advances_one_session_branch_for_each_task;
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    fetching_a_work_session_delivery_closes_the_work_session;
 }
 
 struct Credentials {
@@ -111,66 +109,47 @@ impl Credentials {
     }
 }
 
-async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branches(
+async fn the_host_writes_each_session_delivery_to_its_branch_and_leaves_moved_branches(
     database: String,
 ) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
-    let operator_repository = root.join("operator");
-    fs::create_dir(&operator_repository)?;
-    git(
-        &operator_repository,
-        &["init", "--quiet", "--initial-branch=main"],
-    )
-    .await?;
-    fs::write(operator_repository.join("workspace.txt"), "base\n")?;
-    git(&operator_repository, &["add", "workspace.txt"]).await?;
-    git(&operator_repository, &["commit", "--quiet", "-m", "Base"]).await?;
-    let base = git(&operator_repository, &["rev-parse", "HEAD"]).await?;
-    // The remote Worker Host's own checkout of the same repository.
+    // The Worker Host's own repository, which it maps as the Workspace's source.
     let checkout = root.join("host-checkout");
-    git(
-        root,
-        &[
-            "clone",
-            "--quiet",
-            "--no-local",
-            operator_repository.to_str().context("path")?,
-            checkout.to_str().context("path")?,
-        ],
-    )
-    .await?;
-    fs::write(operator_repository.join("workspace.txt"), "operator edit\n")?;
+    fs::create_dir(&checkout)?;
+    git(&checkout, &["init", "--quiet", "--initial-branch=main"]).await?;
+    fs::write(checkout.join("workspace.txt"), "base\n")?;
+    git(&checkout, &["add", "workspace.txt"]).await?;
+    git(&checkout, &["commit", "--quiet", "-m", "Base"]).await?;
+    let base = git(&checkout, &["rev-parse", "HEAD"]).await?;
+    fs::write(checkout.join("workspace.txt"), "operator edit\n")?;
 
     let credentials = Credentials::new();
-    let blobs = root.join("transfers");
     let mut plane = credentials.command(&["control-plane"]);
     plane.env("SUPERTAG_DATABASE_URL", &database);
     let (mut plane, public) = service(plane).await?;
-    json(credentials.operator(
-        &[
-            "tag",
-            "put",
-            "builder",
-            "--instructions",
-            "Improve the repository",
-            "--allow",
-            "file:write",
-            "--workspace-id",
-            "project",
-            "--workspace-base",
-            &base,
-        ],
-        &public,
-    ))
-    .await?;
+    for tag in ["builder", "reviewer"] {
+        json(credentials.operator(
+            &[
+                "tag",
+                "put",
+                tag,
+                "--instructions",
+                "Improve the repository",
+                "--allow",
+                "file:write",
+                "--workspace-id",
+                "project",
+                "--workspace-base",
+                &base,
+            ],
+            &public,
+        ))
+        .await?;
+    }
     let branch = supertag_protocol::session_branch("builder", "feature");
     let mut hosts = 0;
-    // The Control Plane stores no delivery: after each `--once` host exits, a holding host keeps
-    // its deliveries reachable for `fetch`.
-    let mut holding: Option<Child> = None;
-    let mut run = async |tag: &str, prompt: &str| -> Result<Value> {
-        holding = None;
+    let mut run = async |tag: &str, prompt: &str, extra: &[&str]| -> Result<Value> {
         let task = json(credentials.operator(
             &[
                 "task",
@@ -186,345 +165,75 @@ async fn fetch_imports_each_session_delivery_and_refuses_tampered_or_moved_branc
         .await?;
         let task_id = field(&task, "task_id")?.to_owned();
         hosts += 1;
-        success(credentials.worker(&public, &root.join(format!("host-{hosts}")), &checkout))
-            .await?;
+        let mut worker =
+            credentials.worker(&public, &root.join(format!("host-{hosts}")), &checkout);
+        worker.args(extra);
+        success(worker).await?;
         let task = json(credentials.operator(&["get", "task", &task_id], &public)).await?;
         ensure!(task["state"] == "TASK_STATE_SUCCEEDED", "{task}");
-        holding = Some(
-            holding_host::serve(credentials.holder(
-                &public,
-                &root.join(format!("holder-{hosts}")),
-                &checkout,
-            ))
-            .await?,
-        );
         Ok(task)
     };
-    let fetch = |id: &str, extra: &[&str]| {
-        let mut command = credentials.operator(&["fetch", id], &public);
-        command
-            .args(extra)
-            .arg("--repository")
-            .arg(&operator_repository);
-        command
-    };
 
-    // The first Task of the Session creates its branch.
-    let first = run("builder", "first").await?;
-    let first_id = field(&first, "task_id")?;
+    // The first Task of the Session creates its branch, the second advances it.
+    let first = run("builder", "first", &[]).await?;
     let first_head = field(&first["workspace_delivery"], "head_commit")?.to_owned();
-    let imported = json(fetch(first_id, &[])).await?;
-    assert_eq!(imported["result"], "created");
-    assert_eq!(imported["branch"], branch.as_str());
-    // Only pulling a Work Session's delivery closes a Work Session.
-    assert_eq!(imported["work_session_closed"], false);
-    assert_eq!(imported["session_id"], "feature");
     assert_eq!(
-        branch_head(&operator_repository, &branch).await?,
+        branch_head(&checkout, &branch).await?,
         Some(first_head.clone())
     );
-    assert_eq!(json(fetch(first_id, &[])).await?["result"], "current");
-
-    // The second Task continues it, imported by Session.
-    let second = run("builder", "second").await?;
+    let second = run("builder", "second", &[]).await?;
     let second_head = field(&second["workspace_delivery"], "head_commit")?.to_owned();
-    let imported = json(fetch("feature", &["--tag", "builder"])).await?;
-    assert_eq!(imported["result"], "advanced");
-    assert_eq!(imported["task_id"], second["task_id"]);
     assert_eq!(
-        branch_head(&operator_repository, &branch).await?,
+        branch_head(&checkout, &branch).await?,
         Some(second_head.clone())
     );
     assert_eq!(
-        git(
-            &operator_repository,
-            &["rev-parse", &format!("{second_head}^")]
-        )
-        .await?,
+        git(&checkout, &["rev-parse", &format!("{second_head}^")]).await?,
         first_head
     );
     assert_eq!(
-        git(
-            &operator_repository,
-            &["show", &format!("{branch}:workspace.txt")]
-        )
-        .await?,
+        git(&checkout, &["show", &format!("{branch}:workspace.txt")]).await?,
         "base\nfirst\nsecond"
     );
-    // One Tag has this Session, so the Tag is optional.
-    assert_eq!(json(fetch("feature", &[])).await?["result"], "current");
-    // The second delivery's bundle carries only what it added to the first. A clone that has
-    // only the base lacks that start commit, so it imports a complete bundle the holding host
-    // builds on demand.
-    let second_bundle = &second["workspace_delivery"]["bundle"];
-    ensure!(
-        second_bundle["byte_length"]
-            .as_u64()
-            .is_some_and(|bytes| bytes < 4_096),
-        "{second}"
-    );
-    let fresh = root.join("fresh-clone");
-    git(
-        root,
-        &[
-            "clone",
-            "--quiet",
-            "--no-local",
-            checkout.to_str().context("path")?,
-            fresh.to_str().context("path")?,
-        ],
-    )
-    .await?;
-    let mut fresh_fetch = credentials.operator(&["fetch", field(&second, "task_id")?], &public);
-    fresh_fetch.arg("--repository").arg(&fresh);
-    assert_eq!(json(fresh_fetch).await?["result"], "created");
-    assert_eq!(
-        branch_head(&fresh, &branch).await?,
-        Some(second_head.clone())
-    );
 
-    // A person moves the branch: the next delivery no longer continues it, so it stays put.
-    let tree = git(
-        &operator_repository,
-        &["rev-parse", &format!("{base}^{{tree}}")],
-    )
-    .await?;
+    // A person moves the branch: the next delivery no longer continues it, so it stays put, and
+    // the Task still succeeds.
+    let tree = git(&checkout, &["rev-parse", &format!("{base}^{{tree}}")]).await?;
     let person = git(
-        &operator_repository,
+        &checkout,
         &["commit-tree", &tree, "-p", &second_head, "-m", "Person"],
     )
     .await?;
     git(
-        &operator_repository,
+        &checkout,
         &["update-ref", &format!("refs/heads/{branch}"), &person],
     )
     .await?;
-    let third = run("builder", "third").await?;
-    let third_id = field(&third, "task_id")?.to_owned();
-    let refused = output(fetch(&third_id, &[])).await?;
-    assert!(!refused.status.success());
-    let message = String::from_utf8_lossy(&refused.stderr);
-    assert!(message.contains("moved outside SuperTag"), "{message}");
-    assert!(message.contains(&person), "{message}");
-    assert_eq!(
-        branch_head(&operator_repository, &branch).await?,
-        Some(person.clone())
-    );
+    run("builder", "third", &[]).await?;
+    assert_eq!(branch_head(&checkout, &branch).await?, Some(person.clone()));
 
-    // A tampered bundle is refused before the repository receives anything.
-    git(
-        &operator_repository,
-        &["update-ref", &format!("refs/heads/{branch}"), &second_head],
-    )
-    .await?;
-    let fourth = run("builder", "fourth").await?;
-    let fourth_head = field(&fourth["workspace_delivery"], "head_commit")?.to_owned();
-    let digest = field(&fourth["workspace_delivery"]["bundle"], "sha256")?;
-    // The holding host's copy is the only one: the Control Plane stored none.
-    ensure!(
-        !blobs.exists() || find(&blobs, digest)?.is_none(),
-        "the Control Plane stored a bundle"
-    );
-    let stored =
-        find(&holding_host::artifact_directory(root), digest)?.context("held bundle missing")?;
-    let mut bytes = fs::read(&stored)?;
-    let last = bytes.len() - 1;
-    bytes[last] ^= 1;
-    fs::write(&stored, bytes)?;
-    let refused = output(fetch(field(&fourth, "task_id")?, &[])).await?;
-    assert!(!refused.status.success());
-    let message = String::from_utf8_lossy(&refused.stderr);
-    assert!(
-        message.contains("no longer holds verified bytes"),
-        "{message}"
-    );
-    assert_eq!(
-        branch_head(&operator_repository, &branch).await?,
-        Some(second_head.clone())
-    );
-    let mut absent = Command::new("/usr/bin/git");
-    absent
-        .arg("-C")
-        .arg(&operator_repository)
-        .args(["cat-file", "-e", &fourth_head]);
-    assert!(!output(absent).await?.status.success());
-
-    // The operator's checkout, current branch, and uncommitted edit never changed.
-    assert_eq!(
-        git(&operator_repository, &["rev-parse", "HEAD"]).await?,
-        base
-    );
-    assert_eq!(
-        git(&operator_repository, &["branch", "--show-current"]).await?,
-        "main"
-    );
-    assert_eq!(
-        fs::read_to_string(operator_repository.join("workspace.txt"))?,
-        "operator edit\n"
-    );
-    // Another Tag's Session with the same ID has its own branch, and the Session ID alone is
-    // then ambiguous.
-    json(credentials.operator(
-        &[
-            "tag",
-            "put",
-            "reviewer",
-            "--instructions",
-            "Review the repository",
-            "--allow",
-            "file:write",
-            "--workspace-id",
-            "project",
-            "--workspace-base",
-            &base,
-        ],
-        &public,
-    ))
-    .await?;
-    let other = run("reviewer", "other").await?;
-    let ambiguous = output(fetch("feature", &[])).await?;
-    assert!(!ambiguous.status.success());
-    let message = String::from_utf8_lossy(&ambiguous.stderr);
-    assert!(message.contains("name the Tag"), "{message}");
-    let imported = json(fetch("feature", &["--tag", "reviewer"])).await?;
+    // Another Tag's Session with the same ID has its own branch.
+    let other = run("reviewer", "other", &[]).await?;
     let other_branch = supertag_protocol::session_branch("reviewer", "feature");
     assert_ne!(other_branch, branch);
-    assert_eq!(imported["branch"], other_branch.as_str());
-    assert_eq!(imported["result"], "created");
     assert_eq!(
-        branch_head(&operator_repository, &other_branch)
-            .await?
-            .as_deref(),
+        branch_head(&checkout, &other_branch).await?.as_deref(),
         Some(field(&other["workspace_delivery"], "head_commit")?)
     );
+    // A patch-only Workspace gets no branch.
+    let patched = run("reviewer", "patched", &["--workspace-patch", "project"]).await?;
+    assert_ne!(
+        branch_head(&checkout, &other_branch).await?.as_deref(),
+        Some(field(&patched["workspace_delivery"], "head_commit")?)
+    );
+
+    // The host's checkout, current branch, and uncommitted edit never changed.
+    assert_eq!(git(&checkout, &["rev-parse", "HEAD"]).await?, base);
+    assert_eq!(git(&checkout, &["branch", "--show-current"]).await?, "main");
     assert_eq!(
-        branch_head(&operator_repository, &branch).await?,
-        Some(second_head.clone())
+        fs::read_to_string(checkout.join("workspace.txt"))?,
+        "operator edit\n"
     );
-
-    // An unknown ID names neither a Task nor a Session.
-    let missing = output(fetch("no-such-id", &[])).await?;
-    assert!(!missing.status.success());
-    assert!(String::from_utf8_lossy(&missing.stderr).contains("no Task or Session"));
-
-    plane.kill().await?;
-    Ok(())
-}
-
-/// Pulling a Work Session's delivery with `supertag fetch` accepts it: the Work Session closes,
-/// stops counting toward its Tag's open Work Sessions, and cannot be continued.
-async fn fetching_a_work_session_delivery_closes_the_work_session(database: String) -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let root = directory.path();
-    let operator_repository = root.join("operator");
-    fs::create_dir(&operator_repository)?;
-    git(
-        &operator_repository,
-        &["init", "--quiet", "--initial-branch=main"],
-    )
-    .await?;
-    fs::write(operator_repository.join("workspace.txt"), "base\n")?;
-    git(&operator_repository, &["add", "workspace.txt"]).await?;
-    git(&operator_repository, &["commit", "--quiet", "-m", "Base"]).await?;
-    let base = git(&operator_repository, &["rev-parse", "HEAD"]).await?;
-    let checkout = root.join("host-checkout");
-    git(
-        root,
-        &[
-            "clone",
-            "--quiet",
-            "--no-local",
-            operator_repository.to_str().context("path")?,
-            checkout.to_str().context("path")?,
-        ],
-    )
-    .await?;
-    let credentials = Credentials::new();
-    let mut plane = credentials.command(&["control-plane"]);
-    plane.env("SUPERTAG_DATABASE_URL", &database);
-    let (mut plane, public) = service(plane).await?;
-    json(credentials.operator(
-        &[
-            "tag",
-            "put",
-            "builder",
-            "--instructions",
-            "Improve the repository",
-            "--allow",
-            "file:write",
-            "--workspace-id",
-            "project",
-            "--workspace-base",
-            &base,
-        ],
-        &public,
-    ))
-    .await?;
-    json(credentials.operator(
-        &[
-            "task",
-            "submit",
-            "--tag",
-            "builder",
-            "--session",
-            "feature",
-            "Split the work",
-        ],
-        &public,
-    ))
-    .await?;
-    // The root turn starts a Work Session; its own turn then delivers a commit.
-    let mut starter = credentials.worker(&public, &root.join("host-root"), &checkout);
-    starter.arg("--adapter-arg=--start-work-session");
-    success(starter).await?;
-    let listed = json(credentials.operator(
-        &[
-            "get",
-            "session",
-            "--parent-tag",
-            "builder",
-            "--parent-session",
-            "feature",
-        ],
-        &public,
-    ))
-    .await?;
-    ensure!(listed["open_work_sessions"] == 1, "{listed}");
-    let work = field(&listed["work_sessions"][0], "work_session_id")?.to_owned();
-    success(credentials.worker(&public, &root.join("host-child"), &checkout)).await?;
-    let delivered = json(credentials.operator(&["get", "session", &work], &public)).await?;
-    ensure!(
-        delivered["workspace_delivery"]["committed"] == true,
-        "{delivered}"
-    );
-    // The Control Plane stores no delivery; a holding host keeps it reachable for `fetch`.
-    let _holding =
-        holding_host::serve(credentials.holder(&public, &root.join("holder"), &checkout)).await?;
-    let mut fetch = credentials.operator(&["fetch", &work, "--tag", "builder"], &public);
-    fetch.arg("--repository").arg(&operator_repository);
-    let imported = json(fetch).await?;
-    ensure!(
-        imported["work_session_closed"] == true && imported["session_id"] == work.as_str(),
-        "{imported}"
-    );
-    let closed = json(credentials.operator(&["get", "session", &work], &public)).await?;
-    ensure!(
-        closed["close_reason"] == "WORK_SESSION_CLOSE_REASON_DELIVERY_PULLED",
-        "{closed}"
-    );
-    let listed = json(credentials.operator(
-        &[
-            "get",
-            "session",
-            "--parent-tag",
-            "builder",
-            "--parent-session",
-            "feature",
-        ],
-        &public,
-    ))
-    .await?;
-    ensure!(listed["open_work_sessions"] == 0, "{listed}");
     plane.kill().await?;
     Ok(())
 }
@@ -705,20 +414,6 @@ async fn local_supervisor_advances_one_session_branch_for_each_task(
     let _ = supervisor.kill();
     let _ = supervisor.wait();
     result
-}
-
-fn find(directory: &Path, name: &str) -> Result<Option<PathBuf>> {
-    for entry in fs::read_dir(directory)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            if let Some(found) = find(&path, name)? {
-                return Ok(Some(found));
-            }
-        } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
 }
 
 async fn branch_head(repository: &Path, branch: &str) -> Result<Option<String>> {

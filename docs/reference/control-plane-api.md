@@ -85,7 +85,7 @@ name in `supertag audit`.
 | `AuthKeys`, `Enrollments` | Auth Keys, enrollment, and credential rotation |
 | `OperatorAccess` | Operator Tokens (admin only) and the audit log |
 | `ArtifactCatalog`, `ArtifactPublications`, `ArtifactVolumes` | Artifacts, publications to other Objectives, and Volumes |
-| `Transfers.DownloadWorkspaceArtifact` | A Workspace delivery's bundle for `supertag fetch`, relayed from the Worker Host that holds it |
+| `HostLandings` | Worker Hosts claim and record the landings of the Workspace deliveries they hold |
 | `Workspaces`, `WorkspaceCredentials`, `WorkspaceLandings` | Remote Workspaces, their Workspace Credentials and checks, and where Session changes landed |
 | `WorkspaceVolumes` | Workspace data Volumes |
 | `TaskFiles` | `Locate`: where a Task's files can be read, as locations only, never file content. A running Task's local checkout is returned only to a caller whose `machine_id` matches its Worker Host's (both read `supertag/machine-id` in the per-user configuration directory); others get "Files on Worker Host NAME are unreachable from here" |

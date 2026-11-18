@@ -168,8 +168,8 @@ Tag a `volume`: the capturing host writes each copy there itself. The Control Pl
 Volume; for an S3 Volume it only signs, with the credential `supertag volume credential set`
 stores in its credential vault on this machine. See
 [Keep every capture on a Volume](../reference/artifacts.md#keep-every-capture-on-a-volume).
-Workspace deliveries, the patch and bundle behind `supertag fetch`, stay on the host that ran the
-Task and are relayed while it is connected. See
+Workspace deliveries stay on the Worker Host that ran the Task: it writes or pushes each Session
+branch itself. See
 [Artifacts](../reference/artifacts.md).
 
 ## Replicas

@@ -361,8 +361,8 @@ enum Command {
         /// Removed: S3 Volume credentials live in the credential vault. Refused with what replaces it.
         #[arg(long = "artifact-s3-volumes", hide = true)]
         removed_artifact_s3_volumes: Option<PathBuf>,
-        /// Private directory of git delivery, which reads remote Workspaces and lands Session
-        /// changes on them: scratch for each operation and remembered SSH host keys. Default:
+        /// Private directory of git delivery, which reads remote Workspaces and opens review
+        /// pull requests: scratch for each operation and remembered SSH host keys. Default:
         /// git-delivery in SUPERTAG_STATE_DIR or ~/.supertag. Workspace Credentials come from the
         /// credential vault there (SUPERTAG_CREDENTIAL_VAULT).
         #[arg(long)]
@@ -687,13 +687,6 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         connection: Connection,
         #[command(subcommand)]
         command: workspace_mounts::VolumeCommand,
-    },
-    /// Import a Task's or Session's delivered commits as its Session branch in a repository.
-    Fetch {
-        #[command(flatten)]
-        connection: Connection,
-        #[command(flatten)]
-        args: delivery_branches::FetchArgs,
     },
     /// Close a Work Session so it no longer counts toward its Tag's limit.
     Session {
@@ -1468,7 +1461,6 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => tasks::run(connection, command).await?,
-        Command::Fetch { connection, args } => delivery_branches::fetch(connection, args).await?,
         Command::ArtifactPublication {
             connection,
             command,
@@ -1648,7 +1640,6 @@ async fn control_plane(
         }
     });
     let shutdown = CancellationToken::new();
-    let transfers_for_landings = transfers.clone();
     let routes = api.routes(transfers, internal, shutdown.clone()).await;
     // Refuse every call from a peer that skipped protocol negotiation, then authenticate the
     // caller and check its role against the one authorization table.
@@ -1669,11 +1660,10 @@ async fn control_plane(
     let landing_loop = async {
         if let Some(delivery) = &delivery {
             let result = delivery
-                .run_landings(
+                .run_reviews(
                     channel.clone(),
                     service_token.clone(),
                     supertag_control_plane::GIT_DELIVERY_PRINCIPAL.into(),
-                    std::sync::Arc::new(RelayedBundles(transfers_for_landings.clone())),
                     shutdown.clone(),
                 )
                 .await;
@@ -1762,28 +1752,12 @@ impl supertag_api::transfers::volumes::VolumeGarbage for VolumeGarbage {
 /// Git delivery for the API tier: remote Workspace sources and checks.
 struct WorkspaceGit(supertag_git_delivery::GitDelivery);
 
-/// Git delivery's delivered bundles, relayed from the Worker Host holding each delivery.
-struct RelayedBundles(ApiTransfers);
-
-#[tonic::async_trait]
-impl supertag_git_delivery::BundleReader for RelayedBundles {
-    async fn read(
-        &self,
-        holder: &supertag_protocol::v2::BlobHolder,
-        delivery: &supertag_protocol::v2::WorkspaceDeliveryReference,
-        destination: &std::path::Path,
-    ) -> Result<()> {
-        self.0
-            .relay_complete_bundle_to_file(holder, delivery, destination)
-            .await
-    }
-}
-
 #[tonic::async_trait]
 impl supertag_api::transfers::WorkspaceGit for WorkspaceGit {
-    async fn grant_read(
+    async fn grant(
         &self,
         workspace: &supertag_protocol::v2::Workspace,
+        push: bool,
     ) -> Result<(
         Option<supertag_protocol::v2::workspace_git_grant::Credential>,
         i64,
@@ -1794,7 +1768,14 @@ impl supertag_api::transfers::WorkspaceGit for WorkspaceGit {
         };
         let grant = self
             .0
-            .grant(workspace, supertag_git_delivery::Access::Read)
+            .grant(
+                workspace,
+                if push {
+                    supertag_git_delivery::Access::Push
+                } else {
+                    supertag_git_delivery::Access::Read
+                },
+            )
             .await?;
         let credential = match grant.credential {
             None => None,
@@ -1931,6 +1912,7 @@ async fn state_owner(
         .add_service(plane.workspace_credentials_service())
         .add_service(plane.workspace_landings_service())
         .add_service(plane.git_delivery_service())
+        .add_service(plane.host_landings_service())
         .add_service(plane.reply_progress_service())
         .add_service(plane.operator_notifications_service())
         .add_service(
@@ -3232,7 +3214,7 @@ mod tests {
 
     /// Top-level commands that act on this machine, a deployment, or a report rather than on one
     /// resource kind. `connect` is the one verb: it saves a Control Plane on this machine.
-    const OPERATIONS: [&str; 18] = [
+    const OPERATIONS: [&str; 17] = [
         "health",
         "init",
         "sign-in",
@@ -3247,7 +3229,6 @@ mod tests {
         "tui",
         "worker-host",
         "connect",
-        "fetch",
         "spend",
         "metrics",
         "audit",

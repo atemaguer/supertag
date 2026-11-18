@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// WorkspaceLandingsName is the fully-qualified name of the WorkspaceLandings service.
 	WorkspaceLandingsName = "supertag.runtime.v2.WorkspaceLandings"
+	// HostLandingsName is the fully-qualified name of the HostLandings service.
+	HostLandingsName = "supertag.runtime.v2.HostLandings"
 	// GitDeliveryName is the fully-qualified name of the GitDelivery service.
 	GitDeliveryName = "supertag.runtime.v2.GitDelivery"
 )
@@ -42,6 +44,12 @@ const (
 	// WorkspaceLandingsReturnConflictProcedure is the fully-qualified name of the WorkspaceLandings's
 	// ReturnConflict RPC.
 	WorkspaceLandingsReturnConflictProcedure = "/supertag.runtime.v2.WorkspaceLandings/ReturnConflict"
+	// HostLandingsClaimProcedure is the fully-qualified name of the HostLandings's Claim RPC.
+	HostLandingsClaimProcedure = "/supertag.runtime.v2.HostLandings/Claim"
+	// HostLandingsRenewProcedure is the fully-qualified name of the HostLandings's Renew RPC.
+	HostLandingsRenewProcedure = "/supertag.runtime.v2.HostLandings/Renew"
+	// HostLandingsRecordProcedure is the fully-qualified name of the HostLandings's Record RPC.
+	HostLandingsRecordProcedure = "/supertag.runtime.v2.HostLandings/Record"
 	// GitDeliveryListPendingSourcesProcedure is the fully-qualified name of the GitDelivery's
 	// ListPendingSources RPC.
 	GitDeliveryListPendingSourcesProcedure = "/supertag.runtime.v2.GitDelivery/ListPendingSources"
@@ -180,6 +188,132 @@ func (UnimplementedWorkspaceLandingsHandler) List(context.Context, *connect.Requ
 
 func (UnimplementedWorkspaceLandingsHandler) ReturnConflict(context.Context, *connect.Request[runtimev2.ReturnLandingConflictRequest]) (*connect.Response[runtimev2.Task], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceLandings.ReturnConflict is not implemented"))
+}
+
+// HostLandingsClient is a client for the supertag.runtime.v2.HostLandings service.
+type HostLandingsClient interface {
+	Claim(context.Context, *connect.Request[runtimev2.ClaimWorkspaceLandingRequest]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error)
+	Renew(context.Context, *connect.Request[runtimev2.WorkspaceLandingLease]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error)
+	// In review mode, a host records the pushed branch as Landed without a pull request; the
+	// Control Plane's git delivery then opens or updates the pull request.
+	Record(context.Context, *connect.Request[runtimev2.RecordWorkspaceLandingRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error)
+}
+
+// NewHostLandingsClient constructs a client for the supertag.runtime.v2.HostLandings service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHostLandingsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HostLandingsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	hostLandingsMethods := runtimev2.File_supertag_runtime_v2_workspace_landings_proto.Services().ByName("HostLandings").Methods()
+	return &hostLandingsClient{
+		claim: connect.NewClient[runtimev2.ClaimWorkspaceLandingRequest, runtimev2.ClaimWorkspaceLandingResponse](
+			httpClient,
+			baseURL+HostLandingsClaimProcedure,
+			connect.WithSchema(hostLandingsMethods.ByName("Claim")),
+			connect.WithClientOptions(opts...),
+		),
+		renew: connect.NewClient[runtimev2.WorkspaceLandingLease, runtimev2.ClaimWorkspaceLandingResponse](
+			httpClient,
+			baseURL+HostLandingsRenewProcedure,
+			connect.WithSchema(hostLandingsMethods.ByName("Renew")),
+			connect.WithClientOptions(opts...),
+		),
+		record: connect.NewClient[runtimev2.RecordWorkspaceLandingRequest, runtimev2.WorkspaceLanding](
+			httpClient,
+			baseURL+HostLandingsRecordProcedure,
+			connect.WithSchema(hostLandingsMethods.ByName("Record")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// hostLandingsClient implements HostLandingsClient.
+type hostLandingsClient struct {
+	claim  *connect.Client[runtimev2.ClaimWorkspaceLandingRequest, runtimev2.ClaimWorkspaceLandingResponse]
+	renew  *connect.Client[runtimev2.WorkspaceLandingLease, runtimev2.ClaimWorkspaceLandingResponse]
+	record *connect.Client[runtimev2.RecordWorkspaceLandingRequest, runtimev2.WorkspaceLanding]
+}
+
+// Claim calls supertag.runtime.v2.HostLandings.Claim.
+func (c *hostLandingsClient) Claim(ctx context.Context, req *connect.Request[runtimev2.ClaimWorkspaceLandingRequest]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error) {
+	return c.claim.CallUnary(ctx, req)
+}
+
+// Renew calls supertag.runtime.v2.HostLandings.Renew.
+func (c *hostLandingsClient) Renew(ctx context.Context, req *connect.Request[runtimev2.WorkspaceLandingLease]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error) {
+	return c.renew.CallUnary(ctx, req)
+}
+
+// Record calls supertag.runtime.v2.HostLandings.Record.
+func (c *hostLandingsClient) Record(ctx context.Context, req *connect.Request[runtimev2.RecordWorkspaceLandingRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error) {
+	return c.record.CallUnary(ctx, req)
+}
+
+// HostLandingsHandler is an implementation of the supertag.runtime.v2.HostLandings service.
+type HostLandingsHandler interface {
+	Claim(context.Context, *connect.Request[runtimev2.ClaimWorkspaceLandingRequest]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error)
+	Renew(context.Context, *connect.Request[runtimev2.WorkspaceLandingLease]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error)
+	// In review mode, a host records the pushed branch as Landed without a pull request; the
+	// Control Plane's git delivery then opens or updates the pull request.
+	Record(context.Context, *connect.Request[runtimev2.RecordWorkspaceLandingRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error)
+}
+
+// NewHostLandingsHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHostLandingsHandler(svc HostLandingsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	hostLandingsMethods := runtimev2.File_supertag_runtime_v2_workspace_landings_proto.Services().ByName("HostLandings").Methods()
+	hostLandingsClaimHandler := connect.NewUnaryHandler(
+		HostLandingsClaimProcedure,
+		svc.Claim,
+		connect.WithSchema(hostLandingsMethods.ByName("Claim")),
+		connect.WithHandlerOptions(opts...),
+	)
+	hostLandingsRenewHandler := connect.NewUnaryHandler(
+		HostLandingsRenewProcedure,
+		svc.Renew,
+		connect.WithSchema(hostLandingsMethods.ByName("Renew")),
+		connect.WithHandlerOptions(opts...),
+	)
+	hostLandingsRecordHandler := connect.NewUnaryHandler(
+		HostLandingsRecordProcedure,
+		svc.Record,
+		connect.WithSchema(hostLandingsMethods.ByName("Record")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.HostLandings/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HostLandingsClaimProcedure:
+			hostLandingsClaimHandler.ServeHTTP(w, r)
+		case HostLandingsRenewProcedure:
+			hostLandingsRenewHandler.ServeHTTP(w, r)
+		case HostLandingsRecordProcedure:
+			hostLandingsRecordHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHostLandingsHandler returns CodeUnimplemented from all methods.
+type UnimplementedHostLandingsHandler struct{}
+
+func (UnimplementedHostLandingsHandler) Claim(context.Context, *connect.Request[runtimev2.ClaimWorkspaceLandingRequest]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostLandings.Claim is not implemented"))
+}
+
+func (UnimplementedHostLandingsHandler) Renew(context.Context, *connect.Request[runtimev2.WorkspaceLandingLease]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostLandings.Renew is not implemented"))
+}
+
+func (UnimplementedHostLandingsHandler) Record(context.Context, *connect.Request[runtimev2.RecordWorkspaceLandingRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostLandings.Record is not implemented"))
 }
 
 // GitDeliveryClient is a client for the supertag.runtime.v2.GitDelivery service.

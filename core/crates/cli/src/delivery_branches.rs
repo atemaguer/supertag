@@ -1,281 +1,56 @@
-//! Session branches in the operator's repository: `supertag fetch`, and the local supervisor's
-//! automatic import of each delivered Task of a Workspace one of its Worker Hosts maps, followed
-//! by the Workspace's `land` ([`crate::local_landing`]).
+//! Local Workspaces' `land` beyond their Session branches: the supervisor follows each delivered
+//! Task of a Workspace one of its Worker Hosts maps and runs the Workspace's `land`
+//! ([`crate::local_landing`]).
 //!
-//! A Worker Host never writes the operator's repository. Its delivery is a verified bundle the
-//! Control Plane accepted; this machine downloads it from the Control Plane, checks it against the
-//! accepted receipt, and imports only the delivered commit as `supertag/session/<id>`.
+//! The Worker Host writes each Session branch `supertag/session/<id>` into the mapped repository
+//! itself as the Task delivers, from its own copy of the commit; no delivery bytes pass through
+//! the Control Plane. The supervisor only checks the branch holds the delivered commit.
 
 use std::{
     collections::{BTreeMap, HashSet},
-    io::Write as _,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use clap::Args;
-use serde_json::json;
-use sha2::{Digest, Sha256};
 use supertag_protocol::negotiation::ProtocolChannel;
 use supertag_protocol::{
-    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES, MAX_WORKSPACE_BLOB_BYTES,
+    MAX_MESSAGE_BYTES,
     v2::{
-        GetSessionDeliveryRequest, GetTaskRequest, GetWorkspaceArtifactRequest, TaskState,
-        WatchKind, WatchRequest, WorkspaceArtifactKind, WorkspaceDeliveryReference,
-        operator_client::OperatorClient, operator_events_client::OperatorEventsClient,
-        transfers_client::TransfersClient, watch_event::Update, workspace_download,
+        GetTaskRequest, TaskState, WatchKind, WatchRequest, operator_client::OperatorClient,
+        operator_events_client::OperatorEventsClient, watch_event::Update,
     },
-    validate_workspace_delivery,
 };
-use supertag_workspaces::session_branch::{self, Imported, SessionDelivery};
-use tokio_util::sync::CancellationToken;
 use tonic::Code;
 
-use crate::{Connection, connect_operator, request};
+use crate::request;
 
-#[derive(Args)]
-pub struct FetchArgs {
-    /// A Task ID, or a Session ID to import that Session's latest delivery.
-    id: String,
-    /// The Tag whose Session to import, when more than one Tag has a Session with this ID.
-    #[arg(long)]
-    tag: Option<String>,
-    /// The Git repository that receives the Session branch.
-    #[arg(long, default_value = ".")]
-    repository: PathBuf,
-}
-
-/// One accepted delivery and the Session it belongs to.
-struct Accepted {
-    task_id: String,
-    tag_id: String,
-    session_id: String,
-    delivery: WorkspaceDeliveryReference,
-}
-
-pub async fn fetch(connection: Connection, args: FetchArgs) -> Result<()> {
-    let (channel, token) = connect_operator(connection).await?;
-    let accepted = resolve(&channel, &token, &args.id, args.tag.as_deref()).await?;
-    let repository = args.repository;
-    let (branch, imported) = import(&channel, &token, &accepted, &repository).await?;
-    // Pulling a Work Session's delivery accepts it: the Work Session closes and stops counting
-    // toward its Tag's open Work Sessions.
-    let closed = if accepted.session_id.starts_with("work/") {
-        crate::work_sessions::close(channel.clone(), &token, accepted.session_id.clone(), true)
-            .await?
-            .closed_at_ms
-            .is_some()
-    } else {
-        false
-    };
-    crate::terminal::print_json(&json!({
-        "work_session_closed": closed,
-        "task_id": accepted.task_id,
-        "tag_id": accepted.tag_id,
-        "session_id": accepted.session_id,
-        "repository": repository,
-        "branch": branch,
-        "head_commit": accepted.delivery.head_commit,
-        "result": imported.as_str(),
-    }))?;
-    Ok(())
-}
-
-/// A Task's accepted delivery, else the named Session's latest one.
-async fn resolve(
-    channel: &ProtocolChannel,
-    token: &str,
-    id: &str,
-    tag: Option<&str>,
-) -> Result<Accepted> {
-    let mut operator = OperatorClient::new(channel.clone())
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    if tag.is_none() {
-        match operator
-            .get_task(request(GetTaskRequest { task_id: id.into() }, token)?)
-            .await
-        {
-            Ok(task) => {
-                let task = task.into_inner();
-                let succeeded = task.state() == TaskState::Succeeded;
-                let delivery = task.workspace_delivery.with_context(|| {
-                    if succeeded {
-                        format!("Task {id} has no Workspace delivery")
-                    } else {
-                        format!("Task {id} has not delivered Workspace commits")
-                    }
-                })?;
-                return Ok(Accepted {
-                    task_id: task.task_id,
-                    tag_id: task.tag_id,
-                    session_id: task.session_id,
-                    delivery,
-                });
-            }
-            Err(status) if status.code() == Code::NotFound => {}
-            Err(status) => return Err(status.into()),
-        }
-    }
-    let found = operator
-        .get_session_delivery(request(
-            GetSessionDeliveryRequest {
-                session_id: id.into(),
-                tag_id: tag.unwrap_or_default().into(),
-            },
-            token,
-        )?)
+/// Whether `repository`'s branch `branch` holds `head`: the Worker Host writes each local
+/// Session branch itself as the Task delivers.
+async fn holds(repository: &Path, branch: &str, head: &str) -> Result<bool> {
+    let output = tokio::process::Command::new("git")
+        .current_dir(repository)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "merge-base",
+            "--is-ancestor",
+            "--",
+        ])
+        .arg(head)
+        .arg(format!("refs/heads/{branch}"))
+        .output()
         .await
-        .map_err(|status| {
-            if status.code() == Code::NotFound {
-                anyhow::anyhow!("no Task or Session {id} has delivered Workspace commits")
-            } else {
-                status.into()
-            }
-        })?
-        .into_inner();
-    Ok(Accepted {
-        task_id: found.task_id,
-        tag_id: found.tag_id,
-        session_id: found.session_id,
-        delivery: found
-            .delivery
-            .context("Session delivery has no Workspace delivery")?,
-    })
-}
-
-/// Download the accepted bundle, verify it against the accepted receipt, and import it.
-async fn import(
-    channel: &ProtocolChannel,
-    token: &str,
-    accepted: &Accepted,
-    repository: &Path,
-) -> Result<(String, Imported)> {
-    let delivery = &accepted.delivery;
-    validate_workspace_delivery(delivery)?;
-    ensure!(
-        delivery.head_commit != delivery.base_commit,
-        "Task {} delivered no commits",
-        accepted.task_id
-    );
-    let blob = delivery.bundle.as_ref().context("delivery has no bundle")?;
-    let staging = tempfile::tempdir()?;
-    let branch = supertag_protocol::session_branch(&accepted.tag_id, &accepted.session_id);
-    let session = SessionDelivery {
-        branch: branch.clone(),
-        delivery_id: delivery.delivery_id.clone(),
-        base_commit: delivery.base_commit.clone(),
-        start_commit: delivery.start_commit.clone(),
-        head_commit: delivery.head_commit.clone(),
-        bundle_sha256: blob.sha256.clone(),
-        bundle_byte_length: blob.byte_length,
-    };
-    // The delivery's own bundle builds on its start commit. A repository without it gets a
-    // complete bundle of the delivered commit, which the holding Worker Host builds on demand.
-    let own = staging.path().join("delivery.bundle");
-    download(
-        channel,
-        token,
-        accepted,
-        WorkspaceArtifactKind::Bundle,
-        &own,
-    )
-    .await?;
-    let imported =
-        match session_branch::import(repository, &session, &own, false, &CancellationToken::new())
-            .await
-        {
-            Err(error) if error.is::<supertag_workspaces::MissingPrerequisite>() => {
-                let complete = staging.path().join("complete.bundle");
-                download(
-                    channel,
-                    token,
-                    accepted,
-                    WorkspaceArtifactKind::CompleteBundle,
-                    &complete,
-                )
-                .await?;
-                session_branch::import(
-                    repository,
-                    &session,
-                    &complete,
-                    true,
-                    &CancellationToken::new(),
-                )
-                .await?
-            }
-            result => result?,
-        };
-    Ok((branch, imported))
-}
-
-/// Downloads one bundle of an accepted delivery into `path`: its own bundle, checked against its
-/// receipt, or a complete bundle, bounded only by the Workspace blob limit, which Git checks when
-/// it is imported.
-async fn download(
-    channel: &ProtocolChannel,
-    token: &str,
-    accepted: &Accepted,
-    kind: WorkspaceArtifactKind,
-    path: &Path,
-) -> Result<()> {
-    let delivery = &accepted.delivery;
-    let receipt = match kind {
-        WorkspaceArtifactKind::Bundle => {
-            Some(delivery.bundle.as_ref().context("delivery has no bundle")?)
-        }
-        _ => None,
-    };
-    let limit = receipt.map_or(MAX_WORKSPACE_BLOB_BYTES as u64, |blob| blob.byte_length);
-    let mut client = TransfersClient::new(channel.clone())
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let mut upstream = request(
-        GetWorkspaceArtifactRequest {
-            task_id: accepted.task_id.clone(),
-            kind: kind as i32,
-        },
-        token,
-    )?;
-    upstream.set_timeout(Duration::from_secs(120));
-    let mut stream = client
-        .download_workspace_artifact(upstream)
-        .await?
-        .into_inner();
-    match stream.message().await?.and_then(|message| message.part) {
-        Some(workspace_download::Part::Reference(reference)) if &reference == delivery => {}
-        Some(workspace_download::Part::Reference(_)) => {
-            bail!("downloaded bundle belongs to a different delivery")
-        }
-        _ => bail!("workspace download did not include a receipt"),
+        .context("run git")?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1 | 128) => Ok(false),
+        _ => bail!(
+            "git could not read {branch}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
     }
-    let mut file = std::fs::File::create_new(path)?;
-    let mut size = 0u64;
-    let mut digest = Sha256::new();
-    while let Some(message) = stream.message().await? {
-        let Some(workspace_download::Part::Chunk(chunk)) = message.part else {
-            bail!("unexpected workspace download record");
-        };
-        size += chunk.len() as u64;
-        ensure!(
-            !chunk.is_empty()
-                && chunk.len() <= CHECKPOINT_CHUNK_BYTES
-                && size <= limit
-                && size <= MAX_WORKSPACE_BLOB_BYTES as u64,
-            "bundle exceeds its receipt"
-        );
-        digest.update(&chunk);
-        file.write_all(&chunk)?;
-    }
-    if let Some(blob) = receipt {
-        ensure!(
-            size == blob.byte_length && format!("{:x}", digest.finalize()) == blob.sha256,
-            "bundle differs from its receipt"
-        );
-    }
-    file.sync_all()?;
-    Ok(())
 }
 
 pub use crate::local_landing::LocalLanding;
@@ -356,13 +131,13 @@ pub async fn follow(
                         .await
                         {
                             log(&format!(
-                                "Session branch for Task {} was not imported: {error:#}. Run supertag fetch {} after fixing it",
-                                change.id, change.id
+                                "Session branch for Task {} was not landed: {error:#}",
+                                change.id
                             ));
                         }
                     }
                     Some(Update::Resync(_)) => log(
-                        "Session branch import missed Task changes; run supertag fetch for any Task whose branch is missing",
+                        "Session landing missed Task changes; a Session's next delivery lands it",
                     ),
                     _ => {}
                 }
@@ -371,7 +146,9 @@ pub async fn follow(
                 }
                 resume = event.resume_token;
                 if let Err(error) = write_state(&directory, &resume, &*pending.lock().await) {
-                    log(&format!("Session branch import state was not saved: {error:#}"));
+                    log(&format!(
+                        "Session branch import state was not saved: {error:#}"
+                    ));
                 }
             }
             Ok(())
@@ -431,22 +208,14 @@ async fn import_task(
     {
         return Ok(());
     }
-    let accepted = Accepted {
-        task_id: task.task_id.clone(),
-        tag_id: task.tag_id.clone(),
-        session_id: task.session_id.clone(),
-        delivery,
-    };
-    let (branch, outcome) = import(channel, token, &accepted, repository).await?;
-    imported.insert(accepted.delivery.delivery_id.clone());
-    if outcome != Imported::Current {
-        log(&format!(
-            "Task {} delivered {} to branch {branch} in {}",
-            accepted.task_id,
-            accepted.delivery.head_commit,
-            repository.display()
-        ));
-    }
+    let branch = supertag_protocol::session_branch(&task.tag_id, &task.session_id);
+    ensure!(
+        holds(repository, &branch, &delivery.head_commit).await?,
+        "the Worker Host did not write {} to branch {branch} in {}",
+        delivery.head_commit,
+        repository.display()
+    );
+    imported.insert(delivery.delivery_id.clone());
     crate::local_landing::imported(&task, &branch, landing, pending, log).await
 }
 

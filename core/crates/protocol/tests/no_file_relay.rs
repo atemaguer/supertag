@@ -20,8 +20,6 @@ const REMAINING: &[(&str, &str, u8)] = &[
     ("Transfers", "DownloadWorkspace", 2),
     ("Transfers", "DownloadCompleteWorkspace", 2),
     ("Transfers", "DownloadReviewArtifact", 2),
-    // Slice 3: hosts push Session branches, so `supertag fetch` reads the remote.
-    ("Transfers", "DownloadWorkspaceArtifact", 3),
     // Slice 6: the relay itself.
     ("HostRelay", "Deliver", 6),
 ];

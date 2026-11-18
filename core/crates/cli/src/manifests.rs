@@ -90,7 +90,7 @@ struct WorkspaceCredentialsSpec {
     push: String,
 }
 
-/// `land: branch`, `land: { merge: TARGET }`, or `land: { review: { base: BRANCH } }`.
+/// `land: { merge: TARGET }` or `land: { review: { base: BRANCH } }`; any other value is refused.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum LandSpec {
@@ -274,7 +274,7 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
         Kind::Workspace => {
             use supertag_protocol::v2::{
                 Workspace, WorkspaceCredentialNames, WorkspaceForge, WorkspaceLand,
-                WorkspaceLandBranch, WorkspaceLandMerge, WorkspaceLandReview, workspace_land,
+                WorkspaceLandMerge, WorkspaceLandReview, workspace_land,
             };
             let value: WorkspaceSpecInput = typed(spec, kind)?;
             ensure!(
@@ -294,12 +294,9 @@ fn manifest(value: Value, source: &str) -> Result<Manifest> {
             };
             let land = match value.land {
                 None => None,
-                Some(LandSpec::Mode(mode)) if mode == "branch" => Some(WorkspaceLand {
-                    mode: Some(workspace_land::Mode::Branch(WorkspaceLandBranch {})),
-                }),
                 Some(LandSpec::Mode(mode)) => {
                     anyhow::bail!(
-                        "land is branch, {{merge: TARGET}}, or {{review: {{base: BRANCH}}}}, not {mode}"
+                        "land is {{merge: TARGET}} or {{review: {{base: BRANCH}}}}, not {mode}; every delivered Task already updates its Session's branch"
                     )
                 }
                 Some(LandSpec::Merge { merge }) => Some(WorkspaceLand {

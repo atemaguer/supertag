@@ -269,24 +269,6 @@ impl Store {
             )),
         }
     }
-
-    pub async fn get_workspace_artifact(
-        &self,
-        input: &GetWorkspaceArtifactRequest,
-    ) -> Result<WorkspaceDeliveryReference> {
-        name("Task ID", &input.task_id)?;
-        if !matches!(
-            input.kind(),
-            WorkspaceArtifactKind::Patch
-                | WorkspaceArtifactKind::Bundle
-                | WorkspaceArtifactKind::CompleteBundle
-        ) {
-            return Err(invalid("workspace artifact kind required"));
-        }
-        let task = self.get_task(&input.task_id).await?;
-        task.workspace_delivery
-            .ok_or_else(|| StoreError::NotFound("Task has no published workspace delivery".into()))
-    }
 }
 
 /// The Worker Host holding a committed delivery's bytes, for a reader already authorized for
@@ -605,22 +587,5 @@ impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
                 .commit_workspace_delivery(&host, &request.into_inner())
                 .await?,
         ))
-    }
-
-    async fn get_artifact(
-        &self,
-        request: Request<GetWorkspaceArtifactRequest>,
-    ) -> std::result::Result<Response<HeldWorkspaceDelivery>, Status> {
-        let principal = self.actor(&request)?;
-        let input = request.into_inner();
-        self.store
-            .ensure_task_access(&principal, &input.task_id)
-            .await?;
-        let delivery = self.store.get_workspace_artifact(&input).await?;
-        let holder = self.store.workspace_delivery_holder(&delivery).await?;
-        Ok(Response::new(HeldWorkspaceDelivery {
-            delivery: Some(delivery),
-            holder: Some(holder),
-        }))
     }
 }

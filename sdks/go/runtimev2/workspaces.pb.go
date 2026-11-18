@@ -359,11 +359,12 @@ func (x *WorkspaceCredentialNames) GetPush() string {
 }
 
 // Where a Session's changes land.
+// Every delivered Task updates the Session's branch `supertag/session/ID` on the remote; `land`
+// adds a merge or a review.
 type WorkspaceLand struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Mode:
 	//
-	//	*WorkspaceLand_Branch
 	//	*WorkspaceLand_Merge
 	//	*WorkspaceLand_Review
 	Mode          isWorkspaceLand_Mode `protobuf_oneof:"mode"`
@@ -408,15 +409,6 @@ func (x *WorkspaceLand) GetMode() isWorkspaceLand_Mode {
 	return nil
 }
 
-func (x *WorkspaceLand) GetBranch() *WorkspaceLandBranch {
-	if x != nil {
-		if x, ok := x.Mode.(*WorkspaceLand_Branch); ok {
-			return x.Branch
-		}
-	}
-	return nil
-}
-
 func (x *WorkspaceLand) GetMerge() *WorkspaceLandMerge {
 	if x != nil {
 		if x, ok := x.Mode.(*WorkspaceLand_Merge); ok {
@@ -439,63 +431,20 @@ type isWorkspaceLand_Mode interface {
 	isWorkspaceLand_Mode()
 }
 
-type WorkspaceLand_Branch struct {
-	// Each delivered Task updates the Session's branch `supertag/session/ID` on the remote.
-	Branch *WorkspaceLandBranch `protobuf:"bytes,1,opt,name=branch,proto3,oneof"`
-}
-
 type WorkspaceLand_Merge struct {
 	// A Session's finished work is merged into `target`, which is pushed.
 	Merge *WorkspaceLandMerge `protobuf:"bytes,2,opt,name=merge,proto3,oneof"`
 }
 
 type WorkspaceLand_Review struct {
-	// Each delivered Task updates the Session's branch, and a draft pull request from it
-	// against `base` is opened or updated. Needs a forge.
+	// A draft pull request from the Session's branch against `base` is opened or updated for
+	// each delivered Task. Needs a forge.
 	Review *WorkspaceLandReview `protobuf:"bytes,3,opt,name=review,proto3,oneof"`
 }
-
-func (*WorkspaceLand_Branch) isWorkspaceLand_Mode() {}
 
 func (*WorkspaceLand_Merge) isWorkspaceLand_Mode() {}
 
 func (*WorkspaceLand_Review) isWorkspaceLand_Mode() {}
-
-type WorkspaceLandBranch struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *WorkspaceLandBranch) Reset() {
-	*x = WorkspaceLandBranch{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *WorkspaceLandBranch) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*WorkspaceLandBranch) ProtoMessage() {}
-
-func (x *WorkspaceLandBranch) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use WorkspaceLandBranch.ProtoReflect.Descriptor instead.
-func (*WorkspaceLandBranch) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{3}
-}
 
 type WorkspaceLandMerge struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -506,7 +455,7 @@ type WorkspaceLandMerge struct {
 
 func (x *WorkspaceLandMerge) Reset() {
 	*x = WorkspaceLandMerge{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -518,7 +467,7 @@ func (x *WorkspaceLandMerge) String() string {
 func (*WorkspaceLandMerge) ProtoMessage() {}
 
 func (x *WorkspaceLandMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -531,7 +480,7 @@ func (x *WorkspaceLandMerge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceLandMerge.ProtoReflect.Descriptor instead.
 func (*WorkspaceLandMerge) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *WorkspaceLandMerge) GetTarget() string {
@@ -550,7 +499,7 @@ type WorkspaceLandReview struct {
 
 func (x *WorkspaceLandReview) Reset() {
 	*x = WorkspaceLandReview{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -562,7 +511,7 @@ func (x *WorkspaceLandReview) String() string {
 func (*WorkspaceLandReview) ProtoMessage() {}
 
 func (x *WorkspaceLandReview) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -575,7 +524,7 @@ func (x *WorkspaceLandReview) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceLandReview.ProtoReflect.Descriptor instead.
 func (*WorkspaceLandReview) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{5}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *WorkspaceLandReview) GetBase() string {
@@ -596,7 +545,7 @@ type PutWorkspaceRequest struct {
 
 func (x *PutWorkspaceRequest) Reset() {
 	*x = PutWorkspaceRequest{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -608,7 +557,7 @@ func (x *PutWorkspaceRequest) String() string {
 func (*PutWorkspaceRequest) ProtoMessage() {}
 
 func (x *PutWorkspaceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -621,7 +570,7 @@ func (x *PutWorkspaceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutWorkspaceRequest.ProtoReflect.Descriptor instead.
 func (*PutWorkspaceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{6}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PutWorkspaceRequest) GetOperationId() string {
@@ -654,7 +603,7 @@ type GetWorkspaceRequest struct {
 
 func (x *GetWorkspaceRequest) Reset() {
 	*x = GetWorkspaceRequest{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -666,7 +615,7 @@ func (x *GetWorkspaceRequest) String() string {
 func (*GetWorkspaceRequest) ProtoMessage() {}
 
 func (x *GetWorkspaceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -679,7 +628,7 @@ func (x *GetWorkspaceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkspaceRequest.ProtoReflect.Descriptor instead.
 func (*GetWorkspaceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{7}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetWorkspaceRequest) GetWorkspaceId() string {
@@ -699,7 +648,7 @@ type ListWorkspacesRequest struct {
 
 func (x *ListWorkspacesRequest) Reset() {
 	*x = ListWorkspacesRequest{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -711,7 +660,7 @@ func (x *ListWorkspacesRequest) String() string {
 func (*ListWorkspacesRequest) ProtoMessage() {}
 
 func (x *ListWorkspacesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -724,7 +673,7 @@ func (x *ListWorkspacesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{8}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListWorkspacesRequest) GetAfterId() string {
@@ -751,7 +700,7 @@ type ListWorkspacesResponse struct {
 
 func (x *ListWorkspacesResponse) Reset() {
 	*x = ListWorkspacesResponse{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -763,7 +712,7 @@ func (x *ListWorkspacesResponse) String() string {
 func (*ListWorkspacesResponse) ProtoMessage() {}
 
 func (x *ListWorkspacesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -776,7 +725,7 @@ func (x *ListWorkspacesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{9}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListWorkspacesResponse) GetWorkspaces() []*Workspace {
@@ -806,7 +755,7 @@ type DeleteWorkspaceRequest struct {
 
 func (x *DeleteWorkspaceRequest) Reset() {
 	*x = DeleteWorkspaceRequest{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -818,7 +767,7 @@ func (x *DeleteWorkspaceRequest) String() string {
 func (*DeleteWorkspaceRequest) ProtoMessage() {}
 
 func (x *DeleteWorkspaceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -831,7 +780,7 @@ func (x *DeleteWorkspaceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteWorkspaceRequest.ProtoReflect.Descriptor instead.
 func (*DeleteWorkspaceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{10}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DeleteWorkspaceRequest) GetOperationId() string {
@@ -870,7 +819,7 @@ type DeleteWorkspaceResponse struct {
 
 func (x *DeleteWorkspaceResponse) Reset() {
 	*x = DeleteWorkspaceResponse{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -882,7 +831,7 @@ func (x *DeleteWorkspaceResponse) String() string {
 func (*DeleteWorkspaceResponse) ProtoMessage() {}
 
 func (x *DeleteWorkspaceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -895,7 +844,7 @@ func (x *DeleteWorkspaceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteWorkspaceResponse.ProtoReflect.Descriptor instead.
 func (*DeleteWorkspaceResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{11}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{10}
 }
 
 type CheckWorkspaceRequest struct {
@@ -907,7 +856,7 @@ type CheckWorkspaceRequest struct {
 
 func (x *CheckWorkspaceRequest) Reset() {
 	*x = CheckWorkspaceRequest{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[12]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -919,7 +868,7 @@ func (x *CheckWorkspaceRequest) String() string {
 func (*CheckWorkspaceRequest) ProtoMessage() {}
 
 func (x *CheckWorkspaceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[12]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -932,7 +881,7 @@ func (x *CheckWorkspaceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckWorkspaceRequest.ProtoReflect.Descriptor instead.
 func (*CheckWorkspaceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{12}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CheckWorkspaceRequest) GetWorkspaceId() string {
@@ -954,7 +903,7 @@ type WorkspaceCheckStep struct {
 
 func (x *WorkspaceCheckStep) Reset() {
 	*x = WorkspaceCheckStep{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -966,7 +915,7 @@ func (x *WorkspaceCheckStep) String() string {
 func (*WorkspaceCheckStep) ProtoMessage() {}
 
 func (x *WorkspaceCheckStep) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -979,7 +928,7 @@ func (x *WorkspaceCheckStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceCheckStep.ProtoReflect.Descriptor instead.
 func (*WorkspaceCheckStep) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{13}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *WorkspaceCheckStep) GetStep() string {
@@ -1013,7 +962,7 @@ type WorkspaceCheck struct {
 
 func (x *WorkspaceCheck) Reset() {
 	*x = WorkspaceCheck{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[14]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1025,7 +974,7 @@ func (x *WorkspaceCheck) String() string {
 func (*WorkspaceCheck) ProtoMessage() {}
 
 func (x *WorkspaceCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[14]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1038,7 +987,7 @@ func (x *WorkspaceCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceCheck.ProtoReflect.Descriptor instead.
 func (*WorkspaceCheck) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{14}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *WorkspaceCheck) GetWorkspaceId() string {
@@ -1069,7 +1018,7 @@ type WorkspaceCredential struct {
 
 func (x *WorkspaceCredential) Reset() {
 	*x = WorkspaceCredential{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[15]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1081,7 +1030,7 @@ func (x *WorkspaceCredential) String() string {
 func (*WorkspaceCredential) ProtoMessage() {}
 
 func (x *WorkspaceCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[15]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1094,7 +1043,7 @@ func (x *WorkspaceCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceCredential.ProtoReflect.Descriptor instead.
 func (*WorkspaceCredential) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{15}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *WorkspaceCredential) GetName() string {
@@ -1136,7 +1085,7 @@ type PutWorkspaceCredentialRequest struct {
 
 func (x *PutWorkspaceCredentialRequest) Reset() {
 	*x = PutWorkspaceCredentialRequest{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[16]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1148,7 +1097,7 @@ func (x *PutWorkspaceCredentialRequest) String() string {
 func (*PutWorkspaceCredentialRequest) ProtoMessage() {}
 
 func (x *PutWorkspaceCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[16]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1161,7 +1110,7 @@ func (x *PutWorkspaceCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutWorkspaceCredentialRequest.ProtoReflect.Descriptor instead.
 func (*PutWorkspaceCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{16}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *PutWorkspaceCredentialRequest) GetOperationId() string {
@@ -1194,7 +1143,7 @@ type GetWorkspaceCredentialRequest struct {
 
 func (x *GetWorkspaceCredentialRequest) Reset() {
 	*x = GetWorkspaceCredentialRequest{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[17]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1206,7 +1155,7 @@ func (x *GetWorkspaceCredentialRequest) String() string {
 func (*GetWorkspaceCredentialRequest) ProtoMessage() {}
 
 func (x *GetWorkspaceCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[17]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1219,7 +1168,7 @@ func (x *GetWorkspaceCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkspaceCredentialRequest.ProtoReflect.Descriptor instead.
 func (*GetWorkspaceCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{17}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetWorkspaceCredentialRequest) GetName() string {
@@ -1239,7 +1188,7 @@ type ListWorkspaceCredentialsRequest struct {
 
 func (x *ListWorkspaceCredentialsRequest) Reset() {
 	*x = ListWorkspaceCredentialsRequest{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[18]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1251,7 +1200,7 @@ func (x *ListWorkspaceCredentialsRequest) String() string {
 func (*ListWorkspaceCredentialsRequest) ProtoMessage() {}
 
 func (x *ListWorkspaceCredentialsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[18]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1264,7 +1213,7 @@ func (x *ListWorkspaceCredentialsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspaceCredentialsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkspaceCredentialsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{18}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListWorkspaceCredentialsRequest) GetAfterName() string {
@@ -1291,7 +1240,7 @@ type ListWorkspaceCredentialsResponse struct {
 
 func (x *ListWorkspaceCredentialsResponse) Reset() {
 	*x = ListWorkspaceCredentialsResponse{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[19]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1303,7 +1252,7 @@ func (x *ListWorkspaceCredentialsResponse) String() string {
 func (*ListWorkspaceCredentialsResponse) ProtoMessage() {}
 
 func (x *ListWorkspaceCredentialsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[19]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1316,7 +1265,7 @@ func (x *ListWorkspaceCredentialsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspaceCredentialsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkspaceCredentialsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{19}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListWorkspaceCredentialsResponse) GetCredentials() []*WorkspaceCredential {
@@ -1344,7 +1293,7 @@ type DeleteWorkspaceCredentialRequest struct {
 
 func (x *DeleteWorkspaceCredentialRequest) Reset() {
 	*x = DeleteWorkspaceCredentialRequest{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[20]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1356,7 +1305,7 @@ func (x *DeleteWorkspaceCredentialRequest) String() string {
 func (*DeleteWorkspaceCredentialRequest) ProtoMessage() {}
 
 func (x *DeleteWorkspaceCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[20]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1369,7 +1318,7 @@ func (x *DeleteWorkspaceCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteWorkspaceCredentialRequest.ProtoReflect.Descriptor instead.
 func (*DeleteWorkspaceCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{20}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DeleteWorkspaceCredentialRequest) GetOperationId() string {
@@ -1401,7 +1350,7 @@ type DeleteWorkspaceCredentialResponse struct {
 
 func (x *DeleteWorkspaceCredentialResponse) Reset() {
 	*x = DeleteWorkspaceCredentialResponse{}
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[21]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1413,7 +1362,7 @@ func (x *DeleteWorkspaceCredentialResponse) String() string {
 func (*DeleteWorkspaceCredentialResponse) ProtoMessage() {}
 
 func (x *DeleteWorkspaceCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[21]
+	mi := &file_supertag_runtime_v2_workspaces_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1426,7 +1375,7 @@ func (x *DeleteWorkspaceCredentialResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use DeleteWorkspaceCredentialResponse.ProtoReflect.Descriptor instead.
 func (*DeleteWorkspaceCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{21}
+	return file_supertag_runtime_v2_workspaces_proto_rawDescGZIP(), []int{20}
 }
 
 var File_supertag_runtime_v2_workspaces_proto protoreflect.FileDescriptor
@@ -1446,13 +1395,11 @@ const file_supertag_runtime_v2_workspaces_proto_rawDesc = "" +
 	"\x05forge\x18\t \x01(\x0e2#.supertag.runtime.v2.WorkspaceForgeR\x05forge\"B\n" +
 	"\x18WorkspaceCredentialNames\x12\x12\n" +
 	"\x04read\x18\x01 \x01(\tR\x04read\x12\x12\n" +
-	"\x04push\x18\x02 \x01(\tR\x04push\"\xe0\x01\n" +
-	"\rWorkspaceLand\x12B\n" +
-	"\x06branch\x18\x01 \x01(\v2(.supertag.runtime.v2.WorkspaceLandBranchH\x00R\x06branch\x12?\n" +
+	"\x04push\x18\x02 \x01(\tR\x04push\"\xa2\x01\n" +
+	"\rWorkspaceLand\x12?\n" +
 	"\x05merge\x18\x02 \x01(\v2'.supertag.runtime.v2.WorkspaceLandMergeH\x00R\x05merge\x12B\n" +
 	"\x06review\x18\x03 \x01(\v2(.supertag.runtime.v2.WorkspaceLandReviewH\x00R\x06reviewB\x06\n" +
-	"\x04mode\"\x15\n" +
-	"\x13WorkspaceLandBranch\",\n" +
+	"\x04modeJ\x04\b\x01\x10\x02\",\n" +
 	"\x12WorkspaceLandMerge\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\")\n" +
 	"\x13WorkspaceLandReview\x12\x12\n" +
@@ -1559,7 +1506,7 @@ func file_supertag_runtime_v2_workspaces_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_workspaces_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_supertag_runtime_v2_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_supertag_runtime_v2_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_supertag_runtime_v2_workspaces_proto_goTypes = []any{
 	(WorkspaceForge)(0),                       // 0: supertag.runtime.v2.WorkspaceForge
 	(WorkspaceCheckStatus)(0),                 // 1: supertag.runtime.v2.WorkspaceCheckStatus
@@ -1567,63 +1514,61 @@ var file_supertag_runtime_v2_workspaces_proto_goTypes = []any{
 	(*Workspace)(nil),                         // 3: supertag.runtime.v2.Workspace
 	(*WorkspaceCredentialNames)(nil),          // 4: supertag.runtime.v2.WorkspaceCredentialNames
 	(*WorkspaceLand)(nil),                     // 5: supertag.runtime.v2.WorkspaceLand
-	(*WorkspaceLandBranch)(nil),               // 6: supertag.runtime.v2.WorkspaceLandBranch
-	(*WorkspaceLandMerge)(nil),                // 7: supertag.runtime.v2.WorkspaceLandMerge
-	(*WorkspaceLandReview)(nil),               // 8: supertag.runtime.v2.WorkspaceLandReview
-	(*PutWorkspaceRequest)(nil),               // 9: supertag.runtime.v2.PutWorkspaceRequest
-	(*GetWorkspaceRequest)(nil),               // 10: supertag.runtime.v2.GetWorkspaceRequest
-	(*ListWorkspacesRequest)(nil),             // 11: supertag.runtime.v2.ListWorkspacesRequest
-	(*ListWorkspacesResponse)(nil),            // 12: supertag.runtime.v2.ListWorkspacesResponse
-	(*DeleteWorkspaceRequest)(nil),            // 13: supertag.runtime.v2.DeleteWorkspaceRequest
-	(*DeleteWorkspaceResponse)(nil),           // 14: supertag.runtime.v2.DeleteWorkspaceResponse
-	(*CheckWorkspaceRequest)(nil),             // 15: supertag.runtime.v2.CheckWorkspaceRequest
-	(*WorkspaceCheckStep)(nil),                // 16: supertag.runtime.v2.WorkspaceCheckStep
-	(*WorkspaceCheck)(nil),                    // 17: supertag.runtime.v2.WorkspaceCheck
-	(*WorkspaceCredential)(nil),               // 18: supertag.runtime.v2.WorkspaceCredential
-	(*PutWorkspaceCredentialRequest)(nil),     // 19: supertag.runtime.v2.PutWorkspaceCredentialRequest
-	(*GetWorkspaceCredentialRequest)(nil),     // 20: supertag.runtime.v2.GetWorkspaceCredentialRequest
-	(*ListWorkspaceCredentialsRequest)(nil),   // 21: supertag.runtime.v2.ListWorkspaceCredentialsRequest
-	(*ListWorkspaceCredentialsResponse)(nil),  // 22: supertag.runtime.v2.ListWorkspaceCredentialsResponse
-	(*DeleteWorkspaceCredentialRequest)(nil),  // 23: supertag.runtime.v2.DeleteWorkspaceCredentialRequest
-	(*DeleteWorkspaceCredentialResponse)(nil), // 24: supertag.runtime.v2.DeleteWorkspaceCredentialResponse
+	(*WorkspaceLandMerge)(nil),                // 6: supertag.runtime.v2.WorkspaceLandMerge
+	(*WorkspaceLandReview)(nil),               // 7: supertag.runtime.v2.WorkspaceLandReview
+	(*PutWorkspaceRequest)(nil),               // 8: supertag.runtime.v2.PutWorkspaceRequest
+	(*GetWorkspaceRequest)(nil),               // 9: supertag.runtime.v2.GetWorkspaceRequest
+	(*ListWorkspacesRequest)(nil),             // 10: supertag.runtime.v2.ListWorkspacesRequest
+	(*ListWorkspacesResponse)(nil),            // 11: supertag.runtime.v2.ListWorkspacesResponse
+	(*DeleteWorkspaceRequest)(nil),            // 12: supertag.runtime.v2.DeleteWorkspaceRequest
+	(*DeleteWorkspaceResponse)(nil),           // 13: supertag.runtime.v2.DeleteWorkspaceResponse
+	(*CheckWorkspaceRequest)(nil),             // 14: supertag.runtime.v2.CheckWorkspaceRequest
+	(*WorkspaceCheckStep)(nil),                // 15: supertag.runtime.v2.WorkspaceCheckStep
+	(*WorkspaceCheck)(nil),                    // 16: supertag.runtime.v2.WorkspaceCheck
+	(*WorkspaceCredential)(nil),               // 17: supertag.runtime.v2.WorkspaceCredential
+	(*PutWorkspaceCredentialRequest)(nil),     // 18: supertag.runtime.v2.PutWorkspaceCredentialRequest
+	(*GetWorkspaceCredentialRequest)(nil),     // 19: supertag.runtime.v2.GetWorkspaceCredentialRequest
+	(*ListWorkspaceCredentialsRequest)(nil),   // 20: supertag.runtime.v2.ListWorkspaceCredentialsRequest
+	(*ListWorkspaceCredentialsResponse)(nil),  // 21: supertag.runtime.v2.ListWorkspaceCredentialsResponse
+	(*DeleteWorkspaceCredentialRequest)(nil),  // 22: supertag.runtime.v2.DeleteWorkspaceCredentialRequest
+	(*DeleteWorkspaceCredentialResponse)(nil), // 23: supertag.runtime.v2.DeleteWorkspaceCredentialResponse
 }
 var file_supertag_runtime_v2_workspaces_proto_depIdxs = []int32{
 	4,  // 0: supertag.runtime.v2.Workspace.credentials:type_name -> supertag.runtime.v2.WorkspaceCredentialNames
 	5,  // 1: supertag.runtime.v2.Workspace.land:type_name -> supertag.runtime.v2.WorkspaceLand
 	0,  // 2: supertag.runtime.v2.Workspace.forge:type_name -> supertag.runtime.v2.WorkspaceForge
-	6,  // 3: supertag.runtime.v2.WorkspaceLand.branch:type_name -> supertag.runtime.v2.WorkspaceLandBranch
-	7,  // 4: supertag.runtime.v2.WorkspaceLand.merge:type_name -> supertag.runtime.v2.WorkspaceLandMerge
-	8,  // 5: supertag.runtime.v2.WorkspaceLand.review:type_name -> supertag.runtime.v2.WorkspaceLandReview
-	3,  // 6: supertag.runtime.v2.PutWorkspaceRequest.workspace:type_name -> supertag.runtime.v2.Workspace
-	3,  // 7: supertag.runtime.v2.ListWorkspacesResponse.workspaces:type_name -> supertag.runtime.v2.Workspace
-	1,  // 8: supertag.runtime.v2.WorkspaceCheckStep.status:type_name -> supertag.runtime.v2.WorkspaceCheckStatus
-	16, // 9: supertag.runtime.v2.WorkspaceCheck.steps:type_name -> supertag.runtime.v2.WorkspaceCheckStep
-	2,  // 10: supertag.runtime.v2.WorkspaceCredential.kind:type_name -> supertag.runtime.v2.WorkspaceCredentialKind
-	18, // 11: supertag.runtime.v2.PutWorkspaceCredentialRequest.credential:type_name -> supertag.runtime.v2.WorkspaceCredential
-	18, // 12: supertag.runtime.v2.ListWorkspaceCredentialsResponse.credentials:type_name -> supertag.runtime.v2.WorkspaceCredential
-	9,  // 13: supertag.runtime.v2.Workspaces.Put:input_type -> supertag.runtime.v2.PutWorkspaceRequest
-	10, // 14: supertag.runtime.v2.Workspaces.Get:input_type -> supertag.runtime.v2.GetWorkspaceRequest
-	11, // 15: supertag.runtime.v2.Workspaces.List:input_type -> supertag.runtime.v2.ListWorkspacesRequest
-	13, // 16: supertag.runtime.v2.Workspaces.Delete:input_type -> supertag.runtime.v2.DeleteWorkspaceRequest
-	15, // 17: supertag.runtime.v2.Workspaces.Check:input_type -> supertag.runtime.v2.CheckWorkspaceRequest
-	19, // 18: supertag.runtime.v2.WorkspaceCredentials.Put:input_type -> supertag.runtime.v2.PutWorkspaceCredentialRequest
-	20, // 19: supertag.runtime.v2.WorkspaceCredentials.Get:input_type -> supertag.runtime.v2.GetWorkspaceCredentialRequest
-	21, // 20: supertag.runtime.v2.WorkspaceCredentials.List:input_type -> supertag.runtime.v2.ListWorkspaceCredentialsRequest
-	23, // 21: supertag.runtime.v2.WorkspaceCredentials.Delete:input_type -> supertag.runtime.v2.DeleteWorkspaceCredentialRequest
-	3,  // 22: supertag.runtime.v2.Workspaces.Put:output_type -> supertag.runtime.v2.Workspace
-	3,  // 23: supertag.runtime.v2.Workspaces.Get:output_type -> supertag.runtime.v2.Workspace
-	12, // 24: supertag.runtime.v2.Workspaces.List:output_type -> supertag.runtime.v2.ListWorkspacesResponse
-	14, // 25: supertag.runtime.v2.Workspaces.Delete:output_type -> supertag.runtime.v2.DeleteWorkspaceResponse
-	17, // 26: supertag.runtime.v2.Workspaces.Check:output_type -> supertag.runtime.v2.WorkspaceCheck
-	18, // 27: supertag.runtime.v2.WorkspaceCredentials.Put:output_type -> supertag.runtime.v2.WorkspaceCredential
-	18, // 28: supertag.runtime.v2.WorkspaceCredentials.Get:output_type -> supertag.runtime.v2.WorkspaceCredential
-	22, // 29: supertag.runtime.v2.WorkspaceCredentials.List:output_type -> supertag.runtime.v2.ListWorkspaceCredentialsResponse
-	24, // 30: supertag.runtime.v2.WorkspaceCredentials.Delete:output_type -> supertag.runtime.v2.DeleteWorkspaceCredentialResponse
-	22, // [22:31] is the sub-list for method output_type
-	13, // [13:22] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	6,  // 3: supertag.runtime.v2.WorkspaceLand.merge:type_name -> supertag.runtime.v2.WorkspaceLandMerge
+	7,  // 4: supertag.runtime.v2.WorkspaceLand.review:type_name -> supertag.runtime.v2.WorkspaceLandReview
+	3,  // 5: supertag.runtime.v2.PutWorkspaceRequest.workspace:type_name -> supertag.runtime.v2.Workspace
+	3,  // 6: supertag.runtime.v2.ListWorkspacesResponse.workspaces:type_name -> supertag.runtime.v2.Workspace
+	1,  // 7: supertag.runtime.v2.WorkspaceCheckStep.status:type_name -> supertag.runtime.v2.WorkspaceCheckStatus
+	15, // 8: supertag.runtime.v2.WorkspaceCheck.steps:type_name -> supertag.runtime.v2.WorkspaceCheckStep
+	2,  // 9: supertag.runtime.v2.WorkspaceCredential.kind:type_name -> supertag.runtime.v2.WorkspaceCredentialKind
+	17, // 10: supertag.runtime.v2.PutWorkspaceCredentialRequest.credential:type_name -> supertag.runtime.v2.WorkspaceCredential
+	17, // 11: supertag.runtime.v2.ListWorkspaceCredentialsResponse.credentials:type_name -> supertag.runtime.v2.WorkspaceCredential
+	8,  // 12: supertag.runtime.v2.Workspaces.Put:input_type -> supertag.runtime.v2.PutWorkspaceRequest
+	9,  // 13: supertag.runtime.v2.Workspaces.Get:input_type -> supertag.runtime.v2.GetWorkspaceRequest
+	10, // 14: supertag.runtime.v2.Workspaces.List:input_type -> supertag.runtime.v2.ListWorkspacesRequest
+	12, // 15: supertag.runtime.v2.Workspaces.Delete:input_type -> supertag.runtime.v2.DeleteWorkspaceRequest
+	14, // 16: supertag.runtime.v2.Workspaces.Check:input_type -> supertag.runtime.v2.CheckWorkspaceRequest
+	18, // 17: supertag.runtime.v2.WorkspaceCredentials.Put:input_type -> supertag.runtime.v2.PutWorkspaceCredentialRequest
+	19, // 18: supertag.runtime.v2.WorkspaceCredentials.Get:input_type -> supertag.runtime.v2.GetWorkspaceCredentialRequest
+	20, // 19: supertag.runtime.v2.WorkspaceCredentials.List:input_type -> supertag.runtime.v2.ListWorkspaceCredentialsRequest
+	22, // 20: supertag.runtime.v2.WorkspaceCredentials.Delete:input_type -> supertag.runtime.v2.DeleteWorkspaceCredentialRequest
+	3,  // 21: supertag.runtime.v2.Workspaces.Put:output_type -> supertag.runtime.v2.Workspace
+	3,  // 22: supertag.runtime.v2.Workspaces.Get:output_type -> supertag.runtime.v2.Workspace
+	11, // 23: supertag.runtime.v2.Workspaces.List:output_type -> supertag.runtime.v2.ListWorkspacesResponse
+	13, // 24: supertag.runtime.v2.Workspaces.Delete:output_type -> supertag.runtime.v2.DeleteWorkspaceResponse
+	16, // 25: supertag.runtime.v2.Workspaces.Check:output_type -> supertag.runtime.v2.WorkspaceCheck
+	17, // 26: supertag.runtime.v2.WorkspaceCredentials.Put:output_type -> supertag.runtime.v2.WorkspaceCredential
+	17, // 27: supertag.runtime.v2.WorkspaceCredentials.Get:output_type -> supertag.runtime.v2.WorkspaceCredential
+	21, // 28: supertag.runtime.v2.WorkspaceCredentials.List:output_type -> supertag.runtime.v2.ListWorkspaceCredentialsResponse
+	23, // 29: supertag.runtime.v2.WorkspaceCredentials.Delete:output_type -> supertag.runtime.v2.DeleteWorkspaceCredentialResponse
+	21, // [21:30] is the sub-list for method output_type
+	12, // [12:21] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_workspaces_proto_init() }
@@ -1632,19 +1577,18 @@ func file_supertag_runtime_v2_workspaces_proto_init() {
 		return
 	}
 	file_supertag_runtime_v2_workspaces_proto_msgTypes[2].OneofWrappers = []any{
-		(*WorkspaceLand_Branch)(nil),
 		(*WorkspaceLand_Merge)(nil),
 		(*WorkspaceLand_Review)(nil),
 	}
-	file_supertag_runtime_v2_workspaces_proto_msgTypes[6].OneofWrappers = []any{}
-	file_supertag_runtime_v2_workspaces_proto_msgTypes[16].OneofWrappers = []any{}
+	file_supertag_runtime_v2_workspaces_proto_msgTypes[5].OneofWrappers = []any{}
+	file_supertag_runtime_v2_workspaces_proto_msgTypes[15].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_workspaces_proto_rawDesc), len(file_supertag_runtime_v2_workspaces_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   22,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

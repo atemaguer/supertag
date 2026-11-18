@@ -211,15 +211,9 @@ answer out of the shell history and the process list. See
 
 ## Bring delivered work into your repository
 
-A Task that changes a Workspace delivers its commits. For a Workspace that `supertag.yaml` maps,
-`supertag up` imports each delivery into the repository as the branch `supertag/session/HASH`,
-one branch per Session. Import a delivery yourself, or into another clone, with `fetch`:
-
-```sh
-supertag fetch TASK_ID --repository ~/code/app
-```
-
-See [Work in a repository with Workspaces](../guides/workspaces.md).
+A Task that changes a Workspace delivers its commits as the branch `supertag/session/HASH`, one
+branch per Session. The Worker Host that ran the Task writes it into the repository it maps for a
+local Workspace, or pushes it to a remote Workspace's git server, where you `git fetch` it. See [Work in a repository with Workspaces](../guides/workspaces.md).
 
 ## Spend and audit
 

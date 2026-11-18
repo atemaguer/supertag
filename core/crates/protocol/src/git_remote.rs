@@ -22,11 +22,6 @@ pub const MAX_REMOTE_BYTES: usize = 2048;
 /// mail, so no reply reaches a person by mistake.
 pub const NOREPLY_DOMAIN: &str = "noreply.supertag.invalid";
 
-/// Why a landing went back to Queued: the Worker Host holding its delivery is not connected. The
-/// Control Plane retries it as soon as that host reports Ready.
-pub const LANDING_HOLDER_OFFLINE: &str =
-    "the Worker Host holding the Session's delivery is not connected; nothing was pushed";
-
 /// The transport a Workspace remote uses, or why it is refused. A remote never carries a
 /// password or token (those belong in a Workspace Credential), never names a git transport
 /// helper (`ext::`), and never starts with `-`.

@@ -94,7 +94,6 @@ pub fn validate_manifest_workspace(value: &mut Workspace) -> Result<()> {
     }
     match value.land.as_ref().and_then(|land| land.mode.as_ref()) {
         None => value.land = None,
-        Some(workspace_land::Mode::Branch(_)) => {}
         Some(workspace_land::Mode::Review(review)) => {
             if value.forge() != WorkspaceForge::Github {
                 return Err(invalid(

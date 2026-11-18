@@ -5372,11 +5372,6 @@ class TransfersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
                 _registered_method=True)
-        self.DownloadWorkspaceArtifact = channel.unary_stream(
-                '/supertag.runtime.v2.Transfers/DownloadWorkspaceArtifact',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
-                _registered_method=True)
         self.DownloadReviewArtifact = channel.unary_stream(
                 '/supertag.runtime.v2.Transfers/DownloadReviewArtifact',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
@@ -5414,12 +5409,6 @@ class TransfersServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def DownloadWorkspaceArtifact(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def DownloadReviewArtifact(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -5448,11 +5437,6 @@ def add_TransfersServicer_to_server(servicer, server):
             'DownloadCompleteWorkspace': grpc.unary_stream_rpc_method_handler(
                     servicer.DownloadCompleteWorkspace,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
-            ),
-            'DownloadWorkspaceArtifact': grpc.unary_stream_rpc_method_handler(
-                    servicer.DownloadWorkspaceArtifact,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
             ),
             'DownloadReviewArtifact': grpc.unary_stream_rpc_method_handler(
@@ -5547,33 +5531,6 @@ class Transfers:
             target,
             '/supertag.runtime.v2.Transfers/DownloadCompleteWorkspace',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def DownloadWorkspaceArtifact(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_stream(
-            request,
-            target,
-            '/supertag.runtime.v2.Transfers/DownloadWorkspaceArtifact',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
             options,
             channel_credentials,
@@ -5748,11 +5705,6 @@ class WorkspaceDirectoryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
                 _registered_method=True)
-        self.GetArtifact = channel.unary_unary(
-                '/supertag.runtime.v2.WorkspaceDirectory/GetArtifact',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.FromString,
-                _registered_method=True)
         self.GetReviewArtifact = channel.unary_unary(
                 '/supertag.runtime.v2.WorkspaceDirectory/GetReviewArtifact',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
@@ -5790,12 +5742,6 @@ class WorkspaceDirectoryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetArtifact(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def GetReviewArtifact(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -5824,11 +5770,6 @@ def add_WorkspaceDirectoryServicer_to_server(servicer, server):
                     servicer.CommitDelivery,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
-            ),
-            'GetArtifact': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetArtifact,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.SerializeToString,
             ),
             'GetReviewArtifact': grpc.unary_unary_rpc_method_handler(
                     servicer.GetReviewArtifact,
@@ -5945,33 +5886,6 @@ class WorkspaceDirectory:
             '/supertag.runtime.v2.WorkspaceDirectory/CommitDelivery',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetArtifact(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/supertag.runtime.v2.WorkspaceDirectory/GetArtifact',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HeldWorkspaceDelivery.FromString,
             options,
             channel_credentials,
             insecure,

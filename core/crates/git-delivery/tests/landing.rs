@@ -7,11 +7,15 @@ use std::{
 
 use sha2::{Digest, Sha256};
 use supertag_credential_vault::CredentialVault;
-use supertag_git_delivery::{Access, Credentials, GitDelivery, landing::Outcome};
+use supertag_git_delivery::{Access, Credentials, GitDelivery, Remote, landing::Outcome};
+
+/// The landing's remote, which needs no credential in these tests.
+fn remote(landing: &supertag_protocol::v2::WorkspaceLanding) -> Remote {
+    Remote::new(&landing.remote, None).unwrap()
+}
 use supertag_protocol::v2::{
     BlobReference, Workspace, WorkspaceCheckStatus, WorkspaceDeliveryReference, WorkspaceLand,
-    WorkspaceLandBranch, WorkspaceLandMerge, WorkspaceLanding, WorkspaceLandingMode,
-    workspace_land,
+    WorkspaceLandMerge, WorkspaceLanding, WorkspaceLandingMode, workspace_land,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -275,7 +279,7 @@ async fn branch_mode_pushes_the_session_branch_fast_forward_only() {
     let landing = fixture.landing(WorkspaceLandingMode::Branch, &head, blob);
     let outcome = fixture
         .delivery
-        .land(&landing, "", &bundle, &cancel)
+        .land(&landing, &remote(&landing), &bundle, &cancel)
         .await
         .unwrap();
     assert_eq!(outcome, Outcome::Landed(head.clone()));
@@ -283,7 +287,7 @@ async fn branch_mode_pushes_the_session_branch_fast_forward_only() {
     // Landing the same commit again changes nothing.
     let again = fixture
         .delivery
-        .land(&landing, "", &bundle, &cancel)
+        .land(&landing, &remote(&landing), &bundle, &cancel)
         .await
         .unwrap();
     assert_eq!(again, Outcome::Landed(head));
@@ -294,7 +298,7 @@ async fn branch_mode_pushes_the_session_branch_fast_forward_only() {
     let landing = fixture.landing(WorkspaceLandingMode::Branch, &next, blob);
     match fixture
         .delivery
-        .land(&landing, "", &bundle, &cancel)
+        .land(&landing, &remote(&landing), &bundle, &cancel)
         .await
         .unwrap()
     {
@@ -313,7 +317,7 @@ async fn merge_mode_merges_into_the_target_with_the_tag_as_author() {
     // The first Session to land creates a missing target.
     let outcome = fixture
         .delivery
-        .land(&landing, "", &bundle, &cancel)
+        .land(&landing, &remote(&landing), &bundle, &cancel)
         .await
         .unwrap();
     assert_eq!(outcome, Outcome::Landed(head.clone()));
@@ -323,7 +327,7 @@ async fn merge_mode_merges_into_the_target_with_the_tag_as_author() {
     let other = fixture.push_other("drafts", "other.md", "someone else\n");
     let outcome = fixture
         .delivery
-        .land(&landing, "", &bundle, &cancel)
+        .land(&landing, &remote(&landing), &bundle, &cancel)
         .await
         .unwrap();
     let Outcome::Landed(merged) = outcome else {
@@ -353,7 +357,7 @@ async fn merge_mode_merges_into_the_target_with_the_tag_as_author() {
     // Already merged: nothing new is pushed.
     let again = fixture
         .delivery
-        .land(&landing, "", &bundle, &cancel)
+        .land(&landing, &remote(&landing), &bundle, &cancel)
         .await
         .unwrap();
     assert_eq!(again, Outcome::Landed(merged));
@@ -368,7 +372,7 @@ async fn a_conflict_is_reported_and_never_resolved() {
     let landing = fixture.landing(WorkspaceLandingMode::Merge, &head, blob);
     let outcome = fixture
         .delivery
-        .land(&landing, "", &bundle, &cancel)
+        .land(&landing, &remote(&landing), &bundle, &cancel)
         .await
         .unwrap();
     assert_eq!(
@@ -384,7 +388,7 @@ async fn a_conflict_is_reported_and_never_resolved() {
 }
 
 #[tokio::test]
-async fn landing_refuses_refs_outside_the_allowlist_and_missing_credentials() {
+async fn landing_refuses_refs_outside_the_allowlist_and_a_credential_for_another_remote() {
     let fixture = Fixture::new();
     let cancel = CancellationToken::new();
     let (head, bundle, blob) = fixture.session("refused", "line one\nx\n");
@@ -393,23 +397,19 @@ async fn landing_refuses_refs_outside_the_allowlist_and_missing_credentials() {
     assert!(
         fixture
             .delivery
-            .land(&landing, "", &bundle, &cancel)
+            .land(&landing, &remote(&landing), &bundle, &cancel)
             .await
             .is_err()
     );
     let landing = fixture.landing(WorkspaceLandingMode::Branch, &head, blob);
-    match fixture
-        .delivery
-        .land(&landing, "absent", &bundle, &cancel)
-        .await
-        .unwrap()
-    {
-        Outcome::Held(reason) => assert!(
-            reason.contains("supertag workspace credential add absent"),
-            "{reason}"
-        ),
-        other => panic!("{other:?}"),
-    }
+    let elsewhere = Remote::new("https://example.invalid/other.git", None).unwrap();
+    assert!(
+        fixture
+            .delivery
+            .land(&landing, &elsewhere, &bundle, &cancel)
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -452,7 +452,7 @@ async fn check_reports_each_step_without_changing_the_remote() {
     assert_eq!(status("ci").0, WorkspaceCheckStatus::Unknown);
     assert_eq!(git(&fixture.remote, &["for-each-ref"]), before);
 
-    let mut missing = fixture.workspace(Some(workspace_land::Mode::Branch(WorkspaceLandBranch {})));
+    let mut missing = fixture.workspace(None);
     missing.remote = "file:///nonexistent/remote.git".into();
     let check = fixture.delivery.check(&missing, &cancel).await.unwrap();
     assert_eq!(check.steps[0].status(), WorkspaceCheckStatus::Failed);

@@ -14,6 +14,7 @@ pub mod environment;
 mod failures;
 mod guardian;
 mod journal;
+mod landing;
 mod mcp;
 mod native_memory;
 mod native_memory_volume;
@@ -550,6 +551,19 @@ pub async fn run(
             &registration.host_id,
         ))
         .with_volumes(std::sync::Arc::new(options.volumes.clone()));
+    // This host lands the Workspace deliveries it holds: right after each one, and queued ones
+    // (retries, merges after their Work Session closed) in the background. A `--once` host lands
+    // only what it may claim before it exits.
+    let landings = landing::Landings::new(
+        &options.state_directory,
+        channel.clone(),
+        headers.clone(),
+        &token,
+        serving.storage.clone(),
+    )?;
+    if !options.once {
+        landings.spawn(shutdown.clone());
+    }
     // At start and every hour, delete the checkpoint files no Session will resume.
     {
         let transfers = transfers.clone();
@@ -1163,6 +1177,12 @@ pub async fn run(
                     continue;
                 }
                 supertag_protocol::crash_point("worker-host.finish", "journaled");
+                // A local Workspace's Session branch goes into its own repository before the
+                // Task is reported, so whoever sees it succeed finds the branch. Best effort: the
+                // delivery stands either way, and a later delivery writes the branch again.
+                if let Some(pending) = workspace.as_ref().filter(|_| succeeded) {
+                    write_session_branch(&mut host, &workspaces, &attempt, &token, pending, &shutdown).await;
+                }
                 let outcome = host
                     .finish_task(request(
                         FinishTaskRequest {
@@ -1265,6 +1285,7 @@ pub async fn run(
             Entry::Terminal { attempt, prepared } => {
                 let discarded = cleanup_terminal(&journal, &workspaces, &options.state_directory, &attempt, prepared.as_deref())?;
                 purge_discarded(discarded, options.once);
+                landings.land_now(&shutdown).await;
                 if let Some(ready) = ready.take() {
                     ready();
                 }
@@ -3001,6 +3022,34 @@ fn retryable(error: &Status) -> bool {
 
 /// Records on the Task whether its Attempt waits for the Worker Host holding its Session's last
 /// delivery. Best effort: a lost report only leaves the reason unshown until the next try.
+/// Writes `pending`'s Session branch into its local Workspace's repository, noting a failure.
+async fn write_session_branch(
+    host: &mut RegisteredHost,
+    workspaces: &workspaces::Workspaces,
+    attempt: &Attempt,
+    token: &str,
+    pending: &workspaces::PendingWorkspace,
+    shutdown: &CancellationToken,
+) {
+    let written = async {
+        let authority = host
+            .renew_attempt(request(attempt.inspect(), token)?)
+            .await?
+            .into_inner();
+        let task = authority.task.context("Attempt authority names no Task")?;
+        workspaces
+            .write_session_branch(pending, &task.tag_id, &shutdown.child_token())
+            .await
+    }
+    .await;
+    if let Err(error) = written {
+        failures::note_unrecorded(
+            "the Session branch was not written to the Workspace",
+            &error,
+        );
+    }
+}
+
 /// Tells the Control Plane, in the background and best-effort, that the Attempt reached
 /// `milestone`, for `supertag metrics`. The run never waits on it.
 pub(crate) fn report_milestone(

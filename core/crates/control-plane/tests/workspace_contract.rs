@@ -157,14 +157,11 @@ async fn exercise(url: &str) {
 
     let expected = delivery(&attempt, BASE, HEAD);
     let reference = expected.delivery.clone().unwrap();
-    let artifact = GetWorkspaceArtifactRequest {
-        task_id: first.task_id.clone(),
-        kind: WorkspaceArtifactKind::Patch.into(),
+    let published = |store: &Store| {
+        let (store, task) = (store.clone(), first.task_id.clone());
+        async move { store.get_task(&task).await.unwrap().workspace_delivery }
     };
-    assert!(matches!(
-        store.get_workspace_artifact(&artifact).await,
-        Err(StoreError::NotFound(_))
-    ));
+    assert_eq!(published(&store).await, None);
     assert!(matches!(
         store.reserve_workspace_delivery(&other, &expected).await,
         Err(StoreError::PermissionDenied)
@@ -213,10 +210,7 @@ async fn exercise(url: &str) {
             .unwrap(),
         reference
     );
-    assert!(matches!(
-        store.get_workspace_artifact(&artifact).await,
-        Err(StoreError::NotFound(_))
-    ));
+    assert_eq!(published(&store).await, None);
     let mut incomplete_finish = first_finish.clone();
     incomplete_finish.checkpoint_sha256 = Some("0".repeat(64));
     assert!(matches!(
@@ -244,10 +238,7 @@ async fn exercise(url: &str) {
         store.finish_task(&owner, &first_finish).await.unwrap(),
         completed
     );
-    assert_eq!(
-        store.get_workspace_artifact(&artifact).await.unwrap(),
-        reference
-    );
+    assert_eq!(published(&store).await, Some(reference.clone()));
 
     let later = submit(&store, "engineering").await.unwrap();
     let next = claim(&store, &other, "continue", &later.task_id).await;

@@ -119,6 +119,10 @@ pub struct AdapterOptions {
     /// Workspace's base commit, with a 10-minute limit.
     #[arg(long, value_name = "ID=COMMAND", requires = "workspace_id")]
     workspace_setup: Vec<String>,
+    /// ID: deliver a local Workspace as patches only; this host writes no Session branch into
+    /// its repository.
+    #[arg(long, value_name = "ID", requires = "workspace_source")]
+    workspace_patch: Vec<String>,
     /// Serve each --workspace-id as a remote Workspace, read from its server with a credential
     /// the Control Plane grants for each read.
     #[arg(
@@ -166,6 +170,12 @@ impl AdapterOptions {
                 "Workspace {id} has more than one setup command"
             );
         }
+        for id in &self.workspace_patch {
+            ensure!(
+                self.workspace_id.iter().any(|workspace| workspace == id),
+                "--workspace-patch names an unmapped Workspace"
+            );
+        }
         let mut seen = std::collections::BTreeSet::new();
         self.workspace_id
             .iter()
@@ -182,6 +192,8 @@ impl AdapterOptions {
                         None => WorkspaceSource::ControlPlane,
                     },
                     setup: setups.get(workspace_id.as_str()).cloned(),
+                    session_branches: self.workspace_source.get(index).is_some()
+                        && !self.workspace_patch.contains(workspace_id),
                 })
             })
             .collect()
@@ -379,6 +391,9 @@ impl AdapterOptions {
         }
         for setup in &self.workspace_setup {
             args.extend([OsString::from("--workspace-setup"), setup.into()]);
+        }
+        for id in &self.workspace_patch {
+            args.extend([OsString::from("--workspace-patch"), id.into()]);
         }
         if self.workspace_from_control_plane {
             args.push(OsString::from("--workspace-from-control-plane"));

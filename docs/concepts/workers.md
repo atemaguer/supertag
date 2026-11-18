@@ -37,9 +37,9 @@ Worker Host ── prepares a pinned checkout ── starts the harness adapter
    Task's Skills, and starts the harness adapter in it.
 4. The adapter runs the agent, reports progress, and completes the Task Attempt with its result
    and a Session checkpoint.
-5. The host verifies the commits the Task made and delivers them as a Git bundle. Your machine
-   imports them as a `supertag/session/...` branch, automatically for a Workspace one of its
-   Worker Hosts maps, or with `supertag fetch`.
+5. The host verifies the commits the Task made and delivers them as the branch
+   `supertag/session/...`: it writes the branch into the repository it maps, or pushes it to a
+   remote Workspace's git server.
 
 ## Worker Host
 

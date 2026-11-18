@@ -23,9 +23,9 @@ your repository  <──  branch supertag/session/HASH  <── delivery
 3. Each Task Attempt gets a separate checkout at the pinned commit. Later Tasks of the same
    Session continue on the Session's own branch, on top of the earlier ones.
 4. After the harness finishes, the host commits the changes, verifies them, and delivers a Git
-   bundle and a patch. It never writes your repository.
-5. The delivery **lands**: your machine imports it as the branch `supertag/session/HASH`, one
-   branch per Session, or SuperTag pushes it to the Workspace's git server. `HASH` is a SHA-256
+   bundle and a patch.
+5. The delivery **lands**: the Worker Host writes it into the repository it maps as the branch
+   `supertag/session/HASH`, one branch per Session, or pushes it to the Workspace's git server. `HASH` is a SHA-256
    digest of the Tag and Session IDs, and the Session's report names the branch.
 
 ## Before you start
@@ -110,25 +110,19 @@ credentials. A failed setup fails the Task Attempt with the command's output.
 
 ## 3. See the branches appear
 
-With `land: local`, the default, `supertag up` imports each delivered Task into the mapped
-repository:
+With `land: local`, the default, the Worker Host writes each delivered Task into the mapped
+repository as it delivers:
 
 ```sh
 git -C ~/code/app branch --list 'supertag/session/*'
 git -C ~/code/app diff main...supertag/session/HASH
 ```
 
-Your checkout stays on its own branch; SuperTag never switches it or changes its files. To import
-a delivery into another clone, or for a Workspace with `land: patch`:
-
-```sh
-supertag fetch TASK_ID --repository ~/code/app-review
-```
-
-`fetch` also takes a Session ID, to import that Session's latest delivery. A Task with no
-commits delivers nothing. The Control Plane stores no delivery: it relays the bundle or patch
-from the Worker Host that ran the Task, so that host must be running and connected. Otherwise the
-command fails and names the host.
+Your checkout stays on its own branch; SuperTag never switches it or changes its files. A branch
+someone moved outside SuperTag is left as it is. With `land: patch`, the host writes no branch. A
+Task with no commits delivers nothing. The Control Plane stores no delivery: the branch comes from
+the Worker Host that ran the Task, which maps the repository. Fetch it into another clone with
+`git fetch ~/code/app supertag/session/HASH`.
 
 ## Build on earlier work in the same Session
 
@@ -161,13 +155,14 @@ checkout and the conflicting files marked, and it merges again once that Task su
 A **remote Workspace** keeps its repository on a git server: GitHub, GitLab, Gitea or Forgejo,
 Bitbucket, any server you reach over SSH or HTTPS, or a bare repository on the Control Plane's
 machine. Each Worker Host that serves it reads the Session's source from the server itself, so it
-needs no clone and stores no credential: the Control Plane grants a credential for each read, and
-the host keeps it only in memory, never in a harness or sandbox. A GitHub App credential is
+needs no clone and stores no credential: the Control Plane grants a credential for each read or push,
+and the host keeps it only in memory, never in a harness or sandbox. A GitHub App credential is
 narrowed to a token for the one repository, which expires within an hour; an HTTPS token or SSH
 key is handed over as it is. A credential helper runs only on the Control Plane's machine, so a
 Workspace whose read credential is a helper can't run Tasks. A `file://` remote is a path on the
-Control Plane's machine, so only hosts that share that filesystem can read it. **Git delivery**,
-the part of the Control Plane that talks to the server, pushes each Session's changes back.
+Control Plane's machine, so only hosts that share that filesystem can read it. The Worker Host that
+ran each Task pushes the Session's changes back the same way, with the push credential, granted
+only while it holds the landing.
 
 1. Store a **Workspace Credential**: what git delivery presents to the server. Run this on the
    machine that runs the Control Plane, because the secret stays in that machine's credential vault
@@ -205,7 +200,7 @@ the part of the Control Plane that talks to the server, pushes each Session's ch
      remote: ssh://git@git.acme.internal/handbook.git
      ref: main
      credentials: { read: handbook-ro, push: handbook-rw }   # or credential: NAME for both
-     land: { merge: drafts }                                   # or land: branch
+     land: { merge: drafts }                                   # optional: or { review: ... }
    ```
 
 3. Check the whole path. It reads the branch and checks pushing without changing anything:
@@ -234,12 +229,12 @@ Without `ref`, it follows the server's default branch.
 
 | `land` | What happens |
 | --- | --- |
-| omitted | Changes stay with SuperTag; import them with `supertag fetch` |
-| `branch` | Each delivered Task updates the Session's branch `supertag/session/HASH` on the server |
-| `merge` | Once the Session's work is reported done, its branch is pushed and merged into the target branch with a merge commit, which is pushed. Nothing is pushed before then |
-| `review` | As `branch`, and the Session's draft pull request against `base` is opened or updated (GitHub) |
+| omitted | Each delivered Task updates the Session's branch `supertag/session/HASH` on the server |
+| `merge` | The Session's branch too, and once the Session's work is reported done it is merged into the target branch with a merge commit, which is pushed |
+| `review` | The Session's branch too, and its draft pull request against `base` is opened or updated (GitHub) |
 
-Git delivery pushes only `supertag/session/...` branches and the Workspace's merge target, and
+The Worker Host that ran the Task pushes from its own copy of the commits; the Control Plane opens
+review pull requests. SuperTag pushes only `supertag/session/...` branches and the Workspace's merge target, and
 only fast-forward. A branch someone changed outside SuperTag is never overwritten: its landing is
 held with the reason. Merge commits name the Tag as their author with a SuperTag no-reply address,
 and the person who asked as a co-author. A merge conflict gives the Session a follow-up Task, as

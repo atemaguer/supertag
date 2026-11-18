@@ -73,18 +73,12 @@ class WorkspaceCredentialNames(_message.Message):
     def __init__(self, read: _Optional[str] = ..., push: _Optional[str] = ...) -> None: ...
 
 class WorkspaceLand(_message.Message):
-    __slots__ = ("branch", "merge", "review")
-    BRANCH_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("merge", "review")
     MERGE_FIELD_NUMBER: _ClassVar[int]
     REVIEW_FIELD_NUMBER: _ClassVar[int]
-    branch: WorkspaceLandBranch
     merge: WorkspaceLandMerge
     review: WorkspaceLandReview
-    def __init__(self, branch: _Optional[_Union[WorkspaceLandBranch, _Mapping]] = ..., merge: _Optional[_Union[WorkspaceLandMerge, _Mapping]] = ..., review: _Optional[_Union[WorkspaceLandReview, _Mapping]] = ...) -> None: ...
-
-class WorkspaceLandBranch(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    def __init__(self, merge: _Optional[_Union[WorkspaceLandMerge, _Mapping]] = ..., review: _Optional[_Union[WorkspaceLandReview, _Mapping]] = ...) -> None: ...
 
 class WorkspaceLandMerge(_message.Message):
     __slots__ = ("target",)

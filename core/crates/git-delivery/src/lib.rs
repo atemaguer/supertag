@@ -23,24 +23,11 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
     git_remote::{RemoteTransport, remote_transport},
-    v2::{BlobHolder, Workspace, WorkspaceDeliveryReference},
+    v2::Workspace,
 };
 use tempfile::TempDir;
 
 pub use credentials::{Credential, Credentials};
-
-/// Reads a complete bundle of a Workspace delivery's commit from the Worker Host that holds it.
-/// The Control Plane stores no delivery bytes; its relay writes them to `destination`. The bundle
-/// has no recorded digest: git delivery checks it with git against the delivered commit.
-#[tonic::async_trait]
-pub trait BundleReader: Send + Sync + 'static {
-    async fn read(
-        &self,
-        holder: &BlobHolder,
-        delivery: &WorkspaceDeliveryReference,
-        destination: &Path,
-    ) -> Result<()>;
-}
 
 /// Which credential of a Workspace an operation uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,7 +60,7 @@ pub struct Grant {
 }
 
 /// One remote, with the credential an operation presents to it.
-pub(crate) struct Remote {
+pub struct Remote {
     pub(crate) url: String,
     pub(crate) transport: RemoteTransport,
     pub(crate) credential: Option<(String, Credential)>,
@@ -95,6 +82,19 @@ pub(crate) struct Session {
     pub(crate) settings: git::Settings,
     pub(crate) transport: RemoteTransport,
     pub(crate) url: String,
+}
+
+impl Remote {
+    /// `url` with `credential`, such as one the Control Plane minted for one operation. Held in
+    /// memory only; git receives it through its environment and askpass, never argv or config.
+    pub fn new(url: &str, credential: Option<Credential>) -> Result<Self> {
+        Ok(Self {
+            url: url.to_owned(),
+            transport: remote_transport(url).map_err(anyhow::Error::msg)?,
+            credential: credential.map(|credential| ("granted".to_owned(), credential)),
+            minted: None,
+        })
+    }
 }
 
 impl Session {
@@ -224,12 +224,7 @@ impl GitDelivery {
 
     /// The remote of `workspace` with a credential the Control Plane granted.
     pub(crate) fn granted(workspace: &Workspace, credential: Option<Credential>) -> Result<Remote> {
-        Ok(Remote {
-            url: workspace.remote.clone(),
-            transport: remote_transport(&workspace.remote).map_err(anyhow::Error::msg)?,
-            credential: credential.map(|credential| ("granted".to_owned(), credential)),
-            minted: None,
-        })
+        Remote::new(&workspace.remote, credential)
     }
 
     /// A token for the GitHub repository `remote` names, from a GitHub App credential, with

@@ -13,8 +13,19 @@ service WorkspaceLandings {
   rpc ReturnConflict(ReturnLandingConflictRequest) returns (Task);
 }
 
-// Internal to the Control Plane: git delivery pins each Session's source and lands verified
-// commits. A claim names what to push; git delivery holds the credentials.
+// The Worker Host holding a delivery lands it: it pushes the Session's branch, and in merge mode
+// merges it into the target, from its own copy of the delivered commit, with credentials the
+// Control Plane mints for the one push. A host claims only landings of deliveries it holds.
+service HostLandings {
+  rpc Claim(ClaimWorkspaceLandingRequest) returns (ClaimWorkspaceLandingResponse);
+  rpc Renew(WorkspaceLandingLease) returns (ClaimWorkspaceLandingResponse);
+  // In review mode, a host records the pushed branch as Landed without a pull request; the
+  // Control Plane's git delivery then opens or updates the pull request.
+  rpc Record(RecordWorkspaceLandingRequest) returns (WorkspaceLanding);
+}
+
+// Internal to the Control Plane: git delivery pins each Session's source, and opens or updates
+// the pull request of a review landing whose branch a Worker Host pushed. It claims only those.
 service GitDelivery {
   rpc ListPendingSources(ListPendingWorkspaceSourcesRequest) returns (ListPendingWorkspaceSourcesResponse);
   rpc PinSource(PinWorkspaceSourceRequest) returns (WorkspaceSourcePin);
@@ -143,10 +154,14 @@ message ClaimWorkspaceLandingResponse {
   WorkspaceLanding landing = 1;
   string lease_token = 2;
   uint64 valid_for_ms = 3;
-  // The Worker Host holding the delivery's bundle, which git delivery reads through the relay.
+  // A Worker Host's claims only: the Attempt whose Workspace state on the claiming host holds
+  // the delivered commit.
   BlobHolder holder = 4;
-  // The push credential's name; empty when the remote needs none.
+  // Git delivery's claims only: the push credential's name, which its review adapter uses.
   string credential = 5;
+  // A Worker Host's claims and renewals only: the remote Workspace as the landing's Task
+  // recorded it, whose push credential `WorkspaceGitAccess.Mint` grants for the lease.
+  Workspace workspace = 6;
 }
 message RecordWorkspaceLandingRequest {
   WorkspaceLandingLease lease = 1;

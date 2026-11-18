@@ -75,7 +75,7 @@ pub use remote_workspaces::validate_manifest_workspace;
 pub use store::{HostAuthority, Role, Store, StoreError};
 pub use surface_policy::{validate_manifest_account, validate_manifest_location};
 pub use watch::OperatorWatch;
-pub use workspace_landings::GIT_DELIVERY_PRINCIPAL;
+pub use workspace_landings::{GIT_DELIVERY_PRINCIPAL, LandingClaimer};
 
 use std::sync::Arc;
 

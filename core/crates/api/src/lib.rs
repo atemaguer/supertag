@@ -18,6 +18,7 @@ mod attempt_safety;
 pub mod authorize;
 mod conversations;
 mod enrollments;
+mod host_landings;
 pub mod in_process;
 mod inbox;
 mod inputs;
@@ -212,6 +213,7 @@ impl Api {
             transfers.workspace_git_access_service(),
             self.workspace_credentials_service(),
             self.workspace_landings_service(),
+            self.host_landings_service(),
             self.artifact_publications_service(),
             self.policy_service(),
             self.manifest_relationships_service(),

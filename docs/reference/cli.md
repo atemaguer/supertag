@@ -58,7 +58,6 @@ Commands:
   artifact-consumption  Approve and withdraw a destination Objective's use of a publication
   volume                Register Volumes and copy immutable artifact files into explicitly mapped storage
   workspace-volume      Register a Volume whose files Tasks receive as Workspace copies
-  fetch                 Import a Task's or Session's delivered commits as its Session branch in a repository
   session               Close a Work Session so it no longer counts toward its Tag's limit
   schedule              Wake a Tag later in your conversation with it, or pause and resume a Schedule
   input                 Resolve a message whose delivery to a running Task is uncertain
@@ -507,10 +506,9 @@ Options:
           The Workspace Credential that pushes to the remote
 
       --land <LAND>
-          Where Session changes land. Omit to keep them with SuperTag (supertag fetch)
+          Where Session changes land beyond the Session's branch supertag/session/ID, which every delivered Task updates on the remote
 
           Possible values:
-          - branch: Each delivered Task updates its Session's branch supertag/session/ID on the remote
           - merge:  Finished Sessions merge into --target, which is pushed
           - review: Each delivered Task updates its Session's branch and a draft pull request against --base. Needs a GitHub remote
 
@@ -1863,6 +1861,9 @@ Options:
       --workspace-setup <ID=COMMAND>
           ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
 
+      --workspace-patch <ID>
+          ID: deliver a local Workspace as patches only; this host writes no Session branch into its repository
+
       --workspace-from-control-plane
           Serve each --workspace-id as a remote Workspace, read from its server with a credential the Control Plane grants for each read
 
@@ -2010,7 +2011,7 @@ Options:
       --websocket-listen <WEBSOCKET_LISTEN>
           Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
       --git-delivery-directory <GIT_DELIVERY_DIRECTORY>
-          Private directory of git delivery, which reads remote Workspaces and lands Session changes on them: scratch for each operation and remembered SSH host keys. Default: git-delivery in SUPERTAG_STATE_DIR or ~/.supertag. Workspace Credentials come from the credential vault there (SUPERTAG_CREDENTIAL_VAULT)
+          Private directory of git delivery, which reads remote Workspaces and opens review pull requests: scratch for each operation and remembered SSH host keys. Default: git-delivery in SUPERTAG_STATE_DIR or ~/.supertag. Workspace Credentials come from the credential vault there (SUPERTAG_CREDENTIAL_VAULT)
       --audit-log <stderr|PATH>
           Also write each committed audit entry as one JSON line to `stderr` or to this absolute file path, created owner-only. The database keeps every entry either way
   -h, --help
@@ -2291,6 +2292,9 @@ Options:
 
       --workspace-setup <ID=COMMAND>
           ID=COMMAND: a shell command, such as `npm ci`, that prepares each new Task checkout of a Workspace. It runs on this host, outside any harness sandbox, in the checkout on the Workspace's base commit, with a 10-minute limit
+
+      --workspace-patch <ID>
+          ID: deliver a local Workspace as patches only; this host writes no Session branch into its repository
 
       --workspace-from-control-plane
           Serve each --workspace-id as a remote Workspace, read from its server with a credential the Control Plane grants for each read
@@ -3211,29 +3215,6 @@ Options:
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
       --expected-revision <EXPECTED_REVISION>
           The revision you last read, or 0 to create. The change is refused when it no longer matches [default: 0]
-  -h, --help
-          Print help
-```
-
-## `supertag fetch`
-
-```text
-Import a Task's or Session's delivered commits as its Session branch in a repository
-
-Usage: supertag fetch [OPTIONS] <ID>
-
-Arguments:
-  <ID>  A Task ID, or a Session ID to import that Session's latest delivery
-
-Options:
-      --gateway <URL|NAME>
-          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --state-directory <STATE_DIRECTORY>
-          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-      --tag <TAG>
-          The Tag whose Session to import, when more than one Tag has a Session with this ID
-      --repository <REPOSITORY>
-          The Git repository that receives the Session branch [default: .]
   -h, --help
           Print help
 ```

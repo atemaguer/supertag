@@ -1,21 +1,22 @@
 //! Landing verified Session commits on a Workspace's remote, fast-forward only.
 //!
-//! `branch` pushes the Session's branch `supertag/session/ID`. `merge` also merges the Session
-//! into the Workspace's target with a merge commit and pushes the target. `review` pushes the
-//! branch and opens or updates its draft pull request through the review adapter. A conflict is
+//! The Worker Host holding a delivery lands it, from its own copy of the commit and with a push
+//! credential minted for the landing. `branch` pushes the Session's branch `supertag/session/ID`.
+//! `merge` also merges the Session into the Workspace's target with a merge commit and pushes
+//! the target. `review` pushes the branch; the Control Plane's git delivery then opens or
+//! updates its draft pull request through the review adapter. A conflict is
 //! never resolved here: it is recorded, and the Control Plane gives the Session a follow-up Task.
 use std::{path::Path, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
-    git_remote::{LANDING_HOLDER_OFFLINE, may_push},
+    git_remote::may_push,
     negotiation::ProtocolChannel,
     v2::{
         ClaimWorkspaceLandingRequest, ClaimWorkspaceLandingResponse, RecordWorkspaceLandingRequest,
-        Workspace, WorkspaceCredentialNames, WorkspaceLanding, WorkspaceLandingLease,
-        WorkspaceLandingMode, WorkspaceLandingState, WorkspacePullRequest,
-        git_delivery_client::GitDeliveryClient,
+        WorkspaceLanding, WorkspaceLandingLease, WorkspaceLandingMode, WorkspaceLandingState,
+        WorkspacePullRequest, git_delivery_client::GitDeliveryClient,
     },
     valid_git_commit,
 };
@@ -25,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Code, Request, Status};
 use uuid::Uuid;
 
-use crate::{Access, BundleReader, GitDelivery, Session, git, review::Reviewed, source::list_refs};
+use crate::{GitDelivery, Remote, Session, git, review::Reviewed, source::list_refs};
 
 const PUSH_TIMEOUT: Duration = Duration::from_secs(120);
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -118,12 +119,47 @@ fn merge_message(landing: &WorkspaceLanding) -> String {
     message
 }
 
+/// The landing calls a runner makes: the Control Plane's `GitDelivery` service for review pull
+/// requests, or a Worker Host's `HostLandings` for the deliveries it holds.
+#[tonic::async_trait]
+pub trait LandingCalls: Send + Sync + 'static {
+    async fn claim(
+        &self,
+        request: ClaimWorkspaceLandingRequest,
+    ) -> Result<ClaimWorkspaceLandingResponse, Status>;
+    async fn renew(
+        &self,
+        lease: WorkspaceLandingLease,
+    ) -> Result<ClaimWorkspaceLandingResponse, Status>;
+    async fn record(
+        &self,
+        record: RecordWorkspaceLandingRequest,
+    ) -> Result<WorkspaceLanding, Status>;
+}
+
+/// What a Worker Host lands from: its own copy of each delivered commit, and a push credential
+/// minted for the one landing.
+#[tonic::async_trait]
+pub trait HeldDeliveries: Send + Sync + 'static {
+    /// Writes a complete bundle of the claimed landing's delivered commit, which this host
+    /// holds, to `into`. `false` when it no longer holds it.
+    async fn bundle(&self, claim: &ClaimWorkspaceLandingResponse, into: &Path) -> Result<bool>;
+    /// The landing's remote, with a credential for pushing to it under `lease`.
+    async fn push_remote(
+        &self,
+        landing: &WorkspaceLanding,
+        lease: &WorkspaceLandingLease,
+    ) -> Result<Remote>;
+}
+
 impl GitDelivery {
-    /// Lands `landing`, whose delivered commit is in `repository`, on its remote.
+    /// Pushes `landing`'s branch, and in merge mode merges it into the target, from `bundle`, a
+    /// complete bundle of the delivered commit. A review landing's pull request is the Control
+    /// Plane's to open: see [`Self::open_review`].
     pub async fn land(
         &self,
         landing: &WorkspaceLanding,
-        credential: &str,
+        remote: &Remote,
         bundle: &Path,
         cancel: &CancellationToken,
     ) -> Result<Outcome> {
@@ -133,21 +169,13 @@ impl GitDelivery {
             .context("landing has no delivery")?;
         let head = delivery.head_commit.clone();
         ensure!(valid_git_commit(&head), "invalid delivered commit");
-        let workspace = Workspace {
-            remote: landing.remote.clone(),
-            credentials: Some(WorkspaceCredentialNames {
-                read: String::new(),
-                push: credential.to_owned(),
-            }),
-            ..Default::default()
-        };
-        let remote = match self.remote(&workspace, Access::Push).await {
-            Ok(remote) => remote,
-            Err(error) => return Ok(Outcome::Held(format!("{error:#}"))),
-        };
-        let session = self.session(&remote)?;
-        // The relayed bundle has no recorded digest: materializing it verifies it is complete
-        // and holds exactly the delivered commit.
+        ensure!(
+            remote.url == landing.remote,
+            "the landing's credential is for another remote"
+        );
+        let session = self.session(remote)?;
+        // Materializing the bundle verifies it is complete and holds exactly the delivered
+        // commit.
         let bytes = std::fs::read(bundle)?;
         let repository = source::materialize(
             &session.directory.path().join("delivered"),
@@ -182,17 +210,26 @@ impl GitDelivery {
                 self.merge(landing, &session, &repository, &head, cancel)
                     .await
             }
-            WorkspaceLandingMode::Review => {
-                Ok(match self.review(landing, credential, &head).await? {
-                    Reviewed::Done(pull_request) => Outcome::Reviewed {
-                        commit: head,
-                        pull_request,
-                    },
-                    Reviewed::Held(reason) => Outcome::Held(reason),
-                })
-            }
             _ => Ok(Outcome::Landed(head)),
         }
+    }
+
+    /// Opens or updates the draft pull request of a review landing whose branch a Worker Host
+    /// pushed, with the Workspace's push credential `credential`.
+    pub async fn open_review(
+        &self,
+        landing: &WorkspaceLanding,
+        credential: &str,
+    ) -> Result<Outcome> {
+        let head = landing.landed_commit.clone();
+        ensure!(valid_git_commit(&head), "the pushed branch names no commit");
+        Ok(match self.review(landing, credential, &head).await? {
+            Reviewed::Done(pull_request) => Outcome::Reviewed {
+                commit: head,
+                pull_request,
+            },
+            Reviewed::Held(reason) => Outcome::Held(reason),
+        })
     }
 
     async fn merge(
@@ -327,23 +364,63 @@ impl GitDelivery {
         )))
     }
 
-    /// Claims and lands landings until `shutdown`.
-    pub async fn run_landings(
+    /// Opens the pull requests of review landings whose branches Worker Hosts pushed, until
+    /// `shutdown`. Runs on the Control Plane, which holds the review credentials; it reads no
+    /// delivery bytes.
+    pub async fn run_reviews(
         &self,
         channel: ProtocolChannel,
         token: String,
         principal: String,
-        bundles: Arc<dyn BundleReader>,
         shutdown: CancellationToken,
     ) -> Result<()> {
-        let runner = Runner {
-            delivery: self.clone(),
+        let calls = DeliveryCalls {
             client: GitDeliveryClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
             token,
             principal,
-            bundles,
+        };
+        self.run(Arc::new(calls), Work::Review, shutdown).await
+    }
+
+    /// Lands the deliveries this Worker Host holds, through `calls`, until `shutdown`.
+    pub async fn run_host_landings(
+        &self,
+        calls: Arc<dyn LandingCalls>,
+        held: Arc<dyn HeldDeliveries>,
+        shutdown: CancellationToken,
+    ) -> Result<()> {
+        self.run(calls, Work::Host(held), shutdown).await
+    }
+
+    /// Lands everything this Worker Host may claim now, once: a host runs this right after it
+    /// delivers, so the Session's branch reaches the remote before the host moves on or exits.
+    pub async fn land_claimable(
+        &self,
+        calls: Arc<dyn LandingCalls>,
+        held: Arc<dyn HeldDeliveries>,
+        shutdown: &CancellationToken,
+    ) {
+        Runner {
+            delivery: self.clone(),
+            calls,
+            work: Work::Host(held),
+        }
+        .drain(shutdown)
+        .await;
+    }
+
+    async fn run(
+        &self,
+        calls: Arc<dyn LandingCalls>,
+        work: Work,
+        shutdown: CancellationToken,
+    ) -> Result<()> {
+        let runner = Runner {
+            delivery: self.clone(),
+            calls,
+            work,
         };
         let mut interval = time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
@@ -352,46 +429,96 @@ impl GitDelivery {
                 _ = shutdown.cancelled() => return Ok(()),
                 _ = interval.tick() => {}
             }
-            // Land everything claimable before waiting again.
-            loop {
-                let claim = match runner
-                    .client
-                    .clone()
-                    .claim(runner.request(ClaimWorkspaceLandingRequest {
-                        operation_id: Uuid::new_v4().to_string(),
-                    })?)
-                    .await
-                {
-                    Ok(claim) => claim.into_inner(),
-                    Err(_) => break,
-                };
-                if claim.landing.is_none() {
-                    break;
-                }
-                // Errors hold no credentials. The Control Plane keeps the landing until it is
-                // recorded, and an expired claim is claimed again.
-                let _ = runner.deliver(claim, shutdown.child_token()).await;
-                if shutdown.is_cancelled() {
-                    return Ok(());
-                }
-            }
+            runner.drain(&shutdown).await;
         }
     }
 }
 
-struct Runner {
-    delivery: GitDelivery,
+struct DeliveryCalls {
     client: GitDeliveryClient<ProtocolChannel>,
     token: String,
     principal: String,
-    bundles: Arc<dyn BundleReader>,
 }
 
-impl Runner {
+impl DeliveryCalls {
     fn request<T>(&self, value: T) -> Result<Request<T>, Status> {
         let mut request = authenticated_request(value, &self.token, Some(&self.principal))?;
         request.set_timeout(Duration::from_secs(5));
         Ok(request)
+    }
+}
+
+#[tonic::async_trait]
+impl LandingCalls for DeliveryCalls {
+    async fn claim(
+        &self,
+        request: ClaimWorkspaceLandingRequest,
+    ) -> Result<ClaimWorkspaceLandingResponse, Status> {
+        Ok(self
+            .client
+            .clone()
+            .claim(self.request(request)?)
+            .await?
+            .into_inner())
+    }
+    async fn renew(
+        &self,
+        lease: WorkspaceLandingLease,
+    ) -> Result<ClaimWorkspaceLandingResponse, Status> {
+        Ok(self
+            .client
+            .clone()
+            .renew(self.request(lease)?)
+            .await?
+            .into_inner())
+    }
+    async fn record(
+        &self,
+        record: RecordWorkspaceLandingRequest,
+    ) -> Result<WorkspaceLanding, Status> {
+        Ok(self
+            .client
+            .clone()
+            .record(self.request(record)?)
+            .await?
+            .into_inner())
+    }
+}
+
+enum Work {
+    /// A Worker Host lands the deliveries it holds.
+    Host(Arc<dyn HeldDeliveries>),
+    /// The Control Plane opens pushed review branches' pull requests.
+    Review,
+}
+
+struct Runner {
+    delivery: GitDelivery,
+    calls: Arc<dyn LandingCalls>,
+    work: Work,
+}
+
+impl Runner {
+    /// Lands everything claimable now.
+    async fn drain(&self, shutdown: &CancellationToken) {
+        while !shutdown.is_cancelled() {
+            let claim = match self
+                .calls
+                .claim(ClaimWorkspaceLandingRequest {
+                    operation_id: Uuid::new_v4().to_string(),
+                })
+                .await
+            {
+                Ok(claim) => claim,
+                Err(_) => return,
+            };
+            if claim.landing.is_none() {
+                return;
+            }
+            // Errors hold no credentials. The Control Plane keeps the landing until it is
+            // recorded, and an expired claim is claimed again.
+            let _ = self.deliver(claim, shutdown.child_token()).await;
+        }
     }
 
     async fn maintain(&self, lease: &WorkspaceLandingLease, mut until: Instant) -> Result<()> {
@@ -399,14 +526,9 @@ impl Runner {
             time::sleep_until((Instant::now() + Duration::from_secs(10)).min(until)).await;
             ensure!(Instant::now() < until, "landing authority expired");
             let started = Instant::now();
-            match time::timeout_at(
-                until,
-                self.client.clone().renew(self.request(lease.clone())?),
-            )
-            .await
-            {
+            match time::timeout_at(until, self.calls.renew(lease.clone())).await {
                 Ok(Ok(response)) => {
-                    until = started + Duration::from_millis(response.into_inner().valid_for_ms);
+                    until = started + Duration::from_millis(response.valid_for_ms);
                 }
                 Ok(Err(status))
                     if matches!(
@@ -430,7 +552,7 @@ impl Runner {
             lease_token: claim.lease_token.clone(),
         };
         let until = Instant::now() + Duration::from_millis(claim.valid_for_ms);
-        let operation = self.attempt(&claim, &cancel);
+        let operation = self.attempt(&claim, &lease, &cancel);
         tokio::pin!(operation);
         let outcome = tokio::select! {
             outcome = &mut operation => outcome,
@@ -441,7 +563,7 @@ impl Runner {
         };
         let outcome = outcome.unwrap_or_else(|error| Outcome::Retry(format!("{error:#}")));
         let mut record = RecordWorkspaceLandingRequest {
-            lease: Some(lease),
+            lease: Some(lease.clone()),
             operation_id: Uuid::new_v4().to_string(),
             ..Default::default()
         };
@@ -480,39 +602,36 @@ impl Runner {
                 record.reason = bounded(&reason);
             }
         }
-        self.client.clone().record(self.request(record)?).await?;
+        self.calls.record(record).await?;
         Ok(())
     }
 
     async fn attempt(
         &self,
         claim: &ClaimWorkspaceLandingResponse,
+        lease: &WorkspaceLandingLease,
         cancel: &CancellationToken,
     ) -> Result<Outcome> {
         let landing = claim.landing.as_ref().context("claim is empty")?;
-        let delivery = landing
-            .delivery
-            .as_ref()
-            .context("landing has no delivery")?;
-        let Some(holder) = &claim.holder else {
-            return Ok(Outcome::Retry(LANDING_HOLDER_OFFLINE.into()));
-        };
-        let scratch = tempfile::Builder::new()
-            .prefix(crate::SCRATCH_PREFIX)
-            .tempdir_in(&self.delivery.0.directory)?;
-        let path = scratch.path().join("delivery.bundle");
-        if let Err(error) = self.bundles.read(holder, delivery, &path).await {
-            if error
-                .downcast_ref::<Status>()
-                .is_some_and(|status| status.code() == Code::Unavailable)
-            {
-                return Ok(Outcome::Retry(LANDING_HOLDER_OFFLINE.into()));
+        match &self.work {
+            Work::Review => self.delivery.open_review(landing, &claim.credential).await,
+            Work::Host(held) => {
+                let scratch = tempfile::Builder::new()
+                    .prefix(crate::SCRATCH_PREFIX)
+                    .tempdir_in(&self.delivery.0.directory)?;
+                let bundle = scratch.path().join("delivery.bundle");
+                if !held.bundle(claim, &bundle).await? {
+                    return Ok(Outcome::Held(
+                        "this Worker Host no longer holds the delivered commit".into(),
+                    ));
+                }
+                let remote = match held.push_remote(landing, lease).await {
+                    Ok(remote) => remote,
+                    Err(error) => return Ok(Outcome::Held(format!("{error:#}"))),
+                };
+                self.delivery.land(landing, &remote, &bundle, cancel).await
             }
-            return Err(error.context("reading the delivered bundle"));
         }
-        self.delivery
-            .land(landing, &claim.credential, &path, cancel)
-            .await
     }
 }
 

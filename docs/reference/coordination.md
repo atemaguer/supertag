@@ -236,7 +236,6 @@ when:
 
 - the Tag calls `close_session` because the work is done or no longer needed;
 - an operator runs `supertag session close ID`;
-- its delivery is pulled with `supertag fetch`;
 - the pull request its Workspace's review landing opened is merged, which the Gateway's GitHub
   connector reports (`closed: pull request merged`). A pull request closed without merging leaves the work
   Session open, so it can still send a revision;

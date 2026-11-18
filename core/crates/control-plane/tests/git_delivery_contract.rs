@@ -16,7 +16,9 @@ mod support;
 
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, Executor};
-use supertag_control_plane::{GIT_DELIVERY_PRINCIPAL, HostAuthority, Store, StoreError};
+use supertag_control_plane::{
+    GIT_DELIVERY_PRINCIPAL, HostAuthority, LandingClaimer, Store, StoreError,
+};
 use supertag_protocol::v2::*;
 use uuid::Uuid;
 
@@ -80,9 +82,9 @@ async fn put(store: &Store, value: Workspace) -> Result<Workspace, StoreError> {
         .await
 }
 
-async fn setup(store: &Store, land: workspace_land::Mode) {
+async fn setup(store: &Store, land: Option<workspace_land::Mode>) {
     credential(store, "handbook").await;
-    put(store, workspace(Some(land))).await.unwrap();
+    put(store, workspace(land)).await.unwrap();
     store
         .put_tag_spec(PutTagRequest {
             tag_id: "engineer".into(),
@@ -238,10 +240,13 @@ async fn finish(
         .unwrap();
 }
 
-async fn claim_landing(store: &Store) -> ClaimWorkspaceLandingResponse {
+async fn claim_landing(
+    store: &Store,
+    claimer: LandingClaimer<'_>,
+) -> ClaimWorkspaceLandingResponse {
     store
         .claim_workspace_landing(
-            GIT_DELIVERY_PRINCIPAL,
+            claimer,
             &ClaimWorkspaceLandingRequest {
                 operation_id: Uuid::new_v4().to_string(),
             },
@@ -252,12 +257,13 @@ async fn claim_landing(store: &Store) -> ClaimWorkspaceLandingResponse {
 
 async fn record(
     store: &Store,
+    claimer: LandingClaimer<'_>,
     claim: &ClaimWorkspaceLandingResponse,
     input: RecordWorkspaceLandingRequest,
 ) -> WorkspaceLanding {
     store
         .record_workspace_landing(
-            GIT_DELIVERY_PRINCIPAL,
+            claimer,
             &RecordWorkspaceLandingRequest {
                 lease: Some(WorkspaceLandingLease {
                     landing_id: claim.landing.as_ref().unwrap().landing_id.clone(),
@@ -405,7 +411,7 @@ async fn catalog_contract(url: String) {
     assert!(matches!(
         store
             .claim_workspace_landing(
-                OP,
+                LandingClaimer::Delivery(OP),
                 &ClaimWorkspaceLandingRequest {
                     operation_id: "x".into()
                 }
@@ -437,7 +443,7 @@ async fn branch_contract(url: String) {
         .await
         .unwrap()
         .with_execution_clock(move || clock.load(std::sync::atomic::Ordering::SeqCst));
-    setup(&store, workspace_land::Mode::Branch(WorkspaceLandBranch {})).await;
+    setup(&store, None).await;
     let host = support::register_host(&store, "docs-host").await;
     support::hold_artifacts(&store, &host).await;
 
@@ -538,7 +544,7 @@ async fn branch_contract(url: String) {
         ]
     );
 
-    let claimed = claim_landing(&store).await;
+    let claimed = claim_landing(&store, LandingClaimer::Host(&host)).await;
     let landing = claimed.landing.clone().unwrap();
     assert_eq!(landing.mode(), WorkspaceLandingMode::Branch);
     assert_eq!(landing.delivery.as_ref().unwrap().head_commit, second_head);
@@ -547,22 +553,54 @@ async fn branch_contract(url: String) {
         supertag_protocol::session_branch("engineer", "notes")
     );
     assert_eq!(landing.remote, REMOTE);
-    assert_eq!(claimed.credential, "handbook");
+    // The host mints its push credential; it learns which of its Attempts holds the commit.
+    assert_eq!(claimed.credential, "");
     assert_eq!(claimed.holder.as_ref().unwrap().host_id, "docs-host");
+    // ...and the Workspace whose push credential WorkspaceGitAccess.Mint grants for the lease.
+    assert_eq!(claimed.workspace.as_ref().unwrap().remote, REMOTE);
+    // Only the host holding the delivery lands it, and only it renews or records the lease.
+    let other = support::register_host(&store, "other-host").await;
+    assert!(
+        claim_landing(&store, LandingClaimer::Host(&other))
+            .await
+            .landing
+            .is_none()
+    );
+    let lease = WorkspaceLandingLease {
+        landing_id: landing.landing_id.clone(),
+        lease_token: claimed.lease_token.clone(),
+    };
+    for claimer in [
+        LandingClaimer::Host(&other),
+        LandingClaimer::Delivery(GIT_DELIVERY_PRINCIPAL),
+    ] {
+        assert!(
+            store
+                .renew_workspace_landing(claimer, &lease)
+                .await
+                .is_err()
+        );
+    }
     // A landing put back because its holding Worker Host was away waits, and retries as soon as
     // that host reports Ready instead of waiting out its retry.
     record(
         &store,
+        LandingClaimer::Host(&host),
         &claimed,
         RecordWorkspaceLandingRequest {
             state: WorkspaceLandingState::Queued as i32,
-            reason: supertag_protocol::git_remote::LANDING_HOLDER_OFFLINE.into(),
+            reason: "the remote was unreachable".into(),
             retry_after_ms: 60_000,
             ..Default::default()
         },
     )
     .await;
-    assert!(claim_landing(&store).await.landing.is_none());
+    assert!(
+        claim_landing(&store, LandingClaimer::Host(&host))
+            .await
+            .landing
+            .is_none()
+    );
     store
         .report_host(
             &host,
@@ -576,9 +614,10 @@ async fn branch_contract(url: String) {
         )
         .await
         .unwrap();
-    let claimed = claim_landing(&store).await;
+    let claimed = claim_landing(&store, LandingClaimer::Host(&host)).await;
     let landed = record(
         &store,
+        LandingClaimer::Host(&host),
         &claimed,
         RecordWorkspaceLandingRequest {
             state: WorkspaceLandingState::Landed as i32,
@@ -589,7 +628,12 @@ async fn branch_contract(url: String) {
     .await;
     assert_eq!(landed.state(), WorkspaceLandingState::Landed);
     assert_eq!(landed.landed_commit, second_head);
-    assert!(claim_landing(&store).await.landing.is_none());
+    assert!(
+        claim_landing(&store, LandingClaimer::Host(&host))
+            .await
+            .landing
+            .is_none()
+    );
     let read = store
         .get_workspace_landing(
             OP,
@@ -641,17 +685,38 @@ async fn merge_contract(url: String) {
     let store = Store::open(&url).await.unwrap();
     setup(
         &store,
-        workspace_land::Mode::Merge(WorkspaceLandMerge {
+        Some(workspace_land::Mode::Merge(WorkspaceLandMerge {
             target: "drafts".into(),
-        }),
+        })),
     )
     .await;
     let host = support::register_host(&store, "docs-host").await;
     support::hold_artifacts(&store, &host).await;
     let head = "2".repeat(40);
     let work = work_session(&store, &host, &head).await;
-    // Unfinished work never lands in a shared branch.
-    assert!(claim_landing(&store).await.landing.is_none());
+    // Unfinished work never lands in a shared branch; the Session's own branch is pushed.
+    let pushed = claim_landing(&store, LandingClaimer::Host(&host)).await;
+    assert_eq!(
+        pushed.landing.as_ref().unwrap().mode(),
+        WorkspaceLandingMode::Branch
+    );
+    record(
+        &store,
+        LandingClaimer::Host(&host),
+        &pushed,
+        RecordWorkspaceLandingRequest {
+            state: WorkspaceLandingState::Landed as i32,
+            landed_commit: head.clone(),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(
+        claim_landing(&store, LandingClaimer::Host(&host))
+            .await
+            .landing
+            .is_none()
+    );
     // Reporting the work done lands it.
     store
         .close_work_session(
@@ -663,7 +728,7 @@ async fn merge_contract(url: String) {
         )
         .await
         .unwrap();
-    let claimed = claim_landing(&store).await;
+    let claimed = claim_landing(&store, LandingClaimer::Host(&host)).await;
     let landing = claimed.landing.clone().unwrap();
     assert_eq!(landing.mode(), WorkspaceLandingMode::Merge);
     assert_eq!(landing.target, "drafts");
@@ -675,6 +740,7 @@ async fn merge_contract(url: String) {
     let target = "4".repeat(40);
     let conflict = record(
         &store,
+        LandingClaimer::Host(&host),
         &claimed,
         RecordWorkspaceLandingRequest {
             state: WorkspaceLandingState::Conflict as i32,
@@ -706,11 +772,12 @@ async fn merge_contract(url: String) {
     // The resolved merge lands again as soon as it is delivered.
     let merged = "5".repeat(40);
     finish(&store, &host, attempt, &head, &merged).await;
-    let claimed = claim_landing(&store).await;
+    let claimed = claim_landing(&store, LandingClaimer::Host(&host)).await;
     let landing = claimed.landing.clone().unwrap();
     assert_eq!(landing.delivery.as_ref().unwrap().head_commit, merged);
     let landed = record(
         &store,
+        LandingClaimer::Host(&host),
         &claimed,
         RecordWorkspaceLandingRequest {
             state: WorkspaceLandingState::Landed as i32,
@@ -731,7 +798,12 @@ async fn merge_contract(url: String) {
         )
         .await
         .unwrap();
-    assert!(claim_landing(&store).await.landing.is_none());
+    assert!(
+        claim_landing(&store, LandingClaimer::Host(&host))
+            .await
+            .landing
+            .is_none()
+    );
     store.close().await;
 }
 
@@ -882,8 +954,58 @@ async fn review_contract(url: String) {
     let head = "2".repeat(40);
     let work = work_session(&store, &host, &head).await;
     // Every delivered Task lands at once, without waiting for the Session to finish.
-    let claimed = claim_landing(&store).await;
+    let pushed = claim_landing(&store, LandingClaimer::Host(&host)).await;
+    // Git delivery claims nothing until the host pushed the branch.
+    assert!(
+        claim_landing(&store, LandingClaimer::Delivery(GIT_DELIVERY_PRINCIPAL))
+            .await
+            .landing
+            .is_none()
+    );
+    // A host never opens the pull request; it records the pushed branch.
+    let refused = store
+        .record_workspace_landing(
+            LandingClaimer::Host(&host),
+            &RecordWorkspaceLandingRequest {
+                lease: Some(WorkspaceLandingLease {
+                    landing_id: pushed.landing.as_ref().unwrap().landing_id.clone(),
+                    lease_token: pushed.lease_token.clone(),
+                }),
+                operation_id: Uuid::new_v4().to_string(),
+                state: WorkspaceLandingState::Landed as i32,
+                landed_commit: head.clone(),
+                pull_request: Some(WorkspacePullRequest::default()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(refused, StoreError::InvalidArgument(_)),
+        "{refused:?}"
+    );
+    let queued = record(
+        &store,
+        LandingClaimer::Host(&host),
+        &pushed,
+        RecordWorkspaceLandingRequest {
+            state: WorkspaceLandingState::Landed as i32,
+            landed_commit: head.clone(),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(queued.state(), WorkspaceLandingState::Queued);
+    assert_eq!(queued.landed_commit, head);
+    assert!(
+        claim_landing(&store, LandingClaimer::Host(&host))
+            .await
+            .landing
+            .is_none()
+    );
+    let claimed = claim_landing(&store, LandingClaimer::Delivery(GIT_DELIVERY_PRINCIPAL)).await;
     assert_eq!(claimed.credential, "acme-github");
+    assert!(claimed.holder.is_none());
     let landing = claimed.landing.clone().unwrap();
     assert_eq!(landing.mode(), WorkspaceLandingMode::Review);
     assert_eq!(landing.target, "main");
@@ -914,7 +1036,7 @@ async fn review_contract(url: String) {
     ] {
         let refused = store
             .record_workspace_landing(
-                GIT_DELIVERY_PRINCIPAL,
+                LandingClaimer::Delivery(GIT_DELIVERY_PRINCIPAL),
                 &RecordWorkspaceLandingRequest {
                     lease: Some(WorkspaceLandingLease {
                         landing_id: landing.landing_id.clone(),
@@ -936,6 +1058,7 @@ async fn review_contract(url: String) {
     }
     let landed = record(
         &store,
+        LandingClaimer::Delivery(GIT_DELIVERY_PRINCIPAL),
         &claimed,
         RecordWorkspaceLandingRequest {
             state: WorkspaceLandingState::Landed as i32,

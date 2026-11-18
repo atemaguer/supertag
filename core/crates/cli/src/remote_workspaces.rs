@@ -26,8 +26,6 @@ pub const TOKEN_ENVIRONMENT: &str = "SUPERTAG_WORKSPACE_TOKEN";
 
 #[derive(Clone, Copy, ValueEnum)]
 pub enum Land {
-    /// Each delivered Task updates its Session's branch supertag/session/ID on the remote.
-    Branch,
     /// Finished Sessions merge into --target, which is pushed.
     Merge,
     /// Each delivered Task updates its Session's branch and a draft pull request against
@@ -62,7 +60,8 @@ pub enum WorkspaceCommand {
         /// The Workspace Credential that pushes to the remote.
         #[arg(long)]
         push_credential: Option<String>,
-        /// Where Session changes land. Omit to keep them with SuperTag (supertag fetch).
+        /// Where Session changes land beyond the Session's branch supertag/session/ID, which
+        /// every delivered Task updates on the remote.
         #[arg(long, value_enum)]
         land: Option<Land>,
         /// The branch finished Sessions merge into, with --land merge.
@@ -251,7 +250,6 @@ pub async fn run(connection: Connection, command: WorkspaceCommand) -> Result<()
             );
             let land = land.map(|land| WorkspaceLand {
                 mode: Some(match land {
-                    Land::Branch => workspace_land::Mode::Branch(WorkspaceLandBranch {}),
                     Land::Merge => workspace_land::Mode::Merge(WorkspaceLandMerge {
                         target: target.unwrap_or_default(),
                     }),
@@ -553,7 +551,6 @@ fn read_token() -> Result<String> {
 pub(crate) fn describe(value: Workspace) -> Value {
     let forge = value.forge();
     let land = match value.land.and_then(|land| land.mode) {
-        Some(workspace_land::Mode::Branch(_)) => json!("branch"),
         Some(workspace_land::Mode::Merge(merge)) => json!({"merge": merge.target}),
         Some(workspace_land::Mode::Review(review)) => json!({"review": {"base": review.base}}),
         None => Value::Null,

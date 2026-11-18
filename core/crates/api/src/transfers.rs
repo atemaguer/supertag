@@ -44,9 +44,12 @@ mod review_tests;
 pub trait WorkspaceGit: Send + Sync + 'static {
     /// The credential a Worker Host presents to read `workspace`'s remote, with its expiry in
     /// milliseconds since the epoch (0 when it does not expire). None for a remote that needs none.
-    async fn grant_read(
+    /// The credential a Worker Host presents to `workspace`'s remote for one read, or with
+    /// `push` one push.
+    async fn grant(
         &self,
         workspace: &Workspace,
+        push: bool,
     ) -> Result<(Option<workspace_git_grant::Credential>, i64)>;
 
     /// The remote URL when it advertises `commit` on a branch or tag, if any.
@@ -102,31 +105,6 @@ impl ApiTransfers {
         host_relay_server::HostRelayServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
-    }
-
-    /// Writes a complete bundle of `delivery`'s commit, which `holder` builds on demand, into
-    /// `destination`. Git delivery reads deliveries this way: its scratch repository
-    /// starts empty. The bundle has no recorded digest; the caller checks it with Git against the
-    /// delivered commit and deletes the file.
-    pub async fn relay_complete_bundle_to_file(
-        &self,
-        holder: &BlobHolder,
-        delivery: &WorkspaceDeliveryReference,
-        destination: &Path,
-    ) -> Result<()> {
-        let incoming = self
-            .relay
-            .open_complete_bundle(holder, delivery)
-            .await
-            .map_err(|error| relay_status(error, &holder.host_id, "Workspace delivery"))?;
-        self.write_relayed(
-            incoming,
-            Expected::Unrecorded {
-                limit: supertag_protocol::MAX_WORKSPACE_BLOB_BYTES as u64,
-            },
-            destination,
-        )
-        .await
     }
 
     /// Writes one blob held by `holder` into `destination`, verifying its length and digest.
@@ -434,8 +412,6 @@ impl Transfers for ApiTransfers {
             .await
     }
 
-    type DownloadWorkspaceArtifactStream = Download<WorkspaceDownload>;
-
     type DownloadReviewArtifactStream = Download<WorkspaceDownload>;
 
     async fn download_review_artifact(
@@ -463,36 +439,6 @@ impl Transfers for ApiTransfers {
             }
         };
         self.workspace_download(reference, holder, WorkspaceArtifactKind::Patch, authorize)
-            .await
-    }
-
-    async fn download_workspace_artifact(
-        &self,
-        request: Request<GetWorkspaceArtifactRequest>,
-    ) -> Result<Response<Self::DownloadWorkspaceArtifactStream>, Status> {
-        let kind = request.get_ref().kind();
-        let input = request.get_ref().clone();
-        let metadata = request.metadata().clone();
-        let (delivery, holder) = self.get_workspace_artifact(request).await?;
-        let expected = delivery.clone();
-        let service = self.clone();
-        // Recheck the operator's credential, such as a revoked Operator Token, while streaming.
-        let authorize = move || {
-            let service = service.clone();
-            let expected = expected.clone();
-            let mut request = Request::new(input.clone());
-            *request.metadata_mut() = metadata.clone();
-            async move {
-                if service.get_workspace_artifact(request).await?.0 == expected {
-                    Ok(())
-                } else {
-                    Err(Status::permission_denied(
-                        "workspace artifact is no longer authorized",
-                    ))
-                }
-            }
-        };
-        self.workspace_download(delivery, holder, kind, authorize)
             .await
     }
 }
@@ -533,22 +479,6 @@ impl ApiTransfers {
         };
         self.workspace_download(reference, holder, kind, authorize)
             .await
-    }
-}
-
-impl ApiTransfers {
-    async fn get_workspace_artifact(
-        &self,
-        request: Request<GetWorkspaceArtifactRequest>,
-    ) -> Result<(WorkspaceDeliveryReference, BlobHolder), Status> {
-        held(
-            self.api
-                .forward(request, |channel, request| async move {
-                    workspace_client(channel).get_artifact(request).await
-                })
-                .await?
-                .into_inner(),
-        )
     }
 }
 
@@ -731,17 +661,27 @@ where
 
 #[tonic::async_trait]
 impl workspace_git_access_server::WorkspaceGitAccess for ApiTransfers {
-    /// Grants a live Attempt's Worker Host the credential to read its Workspace's source itself.
+    /// Grants a live Attempt's Worker Host the credential to read its Workspace's source itself,
+    /// or the Worker Host holding a landing's lease the credential to push it.
     async fn mint(
         &self,
         request: Request<MintWorkspaceGitAccessRequest>,
     ) -> Result<Response<WorkspaceGitGrant>, Status> {
-        let (metadata, _, input) = request.into_parts();
-        if input.permission() != WorkspaceGitPermission::Read {
-            return Err(Status::invalid_argument(
-                "a Worker Host is granted only read access to a Workspace's remote",
-            ));
+        match (
+            request.get_ref().permission(),
+            request.get_ref().landing_id.is_empty(),
+        ) {
+            (WorkspaceGitPermission::Push, false) if request.get_ref().attempt.is_none() => {
+                return self.mint_push(request).await;
+            }
+            (WorkspaceGitPermission::Read, true) => {}
+            _ => {
+                return Err(Status::invalid_argument(
+                    "a Worker Host reads with an Attempt, and pushes only with a landing lease it holds",
+                ));
+            }
         }
+        let (metadata, _, input) = request.into_parts();
         // This authoritative check precedes credential resolution.
         let mut source = Request::new(DownloadWorkspaceSourceRequest {
             attempt: input.attempt,
@@ -752,15 +692,17 @@ impl workspace_git_access_server::WorkspaceGitAccess for ApiTransfers {
         let workspace = source
             .workspace
             .ok_or_else(|| Status::internal("Workspace source is incomplete"))?;
-        let (credential, expires_at_ms) =
-            timeout(Duration::from_secs(30), self.git()?.grant_read(&workspace))
-                .await
-                .map_err(|_| Status::deadline_exceeded("Workspace Credential lookup timed out"))?
-                .map_err(|error| {
-                    Status::failed_precondition(format!(
-                        "Workspace source cannot be read from a Worker Host: {error:#}"
-                    ))
-                })?;
+        let (credential, expires_at_ms) = timeout(
+            Duration::from_secs(30),
+            self.git()?.grant(&workspace, false),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("Workspace Credential lookup timed out"))?
+        .map_err(|error| {
+            Status::failed_precondition(format!(
+                "Workspace source cannot be read from a Worker Host: {error:#}"
+            ))
+        })?;
         Ok(Response::new(WorkspaceGitGrant {
             workspace: Some(workspace),
             commit: source.commit,
@@ -771,6 +713,59 @@ impl workspace_git_access_server::WorkspaceGitAccess for ApiTransfers {
 }
 
 impl ApiTransfers {
+    /// The push credential for a landing whose lease the calling Worker Host holds. Renewing
+    /// the lease at the state owner, as the host, is the authoritative check, and names the
+    /// landing's Workspace and delivered commit.
+    async fn mint_push(
+        &self,
+        request: Request<MintWorkspaceGitAccessRequest>,
+    ) -> Result<Response<WorkspaceGitGrant>, Status> {
+        let (metadata, extensions, input) = request.into_parts();
+        let lease = WorkspaceLandingLease {
+            landing_id: input.landing_id,
+            lease_token: input.landing_lease_token,
+        };
+        let renewed = self
+            .api
+            .forward_host(
+                Request::from_parts(metadata, extensions, lease),
+                true,
+                |channel, request| async {
+                    host_landings_client::HostLandingsClient::new(channel)
+                        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                        .renew(request)
+                        .await
+                },
+            )
+            .await?
+            .into_inner();
+        let (Some(landing), Some(workspace)) = (renewed.landing, renewed.workspace) else {
+            return Err(Status::failed_precondition(
+                "the landing has no remote Workspace to push to",
+            ));
+        };
+        let commit = landing
+            .delivery
+            .map(|delivery| delivery.head_commit)
+            .ok_or_else(|| Status::failed_precondition("the landing has no delivery"))?;
+        let (credential, expires_at_ms) =
+            timeout(Duration::from_secs(30), self.git()?.grant(&workspace, true))
+                .await
+                .map_err(|_| Status::deadline_exceeded("Workspace Credential lookup timed out"))?
+                .map_err(|error| {
+                    Status::failed_precondition(format!(
+                        "the Workspace's remote cannot be pushed from a Worker Host: {error:#}"
+                    ))
+                })?;
+        Ok(Response::new(WorkspaceGitGrant {
+            workspace: Some(workspace),
+            commit,
+            credential,
+            expires_at_ms,
+        }))
+    }
+
     pub fn workspace_git_access_service(
         &self,
     ) -> workspace_git_access_server::WorkspaceGitAccessServer<Self> {

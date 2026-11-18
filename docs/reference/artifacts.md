@@ -344,9 +344,9 @@ neither copy is reachable: the producing Worker Host is not connected, or the co
 artifact peer for it. A Volume copy outlives the producing Worker Host, for the hosts and people
 who use the Volume.
 
-Git delivery writes a delivery's bundle and the repository made from it into its private
-`--git-delivery-directory` while it lands them on a remote Workspace; a Control Plane that stopped
-during one removes what it left when it starts again.
+A Worker Host lands its deliveries on a remote Workspace from scratch in the `git-delivery`
+directory of its state directory, which it removes when each landing ends and, after a crash, when
+it starts again.
 
 ### Direct transfer between Worker Hosts
 

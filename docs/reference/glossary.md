@@ -148,7 +148,7 @@ whole system rather than another first-class resource.
   SuperTag rejects reports from a host that lost the lease. See
   [Leases and unknown outcomes](scheduling-and-recovery.md#leases-and-unknown-outcomes).
 - <a id="git-delivery"></a>**git delivery** — the part of the Control Plane that talks to remote Workspaces' git servers: it
-  reads each Session's source and pushes verified changes, fast-forward only. See
+  reads each Session's source and opens review pull requests. Worker Hosts push the changes. See
   [Landing](resource-model.md#landing).
-- <a id="landing"></a>**Landing** — where git delivery put one Session's changes: its `supertag/session/...` branch, or a
+- <a id="landing"></a>**Landing** — where a Worker Host put one Session's changes: its `supertag/session/...` branch, or a
   merge into the Workspace's target branch. See [Landing](resource-model.md#landing).

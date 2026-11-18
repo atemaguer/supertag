@@ -192,9 +192,178 @@ class WorkspaceLandings:
             _registered_method=True)
 
 
+class HostLandingsStub:
+    """The Worker Host holding a delivery lands it: it pushes the Session's branch, and in merge mode
+    merges it into the target, from its own copy of the delivered commit, with credentials the
+    Control Plane mints for the one push. A host claims only landings of deliveries it holds.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Claim = channel.unary_unary(
+                '/supertag.runtime.v2.HostLandings/Claim',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ClaimWorkspaceLandingRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ClaimWorkspaceLandingResponse.FromString,
+                _registered_method=True)
+        self.Renew = channel.unary_unary(
+                '/supertag.runtime.v2.HostLandings/Renew',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLandingLease.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ClaimWorkspaceLandingResponse.FromString,
+                _registered_method=True)
+        self.Record = channel.unary_unary(
+                '/supertag.runtime.v2.HostLandings/Record',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.RecordWorkspaceLandingRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLanding.FromString,
+                _registered_method=True)
+
+
+class HostLandingsServicer:
+    """The Worker Host holding a delivery lands it: it pushes the Session's branch, and in merge mode
+    merges it into the target, from its own copy of the delivered commit, with credentials the
+    Control Plane mints for the one push. A host claims only landings of deliveries it holds.
+    """
+
+    def Claim(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Renew(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Record(self, request, context):
+        """In review mode, a host records the pushed branch as Landed without a pull request; the
+        Control Plane's git delivery then opens or updates the pull request.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HostLandingsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Claim': grpc.unary_unary_rpc_method_handler(
+                    servicer.Claim,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ClaimWorkspaceLandingRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ClaimWorkspaceLandingResponse.SerializeToString,
+            ),
+            'Renew': grpc.unary_unary_rpc_method_handler(
+                    servicer.Renew,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLandingLease.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ClaimWorkspaceLandingResponse.SerializeToString,
+            ),
+            'Record': grpc.unary_unary_rpc_method_handler(
+                    servicer.Record,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.RecordWorkspaceLandingRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLanding.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HostLandings', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HostLandings', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HostLandings:
+    """The Worker Host holding a delivery lands it: it pushes the Session's branch, and in merge mode
+    merges it into the target, from its own copy of the delivered commit, with credentials the
+    Control Plane mints for the one push. A host claims only landings of deliveries it holds.
+    """
+
+    @staticmethod
+    def Claim(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HostLandings/Claim',
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ClaimWorkspaceLandingRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ClaimWorkspaceLandingResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Renew(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HostLandings/Renew',
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLandingLease.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ClaimWorkspaceLandingResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Record(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HostLandings/Record',
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.RecordWorkspaceLandingRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLanding.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class GitDeliveryStub:
-    """Internal to the Control Plane: git delivery pins each Session's source and lands verified
-    commits. A claim names what to push; git delivery holds the credentials.
+    """Internal to the Control Plane: git delivery pins each Session's source, and opens or updates
+    the pull request of a review landing whose branch a Worker Host pushed. It claims only those.
     """
 
     def __init__(self, channel):
@@ -231,8 +400,8 @@ class GitDeliveryStub:
 
 
 class GitDeliveryServicer:
-    """Internal to the Control Plane: git delivery pins each Session's source and lands verified
-    commits. A claim names what to push; git delivery holds the credentials.
+    """Internal to the Control Plane: git delivery pins each Session's source, and opens or updates
+    the pull request of a review landing whose branch a Worker Host pushed. It claims only those.
     """
 
     def ListPendingSources(self, request, context):
@@ -302,8 +471,8 @@ def add_GitDeliveryServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class GitDelivery:
-    """Internal to the Control Plane: git delivery pins each Session's source and lands verified
-    commits. A claim names what to push; git delivery holds the credentials.
+    """Internal to the Control Plane: git delivery pins each Session's source, and opens or updates
+    the pull request of a review landing whose branch a Worker Host pushed. It claims only those.
     """
 
     @staticmethod

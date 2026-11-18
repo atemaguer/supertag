@@ -133,6 +133,8 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("Inbox", "DecideApproval", OC),
     // Execution.
     ("WorkerHost", "*", HOST),
+    // Landings of deliveries the calling Worker Host holds.
+    ("HostLandings", "*", HOST),
     // A restarted host reclaiming an Attempt it proved stopped, and the limits its adapter
     // confirmed: only the Worker Host that holds the Attempt.
     ("WorkerHost", "ReclaimAttempt", HOST),
@@ -158,7 +160,6 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("VolumeObjects", "*", HOST),
     ("Transfers", "*", HOST),
     ("WorkspaceGitAccess", "*", HOST),
-    ("Transfers", "DownloadWorkspaceArtifact", OC),
     // A Worker Host serving the artifact and Workspace bytes it holds to the Control Plane's
     // relay: only the host the relay asked.
     ("HostRelay", "Await", HOST),
@@ -313,10 +314,7 @@ mod tests {
             ["operator"]
         );
         assert_eq!(roles("WorkerHost/GetCheckpoint"), ["host"]);
-        assert_eq!(
-            roles("Transfers/DownloadWorkspaceArtifact"),
-            ["operator", "client"]
-        );
+        assert_eq!(roles("HostLandings/Claim"), ["host"]);
         assert_eq!(roles("HostRelay/Await"), ["host"]);
         assert_eq!(roles("HostRelay/Deliver"), ["host"]);
         assert_eq!(roles("AttemptArtifacts/CommitCapture"), ["host"]);
@@ -351,7 +349,6 @@ mod tests {
             "NetworkLogs/List",
             "OperatorAccess/CreateOperatorToken",
             "Conversations/FollowConversation",
-            "Transfers/DownloadWorkspaceArtifact",
         ] {
             assert!(forwards(path), "{path}");
         }

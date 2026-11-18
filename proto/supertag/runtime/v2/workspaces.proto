@@ -50,18 +50,18 @@ message WorkspaceCredentialNames {
 }
 
 // Where a Session's changes land.
+// Every delivered Task updates the Session's branch `supertag/session/ID` on the remote; `land`
+// adds a merge or a review.
 message WorkspaceLand {
+  reserved 1;
   oneof mode {
-    // Each delivered Task updates the Session's branch `supertag/session/ID` on the remote.
-    WorkspaceLandBranch branch = 1;
     // A Session's finished work is merged into `target`, which is pushed.
     WorkspaceLandMerge merge = 2;
-    // Each delivered Task updates the Session's branch, and a draft pull request from it
-    // against `base` is opened or updated. Needs a forge.
+    // A draft pull request from the Session's branch against `base` is opened or updated for
+    // each delivered Task. Needs a forge.
     WorkspaceLandReview review = 3;
   }
 }
-message WorkspaceLandBranch {}
 message WorkspaceLandMerge { string target = 1; }
 message WorkspaceLandReview { string base = 1; }
 

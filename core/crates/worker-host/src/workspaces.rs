@@ -35,6 +35,9 @@ pub struct WorkspaceMapping {
     pub source: WorkspaceSource,
     /// Shell command run in each new Task checkout on its base commit.
     pub setup: Option<String>,
+    /// A local Workspace whose Session branches `supertag/session/<id>` this host writes into its
+    /// repository as each Task delivers; `false` delivers patches only.
+    pub session_branches: bool,
 }
 
 impl WorkspaceMapping {
@@ -588,6 +591,60 @@ impl Workspaces {
             .await
     }
 
+    /// Writes the Session's branch for `pending`'s delivery into its local Workspace's own
+    /// repository, as `supertag up` once imported it: only the delivered commit, which moves the
+    /// branch forward only. `None` when the Workspace takes no Session branches.
+    pub async fn write_session_branch(
+        &self,
+        pending: &PendingWorkspace,
+        tag_id: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Option<supertag_workspaces::session_branch::Imported>> {
+        let Some(mapping) = self
+            .mapping(&pending.workspace_id)
+            .filter(|mapping| mapping.session_branches)
+        else {
+            return Ok(None);
+        };
+        let (WorkspaceSource::Local(repository), delivery) = (&mapping.source, &pending.delivery)
+        else {
+            return Ok(None);
+        };
+        if delivery.head_commit == delivery.base_commit {
+            return Ok(None);
+        }
+        let session = supertag_workspaces::session_branch::SessionDelivery {
+            branch: supertag_protocol::session_branch(tag_id, &delivery.session_id),
+            delivery_id: delivery.delivery_id.clone(),
+            base_commit: delivery.base_commit.clone(),
+            start_commit: delivery.start_commit.clone(),
+            head_commit: delivery.head_commit.clone(),
+            bundle_sha256: delivery.bundle_sha256.clone(),
+            bundle_byte_length: fs::metadata(&delivery.bundle_path)?.len(),
+        };
+        use supertag_workspaces::session_branch::import;
+        match import(repository, &session, &delivery.bundle_path, false, cancel).await {
+            // The repository lacks the delivery's start commit: import the complete history.
+            Err(error) if error.is::<supertag_workspaces::MissingPrerequisite>() => {
+                let state = self.state_directory(&pending.workspace_id, &delivery.base_commit)?;
+                let bytes = supertag_workspaces::complete_delivery_bundle(
+                    &state,
+                    &delivery.head_commit,
+                    &delivery.delivery_id,
+                    cancel,
+                )
+                .await?;
+                let mut file = NamedTempFile::new_in(self.directory.canonicalize()?)?;
+                file.write_all(&bytes)?;
+                file.as_file().sync_all()?;
+                import(repository, &session, file.path(), true, cancel)
+                    .await
+                    .map(Some)
+            }
+            result => result.map(Some),
+        }
+    }
+
     pub fn verify(&self, pending: &PendingWorkspace) -> Result<WorkspaceDeliveryReference> {
         let delivery = &pending.delivery;
         self.open(&pending.workspace_id, &delivery.base_commit)?
@@ -734,6 +791,7 @@ impl Transfers {
                 attempt: Some(attempt.inspect()),
                 merge,
                 permission: WorkspaceGitPermission::Read as i32,
+                ..Default::default()
             },
             token,
         )
@@ -1003,6 +1061,7 @@ mod tests {
                 workspace_id: "project".into(),
                 source: WorkspaceSource::Local(source),
                 setup: None,
+                session_branches: false,
             }],
         )?;
         let live = CancellationToken::new();
@@ -1067,6 +1126,7 @@ mod tests {
             workspace_id: "project".into(),
             source: WorkspaceSource::Local(source.clone()),
             setup: None,
+            session_branches: false,
         };
         let workspaces = Workspaces::new(&state, vec![mapping.clone()])?;
         assert_eq!(workspaces.ids(), ["project"]);

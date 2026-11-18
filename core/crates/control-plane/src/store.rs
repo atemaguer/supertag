@@ -103,7 +103,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 108;
+        const SCHEMA_VERSION: i64 = 109;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -308,6 +308,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0106_volume_garbage.sql"),
                 include_str!("../migrations/sqlite/0107_task_file_locations.sql"),
                 include_str!("../migrations/sqlite/0108_native_memory_volume_heads.sql"),
+                include_str!("../migrations/sqlite/0109_host_landings.sql"),
             ]
         } else {
             [
@@ -421,6 +422,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0106_volume_garbage.sql"),
                 include_str!("../migrations/postgresql/0107_task_file_locations.sql"),
                 include_str!("../migrations/postgresql/0108_native_memory_volume_heads.sql"),
+                include_str!("../migrations/postgresql/0109_host_landings.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

@@ -291,16 +291,15 @@ github=GITHUB_TOKEN` and reads the value from `SUPERTAG_NETWORK_CREDENTIAL_GITHU
 
 Each Task Attempt runs in its own checkout of the repository, pinned to an exact commit. `setup`
 runs in each new checkout before the harness starts, on the host and outside any harness sandbox,
-with a 10-minute limit. `land` says where a Session's changes go. `supertag up` lands them only
-for a host of the file's own Control Plane; on a host of a shared Control Plane, import a delivery
-with `supertag fetch ID`.
+with a 10-minute limit. `land` says where a Session's changes go. The host writes each Session branch into the repository
+itself; `supertag up` runs `push` and `merge` only for a host of the file's own Control Plane.
 
 | `land` | What `supertag up` does |
 | --- | --- |
-| `local` (default) | Imports each delivered Task into the repository as the branch `supertag/session/HASH` |
-| `patch` | Leaves the repository alone; `supertag fetch` imports a delivery when you want it |
-| `{ push: REMOTE }` | Imports, then pushes each Session branch to `REMOTE`, one of the repository's git remotes |
-| `{ merge: BRANCH }` | Imports, then merges a Session into the local branch `BRANCH` once its work is reported done |
+| `local` (default) | The host writes each delivered Task into the repository as the branch `supertag/session/HASH` |
+| `patch` | Leaves the repository alone (the host's `--workspace-patch`) |
+| `{ push: REMOTE }` | As `local`, then pushes each Session branch to `REMOTE`, one of the repository's git remotes |
+| `{ merge: BRANCH }` | As `local`, then merges a Session into the local branch `BRANCH` once its work is reported done |
 | `{ merge: BRANCH, push: REMOTE }` | Merges as above, then pushes the Session branch and `BRANCH` to `REMOTE` |
 
 It uses the machine's own git configuration and credentials. Branches move only forward: nothing is
