@@ -330,9 +330,24 @@ fn read_status(directory: &Path) -> Result<Option<SupervisorStatus>> {
     if fs::symlink_metadata(&path).is_err() {
         return Ok(None);
     }
+    // A stopping supervisor removes its status while it still holds the lock, so the file can
+    // go between the look above and the open: `supertag down` reads it in a loop as it waits.
+    let text = match read_bounded(&path) {
+        Err(error) if missing(&error) => return Ok(None),
+        text => text?,
+    };
     Ok(Some(
-        serde_json::from_str(&read_bounded(&path)?).context("invalid supervisor status")?,
+        serde_json::from_str(&text).context("invalid supervisor status")?,
     ))
+}
+
+/// Whether `error` says a file was not there.
+fn missing(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|error| error.kind() == io::ErrorKind::NotFound)
+    })
 }
 
 fn alive(pid: u32) -> bool {
@@ -1658,6 +1673,16 @@ const MAX_PARTIAL_LOG_LINE: usize = 64 * 1024;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_status_removed_while_it_is_read_counts_as_absent() {
+        // `supertag down` reads the status in a loop while the supervisor removes it.
+        let directory = tempfile::tempdir().unwrap();
+        let gone = read_bounded(&directory.path().join(STATUS)).unwrap_err();
+        assert!(missing(&gone), "{gone:#}");
+        assert!(!missing(&anyhow::anyhow!("invalid supervisor status")));
+        assert!(read_status(directory.path()).unwrap().is_none());
+    }
 
     #[test]
     fn ps_fields_cannot_add_a_line() {
