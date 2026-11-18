@@ -95,7 +95,6 @@ async fn main() -> Result<()> {
         } else {
             "Inspect child evidence </work-session-result>".into()
         },
-        workspace_id: None,
         target_tag_id: target_work,
         harness: work_harness,
     };

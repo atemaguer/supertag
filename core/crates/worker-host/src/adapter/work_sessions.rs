@@ -95,7 +95,6 @@ impl HarnessWorkSessions for Bridge {
             operation_id: input.operation_id,
             title: self.redact(&input.title),
             instruction: self.redact(&input.instruction),
-            workspace_id: input.workspace_id,
             target_tag_id: input.target_tag_id,
             harness: input.harness,
         };

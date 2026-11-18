@@ -337,12 +337,15 @@ async fn contract(url: &str) {
         .await
         .unwrap();
     let attempt = run(&store, &owner_host, &ordinary.task_id, OWNER_HARNESS, None).await;
-    assert!(matches!(
-        store
-            .start_work_session(&owner_host, &delegate(&attempt, "builder"))
-            .await,
-        Err(StoreError::PermissionDenied)
-    ));
+    match store
+        .start_work_session(&owner_host, &delegate(&attempt, "builder"))
+        .await
+    {
+        Err(StoreError::FailedPrecondition(reason)) => {
+            assert!(reason.contains("only an Objective's own turn"), "{reason}")
+        }
+        other => panic!("{other:?}"),
+    }
     store
         .finish_task(&owner_host, &finish(&attempt))
         .await
@@ -387,12 +390,18 @@ async fn contract(url: &str) {
         None,
     )
     .await;
-    assert!(matches!(
-        store
-            .start_work_session(&owner_host, &delegate(&owner, "outsider"))
-            .await,
-        Err(StoreError::PermissionDenied)
-    ));
+    match store
+        .start_work_session(&owner_host, &delegate(&owner, "outsider"))
+        .await
+    {
+        Err(StoreError::FailedPrecondition(reason)) => {
+            assert!(
+                reason.contains("is not on this Objective's Team"),
+                "{reason}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
     let request = delegate(&owner, "builder");
     assert!(matches!(
         store.start_work_session(&owner_host, &request).await,
@@ -519,12 +528,18 @@ async fn contract(url: &str) {
     };
 
     let team = change_members(&store, &team, &["owner"], "remove-builder").await;
-    assert!(matches!(
-        store
-            .continue_work_session(&owner_host, &continuation)
-            .await,
-        Err(StoreError::PermissionDenied)
-    ));
+    match store
+        .continue_work_session(&owner_host, &continuation)
+        .await
+    {
+        Err(StoreError::FailedPrecondition(reason)) => {
+            assert!(
+                reason.contains("is not on this Objective's Team"),
+                "{reason}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
     assert_eq!(
         store
             .start_work_session(&owner_host, &request)

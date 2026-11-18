@@ -127,7 +127,12 @@ async fn insert_child_in(
     if target == parent.tag_id {
         return insert_task_from_snapshot(tx, order, parent, session_id, prompt).await;
     }
-    let objective = objective_id.ok_or(StoreError::PermissionDenied)?;
+    let objective = objective_id.ok_or_else(|| {
+        StoreError::FailedPrecondition(format!(
+            "only an Objective's own turn may start a Work Session on another Tag; omit tag to start it on {}",
+            parent.tag_id
+        ))
+    })?;
     let team: Option<String> =
         sqlx::query_scalar("SELECT team_id FROM supertag_v2_objectives WHERE objective_id=$1")
             .bind(objective)
@@ -144,7 +149,9 @@ async fn insert_child_in(
     .fetch_optional(&mut **tx)
     .await?;
     if member.is_none() {
-        return Err(StoreError::PermissionDenied);
+        return Err(StoreError::FailedPrecondition(format!(
+            "Tag {target} is not on this Objective's Team, so it can't take this work"
+        )));
     }
     let host: Option<String> = sqlx::query_scalar(
         "SELECT h.host_id FROM supertag_v2_hosts h
@@ -579,24 +586,6 @@ impl Store {
             .workspace
             .as_ref()
             .map(|spec| spec.workspace_id.as_str());
-        if let Some(requested) = &input.workspace_id {
-            name("Workspace ID", requested)?;
-        }
-        // A Work Session always works in its parent Task's Workspace; a request may only repeat it.
-        if let Some(requested) = input
-            .workspace_id
-            .as_deref()
-            .filter(|requested| Some(*requested) != workspace)
-        {
-            return Err(StoreError::FailedPrecondition(match workspace {
-                Some(accepted) => format!(
-                    "Workspace {requested} is not this Task's Workspace {accepted}; a Work Session works in {accepted}, so name no Workspace"
-                ),
-                None => format!(
-                    "Workspace {requested} is not available: this Task has no Workspace, so name none"
-                ),
-            }));
-        }
         // A start that names no harness keeps the digest it had before starts could name one, so a
         // retry of an operation recorded then still matches.
         let content = match &input.harness {

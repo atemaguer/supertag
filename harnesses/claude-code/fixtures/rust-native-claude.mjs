@@ -526,7 +526,6 @@ async function workSessionTools() {
   const input = {
     title: "  Investigate   release  ",
     instruction: ` Inspect the pinned checkout ${process.env.ANTHROPIC_API_KEY} `,
-    tag: "actor",
     harness: "claude-code",
   };
   const metadata = { mcp_server: { name: "supertag", source: "sdk" } };

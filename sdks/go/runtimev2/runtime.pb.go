@@ -5585,7 +5585,6 @@ type StartWorkSessionRequest struct {
 	OperationId string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	Title       string                 `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
 	Instruction string                 `protobuf:"bytes,4,opt,name=instruction,proto3" json:"instruction,omitempty"`
-	WorkspaceId *string                `protobuf:"bytes,5,opt,name=workspace_id,json=workspaceId,proto3,oneof" json:"workspace_id,omitempty"`
 	TargetTagId *string                `protobuf:"bytes,6,opt,name=target_tag_id,json=targetTagId,proto3,oneof" json:"target_tag_id,omitempty"`
 	// A built-in harness for the Work Session, such as `claude-code`: by default, the target Tag's.
 	// The Work Session keeps it for its whole life.
@@ -5648,13 +5647,6 @@ func (x *StartWorkSessionRequest) GetTitle() string {
 func (x *StartWorkSessionRequest) GetInstruction() string {
 	if x != nil {
 		return x.Instruction
-	}
-	return ""
-}
-
-func (x *StartWorkSessionRequest) GetWorkspaceId() string {
-	if x != nil && x.WorkspaceId != nil {
-		return *x.WorkspaceId
 	}
 	return ""
 }
@@ -11003,7 +10995,6 @@ type HarnessStartWorkSessionRequest struct {
 	OperationId   string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
 	Instruction   string                 `protobuf:"bytes,3,opt,name=instruction,proto3" json:"instruction,omitempty"`
-	WorkspaceId   *string                `protobuf:"bytes,4,opt,name=workspace_id,json=workspaceId,proto3,oneof" json:"workspace_id,omitempty"`
 	TargetTagId   *string                `protobuf:"bytes,5,opt,name=target_tag_id,json=targetTagId,proto3,oneof" json:"target_tag_id,omitempty"`
 	Harness       *string                `protobuf:"bytes,6,opt,name=harness,proto3,oneof" json:"harness,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -11057,13 +11048,6 @@ func (x *HarnessStartWorkSessionRequest) GetTitle() string {
 func (x *HarnessStartWorkSessionRequest) GetInstruction() string {
 	if x != nil {
 		return x.Instruction
-	}
-	return ""
-}
-
-func (x *HarnessStartWorkSessionRequest) GetWorkspaceId() string {
-	if x != nil && x.WorkspaceId != nil {
-		return *x.WorkspaceId
 	}
 	return ""
 }
@@ -26598,19 +26582,17 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x0fpublished_at_ms\x18\x06 \x01(\x03H\x00R\rpublishedAtMs\x88\x01\x01\x12)\n" +
 	"\x0eanswer_task_id\x18\a \x01(\tH\x01R\fanswerTaskId\x88\x01\x01B\x12\n" +
 	"\x10_published_at_msB\x11\n" +
-	"\x0f_answer_task_id\"\xd9\x02\n" +
+	"\x0f_answer_task_id\"\xb4\x02\n" +
 	"\x17StartWorkSessionRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x14\n" +
 	"\x05title\x18\x03 \x01(\tR\x05title\x12 \n" +
-	"\vinstruction\x18\x04 \x01(\tR\vinstruction\x12&\n" +
-	"\fworkspace_id\x18\x05 \x01(\tH\x00R\vworkspaceId\x88\x01\x01\x12'\n" +
-	"\rtarget_tag_id\x18\x06 \x01(\tH\x01R\vtargetTagId\x88\x01\x01\x12\x1d\n" +
-	"\aharness\x18\a \x01(\tH\x02R\aharness\x88\x01\x01B\x0f\n" +
-	"\r_workspace_idB\x10\n" +
+	"\vinstruction\x18\x04 \x01(\tR\vinstruction\x12'\n" +
+	"\rtarget_tag_id\x18\x06 \x01(\tH\x00R\vtargetTagId\x88\x01\x01\x12\x1d\n" +
+	"\aharness\x18\a \x01(\tH\x01R\aharness\x88\x01\x01B\x10\n" +
 	"\x0e_target_tag_idB\n" +
 	"\n" +
-	"\b_harness\"}\n" +
+	"\b_harnessJ\x04\b\x05\x10\x06R\fworkspace_id\"}\n" +
 	"\x15GetWorkSessionRequest\x12&\n" +
 	"\x0fwork_session_id\x18\x01 \x01(\tR\rworkSessionId\x12)\n" +
 	"\x0ereport_task_id\x18\x02 \x01(\tH\x00R\freportTaskId\x88\x01\x01B\x11\n" +
@@ -27026,18 +27008,16 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\amessage\x18\x03 \x01(\tR\amessage\"]\n" +
 	"$HarnessAskWorkSessionQuestionRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"\x9a\x02\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"\xf5\x01\n" +
 	"\x1eHarnessStartWorkSessionRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
-	"\vinstruction\x18\x03 \x01(\tR\vinstruction\x12&\n" +
-	"\fworkspace_id\x18\x04 \x01(\tH\x00R\vworkspaceId\x88\x01\x01\x12'\n" +
-	"\rtarget_tag_id\x18\x05 \x01(\tH\x01R\vtargetTagId\x88\x01\x01\x12\x1d\n" +
-	"\aharness\x18\x06 \x01(\tH\x02R\aharness\x88\x01\x01B\x0f\n" +
-	"\r_workspace_idB\x10\n" +
+	"\vinstruction\x18\x03 \x01(\tR\vinstruction\x12'\n" +
+	"\rtarget_tag_id\x18\x05 \x01(\tH\x00R\vtargetTagId\x88\x01\x01\x12\x1d\n" +
+	"\aharness\x18\x06 \x01(\tH\x01R\aharness\x88\x01\x01B\x10\n" +
 	"\x0e_target_tag_idB\n" +
 	"\n" +
-	"\b_harness\"\xc4\x01\n" +
+	"\b_harnessJ\x04\b\x04\x10\x05R\fworkspace_id\"\xc4\x01\n" +
 	"\x1cHarnessSendTagMessageRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12(\n" +
 	"\x10recipient_tag_id\x18\x02 \x01(\tR\x0erecipientTagId\x12\x12\n" +

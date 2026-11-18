@@ -1009,7 +1009,6 @@ async fn exercise(database_url: &str) -> Result<()> {
             operation_id: "describe-session".into(),
             title: "Check the docs".into(),
             instruction: "Read the docs and report.".into(),
-            workspace_id: None,
             target_tag_id: None,
             harness: None,
         },

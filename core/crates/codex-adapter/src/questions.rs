@@ -342,6 +342,14 @@ impl Bridge {
                 .expect("tool specifications")
                 .push(coordination::close_spec());
         }
+        if !self.capabilities.may_ask_objective_question {
+            for tool in specs[0]["tools"]
+                .as_array_mut()
+                .expect("tool specifications")
+            {
+                without_delegation(tool);
+            }
+        }
         // The Tag's open Work Sessions, so the model knows its room before it starts one.
         if self.capabilities.may_start_work_session && self.capabilities.max_work_sessions > 0 {
             for tool in specs[0]["tools"]
@@ -682,6 +690,22 @@ impl Bridge {
     }
 }
 
+/// `start_session` for a turn that doesn't own an Objective: only an Objective's own turn may
+/// delegate to another Tag, so others aren't offered `tag`.
+fn without_delegation(tool: &mut Value) {
+    if tool["name"] != "start_session" {
+        return;
+    }
+    if let Some(properties) = tool["inputSchema"]["properties"].as_object_mut() {
+        properties.remove("tag");
+    }
+    let description = tool["description"].as_str().unwrap_or_default().replace(
+        " To delegate to an eligible Tag on this Objective's Team, name it in tag; omit tag to run the work on this Tag.",
+        "",
+    );
+    tool["description"] = json!(description);
+}
+
 pub(crate) fn tool_specs(inventory: Inventory) -> Value {
     let (description, max) = if inventory == Inventory::ChildQuestions {
         (
@@ -843,6 +867,39 @@ pub(crate) fn validate_report(params: &Value) -> Result<ObjectiveReport> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_objective_turn_is_offered_tag_and_every_turn_hears_its_harness() {
+        let start = || {
+            tool_specs(Inventory::WorkSessions)[0]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == "start_session")
+                .cloned()
+                .unwrap()
+        };
+        let owner = start();
+        assert!(owner["inputSchema"]["properties"].get("tag").is_some());
+        assert!(
+            owner["inputSchema"]["properties"]
+                .get("workspace")
+                .is_none()
+        );
+        let mut conversation = start();
+        without_delegation(&mut conversation);
+        assert!(
+            conversation["inputSchema"]["properties"]
+                .get("tag")
+                .is_none()
+        );
+        let description = conversation["description"].as_str().unwrap();
+        assert!(!description.contains("tag"), "{description}");
+        assert!(
+            description.contains("Omit harness to keep codex"),
+            "{description}"
+        );
+    }
 
     fn call(arguments: Value) -> Value {
         json!({"namespace":"supertag","tool":"report_objective","arguments":arguments})

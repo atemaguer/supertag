@@ -228,8 +228,10 @@ within the pre-1.0 compatibility policy described in
   whole state directory after `supertag down`, as before. An existing database switches the first
   time the Control Plane opens it.
 - `start_session` no longer takes `workspace`: a work Session always works in the Workspace of the
-  Task that started it, including on another Tag. A start that still names another Workspace is
-  refused naming the Task's own, instead of "Workspace differs from the accepted parent Task".
+  Task that started it, including on another Tag. Only an Objective's own turn is offered `tag`,
+  and the tool says which harness a work Session keeps when it names none. A refusal the model can
+  act on, such as a Tag outside the Objective's Team, a turn that can't delegate, or the Work
+  Session limit, comes back with its reason instead of "could not be confirmed".
 - Worker Hosts deliver Workspace changes themselves. Every delivered Task's Session branch
   `supertag/session/...` is pushed to a remote Workspace's server by the host that ran it, with a
   short-lived credential the Control Plane mints for that one push; `land` adds only a merge or a

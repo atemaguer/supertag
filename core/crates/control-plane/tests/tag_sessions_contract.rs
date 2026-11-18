@@ -473,7 +473,6 @@ async fn contract(url: &str) {
                 operation_id: "work".into(),
                 title: "Compare notes".into(),
                 instruction: "Compare the release notes".into(),
-                workspace_id: None,
                 target_tag_id: None,
                 harness: None,
             },

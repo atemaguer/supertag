@@ -241,16 +241,14 @@ async fn contract(url: String) {
     let first_attempt = claim_start(&store, &host, &first.task_id).await;
     let mut wrong = request(&first_attempt, "wrong-target");
     wrong.target_tag_id = Some("recipient".into());
-    assert!(matches!(
-        store.start_work_session(&host, &wrong).await,
-        Err(StoreError::PermissionDenied)
-    ));
-    wrong = request(&first_attempt, "wrong-workspace");
-    wrong.workspace_id = Some("unbound".into());
-    assert!(matches!(
-        store.start_work_session(&host, &wrong).await,
-        Err(StoreError::FailedPrecondition(_))
-    ));
+    // A conversation's turn can't delegate, and the refusal says so, so a model can recover.
+    match store.start_work_session(&host, &wrong).await {
+        Err(StoreError::FailedPrecondition(reason)) => assert!(
+            reason.contains("only an Objective's own turn") && reason.contains("omit tag"),
+            "{reason}"
+        ),
+        other => panic!("{other:?}"),
+    }
     assert!(matches!(
         store
             .start_work_session(&other, &request(&first_attempt, "wrong-host"))

@@ -592,7 +592,9 @@ message StartWorkSessionRequest {
   string operation_id = 2;
   string title = 3;
   string instruction = 4;
-  optional string workspace_id = 5;
+  // A Work Session always works in its parent Task's Workspace.
+  reserved 5;
+  reserved "workspace_id";
   optional string target_tag_id = 6;
   // A built-in harness for the Work Session, such as `claude-code`: by default, the target Tag's.
   // The Work Session keeps it for its whole life.
@@ -1469,7 +1471,9 @@ message HarnessStartWorkSessionRequest {
   string operation_id = 1;
   string title = 2;
   string instruction = 3;
-  optional string workspace_id = 4;
+  // A Work Session always works in its parent Task's Workspace.
+  reserved 4;
+  reserved "workspace_id";
   optional string target_tag_id = 5;
   optional string harness = 6;
 }

@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import {
   AttemptMemoryResponseSchema,
   AttemptScheduleResponseSchema,
+  HarnessKind,
   HarnessRunSchema,
   harnessClient,
   ListTagSessionsResponseSchema,
@@ -648,9 +649,17 @@ it("shows the open Work Sessions, passes the limit's refusal to the model, and c
   const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
   const refusal =
     'This Tag has 8 of 8 Work Sessions open, its limit, so no new one started.\n- work/1 "Draft" (reported, this conversation)';
-  const start = vi.spyOn(bridge.workSessions, "start").mockImplementation(async () => {
-    throw new ConnectError(refusal, Code.FailedPrecondition);
-  });
+  const start = vi
+    .spyOn(bridge.workSessions, "start")
+    .mockImplementationOnce(async () => {
+      throw new ConnectError(refusal, Code.FailedPrecondition);
+    })
+    .mockImplementationOnce(async () => {
+      throw new ConnectError("unknown Work Session harness", Code.InvalidArgument);
+    })
+    .mockImplementationOnce(async () => {
+      throw new ConnectError("execution ownership does not match", Code.PermissionDenied);
+    });
   const close = vi
     .spyOn(bridge.workSessions, "close")
     .mockImplementation(async ({ workSessionId }) =>
@@ -664,7 +673,7 @@ it("shows the open Work Sessions, passes the limit's refusal to the model, and c
   const service = await startCoordination(
     bridge,
     create(HarnessRunSchema, {
-      task: { taskId, tagId, sessionId: "conversation/1" },
+      task: { taskId, tagId, sessionId: "conversation/1", harnessKind: HarnessKind.OPENCODE },
       attemptId,
       coordination: { mayStartWorkSession: true, openWorkSessions: 8, maxWorkSessions: 8 },
     }),
@@ -689,13 +698,42 @@ it("shows the open Work Sessions, passes the limit's refusal to the model, and c
     );
     const listed = (await client.listTools()).tools.find(({ name }) => name === "start_session");
     expect(listed?.description).toContain("This Tag has 8 of 8 Work Sessions open");
+    // A conversation's turn can't delegate, so it isn't offered tag, nor ever a Workspace; it
+    // hears which harness it keeps.
+    expect(Object.keys(listed?.inputSchema.properties ?? {}).sort()).toEqual([
+      "harness",
+      "instruction",
+      "title",
+    ]);
+    expect(listed?.description).toContain("Omit harness to keep opencode");
+    expect(listed?.description).not.toContain("tag");
+    const text = (result: Awaited<ReturnType<typeof client.callTool>>) =>
+      (result.content as { text: string }[])[0]?.text;
     const refused = await client.callTool({
       name: "start_session",
       arguments: { title: "More", instruction: "Do more" },
     });
     expect(refused).toMatchObject({ isError: true });
-    expect((refused.content as { text: string }[])[0]?.text).toBe(refusal);
-    expect(start).toHaveBeenCalledOnce();
+    expect(text(refused)).toBe(refusal);
+    // Every refusal the model can act on comes back with its reason; an ownership failure
+    // stays opaque.
+    const invalid = await client.callTool({
+      name: "start_session",
+      arguments: { title: "More", instruction: "Do more" },
+    });
+    expect(text(invalid)).toBe("unknown Work Session harness");
+    const opaque = await client.callTool({
+      name: "start_session",
+      arguments: { title: "More", instruction: "Do more" },
+    });
+    expect(text(opaque)).toBe("The Work Session start could not be confirmed.");
+    expect(
+      await client.callTool({
+        name: "start_session",
+        arguments: { title: "More", instruction: "Do more", tag: "builder" },
+      }),
+    ).toMatchObject({ isError: true });
+    expect(start).toHaveBeenCalledTimes(3);
     const sessionId = "work/1ed2c531-904a-419e-b7af-332f10537ba2";
     const closed = await client.callTool({ name: "close_session", arguments: { sessionId } });
     expect(closed.isError).toBeFalsy();

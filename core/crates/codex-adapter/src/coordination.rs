@@ -498,7 +498,7 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
     if inventory >= Inventory::WorkSessions {
         tools.push(json!({
             "type":"function", "name":"start_session",
-            "description":"Start a Work Session with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session works in this Task's Workspace and reports to this conversation. An Objective owner can specify an eligible Tag on its Team. You may name another harness for the Work Session; it keeps that harness, and you talk to it only through its report and continue_session.",
+            "description":"Start a Work Session with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session works in this Task's Workspace and reports to this conversation. To delegate to an eligible Tag on this Objective's Team, name it in tag; omit tag to run the work on this Tag. Omit harness to keep codex; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session.",
             "inputSchema":{"type":"object","properties":{
                 "title":{"type":"string","minLength":1,"maxLength":120},
                 "instruction":{"type":"string","minLength":1,"maxLength":8000},
@@ -577,7 +577,6 @@ impl Client {
             operation_id,
             title: title.clone(),
             instruction: start.instruction,
-            workspace_id: None,
             target_tag_id: start.tag,
             harness: start.harness,
         };
@@ -1191,17 +1190,25 @@ async fn confirm_reason<T>(
             {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            Err(status) if status.code() == Code::FailedPrecondition => {
+            // A refusal the model can act on comes back with its reason; an ownership or
+            // credential refusal stays opaque.
+            Err(status)
+                if matches!(
+                    status.code(),
+                    Code::FailedPrecondition
+                        | Code::InvalidArgument
+                        | Code::NotFound
+                        | Code::AlreadyExists
+                        | Code::ResourceExhausted
+                        | Code::OutOfRange
+                ) =>
+            {
                 return Ok(Err(Some(status.message().to_owned())));
             }
             Err(status)
                 if matches!(
                     status.code(),
-                    Code::PermissionDenied
-                        | Code::Unauthenticated
-                        | Code::AlreadyExists
-                        | Code::InvalidArgument
-                        | Code::NotFound
+                    Code::PermissionDenied | Code::Unauthenticated
                 ) =>
             {
                 return Ok(Err(None));

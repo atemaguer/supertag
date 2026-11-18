@@ -19,6 +19,7 @@ import { ObjectiveSessionStatus } from "./gen/supertag/runtime/v2/objective_over
 import {
   ApprovalState,
   type HarnessCompleteRequest,
+  HarnessKind,
   type HarnessRun,
   ObjectiveSignal,
   ObjectiveStatus,
@@ -30,6 +31,24 @@ import {
 import type { AttemptScheduleResponse, Schedule } from "./gen/supertag/runtime/v2/schedules_pb.js";
 import { TagSessionAudience } from "./gen/supertag/runtime/v2/tag_sessions_pb.js";
 import { redact } from "./redact.js";
+
+/** Refusals a model can act on, which a coordination tool returns with their reason. Others,
+ * such as an ownership or transport failure, stay opaque. */
+const ACTIONABLE = [
+  Code.FailedPrecondition,
+  Code.InvalidArgument,
+  Code.NotFound,
+  Code.AlreadyExists,
+  Code.ResourceExhausted,
+  Code.OutOfRange,
+];
+
+/** The harness name a Work Session's `harness` argument uses, such as `claude-code`. */
+function harnessName(kind: HarnessKind | undefined): string | undefined {
+  const name =
+    kind === undefined || kind === HarnessKind.UNSPECIFIED ? undefined : HarnessKind[kind];
+  return name?.toLowerCase().replaceAll("_", "-");
+}
 
 export const COORDINATION_SERVER = "supertag";
 export const WORKSTREAM_POST_ACTION = "workstream:post";
@@ -763,15 +782,18 @@ export function registerCoordinationTools(
     const capacity = run.coordination.maxWorkSessions
       ? ` This Tag has ${run.coordination.openWorkSessions} of ${run.coordination.maxWorkSessions} Work Sessions open; close one that is done with close_session.`
       : "";
+    // Only an Objective's own turn may delegate to another Tag, so only it is offered `tag`.
+    const delegates = run.coordination?.mayAskObjectiveQuestion ?? run.mayAskObjectiveQuestion;
+    const current = harnessName(run.task?.harnessKind);
     tools.push("start_session");
     server.registerTool(
       "start_session",
       {
-        description: `Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction; it works in this Task's Workspace. When this Task owns an Objective, you can delegate to an eligible Tag on its Team. You may name another harness for the Work Session; it keeps that harness, and you talk to it only through its report and continue_session.${capacity}`,
-        inputSchema: schemas.start_session,
+        description: `Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction; it works in this Task's Workspace.${delegates ? " To delegate to an eligible Tag on this Objective's Team, name it in tag; omit tag to run the work on this Tag." : ""} Omit harness to keep ${current ?? "this Tag's harness"}; name another only when the work needs it. A Work Session keeps its harness, and you talk to it only through its report and continue_session.${capacity}`,
+        inputSchema: delegates ? schemas.start_session : schemas.start_session.omit({ tag: true }),
         _meta: meta,
       },
-      ({ title, instruction, tag, harness }, tool) =>
+      ({ title, instruction, tag, harness }: z.infer<typeof schemas.start_session>, tool) =>
         write(async () => {
           if (asked || pending.size || scope.hasPendingExternalApprovals?.())
             return response(
@@ -817,10 +839,10 @@ export function registerCoordinationTools(
               );
             }
           } catch (error) {
-            // At its limit, the Tag reads which Work Sessions are open and continues or closes
-            // one; the turn goes on.
+            // A refusal the model can act on, such as the Tag's Work Session limit or a Tag
+            // outside the Objective's Team, comes back with its reason; the turn goes on.
             const failure = ConnectError.from(error);
-            if (failure.code === Code.FailedPrecondition)
+            if (ACTIONABLE.includes(failure.code))
               return response(safeText(failure.rawMessage), true);
           }
           return response("The Work Session start could not be confirmed.", true);
@@ -908,7 +930,7 @@ export function registerCoordinationTools(
           } catch (error) {
             // Reopening a closed Work Session at the limit lists the open ones.
             const failure = ConnectError.from(error);
-            if (failure.code === Code.FailedPrecondition)
+            if (ACTIONABLE.includes(failure.code))
               return response(safeText(failure.rawMessage), true);
           }
           return response("The Work Session continuation could not be confirmed.", true);

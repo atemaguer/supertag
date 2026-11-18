@@ -208,7 +208,7 @@ An Objective's turn starts work with `start_session {title, instruction, tag?, h
   Host and a member of the Objective's Team; otherwise the call is refused and says why.
 - A delegated Session runs with the target Tag's Roles, narrowed to the Objective's runtime
   actions and to the starting turn's authorization.
-- Only an Objective's own turn may pass `tag`. A conversation's or an inbox turn's
+- Only an Objective's own turn is offered `tag`. A conversation's or an inbox turn's
   `start_session` runs on its own Tag.
 - The work Session works in the Workspace of the Task that started it, including when it runs on
   another Tag. Edits go to that Session's one branch, and each later Task of the Session commits
@@ -497,7 +497,7 @@ when the Tag makes the call; see [Approval requests](#approval-requests). The [a
 
 | Tool | Input | Effect |
 | --- | --- | --- |
-| `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `tag` and `harness` | Starts a work Session; see [Work and delegation](#work-and-delegation) |
+| `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `harness`, and `tag` on an Objective's own turn | Starts a work Session; see [Work and delegation](#work-and-delegation) |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts that work Session's next Task |
 | `close_session` | `sessionId` | Closes one of the Tag's work Sessions, so it stops counting toward the [limit](#open-work-sessions) |
 | `ask` | `text` (up to 16,000 characters; 2,000 in a work Session) | Ends the Task waiting on a person's answer |
