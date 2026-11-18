@@ -831,7 +831,7 @@ fn log_tail(state: &Path, service: &str, start: u64) -> String {
     let mut tail = lines[lines.len().saturating_sub(20)..].join("\n");
     if text.contains("Address already in use") {
         tail.push_str(
-            "\nAnother program is using a port SuperTag listens on. Stop it, or change the port under services.control-plane.ports in supertag.yaml and run supertag up again.",
+            "\nAnother program is using a port SuperTag listens on. Stop it and run supertag up again. (Before the first supertag up, you can instead choose another port under services.control-plane.ports in supertag.yaml.)",
         );
     }
     tail
