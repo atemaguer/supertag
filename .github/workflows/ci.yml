@@ -10,6 +10,20 @@ permissions:
   contents: read
 
 jobs:
+  internal-notes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # contributing/ holds internal notes and is gitignored; a force-added file must never ship.
+      - name: No internal notes are tracked
+        run: |
+          tracked="$(git ls-files -- contributing)"
+          if [ -n "$tracked" ]; then
+            echo "These files under contributing/ are tracked; untrack them:" >&2
+            echo "$tracked" >&2
+            exit 1
+          fi
   rust-harness-interop:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
