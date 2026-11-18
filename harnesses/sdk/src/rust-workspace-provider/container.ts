@@ -22,6 +22,9 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import {
   listSandboxOutputFiles,
@@ -569,8 +572,8 @@ export function containerSandboxProvider(
   }
 
   /**
-   * Builds an image once per Dockerfile and platform, with no build context: `-` reads the
-   * Dockerfile from standard input. A build an earlier run left is reused by its tag.
+   * Builds an image once per Dockerfile and platform, from a context holding the Dockerfile
+   * alone, so no host file can enter the image. A build an earlier run left is reused by its tag.
    */
   function build(dockerfile: string, signal: AbortSignal): Promise<Built> {
     const tag = `supertag-workspace:${createHash("sha256")
@@ -583,13 +586,37 @@ export function containerSandboxProvider(
         const existing = await imageId(tag);
         if (existing !== undefined) return { tag, id: existing };
         options.log?.(`Building the Workspace image ${tag} for ${platform}; this runs once.`);
-        const built = await cli(runtime, ["build", "--platform", platform, "-t", tag, "-"], {
-          input: new TextEncoder().encode(dockerfile),
-          signal,
-          timeoutMs: BUILD_TIMEOUT_MS,
-        });
+        // The context is a new directory holding only the Dockerfile: every runtime reads that,
+        // where Podman and Apple's `container` do not read a Dockerfile from standard input.
+        const context = await mkdtemp(join(tmpdir(), "supertag-image-"));
+        let built: Ran;
+        try {
+          await writeFile(join(context, "Dockerfile"), dockerfile, { mode: 0o600 });
+          built = await cli(
+            runtime,
+            [
+              "build",
+              "--platform",
+              platform,
+              "-t",
+              tag,
+              "-f",
+              join(context, "Dockerfile"),
+              context,
+            ],
+            { signal, timeoutMs: BUILD_TIMEOUT_MS },
+          );
+        } finally {
+          await rm(context, { recursive: true, force: true });
+        }
         const id = built.exitCode === 0 ? await imageId(tag) : undefined;
-        if (id === undefined) throw new Error("The Workspace image could not be built");
+        if (id === undefined) {
+          // The operator's own image definition: its build output may name what went wrong.
+          options.log?.(
+            `The Workspace image ${tag} could not be built: ${built.stderr.trim().slice(-2_000)}`,
+          );
+          throw new Error("The Workspace image could not be built");
+        }
         options.log?.(`Built the Workspace image ${tag} as ${id}.`);
         return { tag, id };
       })();
