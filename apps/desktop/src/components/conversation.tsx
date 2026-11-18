@@ -245,6 +245,12 @@ export function ConversationPane({
     }
   }
 
+  // Opening a Tag's conversation puts the cursor in its composer, as a messaging app does.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when another Tag opens.
+  useEffect(() => {
+    composer.current?.focus({ preventScroll: true });
+  }, [tagId]);
+
   // The message leaves the composer at once and shows as sending until the Gateway has it.
   function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
