@@ -7,7 +7,7 @@
 
 **Persistent, proactive, multiplayer AI actors for engineering work.**
 
-Open source and self-hosted, on the coding agents your team already uses.
+Open source and self-hosted, on the coding agents you already use.
 
 **Give them jobs, not tasks.** A Tag is a persistent AI actor with its own identity, permissions, and work history. Give it a job, the responsibilities it keeps up and the outcomes it delivers, and it keeps the work going, acts without being asked, and works alongside your teammates and their Tags, on Claude Code, Codex, Cursor, or OpenCode and on machines you choose.
 
