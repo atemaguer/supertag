@@ -157,6 +157,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | `spec.lead` | `true` or `false` | Whether this is the Control Plane's **lead Tag**. Omitted keeps the current value. |
 | `spec.maxWorkSessions` | 1 to 64 | How many work Sessions the Tag may have open at once, 8 by default. Omitted keeps the current value. See [Open work Sessions](coordination.md#open-work-sessions). |
 | `spec.memory` | `true` or `false` | Whether the Tag keeps [Memory](coordination.md#memory): notes it writes and a daily review. Omitted keeps the current value; a new Tag keeps memory. |
+| `spec.volume` | A Volume ID, or `""` | Keeps the Tag's work beyond any one Worker Host: the capturing host writes a copy of every capture there, and a capture fails when its copy cannot be written. A file Volume places the Tag only on hosts that map it. Omitted keeps the current value. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume). |
 | `spec.startRate` | `starts` (1 to 10,000) and `per` (`1m` to `7d`) | At most how many of the Tag's Task Attempts start per period; `starts: 0` removes it. Omitted keeps the current value; a new Tag has none. See [Start rates](scheduling-and-recovery.md#start-rates). |
 
 Where a Tag answers is a separate `SurfaceLocation` resource, a Tag **location**. It names the
@@ -552,8 +553,9 @@ on the Worker Host. Volumes are Experimental. There are two kinds, registered se
 
 - A **Workspace Volume** holds data Tasks receive as copies; see
   [Workspace Volume copies](#workspace-volume-copies).
-- An **artifact Volume** holds artifact copies and captured Task files; see
-  [Artifacts](artifacts.md).
+- An **artifact Volume** keeps a Tag's work beyond any one Worker Host, such as a copy of every
+  capture, when a Tag names it as its `volume`; see
+  [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume).
 
 ```sh
 supertag workspace-volume put datasets --source s3://acme-data/datasets/v3 --credential acme-data
@@ -589,15 +591,19 @@ spec:
   source: s3://acme-artifacts/archive
 ```
 
-`supertag get volume` lists artifact Volumes, and `supertag volume copy` copies one artifact file
-in. For what a Volume keeps when a
-sandbox or host dies, see [Persistence](../concepts/persistence.md).
+`supertag get volume` lists artifact Volumes. The Control Plane maps none of them and carries no
+Volume byte: Worker Hosts write and read them, a file Volume through each host's own `--volume`
+mapping, an S3 Volume through URLs the Control Plane presigns with the credential `supertag volume
+credential set` stores in its vault. For what a Volume keeps when a sandbox or host dies, see
+[Persistence](../concepts/persistence.md).
 
 ### Volume security
 
-A host's artifact Volume stores captured Task files governed by artifact grants. Workspace Volume
-copies cannot expose that Volume, a parent location, or any location beneath it. Placement checks advertised artifact Volumes and Volumes with recorded copies;
-dispatch checks them again. The Worker Host also checks its own current artifact Volume.
+An artifact Volume stores captured Task files governed by artifact grants. Workspace Volume copies
+cannot expose an artifact Volume, a parent location, or any location beneath it. Placement checks
+registered artifact Volumes; dispatch checks them again. Every host that maps a file Volume, and
+anyone holding an S3 Volume's credential, can read every Tag's data on it: use one Volume per
+trust domain.
 
 SuperTag compares locations, not source URL strings. File paths compare by component, and on
 macOS also case- and Unicode-insensitively, so `/srv/Data` and `/srv/data` are one location.
@@ -776,7 +782,7 @@ never erases history, and it refuses a resource that is still in use:
 | --- | --- |
 | Team | An Objective that names it is still open |
 | Permission Set, Context Set | A Role lists it, or a surface location activates it |
-| Volume | Reserved or verified artifact copies depend on it |
+| Volume | Reserved or verified artifact copies depend on it, or a Tag names it as its `volume` |
 | Workspace | Given an out-of-date `--expected-revision` |
 | A surface location | Given an out-of-date `--expected-revision` |
 

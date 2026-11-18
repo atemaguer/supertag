@@ -316,12 +316,13 @@ not as instructions that change the consuming Task's allowed actions.
 
 Artifact metadata and artifact bytes have different homes. The Control Plane database is the
 authoritative catalog for identity, provenance, allowed access, and which Worker Host holds each
-capture. The Control Plane stores no artifact bytes. The bytes live in up to two places:
+capture. The Control Plane stores no artifact bytes, and no Volume byte passes through it. The
+bytes live in up to two places:
 
 | Copy | Where | Made by |
 | --- | --- | --- |
 | Worker Host copy | The producing Worker Host's artifact storage: `STATE_DIRECTORY/artifacts`, or the directory named by `--artifact-directory` | Every capture |
-| Volume copy | An artifact Volume the Control Plane maps with `--artifact-volume` or `--artifact-s3-volumes` | An operator, with `supertag volume copy` |
+| Volume copy | The Tag's Volume, under `tags/<SHA-256 of the Tag ID>/attempts/…` | Every capture of a Tag that names a Volume, written by the capturing Worker Host itself |
 
 A Worker Host's artifact storage is an owner-only directory, one file per Task Attempt and
 SHA-256 digest. For a Worker Host that `supertag up` starts, it is an `artifacts` directory in
@@ -330,28 +331,23 @@ directory on persistent storage, and back it up with the database.
 
 ### How readers reach the bytes
 
-Every Worker Host keeps one relay stream open to the Control Plane while it runs. When an
-authorized reader asks for a file, the Control Plane looks for a verified Volume copy it maps
-first. Otherwise it asks the holding Worker Host for the exact bytes over that stream, then relays
-them to the reader without writing them to disk. It checks their size and digest against the
-catalog, and fails the read when they differ.
+Every Worker Host keeps one relay stream open to the Control Plane while it runs. When a consuming
+Task's Worker Host asks for a file, the Control Plane asks the holding Worker Host for the exact
+bytes over that stream, then relays them without writing them to disk. It checks their size and
+digest against the catalog, and fails the read when they differ.
 
-Two reads write the bytes down briefly on the Control Plane. Reading an S3 Volume copy stages the
-file in an unnamed temporary file, which disappears when the read ends or the process stops. Git
-delivery writes a delivery's bundle and the repository made from it into its private
+Git delivery writes a delivery's bundle and the repository made from it into its private
 `--git-delivery-directory` while it lands them on a remote Workspace; a Control Plane that stopped
 during one removes what it left when it starts again.
 
-When the holding Worker Host is not connected and no Volume copy is readable, the read fails. The
-error names that Worker Host, for example:
+When the holding Worker Host is not connected, the read fails, and the error names it, for example:
 
 ```text
 no reachable copy of these artifact bytes: their Worker Host is not connected to the Control Plane
-and no verified Volume copy is readable (held by Worker Host laptop)
+(held by Worker Host laptop)
 ```
 
-Restart that Worker Host, or copy its artifacts to a Volume before it goes away. A Volume copy
-stays readable while the holding Worker Host is offline.
+Restart that Worker Host. A Volume copy outlives it, for the hosts and people who use the Volume.
 
 ### Direct transfer between Worker Hosts
 
@@ -364,35 +360,62 @@ consumer, and expiry. It then downloads the file from the producer and checks it
 digest. The bytes skip the Control Plane's relay entirely. When the peer cannot serve the file,
 the consumer falls back to the relay. A retried transfer never reruns the producer.
 
-### Volume copies
+### Keep every capture on a Volume
 
-An artifact Volume holds copies that stay readable while the producing Worker Host is offline or
-gone. The Control Plane owner consents to each Volume's storage when starting it:
-`--artifact-volume VOLUME_ID=/absolute/private/directory` for a directory, or a JSON file passed to
-`--artifact-s3-volumes` that maps each `s3://` Volume to its endpoint, region, and the environment
-variables that hold its keys. Register the Volume, then copy one file:
+A Tag that names a Volume keeps a copy of every capture of its Tasks there, explicit captures and
+automatic Task outputs alike. Give one to the Tags that run on ephemeral Worker Hosts, such as CI
+runners or Modal, so their artifacts outlive the host:
 
 ```sh
 supertag volume put archive --source s3://acme-artifacts/archive --operation-id put-archive
-supertag volume copy archive ARTIFACT_ID --path research/findings.md --expected-revision 1 \
-  --operation-id copy-findings
-supertag get volume-copy
+supertag tag put builder --instructions "..." --volume archive
 ```
 
-`volume copy` relays the bytes from the holding Worker Host into the Volume, so that Worker Host
-must be connected. Repeating a copy that already reached the Volume succeeds while it is offline.
-A consuming Task's Worker Host reads a recorded Volume copy whether or not the holding Worker Host
-is connected. `supertag delete volume` is refused while reserved or verified copies depend on the
-Volume.
+A Tag manifest sets it with `spec.volume`; `--volume none` or `""` removes it.
+
+The capturing Worker Host writes each file to the Volume itself, so the bytes never pass through
+the Control Plane:
+
+- **S3 Volume.** On the Control Plane's machine, store the credential it signs with:
+
+  ```sh
+  SUPERTAG_VOLUME_ACCESS_KEY_ID=... SUPERTAG_VOLUME_SECRET_ACCESS_KEY=... \
+    supertag volume credential set archive --endpoint https://s3.us-east-1.amazonaws.com \
+    --region us-east-1
+  ```
+
+  It goes to the Control Plane's credential vault, and Worker Hosts never receive it. It needs
+  only `PutObject`, `GetObject`, and `HeadObject` on the Volume's prefix. When a host reserves a
+  capture, the Control Plane presigns one PUT per file, valid for 15 minutes; the file's length and
+  SHA-256 checksum are signed headers and the PUT cannot overwrite, so the store refuses any other
+  bytes. When the capture commits, the Control Plane checks each object with a HEAD request: its
+  length and the SHA-256 checksum the store recorded must match. A store that keeps no SHA-256
+  checksum cannot pass, so use one that supports S3's `x-amz-checksum-sha256`.
+- **File Volume.** Only Worker Hosts map a file Volume: give each host that may write it
+  `--volume VOLUME_ID=/absolute/private/directory`, or `volumes` on its host service in
+  `supertag.yaml`. Such a host carries the label `volume:VOLUME_ID`, and a Tag that names a file
+  Volume runs only on hosts with it; `supertag placement explain` names the label when none is
+  connected. The host writes the file, reopens it, and checks its length and SHA-256; the Control
+  Plane records that check as the host's attestation (`host_attested`), since it never opens the
+  directory.
+
+The capture succeeds only once every copy is checked. A capture whose copy cannot be written or
+checked fails, for example when the Control Plane holds no credential for an S3 Volume, and the
+Task sees the error. The capture's copies are listed by `supertag get volume-copies` to anyone
+who may read the capture. Hosts and people that mount the Volume read them; the Control Plane
+serves no Volume file.
+
+The Volume must be registered before a Tag names it, and it cannot be retargeted or deleted while
+a Tag names it. Captures made before a Tag named the Volume keep only their Worker Host copy.
 
 ### Client downloads
 
 Clients can't download artifact files: the CLI, the terminal UI, the desktop app, and the SDKs
-list artifacts and their files, but the bytes stay on the Worker Host that captured them or in a
-Volume copy. The Control Plane doesn't pass files to clients.
+list artifacts and their files, but the bytes stay on the Worker Host that captured them or on
+the Tag's Volume. The Control Plane doesn't pass files to clients.
 
 Automatic replication and repair are not implemented. Back up every Worker Host's artifact
-storage, artifact Volumes, and the catalog database together.
+storage, the Volumes, and the catalog database together.
 
 ### Limits
 

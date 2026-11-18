@@ -240,7 +240,10 @@ Worker Host that produced it. The Control Plane stores none of them. It relays t
 from the host while the host is connected. By default the host keeps them in
 `STATE_DIRECTORY/artifacts`; `--artifact-directory` names another owner-only directory. Keep that
 directory on persistent storage: losing it loses those artifacts and deliveries, unless an
-artifact also has a Volume copy.
+artifact also has a Volume copy. On a host that does not last, such as a CI runner or one whose Tasks run
+in Modal or E2B sandboxes, give its Tags a `volume`: every capture then gets a Volume copy, written
+by the host, before it succeeds. A file Volume also needs `--volume VOLUME_ID=DIRECTORY` on each
+host that writes it. See [Keep every capture on a Volume](../reference/artifacts.md#keep-every-capture-on-a-volume).
 
 A host can also serve its artifacts to Tasks on other hosts directly, without the Control Plane's
 relay. Give it a transfer listener:
@@ -269,8 +272,8 @@ A draining host finishes its running Task Attempts and claims no new ones. Revok
 its credential at once. `supertag down` drains this machine's hosts before stopping them.
 
 A host keeps the only copy of the artifacts and Workspace deliveries it produced, so once it is
-revoked they cannot be read, fetched, or continued from. Copy the artifacts you need to a Volume
-with `supertag volume copy` first; Workspace deliveries have no Volume copy. When you remove a
+revoked they cannot be read, fetched, or continued from, unless their Tag keeps its captures on a
+Volume; Workspace deliveries have no Volume copy. When you remove a
 host service from `supertag.yaml` and revoke it, `supertag up` removes its state but keeps its
 `artifacts` directory, and names it on every run until you delete it.
 

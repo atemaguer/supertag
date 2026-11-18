@@ -14,6 +14,16 @@ within the pre-1.0 compatibility policy described in
 - Claude Code's own memory is on and lasts per Tag: the Worker Host keeps a shared store and one
   per person, copies it into each turn and merges it back afterwards, file by file. `supertag
   describe tag` shows each host's copy; `supertag delete memory --native TAG` resets it.
+- A Tag keeps its work on a Volume beyond any one Worker Host (`supertag tag put --volume NAME`,
+  `spec.volume`): the capturing host writes a copy of every capture there itself, and the
+  Control Plane never maps a Volume or carries a Volume byte. For an S3 Volume the Control Plane
+  presigns one PUT per file that binds its length and SHA-256 checksum, and checks each object
+  with a HEAD before the capture succeeds; its signing credential lives in the Control Plane's
+  credential vault (`supertag volume credential set`). A file Volume is written only by hosts
+  that map it (`supertag worker-host --volume ID=DIR`, `volumes:` on a host service), which carry
+  the label `volume:ID` that placement requires, and the writing host's check stands as its
+  attestation. A capture whose copy cannot be written fails. A new host call,
+  `VolumeObjects.Grant`, authorizes one object on the Tag's Volume, such as a Session checkpoint.
 - Unprompted messages are paced: at most one reaches a person's conversation or a surface thread
   in 30 minutes. Later ones wait and go out together when the window ends, or at once when the
   person writes; in a surface thread they post as one reply listing the earlier updates.
@@ -268,6 +278,11 @@ within the pre-1.0 compatibility policy described in
 ### Removed
 
 - `--checkpoint-directory` and the Control Plane's checkpoint storage.
+- `supertag volume copy` and the Control Plane's `--artifact-volume` and `--artifact-s3-volumes`:
+  the Control Plane maps no Volume. Starting it with either flag is refused with the replacement:
+  `--volume ID=DIR` on the Worker Hosts that write a file Volume, and `supertag volume credential
+  set` for an S3 Volume. Existing operator-made copies are dropped from the catalog; their objects
+  stay under `attempts/` in the Volume, which you can delete.
 - Client file downloads: `supertag artifact download`, `supertag task download`, `supertag volume
   download`, the desktop app's Task result files, the terminal UI's Task files view, and the SDK
   Gateway clients' download methods. The Control Plane no longer passes files to clients;

@@ -156,6 +156,7 @@ echoing secret values.
 | `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
 | `network-credentials` | none | Credential name to `{ secret, environment }`, added to a Task's requests by the egress proxy. Codex only. See [Network credentials](#network-credentials) |
+| `volumes` | none | Volume ID to an absolute, owner-only directory: a file Volume this host maps and writes directly, such as the copies of a Tag's captures. Tags on that Volume run only on hosts that map it. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume) |
 | `concurrency` | `1` | Task Attempts each harness runs at once, from 1 through 16. See [Host concurrency](#host-concurrency) |
 | `attempt-timeout-seconds` | `3600` | Seconds a Task Attempt may run, from 1 through 86400 |
 | `depends_on` | none | The file's `control-plane` service, to bring up first. Only a host of the local Control Plane takes it |
@@ -189,7 +190,7 @@ host that lists it. OpenCode requires a `provider/model`.
 
 The host reports these labels when it connects, in addition to its automatic ones. `supertag up`
 checks them before starting any service: each must be a valid label, outside the reserved
-`mcp:`, `mcp-login:`, `volume-credential:`, and `artifact-volume:` prefixes, and a host takes at
+`mcp:`, `mcp-login:`, `volume-credential:`, and `volume:` prefixes, and a host takes at
 most 64. Changing a host's labels restarts that host on the next `supertag up`.
 
 ### Host concurrency

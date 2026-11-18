@@ -2006,27 +2006,15 @@ Usage: supertag control-plane [OPTIONS]
 
 Options:
       --listen <LISTEN>
-          Address this service listens on. Port 0 picks a free port
-          
-          [default: 127.0.0.1:0]
-
+          Address this service listens on. Port 0 picks a free port [default: 127.0.0.1:0]
       --websocket-listen <WEBSOCKET_LISTEN>
           Also accept gRPC carried in a WebSocket on this address, for hosts that only forward HTTP/1.1. This service's TLS runs inside the tunnel. Its bound address is reported after the gRPC address
-
-      --artifact-volume <ARTIFACT_VOLUMES>
-          Explicit storage-host consent: VOLUME_ID=/absolute/private/directory
-
-      --artifact-s3-volumes <ARTIFACT_S3_VOLUMES>
-          Path to a JSON array of mappings with volumeId, source (s3://bucket/prefix), endpoint (HTTPS origin), region, and credentialEnvPrefix. The Control Plane reads <prefix>_ACCESS_KEY_ID, <prefix>_SECRET_ACCESS_KEY, and optionally <prefix>_SESSION_TOKEN. For Cloudflare R2, use region auto.
-
       --git-delivery-directory <GIT_DELIVERY_DIRECTORY>
           Private directory of git delivery, which reads remote Workspaces and lands Session changes on them: scratch for each operation and remembered SSH host keys. Default: git-delivery in SUPERTAG_STATE_DIR or ~/.supertag. Workspace Credentials come from the credential vault there (SUPERTAG_CREDENTIAL_VAULT)
-
       --audit-log <stderr|PATH>
           Also write each committed audit entry as one JSON line to `stderr` or to this absolute file path, created owner-only. The database keeps every entry either way
-
   -h, --help
-          Print help (see a summary with '-h')
+          Print help
 ```
 
 ## `supertag gateway`
@@ -2309,6 +2297,9 @@ Options:
 
       --workspace-mount-mappings <WORKSPACE_MOUNT_MAPPINGS>
           Owner-controlled JSON mappings for Workspace Volume copies: each maps a Volume to a destination root, and an S3 Volume's credential name to an endpoint, region, and key variables
+
+      --volume <VOLUME_ID=DIRECTORY>
+          A file Volume this host maps, as VOLUME_ID=/absolute/private/directory. A Tag that keeps its work on it runs only on hosts that map it, and they write there directly
 
       --artifact-transfer-listen <ARTIFACT_TRANSFER_LISTEN>
           Listen for authorized artifact reads from other Worker Hosts
@@ -2646,6 +2637,8 @@ Options:
           Keep memory: notes the Tag writes and a daily review of its work. With false, the Tag keeps no notes and does not review. Omit to keep it as it is; a new Tag keeps memory [possible values: true, false]
       --start-rate <START_RATE>
           At most how many of the Tag's Task Attempts start per period, as STARTS/PERIOD such as 10/1h (periods in m, h, or d, from 1m to 7d), or none to remove it. A Task over it waits; a person's message always starts. Omit to keep it as it is; a new Tag has none
+      --volume <VOLUME>
+          The Volume that keeps the Tag's work beyond any one Worker Host: a copy of every capture, written by the capturing host directly. none removes it. A capture fails when its copy cannot be written. Omit to keep it as it is; a new Tag has none
   -h, --help
           Print help
 ```
@@ -3067,9 +3060,9 @@ Register Volumes and copy immutable artifact files into explicitly mapped storag
 Usage: supertag volume [OPTIONS] <COMMAND>
 
 Commands:
-  put   Register a file or S3-compatible Volume. Existing metadata requires its exact revision
-  copy  Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage
-  help  Print this message or the help of the given subcommand(s)
+  put         Register a file or S3-compatible Volume. Existing metadata requires its exact revision
+  credential  Store or remove an S3 Volume's signing credential in this machine's credential vault. Run it on the machine that runs the Control Plane, or with its vault
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
@@ -3105,28 +3098,65 @@ Options:
           Print help
 ```
 
-## `supertag volume copy`
+## `supertag volume credential`
 
 ```text
-Copy one exact artifact file. The Control Plane must separately consent to this Volume's storage
+Store or remove an S3 Volume's signing credential in this machine's credential vault. Run it on the machine that runs the Control Plane, or with its vault
 
-Usage: supertag volume copy [OPTIONS] --path <PATH> --expected-revision <EXPECTED_REVISION> --operation-id <OPERATION_ID> <VOLUME_ID> <ARTIFACT_ID>
+Usage: supertag volume credential [OPTIONS] <COMMAND>
 
-Arguments:
-  <VOLUME_ID>    
-  <ARTIFACT_ID>  
+Commands:
+  set     Store the credential the Control Plane signs an S3 Volume's object URLs with. The access key comes from SUPERTAG_VOLUME_ACCESS_KEY_ID, the secret from SUPERTAG_VOLUME_SECRET_ACCESS_KEY, and an optional session token from SUPERTAG_VOLUME_SESSION_TOKEN. Worker Hosts never receive it
+  remove  Remove an S3 Volume's signing credential from this machine's credential vault
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --gateway <URL|NAME>
           Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
-      --path <PATH>
-          File in the artifact to copy
-      --expected-revision <EXPECTED_REVISION>
-          The revision you last read. The change is refused when the resource has changed since
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
-      --operation-id <OPERATION_ID>
-          Idempotency key: a retry with the same key returns the first result instead of acting twice
+  -h, --help
+          Print help
+```
+
+## `supertag volume credential set`
+
+```text
+Store the credential the Control Plane signs an S3 Volume's object URLs with. The access key comes from SUPERTAG_VOLUME_ACCESS_KEY_ID, the secret from SUPERTAG_VOLUME_SECRET_ACCESS_KEY, and an optional session token from SUPERTAG_VOLUME_SESSION_TOKEN. Worker Hosts never receive it
+
+Usage: supertag volume credential set [OPTIONS] --endpoint <ENDPOINT> --region <REGION> <VOLUME_ID>
+
+Arguments:
+  <VOLUME_ID>  
+
+Options:
+      --endpoint <ENDPOINT>
+          The S3-compatible service's HTTPS origin, such as https://s3.us-east-1.amazonaws.com
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --region <REGION>
+          The service's region, such as us-east-1, or auto
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+  -h, --help
+          Print help
+```
+
+## `supertag volume credential remove`
+
+```text
+Remove an S3 Volume's signing credential from this machine's credential vault
+
+Usage: supertag volume credential remove [OPTIONS] <VOLUME_ID>
+
+Arguments:
+  <VOLUME_ID>  
+
+Options:
+      --gateway <URL|NAME>
+          Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --state-directory <STATE_DIRECTORY>
+          Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
   -h, --help
           Print help
 ```

@@ -26,7 +26,7 @@ dies.
 | A cloud Worker Host's state: Task worktrees, undelivered branches, staged outputs, caches | No, unless that state is on a Volume |
 | Artifacts stored on a Worker Host that isn't persistent | No |
 | Artifacts stored on a persistent Worker Host | Yes, while that host's disk lasts |
-| Artifacts on an artifact Volume | Yes, per the Volume's own durability |
+| Artifacts on a Tag's Volume | Yes, per the Volume's own durability |
 | Delivered git branches and pull requests | Yes, in the git remote |
 | The Control Plane's catalog, Tasks, and results | Yes, in its database |
 | Session checkpoints, which let a later Task resume the harness session | Yes, on the Worker Host that wrote them, until dropped; see [Session checkpoints](../reference/control-plane.md#session-checkpoints) |
@@ -73,8 +73,9 @@ publication is the exception: it keeps the delivery in private scratch until it 
 
 So an artifact is readable only while its Worker Host is running and connected, unless it also has
 a Volume copy. For example, a laptop's artifacts are unreachable while the laptop sleeps, and the
-error names the laptop's Worker Host. An operator can copy a file to an artifact Volume, such as a
-bucket prefix; that copy stays readable while the Worker Host is offline and outlives it. For
+error names the laptop's Worker Host. A Tag whose `volume` names a Volume gets a copy of every
+capture there, such as in a bucket prefix, written by the capturing Worker Host itself before the
+capture succeeds; it outlives the host, for the hosts and people that use the Volume. For
 details, see [Run the Control Plane](../operations/control-plane.md#artifact-storage) and
 [Artifacts](../reference/artifacts.md).
 
@@ -93,7 +94,8 @@ identities or an isolation boundary that denies access to supervisor storage for
 A Worker Host that joins with an ephemeral Auth Key (`supertag auth-key create NAME --role host
 --ephemeral`) is removed once it goes offline. Use one for a CI runner or a cloud machine that
 does not come back. Its host record marks it ephemeral. Its Workspace deliveries go with it, and
-so do its artifacts, unless an operator copied them to a Volume first.
+so do its artifacts, unless they have a Volume copy. Give the Tags that run there a `volume` so
+that every capture does.
 
 Downloads check availability, size, and digest at the time of retrieval. Volume durability still
 depends on the storage provider and its retention settings. For the commands, see

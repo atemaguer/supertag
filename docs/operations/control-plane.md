@@ -158,11 +158,13 @@ replica counts only the events it served.
 
 An artifact is saved output from a Task, such as a report or a file. The Control Plane keeps its
 catalog in the database and never stores its files. The Worker Host whose Task captured them keeps
-them, and the Control Plane relays them to readers while that host is connected. A read of an
-offline host's files fails with an error naming the host. For copies that stay readable while it
-is offline, start the Control Plane with `--artifact-volume VOLUME_ID=DIRECTORY` or
-`--artifact-s3-volumes FILE` to map artifact Volumes, and copy files there with
-`supertag volume copy`. Worker Hosts run
+them, and the Control Plane relays them to Worker Hosts while that host is connected. A read of an
+offline host's files fails with an error naming the host. For copies that outlive the host, give a
+Tag a `volume`: the capturing host writes each copy there itself. The Control Plane maps no
+Volume; for an S3 Volume it only signs, with the credential `supertag volume credential set`
+stores in its credential vault on this machine. See
+[Keep every capture on a Volume](../reference/artifacts.md#keep-every-capture-on-a-volume).
+Worker Hosts run
 with `--artifact-transfer-listen` also serve each other directly. Workspace deliveries, the patch
 and bundle behind `supertag fetch`, follow the same rule without Volume copies. See
 [Artifacts](../reference/artifacts.md).
@@ -172,8 +174,8 @@ and bundle behind `supertag fetch`, follow the same rule without Volume copies. 
 Several Control Plane processes can share one PostgreSQL database. Put them behind one TCP load balancer or private DNS name, keep their clocks in
 sync, and run the same release on all of them. Each Worker Host's relay stream reaches one
 replica, so only that replica can relay its artifacts and Workspace deliveries. A read through
-another replica fails with the offline error; Volume copies are readable through every replica
-that maps the Volume. A SQLite database serves one process. See
+another replica fails with the offline error. Every replica signs S3 Volume URLs with the same
+vault credential, so give the replicas one credential vault. A SQLite database serves one process. See
 [Control Plane replicas](../../deploy/native/README.md#control-plane-replicas).
 
 ## Back up
