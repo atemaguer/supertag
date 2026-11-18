@@ -5362,15 +5362,10 @@ class TransfersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
                 _registered_method=True)
-        self.DownloadWorkspace = channel.unary_stream(
-                '/supertag.runtime.v2.Transfers/DownloadWorkspace',
+        self.GetWorkspaceContinuation = channel.unary_unary(
+                '/supertag.runtime.v2.Transfers/GetWorkspaceContinuation',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
-                _registered_method=True)
-        self.DownloadCompleteWorkspace = channel.unary_stream(
-                '/supertag.runtime.v2.Transfers/DownloadCompleteWorkspace',
-                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceContinuation.FromString,
                 _registered_method=True)
         self.DownloadReviewArtifact = channel.unary_stream(
                 '/supertag.runtime.v2.Transfers/DownloadReviewArtifact',
@@ -5395,15 +5390,10 @@ class TransfersServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def DownloadWorkspace(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def DownloadCompleteWorkspace(self, request, context):
-        """The same continuation as a complete bundle the holding Worker Host builds, for a host that
-        lacks the delivery's start commit.
+    def GetWorkspaceContinuation(self, request, context):
+        """The Session's last delivery, which this Attempt continues, and the Worker Host holding it.
+        No bytes: the host reads the commit from its own repository, or from the remote Workspace's
+        Session branch, where the delivering host pushed it.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -5429,15 +5419,10 @@ def add_TransfersServicer_to_server(servicer, server):
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
             ),
-            'DownloadWorkspace': grpc.unary_stream_rpc_method_handler(
-                    servicer.DownloadWorkspace,
+            'GetWorkspaceContinuation': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetWorkspaceContinuation,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
-            ),
-            'DownloadCompleteWorkspace': grpc.unary_stream_rpc_method_handler(
-                    servicer.DownloadCompleteWorkspace,
-                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
-                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceContinuation.SerializeToString,
             ),
             'DownloadReviewArtifact': grpc.unary_stream_rpc_method_handler(
                     servicer.DownloadReviewArtifact,
@@ -5489,7 +5474,7 @@ class Transfers:
             _registered_method=True)
 
     @staticmethod
-    def DownloadWorkspace(request,
+    def GetWorkspaceContinuation(request,
             target,
             options=(),
             channel_credentials=None,
@@ -5499,39 +5484,12 @@ class Transfers:
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_stream(
+        return grpc.experimental.unary_unary(
             request,
             target,
-            '/supertag.runtime.v2.Transfers/DownloadWorkspace',
+            '/supertag.runtime.v2.Transfers/GetWorkspaceContinuation',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def DownloadCompleteWorkspace(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_stream(
-            request,
-            target,
-            '/supertag.runtime.v2.Transfers/DownloadCompleteWorkspace',
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
-            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceContinuation.FromString,
             options,
             channel_credentials,
             insecure,

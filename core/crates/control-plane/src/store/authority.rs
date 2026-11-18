@@ -581,6 +581,13 @@ pub(super) async fn claim_candidate(
             if left_for_warm_host(transaction, now, &task, accepted_order, sticky).await? {
                 continue;
             }
+            // A local Workspace's Session continues only on the host holding its last delivery.
+            if crate::workspaces::local_holder_wait_in(transaction, &task, Some(&scope.host_id))
+                .await?
+                .is_some()
+            {
+                continue;
+            }
             // The host holding the Session's checkpoint resumes it; others leave it for a while.
             if crate::checkpoints::holder_wait_in(transaction, &task, Some(&scope.host_id), now)
                 .await?

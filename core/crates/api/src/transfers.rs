@@ -392,24 +392,15 @@ impl Transfers for ApiTransfers {
         self.commit_workspace_delivery(request).await
     }
 
-    type DownloadWorkspaceStream = Download<WorkspaceDownload>;
-
-    async fn download_workspace(
+    async fn get_workspace_continuation(
         &self,
         request: Request<InspectAttemptRequest>,
-    ) -> Result<Response<Self::DownloadWorkspaceStream>, Status> {
-        self.continuation(request, WorkspaceArtifactKind::Bundle)
-            .await
-    }
-
-    type DownloadCompleteWorkspaceStream = Download<WorkspaceDownload>;
-
-    async fn download_complete_workspace(
-        &self,
-        request: Request<InspectAttemptRequest>,
-    ) -> Result<Response<Self::DownloadCompleteWorkspaceStream>, Status> {
-        self.continuation(request, WorkspaceArtifactKind::CompleteBundle)
-            .await
+    ) -> Result<Response<WorkspaceContinuation>, Status> {
+        let (delivery, holder) = match self.get_workspace_reference(request).await? {
+            Some((delivery, holder)) => (Some(delivery), Some(holder)),
+            None => (None, None),
+        };
+        Ok(Response::new(WorkspaceContinuation { delivery, holder }))
     }
 
     type DownloadReviewArtifactStream = Download<WorkspaceDownload>;
@@ -439,45 +430,6 @@ impl Transfers for ApiTransfers {
             }
         };
         self.workspace_download(reference, holder, WorkspaceArtifactKind::Patch, authorize)
-            .await
-    }
-}
-
-impl ApiTransfers {
-    /// A Session's continuation for the Attempt about to run: the previous delivery's own bundle,
-    /// or a complete bundle of it for a host that lacks its start commit.
-    async fn continuation(
-        &self,
-        request: Request<InspectAttemptRequest>,
-        kind: WorkspaceArtifactKind,
-    ) -> Result<Response<Download<WorkspaceDownload>>, Status> {
-        let attempt = request.get_ref().clone();
-        let metadata = request.metadata().clone();
-        let Some((reference, holder)) = self.get_workspace_reference(request).await? else {
-            return Ok(Response::new(empty_stream()));
-        };
-        let service = self.clone();
-        let expected = reference.clone();
-        let authorize = move || {
-            let service = service.clone();
-            let expected = expected.clone();
-            let mut request = Request::new(attempt.clone());
-            *request.metadata_mut() = metadata.clone();
-            async move {
-                if service
-                    .get_workspace_reference(request)
-                    .await?
-                    .is_some_and(|(current, _)| current == expected)
-                {
-                    Ok(())
-                } else {
-                    Err(Status::permission_denied(
-                        "Session bundle is no longer authorized",
-                    ))
-                }
-            }
-        };
-        self.workspace_download(reference, holder, kind, authorize)
             .await
     }
 }
@@ -566,11 +518,6 @@ impl Source {
 /// A download's response stream: it ends with the producer's error when the transfer fails, so
 /// a reader never mistakes a short stream for a complete one.
 pub(crate) type Download<T> = EndsWithError<ReceiverStream<Result<T, Status>>>;
-
-fn empty_stream<T>() -> Download<T> {
-    let (_, receive) = mpsc::channel(1);
-    ends_with_error(ReceiverStream::new(receive)).0
-}
 
 /// What a download must match: its blob's receipt, or, for a bundle the holder builds on demand,
 /// only a size limit. Git checks such a bundle against the delivered commit.

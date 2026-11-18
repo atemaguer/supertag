@@ -28,8 +28,9 @@ Session's checkpoint; see [Session checkpoints](control-plane.md#session-checkpo
 eligible hosts have no free slot for the Task's harness, it is `capacity`, and the summary names
 each host's state: busy, offline, draining, or a slot kept by an uncertain Task Attempt, with the
 `supertag task resolve-attempt` command that frees it. It is `harness` when no eligible host runs
-the Task's harness. A running Task waiting for the Session's last delivery, held by a Worker Host
-that is not connected, reports `workspace-holder` with that host's name. The desktop app and the terminal UI show this summary under a waiting message.
+the Task's harness. A Task waiting for the Session's last delivery reports `workspace-holder` with
+the name of the Worker Host holding it: a local Workspace's Session continues only on that host,
+and a remote Workspace's waits until that host has pushed the Session's branch. The desktop app and the terminal UI show this summary under a waiting message.
 
 ## Placement by harness and model
 

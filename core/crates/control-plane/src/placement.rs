@@ -684,9 +684,16 @@ impl Store {
         } else {
             None
         };
+        let local_holder = if task.state() == TaskState::Queued {
+            crate::workspaces::local_holder_wait_in(&mut transaction, &task, None).await?
+        } else {
+            None
+        };
         transaction.commit().await?;
         let missing = missing_labels(&required, &carried);
-        let (requirement, summary) = if let Some(holder) = &task.waiting_for_holder {
+        let (requirement, summary) = if let Some(holder) =
+            task.waiting_for_holder.as_ref().or(local_holder.as_ref())
+        {
             (
                 "workspace-holder".to_owned(),
                 supertag_protocol::waiting_for_holder(holder),

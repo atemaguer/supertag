@@ -11,10 +11,9 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use supertag_protocol::{
-    CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES, MAX_WORKSPACE_BLOB_BYTES,
+    MAX_MESSAGE_BYTES, MAX_WORKSPACE_BLOB_BYTES,
     v2::{
-        transfers_client::TransfersClient, workspace_download,
-        workspace_git_access_client::WorkspaceGitAccessClient, *,
+        transfers_client::TransfersClient, workspace_git_access_client::WorkspaceGitAccessClient, *,
     },
     valid_workspace_id, validate_workspace_delivery,
 };
@@ -84,6 +83,41 @@ pub(crate) struct Workspaces {
 /// How long reading one commit of a remote Workspace may take.
 const SOURCE_READ_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// The git-delivery credential a Control Plane grant carries.
+pub(crate) fn granted_credential(
+    credential: Option<workspace_git_grant::Credential>,
+) -> Option<supertag_git_delivery::Credential> {
+    credential.map(|credential| match credential {
+        workspace_git_grant::Credential::Https(https) => {
+            supertag_git_delivery::Credential::HttpsToken {
+                username: https.username,
+                token: https.token,
+            }
+        }
+        workspace_git_grant::Credential::Ssh(ssh) => supertag_git_delivery::Credential::SshKey {
+            private_key: ssh.private_key,
+            known_hosts: (!ssh.known_hosts.is_empty()).then_some(ssh.known_hosts),
+        },
+    })
+}
+
+/// A complete bundle of a Session's last delivery, read on this host.
+enum Continuation {
+    /// From another lane's repository, in a private temporary file, with its SHA-256.
+    Local(NamedTempFile, String),
+    /// From the remote Workspace's Session branch.
+    Remote(supertag_git_delivery::source::FetchedSource),
+}
+
+/// The Attempt cannot read its Session's last delivery yet, and waits for `holder`: it has not
+/// pushed it, or it holds a local Workspace, which continues only there.
+fn waits_for(holder: &str) -> Status {
+    Status::unavailable(format!(
+        "this Attempt {}, Worker Host {holder}",
+        supertag_protocol::WAITS_FOR_HOLDER
+    ))
+}
+
 /// A Worker Host advertises at most this many Workspaces, as the Control Plane accepts.
 const MAX_WORKSPACE_MAPPINGS: usize = 128;
 
@@ -137,6 +171,39 @@ impl Workspaces {
         Ok(self.git.get_or_init(|| git))
     }
 
+    /// Reads a Session's delivered `commit` from its Session branch on the remote, with the
+    /// credential the Control Plane granted. None while the branch does not hold it yet.
+    async fn fetch_session(
+        &self,
+        grant: WorkspaceGitGrant,
+        session_branch: &str,
+        commit: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Option<supertag_git_delivery::source::FetchedSource>> {
+        let workspace = grant
+            .workspace
+            .context("Workspace grant has no Workspace")?;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&self.directory)?;
+        tokio::time::timeout(
+            SOURCE_READ_TIMEOUT,
+            self.git()?.fetch_session(
+                &workspace,
+                session_branch,
+                commit,
+                granted_credential(grant.credential),
+                cancel,
+            ),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("reading the Workspace remote timed out"))?
+        .map_err(|error| {
+            Status::unavailable(format!("Session branch could not be read: {error:#}")).into()
+        })
+    }
+
     /// Reads `commit` of a remote Workspace with the credential the Control Plane granted for it.
     async fn fetch_granted(
         &self,
@@ -146,20 +213,7 @@ impl Workspaces {
         let workspace = grant
             .workspace
             .context("Workspace grant has no Workspace")?;
-        let credential = grant.credential.map(|credential| match credential {
-            workspace_git_grant::Credential::Https(https) => {
-                supertag_git_delivery::Credential::HttpsToken {
-                    username: https.username,
-                    token: https.token,
-                }
-            }
-            workspace_git_grant::Credential::Ssh(ssh) => {
-                supertag_git_delivery::Credential::SshKey {
-                    private_key: ssh.private_key,
-                    known_hosts: (!ssh.known_hosts.is_empty()).then_some(ssh.known_hosts),
-                }
-            }
-        });
+        let credential = granted_credential(grant.credential);
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -312,67 +366,82 @@ impl Workspaces {
             }
         }
         let workspace = self.open(&spec.workspace_id, &spec.base_commit)?;
-        // A continuation this host already holds, such as one it delivered itself, is not
-        // downloaded again: only its receipt is read.
-        let held = async |reference: &WorkspaceDeliveryReference| {
-            reference.workspace_id == spec.workspace_id
-                && reference.base_commit == spec.base_commit
-                && workspace.holds_commit(&reference.head_commit, cancel).await
-        };
+        // The Session's last delivery: this host may hold it already, such as one it delivered
+        // itself; another lane of this host may hold it; or, for a remote Workspace, the Session's
+        // branch on the remote holds it once its holder pushed it. No delivery passes through the
+        // Control Plane.
         let previous = tokio::select! {
-            previous = transfers.download_workspace(attempt, token, held) => previous?,
+            previous = transfers.workspace_continuation(attempt, token) => previous?,
             _ = cancel.cancelled() => return Err(Status::cancelled("workspace preparation cancelled").into()),
         };
         let expected_head = match previous {
             None => Some(spec.base_commit.clone()),
-            Some((reference, None)) => Some(reference.head_commit),
-            Some((reference, Some(payload))) => {
+            Some((reference, holder)) => {
                 ensure!(
                     reference.workspace_id == spec.workspace_id
                         && reference.base_commit == spec.base_commit,
                     "approved continuation belongs to another workspace"
                 );
-                // A configured state path may contain a platform alias such as
-                // /var on macOS. Import validates every directory component,
-                // so use the canonical private parent for this host-owned file.
-                let mut temporary = NamedTempFile::new_in(self.directory.canonicalize()?)?;
-                temporary.write_all(&payload)?;
-                temporary.as_file().sync_all()?;
-                let bundle = reference
-                    .bundle
-                    .clone()
-                    .context("approved continuation has no bundle")?;
-                let imported = workspace
-                    .import_bundle(
-                        temporary.path(),
-                        &bundle.sha256,
-                        &reference.head_commit,
-                        Some(&reference.start_commit),
-                        cancel,
-                    )
-                    .await;
-                match imported {
-                    // The continuation builds on a commit this host never received: take a
-                    // complete bundle of it from the host holding it.
-                    Err(error) if error.is::<supertag_workspaces::MissingPrerequisite>() => {
-                        let complete = tokio::select! {
-                            complete = transfers.download_complete_workspace(attempt, token, &reference) => complete?,
-                            _ = cancel.cancelled() => return Err(Status::cancelled("workspace preparation cancelled").into()),
-                        };
-                        let mut temporary = NamedTempFile::new_in(self.directory.canonicalize()?)?;
-                        temporary.write_all(&complete)?;
-                        temporary.as_file().sync_all()?;
-                        workspace
-                            .import_bundle(
-                                temporary.path(),
-                                &format!("{:x}", Sha256::digest(&complete)),
+                if !workspace.holds_commit(&reference.head_commit, cancel).await {
+                    let bundle = match transfers.held_workspace(&holder.attempt_id) {
+                        // Another lane of this host delivered it: bundle it from that lane's
+                        // repository.
+                        Some(state) => {
+                            let bytes = supertag_workspaces::complete_delivery_bundle(
+                                &state,
                                 &reference.head_commit,
-                                Some(&reference.start_commit),
+                                &reference.delivery_id,
                                 cancel,
                             )
                             .await?;
-                    }
-                    result => result?,
+                            // A configured state path may contain a platform alias such as /var
+                            // on macOS. Import validates every directory component, so use the
+                            // canonical private parent for this host-owned file.
+                            let mut temporary =
+                                NamedTempFile::new_in(self.directory.canonicalize()?)?;
+                            temporary.write_all(&bytes)?;
+                            temporary.as_file().sync_all()?;
+                            let sha256 = format!("{:x}", Sha256::digest(&bytes));
+                            Continuation::Local(temporary, sha256)
+                        }
+                        None if matches!(mapping.source, WorkspaceSource::ControlPlane) => {
+                            let grant = tokio::select! {
+                                result = transfers.grant_source(attempt, token, false) => result?,
+                                _ = cancel.cancelled() => return Err(Status::cancelled("workspace preparation cancelled").into()),
+                            };
+                            let fetched = self
+                                .fetch_session(
+                                    grant,
+                                    &supertag_protocol::session_branch(
+                                        &task.tag_id,
+                                        &task.session_id,
+                                    ),
+                                    &reference.head_commit,
+                                    cancel,
+                                )
+                                .await?
+                                .ok_or_else(|| waits_for(&holder.host_id))?;
+                            Continuation::Remote(fetched)
+                        }
+                        // A local Workspace's Session continues only on the host holding it.
+                        None => return Err(waits_for(&holder.host_id).into()),
+                    };
+                    let (path, sha256) = match &bundle {
+                        Continuation::Local(file, sha256) => (file.path(), sha256.as_str()),
+                        Continuation::Remote(fetched) => (
+                            fetched.bundle.path.as_path(),
+                            fetched.bundle.sha256.as_str(),
+                        ),
+                    };
+                    workspace
+                        .import_bundle(
+                            path,
+                            sha256,
+                            &reference.head_commit,
+                            Some(&reference.start_commit),
+                            cancel,
+                        )
+                        .await?;
                 }
                 Some(reference.head_commit)
             }
@@ -890,31 +959,26 @@ impl Transfers {
 
     /// The Session's approved continuation, if any: its receipt and, unless `held` says this host
     /// already has it, its bundle.
-    async fn download_workspace(
+    /// The Session's last delivery this Attempt continues, and the Worker Host holding it.
+    async fn workspace_continuation(
         &self,
         attempt: &Attempt,
         token: &str,
-        held: impl AsyncFnOnce(&WorkspaceDeliveryReference) -> bool,
-    ) -> Result<Option<(WorkspaceDeliveryReference, Option<Vec<u8>>)>, Status> {
+    ) -> Result<Option<(WorkspaceDeliveryReference, BlobHolder)>, Status> {
         let mut upstream = request(attempt.inspect(), token).map_err(|error| {
             crate::failures::noted(
-                Status::internal("cannot authenticate workspace download"),
+                Status::internal("cannot authenticate the continuation lookup"),
                 &error,
             )
         })?;
-        upstream.set_timeout(Duration::from_secs(120));
-        let mut stream =
+        upstream.set_timeout(Duration::from_secs(30));
+        let continuation =
             TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .download_workspace(upstream)
+                .get_workspace_continuation(upstream)
                 .await?
                 .into_inner();
-        let reference = match stream.message().await? {
-            None => return Ok(None),
-            Some(WorkspaceDownload {
-                part: Some(workspace_download::Part::Reference(reference)),
-            }) => reference,
-            _ => return Err(Status::data_loss("workspace download has no receipt")),
+        let (Some(reference), Some(holder)) = (continuation.delivery, continuation.holder) else {
+            return Ok(None);
         };
         validate_workspace_delivery(&reference).map_err(|error| {
             crate::failures::noted(
@@ -922,86 +986,13 @@ impl Transfers {
                 &error,
             )
         })?;
-        let bundle = reference
-            .bundle
-            .as_ref()
-            .ok_or_else(|| Status::data_loss("workspace receipt has no bundle"))?;
-        if bundle.byte_length == 0 || bundle.byte_length > MAX_WORKSPACE_BLOB_BYTES as u64 {
-            return Err(Status::data_loss("workspace bundle size is invalid"));
-        }
-        if held(&reference).await {
-            // Dropping the stream stops the transfer.
-            return Ok(Some((reference, None)));
-        }
-        let mut bytes = Vec::new();
-        while let Some(message) = stream.message().await? {
-            let Some(workspace_download::Part::Chunk(chunk)) = message.part else {
-                return Err(Status::data_loss("unexpected workspace download record"));
-            };
-            if chunk.is_empty()
-                || chunk.len() > CHECKPOINT_CHUNK_BYTES
-                || bytes.len() as u64 + chunk.len() as u64 > bundle.byte_length
-            {
-                return Err(Status::data_loss("invalid workspace bundle chunk"));
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        if bytes.len() as u64 != bundle.byte_length
-            || format!("{:x}", Sha256::digest(&bytes)) != bundle.sha256
-        {
-            return Err(Status::data_loss(
-                "workspace bundle does not match its receipt",
-            ));
-        }
-        Ok(Some((reference, Some(bytes))))
+        Ok(Some((reference, holder)))
     }
 
-    /// A complete bundle of the Session's approved continuation `expected`, which the Worker
-    /// Host holding it builds on demand, for this host that lacks the delivery's start commit.
-    /// It has no recorded digest; importing it checks it with Git against the delivered commit.
-    async fn download_complete_workspace(
-        &self,
-        attempt: &Attempt,
-        token: &str,
-        expected: &WorkspaceDeliveryReference,
-    ) -> Result<Vec<u8>, Status> {
-        let mut upstream = request(attempt.inspect(), token).map_err(|error| {
-            crate::failures::noted(
-                Status::internal("cannot authenticate workspace download"),
-                &error,
-            )
-        })?;
-        upstream.set_timeout(Duration::from_secs(120));
-        let mut stream =
-            TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .download_complete_workspace(upstream)
-                .await?
-                .into_inner();
-        match stream.message().await? {
-            Some(WorkspaceDownload {
-                part: Some(workspace_download::Part::Reference(reference)),
-            }) if &reference == expected => {}
-            _ => {
-                return Err(Status::data_loss(
-                    "complete workspace bundle belongs to another continuation",
-                ));
-            }
-        }
-        let mut bytes = Vec::new();
-        while let Some(message) = stream.message().await? {
-            let Some(workspace_download::Part::Chunk(chunk)) = message.part else {
-                return Err(Status::data_loss("unexpected workspace download record"));
-            };
-            if chunk.is_empty()
-                || chunk.len() > CHECKPOINT_CHUNK_BYTES
-                || bytes.len() + chunk.len() > MAX_WORKSPACE_BLOB_BYTES
-            {
-                return Err(Status::data_loss("invalid workspace bundle chunk"));
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        Ok(bytes)
+    /// The Workspace state directory another lane of this host delivered `attempt` from, when
+    /// this host's artifact storage records one.
+    fn held_workspace(&self, attempt: &str) -> Option<PathBuf> {
+        self.storage.as_ref()?.workspace_of(attempt).ok()
     }
 }
 

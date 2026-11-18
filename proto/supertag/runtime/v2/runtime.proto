@@ -1035,10 +1035,10 @@ service Connector {
 service Transfers {
   // Records a delivery whose patch and bundle the calling Worker Host already holds.
   rpc CommitWorkspace(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
-  rpc DownloadWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
-  // The same continuation as a complete bundle the holding Worker Host builds, for a host that
-  // lacks the delivery's start commit.
-  rpc DownloadCompleteWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
+  // The Session's last delivery, which this Attempt continues, and the Worker Host holding it.
+  // No bytes: the host reads the commit from its own repository, or from the remote Workspace's
+  // Session branch, where the delivering host pushed it.
+  rpc GetWorkspaceContinuation(InspectAttemptRequest) returns (WorkspaceContinuation);
   rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
   rpc VerifyWorkspaceOutputRemote(VerifyWorkspaceOutputRemoteRequest) returns (VerifyWorkspaceOutputRemoteResponse);
 }

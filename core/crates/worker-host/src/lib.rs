@@ -1799,12 +1799,13 @@ async fn run_assignment(
             prepared
         }
         Err(error) if retryable(&error) && !shutdown.is_cancelled() => {
-            // The host holding the Session's last delivery is not connected: say so once, so the
-            // Task shows what it waits for, then keep trying until that host is back.
+            // The Session's last delivery is not readable here yet: its holder has not pushed it,
+            // or holds a local Workspace. Say so once, so the Task shows what it waits for, then
+            // keep trying.
             if error.code() == Code::Unavailable
                 && error
                     .message()
-                    .contains(supertag_protocol::HOLDER_NOT_CONNECTED)
+                    .contains(supertag_protocol::WAITS_FOR_HOLDER)
                 && task.waiting_for_holder.is_none()
             {
                 report_waiting_for_holder(host, &attempt, token, true).await;

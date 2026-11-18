@@ -42,11 +42,16 @@ pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// continuation fails this way reports that it waits for that host.
 pub const HOLDER_NOT_CONNECTED: &str = "which is not connected to the Control Plane";
 
-/// Why a running Attempt waits before its harness starts: the Worker Host holding its Session's
-/// last delivery is not connected. Shown by `describe task`, `placement explain`, and clients.
+/// How a Worker Host says its Attempt cannot continue its Session yet: the Session's last delivery
+/// is not where it can read it. It then reports that it waits for the host holding it.
+pub const WAITS_FOR_HOLDER: &str = "waits for the Worker Host holding this Session's last delivery";
+
+/// Why an Attempt waits before its harness starts: the Worker Host holding its Session's last
+/// delivery has not pushed it to the remote Workspace, or holds a local Workspace's Session, which
+/// continues only there. Shown by `describe task`, `placement explain`, and clients.
 pub fn waiting_for_holder(holder: &str) -> String {
     format!(
-        "Waiting for Worker Host {holder}, which holds this Session's last delivery and is not connected to the Control Plane; start that host, or cancel the Task"
+        "Waiting for Worker Host {holder}, which holds this Session's last delivery: a local Workspace's Session continues only on that host, and a remote Workspace's once that host has pushed the Session's branch; start that host, or cancel the Task"
     )
 }
 pub const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;

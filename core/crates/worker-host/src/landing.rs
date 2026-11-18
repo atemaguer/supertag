@@ -7,7 +7,7 @@ use std::{path::Path, sync::Arc};
 
 use anyhow::{Context, Result, ensure};
 use supertag_git_delivery::{
-    Credential, GitDelivery, Remote,
+    GitDelivery, Remote,
     landing::{HeldDeliveries, LandingCalls},
 };
 use supertag_protocol::{
@@ -16,7 +16,7 @@ use supertag_protocol::{
         ClaimWorkspaceLandingRequest, ClaimWorkspaceLandingResponse, MintWorkspaceGitAccessRequest,
         RecordWorkspaceLandingRequest, WorkspaceGitPermission, WorkspaceLanding,
         WorkspaceLandingLease, host_landings_client::HostLandingsClient,
-        workspace_git_access_client::WorkspaceGitAccessClient, workspace_git_grant,
+        workspace_git_access_client::WorkspaceGitAccessClient,
     },
 };
 use tokio_util::sync::CancellationToken;
@@ -191,16 +191,9 @@ impl HeldDeliveries for Held {
             workspace.remote == landing.remote,
             "push grant is for another remote"
         );
-        let credential = grant.credential.map(|credential| match credential {
-            workspace_git_grant::Credential::Https(https) => Credential::HttpsToken {
-                username: https.username,
-                token: https.token,
-            },
-            workspace_git_grant::Credential::Ssh(ssh) => Credential::SshKey {
-                private_key: ssh.private_key,
-                known_hosts: (!ssh.known_hosts.is_empty()).then_some(ssh.known_hosts),
-            },
-        });
-        Remote::new(&landing.remote, credential)
+        Remote::new(
+            &landing.remote,
+            crate::workspaces::granted_credential(grant.credential),
+        )
     }
 }

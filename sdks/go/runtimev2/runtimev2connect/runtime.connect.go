@@ -378,12 +378,9 @@ const (
 	// TransfersCommitWorkspaceProcedure is the fully-qualified name of the Transfers's CommitWorkspace
 	// RPC.
 	TransfersCommitWorkspaceProcedure = "/supertag.runtime.v2.Transfers/CommitWorkspace"
-	// TransfersDownloadWorkspaceProcedure is the fully-qualified name of the Transfers's
-	// DownloadWorkspace RPC.
-	TransfersDownloadWorkspaceProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspace"
-	// TransfersDownloadCompleteWorkspaceProcedure is the fully-qualified name of the Transfers's
-	// DownloadCompleteWorkspace RPC.
-	TransfersDownloadCompleteWorkspaceProcedure = "/supertag.runtime.v2.Transfers/DownloadCompleteWorkspace"
+	// TransfersGetWorkspaceContinuationProcedure is the fully-qualified name of the Transfers's
+	// GetWorkspaceContinuation RPC.
+	TransfersGetWorkspaceContinuationProcedure = "/supertag.runtime.v2.Transfers/GetWorkspaceContinuation"
 	// TransfersDownloadReviewArtifactProcedure is the fully-qualified name of the Transfers's
 	// DownloadReviewArtifact RPC.
 	TransfersDownloadReviewArtifactProcedure = "/supertag.runtime.v2.Transfers/DownloadReviewArtifact"
@@ -4180,10 +4177,10 @@ func (UnimplementedConnectorHandler) ReleaseConnector(context.Context, *connect.
 type TransfersClient interface {
 	// Records a delivery whose patch and bundle the calling Worker Host already holds.
 	CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
-	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
-	// The same continuation as a complete bundle the holding Worker Host builds, for a host that
-	// lacks the delivery's start commit.
-	DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
+	// The Session's last delivery, which this Attempt continues, and the Worker Host holding it.
+	// No bytes: the host reads the commit from its own repository, or from the remote Workspace's
+	// Session branch, where the delivering host pushed it.
+	GetWorkspaceContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
@@ -4205,16 +4202,10 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("CommitWorkspace")),
 			connect.WithClientOptions(opts...),
 		),
-		downloadWorkspace: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload](
+		getWorkspaceContinuation: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation](
 			httpClient,
-			baseURL+TransfersDownloadWorkspaceProcedure,
-			connect.WithSchema(transfersMethods.ByName("DownloadWorkspace")),
-			connect.WithClientOptions(opts...),
-		),
-		downloadCompleteWorkspace: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload](
-			httpClient,
-			baseURL+TransfersDownloadCompleteWorkspaceProcedure,
-			connect.WithSchema(transfersMethods.ByName("DownloadCompleteWorkspace")),
+			baseURL+TransfersGetWorkspaceContinuationProcedure,
+			connect.WithSchema(transfersMethods.ByName("GetWorkspaceContinuation")),
 			connect.WithClientOptions(opts...),
 		),
 		downloadReviewArtifact: connect.NewClient[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload](
@@ -4235,8 +4226,7 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 // transfersClient implements TransfersClient.
 type transfersClient struct {
 	commitWorkspace             *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
-	downloadWorkspace           *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
-	downloadCompleteWorkspace   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
+	getWorkspaceContinuation    *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation]
 	downloadReviewArtifact      *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
 	verifyWorkspaceOutputRemote *connect.Client[runtimev2.VerifyWorkspaceOutputRemoteRequest, runtimev2.VerifyWorkspaceOutputRemoteResponse]
 }
@@ -4246,14 +4236,9 @@ func (c *transfersClient) CommitWorkspace(ctx context.Context, req *connect.Requ
 	return c.commitWorkspace.CallUnary(ctx, req)
 }
 
-// DownloadWorkspace calls supertag.runtime.v2.Transfers.DownloadWorkspace.
-func (c *transfersClient) DownloadWorkspace(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error) {
-	return c.downloadWorkspace.CallServerStream(ctx, req)
-}
-
-// DownloadCompleteWorkspace calls supertag.runtime.v2.Transfers.DownloadCompleteWorkspace.
-func (c *transfersClient) DownloadCompleteWorkspace(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error) {
-	return c.downloadCompleteWorkspace.CallServerStream(ctx, req)
+// GetWorkspaceContinuation calls supertag.runtime.v2.Transfers.GetWorkspaceContinuation.
+func (c *transfersClient) GetWorkspaceContinuation(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error) {
+	return c.getWorkspaceContinuation.CallUnary(ctx, req)
 }
 
 // DownloadReviewArtifact calls supertag.runtime.v2.Transfers.DownloadReviewArtifact.
@@ -4270,10 +4255,10 @@ func (c *transfersClient) VerifyWorkspaceOutputRemote(ctx context.Context, req *
 type TransfersHandler interface {
 	// Records a delivery whose patch and bundle the calling Worker Host already holds.
 	CommitWorkspace(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
-	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
-	// The same continuation as a complete bundle the holding Worker Host builds, for a host that
-	// lacks the delivery's start commit.
-	DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
+	// The Session's last delivery, which this Attempt continues, and the Worker Host holding it.
+	// No bytes: the host reads the commit from its own repository, or from the remote Workspace's
+	// Session branch, where the delivering host pushed it.
+	GetWorkspaceContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	VerifyWorkspaceOutputRemote(context.Context, *connect.Request[runtimev2.VerifyWorkspaceOutputRemoteRequest]) (*connect.Response[runtimev2.VerifyWorkspaceOutputRemoteResponse], error)
 }
@@ -4291,16 +4276,10 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(transfersMethods.ByName("CommitWorkspace")),
 		connect.WithHandlerOptions(opts...),
 	)
-	transfersDownloadWorkspaceHandler := connect.NewServerStreamHandler(
-		TransfersDownloadWorkspaceProcedure,
-		svc.DownloadWorkspace,
-		connect.WithSchema(transfersMethods.ByName("DownloadWorkspace")),
-		connect.WithHandlerOptions(opts...),
-	)
-	transfersDownloadCompleteWorkspaceHandler := connect.NewServerStreamHandler(
-		TransfersDownloadCompleteWorkspaceProcedure,
-		svc.DownloadCompleteWorkspace,
-		connect.WithSchema(transfersMethods.ByName("DownloadCompleteWorkspace")),
+	transfersGetWorkspaceContinuationHandler := connect.NewUnaryHandler(
+		TransfersGetWorkspaceContinuationProcedure,
+		svc.GetWorkspaceContinuation,
+		connect.WithSchema(transfersMethods.ByName("GetWorkspaceContinuation")),
 		connect.WithHandlerOptions(opts...),
 	)
 	transfersDownloadReviewArtifactHandler := connect.NewServerStreamHandler(
@@ -4319,10 +4298,8 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		switch r.URL.Path {
 		case TransfersCommitWorkspaceProcedure:
 			transfersCommitWorkspaceHandler.ServeHTTP(w, r)
-		case TransfersDownloadWorkspaceProcedure:
-			transfersDownloadWorkspaceHandler.ServeHTTP(w, r)
-		case TransfersDownloadCompleteWorkspaceProcedure:
-			transfersDownloadCompleteWorkspaceHandler.ServeHTTP(w, r)
+		case TransfersGetWorkspaceContinuationProcedure:
+			transfersGetWorkspaceContinuationHandler.ServeHTTP(w, r)
 		case TransfersDownloadReviewArtifactProcedure:
 			transfersDownloadReviewArtifactHandler.ServeHTTP(w, r)
 		case TransfersVerifyWorkspaceOutputRemoteProcedure:
@@ -4340,12 +4317,8 @@ func (UnimplementedTransfersHandler) CommitWorkspace(context.Context, *connect.R
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.CommitWorkspace is not implemented"))
 }
 
-func (UnimplementedTransfersHandler) DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadWorkspace is not implemented"))
-}
-
-func (UnimplementedTransfersHandler) DownloadCompleteWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadCompleteWorkspace is not implemented"))
+func (UnimplementedTransfersHandler) GetWorkspaceContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.GetWorkspaceContinuation is not implemented"))
 }
 
 func (UnimplementedTransfersHandler) DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {

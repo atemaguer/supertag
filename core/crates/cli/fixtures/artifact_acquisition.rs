@@ -33,6 +33,10 @@ pub async fn exercise(bootstrap: &AdapterBootstrap, run: &HarnessRun) -> Result<
             .await?
             .into_inner();
         ensure!(receipt.inputs.is_empty());
+        // The capture froze the files; the Session's Workspace keeps no change, so a Task on
+        // another Worker Host may continue it.
+        std::fs::remove_file(checkout.join("evidence.txt"))?;
+        std::fs::remove_file(checkout.join("not-selected.txt"))?;
         return Ok(format!(
             "artifact:{}",
             receipt.summary.context("missing summary")?.artifact_id

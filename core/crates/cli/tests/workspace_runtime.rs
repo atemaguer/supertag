@@ -485,13 +485,21 @@ async fn exercise(database: &str, directory: &Path) -> Result<()> {
         git(&review, &["show", "-s", "--format=%s", &first_head]).await?,
         "first"
     );
-    // The source object store has never received the generated commit.
-    let mut absent = Command::new("/usr/bin/git");
-    absent
-        .arg("-C")
-        .arg(&source)
-        .args(["cat-file", "-e", &first_head]);
-    assert!(!output(absent).await?.status.success());
+    // The host wrote the delivery into the mapped repository only as the Session's branch.
+    assert_eq!(
+        git(
+            &source,
+            &[
+                "rev-parse",
+                &format!(
+                    "refs/heads/{}",
+                    supertag_protocol::session_branch("builder", "feature")
+                ),
+            ],
+        )
+        .await?,
+        first_head
+    );
 
     let second = json(submit("second")).await?;
     let second_id = field(&second, "task_id")?;

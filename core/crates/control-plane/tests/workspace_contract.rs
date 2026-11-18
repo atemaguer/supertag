@@ -241,26 +241,38 @@ async fn exercise(url: &str) {
     assert_eq!(published(&store).await, Some(reference.clone()));
 
     let later = submit(&store, "engineering").await.unwrap();
-    let next = claim(&store, &other, "continue", &later.task_id).await;
+    // A local Workspace's Session continues only on the host holding its last delivery: another
+    // host mapping the same Workspace leaves it queued.
+    assert!(
+        store
+            .claim_task_with_workspaces(&other, "elsewhere", &[REPOSITORY.into()])
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let waiting = store.diagnose_task_placement(&later.task_id).await.unwrap();
+    assert_eq!(waiting.requirement, "workspace-holder");
+    assert!(waiting.summary.contains("primary"), "{}", waiting.summary);
+    let next = claim(&store, &owner, "continue", &later.task_id).await;
     assert_eq!(
         store
-            .get_workspace_continuation(&other, &next)
+            .get_workspace_continuation(&owner, &next)
             .await
             .unwrap(),
         Some(reference.clone())
     );
     let change = delivery(&next, HEAD, BASE);
     store
-        .reserve_workspace_delivery(&other, &change)
+        .reserve_workspace_delivery(&owner, &change)
         .await
         .unwrap();
     store
-        .commit_workspace_delivery(&other, &change)
+        .commit_workspace_delivery(&owner, &change)
         .await
         .unwrap();
     store.cancel_task(&later.task_id).await.unwrap();
     let cancelled = store
-        .finish_task(&other, &finish(&next, change.delivery))
+        .finish_task(&owner, &finish(&next, change.delivery))
         .await
         .unwrap();
     assert_eq!(cancelled.state(), TaskState::Cancelled);

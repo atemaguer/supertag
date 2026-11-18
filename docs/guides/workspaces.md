@@ -127,7 +127,9 @@ the Worker Host that ran the Task, which maps the repository. Fetch it into anot
 ## Build on earlier work in the same Session
 
 Every Task of a Session continues the Session's branch. Ask for a revision in the same
-conversation, and the next Task starts from the earlier commits, even on another host. Submit
+conversation, and the next Task starts from the earlier commits. A remote Workspace's Session
+continues on any host, which reads the Session's branch from the git server; a local Workspace's
+Session continues only on the host that holds its commits. Submit
 independent work in a new Session with `supertag task submit --session NAME`; it gets its own
 branch.
 

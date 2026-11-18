@@ -242,6 +242,65 @@ impl GitDelivery {
         })
     }
 
+    /// On a Worker Host: fetches a Session's delivered `commit` from its Session branch on
+    /// `workspace`'s remote, where the Worker Host that delivered it pushed it, with the credential
+    /// the Control Plane granted, and bundles exactly its history. None while the branch does not
+    /// hold the commit yet: that host has not pushed it.
+    pub async fn fetch_session(
+        &self,
+        workspace: &Workspace,
+        session_branch: &str,
+        commit: &str,
+        credential: Option<Credential>,
+        cancel: &CancellationToken,
+    ) -> Result<Option<FetchedSource>> {
+        ensure!(valid_git_commit(commit), "invalid delivered commit");
+        ensure!(
+            valid_git_branch(session_branch),
+            "invalid Session branch {session_branch}"
+        );
+        let remote = Self::granted(workspace, credential)?;
+        let session = self.session(&remote)?;
+        let repository = session.directory.path().join("fetched.git");
+        git::init_bare(&repository, cancel).await?;
+        let mut fetch = session.command(&repository);
+        fetch.args([
+            "fetch",
+            "--no-tags",
+            "--no-auto-maintenance",
+            "--no-recurse-submodules",
+            "--no-write-fetch-head",
+            "--quiet",
+            "--",
+            &session.url,
+            &format!("+refs/heads/{session_branch}:refs/remotes/session"),
+        ]);
+        // A branch that does not exist yet is not an error: its delivery has not been pushed.
+        git::run(
+            fetch,
+            session.directory.path(),
+            cancel,
+            16_384,
+            FETCH_TIMEOUT,
+        )
+        .await?;
+        if !has_commit(&session, &repository, commit, cancel).await? {
+            return Ok(None);
+        }
+        refuse_lfs(&session, &repository, commit, cancel).await?;
+        let bundle = source::capture(
+            &session.directory.path().join("verified"),
+            &repository,
+            commit,
+            cancel,
+        )
+        .await?;
+        Ok(Some(FetchedSource {
+            bundle,
+            directory: session.directory,
+        }))
+    }
+
     /// The remote's URL when one of its branches or tags names `commit`.
     pub async fn advertised_output_remote(
         &self,

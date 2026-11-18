@@ -399,7 +399,46 @@ async fn a_remote_workspace_lands_through_git_delivery(database: String) -> Resu
     assert_eq!(git(&bare, &["rev-parse", "refs/heads/main"]).await?, base);
     assert!(server.pushes.load(Ordering::SeqCst) >= 1);
 
+    // The Session continues on a host that holds none of it: its own state and artifact storage.
+    // It reads the Session's branch from the server, never through the Control Plane.
     host.kill().await?;
+    let mut fresh = credentials.command(&["worker-host", "--control-plane", &public]);
+    fresh
+        .arg("--adapter")
+        .arg(&adapter)
+        .arg("--adapter-arg=--workspace-fixture")
+        .arg("--state-directory")
+        .arg(root.join("fresh-host"))
+        .arg("--artifact-directory")
+        .arg(root.join("fresh-artifacts"))
+        .args(["--remote-workspace", "handbook"]);
+    let mut fresh = holding_host::serve(fresh).await?;
+    let second = json(cli(&[
+        "task",
+        "submit",
+        "--tag",
+        "builder",
+        "--session",
+        "notes",
+        "second",
+    ]))
+    .await?;
+    let second_id = field(&second, "task_id")?.to_owned();
+    let second = wait_for(&cli, &["get", "task", &second_id], |task| {
+        matches!(
+            task["state"].as_str(),
+            Some("TASK_STATE_SUCCEEDED" | "TASK_STATE_FAILED")
+        )
+    })
+    .await?;
+    ensure!(second["state"] == "TASK_STATE_SUCCEEDED", "{second}");
+    assert_eq!(second["workspace_delivery"]["start_commit"], head.as_str());
+    assert_eq!(
+        second["result"],
+        "Change: second\nWorkspace before:\nbase\nfirst\n"
+    );
+
+    fresh.kill().await?;
     plane.kill().await?;
     Ok(())
 }

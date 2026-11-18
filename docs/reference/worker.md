@@ -119,21 +119,24 @@ harness sandbox, with a 10-minute limit, and receives no provider credentials.
 After the harness finishes, the host commits the Task's changes and verifies them. It records the
 result as a Git bundle, with the ref `refs/heads/supertag-deliveries/DELIVERY_ID`, and a patch. The
 bundle carries only what the Task added to its start commit: the Session's previous delivery, or
-the Workspace base for its first Task. A reader that lacks that commit gets a complete bundle of
-the delivered commit instead, which the host builds when asked; Git checks it against the
-delivered commit, since it has no recorded digest. The host keeps the bundle and patch in its
-artifact storage and registers only their digests; the Control Plane relays them from the host to
-the next Task of the Session on another host. The host itself writes each delivery as the branch
+the Workspace base for its first Task. The host keeps the bundle and patch in its artifact storage
+and registers only their digests; the Control Plane never passes them. The host itself writes each
+delivery as the branch
 `supertag/session/HASH`, one branch per Session that each later Task advances: into the
 repository it maps for a local Workspace, before it reports the Task, unless the Workspace is
 mapped with `--workspace-patch ID` (`land: patch`); or, for a remote Workspace, by pushing it to
 the git server. The host never switches your checkout's branch or changes its files, and leaves a
 branch someone moved outside SuperTag as it is.
 
-While the host that produced the delivery is offline, the Session's next Task waits: its Task Attempt keeps its slot and
-retries until that host connects, and says it is waiting for that Worker Host wherever a waiting
-turn's reason shows. `supertag placement explain` and `supertag describe task` report the
-requirement `workspace-holder`. Start that host, or cancel the Task.
+The Session's next Task continues from that delivery. On the host that produced it, or another
+lane of that host, it reads the commit from that host's own repository. For a remote Workspace,
+any other host reads the Session's branch from the git server; until the producing host has
+pushed it, the Task Attempt keeps its slot and retries. A local Workspace's Session continues only
+on the host that produced its last delivery, since only that host has its commits: no other host
+claims the Task. In either case the Task says it is waiting for that Worker Host wherever a
+waiting turn's reason shows, and `supertag placement explain` and `supertag describe task` report
+the requirement `workspace-holder`. Start that host, or cancel the Task. To continue Sessions on
+any host, use a remote Workspace.
 
 A Task with no commits delivers nothing. A remote Workspace's changes land on its git server;
 `supertag get landings` follows them. See [Landing](resource-model.md#landing).

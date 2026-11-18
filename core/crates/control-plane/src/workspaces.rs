@@ -351,6 +351,43 @@ pub(crate) async fn finish_in(
     Ok(())
 }
 
+/// The Worker Host a queued Task of a local Workspace waits for: the host holding its Session's
+/// last delivery, since a local Workspace's Session continues only where its commits are. `None`
+/// when `claimer` is that host, the Task's Workspace is remote (any host reads its Session branch
+/// from the remote), or the Session has no delivery yet.
+pub(crate) async fn local_holder_wait_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &Task,
+    claimer: Option<&str>,
+) -> Result<Option<String>> {
+    if task
+        .workspace
+        .as_ref()
+        .is_none_or(|spec| spec.remote.is_some())
+    {
+        return Ok(None);
+    }
+    let Some(row) = sqlx::query(
+        "SELECT d.holder_host_id,d.reference FROM supertag_v2_workspace_heads h
+         JOIN supertag_v2_workspace_deliveries d ON h.attempt_id=d.attempt_id
+         WHERE h.tag_id=$1 AND h.session_id=$2 AND d.committed_at_ms IS NOT NULL",
+    )
+    .bind(&task.tag_id)
+    .bind(&task.session_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    // A delivery that committed nothing leaves the Session at its base, which any host has.
+    let delivery = decode_delivery(row.try_get("reference")?)?;
+    if delivery.head_commit == delivery.base_commit {
+        return Ok(None);
+    }
+    let holder: String = row.try_get("holder_host_id")?;
+    Ok((!holder.is_empty() && claimer != Some(holder.as_str())).then_some(holder))
+}
+
 pub(crate) async fn continuation_in(
     tx: &mut Transaction<'_, Any>,
     task: &AnyRow,
