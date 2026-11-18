@@ -169,6 +169,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- SuperTag now speaks protocol 5. Peers on protocol 4 are refused when they connect; upgrade
+  every service and client together.
 - The terminal UI shows times of day on one 12-hour clock, "4:01 PM", in its Tag list, notes, and
   Schedules as in its conversation dividers. Esc closes the desktop app's Tag details panel.
 - Workspaces deliver through git to any remote. A remote Workspace names a git URL, read and
@@ -258,6 +260,10 @@ within the pre-1.0 compatibility policy described in
 
 ### Removed
 
+- Client file downloads: `supertag artifact download`, `supertag task download`, `supertag volume
+  download`, the desktop app's Task result files, the terminal UI's Task files view, and the SDK
+  Gateway clients' download methods. The Control Plane no longer passes files to clients;
+  `supertag get artifact` still lists them.
 - GitHub Workspaces (`github:` spec, `--account`, `--repository-id`, `--pull-request-base`,
   the `SUPERTAG_GITHUB_*` publisher settings), draft pull request publication and its approval,
   closing a work Session when its pull request merges, and choosing a repository from a surface
