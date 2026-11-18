@@ -12,6 +12,12 @@ license = "Apache-2.0"
 name = "supertag_desktop"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# The executable is named SuperTag: macOS shows an executable's name in Activity Monitor, and
+# in the Dock and notifications of an unbundled `tauri dev` run. The crate keeps its name.
+[[bin]]
+name = "SuperTag"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
