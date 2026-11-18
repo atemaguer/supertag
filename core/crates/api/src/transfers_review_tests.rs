@@ -328,3 +328,47 @@ async fn review_transfer_keeps_exact_scope_across_restart_and_rechecks_before_eo
     assert_eq!(failure.code(), Code::DataLoss);
     Ok(())
 }
+
+/// A transfer that fails behind a slow reader ends the reader's stream with the error after the
+/// chunks already sent, never cleanly but short. The reader here waits longer than a producer
+/// once waited to deliver the error before giving up.
+#[tokio::test]
+async fn a_failed_download_ends_with_its_error_even_for_a_slow_reader() -> anyhow::Result<()> {
+    use tonic::codegen::tokio_stream::StreamExt as _;
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("held");
+    // The receipt promises more than the file holds, so the transfer fails at its end. The file
+    // fits in the stream's buffer, so the failure comes while the reader is still asleep.
+    let bytes = vec![7u8; 1000];
+    std::fs::write(&path, &bytes)?;
+    let receipt = BlobReference {
+        sha256: "0".repeat(64),
+        byte_length: bytes.len() as u64 * 2,
+    };
+    let permit = Arc::new(Semaphore::new(1)).try_acquire_owned()?;
+    let mut stream = download_stream(
+        Source::File(tokio::fs::File::open(&path).await?),
+        permit,
+        receipt,
+        Vec::new(),
+        |chunk| chunk,
+        || async { Ok(()) },
+        Duration::from_secs(30),
+    );
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let mut received = 0;
+    let mut ended = None;
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(chunk) => received += chunk.len(),
+            Err(error) => {
+                ended = Some(error);
+                break;
+            }
+        }
+    }
+    assert_eq!(received, bytes.len());
+    let error = ended.expect("the stream must end with the transfer's error, not cleanly");
+    assert_eq!(error.code(), Code::DataLoss, "{error:?}");
+    Ok(())
+}

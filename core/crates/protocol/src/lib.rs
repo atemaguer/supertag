@@ -8,6 +8,7 @@ pub mod authorization;
 pub mod changed_paths;
 mod crash_points;
 pub mod file_scope;
+pub mod stream_failure;
 #[cfg(feature = "crash-points")]
 pub use crash_points::crash_now;
 pub use crash_points::{CRASH_MARKER_ENV, CRASH_POINT_ENV, crash_point};

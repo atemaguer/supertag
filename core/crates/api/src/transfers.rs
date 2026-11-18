@@ -10,6 +10,7 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 use supertag_protocol::negotiation::ProtocolChannel;
+use supertag_protocol::stream_failure::{EndsWithError, ends_with_error};
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES, MAX_MESSAGE_BYTES,
     v2::{
@@ -321,7 +322,7 @@ impl ApiTransfers {
         holder: BlobHolder,
         kind: WorkspaceArtifactKind,
         authorize: F,
-    ) -> Result<Response<ReceiverStream<Result<WorkspaceDownload, Status>>>, Status>
+    ) -> Result<Response<Download<WorkspaceDownload>>, Status>
     where
         F: Fn() -> Authorization + Send + Sync + 'static,
         Authorization: std::future::Future<Output = Result<(), Status>> + Send,
@@ -373,7 +374,7 @@ impl ApiTransfers {
 
 #[tonic::async_trait]
 impl Transfers for ApiTransfers {
-    type DownloadWorkspaceSourceStream = ReceiverStream<Result<WorkspaceSourceDownload, Status>>;
+    type DownloadWorkspaceSourceStream = Download<WorkspaceSourceDownload>;
 
     async fn verify_workspace_output_remote(
         &self,
@@ -501,7 +502,7 @@ impl Transfers for ApiTransfers {
         self.commit_workspace_delivery(request).await
     }
 
-    type DownloadWorkspaceStream = ReceiverStream<Result<WorkspaceDownload, Status>>;
+    type DownloadWorkspaceStream = Download<WorkspaceDownload>;
 
     async fn download_workspace(
         &self,
@@ -511,7 +512,7 @@ impl Transfers for ApiTransfers {
             .await
     }
 
-    type DownloadCompleteWorkspaceStream = ReceiverStream<Result<WorkspaceDownload, Status>>;
+    type DownloadCompleteWorkspaceStream = Download<WorkspaceDownload>;
 
     async fn download_complete_workspace(
         &self,
@@ -521,9 +522,9 @@ impl Transfers for ApiTransfers {
             .await
     }
 
-    type DownloadWorkspaceArtifactStream = ReceiverStream<Result<WorkspaceDownload, Status>>;
+    type DownloadWorkspaceArtifactStream = Download<WorkspaceDownload>;
 
-    type DownloadReviewArtifactStream = ReceiverStream<Result<WorkspaceDownload, Status>>;
+    type DownloadReviewArtifactStream = Download<WorkspaceDownload>;
 
     async fn download_review_artifact(
         &self,
@@ -591,7 +592,7 @@ impl ApiTransfers {
         &self,
         request: Request<InspectAttemptRequest>,
         kind: WorkspaceArtifactKind,
-    ) -> Result<Response<ReceiverStream<Result<WorkspaceDownload, Status>>>, Status> {
+    ) -> Result<Response<Download<WorkspaceDownload>>, Status> {
         let attempt = request.get_ref().clone();
         let metadata = request.metadata().clone();
         let Some((reference, holder)) = self.get_workspace_reference(request).await? else {
@@ -715,9 +716,13 @@ impl Source {
     }
 }
 
-fn empty_stream<T>() -> ReceiverStream<T> {
+/// A download's response stream: it ends with the producer's error when the transfer fails, so
+/// a reader never mistakes a short stream for a complete one.
+pub(crate) type Download<T> = EndsWithError<ReceiverStream<Result<T, Status>>>;
+
+fn empty_stream<T>() -> Download<T> {
     let (_, receive) = mpsc::channel(1);
-    ReceiverStream::new(receive)
+    ends_with_error(ReceiverStream::new(receive)).0
 }
 
 /// What a download must match: its blob's receipt, or, for a bundle the holder builds on demand,
@@ -750,7 +755,7 @@ fn download_stream<T, Chunk, Check, Authorization>(
     chunk: Chunk,
     authorize: Check,
     budget: Duration,
-) -> ReceiverStream<Result<T, Status>>
+) -> Download<T>
 where
     T: Send + 'static,
     Chunk: Fn(Vec<u8>) -> T + Send + Sync + 'static,
@@ -759,6 +764,7 @@ where
 {
     let expected = expected.into();
     let (send, receive) = mpsc::channel(2);
+    let (download, failure) = ends_with_error(ReceiverStream::new(receive));
     tokio::spawn(async move {
         let _permit = permit;
         let stream = async {
@@ -795,21 +801,15 @@ where
             authorize().await?;
             Ok(())
         };
+        // A failed transfer ends the reader's stream with its error after the chunks already
+        // sent, however slowly the reader reads; it never ends cleanly but short.
         match timeout(budget, stream).await {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                let _ = timeout(Duration::from_secs(2), send.send(Err(error))).await;
-            }
-            Err(_) => {
-                let _ = timeout(
-                    Duration::from_secs(2),
-                    send.send(Err(Status::deadline_exceeded("blob download timed out"))),
-                )
-                .await;
-            }
+            Ok(Err(error)) => failure.fail(error),
+            Err(_) => failure.fail(Status::deadline_exceeded("blob download timed out")),
         }
     });
-    ReceiverStream::new(receive)
+    download
 }
 
 async fn open_blob(path: &Path) -> Result<tokio::fs::File, Status> {

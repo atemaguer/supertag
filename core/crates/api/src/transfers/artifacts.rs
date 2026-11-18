@@ -278,7 +278,7 @@ impl attempt_artifacts_server::AttemptArtifacts for ApiTransfers {
 
 #[tonic::async_trait]
 impl artifact_transfers_server::ArtifactTransfers for ApiTransfers {
-    type DownloadAcquiredFileStream = ReceiverStream<Result<ArtifactDownload, Status>>;
+    type DownloadAcquiredFileStream = super::Download<ArtifactDownload>;
 
     async fn download_acquired_file(
         &self,

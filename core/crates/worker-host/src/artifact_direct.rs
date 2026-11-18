@@ -674,7 +674,9 @@ impl SourceServer {
 
 #[tonic::async_trait]
 impl WorkerArtifactTransfers for SourceServer {
-    type DownloadStream = ReceiverStream<Result<ArtifactDownload, Status>>;
+    type DownloadStream = supertag_protocol::stream_failure::EndsWithError<
+        ReceiverStream<Result<ArtifactDownload, Status>>,
+    >;
 
     async fn download(
         &self,
@@ -741,6 +743,8 @@ impl WorkerArtifactTransfers for SourceServer {
         }
         let source = self.clone();
         let (send, receive) = mpsc::channel(2);
+        let (download, failure) =
+            supertag_protocol::stream_failure::ends_with_error(ReceiverStream::new(receive));
         tokio::spawn(async move {
             let _permit = permit;
             let delivery = async {
@@ -777,9 +781,11 @@ impl WorkerArtifactTransfers for SourceServer {
                 Ok(Err(error)) => error,
                 Err(_) => Status::deadline_exceeded("direct artifact grant expired"),
             };
-            let _ = tokio::time::timeout(Duration::from_secs(1), send.send(Err(error))).await;
+            // The reader's stream ends with this error after the chunks already sent, however
+            // slowly it reads; it never ends cleanly but short.
+            failure.fail(error);
         });
-        Ok(Response::new(ReceiverStream::new(receive)))
+        Ok(Response::new(download))
     }
 }
 
