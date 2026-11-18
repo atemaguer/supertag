@@ -195,6 +195,9 @@ func runtimeObjective(objective *v2.Objective) *views.Objective {
 	if objective.PausedAtMs != nil {
 		out.PausedAt = timestamppb.New(time.UnixMilli(*objective.PausedAtMs))
 	}
+	if objective.IdleSinceMs != nil {
+		out.IdleSince = timestamppb.New(time.UnixMilli(*objective.IdleSinceMs))
+	}
 	if limit := minor(objective.BudgetLimitMinor); limit != nil {
 		out.Budget = &views.Budget{LimitMinor: *limit, Currency: objective.GetBudgetCurrency()}
 	}

@@ -222,6 +222,17 @@ it("shows the Tag's activity first and rereads it when one of its turns ends", a
   expect(tagActivity).toHaveBeenCalledTimes(2);
   expect(section?.textContent).toContain("6 posted · 4 read · 2 answered · 19 stayed quiet");
   expect(section?.textContent).toContain("At most 10 per hour · 3 started in the last hour");
+  expect(section?.textContent).not.toContain("Idle Objectives");
+  activity = {
+    ...activity,
+    idleObjectives: [
+      { objectiveId: "ship", outcome: "Ship SSO\nwith tests", idleSinceMs: Date.now() },
+    ],
+  };
+  act(() => feed.publish({ kind: "conversation", tagId: "lead" }));
+  await settle();
+  expect(section?.textContent).toContain("Idle Objectives");
+  expect(section?.textContent).toMatch(/Ship SSO · idle since /);
 });
 
 it("closes on Esc, unless a dialog or menu is open and takes it first", async () => {

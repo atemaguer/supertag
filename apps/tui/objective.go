@@ -86,8 +86,11 @@ func describeRuntimeObjective(view *views.ObjectiveOverview, teamName string) st
 	lines := []string{
 		fmt.Sprintf("Objective %s · %s", objective.GetId(), state),
 		"Outcome: " + objective.GetOutcome(),
-		"Owner: " + objective.GetOwnerTag(),
 	}
+	if idle := objective.GetIdleSince(); idle != nil {
+		lines = append(lines, "Idle since "+timeLabel(idle.AsTime(), time.Now())+": its owner's last turn left nothing running and asked nothing")
+	}
+	lines = append(lines, "Owner: "+objective.GetOwnerTag())
 	actions := strings.Join(objective.GetRuntimeActions(), ", ")
 	if actions == "" {
 		actions = "none"

@@ -478,6 +478,7 @@ pub(crate) fn output(objective: Objective) -> Value {
         "budget_limit_minor": objective.budget_limit_minor,
         "budget_currency": objective.budget_currency,
         "paused_at_ms": objective.paused_at_ms,
+        "idle_since_ms": objective.idle_since_ms,
         "reported_spend_minor": objective.reported_spend_minor,
         "runtime_actions": objective.runtime_actions.as_ref().map(|scope| scope.actions.as_slice()).unwrap_or_default(),
         "completion_summary": objective.completion_summary,

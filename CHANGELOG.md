@@ -194,6 +194,14 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- An Objective whose owner's turn ends idle twice stays `working` instead of becoming `blocked`:
+  only the owner's `report_objective` changes an Objective's status from a turn. It shows "Idle
+  since …" in `supertag describe objective`, the terminal UI's Objective view, and its owner Tag's
+  **Activity** in the desktop app and the terminal UI, until a message or new work clears it.
+- SuperTag adds less coaching to a Tag's turns: no per-turn note-keeping line, a shorter portfolio
+  footer, tool results that state what was recorded without telling the model to stop, a Work
+  Session's instruction sent as written, and report, start and budget messages without style or
+  strategy directions.
 - Session checkpoints live on the Worker Host that ran the turn, not on the Control Plane. A
   queued Task waits up to 10 minutes for that host; after that, or if it is offline, another
   host starts the Session from its recap (`placement explain` shows `checkpoint-holder`).

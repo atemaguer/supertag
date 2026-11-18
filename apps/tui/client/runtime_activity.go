@@ -19,6 +19,15 @@ type TagActivity struct {
 	Posted, Read, Answered, Quiet uint32
 	// StartRate is nil when the Tag has none.
 	StartRate *StartRate
+	// IdleObjectives are its working Objectives that sit idle, oldest idle first.
+	IdleObjectives []IdleObjective
+}
+
+// IdleObjective is a working Objective whose owner's last turn left nothing running and asked
+// nothing.
+type IdleObjective struct {
+	ID, Outcome string
+	Since       time.Time
 }
 
 // StartRate lets at most Starts Task Attempts start in any Per; InWindow started in the current one.
@@ -41,6 +50,10 @@ func (c *Client) TagActivity(ctx context.Context, tag string) (TagActivity, erro
 	if rate := res.Msg.GetStartRate(); rate.GetStarts() > 0 {
 		out.StartRate = &StartRate{Starts: rate.GetStarts(), InWindow: res.Msg.GetStartsInWindow(),
 			Per: time.Duration(rate.GetPerMs()) * time.Millisecond}
+	}
+	for _, idle := range res.Msg.GetIdleObjectives() {
+		out.IdleObjectives = append(out.IdleObjectives, IdleObjective{ID: idle.GetObjectiveId(),
+			Outcome: idle.GetOutcome(), Since: time.UnixMilli(idle.GetIdleSinceMs())})
 	}
 	return out, nil
 }

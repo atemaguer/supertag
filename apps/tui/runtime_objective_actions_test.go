@@ -3,6 +3,9 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/atemaguer/supertag/apps/tui/views"
 )
@@ -31,5 +34,18 @@ func TestRuntimeObjectiveShowsPendingAndRecordedCommitReviews(t *testing.T) {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing %q:\n%s", expected, text)
 		}
+	}
+}
+
+// An idle Objective says since when, under its outcome; a busy one says nothing of it.
+func TestRuntimeObjectiveSaysSinceWhenItIsIdle(t *testing.T) {
+	view := &views.ObjectiveOverview{Objective: &views.Objective{Id: "ship", Outcome: "Ship it",
+		Status: views.ObjectiveStatus_OBJECTIVE_STATUS_WORKING, IdleSince: timestamppb.New(time.Now())}, Budget: &views.ObjectiveBudgetUse{}}
+	if text := describeRuntimeObjective(view, ""); !strings.Contains(text, "Idle since Today ") {
+		t.Fatalf("idle Objective:\n%s", text)
+	}
+	view.Objective.IdleSince = nil
+	if text := describeRuntimeObjective(view, ""); strings.Contains(text, "Idle since") {
+		t.Fatalf("busy Objective:\n%s", text)
 	}
 }

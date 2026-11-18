@@ -673,7 +673,7 @@ impl Stream {
         let measured = current?.checked_sub(baseline?)?;
         let remaining = ceiling.checked_sub(measured)?;
         (measured * 5 >= ceiling * 4 && remaining >= 4096).then(|| format!(
-            "SuperTag budget: {measured} of {ceiling} reported tokens; {remaining} remain. Prioritize required verification and completion using existing evidence. The limit remains in effect and usage reports can arrive late."
+            "SuperTag budget: {measured} of {ceiling} reported tokens; {remaining} remain. The limit remains in effect and usage reports can arrive late."
         ))
     }
 }

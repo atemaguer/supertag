@@ -642,10 +642,7 @@ impl Store {
             )));
         }
         let id = format!("{SESSION_PREFIX}{}", Uuid::new_v4());
-        let prompt = format!(
-            "Complete the following Work Session assignment. Return the result for the parent Session. If you need an answer to proceed, call ask with a text argument containing one question, then end this turn.\n\n{}",
-            serde_json::json!({ "title": title, "instruction": instruction }),
-        );
+        let prompt = format!("Work Session: {title}\n\n{instruction}");
         let mut child = insert_child_in(
             &mut tx,
             order,

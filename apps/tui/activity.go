@@ -108,6 +108,15 @@ func (a *app) activityKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
+// idleObjectiveLine is an idle Objective in one line: `Ship SSO · idle since Today 4:01 PM`.
+func idleObjectiveLine(idle client.IdleObjective, now time.Time) string {
+	outcome := terminalText(firstLine(idle.Outcome))
+	if outcome == "" {
+		outcome = terminalText(idle.ID)
+	}
+	return outcome + " · idle since " + timeLabel(idle.Since, now)
+}
+
 // periodWords is a period in words, as the desktop app says it: `hour`, `2 hours`, `day`.
 func periodWords(period time.Duration) string {
 	for _, unit := range []struct {
@@ -165,6 +174,12 @@ func (a *app) renderActivity() string {
 			truncate(unprompted, width),
 			faint.Render(truncate("Start rate", width)),
 			truncate(rate, width))
+		if idle := d.activity.IdleObjectives; len(idle) > 0 {
+			lines = append(lines, faint.Render(truncate("Idle Objectives", width)))
+			for _, objective := range idle {
+				lines = append(lines, truncate(idleObjectiveLine(objective, time.Now()), width))
+			}
+		}
 	}
 	lines = append(lines, "", faint.Render(truncate("esc back", width)))
 	return lipgloss.NewStyle().Padding(0, 1).Height(height).MaxHeight(height).Render(strings.Join(lines, "\n"))

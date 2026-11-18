@@ -838,10 +838,10 @@ async fn objectives_wait_on_schedules(store: &Store, host: &HostAuthority, clock
             .contains("Your last turn ended with nothing running")
     );
     finish(store, host, &turn, true).await;
-    assert_eq!(
-        store.get_objective(ALICE, "reset").await.unwrap().status(),
-        ObjectiveStatus::Blocked
-    );
+    // A second idle turn leaves it working and idle: only report_objective changes its status.
+    let idle = store.get_objective(ALICE, "reset").await.unwrap();
+    assert_eq!(idle.status(), ObjectiveStatus::Working);
+    assert!(idle.idle_since_ms.is_some());
 }
 
 async fn retiring_a_tag_cancels_its_schedules(store: &Store) {

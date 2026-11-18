@@ -152,7 +152,7 @@ pub(crate) async fn turn_memory_in(
         return Ok((false, None));
     };
     let section = if root {
-        Some(notes_section(tx, task, audience.as_deref(), writes).await?)
+        Some(notes_section(tx, task, audience.as_deref()).await?)
     } else {
         None
     };
@@ -228,7 +228,6 @@ async fn notes_section(
     tx: &mut Transaction<'_, Any>,
     task: &Task,
     audience: Option<&str>,
-    may_remember: bool,
 ) -> Result<String> {
     let notes = notes_in(tx, &task.tag_id, audience, None).await?;
     let mut lines = vec![if notes.is_empty() {
@@ -243,9 +242,6 @@ async fn notes_section(
             ""
         };
         lines.push(format!("- {}{scope}: {}", note.memory_id, note.text));
-    }
-    if may_remember {
-        lines.push("Keep notes with remember and forget: only what you can't look up again, such as preferences, corrections, decisions and their reasons, and pointers to where things live.".to_owned());
     }
     Ok(lines.join("\n"))
 }

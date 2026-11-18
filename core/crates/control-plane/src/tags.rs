@@ -95,6 +95,7 @@ pub(crate) fn tag_from_row(row: &AnyRow) -> Result<Tag> {
         start_rate: crate::start_rates::from_row(row)?,
         starts_in_window: 0,
         native_memory: vec![],
+        idle_objectives: vec![],
         volume: row
             .try_get::<Option<String>, _>("volume")?
             .unwrap_or_default(),

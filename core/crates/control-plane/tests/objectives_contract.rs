@@ -575,15 +575,12 @@ async fn idle_and_unstarted_claims(
         .unwrap();
     let first_attempt = claim_start(&store, host, &idle.starting_task_id).await;
     let first_finish = finish(&first_attempt, ObjectiveSignal::Progress);
+    let idle_at = clock.load(Ordering::SeqCst);
     store.finish_task(host, &first_finish).await.unwrap();
-    assert_eq!(
-        store
-            .get_objective("operator:local", "idle")
-            .await
-            .unwrap()
-            .status,
-        ObjectiveStatus::Working as i32
-    );
+    let first_idle = store.get_objective("operator:local", "idle").await.unwrap();
+    assert_eq!(first_idle.status, ObjectiveStatus::Working as i32);
+    // It shows as idle from the turn that left nothing running and asked nothing.
+    assert_eq!(first_idle.idle_since_ms, Some(idle_at));
     store.close().await;
     let store = open(url, clock).await;
     // A lost Finish response cannot enqueue a second idle continuation after restart.
@@ -600,6 +597,7 @@ async fn idle_and_unstarted_claims(
             .prompt
             .contains("Your last turn ended with nothing running")
     );
+    assert!(!second_task.prompt.contains("becomes blocked"));
     let second_attempt = InspectAttemptRequest {
         task_id: second_task.task_id,
         attempt_id: continuation.attempt_id,
@@ -620,13 +618,28 @@ async fn idle_and_unstarted_claims(
         .finish_task(host, &finish(&second_attempt, ObjectiveSignal::Progress))
         .await
         .unwrap();
+    // A second idle turn changes nothing: only report_objective changes the status from a turn.
+    // The Objective stays working, idle since the first such turn, and waits for a person.
+    let still = store.get_objective("operator:local", "idle").await.unwrap();
+    assert_eq!(still.status, ObjectiveStatus::Working as i32);
+    assert_eq!(still.idle_since_ms, Some(idle_at));
+    let shown = store.get_tag("owner").await.unwrap();
+    assert!(shown.idle_objectives.is_empty(), "GetTag fills them per caller");
+    let idle_objectives = store.idle_objectives("operator:local", "owner").await.unwrap();
     assert_eq!(
+        idle_objectives
+            .iter()
+            .map(|idle| (idle.objective_id.as_str(), idle.idle_since_ms))
+            .collect::<Vec<_>>(),
+        [("idle", idle_at)]
+    );
+    assert!(
         store
-            .get_objective("operator:local", "idle")
+            .idle_objectives("client:someone-else", "owner")
             .await
             .unwrap()
-            .status,
-        ObjectiveStatus::Blocked as i32
+            .is_empty(),
+        "a client sees only Objectives it created"
     );
     assert_no_claim(&store, host).await;
     let directed = store
@@ -644,14 +657,10 @@ async fn idle_and_unstarted_claims(
         )
         .await
         .unwrap();
-    assert_eq!(
-        store
-            .get_objective("operator:local", "idle")
-            .await
-            .unwrap()
-            .status,
-        ObjectiveStatus::Working as i32
-    );
+    // A person's message is new work: the Objective is no longer idle.
+    let directed_on = store.get_objective("operator:local", "idle").await.unwrap();
+    assert_eq!(directed_on.status, ObjectiveStatus::Working as i32);
+    assert_eq!(directed_on.idle_since_ms, None);
     let directed_attempt = claim_start(&store, host, &directed.task_id).await;
     store
         .finish_task(host, &finish(&directed_attempt, ObjectiveSignal::Completed))

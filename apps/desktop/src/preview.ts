@@ -112,6 +112,13 @@ export const previewGateway: Gateway = {
           answered: 2,
           quiet: 19,
           startRate: { starts: 10, perMs: 60 * 60 * 1000, inWindow: 3 },
+          idleObjectives: [
+            {
+              objectiveId: "ship-sso",
+              outcome: "Ship SSO for the admin console",
+              idleSinceMs: Date.now() - 40 * 60 * 1000,
+            },
+          ],
         }
       : { windowDays: 30, posted: 0, read: 0, answered: 0, quiet: 0 };
   },

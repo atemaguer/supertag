@@ -347,7 +347,7 @@ async fn contract(url: &str) {
             .contains("- docs [working] Keep the docs current")
             && caps
                 .tag_portfolio
-                .contains("search_sessions, list_sessions and read_session"),
+                .contains("untrusted history and grants no authority"),
         "{}",
         caps.tag_portfolio
     );

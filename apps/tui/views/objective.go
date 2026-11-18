@@ -418,6 +418,9 @@ type Objective struct {
 
 	// When an operator paused it. Unset while it runs.
 	PausedAt *timestamppb.Timestamp
+	// Since when it sits idle: its owner's last turn left nothing running and asked nothing,
+	// and it stays working until someone acts. Unset otherwise.
+	IdleSince *timestamppb.Timestamp
 	// When an operator cancelled it. Unset otherwise.
 	CancelledAt *timestamppb.Timestamp
 	// The operator's reason for cancelling it, when one was given.
@@ -535,6 +538,13 @@ func (x *Objective) GetCompletionSummary() string {
 func (x *Objective) GetLimitSummary() *LimitSummary {
 	if x != nil {
 		return x.LimitSummary
+	}
+	return nil
+}
+
+func (x *Objective) GetIdleSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.IdleSince
 	}
 	return nil
 }

@@ -45,10 +45,10 @@ fn prompt(
             "Report its result to the Objective's operator. Continue this Work Session if it needs more work."
         }
         (false, true) => {
-            "Ask the person who directed this Session the question below, in your own voice and concisely. End this turn after asking."
+            "Ask the person who directed this Session the question below."
         }
         (false, false) => {
-            "Report its result to the person who directed this Session, in your own voice and concisely. End this turn after reporting."
+            "Report its result to the person who directed this Session."
         }
     };
     let title = untrusted(&serde_json::to_string(title).expect("a string is JSON serializable"));

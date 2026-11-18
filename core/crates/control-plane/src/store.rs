@@ -102,7 +102,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 103;
+        const SCHEMA_VERSION: i64 = 104;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -302,6 +302,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0101_checkpoints_on_hosts.sql"),
                 include_str!("../migrations/sqlite/0102_tag_volume.sql"),
                 include_str!("../migrations/sqlite/0103_checkpoint_volume.sql"),
+                include_str!("../migrations/sqlite/0104_objective_idle_since.sql"),
             ]
         } else {
             [
@@ -410,6 +411,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0101_checkpoints_on_hosts.sql"),
                 include_str!("../migrations/postgresql/0102_tag_volume.sql"),
                 include_str!("../migrations/postgresql/0103_checkpoint_volume.sql"),
+                include_str!("../migrations/postgresql/0104_objective_idle_since.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -703,6 +705,7 @@ impl Store {
             start_rate,
             starts_in_window: 0,
             native_memory: vec![],
+            idle_objectives: vec![],
             volume: volume.unwrap_or_default(),
         })
     }

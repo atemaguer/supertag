@@ -2161,7 +2161,7 @@ class StartRate(_message.Message):
     def __init__(self, starts: _Optional[int] = ..., per_ms: _Optional[int] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on", "lead", "max_work_sessions", "open_work_sessions", "memory", "memory_reviewed_at_ms", "attention", "start_rate", "volume", "starts_in_window", "native_memory")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules", "execution", "name", "retired_at_ms", "runs_on", "lead", "max_work_sessions", "open_work_sessions", "memory", "memory_reviewed_at_ms", "attention", "start_rate", "volume", "starts_in_window", "native_memory", "idle_objectives")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -2183,6 +2183,7 @@ class Tag(_message.Message):
     VOLUME_FIELD_NUMBER: _ClassVar[int]
     STARTS_IN_WINDOW_FIELD_NUMBER: _ClassVar[int]
     NATIVE_MEMORY_FIELD_NUMBER: _ClassVar[int]
+    IDLE_OBJECTIVES_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -2204,7 +2205,18 @@ class Tag(_message.Message):
     volume: str
     starts_in_window: int
     native_memory: _containers.RepeatedCompositeFieldContainer[NativeMemoryStore]
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., open_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ..., memory_reviewed_at_ms: _Optional[int] = ..., attention: _Optional[_Union[AttentionSummary, _Mapping]] = ..., start_rate: _Optional[_Union[StartRate, _Mapping]] = ..., volume: _Optional[str] = ..., starts_in_window: _Optional[int] = ..., native_memory: _Optional[_Iterable[_Union[NativeMemoryStore, _Mapping]]] = ...) -> None: ...
+    idle_objectives: _containers.RepeatedCompositeFieldContainer[IdleObjective]
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., execution: _Optional[_Union[_policy_pb2.PolicyExecutionSettings, _Mapping]] = ..., name: _Optional[str] = ..., retired_at_ms: _Optional[int] = ..., runs_on: _Optional[_Iterable[str]] = ..., lead: _Optional[bool] = ..., max_work_sessions: _Optional[int] = ..., open_work_sessions: _Optional[int] = ..., memory: _Optional[bool] = ..., memory_reviewed_at_ms: _Optional[int] = ..., attention: _Optional[_Union[AttentionSummary, _Mapping]] = ..., start_rate: _Optional[_Union[StartRate, _Mapping]] = ..., volume: _Optional[str] = ..., starts_in_window: _Optional[int] = ..., native_memory: _Optional[_Iterable[_Union[NativeMemoryStore, _Mapping]]] = ..., idle_objectives: _Optional[_Iterable[_Union[IdleObjective, _Mapping]]] = ...) -> None: ...
+
+class IdleObjective(_message.Message):
+    __slots__ = ("objective_id", "outcome", "idle_since_ms")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    OUTCOME_FIELD_NUMBER: _ClassVar[int]
+    IDLE_SINCE_MS_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    outcome: str
+    idle_since_ms: int
+    def __init__(self, objective_id: _Optional[str] = ..., outcome: _Optional[str] = ..., idle_since_ms: _Optional[int] = ...) -> None: ...
 
 class AttentionSummary(_message.Message):
     __slots__ = ("posted", "read", "answered", "quiet", "window_days")
@@ -3711,7 +3723,7 @@ class RuntimeActions(_message.Message):
     def __init__(self, actions: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Objective(_message.Message):
-    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions", "completion_summary", "cancelled_at_ms", "cancellation_reason", "created_by", "notification_task_id")
+    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions", "completion_summary", "cancelled_at_ms", "cancellation_reason", "created_by", "notification_task_id", "idle_since_ms")
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -3732,6 +3744,7 @@ class Objective(_message.Message):
     CANCELLATION_REASON_FIELD_NUMBER: _ClassVar[int]
     CREATED_BY_FIELD_NUMBER: _ClassVar[int]
     NOTIFICATION_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    IDLE_SINCE_MS_FIELD_NUMBER: _ClassVar[int]
     objective_id: str
     owner_tag_id: str
     session_id: str
@@ -3752,7 +3765,8 @@ class Objective(_message.Message):
     cancellation_reason: str
     created_by: str
     notification_task_id: str
-    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., completion_summary: _Optional[str] = ..., cancelled_at_ms: _Optional[int] = ..., cancellation_reason: _Optional[str] = ..., created_by: _Optional[str] = ..., notification_task_id: _Optional[str] = ...) -> None: ...
+    idle_since_ms: int
+    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ..., completion_summary: _Optional[str] = ..., cancelled_at_ms: _Optional[int] = ..., cancellation_reason: _Optional[str] = ..., created_by: _Optional[str] = ..., notification_task_id: _Optional[str] = ..., idle_since_ms: _Optional[int] = ...) -> None: ...
 
 class Team(_message.Message):
     __slots__ = ("team_id", "name", "member_tag_ids", "max_concurrency", "revision", "created_at_ms", "updated_at_ms")

@@ -360,7 +360,7 @@ async fn create_in(
     )
     .await?;
     let prompt = format!(
-        "The Objective just started: plan the work, then start it.\n\n{outcome}\n\nA person started this Objective from a surface thread. Your replies post in that thread, and their later messages there reach you as new turns.\n\nWhen the outcome is met, call report_objective with ready_for_review or completed and a summary of the result."
+        "The Objective just started.\n\n{outcome}\n\nA person started this Objective from a surface thread. Your replies post in that thread, and their later messages there reach you as new turns.\n\nWhen the outcome is met, call report_objective with ready_for_review or completed and a summary of the result."
     );
     // Admission checks already ran above; the new Objective has no limits yet.
     let mut task = Box::pin(insert_task_with_surface(

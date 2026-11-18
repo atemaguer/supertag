@@ -797,14 +797,13 @@ async fn report_objectives(
         .finish_task(host, &finish(&idle_attempt))
         .await
         .unwrap();
-    assert_eq!(
-        store
-            .get_objective("operator:local", "objective")
-            .await
-            .unwrap()
-            .status,
-        ObjectiveStatus::Blocked as i32
-    );
+    // A second idle turn leaves it working and idle: only report_objective changes its status.
+    let objective = store
+        .get_objective("operator:local", "objective")
+        .await
+        .unwrap();
+    assert_eq!(objective.status, ObjectiveStatus::Working as i32);
+    assert!(objective.idle_since_ms.is_some());
     routed_report(store, pool, host).await;
     let parent = conversation(store).await;
     let parent_attempt = start(store, host, &parent.task_id).await;

@@ -218,8 +218,10 @@ Three rules shape what the owner can do:
 - **The Objective keeps moving or stops.** When a turn ends with nothing running and no question
   asked while the Objective is still `working`, SuperTag wakes the owner once and asks it to
   continue or to report the Objective's status. If that woken turn also ends that way, the Objective
-  becomes `blocked`. An `--ongoing` Objective is exempt: it may
-  rest until its next message.
+  stays `working` and shows "Idle since …" in `supertag describe objective`, the terminal UI's
+  Objective view, and its owner Tag's **Activity**, until a person messages it or acts on it. Only
+  the owner's `report_objective` makes it `blocked` or finished from a turn. An `--ongoing`
+  Objective is exempt: it may rest until its next message.
 
 An outstanding commit review also keeps an Objective waiting for work. When the reviewer
 records a verdict, SuperTag attaches it to the exact commit and delivers it to the lead in

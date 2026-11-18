@@ -340,6 +340,15 @@ export function attentionLine(activity: TagActivity): string {
   ].join(" · ");
 }
 
+/** An idle Objective in one line: `Ship SSO · idle since 4:01 PM`. */
+export function idleObjectiveLine(
+  idle: NonNullable<TagActivity["idleObjectives"]>[number],
+  now = Date.now(),
+): string {
+  const outcome = idle.outcome.split("\n")[0]?.trim() || idle.objectiveId;
+  return `${outcome} · idle since ${relativeTime(idle.idleSinceMs, now)}`;
+}
+
 /** The start rate in one line: `At most 10 per hour · 3 started in the last hour`. */
 export function startRateLine(rate: NonNullable<TagActivity["startRate"]>): string {
   const period = periodWords(rate.perMs);
@@ -402,6 +411,16 @@ export function ActivitySection({
           </dd>
           <dt>Start rate</dt>
           <dd>{activity.startRate ? startRateLine(activity.startRate) : "None"}</dd>
+          {activity.idleObjectives && activity.idleObjectives.length > 0 && (
+            <>
+              <dt>Idle Objectives</dt>
+              {activity.idleObjectives.map((idle) => (
+                <dd key={idle.objectiveId} title={idle.objectiveId}>
+                  {idleObjectiveLine(idle)}
+                </dd>
+              ))}
+            </>
+          )}
         </dl>
       )}
     </section>

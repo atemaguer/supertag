@@ -133,6 +133,12 @@ pub(crate) fn text(view: &ObjectiveOverview) -> String {
         // The outcome is one operator-written field: a line break in it must not add a line.
         format!("Outcome: {}", terminal_text(objective.outcome.trim())),
     ];
+    if let Some(idle) = objective.idle_since_ms {
+        lines.push(format!(
+            "Idle since {}: its owner's last turn left nothing running and asked nothing",
+            time(idle)
+        ));
+    }
     if let Some(summary) = objective
         .completion_summary
         .as_deref()
@@ -582,6 +588,20 @@ mod tests {
         ));
         assert!(text.contains("Work: 1 Session\n"));
         assert!(text.contains("Follow it: supertag watch objective"));
+    }
+
+    #[test]
+    fn an_idle_objective_says_since_when_under_its_outcome() {
+        let mut idle = view(ObjectiveStatus::Working);
+        idle.objective.as_mut().unwrap().idle_since_ms = Some(1_900_000_000_000);
+        let shown = text(&idle);
+        let lines: Vec<&str> = shown.lines().collect();
+        assert_eq!(lines[0], "Objective ship-sso: working");
+        assert!(
+            lines[2].starts_with("Idle since 2030-03-17T17:46:40.000Z"),
+            "{shown}"
+        );
+        assert!(!text(&view(ObjectiveStatus::Working)).contains("Idle since"));
     }
 
     #[test]

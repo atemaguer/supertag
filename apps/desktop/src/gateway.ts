@@ -222,6 +222,8 @@ export interface TagActivity {
   /** Checks that found nothing and posted nothing. */
   quiet: number;
   startRate?: { starts: number; perMs: number; inWindow: number };
+  /** Its working Objectives that sit idle: the owner's last turn left nothing running or asked. */
+  idleObjectives?: { objectiveId: string; outcome: string; idleSinceMs: number }[];
 }
 
 /** A Task Attempt's network log: its first requests and how many it allowed and refused. */

@@ -1707,6 +1707,15 @@ message Tag {
   uint32 starts_in_window = 7001;
   // What Worker Hosts hold of the Tag's harness-native memory, newest first; read with GetTag.
   repeated NativeMemoryStore native_memory = 7200;
+  // Its working Objectives that sit idle, which the caller may see; read with GetTag.
+  repeated IdleObjective idle_objectives = 7300;
+}
+
+// A working Objective whose owner's last turn left nothing running and asked nothing.
+message IdleObjective {
+  string objective_id = 1;
+  string outcome = 2;
+  int64 idle_since_ms = 3;
 }
 
 // A Tag's unprompted messages: the replies of turns no person asked for (Schedule fires and
@@ -2932,6 +2941,10 @@ message Objective {
   string created_by = 4100;
   // The surface Task an operator chose for the Objective's notices.
   optional string notification_task_id = 5300;
+  // Set while a working Objective sits idle: when its owner's turn last ended with nothing
+  // running and nothing asked. It stays working; only report_objective changes its status from a
+  // turn, and new work clears this.
+  optional int64 idle_since_ms = 7100;
 }
 
 message Team {

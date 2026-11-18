@@ -268,8 +268,13 @@ When a turn ends with none of those, and the Objective is still `working` and no
 
 1. The Control Plane wakes the conversation once, saying that nothing is running and nothing was
    asked, and asking the owner to continue or to call `report_objective`.
-2. When that woken turn also ends idle, the Objective becomes `blocked`. The Objective overview
-   flags it, and a message starts its next turn.
+2. When that woken turn also ends idle, nothing more happens: the Objective stays `working` with
+   `idle_since_ms` set. `describe objective` and the terminal UI's Objective view say "Idle since
+   …", and the owner Tag's **Activity** in the desktop app and the terminal UI lists it. A message
+   or new work clears it, and so does any status change.
+
+Only the owner's `report_objective` changes an Objective's status from a turn (`blocked`,
+`ready_for_review`, or `completed`); operators change it with their own commands.
 
 An Objective is idle only when all of these hold: its latest conversation turn completed or
 failed, it asked no question and waits on no approval, no turn is pending or running in any of its

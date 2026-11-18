@@ -31,6 +31,8 @@ impl Record {
         if self.value.status != status as i32 {
             self.value.status = status as i32;
             self.limits.status = domain_status(status);
+            // Idle describes a working Objective only.
+            self.value.idle_since_ms = None;
             self.changed(now_ms);
         }
     }
@@ -268,6 +270,7 @@ fn record_row(row: &AnyRow) -> Result<Record> {
             cancellation_reason: None,
             created_by: row.try_get("created_by")?,
             notification_task_id: row.try_get("notification_task_id")?,
+            idle_since_ms: row.try_get("idle_since_ms")?,
         },
         limits: limits::ObjectiveLimits {
             status: domain_status(status),
@@ -306,12 +309,13 @@ async fn get_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Record> {
 }
 
 async fn save_in(tx: &mut Transaction<'_, Any>, record: &Record) -> Result<()> {
-    sqlx::query("UPDATE supertag_v2_objectives SET status=$1, revision=$2, deadline_ms=$3, budget_limit_minor=$4, budget_currency=$5, paused_at_ms=$6, cancelled_at_ms=$7, cancellation_reason=$8, completion_summary=$9, limit_state=$10, updated_at_ms=$11, starting_task_id=$12, idle_wake_count=$14, runtime_actions=$15 WHERE objective_id=$13")
+    sqlx::query("UPDATE supertag_v2_objectives SET status=$1, revision=$2, deadline_ms=$3, budget_limit_minor=$4, budget_currency=$5, paused_at_ms=$6, cancelled_at_ms=$7, cancellation_reason=$8, completion_summary=$9, limit_state=$10, updated_at_ms=$11, starting_task_id=$12, idle_wake_count=$14, runtime_actions=$15, idle_since_ms=$16 WHERE objective_id=$13")
         .bind(record.value.status as i64).bind(record.value.revision as i64).bind(record.value.deadline_ms)
         .bind(record.value.budget_limit_minor.map(|value| value as i64)).bind(&record.value.budget_currency)
         .bind(record.value.paused_at_ms).bind(record.cancelled_at_ms).bind(&record.cancellation_reason).bind(&record.completion_summary)
         .bind(serde_json::to_string(&record.limits.state)?).bind(record.updated_at_ms).bind(&record.value.starting_task_id).bind(&record.value.objective_id).bind(record.idle_wake_count)
         .bind(serde_json::to_string(&record.value.runtime_actions.as_ref().map(|value| value.actions.as_slice()).unwrap_or_default())?)
+        .bind(record.value.idle_since_ms)
         .execute(&mut **tx).await?;
     Ok(())
 }
@@ -559,7 +563,7 @@ pub(crate) async fn create_objective_in(
     sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
             .bind(&input.owner_tag_id).bind(&session_id).bind(&input.objective_id).execute(&mut **tx).await?;
     let prompt = format!(
-        "The Objective just started: plan the work, then start it.\n\n{}\n\n{}",
+        "The Objective just started.\n\n{}\n\n{}",
         input.outcome,
         if input.ongoing {
             "This responsibility is ongoing. An operator must end it; completing an assessment does not complete the Objective."
@@ -611,6 +615,34 @@ impl Store {
     }
 
     /// Operators list every Objective; a client lists only the Objectives it created.
+    /// The Tag's working Objectives that sit idle, as `principal` may see them: an operator
+    /// sees every one, anyone else only those it created.
+    pub async fn idle_objectives(&self, principal: &str, tag_id: &str) -> Result<Vec<IdleObjective>> {
+        let creator = if principal.starts_with("operator:") {
+            ""
+        } else {
+            principal
+        };
+        let rows: Vec<(String, String, i64)> = sqlx::query_as(
+            "SELECT objective_id,outcome,idle_since_ms FROM supertag_v2_objectives
+             WHERE owner_tag_id=$1 AND status=$2 AND idle_since_ms IS NOT NULL AND ($3='' OR created_by=$3)
+             ORDER BY idle_since_ms,objective_id LIMIT 20",
+        )
+        .bind(tag_id)
+        .bind(ObjectiveStatus::Working as i64)
+        .bind(creator)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(objective_id, outcome, idle_since_ms)| IdleObjective {
+                objective_id,
+                outcome,
+                idle_since_ms,
+            })
+            .collect())
+    }
+
     pub async fn list_objectives(
         &self,
         principal: &str,
@@ -1195,6 +1227,7 @@ pub(crate) async fn objective_admission_in(
         }
         // A person's new accepted work is a fresh opportunity to make progress.
         record.idle_wake_count = 0;
+        record.value.idle_since_ms = None;
         if record.value.status == ObjectiveStatus::Blocked as i32 {
             record.change_status(ObjectiveStatus::Working, now_ms);
         }
@@ -1406,6 +1439,10 @@ pub(crate) async fn objective_finish_in(
             || crate::commit_reviews::pending_objective_in(tx, &id).await?
             || crate::schedules::objective_waits_in(tx, &id).await?
         {
+            // Waiting on a person, a child, a review, or a Schedule is not idle.
+            if record.value.idle_since_ms.take().is_some() {
+                save_in(tx, &record).await?;
+            }
             return Ok(());
         }
         if !record.value.ongoing
@@ -1420,12 +1457,16 @@ pub(crate) async fn objective_finish_in(
                     Err(StoreError::FailedPrecondition(_)) => return Ok(()),
                     Err(error) => return Err(error),
                 }
+                // An idle Objective stays working: only report_objective changes its status from
+                // a turn. The owner gets one more turn to continue or report; after that it waits,
+                // shown as idle, for a person.
+                record.value.idle_since_ms.get_or_insert(now_ms);
                 if record.idle_wake_count == 0 {
                     record.idle_wake_count = 1;
-                    internal_turn_in(tx, &record, &format!("idle:{}", task.task_id), "Your last turn ended with nothing running and nothing asked, while the Objective is still working. Continue the work, or call report_objective to report it ready_for_review, completed, or blocked. If this turn also ends that way, the Objective becomes blocked.", "idle", now_ms).await?;
-                } else {
-                    record.change_status(ObjectiveStatus::Blocked, now_ms);
+                    internal_turn_in(tx, &record, &format!("idle:{}", task.task_id), "Your last turn ended with nothing running and nothing asked, while the Objective is still working. Continue the work, or call report_objective to report it ready_for_review, completed, or blocked.", "idle", now_ms).await?;
                 }
+                save_in(tx, &record).await?;
+            } else if record.value.idle_since_ms.take().is_some() {
                 save_in(tx, &record).await?;
             }
         }

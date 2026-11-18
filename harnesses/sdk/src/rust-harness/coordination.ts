@@ -738,7 +738,7 @@ export function registerCoordinationTools(
             );
           report = { signal: reportedSignal[status], summary: trim(safeText(summary)) };
           return response(
-            "Objective status recorded. It applies when this turn ends, and your summary becomes this turn's result. Finish the turn now.",
+            "Objective status recorded. It applies when this turn ends, and your summary becomes this turn's result.",
           );
         }),
     );
@@ -756,9 +756,7 @@ export function registerCoordinationTools(
           if (pending.size || scope.hasPendingExternalApprovals?.())
             return response("This turn is waiting for an approval decision.", true);
           quiet = trim(safeText(note));
-          return response(
-            "Recorded: nothing from this turn is posted. Finish the turn now without further tool calls.",
-          );
+          return response("Recorded: nothing from this turn is posted.");
         }),
     );
   }

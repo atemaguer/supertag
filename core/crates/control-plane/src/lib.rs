@@ -388,6 +388,7 @@ impl operator_server::Operator for ControlPlane {
         self.store.ensure_client_tag(&principal, &tag_id).await?;
         let mut tag = self.store.get_tag(&tag_id).await?;
         tag.native_memory = self.store.native_memory_stores(&principal, &tag_id).await?;
+        tag.idle_objectives = self.store.idle_objectives(&principal, &tag_id).await?;
         Ok(Response::new(tag))
     }
 

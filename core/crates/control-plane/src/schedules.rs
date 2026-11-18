@@ -1120,7 +1120,7 @@ async fn queue_turn_in(
     let task = Box::pin(insert_task(tx, order, &schedule.tag_id, &session, prompt)).await?;
     crate::objectives::objective_link_task_in(tx, &task).await?;
     // A planned continuation is a fresh opportunity to make progress, like a person's message.
-    sqlx::query("UPDATE supertag_v2_objectives SET idle_wake_count=0 WHERE objective_id IN (SELECT objective_id FROM supertag_v2_objective_sessions WHERE tag_id=$1 AND session_id=$2)")
+    sqlx::query("UPDATE supertag_v2_objectives SET idle_wake_count=0, idle_since_ms=NULL WHERE objective_id IN (SELECT objective_id FROM supertag_v2_objective_sessions WHERE tag_id=$1 AND session_id=$2)")
         .bind(&task.tag_id).bind(&task.session_id).execute(&mut **tx).await?;
     let operation = format!("schedule/{}/{due}", schedule.schedule_id);
     match &schedule.audience {
