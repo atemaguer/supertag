@@ -624,12 +624,10 @@ spec:
             cls.host.kill()
         cls.host_log.close()
 
-    down = Journeys.__dict__["down"]
-    environment = Journeys.__dict__["environment"]
-    cli = Journeys.__dict__["cli"]
-    until = Journeys.until
-    finished = Journeys.finished
-    landing = Journeys.landing
+    # The journeys' own stack helpers, wherever in their class hierarchy they are defined.
+    down, environment, cli, until, finished, landing = (
+        next(vars(base)[name] for base in Journeys.__mro__ if name in vars(base))
+        for name in ("down", "environment", "cli", "until", "finished", "landing"))
 
     def test_a_local_vm_task_runs_commands_in_its_container_and_lands_its_session_branch(self):
         task_id = self.cli("task", "submit", "--tag", "vm", "--session", "journey-vm",
