@@ -19,6 +19,13 @@ a queued Task only to a host that:
 4. maps the Task's Workspace and any Workspace Volume it copies;
 5. is ready, not draining, and has a free slot for that harness.
 
+A Session stays warm for 5 minutes on the Worker Host its last Task finished on. For its first
+2 seconds, a new Task of that Session is left for the warm host when that host can take it: it is
+waiting to claim and may run the Task, or, seen from another Control Plane replica, it is ready
+with a free slot, bound to the Tag, and serves the Task's harness. A busy, draining, or offline
+warm host is not waited for. Warm Sessions are recorded in the database, so every replica honours
+them and they survive a Control Plane restart.
+
 `supertag placement explain TASK_ID` reports which condition keeps a Task queued, and
 `supertag describe task TASK_ID` includes the same explanation as `waiting_for`. Its
 `requirement` is `worker-host`, `labels:NAMES`, or, when the Task's harness cannot run what the

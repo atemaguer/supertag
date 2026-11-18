@@ -234,25 +234,9 @@ pub(crate) async fn holder_wait_in(
     if now >= until {
         return Ok(None);
     }
-    let bound: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM supertag_v2_hosts h WHERE h.host_id=$1 AND h.revoked_at_ms IS NULL AND (h.all_tags=1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$2))",
-    )
-    .bind(&holder)
-    .bind(&task.tag_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if bound == 0 {
-        return Ok(None);
-    }
-    let status = crate::store::host_status_in(tx, &holder, now).await?;
-    let harness = task.harness_kind();
-    let serves = status
-        .harnesses
-        .iter()
-        .any(|lane| harness == HarnessKind::Unspecified || lane.harness_kind() == harness)
-        || (status.harnesses.is_empty()
-            && (harness == HarnessKind::Unspecified || status.harness_kind() == harness));
-    Ok((status.phase() == HostPhase::Ready && serves).then_some((holder, until)))
+    Ok(crate::placement::ready_for_in(tx, &holder, task, now)
+        .await?
+        .then_some((holder, until)))
 }
 
 pub(crate) async fn finish_in(

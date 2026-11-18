@@ -112,11 +112,15 @@ async fn exercise(database: &str) {
 }
 
 async fn send(store: &Store, text: &str) -> String {
+    send_to(store, "coder", text).await
+}
+
+async fn send_to(store: &Store, tag: &str, text: &str) -> String {
     store
         .send_message(
             "operator:alice",
             &SendMessageRequest {
-                tag_id: "coder".into(),
+                tag_id: tag.into(),
                 text: text.into(),
                 operation_id: text.into(),
                 ..Default::default()
@@ -342,12 +346,202 @@ async fn exercise_sandboxed(database: &str) {
     store.close().await;
 }
 
+async fn ready(
+    store: &Store,
+    host: &supertag_control_plane::HostAuthority,
+    sequence: u64,
+    free: u32,
+) {
+    store
+        .report_host(
+            host,
+            &ReportHostRequest {
+                sequence,
+                capacity: 1,
+                available_slots: free,
+                readiness: HostReadiness::Ready as i32,
+                reason: HostReadinessReason::Unspecified as i32,
+                harness_kind: HarnessKind::Codex as i32,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+}
+
+/// Claims and runs the next Task with no wait, on `store`, and finishes it there.
+async fn run_one(
+    store: &Store,
+    host: &supertag_control_plane::HostAuthority,
+    operation: &str,
+) -> String {
+    let assignment = store
+        .claim_task_waiting(
+            host,
+            &codex(operation, 0, HarnessKind::Codex),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap()
+        .unwrap_or_else(|| panic!("{operation} claimed no Task"));
+    let task = assignment.task.as_ref().unwrap().task_id.clone();
+    store
+        .start_task(
+            host,
+            &StartTaskRequest {
+                task_id: task.clone(),
+                attempt_id: assignment.attempt_id.clone(),
+                lease_token: assignment.lease_token.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .finish_task(
+            host,
+            &FinishTaskRequest {
+                task_id: task.clone(),
+                attempt_id: assignment.attempt_id.clone(),
+                lease_token: assignment.lease_token.clone(),
+                result: "Done".into(),
+                succeeded: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    task
+}
+
+/// Warm leases are in the database, so every Control Plane replica honours them and they survive
+/// a restart. A replica that does not hold the warm host's waiting claim judges it by its
+/// recorded readiness: a ready warm host gets its Session's next Task first for 2 s; a busy one
+/// is not waited for; after 5 minutes the Session is no longer warm.
+async fn exercise_replicas(database: &str) {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicI64, Ordering},
+    };
+    // Task acceptance is stamped by the wall clock, so the stores' clock runs at wall time plus
+    // an offset the test moves.
+    let offset = Arc::new(AtomicI64::new(0));
+    let clock = |offset: &Arc<AtomicI64>| {
+        let offset = offset.clone();
+        move || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64
+                + offset.load(Ordering::SeqCst)
+        }
+    };
+    let first = Store::open(database)
+        .await
+        .unwrap()
+        .with_execution_clock(clock(&offset));
+    let second = Store::open(database)
+        .await
+        .unwrap()
+        .with_execution_clock(clock(&offset));
+    first
+        .put_tag_configured("replica-coder", "Code", vec![], None, HarnessKind::Codex)
+        .await
+        .unwrap();
+    let warm = support::register_host(&first, "replica-warm").await;
+    let other = support::register_host(&first, "replica-other").await;
+    let sequence = std::cell::Cell::new(0);
+    let next = || {
+        sequence.set(sequence.get() + 1);
+        sequence.get()
+    };
+    let both_ready = |store: &Store| {
+        let at = next();
+        let (warm, other) = (warm.clone(), other.clone());
+        let store = store.clone();
+        async move {
+            ready(&store, &warm, at, 1).await;
+            ready(&store, &other, at, 1).await;
+        }
+    };
+    both_ready(&first).await;
+
+    // The Session finishes on the warm host through the first replica.
+    send_to(&first, "replica-coder", "Replica turn one").await;
+    run_one(&first, &warm, "replica-warm-1").await;
+
+    // Through the second replica, which holds no claim of the warm host, a ready warm host still
+    // gets the next Task first; 2 s after the Task was sent, another host takes it.
+    let turn = send_to(&second, "replica-coder", "Replica turn two").await;
+    assert!(
+        second
+            .claim_task_waiting(
+                &other,
+                &codex("replica-other-1", 0, HarnessKind::Codex),
+                Duration::ZERO
+            )
+            .await
+            .unwrap()
+            .is_none(),
+        "another replica gave a warm Session's Task away at once"
+    );
+    offset.store(2_001, Ordering::SeqCst);
+    assert_eq!(run_one(&second, &other, "replica-other-2").await, turn);
+    offset.store(0, Ordering::SeqCst);
+
+    // The Session is now warm on the other host. Busy, it is not waited for.
+    let at = next();
+    ready(&first, &other, at, 0).await;
+    ready(&first, &warm, at, 1).await;
+    let turn = send_to(&first, "replica-coder", "Replica turn three").await;
+    assert_eq!(run_one(&first, &warm, "replica-warm-2").await, turn);
+
+    // A restarted replica still honours the lease the Session's last finish recorded.
+    first.close().await;
+    let restarted = Store::open(database)
+        .await
+        .unwrap()
+        .with_execution_clock(clock(&offset));
+    both_ready(&restarted).await;
+    send_to(&restarted, "replica-coder", "Replica turn four").await;
+    assert!(
+        restarted
+            .claim_task_waiting(
+                &other,
+                &codex("replica-other-3", 0, HarnessKind::Codex),
+                Duration::ZERO
+            )
+            .await
+            .unwrap()
+            .is_none(),
+        "a restarted replica forgot the warm lease"
+    );
+
+    // A lease more than five minutes old is not honoured: the warm host finishes turn four six
+    // minutes ago, and turn five, sent now, goes to whichever host claims it.
+    offset.store(-6 * 60 * 1000, Ordering::SeqCst);
+    both_ready(&restarted).await;
+    run_one(&restarted, &warm, "replica-warm-3").await;
+    offset.store(0, Ordering::SeqCst);
+    both_ready(&restarted).await;
+    let turn = send_to(&restarted, "replica-coder", "Replica turn five").await;
+    assert_eq!(run_one(&second, &other, "replica-other-4").await, turn);
+    second.close().await;
+    restarted.close().await;
+}
+
 #[tokio::test]
 async fn sqlite_claim_wait_contract() {
     let local = tokio::task::LocalSet::new();
     local.run_until(exercise("sqlite::memory:")).await;
     local.run_until(exercise_sticky("sqlite::memory:")).await;
     local.run_until(exercise_sandboxed("sqlite::memory:")).await;
+    // Replicas share a file: an in-memory database is private to one Store.
+    let directory = tempfile::tempdir().unwrap();
+    let file = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("replicas.db").display()
+    );
+    local.run_until(exercise_replicas(&file)).await;
 }
 
 #[tokio::test]
@@ -371,6 +565,7 @@ async fn postgres_claim_wait_contract() {
                 exercise(url.as_str()).await;
                 exercise_sticky(url.as_str()).await;
                 exercise_sandboxed(url.as_str()).await;
+                exercise_replicas(url.as_str()).await;
             })
             .await
         })

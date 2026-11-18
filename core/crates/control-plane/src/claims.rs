@@ -12,7 +12,7 @@ use tokio::time::Instant;
 
 use crate::{
     HostAuthority, Store,
-    store::{ClaimScope, Result, Sticky},
+    store::{ClaimScope, Result},
 };
 
 /// The longest a claim is held, inside the API tier's 10-second call budget.
@@ -24,17 +24,12 @@ const CHECK: Duration = Duration::from_millis(250);
 /// The longest a held claim goes without claiming again, for the sweeps a claim runs.
 const RECLAIM: Duration = Duration::from_secs(1);
 
-/// How long a Session stays warm on the host its last Task finished on.
-const WARM_MS: i64 = 5 * 60 * 1000;
-
 /// The claims held now: how many per host principal, and what each can run.
 #[derive(Default)]
 pub(crate) struct HeldClaims {
     held: Mutex<HashMap<String, usize>>,
     scopes: Mutex<HashMap<u64, (String, ClaimScope)>>,
     next: Mutex<u64>,
-    /// Each warm Session's host and until when, by Tag and Session.
-    warm: Mutex<HashMap<(String, String), (String, i64)>>,
 }
 
 struct Held<'a> {
@@ -70,38 +65,19 @@ impl Drop for Held<'_> {
 }
 
 impl HeldClaims {
-    /// The Session's last Task finished on this host: its next Task is offered here first.
-    pub(crate) fn warm(&self, tag_id: &str, session_id: &str, principal: &str, now: i64) {
-        let mut warm = self.warm.lock().unwrap();
-        warm.retain(|_, (_, until)| *until > now);
-        warm.insert(
-            (tag_id.to_owned(), session_id.to_owned()),
-            (principal.to_owned(), now + WARM_MS),
-        );
-    }
-
-    /// The warm Sessions of other hosts that wait to claim now, with what their waiting claims
-    /// can run.
-    pub(crate) fn sticky(&self, principal: &str, now: i64) -> Vec<Sticky> {
-        let scopes = self.scopes.lock().unwrap();
-        self.warm
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(_, (host, until))| host != principal && *until > now)
-            .filter_map(|((tag_id, session_id), (host, _))| {
-                let waiting: Vec<ClaimScope> = scopes
-                    .values()
-                    .filter(|(held_by, _)| held_by == host)
-                    .map(|(_, scope)| scope.clone())
-                    .collect();
-                (!waiting.is_empty()).then(|| Sticky {
-                    tag_id: tag_id.clone(),
-                    session_id: session_id.clone(),
-                    scopes: waiting,
-                })
-            })
-            .collect()
+    /// What the claims other hosts hold here now can run, by Worker Host ID. A warm Session's
+    /// Task is left for its host while one of these admits it.
+    pub(crate) fn waiting(&self, principal: &str) -> HashMap<String, Vec<ClaimScope>> {
+        let mut waiting: HashMap<String, Vec<ClaimScope>> = HashMap::new();
+        for (held_by, scope) in self.scopes.lock().unwrap().values() {
+            if held_by != principal {
+                waiting
+                    .entry(scope.host_id.clone())
+                    .or_default()
+                    .push(scope.clone());
+            }
+        }
+        waiting
     }
 
     /// The waiting claims of lanes that run commands in a sandbox away from their Worker Host,

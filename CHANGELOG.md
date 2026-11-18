@@ -215,6 +215,11 @@ within the pre-1.0 compatibility policy described in
 - A Worker Host that runs Cursor's commands without a sandbox warns as it starts that Cursor's API
   key stays readable to them: unlike Claude Code's and OpenCode's, it can't go behind the
   provider proxy.
+- A Session's next Task goes first to the Worker Host its last Task finished on through every
+  Control Plane replica, and after a restart: warm Sessions are recorded in the database
+  (migration 0114) instead of one process's memory. A replica that does not hold the warm host's
+  waiting claim leaves the Task to it for 2 seconds when that host is ready with a free slot for
+  the Task's harness.
 - `supertag up` hands each Worker Host its harness's provider keys and tokens in a private file the
   host reads and deletes as it starts, instead of in its environment, and a Linux Worker Host marks
   itself non-dumpable. This keeps keys out of `ps eww`, `/proc/<pid>/environ`, and core dumps: it

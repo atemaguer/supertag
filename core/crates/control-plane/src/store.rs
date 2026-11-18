@@ -22,8 +22,8 @@ mod replica_tests;
 #[path = "slack_threads.rs"]
 mod slack_threads;
 mod sqlite_files;
+pub(crate) use authority::ClaimScope;
 pub(crate) use authority::lease_is_live;
-pub(crate) use authority::{ClaimScope, Sticky};
 pub use enrollments::Role;
 pub(crate) use enrollments::{client_tags_in, enrollee_name};
 pub(crate) use execution::lane_requirement;
@@ -103,7 +103,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 113;
+        const SCHEMA_VERSION: i64 = 114;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -335,6 +335,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0111_native_memory_garbage.sql"),
                 include_str!("../migrations/sqlite/0112_native_memory_pending_objects.sql"),
                 include_str!("../migrations/sqlite/0113_attempt_finalization.sql"),
+                include_str!("../migrations/sqlite/0114_warm_sessions.sql"),
             ]
         } else {
             [
@@ -453,6 +454,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0111_native_memory_garbage.sql"),
                 include_str!("../migrations/postgresql/0112_native_memory_pending_objects.sql"),
                 include_str!("../migrations/postgresql/0113_attempt_finalization.sql"),
+                include_str!("../migrations/postgresql/0114_warm_sessions.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1161,10 +1163,10 @@ impl Store {
             contracts,
         };
         *claimed_scope = Some(scope.clone());
-        let sticky = self.live.claims.sticky(&host.principal, now);
+        let waiting = self.live.claims.waiting(&host.principal);
         let sandboxed = self.live.claims.sandboxed();
         let Some((id, attempt_execution)) =
-            authority::claim_candidate(&mut transaction, now, &scope, (&sticky, &sandboxed))
+            authority::claim_candidate(&mut transaction, now, &scope, (&waiting, &sandboxed))
                 .await?
         else {
             // Commit maintenance transitions. An empty poll retains no claim receipt.
@@ -1582,15 +1584,10 @@ impl Store {
         if state == TaskState::Running {
             supertag_protocol::crash_point("control-plane.finish", "before-commit");
         }
+        // The Session's next Task is offered to this host first for a while, by every replica.
+        authority::warm_in(&mut transaction, &task, host.id(), self.execution_now_ms()).await?;
         transaction.commit().await?;
         self.text_finished(&input.task_id);
-        // The Session's next Task is offered to this host first for a while.
-        self.live.claims.warm(
-            &task.tag_id,
-            &task.session_id,
-            &host.principal,
-            self.execution_now_ms(),
-        );
         Ok(task)
     }
 

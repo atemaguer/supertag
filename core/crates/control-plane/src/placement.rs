@@ -753,6 +753,35 @@ impl Store {
     }
 }
 
+/// Whether `host_id` could take `task` now by its recorded status: ready (connected, with a free
+/// slot, not draining), bound to the Task's Tag, and running its harness.
+pub(crate) async fn ready_for_in(
+    tx: &mut Transaction<'_, Any>,
+    host_id: &str,
+    task: &Task,
+    now: i64,
+) -> Result<bool> {
+    let bound: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_hosts h WHERE h.host_id=$1 AND h.revoked_at_ms IS NULL AND (h.all_tags=1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$2))",
+    )
+    .bind(host_id)
+    .bind(&task.tag_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if bound == 0 {
+        return Ok(false);
+    }
+    let status = crate::store::host_status_in(tx, host_id, now).await?;
+    let harness = task.harness_kind();
+    let serves = status
+        .harnesses
+        .iter()
+        .any(|lane| harness == HarnessKind::Unspecified || lane.harness_kind() == harness)
+        || (status.harnesses.is_empty()
+            && (harness == HarnessKind::Unspecified || status.harness_kind() == harness));
+    Ok(status.phase() == HostPhase::Ready && serves)
+}
+
 #[tonic::async_trait]
 impl placement_server::Placement for ControlPlane {
     async fn set_tag_runs_on(

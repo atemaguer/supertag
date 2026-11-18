@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -447,17 +447,36 @@ pub(crate) struct ClaimScope {
     pub(crate) contracts: Vec<supertag_protocol::v2::ContextContract>,
 }
 
-/// A Session whose last Task finished on another host that is waiting to claim now: a new Task
-/// of it is left for that host for a moment, when that host can run it.
-pub(crate) struct Sticky {
-    pub(crate) tag_id: String,
-    pub(crate) session_id: String,
-    /// What each of that host's waiting claims can run.
-    pub(crate) scopes: Vec<ClaimScope>,
-}
-
+/// How long a Session stays warm on the host its last Task finished on.
+const WARM_MS: i64 = 5 * 60 * 1000;
 /// How long a new Task of a warm Session is left for its warm host.
 const STICKY_MS: i64 = 2_000;
+
+/// Records that `task`'s Session is warm on `host_id`, the host it just finished on, and drops
+/// leases that have run out.
+pub(crate) async fn warm_in(
+    transaction: &mut Transaction<'_, Any>,
+    task: &Task,
+    host_id: &str,
+    now: i64,
+) -> Result<()> {
+    sqlx::query("DELETE FROM supertag_v2_warm_sessions WHERE warm_until_ms <= $1")
+        .bind(now)
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query(
+        "INSERT INTO supertag_v2_warm_sessions (tag_id,session_id,host_id,warm_until_ms)
+         VALUES ($1,$2,$3,$4) ON CONFLICT(tag_id,session_id)
+         DO UPDATE SET host_id=excluded.host_id, warm_until_ms=excluded.warm_until_ms",
+    )
+    .bind(&task.tag_id)
+    .bind(&task.session_id)
+    .bind(host_id)
+    .bind(now + WARM_MS)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
 
 /// A host's labels and its Tags' required labels, read once per claim.
 struct Placement {
@@ -557,7 +576,7 @@ pub(super) async fn claim_candidate(
     transaction: &mut Transaction<'_, Any>,
     now: i64,
     scope: &ClaimScope,
-    (sticky, sandboxed): (&[Sticky], &[ClaimScope]),
+    (waiting, sandboxed): (&HashMap<String, Vec<ClaimScope>>, &[ClaimScope]),
 ) -> Result<Option<(String, AttemptExecutionSelection)>> {
     let mut placement = scope.placement(transaction).await?;
     let mut after = 0_i64;
@@ -578,7 +597,8 @@ pub(super) async fn claim_candidate(
             else {
                 continue;
             };
-            if left_for_warm_host(transaction, now, &task, accepted_order, sticky).await? {
+            if left_for_warm_host(transaction, now, scope, (&task, accepted_order), waiting).await?
+            {
                 continue;
             }
             // A local Workspace's Session continues only on the host holding its last delivery.
@@ -608,30 +628,41 @@ pub(super) async fn claim_candidate(
     }
 }
 
-/// Whether a new Task of a warm Session is left, for a moment, to the host it last ran on. That
-/// host is waiting to claim, so it takes the Task at once, and only if it may run it.
+/// Whether a new Task of a warm Session is left, for a moment, to the host it last ran on.
+/// When that host's waiting claims are held by this replica, it is left only if one of them may
+/// run the Task. A claim held by another replica, or a lease from before a restart, is judged by
+/// the host's recorded status: ready with a free slot, bound to the Tag, and running the Task's
+/// harness. A busy, draining, or gone warm host is not waited for.
 async fn left_for_warm_host(
     transaction: &mut Transaction<'_, Any>,
     now: i64,
-    task: &Task,
-    accepted_order: i64,
-    sticky: &[Sticky],
+    claimer: &ClaimScope,
+    (task, accepted_order): (&Task, i64),
+    waiting: &HashMap<String, Vec<ClaimScope>>,
 ) -> Result<bool> {
-    let Some(warm) = sticky
-        .iter()
-        .find(|warm| warm.tag_id == task.tag_id && warm.session_id == task.session_id)
+    let Some(row) = sqlx::query(
+        "SELECT w.host_id,t.accepted_at_ms FROM supertag_v2_warm_sessions w
+         JOIN supertag_v2_tasks t ON t.task_id=$3
+         WHERE w.tag_id=$1 AND w.session_id=$2 AND w.warm_until_ms>$4",
+    )
+    .bind(&task.tag_id)
+    .bind(&task.session_id)
+    .bind(&task.task_id)
+    .bind(now)
+    .fetch_optional(&mut **transaction)
+    .await?
     else {
         return Ok(false);
     };
-    let accepted_at: Option<i64> =
-        sqlx::query_scalar("SELECT accepted_at_ms FROM supertag_v2_tasks WHERE task_id=$1")
-            .bind(&task.task_id)
-            .fetch_one(&mut **transaction)
-            .await?;
-    if accepted_at.is_none_or(|at| at + STICKY_MS <= now) {
+    let warm: String = row.try_get("host_id")?;
+    let accepted_at: Option<i64> = row.try_get("accepted_at_ms")?;
+    if warm == claimer.host_id || accepted_at.is_none_or(|at| at + STICKY_MS <= now) {
         return Ok(false);
     }
-    any_admits(transaction, now, task, accepted_order, &warm.scopes).await
+    match waiting.get(&warm) {
+        Some(scopes) => any_admits(transaction, now, task, accepted_order, scopes).await,
+        None => crate::placement::ready_for_in(transaction, &warm, task, now).await,
+    }
 }
 
 /// Whether a Task that runs commands is left to a sandboxed lane waiting to claim now, rather
