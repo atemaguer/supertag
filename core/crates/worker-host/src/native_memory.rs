@@ -571,7 +571,13 @@ mod tests {
     #[test]
     fn a_harness_git_repository_never_merges() -> Result<()> {
         let state = tempfile::tempdir()?;
-        let turn = Prepared::prepare(state.path(), "tag", "codex", "attempt-g", &grant(0))?;
+        let turn = Prepared::prepare(
+            (state.path(), state.path()),
+            "tag",
+            "codex",
+            "attempt-g",
+            &grant(0),
+        )?;
         let work = turn.working_directory();
         fs::create_dir_all(work.join(".git/objects"))?;
         fs::write(work.join(".git/HEAD"), "ref: refs/heads/main")?;
@@ -579,7 +585,8 @@ mod tests {
         fs::write(work.join("extensions/ad_hoc/notes/region.md"), "eu-north-1")?;
         let summary = turn.finish()?;
         assert_eq!(summary.files, 1);
-        let current = state.path().join("native-memory/tag/codex/shared/current");
+        let current = crate::checkpoints::tag_directory(state.path(), "tag")
+            .join("native-memory/codex/shared/current");
         assert!(current.join("extensions/ad_hoc/notes/region.md").is_file());
         assert!(!current.join(".git").exists());
         Ok(())

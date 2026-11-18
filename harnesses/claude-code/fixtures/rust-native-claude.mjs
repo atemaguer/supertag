@@ -857,6 +857,9 @@ async function turn(message) {
     const offered = (arg("--tools") ?? "").split(",").filter(Boolean);
     if (offered.some((tool) => !["WebFetch", "WebSearch"].includes(tool)))
       throw new Error(`Built-in tools were offered: ${offered}`);
+    // Nor native memory: its folder is on the host.
+    if (process.env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE)
+      throw new Error("Native memory reached a remote Workspace");
     if (await hook("Bash", { command: "echo host" })) throw new Error("Bash was admitted");
     const metadata = { mcp_server: { name: "workspace", source: "sdk" } };
     const input = { command: "echo ran > command-output.txt" };

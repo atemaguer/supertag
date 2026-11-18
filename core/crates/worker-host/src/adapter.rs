@@ -545,7 +545,13 @@ async fn run(
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
     ensure!(assignment.task.is_some(), "assignment is missing its Task");
-    let native_memory = prepare_native_memory(options, &assignment, &coordination).await;
+    let native_memory = prepare_native_memory(
+        options,
+        &assignment,
+        &coordination,
+        remote_workspace.is_some(),
+    )
+    .await;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let bootstrap = AdapterBootstrap {
         endpoint: format!("http://{}", listener.local_addr()?),
@@ -671,7 +677,13 @@ async fn prepare_native_memory(
     options: &HostOptions,
     assignment: &Assignment,
     coordination: &CoordinationClients,
+    remote: bool,
 ) -> Option<crate::native_memory::Prepared> {
+    // A remote Workspace keeps every file and command tool in its sandbox; the memory folder is
+    // on this host, so a remote turn keeps no native memory.
+    if remote {
+        return None;
+    }
     let grant = assignment.native_memory.clone()?;
     let harness = crate::native_memory::harness_directory(options.harness)?;
     let tag = assignment.task.as_ref()?.tag_id.clone();

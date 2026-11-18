@@ -855,6 +855,17 @@ it("runs commands in a remote Workspace through its sandbox, with no built-in to
   await expect(readFile(join(run.workspace, "command-output.txt"))).rejects.toThrow();
 }, 30000);
 
+it("keeps no native memory in a remote Workspace, even when handed a memory directory", async () => {
+  // The memory folder is on the Worker Host, and a remote turn runs nothing there.
+  const run = await invoke({
+    prompt: "remote-command",
+    actions: ["files:read", "files:write", "commands:execute"],
+    remoteWorkspace: true,
+    nativeMemory: true,
+  });
+  expect(run.completions[0]?.succeeded, run.completions[0]?.result).toBe(true);
+}, 30000);
+
 it("refuses web actions in a remote Workspace, which would run on the Worker Host", async () => {
   for (const action of ["web:fetch", "web:search"]) {
     const refused = await invoke({

@@ -593,9 +593,14 @@ export async function runAdapter(
       nativeSessionId: () => nativeSessionId,
       hasPendingExternalApprovals: mcp.hasPendingApprovals,
     });
-    const { env, cwd, memory } = await nativeEnvironment(environment, task.outputPolicy?.directory);
-    // Claude Code keeps its memories with its own file tools. A Task whose actions admit none of
-    // them (read-only, or a remote Workspace) still gets them, confined to the memory directory.
+    const native = await nativeEnvironment(environment, task.outputPolicy?.directory);
+    const { env, cwd } = native;
+    // A remote Workspace runs nothing on this host, and the memory folder is on this host, so a
+    // remote turn keeps no native memory; the Worker Host grants none, and this holds if it did.
+    const memory = remote ? undefined : native.memory;
+    if (remote) delete env["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"];
+    // Claude Code keeps its memories with its own file tools. A read-only Task, whose actions
+    // admit none of them, still gets them, confined to the memory directory.
     const memoryOnly = new Set(
       memory ? ["Read", "Write", "Edit"].filter((tool) => !tools.includes(tool)) : [],
     );

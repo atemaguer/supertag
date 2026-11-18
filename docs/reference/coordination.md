@@ -682,8 +682,9 @@ example, is a folder of Markdown files with a `MEMORY.md` index, which Claude Co
 start of each turn and updates with its file tools. A Tag that keeps memory keeps its harness's
 memory too, beside its [notes](#memory), across Tasks:
 
-- **Where it lives.** On the Worker Host that ran the turn, in its artifact storage, which every
-  lane of the host shares, at `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/current`, beside
+- **Where it lives.** On the Worker Host that ran the turn, in its artifact storage
+  (`--artifact-directory`, by default `artifacts` in its state directory), which every lane of the
+  host shares, at `tags/<SHA-256 of TAG>/native-memory/HARNESS/SCOPE/current`, beside
   the Tag's Session checkpoints. The Control Plane never holds the files, only a record of what
   each host holds: the revision, file count, size, and a digest.
 - **Who shares it.** It follows the audience rule for notes: one store for the Tag's shared turns
@@ -709,9 +710,12 @@ Claude Code and Codex keep harness memory this way:
   extra model calls at startup, stay off, so a note is found by searching, not added to the
   summary. Codex's git repository inside the folder is not kept.
 
-OpenCode and Cursor keep no memory of their own on the Worker Host.
+OpenCode and Cursor keep no memory of their own on the Worker Host. A turn in a remote Workspace
+(E2B or Modal) keeps no harness memory either: the memory folder is on the Worker Host, and a
+remote turn runs nothing there.
 
-`supertag describe tag` lists the copies Worker Hosts hold (`native_memory`), and `supertag delete memory --native TAG` drops all of them: each host deletes
+`supertag describe tag` lists the copies Worker Hosts hold (`native_memory`), and
+`supertag delete memory --native TAG` drops all of them: each host deletes
 its copies before it next runs one of the Tag's Tasks. A Tag with `memory: false` keeps no harness
 memory either.
 
