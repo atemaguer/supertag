@@ -34,7 +34,7 @@ pub struct InitArgs {
     state_directory: Option<PathBuf>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Found {
     ClaudeCode,
     Codex,
@@ -69,8 +69,7 @@ enum Commands {
     LocalVm,
     /// On this machine, as the operator (`allow-unsandboxed-commands`).
     Unsandboxed,
-    /// Neither: Codex sandboxes its own, and another harness's Tasks that run commands wait for
-    /// a host that may run them.
+    /// Neither: Codex sandboxes its own, and another harness's lead gets no commands:execute.
     Unset,
 }
 
@@ -681,22 +680,18 @@ fn answers(
         (Some(runtime), Some(prompter)) => {
             let name = harness.harness();
             outln!(
-                "{name} has no sandbox of its own. SuperTag can run its commands and file tools in a container on {runtime} (local-vm), with no network and none of your files but the Workspace."
+                "{name} has no sandbox of its own. SuperTag can run its commands and file tools in a container on {runtime} (local-vm), with no network and none of your files but the Workspace. The first Task builds the container image, which takes a few minutes."
             );
-            if prompter.confirm(&format!("Run {name}'s Tasks in local-vm containers?"), true)? {
+            if prompter.confirm(
+                &format!("Run {name}'s Tasks in local-vm containers?"),
+                false,
+            )? {
                 Commands::LocalVm
             } else {
                 unsandboxed(harness, Some(prompter))?
             }
         }
-        (Some(runtime), None) => {
-            outln!(
-                "  Runs {}'s commands and file tools in containers on {runtime} (environment: local-vm in supertag.yaml). The first Task builds the container image, which takes a few minutes.",
-                harness.harness()
-            );
-            Commands::LocalVm
-        }
-        (None, prompter) => unsandboxed(harness, prompter)?,
+        (_, prompter) => unsandboxed(harness, prompter)?,
     };
     let workspace = match ask.as_deref_mut() {
         None => repository.name.clone(),
@@ -731,15 +726,18 @@ fn answers(
 /// Whether a harness without a container runs commands on this machine, unsandboxed. Codex
 /// sandboxes its own. The suggestion is local-vm containers; running commands without a sandbox
 /// takes an explicit yes, which `--yes` never gives.
+/// How to let a harness without a sandbox run commands after setup.
+const ENABLE_COMMANDS: &str = "To let it run commands later, see https://github.com/atemaguer/supertag/blob/main/docs/operations/cli.md#let-the-lead-run-commands";
+
 fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
     Ok(match (harness, ask) {
         (Found::ClaudeCode | Found::Opencode | Found::Cursor, Some(prompter)) => {
             let name = harness.harness();
             outln!(
-                "{name} has no sandbox of its own, so SuperTag suggests running its commands in local-vm containers: with Docker running, set environment: local-vm on its host in supertag.yaml. Codex sandboxes its commands."
+                "{name} has no sandbox of its own, so by default the lead Tag reads and edits files in your repository's checkout but runs no commands. Codex sandboxes its commands."
             );
             if prompter.confirm(
-                &format!("Allow {name} to run commands without a sandbox instead?"),
+                &format!("Allow {name} to run commands without a sandbox?"),
                 false,
             )? {
                 outln!("  {}", supertag_worker_host::unsandboxed_caveat(name));
@@ -750,15 +748,13 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
                 }
                 Commands::Unsandboxed
             } else {
-                outln!(
-                    "  Tasks that run commands will wait for a host that can run them. Set environment: local-vm, or add allow-unsandboxed-commands, on its host in supertag.yaml, then run supertag up."
-                );
+                outln!("  {ENABLE_COMMANDS}");
                 Commands::Unset
             }
         }
         (Found::ClaudeCode | Found::Opencode | Found::Cursor, None) => {
             outln!(
-                "  {} has no sandbox of its own, and no Docker is running for local-vm containers, so its Tasks that run commands will wait. Start Docker and set environment: local-vm on its host in supertag.yaml, or opt in to commands without a sandbox with allow-unsandboxed-commands; then run supertag up.",
+                "  {} has no sandbox of its own, so the lead Tag reads and edits files but runs no commands. {ENABLE_COMMANDS}",
                 harness.harness()
             );
             Commands::Unset
@@ -792,11 +788,19 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
         Commands::Unsandboxed => host["allow-unsandboxed-commands"] = json!([harness]),
         Commands::Unset => {}
     }
+    // A harness without a sandbox, on a host that may not run its commands, gets no
+    // commands:execute: every Task with it would wait for a host that can run commands.
+    let commands = answers.harness == Found::Codex || answers.commands != Commands::Unset;
     let mut permissions = vec![
-        json!({ "target": "runtime", "action": "commands:execute" }),
         json!({ "target": "runtime", "action": "files:write" }),
         json!({ "target": "runtime", "action": "schedule:create" }),
     ];
+    if commands {
+        permissions.insert(
+            0,
+            json!({ "target": "runtime", "action": "commands:execute" }),
+        );
+    }
     // Current Codex models run commands only in code mode, which SuperTag starts only for a Task
     // that may also fetch from the web: without it the lead could not run commands at all.
     if answers.harness == Found::Codex {
@@ -960,6 +964,40 @@ mod tests {
             !permissions.to_string().contains("web:fetch"),
             "{permissions}"
         );
+    }
+
+    #[test]
+    fn a_lead_whose_host_cannot_run_its_commands_gets_no_commands_execute() {
+        let repository = Repository {
+            root: PathBuf::from("/work/app"),
+            name: "app".into(),
+            start: Start::Branch("main".into()),
+        };
+        let permissions = |harness, commands| {
+            let answers = Answers {
+                port: DEFAULT_PORT,
+                harness,
+                model: None,
+                commands,
+                workspace: "app".into(),
+                tag: "lead".into(),
+            };
+            document(&answers, &repository)["services"]["control-plane"]["provision"][0]["spec"]
+                ["permissions"]
+                .to_string()
+        };
+        // Its Tasks would otherwise wait for a host that may run commands, the first reply too.
+        assert!(!permissions(Found::ClaudeCode, Commands::Unset).contains("commands:execute"));
+        for (harness, commands) in [
+            (Found::ClaudeCode, Commands::LocalVm),
+            (Found::ClaudeCode, Commands::Unsandboxed),
+            (Found::Codex, Commands::Unset),
+        ] {
+            assert!(
+                permissions(harness, commands).contains("commands:execute"),
+                "{harness:?} {commands:?}"
+            );
+        }
     }
 
     #[test]

@@ -199,6 +199,9 @@ database_tests! {
     claude_runs_commands_only_with_the_hosts_unsandboxed_opt_in;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+    a_first_run_claude_code_lead_replies_without_docker_or_the_unsandboxed_opt_in;
+    #[tokio::test]
+    #[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
     claude_holds_only_a_placeholder_key_on_an_unsandboxed_host;
     #[tokio::test]
     #[ignore = "requires SUPERTAG_RUST_TEST_NODE, SUPERTAG_TEST_REAL_CLAUDE=1, and a built Claude Code language adapter"]
@@ -1833,6 +1836,68 @@ async fn real_claude_code_sends_its_requests_through_the_provider_proxy(
         "Claude Code never reached the provider through the proxy with the real key: {seen:?}"
     );
     provider.abort();
+    services.stop().await
+}
+
+/// The README's first question, to the lead `supertag init` sets up for Claude Code on a machine
+/// with no Docker and no unsandboxed opt-in: its Permission Set has no `commands:execute`, so the
+/// Task is not held for a host that may run commands, and the reply arrives.
+async fn a_first_run_claude_code_lead_replies_without_docker_or_the_unsandboxed_opt_in(
+    database: String,
+) -> Result<()> {
+    let Some(interpreter) = crate::prerequisites::env("node", "SUPERTAG_RUST_TEST_NODE")? else {
+        return Ok(());
+    };
+    let entry = repo_path("harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let native = claude_fixture(directory.path())?;
+    let services = LanguageServices::start(directory.path(), &database).await?;
+    // The actions of init's `local-tools` for a host that may not run commands.
+    services
+        .operator(&[
+            "tag",
+            "put",
+            "lead",
+            "--instructions",
+            "Own Objectives for this repository.",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:write",
+            "--allow",
+            "schedule:create",
+        ])
+        .await?;
+    let task = services
+        .operator(&[
+            "task",
+            "submit",
+            "--tag",
+            "lead",
+            "--session",
+            "first-run",
+            "Read this repository and tell me what you would improve first.",
+        ])
+        .await?;
+    let task_id = task["task_id"].as_str().context("Task ID missing")?;
+    let mut host = services.worker(
+        "claude-code",
+        &directory.path().join("host"),
+        Path::new(&interpreter),
+        &entry,
+    );
+    host.arg("--claude-path")
+        .arg(&native)
+        .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+    success(host).await?;
+    let task = services.operator(&["get", "task", task_id]).await?;
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    ensure!(
+        task["result"]
+            .as_str()
+            .is_some_and(|result| result.contains("fixture first turn")),
+        "{task}"
+    );
     services.stop().await
 }
 

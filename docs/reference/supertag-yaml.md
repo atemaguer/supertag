@@ -32,7 +32,9 @@ repositories.
 
 `supertag init` writes a file like this for the repository you run it in. It provisions a
 `local-tools` Permission Set, a `Lead` Role, and the Control Plane's lead Tag, which follows the
-current branch. For a Codex lead, `local-tools` also grants `web:fetch`, because current Codex
+current branch. It grants `commands:execute` only when the host may run the lead's commands: always
+for Codex, and for Claude Code, Cursor, or OpenCode only with `environment: local-vm` or
+`allow-unsandboxed-commands`. For a Codex lead, `local-tools` also grants `web:fetch`, because current Codex
 models run commands only in Codex code mode; see
 [Codex commands and models](../operations/requirements.md#codex-commands-and-models). The host
 service is named after the machine:

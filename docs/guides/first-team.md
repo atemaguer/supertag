@@ -13,7 +13,7 @@ The lead delegates a file to the builder, reviews what comes back, posts the res
 
 Finish the quickstart and send your first message to `lead` in the terminal UI. From the
 repository, run `supertag` to reopen that conversation. The quickstart creates `lead`, the
-`local-tools` **Permission Set** (allowed file edits and commands), and a **Workspace** named
+`local-tools` **Permission Set** (allowed file edits, and commands when the host can run them), and a **Workspace** named
 after your repository: an entry under the host's `workspaces` in `supertag.yaml` that maps the name
 to your checkout, with `lead` bound to it. Commands below use the local Control Plane, which they
 find without a flag.

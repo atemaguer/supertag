@@ -40,15 +40,14 @@ instructions. OpenCode prints `sign-in not checked (choose a model)` until you c
 Claude Code also needs Node.js 22.13.0 or a later 22.x release on `PATH`; without it, `init` says
 so and doesn't offer Claude Code.
 It then asks for the Control Plane port, the harness (and a `provider/model` for OpenCode), the
-Workspace name, and the Tag's name, with defaults in brackets. For Claude Code, Cursor, or
-OpenCode, it suggests local-vm containers: with Docker or Podman running it offers them, defaulting
-to yes (`environment: local-vm` on the host). Otherwise, or if you decline, it asks whether to let
-that harness run commands without a sandbox instead, defaulting to no, and prints what that
-allows; a yes is recorded as `allow-unsandboxed-commands` on the host. `--yes` accepts every
-default, so it never opts in to commands without a sandbox, and needs no terminal. It writes `~/.supertag/supertag.yaml` and starts, in the background:
+Workspace name, and the Tag's name, with defaults in brackets. Codex sandboxes its own commands.
+For Claude Code, `init` asks how the lead may run commands and defaults to not at all: the lead
+then reads and edits files and replies, but runs no commands. Keep that default for the first
+run; [Let the lead run commands](../../docs/operations/cli.md#let-the-lead-run-commands) turns them
+on later. `--yes` accepts every default and needs no terminal. It writes `~/.supertag/supertag.yaml` and starts, in the background:
 
-- a `control-plane` service, which creates the Permission Set `local-tools` (`commands:execute`
-  and `files:write`, plus `web:fetch` for Codex), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
+- a `control-plane` service, which creates the Permission Set `local-tools` (`files:write`, and
+  for Codex also `commands:execute` and `web:fetch`), the Role `Lead`, and the Tag `lead`, bound to this repository's Workspace and
   following the branch checked out when `init` ran;
 - a Gateway; and
 - a `host` service named after the machine, which maps this repository as the Workspace,

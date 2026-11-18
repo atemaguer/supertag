@@ -18,10 +18,10 @@ Check this page before [installing SuperTag](install.md).
 - **npm**, included with Node.js, to install the TypeScript SDK. Source-development tools are
   listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - **git**, available on `PATH`, and a repository for your first Task.
-- **Docker**, running for the Worker Host's user, to keep Claude Code and Cursor Tasks in
-  [local-vm containers](../reference/supertag-yaml.md#local-vm-containers). On macOS, Docker
-  Desktop provides the Linux virtual machine. Allow about 1 GB for the container image and
-  Workspace copies.
+- **Docker** (optional), running for the Worker Host's user, only to let Claude Code, Cursor, or
+  OpenCode Tasks run commands in [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
+  The first run doesn't need it. On macOS, Docker Desktop provides the Linux virtual machine.
+  Allow about 1 GB for the container image and Workspace copies.
 - **macOS on Apple silicon, or Linux on arm64 or amd64.** Linux needs glibc 2.36 or newer, as in
   Debian 12 or Ubuntu 24.04. Intel Macs have no release; [build the CLI](install.md#build-only-the-cli)
   there instead. Restarting background services uses launchd on macOS and systemd user services on

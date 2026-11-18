@@ -54,24 +54,26 @@ Code. It writes
 - a `host` service named after this machine, which maps the repository as a Workspace and runs
   up to three Task Attempts at once (`concurrency: 3`), so one stuck Task does not hold every Tag.
 
-When you choose Claude Code, Cursor, or OpenCode and Docker is running, `init` offers to run the
-harness's Tasks in containers on it, defaulting to yes; `--yes` accepts. The host then gets
-`environment: local-vm`, and the first Task builds the container image. See
-[local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
+Codex sandboxes its own commands. Claude Code, Cursor, and OpenCode don't, so for them `init`
+asks how the lead may run commands, defaulting to not at all:
+
+- With Docker running, it offers to run the harness's Tasks in containers on it (`environment:
+  local-vm`), defaulting to no. The first Task then builds the container image, which takes a few
+  minutes. See [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
+- It asks whether to let the harness run commands without a sandbox, defaulting to no. A yes
+  prints what that allows and becomes the host's `allow-unsandboxed-commands`. See
+  [Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
+- With neither, the lead reads and edits files and replies, but runs no commands. `--yes` takes
+  this default. To change it later, see [Let the lead run commands](#let-the-lead-run-commands).
 
 `init` doesn't offer containers for Codex, which runs commands in its own operating-system
 sandbox. To run a Codex host's Tasks in containers anyway, add `environment: local-vm` to its
 service in supertag.yaml and run `supertag up`. Each image then gets the host's Codex version;
 see [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
 
-Otherwise, or when you decline the containers, `init` suggests local-vm and asks whether to let
-the harness run commands without a sandbox instead, defaulting to no. A yes prints what that
-allows and becomes the host's `allow-unsandboxed-commands`; without it, the lead Tag's Tasks that
-run commands wait. `--yes` never allows it, and prints how to set up local-vm or opt in later.
-See [Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
-
-The `local-tools` Permission Set grants `commands:execute` and `files:write`. For a Codex `lead`,
-it also grants `web:fetch`, and `init` says so: current Codex models run commands only in Codex
+The `local-tools` Permission Set grants `files:write`, plus `commands:execute` when the host may run
+the lead's commands, which it always may on Codex. For a Codex `lead`, it also grants `web:fetch`,
+and `init` says so: current Codex models run commands only in Codex
 code mode, which SuperTag starts only for Tasks that may also fetch from the web. Code-mode
 commands can reach the network. To keep them offline, remove `web:fetch` from `supertag.yaml`,
 select a Codex model that is not code-mode-only, and run `supertag up`. See
@@ -111,6 +113,31 @@ A service with `restart: unless-stopped` makes `supertag up` install a per-user 
 (launchd on macOS, systemd on Linux) that starts SuperTag again after a failure or a login.
 `supertag down --remove-services` also uninstalls the unit.
 
+
+### Let the lead run commands
+
+A Claude Code, Cursor, or OpenCode lead set up without commands reads and edits files but runs
+none. To let it run commands, first choose where they run on the host in
+`~/.supertag/supertag.yaml`: `environment: local-vm` with Docker running, or
+`allow-unsandboxed-commands: [claude-code]` (or the harness's name) to run them on this machine as
+you. Then grant `commands:execute` in the lead's Permission Set and restart the services:
+
+```sh
+supertag apply --set provision -f - <<'END'
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: local-tools }
+spec:
+  permissions:
+    - { target: runtime, action: commands:execute }
+    - { target: runtime, action: files:write }
+    - { target: runtime, action: schedule:create }
+END
+supertag up
+```
+
+Granting `commands:execute` without a place to run the commands makes every Task of the lead
+wait, with `unsandboxed-commands` in `supertag placement explain`.
 ## Talk to a Tag
 
 The terminal UI is the place for conversations. Plain `supertag` opens it for your local
