@@ -28,6 +28,11 @@ class ArtifactVolumeCopyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper)
     ARTIFACT_VOLUME_COPY_STATE_RESERVED: _ClassVar[ArtifactVolumeCopyState]
     ARTIFACT_VOLUME_COPY_STATE_VERIFIED: _ClassVar[ArtifactVolumeCopyState]
 
+class VolumeObjectPurpose(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    VOLUME_OBJECT_PURPOSE_UNSPECIFIED: _ClassVar[VolumeObjectPurpose]
+    VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT: _ClassVar[VolumeObjectPurpose]
+
 class VolumeAccess(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     VOLUME_ACCESS_UNSPECIFIED: _ClassVar[VolumeAccess]
@@ -50,6 +55,8 @@ ARTIFACT_ACQUISITION_STATE_UNCERTAIN: ArtifactAcquisitionState
 ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED: ArtifactVolumeCopyState
 ARTIFACT_VOLUME_COPY_STATE_RESERVED: ArtifactVolumeCopyState
 ARTIFACT_VOLUME_COPY_STATE_VERIFIED: ArtifactVolumeCopyState
+VOLUME_OBJECT_PURPOSE_UNSPECIFIED: VolumeObjectPurpose
+VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT: VolumeObjectPurpose
 VOLUME_ACCESS_UNSPECIFIED: VolumeAccess
 VOLUME_ACCESS_WRITE: VolumeAccess
 VOLUME_ACCESS_READ: VolumeAccess
@@ -450,14 +457,14 @@ class ArtifactVolumeCopy(_message.Message):
     def __init__(self, copy_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., volume: _Optional[_Union[ArtifactVolume, _Mapping]] = ..., artifact_id: _Optional[str] = ..., file: _Optional[_Union[ArtifactFile, _Mapping]] = ..., storage_key: _Optional[str] = ..., state: _Optional[_Union[ArtifactVolumeCopyState, str]] = ..., created_at_ms: _Optional[int] = ..., verified_at_ms: _Optional[int] = ..., upload: _Optional[_Union[ArtifactVolumeUpload, _Mapping]] = ..., host_attested: _Optional[bool] = ...) -> None: ...
 
 class VolumeObjectGrantRequest(_message.Message):
-    __slots__ = ("attempt", "checkpoint", "access")
+    __slots__ = ("attempt", "purpose", "access")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
-    CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
+    PURPOSE_FIELD_NUMBER: _ClassVar[int]
     ACCESS_FIELD_NUMBER: _ClassVar[int]
     attempt: _runtime_pb2.InspectAttemptRequest
-    checkpoint: _runtime_pb2.BlobReference
+    purpose: VolumeObjectPurpose
     access: VolumeAccess
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., checkpoint: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., access: _Optional[_Union[VolumeAccess, str]] = ...) -> None: ...
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., purpose: _Optional[_Union[VolumeObjectPurpose, str]] = ..., access: _Optional[_Union[VolumeAccess, str]] = ...) -> None: ...
 
 class VolumeObjectGrant(_message.Message):
     __slots__ = ("volume", "key", "blob", "presigned")

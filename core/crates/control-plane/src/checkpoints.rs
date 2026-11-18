@@ -308,7 +308,10 @@ const IDLE_SESSION: &str = "NOT EXISTS (SELECT 1 FROM supertag_v2_tasks r WHERE 
 const NOT_RUNNING: &str = "NOT (t.state=$1 AND t.attempt_id=c.attempt_id)";
 
 /// The checkpoint a Session points at, with when its turn finished.
-async fn current_in(tx: &mut Transaction<'_, Any>, task: &AnyRow) -> Result<Option<AnyRow>> {
+pub(crate) async fn current_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &AnyRow,
+) -> Result<Option<AnyRow>> {
     Ok(sqlx::query("SELECT c.*,t.completed_at_ms AS checkpoint_completed_at_ms FROM supertag_v2_session_checkpoints s JOIN supertag_v2_checkpoints c ON s.attempt_id=c.attempt_id JOIN supertag_v2_tasks t ON t.task_id=c.task_id WHERE s.tag_id=$1 AND s.session_id=$2 AND c.committed=1")
         .bind(task.try_get::<String, _>("tag_id")?)
         .bind(task.try_get::<String, _>("session_id")?)
@@ -404,7 +407,7 @@ fn checkpoint_input(
     Ok((attempt, reference))
 }
 
-async fn reservation_in(
+pub(crate) async fn reservation_in(
     tx: &mut Transaction<'_, Any>,
     attempt: &InspectAttemptRequest,
 ) -> Result<Option<AnyRow>> {
@@ -453,7 +456,7 @@ fn require_running_row(row: &AnyRow, now: i64) -> Result<()> {
     Ok(())
 }
 
-fn reference_row(row: &AnyRow) -> Result<CheckpointReference> {
+pub(crate) fn reference_row(row: &AnyRow) -> Result<CheckpointReference> {
     Ok(CheckpointReference {
         harness: row.try_get("harness")?,
         format: row.try_get("format")?,

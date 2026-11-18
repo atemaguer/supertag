@@ -127,16 +127,20 @@ fn child_directory(parent: &File, name: &str, create: bool) -> Result<File> {
     Ok(file)
 }
 /// The segments of an object key the Control Plane derived: `tags/<sha256(tag)>/…/<sha256>`, at
-/// most 8 segments of letters, digits, `-` and `_`, ending with the object's own SHA-256.
+/// most 8 segments of letters, digits, `-` and `_`, ending with the object's own SHA-256, which a
+/// checkpoint suffixes with `.bin`.
 pub fn key_parts<'a>(key: &'a str, blob: &BlobReference) -> Result<Vec<&'a str>> {
     let parts: Vec<&str> = key.split('/').collect();
+    let (last, directories) = parts
+        .split_last()
+        .ok_or_else(|| anyhow::anyhow!("invalid Volume object key"))?;
     ensure!(
         supertag_protocol::valid_sha256(&blob.sha256)
             && blob.byte_length <= MAX_VOLUME_OBJECT_BYTES
             && (3..=8).contains(&parts.len())
             && parts[0] == "tags"
-            && parts.last() == Some(&blob.sha256.as_str())
-            && parts.iter().all(|part| {
+            && last.strip_suffix(".bin").unwrap_or(last) == blob.sha256
+            && directories.iter().all(|part| {
                 !part.is_empty()
                     && part.len() <= 128
                     && part

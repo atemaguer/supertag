@@ -21,10 +21,11 @@ pub(crate) fn capture_key(tag_id: &str, attempt_id: &str, sha256: &str) -> Strin
     format!("{}/attempts/{attempt_id}/sha256/{sha256}", tag_root(tag_id))
 }
 
-/// Where a Session's checkpoint with these bytes lives on its Tag's Volume.
+/// Where a Session's checkpoint with these bytes lives on its Tag's Volume: the same layout as a
+/// Worker Host's own artifact storage.
 pub(crate) fn checkpoint_key(tag_id: &str, session_id: &str, sha256: &str) -> String {
     format!(
-        "{}/sessions/{:x}/checkpoint/{sha256}",
+        "{}/sessions/{:x}/checkpoint/{sha256}.bin",
         tag_root(tag_id),
         Sha256::digest(session_id.as_bytes())
     )
@@ -457,10 +458,14 @@ impl Store {
             .attempt
             .as_ref()
             .ok_or_else(|| invalid("a Volume grant names its Attempt"))?;
-        if !matches!(input.access(), VolumeAccess::Write | VolumeAccess::Read) {
+        if input.purpose() != VolumeObjectPurpose::SessionCheckpoint {
+            return Err(invalid("a Volume grant needs a purpose"));
+        }
+        let access = input.access();
+        if !matches!(access, VolumeAccess::Write | VolumeAccess::Read) {
             return Err(invalid("a Volume grant is for writing or reading"));
         }
-        let mut tx = self.pool.begin().await?;
+        let (mut tx, _) = self.write().await?;
         let row = crate::store::owned(
             &mut tx,
             host,
@@ -475,23 +480,49 @@ impl Store {
             .await?
             .ok_or_else(|| StoreError::FailedPrecondition("the Tag names no Volume".into()))?;
         let volume = volume_in(&mut tx, &id).await?;
-        let (key, blob) = match &input.purpose {
-            Some(volume_object_grant_request::Purpose::Checkpoint(blob))
-                if supertag_protocol::valid_sha256(&blob.sha256)
-                    && blob.byte_length <= supertag_protocol::MAX_CHECKPOINT_BYTES as u64 =>
-            {
-                (
-                    checkpoint_key(&task.tag_id, &task.session_id, &blob.sha256),
-                    blob.clone(),
-                )
-            }
-            _ => return Err(invalid("a Volume grant needs a valid purpose")),
+        let checkpoint = if access == VolumeAccess::Write {
+            // The checkpoint this Attempt reserved, now marked as kept on the Volume.
+            let reserved = crate::checkpoints::reservation_in(&mut tx, attempt)
+                .await?
+                .ok_or_else(|| {
+                    StoreError::FailedPrecondition(
+                        "reserve the checkpoint before its Volume grant".into(),
+                    )
+                })?;
+            sqlx::query(
+                "UPDATE supertag_v2_checkpoints SET volume_id=$1 WHERE attempt_id=$2 AND task_id=$3",
+            )
+            .bind(&id)
+            .bind(&attempt.attempt_id)
+            .bind(&attempt.task_id)
+            .execute(&mut *tx)
+            .await?;
+            reserved
+        } else {
+            // The Session's current checkpoint, when it is on this Volume.
+            crate::checkpoints::current_in(&mut tx, &row)
+                .await?
+                .filter(|current| {
+                    current
+                        .try_get::<Option<String>, _>("volume_id")
+                        .ok()
+                        .flatten()
+                        .as_deref()
+                        == Some(id.as_str())
+                })
+                .ok_or_else(|| {
+                    StoreError::NotFound("the Session has no checkpoint on its Volume".into())
+                })?
         };
+        let reference = crate::checkpoints::reference_row(&checkpoint)?;
         tx.commit().await?;
         Ok(VolumeObjectGrant {
             volume: Some(volume),
-            key,
-            blob: Some(blob),
+            key: checkpoint_key(&task.tag_id, &task.session_id, &reference.sha256),
+            blob: Some(BlobReference {
+                sha256: reference.sha256,
+                byte_length: reference.byte_length,
+            }),
             presigned: None,
         })
     }

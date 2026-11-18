@@ -168,7 +168,7 @@ mod tests {
             byte_length: bytes.len() as u64,
         };
         let key = format!(
-            "tags/{}/sessions/{}/checkpoint/{}",
+            "tags/{}/sessions/{}/checkpoint/{}.bin",
             "a".repeat(64),
             "b".repeat(64),
             blob.sha256

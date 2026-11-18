@@ -333,11 +333,18 @@ service VolumeObjects {
 
 message VolumeObjectGrantRequest {
   InspectAttemptRequest attempt = 1;
-  oneof purpose {
-    // The Attempt's Session checkpoint with these bytes.
-    BlobReference checkpoint = 2;
-  }
+  VolumeObjectPurpose purpose = 2;
   VolumeAccess access = 3;
+}
+
+// What the object is. The Control Plane resolves its bytes from its own records, so a host never
+// names a digest.
+enum VolumeObjectPurpose {
+  VOLUME_OBJECT_PURPOSE_UNSPECIFIED = 0;
+  // WRITE: the checkpoint this Attempt reserved with ReserveCheckpoint, which comes first.
+  // READ: the Session's current checkpoint, the one GetCheckpoint returns. NotFound when the
+  // Session has none on the Tag's current Volume; the turn then starts fresh.
+  VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT = 1;
 }
 
 enum VolumeAccess {

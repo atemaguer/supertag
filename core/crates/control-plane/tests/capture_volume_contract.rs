@@ -293,65 +293,110 @@ async fn exercise(url: &str) {
         other => panic!("deleted a Volume a Tag names: {other:?}"),
     }
     assert_eq!(store.put_tag_spec(tag(Some(""))).await.unwrap().volume, "");
-    // A Volume grant names the object from the Attempt's own Tag and Session.
-    let grant_request = |blob: BlobReference| VolumeObjectGrantRequest {
-        attempt: Some(first.clone()),
-        purpose: Some(volume_object_grant_request::Purpose::Checkpoint(blob)),
-        access: VolumeAccess::Write as i32,
-    };
-    let checkpoint = BlobReference {
-        sha256: "f".repeat(64),
+    // A Volume grant names the object from the Attempt's own Tag, Session and checkpoint rows; the
+    // host never names a digest.
+    let grant_request =
+        |attempt: &InspectAttemptRequest, access: VolumeAccess| VolumeObjectGrantRequest {
+            attempt: Some(attempt.clone()),
+            purpose: VolumeObjectPurpose::SessionCheckpoint as i32,
+            access: access as i32,
+        };
+    let write = grant_request(&first, VolumeAccess::Write);
+    let checkpoint = CheckpointReference {
+        harness: "codex".into(),
+        format: "codex-session-v1".into(),
         byte_length: 1024,
+        sha256: "f".repeat(64),
+    };
+    let reserve = CommitCheckpointRequest {
+        attempt: Some(first.clone()),
+        reference: Some(checkpoint.clone()),
     };
     // Without a Volume there is nothing to grant.
     assert!(matches!(
-        store
-            .grant_volume_object(&host, &grant_request(checkpoint.clone()))
-            .await,
+        store.grant_volume_object(&host, &write).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     store.put_tag_spec(tag(Some("vault"))).await.unwrap();
-    let grant = store
-        .grant_volume_object(&host, &grant_request(checkpoint.clone()))
-        .await
-        .unwrap();
+    // A write grant follows the checkpoint's reservation.
+    assert!(matches!(
+        store.grant_volume_object(&host, &write).await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    // Before the Session points at a checkpoint, a read finds none: the turn starts fresh.
+    assert!(matches!(
+        store
+            .grant_volume_object(&host, &grant_request(&first, VolumeAccess::Read))
+            .await,
+        Err(StoreError::NotFound(_))
+    ));
+    store.reserve_checkpoint(&host, &reserve).await.unwrap();
+    let grant = store.grant_volume_object(&host, &write).await.unwrap();
     let task = store.get_task(&first.task_id).await.unwrap();
-    assert_eq!(
-        grant.key,
-        format!(
-            "tags/{:x}/sessions/{:x}/checkpoint/{}",
-            sha2::Sha256::digest("keeper"),
-            sha2::Sha256::digest(task.session_id.as_bytes()),
-            checkpoint.sha256
-        )
+    let key = format!(
+        "tags/{:x}/sessions/{:x}/checkpoint/{}.bin",
+        sha2::Sha256::digest("keeper"),
+        sha2::Sha256::digest(task.session_id.as_bytes()),
+        checkpoint.sha256
     );
-    assert_eq!(grant.blob.as_ref(), Some(&checkpoint));
+    assert_eq!(grant.key, key);
+    let blob = BlobReference {
+        sha256: checkpoint.sha256.clone(),
+        byte_length: checkpoint.byte_length,
+    };
+    assert_eq!(grant.blob.as_ref(), Some(&blob));
     assert_eq!(
         grant.volume.as_ref().map(|v| v.volume_id.as_str()),
         Some("vault")
     );
-    // Another host, or an invalid object, gets no grant.
+    // Another host gets no grant, nor does a request without a purpose.
     let other = support::register_host(&store, "someone-else").await;
-    assert!(
-        store
-            .grant_volume_object(&other, &grant_request(checkpoint.clone()))
-            .await
-            .is_err()
-    );
+    assert!(store.grant_volume_object(&other, &write).await.is_err());
     assert!(
         store
             .grant_volume_object(
                 &host,
-                &grant_request(BlobReference {
-                    sha256: "not-a-digest".into(),
-                    byte_length: 1,
-                })
+                &VolumeObjectGrantRequest {
+                    purpose: 0,
+                    ..write.clone()
+                }
             )
             .await
             .is_err()
     );
+    store.commit_checkpoint(&host, &reserve).await.unwrap();
+    store
+        .finish_task(
+            &host,
+            &FinishTaskRequest {
+                task_id: first.task_id.clone(),
+                attempt_id: first.attempt_id.clone(),
+                lease_token: first.lease_token.clone(),
+                result: "Kept".into(),
+                succeeded: true,
+                objective_signal: ObjectiveSignal::Progress.into(),
+                checkpoint_sha256: Some(checkpoint.sha256.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    // The Session's next turn reads the checkpoint back from the Volume.
+    let next = attempt(&store, &host, "next").await;
+    assert_eq!(
+        store.get_task(&next.task_id).await.unwrap().session_id,
+        task.session_id
+    );
+    let read = store
+        .grant_volume_object(&host, &grant_request(&next, VolumeAccess::Read))
+        .await
+        .unwrap();
+    assert_eq!(
+        (read.key.as_str(), read.blob.as_ref()),
+        (key.as_str(), Some(&blob))
+    );
     store.put_tag_spec(tag(Some(""))).await.unwrap();
-    let plain = capture(&first, "plain", 'e');
+    let plain = capture(&next, "plain", 'e');
     assert!(
         store
             .reserve_artifact_capture(&host, &plain)

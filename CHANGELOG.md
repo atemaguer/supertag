@@ -34,7 +34,8 @@ within the pre-1.0 compatibility policy described in
   that map it (`supertag worker-host --volume ID=DIR`, `volumes:` on a host service), which carry
   the label `volume:ID` that placement requires, and the writing host's check stands as its
   attestation. A capture whose copy cannot be written fails. A new host call,
-  `VolumeObjects.Grant`, authorizes one object on the Tag's Volume, such as a Session checkpoint.
+  `VolumeObjects.Grant`, lets a running Attempt write its reserved Session checkpoint to the Tag's
+  Volume and read the Session's current one back, under the same keys as a host's own storage.
 - Unprompted messages are paced: at most one reaches a person's conversation or a surface thread
   in 30 minutes. Later ones wait and go out together when the window ends, or at once when the
   person writes; in a surface thread they post as one reply listing the earlier updates.
