@@ -117,9 +117,13 @@ filters, or configuration a Task wrote, and the host fails a Task Attempt whose 
 configuration changed while it ran.
 
 `--workspace-setup ID=COMMAND`, or `setup` in a `supertag.yaml` Workspace, runs a shell command
-such as `npm ci` in each new checkout before the harness starts. A reused checkout keeps its
-setup outputs, and setup does not run again. It runs on the host, outside any
-harness sandbox, with a 10-minute limit, and receives no provider credentials.
+such as `npm ci` in each new checkout before the harness starts. It runs on the host, outside any
+harness sandbox, with a 10-minute limit, and receives no provider credentials. A reused checkout
+keeps its setup outputs, and setup does not run again. Those outputs are whatever the Session's
+previous Task Attempt left in them: its harness could change them (for example, install another
+package into `node_modules`), and the host does not check them. Only the same Session of the same
+Tag reuses a checkout, so nothing crosses a Tag or Session boundary. Tracked files, including
+lockfiles, are always verified against the Task Attempt's start commit.
 
 ### Delivery
 

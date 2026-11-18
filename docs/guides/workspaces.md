@@ -107,8 +107,8 @@ for recovery instead. SuperTag never fetches: update the host's checkout to move
 `setup` runs a shell command, such as `npm ci`, in each new checkout before the harness starts. It
 runs on the host, outside any harness sandbox, with a 10-minute limit, and receives no provider
 credentials. A failed setup fails the Task Attempt with the command's output. When a Session's
-next turn reuses its previous checkout on the same host, the setup outputs stay and setup does not
-run again.
+next turn reuses its previous checkout on the same host, the setup outputs stay as the previous
+turn left them, and setup does not run again. Only that Session's own turns share them.
 
 ## 3. See the branches appear
 
