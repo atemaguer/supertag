@@ -3,6 +3,7 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { Readable } from "node:stream";
+import { EGRESS_RELAY_PROGRAM } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { vi } from "vitest";
 import type { ModalSandboxClient } from "./src/index.ts";
 import {
@@ -37,7 +38,17 @@ export const relayInputs: string[] = [];
 /** The fake relay's standard output, which a test writes as the sandbox's relay would. */
 export const relayOutput: { send?: (line: string) => void } = {};
 
-export function fakePrivileged(sealExit = 0) {
+/** Relays the fake ran as the real program on this machine, and the ports they listen on. */
+export interface LocalRelays {
+  readonly ports: number[];
+  readonly children: ChildProcess[];
+}
+
+/**
+ * With `relays`, the relay's exec runs the real relay program on this machine, on a free
+ * loopback port rather than 3128; without, the test speaks the relay's side itself.
+ */
+export function fakePrivileged(sealExit = 0, relays?: LocalRelays) {
   const stream = (text: string) =>
     new ReadableStream<Uint8Array>({
       start(controller) {
@@ -46,6 +57,47 @@ export function fakePrivileged(sealExit = 0) {
       },
     });
   return vi.fn<ModalSandboxClient["exec"]>(async (command) => {
+    if (command.includes("3128") && relays) {
+      const child = spawn("python3", ["-I", "-S", "-c", EGRESS_RELAY_PROGRAM, "0"], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      relays.children.push(child);
+      child.stdin.on("error", () => {});
+      let open = true;
+      const exited = new Promise<number>((resolve) =>
+        child.once("close", (code) => resolve(code ?? 137)),
+      );
+      return {
+        stdin: {
+          async writeBytes(bytes: Uint8Array) {
+            await new Promise<void>((resolve, reject) =>
+              child.stdin.write(bytes, (error) => (error ? reject(error) : resolve())),
+            );
+          },
+          async close() {
+            child.stdin.end();
+          },
+        },
+        stdout: new ReadableStream<Uint8Array>({
+          start(controller) {
+            child.stdout.on("data", (bytes: Buffer) => {
+              const announced = /relay ready ([0-9]+)/u.exec(bytes.toString());
+              if (announced) relays.ports.push(Number(announced[1]));
+              if (open) controller.enqueue(new Uint8Array(bytes));
+            });
+            child.stdout.once("end", () => {
+              if (open) controller.close();
+              open = false;
+            });
+          },
+          cancel() {
+            open = false;
+          },
+        }),
+        stderr: stream(""),
+        wait: () => exited,
+      };
+    }
     if (command.includes("3128")) {
       // The relay's exec stays open: the test speaks its side of the line protocol.
       const encoder = new TextEncoder();

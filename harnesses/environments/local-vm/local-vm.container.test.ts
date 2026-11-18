@@ -685,7 +685,7 @@ describe.skipIf(!answers)("local-vm provider", () => {
         for (const id of ownedContainers(hostId)) spawnSync(runtime, ["rm", "-f", id]);
       },
     }),
-    { commands: true, snapshots: true, isolated: true, timeoutMs: 120_000 },
+    { commands: true, snapshots: true, isolated: true, egress: true, timeoutMs: 120_000 },
   ))
     it(`local-vm conformance: ${check.name}`, check.run, check.timeoutMs);
 });

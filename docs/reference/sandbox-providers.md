@@ -188,10 +188,11 @@ an outside caller can observe.
 5. **Capture rules.** Capture returns exactly what [Capture](#capture) lists, within the size
    limit, with a receipt. It never follows a link out of the checkout.
 6. **Network rules.** The sandbox has no network access, DNS included. Egress, if offered, must
-   go only to the Worker Host's egress proxy, with no other egress, DNS included. Until a remote
-   relay ships, a Task with a [network scope](iam.md#network-scopes) never runs on such a host,
-   and neither does a Task with `web:fetch`, `web:search`, or `browser:use`, because those tools
-   would run on the host.
+   go only to the Worker Host's egress proxy, with no other egress, DNS included. SuperTag's own
+   E2B, Modal, and local-vm providers offer it through an egress relay in the sandbox, carried
+   over the provider's own command channel. A Task with `web:search`, `browser:use`, or a
+   `web:fetch` without a [network scope](iam.md#network-scopes) never runs on such a host,
+   because those tools would run on the host.
 7. **Ownership.** Every sandbox carries its owner's five labels. Stop and recovery act only on a
    sandbox whose labels match exactly.
 
@@ -249,7 +250,8 @@ supertag worker-host --harness claude-code --workspace-id repository \
   a sandbox the earlier one made.
 - SuperTag has not verified your provider's network rules, so placement never gives such a host
   a Task with a [network scope](iam.md#network-scopes). `supertag placement explain` names this
-  as `network-scope`. This holds even after the egress relay ships for E2B and Modal.
+  as `network-scope`. Only SuperTag's own E2B, Modal, and local-vm providers carry the egress
+  relay.
 - Your provider must pass the [conformance suite](#conformance-suite) with `isolated` set before
   a Worker Host runs it. SuperTag does not check this at start.
 
@@ -280,6 +282,7 @@ of every sandbox it allocates. The options:
 | `commands` | The provider can seal its sandboxes and admits `commands:execute`. Without it, the suite checks that Allocate refuses commands |
 | `snapshots` | The provider keeps prepared artifacts |
 | `isolated` | The sandbox is a separate machine or container. Set it for a real provider. A test double that runs on the test machine leaves it unset, and the host-reach and seal cases then check the protocol only |
+| `egress` | The provider carries a network-scoped Task's connections over an egress relay. The case runs a command in the sandbox that connects through the relay to a proxy the suite runs. A test double whose relay runs on the test machine returns its port from `relayPort()`, and the suite connects to it directly |
 
 A session may also offer `lose()`, which ends its sandbox out of band, to run the lost-sandbox
 case. Find the sandbox by the case's `hostId`, so another run against the same provider keeps its
@@ -289,7 +292,8 @@ The cases check allocation and ownership, Stage's digest check and its refusal o
 the checkout, file tools within the checkout, Capture and its exclusions, Stop, rule 1 after Stop
 and after a lost sandbox, and that a host directory the suite watches never changes. With
 `commands`, they check bounded commands and their time limit, and Capture after a command left a
-process running. The cases need `git` on the machine running them.
+process running. With `egress`, they check that a command gets the proxy variables and that a
+connection's bytes cross the relay intact, both ways. The cases need `git` on the machine running them.
 
 A provider must pass the suite with `isolated` set. E2B and Modal run it against their test
 doubles. The container provider behind the `local-vm` environment

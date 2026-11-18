@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { sandboxProviderConformance } from "@supertag/worker-sdk/internal/rust-workspace-provider/conformance";
 import { afterEach, it } from "vitest";
-import { fixture } from "./rust-fixture.ts";
+import { fixture, localRelays } from "./rust-fixture.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 
@@ -12,10 +12,13 @@ afterEach(async () => {
 // The fake runs files and processes on this machine and never executes the seal program, so it
 // is not isolated: its command and seal cases check the protocol, and the Docker reference
 // provider runs the real seal.
+// Its relay is the real relay program on this machine, which the egress case reaches directly.
 for (const check of sandboxProviderConformance(
-  async ({ directory }) => ({
-    session: (await fixture(cleanups, join(directory, "prepared"))).session,
-  }),
-  { commands: true, snapshots: true, isolated: false },
+  async ({ directory }) => {
+    const relays = localRelays();
+    const { session } = await fixture(cleanups, join(directory, "prepared"), undefined, relays);
+    return { session, relayPort: () => relays.ports.at(-1) };
+  },
+  { commands: true, snapshots: true, isolated: false, egress: true },
 ))
   it(`E2B conformance: ${check.name}`, check.run, check.timeoutMs);

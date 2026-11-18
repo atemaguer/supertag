@@ -51,7 +51,7 @@ for (const check of sandboxProviderConformance(
       },
     };
   },
-  { commands: true, snapshots: true, isolated: true, timeoutMs: 120_000 },
+  { commands: true, snapshots: true, isolated: true, egress: true, timeoutMs: 120_000 },
 ))
   it.skipIf(!available)(
     `Container provider conformance: ${check.name}`,

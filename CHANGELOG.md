@@ -78,7 +78,8 @@ within the pre-1.0 compatibility policy described in
   `web:fetch` and `commands:execute` reaches only the hosts it allows. The sandbox keeps no network,
   DNS included; a relay in it carries each connection over Modal's command channel to the
   Attempt's egress proxy on the Worker Host, which checks it and swaps credential placeholders,
-  so Modal hosts can take `--network-credential` too. E2B Workspaces still refuse network scopes.
+  so Modal hosts can take `--network-credential` too. E2B Workspaces carry the same relay over
+  E2B's command channel, proven against a test double that runs the real relay, not yet live.
 - Cursor and Claude Code Tasks with an E2B or Modal Workspace can run commands
   (`commands:execute`), in the Task's sandbox, without `allow-unsandboxed-commands`. The sandbox
   has no network access. Each command stops at its time limit inside the sandbox, and every

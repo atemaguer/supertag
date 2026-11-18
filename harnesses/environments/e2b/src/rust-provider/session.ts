@@ -24,6 +24,7 @@ import {
   sandboxOwnershipMetadata,
   stopOwnedSandbox,
 } from "./ownership.js";
+import { type RelayCommand, startE2BRelayCommand } from "./relay-carrier.js";
 
 const MAX_LIFETIME_MS = 3_600_000;
 const API_TIMEOUT_MS = 15_000;
@@ -49,10 +50,7 @@ export interface E2BWorkspaceSandbox {
    * Starts a long-lived privileged process whose standard output arrives through `onStdout` and
    * whose standard input `write` feeds: the carrier of the egress relay.
    */
-  startPrivileged?(
-    argv: string[],
-    onStdout: (text: string) => void,
-  ): Promise<{ write(text: string): Promise<void>; kill(): Promise<void> }>;
+  startPrivileged?(argv: string[], onStdout: (text: string) => void): Promise<RelayCommand>;
 }
 
 /**
@@ -171,21 +169,12 @@ const nativeFactory = {
           throw error;
         }
       },
-      async startPrivileged(argv, onStdout) {
-        const handle = await client.commands.run(argv.map(shellQuote).join(" "), {
-          cwd: "/tmp",
-          user: "root",
-          background: true,
-          stdin: true,
-          timeoutMs: 0,
+      startPrivileged(argv, onStdout) {
+        return startE2BRelayCommand(
+          (command, options) => client.commands.run(command, options),
+          argv,
           onStdout,
-        });
-        return {
-          write: (text) => handle.sendStdin(text),
-          kill: async () => {
-            await handle.kill();
-          },
-        };
+        );
       },
     };
   },
@@ -231,6 +220,9 @@ async function startEgressRelay(
     proxy,
   );
   for (const text of pending.splice(0)) host.receive(text);
+  // The relay's command ending, or its output budget spent, ends its clients.
+  const relay = host;
+  void process.ended.then(() => relay.close());
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([

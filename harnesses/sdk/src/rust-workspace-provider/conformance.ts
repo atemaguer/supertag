@@ -14,7 +14,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -51,6 +53,12 @@ export interface ConformanceProvider {
   lose?(): Promise<void>;
   /** Releases what the provider's test double holds, after the case. */
   close?(): Promise<void>;
+  /**
+   * For a test double whose egress relay runs on this machine: the port its relay listens on,
+   * which the egress case connects to directly. An isolated provider leaves it out, and the
+   * case connects from a command in the sandbox to the relay's fixed port instead.
+   */
+  relayPort?(): number | undefined;
 }
 
 export interface ConformanceOptions {
@@ -66,6 +74,11 @@ export interface ConformanceOptions {
   readonly isolated?: boolean;
   /** Each case's time limit; 60 seconds by default. */
   readonly timeoutMs?: number;
+  /**
+   * The provider carries a network-scoped Task's connections over its egress relay
+   * (`RemoteWorkspaceAllocateRequest.egress`). Needs `commands`.
+   */
+  readonly egress?: boolean;
 }
 
 export interface ConformanceCase {
@@ -501,6 +514,105 @@ export function sandboxProviderConformance(
 
   if (options.commands) {
     const COMMANDS = [...READ_WRITE, "commands:execute"];
+
+    if (options.egress)
+      add(
+        "carries a command's connection over the egress relay to the Worker Host's proxy",
+        async (harness) => {
+          // The Attempt's egress proxy, on this machine's loopback: it answers CONNECT, then
+          // echoes, so a connection's bytes cross the relay both ways.
+          const requests: string[] = [];
+          const proxy = createServer((socket) => {
+            socket.on("error", () => {});
+            socket.once("data", (data: Buffer) => {
+              // What follows the request in the same read is the tunnel's first bytes.
+              const end = data.indexOf("\r\n\r\n") + 4;
+              requests.push(data.subarray(0, end).toString("latin1"));
+              socket.write("HTTP/1.1 200 Connection established\r\n\r\n");
+              if (end < data.length) socket.write(data.subarray(end));
+              socket.pipe(socket);
+            });
+          }).listen(0, "127.0.0.1");
+          await once(proxy, "listening");
+          try {
+            const port = (proxy.address() as { port: number }).port;
+            const variables = { HTTPS_PROXY: "http://attempt:placeholder@127.0.0.1:3128" };
+            const allocation = await harness.provider.allocate(
+              {
+                owner: harness.owner,
+                timeoutMs: 600_000,
+                allowedActions: COMMANDS,
+                egress: {
+                  proxy: `127.0.0.1:${port}`,
+                  variables,
+                  caPem: "-----BEGIN CERTIFICATE-----\nconformance\n-----END CERTIFICATE-----\n",
+                },
+              },
+              AUTH,
+            );
+            assert.ok(allocation.sandboxId, "Allocate returns a sandbox ID");
+            await harness.provider.stage(stageParts(harness.bundle), AUTH);
+            const proxied = await tool(harness, {
+              case: "command",
+              value: { command: 'printf "%s" "$HTTPS_PROXY"' },
+            });
+            assert.ok(
+              proxied?.includes(variables.HTTPS_PROXY),
+              "commands get the proxy through the relay",
+            );
+            // More than one credit window each way.
+            const size = 512 * 1024;
+            const relayPort = harness.under.relayPort?.();
+            if (relayPort !== undefined) {
+              const payload = Buffer.alloc(size, 7);
+              const socket = connect(relayPort, "127.0.0.1");
+              socket.on("error", () => {});
+              const received: Buffer[] = [];
+              socket.on("data", (data: Buffer) => received.push(data));
+              await once(socket, "connect");
+              socket.write("CONNECT conformance.example:443 HTTP/1.1\r\n\r\n");
+              socket.write(payload);
+              const reply = "HTTP/1.1 200 Connection established\r\n\r\n";
+              const deadline = Date.now() + 30_000;
+              while (Buffer.concat(received).length < reply.length + size) {
+                assert.ok(Date.now() < deadline, "the relayed bytes arrive");
+                await new Promise((resolve) => setTimeout(resolve, 20));
+              }
+              socket.destroy();
+              const all = Buffer.concat(received);
+              assert.equal(all.subarray(0, reply.length).toString(), reply);
+              assert.ok(all.subarray(reply.length).equals(payload), "the bytes return intact");
+            } else {
+              assert.ok(options.isolated, "a provider whose relay runs elsewhere is isolated");
+              const program = [
+                "import socket",
+                "s = socket.create_connection(('127.0.0.1', 3128), timeout=30)",
+                "s.sendall(b'CONNECT conformance.example:443 HTTP/1.1\\r\\n\\r\\n')",
+                "head = b''",
+                "while not head.endswith(b'\\r\\n\\r\\n'): head += s.recv(1)",
+                `payload = bytes(range(256)) * ${size / 256}`,
+                "s.sendall(payload)",
+                "back = b''",
+                "while len(back) < len(payload): back += s.recv(65536)",
+                "print(head.split(b'\\r\\n')[0].decode(), back == payload)",
+              ].join("\n");
+              const relayed = await tool(harness, {
+                case: "command",
+                value: { command: `python3 -c "${program}"`, timeoutMs: 60_000 },
+              });
+              assert.match(
+                relayed ?? "",
+                /HTTP\/1\.1 200 Connection established True/u,
+                "a command reaches the proxy through the relay",
+              );
+            }
+            assert.match(requests[0] ?? "", /^CONNECT conformance\.example:443 HTTP\/1\.1\r\n/u);
+            await capture(harness);
+          } finally {
+            proxy.close();
+          }
+        },
+      );
 
     add(
       "runs commands in the checkout, bounded in time and output, never on the host",

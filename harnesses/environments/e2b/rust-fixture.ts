@@ -3,8 +3,14 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { EGRESS_RELAY_PROGRAM } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import type { SandboxOpts } from "e2b";
 import { vi } from "vitest";
+import {
+  type RelayCommandHandle,
+  type RelayRunOptions,
+  startE2BRelayCommand,
+} from "./src/rust-provider/relay-carrier.ts";
 import {
   createE2BWorkspaceSession,
   type E2BWorkspaceSandbox,
@@ -41,6 +47,7 @@ export const relayStarts = vi.fn(async (argv: string[], onStdout: (text: string)
       written.push(text);
     },
     async kill() {},
+    ended: new Promise<void>(() => {}),
   };
 });
 
@@ -67,14 +74,95 @@ export function fakePrivileged(sealExit = 0) {
   });
 }
 
-/** `false` leaves the sandbox without a privileged run, so it can never be sealed. */
+/**
+ * `Commands.run` as E2B's SDK runs the relay's background root command, with the real relay
+ * program on this machine: it listens on a free loopback port rather than 3128. Like the SDK's
+ * handle, it keeps all output in `_stdout` and `_stderr` and calls the callbacks with itself as
+ * `this`; like `bash -l`, a profile prints first; output arrives in uneven chunks that split
+ * lines; and each `sendStdin` is a separate, slower request.
+ */
+export interface LocalRelays {
+  /** Each relay's client port, once it announced it. */
+  readonly ports: number[];
+  /** The most output each relay's handle ever held at once. */
+  readonly retained: { stdout: number }[];
+  readonly children: ChildProcess[];
+}
+
+export function localRelays(): LocalRelays {
+  return { ports: [], retained: [], children: [] };
+}
+
+export function localRelayRun({ ports, retained, children }: LocalRelays) {
+  return async (command: string, options: RelayRunOptions): Promise<RelayCommandHandle> => {
+    if (options.user !== "root" || !options.stdin || !options.background)
+      throw new Error("The relay must run as a background root command with standard input");
+    if (!command.includes("relay ready")) throw new Error("Not the relay program");
+    const child = spawn("python3", ["-I", "-S", "-c", EGRESS_RELAY_PROGRAM, "0"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    children.push(child);
+    const handle = {
+      _stdout: "",
+      _stderr: "",
+      async sendStdin(data: string) {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        await new Promise<void>((resolve, reject) =>
+          child.stdin.write(data, (error) => (error ? reject(error) : resolve())),
+        );
+      },
+      async kill() {
+        return child.kill("SIGKILL");
+      },
+      wait: () => wait(child),
+    };
+    const record = { stdout: 0 };
+    retained.push(record);
+    let deliveries = Promise.resolve();
+    const deliver = (text: string) => {
+      deliveries = deliveries.then(() => {
+        handle._stdout += text;
+        record.stdout = Math.max(record.stdout, handle._stdout.length);
+        options.onStdout.call(handle, text);
+      });
+    };
+    deliver("Welcome to the sandbox\n");
+    let piece = 1;
+    child.stdout.setEncoding("utf8").on("data", (text: string) => {
+      const announced = /relay ready ([0-9]+)/u.exec(text);
+      if (announced) ports.push(Number(announced[1]));
+      for (let at = 0; at < text.length; ) {
+        piece = (piece * 7 + 3) % 61;
+        deliver(text.slice(at, at + piece + 1));
+        at += piece + 1;
+      }
+    });
+    child.stderr.setEncoding("utf8").on("data", (text: string) => {
+      handle._stderr += text;
+      options.onStderr.call(handle, text);
+    });
+    child.stdin.on("error", () => {});
+    return handle;
+  };
+}
+
+/**
+ * `false` leaves the sandbox without a privileged run, so it can never be sealed. With `relay`,
+ * the sandbox's relay is the real program on this machine (see `localRelayRun`); its client
+ * ports arrive in `relay.ports`.
+ */
 export async function fixture(
   cleanups: (() => Promise<void>)[],
   preparedRoot?: string,
   privileged:
     | ((argv: string[]) => Promise<{ exitCode: number; stdout: string }>)
     | false = fakePrivileged(),
+  relay?: LocalRelays,
 ) {
+  if (relay)
+    cleanups.push(async () => {
+      for (const child of relay.children) child.kill("SIGKILL");
+    });
   const builds: E2BWorkspaceTemplateBuild[] = [];
   const templates = {
     build: vi.fn(async (spec: E2BWorkspaceTemplateBuild) => {
@@ -182,7 +270,15 @@ export async function fixture(
         writeTransfer,
         readTransfer,
         snapshot,
-        ...(privileged ? { runPrivileged: privileged, startPrivileged: relayStarts } : {}),
+        ...(privileged
+          ? {
+              runPrivileged: privileged,
+              startPrivileged: relay
+                ? (argv: string[], onStdout: (text: string) => void) =>
+                    startE2BRelayCommand(localRelayRun(relay), argv, onStdout)
+                : relayStarts,
+            }
+          : {}),
       };
     }),
     deleteSnapshot: vi.fn(async (_snapshotId: string) => {}),

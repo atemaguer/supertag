@@ -1210,10 +1210,11 @@ async fn run(command: Command) -> Result<()> {
             ensure!(
                 network_credentials.is_empty()
                     || harness == HarnessKind::Codex
+                    || e2b_workspace_provider.is_some()
                     || modal_workspace_provider.is_some()
                     || local_vm
                     || local_vm_workspace_provider.is_some(),
-                "network credentials are injected only for Codex, or through a Modal or local-vm Workspace's egress relay, in this release"
+                "network credentials are injected only for Codex, or through an E2B, Modal, or local-vm Workspace's egress relay, in this release"
             );
             let workspaces = adapter.workspace_mappings()?;
             use supertag_worker_host::{ProviderAuthority, ProviderConfig};
@@ -1304,13 +1305,18 @@ async fn run(command: Command) -> Result<()> {
                 execution_profile.unverified_workspace_provider = remote_provider
                     .as_ref()
                     .is_some_and(|provider| !provider.verified());
-                // Modal and local-vm carry the egress relay over their exec stream while the
-                // sandbox has no network, DNS included (verified live 2026-11-17). E2B's carrier
-                // is built but unverified without credentials, so E2B hosts keep refusing
-                // network scopes.
+                // E2B, Modal, and local-vm carry the egress relay over their exec stream while
+                // the sandbox has no network, DNS included. Modal and local-vm were verified
+                // live (2026-11-17). E2B's carrier, a background root command with standard
+                // input, was proven only against a test double that runs the real relay program
+                // (2026-11-18), not against live E2B: there are no E2B credentials to run it.
                 execution_profile.remote_egress_relay = matches!(
                     remote_provider.as_ref().map(|config| &config.authority),
-                    Some(ProviderAuthority::Modal { .. } | ProviderAuthority::LocalVm { .. })
+                    Some(
+                        ProviderAuthority::E2b { .. }
+                            | ProviderAuthority::Modal { .. }
+                            | ProviderAuthority::LocalVm { .. }
+                    )
                 );
             }
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
