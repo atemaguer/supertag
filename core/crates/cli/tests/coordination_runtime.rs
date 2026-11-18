@@ -639,7 +639,7 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
     let mut db = database::connect(&database).await?;
     let notices = || {
         sqlx::query_scalar::<_, String>(
-            "SELECT task_id FROM supertag_v2_objective_notices WHERE objective_id='release' AND notice_key LIKE 'overlap:%'",
+            "SELECT task_id FROM supertag_v2_objective_notices WHERE objective_id='release' AND notice_key LIKE 'overlap:%' ORDER BY task_id",
         )
     };
     // The fixture writes workspace.txt, then artifact.bin. A scan between the two writes shares
@@ -729,8 +729,8 @@ async fn overlapping_work_sessions_warn_their_objective_once(database: String) -
         let task = json(cli(&["get", "task", child])).await?;
         assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     }
-    // Finished Attempts are no longer compared.
-    assert_eq!(notices().fetch_all(&mut db).await?.len(), 1);
+    // Finished Attempts are no longer compared: the notices told above stay the only ones.
+    assert_eq!(notices().fetch_all(&mut db).await?, told);
     services.stop().await
 }
 
