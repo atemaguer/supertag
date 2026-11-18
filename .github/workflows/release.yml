@@ -1,9 +1,10 @@
 name: Release SuperTag
 
 # Pushing a release tag builds the native archives for macOS on Apple silicon and Linux (arm64,
-# amd64) and attaches them, their SHA256SUMS, and an install.sh pinned to the release to a draft
-# GitHub Release. The archives hold the supertag CLI, the supertag-tui terminal UI, the shared
-# execution provider, and the Node.js bridges. A maintainer publishes the draft once every asset is attached; publishing
+# amd64) and the desktop app's macOS disk image, and attaches them, their SHA256SUMS, and an
+# install.sh pinned to the release to a draft GitHub Release. The archives hold the supertag CLI,
+# the supertag-tui terminal UI, the shared execution provider, and the Node.js bridges; the app
+# uses the supertag CLI on PATH and bundles none. A maintainer publishes the draft once every asset is attached; publishing
 # runs the installer check and the SDK publish workflows, so the README's latest installer URL
 # never points at a release without its archives.
 on:
@@ -69,9 +70,158 @@ jobs:
       APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
       APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
 
+  # The desktop app for Apple silicon, as SuperTag-VERSION-darwin-arm64.dmg. Intel Macs get no
+  # build: the app needs the supertag CLI, and releases ship no Intel Mac CLI. Tauri signs the app
+  # with the Developer ID certificate and the hardened runtime and notarizes and staples it; the
+  # disk image is then signed, notarized, and stapled itself. Without any Apple secret the image
+  # is unsigned, with a warning, as for the archives; an incomplete set fails this job. For now a
+  # failure here leaves the image out of the release with a warning instead of stopping it.
+  desktop:
+    needs: source
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: pnpm
+      - name: Use the pinned Rust toolchain
+        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' core/rust-toolchain.toml)" --profile minimal --no-self-update
+      - run: pnpm install --frozen-lockfile
+      - name: Prepare signing and notarization
+        id: signing
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          missing=()
+          for name in APPLE_DEVELOPER_ID_P12 APPLE_DEVELOPER_ID_P12_PASSWORD APPLE_NOTARY_KEY \
+            APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" = 5 ]; then
+            echo "::warning::Apple credentials are absent. This build will distribute an unsigned desktop app."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${#missing[@]}" != 0 ]; then
+            echo "::error::Incomplete macOS signing configuration. Missing: ${missing[*]}"
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$APPLE_DEVELOPER_ID_P12" | base64 -D > "$RUNNER_TEMP/signing.p12"
+          # Tauri needs the identity's name; read it from the certificate in the PKCS#12 file.
+          subject=$(openssl pkcs12 -in "$RUNNER_TEMP/signing.p12" -nokeys -clcerts \
+              -passin env:APPLE_DEVELOPER_ID_P12_PASSWORD -legacy 2>/dev/null ||
+            openssl pkcs12 -in "$RUNNER_TEMP/signing.p12" -nokeys -clcerts \
+              -passin env:APPLE_DEVELOPER_ID_P12_PASSWORD)
+          identity=$(printf '%s\n' "$subject" | openssl x509 -noout -subject -nameopt multiline |
+            sed -n 's/^ *commonName *= *//p')
+          rm -f "$RUNNER_TEMP/signing.p12"
+          case "$identity" in
+            'Developer ID Application: '*) ;;
+            *) echo "::error::The PKCS#12 file must hold a Developer ID Application certificate"; exit 1 ;;
+          esac
+          printf '%s\n' "$APPLE_NOTARY_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+          {
+            echo "signed=true"
+            echo "identity=$identity"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build the app and disk image
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          APPLE_CERTIFICATE: ${{ steps.signing.outputs.signed == 'true' && secrets.APPLE_DEVELOPER_ID_P12 || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ steps.signing.outputs.signed == 'true' && secrets.APPLE_DEVELOPER_ID_P12_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+          APPLE_API_KEY: ${{ steps.signing.outputs.signed == 'true' && secrets.APPLE_NOTARY_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ steps.signing.outputs.signed == 'true' && secrets.APPLE_NOTARY_ISSUER_ID || '' }}
+          APPLE_API_KEY_PATH: ${{ steps.signing.outputs.signed == 'true' && format('{0}/AuthKey.p8', runner.temp) || '' }}
+        working-directory: apps/desktop
+        run: |
+          # Unset variables, not empty ones, tell Tauri to skip signing and notarization.
+          if [ "$SIGNED" != true ]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+              APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH
+          fi
+          pnpm tauri build --bundles app,dmg
+      - name: Sign, notarize, and check the disk image
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          IDENTITY: ${{ steps.signing.outputs.identity }}
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          bundle=apps/desktop/src-tauri/target/release/bundle
+          app="$bundle/macos/SuperTag.app"
+          images=("$bundle"/dmg/*.dmg)
+          [ "${#images[@]}" = 1 ] && [ -f "${images[0]}" ] || { echo "::error::expected one disk image"; exit 1; }
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION"
+          image="SuperTag-$VERSION-darwin-arm64.dmg"
+          mkdir -p "$RUNNER_TEMP/desktop"
+          cp "${images[0]}" "$RUNNER_TEMP/desktop/$image"
+          cd "$RUNNER_TEMP/desktop"
+          if [ "$SIGNED" = true ]; then
+            codesign --verify --deep --strict --verbose=2 "$GITHUB_WORKSPACE/$app"
+            xcrun stapler validate "$GITHUB_WORKSPACE/$app"
+            # Sign the image from a keychain of its own rather than relying on Tauri's.
+            umask 077
+            keychain="$RUNNER_TEMP/dmg-signing.keychain-db"
+            password=$(openssl rand -hex 32)
+            printf '%s' "$APPLE_DEVELOPER_ID_P12" | base64 -D > "$RUNNER_TEMP/dmg-signing.p12"
+            security create-keychain -p "$password" "$keychain"
+            security unlock-keychain -p "$password" "$keychain"
+            security import "$RUNNER_TEMP/dmg-signing.p12" -k "$keychain" -f pkcs12 \
+              -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+            rm -f "$RUNNER_TEMP/dmg-signing.p12"
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" \
+              "$keychain" > /dev/null
+            # codesign finds the certificate chain through the search list; the runner is discarded.
+            # shellcheck disable=SC2046
+            security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+            codesign --force --timestamp --keychain "$keychain" --sign "$IDENTITY" "$image"
+            security delete-keychain "$keychain"
+            codesign --verify --strict --verbose=2 "$image"
+            xcrun notarytool submit "$image" --key "$RUNNER_TEMP/AuthKey.p8" \
+              --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID" --wait --timeout 20m
+            xcrun stapler staple "$image"
+            xcrun stapler validate "$image"
+            spctl --assess --type open --context context:primary-signature --verbose=2 "$image"
+          fi
+          shasum -a 256 "$image" > "$image.sha256"
+          cat "$image.sha256"
+      - name: Remove the notary key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supertag-desktop-darwin-arm64
+          path: |
+            ${{ runner.temp }}/desktop/*.dmg
+            ${{ runner.temp }}/desktop/*.dmg.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # A failed desktop job leaves the disk image out with a warning; the CLI archives still attach.
   publish:
-    if: github.event_name == 'push' || inputs.upload_assets
-    needs: [source, package]
+    if: >-
+      always() && needs.source.result == 'success' && needs.package.result == 'success' &&
+      (github.event_name == 'push' || inputs.upload_assets)
+    needs: [source, package, desktop]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -89,6 +239,14 @@ jobs:
           pattern: supertag-native-*
           path: release
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        if: needs.desktop.result == 'success'
+        with:
+          name: supertag-desktop-darwin-arm64
+          path: release
+      - name: Warn when the desktop app is missing
+        if: needs.desktop.result != 'success'
+        run: echo "::warning::The desktop app did not build; this release attaches no disk image."
       - name: Verify the archives and write SHA256SUMS
         working-directory: release
         run: |
@@ -99,6 +257,11 @@ jobs:
             cat "$archive.sha256" >> SHA256SUMS
           done
           test "$(wc -l < SHA256SUMS)" -eq 3
+          image="SuperTag-$VERSION-darwin-arm64.dmg"
+          if [ -f "$image" ]; then
+            sha256sum --check "$image.sha256"
+            cat "$image.sha256" >> SHA256SUMS
+          fi
       - name: Pin the installer to this release
         run: |
           sed -i "s/^RELEASE_DEFAULT_VERSION=\"latest\"$/RELEASE_DEFAULT_VERSION=\"$VERSION\"/" install.sh
@@ -125,5 +288,7 @@ jobs:
             true) ;;
             *) echo "::error::$RELEASE_TAG is already published; publish a new version instead"; exit 1 ;;
           esac
-          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber install.sh SHA256SUMS ./*-complete.tar.gz
+          assets=(install.sh SHA256SUMS ./*-complete.tar.gz)
+          for image in ./*.dmg; do [ -f "$image" ] && assets+=("$image"); done
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
           echo "Review the draft $RELEASE_TAG release notes, then publish it." >> "$GITHUB_STEP_SUMMARY"

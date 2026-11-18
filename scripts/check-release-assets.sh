@@ -21,4 +21,9 @@ for name in install.sh SHA256SUMS \
     missing=1
   fi
 done
+# The desktop app's disk image only warns for now, so a signing or notarization failure in its
+# job never holds back the CLI and SDK releases.
+if ! grep -Fxq -- "SuperTag-$version-darwin-arm64.dmg" <<<"$assets"; then
+  printf '::warning::%s has no SuperTag-%s-darwin-arm64.dmg asset\n' "$release_tag" "$version"
+fi
 exit "$missing"

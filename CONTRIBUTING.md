@@ -399,7 +399,8 @@ release without its archives:
 
 1. Push the release tag, for example `git push origin v0.3.0`. **Release SuperTag**
    (`release.yml`) builds and verifies the three archives with `native-release-check.yml`, checks
-   the pinned installer against them, and attaches them with their `SHA256SUMS` and an
+   the pinned installer against them, builds the desktop app's Apple silicon disk image
+   (`SuperTag-VERSION-darwin-arm64.dmg`), and attaches them with their `SHA256SUMS` and an
    `install.sh` pinned to the release to a draft GitHub Release for the tag. It never changes a
    published release.
 2. Review the draft's notes and assets, then publish it as the latest release, for example with
@@ -445,6 +446,13 @@ Set these GitHub Actions secrets on the release repository:
 | `APPLE_NOTARY_KEY` | Contents of the App Store Connect Team API key's `.p8` file |
 | `APPLE_NOTARY_KEY_ID` | Key ID shown in App Store Connect |
 | `APPLE_NOTARY_ISSUER_ID` | Issuer ID shown on the App Store Connect Team Keys page |
+
+The same secrets sign the desktop app: Tauri signs `SuperTag.app` with the hardened runtime and
+notarizes and staples it, and the workflow then signs, notarizes, and staples the disk image. The
+app is built for Apple silicon only and runs the `supertag` CLI on `PATH`; it bundles none. For
+now a failed desktop build or notarization leaves the disk image out of the draft release with a
+warning, and the SDK publish workflows only warn when it is missing, so it never holds back the
+CLI release.
 
 Create the certificate and Team key under the same Apple Developer team. When all five
 secrets are absent, the workflow warns and produces unsigned builds. An incomplete
