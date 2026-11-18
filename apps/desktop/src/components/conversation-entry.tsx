@@ -294,7 +294,7 @@ export function Bubble({
   );
 }
 
-function CopyText({ text }: { text: string }) {
+export function CopyText({ text, label = "Copy message" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -306,8 +306,8 @@ function CopyText({ text }: { text: string }) {
       variant="ghost"
       size="icon"
       className="icon-button"
-      aria-label={copied ? "Copied" : "Copy message"}
-      title={copied ? "Copied" : "Copy message"}
+      aria-label={copied ? "Copied" : label}
+      title={copied ? "Copied" : label}
       onClick={() =>
         navigator.clipboard.writeText(text).then(
           () => setCopied(true),

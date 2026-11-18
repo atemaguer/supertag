@@ -2,6 +2,8 @@ import { ArrowLeft, File, FileText, Folder, FolderOpen, Link2 } from "lucide-rea
 import { useCallback, useEffect, useState } from "react";
 import type { Gateway, TaskFileEntry, TaskFilesPlace } from "../gateway";
 import { describe } from "../lib/polling";
+import { sessionBranch } from "../lib/session-branch";
+import { CopyText } from "./conversation-entry";
 import { Button } from "./ui/button";
 
 /** How often a running Task's listing is read again. */
@@ -19,7 +21,30 @@ export function sizeWords(bytes: number): string {
  * checkout and opens text files read-only; binary files are listed only. Otherwise it says why the
  * files can't be read here. No file passes through SuperTag's servers.
  */
-export function TaskFiles({ gateway, taskId }: { gateway: Gateway; taskId: string }) {
+export function TaskFiles({
+  gateway,
+  taskId,
+  session,
+}: {
+  gateway: Gateway;
+  taskId: string;
+  /** The Task's Tag and Session, to name the branch its finished work is on. */
+  session?: { tagId: string; sessionId: string };
+}) {
+  const [branch, setBranch] = useState<string>();
+  const tagId = session?.tagId;
+  const sessionId = session?.sessionId;
+  useEffect(() => {
+    if (!tagId || !sessionId) return;
+    let cancelled = false;
+    sessionBranch(tagId, sessionId).then(
+      (name) => !cancelled && setBranch(name),
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [tagId, sessionId]);
   const [place, setPlace] = useState<TaskFilesPlace>();
   const [folder, setFolder] = useState("");
   const [entries, setEntries] = useState<TaskFileEntry[]>();
@@ -92,6 +117,7 @@ export function TaskFiles({ gateway, taskId }: { gateway: Gateway; taskId: strin
           {place.reason}
         </p>
       )}
+      {place && !place.live && branch && <BranchHint branch={branch} />}
       {place?.local && open && (
         <div className="task-file-view">
           <div className="task-file-bar">
@@ -170,5 +196,26 @@ export function TaskFiles({ gateway, taskId }: { gateway: Gateway; taskId: strin
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * Where a finished Task's work is: its Session's branch, in the repository of the Workspace the
+ * Tag works in, with commands to copy. A Task that made no commit leaves no branch.
+ */
+function BranchHint({ branch }: { branch: string }) {
+  const commands = [`git diff main...${branch}`, `git checkout ${branch}`];
+  return (
+    <div className="branch-hint">
+      <p className="activity-status">
+        In the Workspace's repository, see what it committed, or check it out:
+      </p>
+      {commands.map((command) => (
+        <div className="branch-command" key={command}>
+          <code title={command}>{command}</code>
+          <CopyText text={command} label="Copy command" />
+        </div>
+      ))}
+    </div>
   );
 }
