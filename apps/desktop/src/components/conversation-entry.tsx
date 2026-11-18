@@ -1,10 +1,27 @@
 import { Check, Copy, ListTree } from "lucide-react";
 import { useEffect, useState } from "react";
+import { defaultRehypePlugins } from "streamdown";
 import type { Gateway, Message as TagMessage, TaskEvent } from "../gateway";
 import { turnView, useTurnEvents } from "../lib/turn";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import { ExternalLink } from "./external-link";
 import { dividerLabel, fromOperator, RUNNING } from "./transcript";
+
+/**
+ * Streamdown's plugins, except that a link it would block, such as a relative path to a file in
+ * the repository (`README.md`), shows as its text rather than with a "[blocked]" marker.
+ */
+const [harden, hardening] = defaultRehypePlugins["harden"] as [
+  (options: Record<string, unknown>) => unknown,
+  Record<string, unknown>,
+];
+const REHYPE_PLUGINS = [
+  ...Object.entries(defaultRehypePlugins)
+    .filter(([name]) => name !== "harden")
+    .map(([, plugin]) => plugin),
+  [harden, { ...hardening, linkBlockPolicy: "text-only" }],
+] as NonNullable<Parameters<typeof MessageResponse>[0]["rehypePlugins"]>;
+
 import { Button } from "./ui/button";
 
 /**
@@ -245,7 +262,11 @@ export function Bubble({
     <div className="bubble-row">
       <MessageContent className={`bubble ${className}${tail ? " tail" : ""}`}>
         {markdown ? (
-          <MessageResponse className="markdown" components={{ a: ExternalLink }}>
+          <MessageResponse
+            className="markdown"
+            components={{ a: ExternalLink }}
+            rehypePlugins={REHYPE_PLUGINS}
+          >
             {text}
           </MessageResponse>
         ) : (

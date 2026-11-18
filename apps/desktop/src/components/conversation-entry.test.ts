@@ -306,3 +306,22 @@ it("shows a reply when the harness finishes, with no activity line, and keeps it
   expect(visible(failed)).toContain("Fixed the flaky test.");
   expect(visible(failed)).toContain("Workspace delivery could not be committed");
 });
+
+it("shows a link to a repository file as its text, never as a blocked link", () => {
+  const html = renderToStaticMarkup(
+    createElement(ConversationEntry, {
+      message: {
+        order: 1,
+        task: {
+          ...task,
+          prompt: "What files are here?",
+          result: "It holds [README.md](README.md) and [the docs](https://example.com/docs).",
+        },
+      },
+      onActivity: () => {},
+    }),
+  );
+  expect(visible(html)).toContain("It holds README.md and the docs.");
+  expect(html).not.toContain("[blocked]");
+  expect(html).toContain('title="example.com"');
+});
