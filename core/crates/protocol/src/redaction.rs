@@ -26,7 +26,7 @@ static CREDENTIAL_NAME: LazyLock<Regex> = LazyLock::new(|| {
 });
 static URL_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(?:^|[_-])url$").unwrap());
 static BASIC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\bBasic\s+[a-z\d+/_-]+=*").unwrap());
+    LazyLock::new(|| Regex::new(r"(?i)\bBasic\s+([a-z\d+/_-]+=*)").unwrap());
 static PROTECTED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"supertag-artifact:sha256:[a-f0-9]{64}|\[REDACTED\]").unwrap());
 static URI_RUN: LazyLock<Regex> = LazyLock::new(|| {
@@ -446,6 +446,34 @@ pub fn sensitive_environment_values<'a>(
     unique_sensitive_values(values)
 }
 
+/// Whether `token`, the word after `Basic`, is an HTTP Basic credential: base64 (standard or
+/// URL-safe) of `user:password`. Prose such as "a basic test" decodes to no `:` and stays.
+fn basic_credentials(token: &str) -> bool {
+    let digits = token.trim_end_matches('=');
+    if digits.len() < 4 || digits.len() % 4 == 1 {
+        return false;
+    }
+    let mut decoded = Vec::with_capacity(digits.len() * 3 / 4);
+    let (mut buffer, mut bits) = (0u32, 0u32);
+    for byte in digits.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            _ => return false,
+        };
+        buffer = (buffer << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            decoded.push((buffer >> bits) as u8);
+        }
+    }
+    decoded.contains(&b':')
+}
+
 fn base64(bytes: &[u8], alphabet: &[u8; 64], pad: bool) -> String {
     let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -680,7 +708,15 @@ pub fn redact_text(text: &str, values: &[SensitiveValue], structural: bool) -> S
     let protected_redact = |input: &str| -> String {
         let safe = outside_protected(input, |part| {
             let urls = redact_url_credentials(part, &mut |_| {});
-            BASIC.replace_all(&urls, "Basic [REDACTED]").into_owned()
+            BASIC
+                .replace_all(&urls, |found: &regex::Captures| {
+                    if basic_credentials(&found[1]) {
+                        "Basic [REDACTED]".to_owned()
+                    } else {
+                        found[0].to_owned()
+                    }
+                })
+                .into_owned()
         });
         let high_safe = outside_protected(&safe, replace_high);
         redact_words(&high_safe)
@@ -791,6 +827,22 @@ mod tests {
             redact("https://example.test/?q=search&page=2"),
             "https://example.test/?q=search&page=2"
         );
+    }
+
+    #[test]
+    fn redacts_basic_credentials_but_not_prose_after_the_word_basic() {
+        const STANDARD: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let credential = base64(b"bot:hunter2", STANDARD, true);
+        let safe = redact_text(&format!("auth Basic {credential} failed"), &[], false);
+        assert_eq!(safe, "auth Basic [REDACTED] failed");
+        for prose in [
+            "It has a Basic test and two edge cases.",
+            "Use basic auth for the proxy.",
+            "A basic example: add(1, 2).",
+        ] {
+            assert_eq!(redact_text(prose, &[], false), prose);
+        }
     }
 
     #[test]

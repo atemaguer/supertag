@@ -8,6 +8,16 @@ const ENVIRONMENT_NAME = /^(?=[A-Z0-9_]*[A-Z])[A-Z0-9_]+$/u;
 const ENVIRONMENT_CREDENTIAL_SEGMENT =
   /(?:^|_)(?:KEY|SK|TOKEN|SECRET|PASS|PASSWD|PASSWORD|PWD|PAT|CREDENTIALS?|AUTH|COOKIE)(?:_|$)/u;
 
+/** Whether `token`, the word after `Basic`, is an HTTP Basic credential: base64 (standard or
+ * URL-safe) of `user:password`. Prose such as "a basic test" decodes to no `:` and stays. */
+function basicCredentials(token: string): boolean {
+  const digits = token.replace(/=+$/u, "");
+  if (digits.length < 4 || digits.length % 4 === 1) return false;
+  if (!/^[A-Za-z0-9+/_-]+$/u.test(digits)) return false;
+  const decoded = Buffer.from(digits.replaceAll("-", "+").replaceAll("_", "/"), "base64");
+  return decoded.includes(0x3a);
+}
+
 export function isSensitiveName(name: string): boolean {
   // Storage locations describe where to find a credential, not the credential itself.
   if (STORAGE_SUFFIX.test(name)) return false;
@@ -296,7 +306,9 @@ export function redactText(
       .join("");
   const protectedRedact = (input: string): string => {
     const safe = outsideProtected(input, (part) =>
-      redactUrlCredentials(part).replace(/\bBasic\s+[a-z\d+/_-]+=*/giu, "Basic [REDACTED]"),
+      redactUrlCredentials(part).replace(/\bBasic\s+([a-z\d+/_-]+=*)/giu, (found, token: string) =>
+        basicCredentials(token) ? "Basic [REDACTED]" : found,
+      ),
     );
     // Replace against the original matches in one pass. A short hint must never split a
     // longer known secret before that secret is masked, or alter a redaction marker.

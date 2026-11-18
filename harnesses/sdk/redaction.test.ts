@@ -83,6 +83,17 @@ it.each(["percent", "json", "base64", "basic"])(
   },
 );
 
+it("redacts a Basic credential but not prose after the word basic", () => {
+  const credential = Buffer.from("bot:hunter2").toString("base64");
+  expect(redactText(`auth Basic ${credential} failed`, [])).toBe("auth Basic [REDACTED] failed");
+  for (const prose of [
+    "It has a Basic test and two edge cases.",
+    "Use basic auth for the proxy.",
+    "A basic example: add(1, 2).",
+  ])
+    expect(redactText(prose, [])).toBe(prose);
+});
+
 it.each([
   "PROVIDER_API_KEY",
   "SERVICE_AUTHORIZATION",

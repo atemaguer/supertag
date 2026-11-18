@@ -435,6 +435,9 @@ within the pre-1.0 compatibility policy described in
   track, such as `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.venv/`, `node_modules/`, and
   `.DS_Store` (and `target/` in a Cargo repository), so a harness's test run no longer adds
   them to the Session branch. A tracked file there is delivered as before.
+- Redaction no longer hides the word after "basic" in ordinary text. An Objective's assessment
+  read "It has a Basic [REDACTED] and two edge cases"; only a `Basic` value that decodes to
+  `user:password` is redacted now.
 - `supertag placement explain` names a `model` requirement when no bound Worker Host lists the
   model a Task names, instead of calling those hosts eligible.
 - A supertag.yaml Worker Host reports the execution profile its lanes claim with. A local-vm host
