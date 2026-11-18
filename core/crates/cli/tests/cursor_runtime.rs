@@ -855,9 +855,20 @@ async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access(
             assert!(
                 String::from_utf8_lossy(&output.stderr).contains("cleanup receipt is unavailable")
             );
-            let unsettled = runtime.task(&queued.task_id).await?;
-            // The harness finished, so its reply is already the Task's result, but completion
-            // stays fenced until cleanup is verified.
+            // The harness finished, so its reply becomes the Task's result, but completion
+            // stays fenced until cleanup is verified. The host reports the reply without
+            // waiting for the answer, so under load it can still be in flight as the host exits.
+            let unsettled = timeout(WAIT, async {
+                loop {
+                    let task = runtime.task(&queued.task_id).await?;
+                    if task.result.is_some() || task.state() != TaskState::Running {
+                        return Ok::<_, anyhow::Error>(task);
+                    }
+                    sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await
+            .context("the harness's reply never reached the fenced Task")??;
             assert_eq!(unsettled.state(), TaskState::Running);
             assert!(unsettled.result.is_some());
             fixture.started(mode)?;
