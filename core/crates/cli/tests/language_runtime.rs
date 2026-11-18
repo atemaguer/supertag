@@ -557,7 +557,8 @@ async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool(database: String)
     let resumed_id = decision["continuation_task_id"]
         .as_str()
         .context("MCP continuation Task")?;
-    success(catalog_worker("catalog-resume")).await?;
+    // The host that wrote the Session's checkpoint resumes it; another host would start fresh.
+    success(catalog_worker("catalog-host")).await?;
     let resumed = services.operator(&["get", "task", resumed_id]).await?;
     assert_eq!(resumed["state"], "TASK_STATE_SUCCEEDED", "{resumed}");
     assert_eq!(resumed["session_id"], completed["session_id"]);
@@ -759,7 +760,8 @@ async fn exercise_stdio_mcp(directory: &Path, database: &str) -> Result<()> {
     // closed it, not that the host exited.
     let mut serving = services.serving_worker(
         "claude-code",
-        &directory.join("catalog-resume"),
+        // The host that wrote the Session's checkpoint, so the continuation resumes it.
+        &directory.join("catalog-host"),
         Path::new(&node),
         &entry,
     );
@@ -2069,7 +2071,8 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn(
         .as_str()
         .context("continuation Task ID")?;
     assert_ne!(source_id, continued_id);
-    success(worker("second-host")).await?;
+    // The host that wrote the Session's checkpoint resumes it; another host would start fresh.
+    success(worker("first-host")).await?;
     let continued = services.operator(&["get", "task", continued_id]).await?;
     assert_eq!(continued["state"], "TASK_STATE_SUCCEEDED", "{continued}");
     assert_eq!(continued["session_id"], first["session_id"]);
