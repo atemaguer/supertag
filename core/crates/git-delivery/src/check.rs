@@ -61,42 +61,23 @@ impl GitDelivery {
         steps.push(read);
 
         // Push: a dry run of a new Session branch, which authenticates as a push without sending.
+        // Every delivered Task pushes its Session's branch, whatever `land` says.
         let pushing = match self.remote(workspace, Access::Push).await {
             Ok(remote) => {
                 let label = credential_label(&remote);
                 match self.probe_push(&remote, cancel).await {
-                    Ok(()) if land.is_some() => step("push", WorkspaceCheckStatus::Ok, label),
-                    Ok(()) => step(
-                        "push",
-                        WorkspaceCheckStatus::Ok,
-                        format!("{label}; the Workspace does not land changes yet"),
-                    ),
-                    Err(error) if land.is_none() => step(
-                        "push",
-                        WorkspaceCheckStatus::NotApplicable,
-                        format!("the Workspace does not land changes ({error:#})"),
-                    ),
+                    Ok(()) => step("push", WorkspaceCheckStatus::Ok, label),
                     Err(error) => step(
                         "push",
                         WorkspaceCheckStatus::Failed,
                         format!("{label}: {error:#}"),
                     ),
                 }
-                .into()
             }
-            Err(error) if land.is_some() => Some(step(
-                "push",
-                WorkspaceCheckStatus::Failed,
-                format!("{error:#}"),
-            )),
-            Err(_) => None,
+            Err(error) => step("push", WorkspaceCheckStatus::Failed, format!("{error:#}")),
         };
-        let pushing_ok = pushing
-            .as_ref()
-            .is_some_and(|step| step.status == WorkspaceCheckStatus::Ok as i32);
-        if let Some(pushing) = pushing {
-            steps.push(pushing);
-        }
+        let pushing_ok = pushing.status == WorkspaceCheckStatus::Ok as i32;
+        steps.push(pushing);
 
         // Scope: SuperTag's ref allowlist always applies; the server's rules are unknown to it.
         let scope = match self.remote(workspace, Access::Push).await {

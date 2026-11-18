@@ -452,10 +452,22 @@ async fn check_reports_each_step_without_changing_the_remote() {
     assert_eq!(status("ci").0, WorkspaceCheckStatus::Unknown);
     assert_eq!(git(&fixture.remote, &["for-each-ref"]), before);
 
+    // Without `land`, every delivery still pushes its Session's branch, so the push is checked.
+    let check = fixture
+        .delivery
+        .check(&fixture.workspace(None), &cancel)
+        .await
+        .unwrap();
+    let push = check.steps.iter().find(|step| step.step == "push").unwrap();
+    assert_eq!(push.status(), WorkspaceCheckStatus::Ok, "{push:?}");
+    assert!(!push.detail.contains("does not land"), "{push:?}");
+
     let mut missing = fixture.workspace(None);
     missing.remote = "file:///nonexistent/remote.git".into();
     let check = fixture.delivery.check(&missing, &cancel).await.unwrap();
     assert_eq!(check.steps[0].status(), WorkspaceCheckStatus::Failed);
+    let push = check.steps.iter().find(|step| step.step == "push").unwrap();
+    assert_eq!(push.status(), WorkspaceCheckStatus::Failed, "{push:?}");
 }
 
 /// The Control Plane hands a Worker Host the credential for one operation: an HTTPS token or SSH
