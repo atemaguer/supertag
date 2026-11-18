@@ -96,7 +96,7 @@ use supertag_protocol::{
         workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
-use supertag_worker_host::HostOptions;
+use supertag_worker_host::{WorkerOptions, WorkletOptions};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tonic::Request;
@@ -1431,34 +1431,19 @@ async fn run(command: Command) -> Result<()> {
             #[cfg(feature = "test-fixtures")]
             let (keep_awake, disk_space) = test_host_environment(disk_space)?;
             let retire = CancellationToken::new();
-            let options = HostOptions {
+            let worklet = WorkletOptions {
                 control_plane: network::endpoint(control_plane).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
                 state_directory,
-                adapter_guardian: std::env::current_exe()?,
-                adapter,
-                adapter_args,
-                harness,
-                provider_model,
-                execution_profile,
-                attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
                 wait_for_recovery,
                 once,
                 workspaces,
-                remote_provider,
-                shared_execution,
-                context_catalog: supertag_worker_host::context::ContextCatalog::load(
-                    skill_catalog.as_deref(),
-                )?,
-                mcp_catalog,
                 artifact_source,
                 artifact_peers,
-                workspace_mounts,
                 volumes: host_volumes,
                 disk_space,
                 keep_awake,
                 labels,
-                network_credentials,
                 lane: supervised_lane.map(|incarnation_id| supertag_worker_host::Lane {
                     incarnation_id,
                     observer: std::sync::Arc::new(|state: supertag_worker_host::LaneState| {
@@ -1466,6 +1451,23 @@ async fn run(command: Command) -> Result<()> {
                     }),
                     retire: retire.clone(),
                 }),
+            };
+            let worker = WorkerOptions {
+                adapter_guardian: std::env::current_exe()?,
+                adapter,
+                adapter_args,
+                harness,
+                provider_model,
+                execution_profile,
+                attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
+                remote_provider,
+                shared_execution,
+                context_catalog: supertag_worker_host::context::ContextCatalog::load(
+                    skill_catalog.as_deref(),
+                )?,
+                mcp_catalog,
+                workspace_mounts,
+                network_credentials,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();
@@ -1481,7 +1483,8 @@ async fn run(command: Command) -> Result<()> {
                     retire.cancel();
                 }
             });
-            let result = supertag_worker_host::run(options, token, || outln!("ready")).await;
+            let result =
+                supertag_worker_host::run(worklet, worker, token, || outln!("ready")).await;
             signal.abort();
             retiring.abort();
             result?;

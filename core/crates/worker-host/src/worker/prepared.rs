@@ -27,8 +27,8 @@ use supertag_protocol::v2::{HostRecord, RemoteWorkspaceEnvironment};
 use supertag_workspaces::{ExclusiveLock, devcontainer::RemoteDevcontainer};
 use tokio_util::sync::CancellationToken;
 
+use crate::worker::{Settings, WorkerOptions};
 use crate::{
-    HostOptions,
     worker::remote_provider::{ProviderConfig, RemoteProvider, Start, validate_artifact},
     worklet::journal::{Attempt, Journal},
     worklet::workspaces::{PreparedWorkspace, Workspaces},
@@ -159,7 +159,7 @@ fn list(directory: &Path, workspace_id: &str, provider_scope: &str) -> Vec<Recor
 /// The prepared artifact for this Attempt's Workspace: a recorded one for the same digest, or a
 /// new one from a preparation sandbox, warm when an ancestor's artifact exists.
 pub(crate) async fn artifact(
-    options: &HostOptions,
+    options: &Settings<'_>,
     journal: &Journal,
     workspaces: &Workspaces,
     (attempt, workspace): (&Attempt, &PreparedWorkspace),
@@ -174,7 +174,7 @@ pub(crate) async fn artifact(
     let scope = config.authority_fingerprint();
     let trusted = &workspace.checkout.base_commit;
     let (digest, warm_key) = keys(&scope, &workspace.workspace_id, environment, trusted);
-    let records = directory(&options.state_directory)?;
+    let records = directory(options.state_directory)?;
     let artifact = {
         let _lock = lock(&records, &digest, cancel).await?;
         let path = records.join(format!("{digest}.json"));
@@ -252,7 +252,7 @@ pub(crate) async fn artifact(
 
 /// Stops a preparation sandbox journaled under the Attempt and forgets it.
 async fn stop_preparation(
-    options: &HostOptions,
+    options: &WorkerOptions,
     journal: &Journal,
     attempt: &Attempt,
     registration: &HostRecord,

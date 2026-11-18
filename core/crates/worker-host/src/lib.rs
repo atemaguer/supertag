@@ -25,7 +25,7 @@ pub use worker::mcp::{
 };
 pub use worker::remote_provider::{ProviderAuthority, ProviderConfig};
 pub use worker::shared_execution::SharedExecutionConfig;
-pub use worker::{context, egress};
+pub use worker::{WorkerOptions, context, egress};
 pub use worklet::artifact_direct::{ArtifactPeers, ArtifactSourceConfig};
 pub use worklet::enrollment::{
     EnrolledRole, credential, enroll, enrolled_control_plane, enrolled_host, rotate_own_credential,
@@ -35,17 +35,18 @@ pub use worklet::shared_host::{
     HarnessSlots, SharedHost, holds_attempt, transient as presence_retryable,
 };
 pub use worklet::workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
+pub use worklet::{Lane, WorkletOptions};
 pub use workspace_mounts::WorkspaceMounts;
 
-use std::{ffi::OsString, path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 use prost::Message;
 use supertag_protocol::{
     HOST_GENERATION_HEADER, authenticated_request, negotiation,
     v2::{
-        Assignment, AttemptExecutionSelection, HarnessExecutionProfile, HarnessKind,
-        InspectAttemptRequest, Task, attempt_artifacts_client::AttemptArtifactsClient,
+        Assignment, AttemptExecutionSelection, HarnessKind, InspectAttemptRequest, Task,
+        attempt_artifacts_client::AttemptArtifactsClient,
         attempt_changed_paths_client::AttemptChangedPathsClient,
         attempt_effects_client::AttemptEffectsClient, attempt_inputs_client::AttemptInputsClient,
         attempt_mailbox_client::AttemptMailboxClient,
@@ -69,66 +70,15 @@ use tonic::{
 };
 use worklet::journal::{self, Attempt};
 
-pub struct HostOptions {
-    pub control_plane: supertag_transport::Target,
-    pub token: Option<String>,
-    pub state_directory: PathBuf,
-    pub adapter_guardian: PathBuf,
-    pub adapter: PathBuf,
-    pub adapter_args: Vec<OsString>,
-    pub harness: HarnessKind,
-    pub provider_model: Option<String>,
-    pub execution_profile: HarnessExecutionProfile,
-    pub attempt_timeout: Duration,
-    pub wait_for_recovery: bool,
-    pub once: bool,
-    /// Every Workspace this host can prepare. Several IDs may name one source.
-    pub workspaces: Vec<WorkspaceMapping>,
-    pub remote_provider: Option<ProviderConfig>,
-    pub shared_execution: Option<SharedExecutionConfig>,
-    pub context_catalog: context::ContextCatalog,
-    pub mcp_catalog: McpCatalog,
-    /// Where this host keeps the artifact and Workspace delivery bytes it holds; `None` keeps them in
-    /// `STATE_DIRECTORY/artifacts`.
-    pub artifact_source: Option<ArtifactSourceConfig>,
-    pub artifact_peers: ArtifactPeers,
-    pub workspace_mounts: WorkspaceMounts,
-    /// File Volumes this host maps, by Volume ID. The work of a Tag that keeps it on one, such as
-    /// its captures, is written there directly.
-    pub volumes:
-        std::collections::BTreeMap<String, supertag_workspaces::artifact_volumes::FileVolume>,
-    /// Where reports sample free disk space, normally the state directory's filesystem.
-    pub disk_space: environment::DiskSpaceSource,
-    /// The OS command that keeps the machine awake while an Attempt runs, if any.
-    pub keep_awake: Option<environment::KeepAwakeCommand>,
-    /// Operator-declared placement labels. The host adds its operating system
-    /// and architecture; the Control Plane derives harness and Workspace labels.
-    pub labels: Vec<String>,
-    /// Set when a supervisor runs this process as one execution lane of a shared Host.
-    pub lane: Option<Lane>,
-    /// Credentials the egress proxy injects for Tasks whose network scope names them.
-    pub network_credentials: Vec<egress::HostCredential>,
-}
-
-/// Runs this Worker Host's Worklet until `shutdown`, calling `ready` once it can take work.
+/// Runs this Worker Host's Worklet until `shutdown`, calling `ready` once it can take work. The
+/// Worklet runs each Attempt it claims in a Worker made from `worker`.
 pub async fn run(
-    options: HostOptions,
+    worklet: WorkletOptions,
+    worker: WorkerOptions,
     shutdown: CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
-    worklet::run::run(options, shutdown, ready).await
-}
-
-/// One supervised execution lane. Every lane of a Host registers the Host's single
-/// incarnation, so sibling lanes never replace each other's generation. The supervisor
-/// owns the Host's presence report and receives this lane's state instead.
-#[derive(Clone)]
-pub struct Lane {
-    pub incarnation_id: String,
-    pub observer: LaneObserver,
-    /// Cancelled when the supervisor lowers the Host's concurrency below this lane: the lane
-    /// claims no more work and returns once it holds no Attempt, so its journal is left empty.
-    pub retire: CancellationToken,
+    worklet::run::run(worklet, worker, shutdown, ready).await
 }
 
 #[derive(Clone)]
@@ -236,7 +186,7 @@ impl Attempt {
         })
     }
 
-    fn can_launch(&self, options: &HostOptions) -> Result<bool> {
+    fn can_launch(&self, options: &WorkerOptions) -> Result<bool> {
         let Some(selection) = &self.execution_selection else {
             return Ok(false);
         };

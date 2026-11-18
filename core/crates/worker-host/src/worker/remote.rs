@@ -11,8 +11,9 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
+use crate::worker::{Settings, WorkerOptions};
 use crate::{
-    CoordinationClients, HostOptions,
+    CoordinationClients,
     worker::adapter::artifact_acquisition::AcquisitionClient,
     worker::remote_provider::{RemoteProvider, Start},
     worker::task_artifact_inputs::RemoteInputs,
@@ -66,7 +67,7 @@ pub(crate) const OUTPUTS_FAILED: &str = "Task output files could not be captured
 /// When a Harness that starts before its sandbox must stop: the sandbox's lifetime less its
 /// cleanup margin, counted from now. The sandbox is allocated later, so this is never later than
 /// the deadline `prepare` reports.
-pub(crate) fn execution_ends(options: &HostOptions, mounted: Option<&Mounted>) -> Instant {
+pub(crate) fn execution_ends(options: &WorkerOptions, mounted: Option<&Mounted>) -> Instant {
     let margin = sandbox_margin(mounted);
     let timeout = options
         .attempt_timeout
@@ -125,7 +126,7 @@ pub(crate) async fn download_inputs(
 }
 
 pub(crate) async fn prepare(
-    options: &HostOptions,
+    options: &Settings<'_>,
     journal: &Journal,
     workspaces: &Workspaces,
     (attempt, workspace, task): (&Attempt, &PreparedWorkspace, &Task),
@@ -316,7 +317,7 @@ pub(crate) const SANDBOX_REPLACED: &str = "The sandbox stopped and was replaced.
 /// Allocates and stages one sandbox of the Attempt from its starting files.
 #[allow(clippy::too_many_arguments)]
 async fn start_sandbox(
-    options: &HostOptions,
+    options: &Settings<'_>,
     journal: &Journal,
     (attempt, export): (&Attempt, &supertag_workspaces::PreparedExport),
     mounted: Option<&Mounted>,
@@ -380,7 +381,7 @@ async fn start_sandbox(
 /// Harness has left. Fails, leaving the old sandbox's record, when the stop cannot be confirmed,
 /// after `MAX_REPLACEMENTS`, or when the Harness has no time left.
 pub(crate) async fn replace(
-    options: &HostOptions,
+    options: &Settings<'_>,
     journal: &Journal,
     workspaces: &Workspaces,
     (attempt, workspace): (&Attempt, &PreparedWorkspace),
@@ -526,7 +527,7 @@ pub(crate) async fn capture(
 }
 
 pub(crate) async fn ensure_stopped(
-    options: &HostOptions,
+    options: &WorkerOptions,
     journal: &Journal,
     attempt: &Attempt,
     registration: &HostRecord,

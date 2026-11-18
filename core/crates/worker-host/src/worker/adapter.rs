@@ -60,8 +60,9 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status, transport::Server};
 use uuid::Uuid;
 
+use crate::worker::{Settings, WorkerOptions};
 use crate::{
-    CoordinationClients, HostOptions, RegisteredHost, RegisteredInputs,
+    CoordinationClients, RegisteredHost, RegisteredInputs,
     artifact_snapshots::Snapshots,
     worker::guardian::{MAX_BOOTSTRAP_BYTES, monotonic_now_ns},
 };
@@ -491,7 +492,7 @@ pub(crate) struct ExecutionInputs<'a> {
 /// the values its reasons must redact: this run's redaction set and the Attempt's resolved MCP
 /// credentials.
 pub(crate) async fn execute(
-    options: &HostOptions,
+    options: &Settings<'_>,
     assignment: Assignment,
     inputs: ExecutionInputs<'_>,
     clients: (RegisteredHost, RegisteredInputs, CoordinationClients),
@@ -528,7 +529,7 @@ pub(crate) async fn execute(
 }
 
 async fn run(
-    options: &HostOptions,
+    options: &Settings<'_>,
     assignment: Assignment,
     ExecutionInputs {
         checkpoint,
@@ -580,7 +581,7 @@ async fn run(
         .map(|path| {
             Ok::<_, anyhow::Error>((
                 path.to_owned(),
-                Snapshots::open(&options.state_directory, &assignment.attempt_id)?,
+                Snapshots::open(options.state_directory, &assignment.attempt_id)?,
             ))
         })
         .transpose()?;
@@ -589,7 +590,7 @@ async fn run(
         .filter(|_| remote_workspace.is_none())
         .map(|(path, _)| {
             crate::artifact_inputs::Inputs::prepare_optional(
-                &options.state_directory,
+                options.state_directory,
                 &assignment.attempt_id,
                 path,
             )
@@ -717,7 +718,7 @@ impl NativeMemory {
 /// harness keeps one. Native memory is a convenience: a copy that cannot be made never stops
 /// the turn.
 async fn prepare_native_memory(
-    options: &HostOptions,
+    options: &Settings<'_>,
     assignment: &Assignment,
     coordination: &CoordinationClients,
     host_token: &str,
@@ -881,7 +882,7 @@ fn environment_credential(variable: &str) -> Option<crate::worker::provider_prox
 /// OpenCode's API key for `provider` from the auth file the host gives its adapter (its
 /// `--auth-file`, from the host's `--opencode-auth-file`): `{ PROVIDER: { "type": "api", "key": KEY } }`. A sign-in of another
 /// kind can't go behind the proxy.
-fn opencode_file_key(options: &HostOptions, provider: &str) -> Option<String> {
+fn opencode_file_key(options: &WorkerOptions, provider: &str) -> Option<String> {
     let path = options
         .adapter_args
         .windows(2)
@@ -956,7 +957,7 @@ pub fn unsandboxed_caveat(name: &str) -> String {
 
 /// Why this unsandboxed host's model key can't go behind the provider proxy, so the commands its
 /// harness runs can reach it; `None` when it can, or when the host runs no command unsandboxed.
-pub(crate) fn unproxied_key_warning(options: &HostOptions) -> Option<String> {
+pub(crate) fn unproxied_key_warning(options: &WorkerOptions) -> Option<String> {
     if !options.execution_profile.allow_unsandboxed_commands {
         return None;
     }
@@ -994,7 +995,7 @@ pub(crate) fn unproxied_key_warning(options: &HostOptions) -> Option<String> {
 /// in the macOS Keychain, an OpenCode OAuth sign-in, or a provider SuperTag doesn't proxy), which
 /// the harness then reads itself.
 async fn start_provider_proxy(
-    options: &HostOptions,
+    options: &Settings<'_>,
 ) -> Result<Option<crate::worker::provider_proxy::ProviderProxy>> {
     if !options.execution_profile.allow_unsandboxed_commands {
         return Ok(None);
@@ -1037,7 +1038,7 @@ async fn start_provider_proxy(
 }
 
 async fn supervise(
-    options: &HostOptions,
+    options: &Settings<'_>,
     bridge: &Bridge,
     bootstrap: AdapterBootstrap,
     (valid_until, execution_ends): (Instant, Instant),
@@ -1119,7 +1120,7 @@ async fn supervise(
                 .into_iter()
                 .map(|(name, value)| (OsStr::new(name), value)),
         );
-        CredentialHandoff::write(&options.state_directory, secrets)?.inspect(|handoff| {
+        CredentialHandoff::write(options.state_directory, secrets)?.inspect(|handoff| {
             command.env(PROVIDER_CREDENTIALS_FILE, &handoff.0);
         })
     } else {

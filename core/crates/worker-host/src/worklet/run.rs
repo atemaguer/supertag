@@ -28,9 +28,9 @@ use crate::worklet::recovery::{
 };
 use crate::worklet::{background, registration};
 use crate::{
-    ArtifactSourceConfig, HostHeaders, HostOptions, McpCatalog, SharedExecutionConfig,
-    artifact_inputs, environment, failures, lost_ownership, provider_environment_for, request,
-    retryable, wait_for_work,
+    ArtifactSourceConfig, HostHeaders, McpCatalog, SharedExecutionConfig, WorkerOptions,
+    WorkletOptions, artifact_inputs, environment, failures, lost_ownership,
+    provider_environment_for, request, retryable, wait_for_work,
     worker::{adapter, remote},
     worklet::{
         checkpoints, cleanup_failure, enrollment,
@@ -41,55 +41,55 @@ use crate::{
 };
 
 pub(crate) async fn run(
-    mut options: HostOptions,
+    mut options: WorkletOptions,
+    mut worker: WorkerOptions,
     shutdown: CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
     if let Some(token) = &options.token {
         failures::remember_credential(token);
     }
-    remote::validate_time_limit(options.attempt_timeout, options.remote_provider.is_some())?;
+    remote::validate_time_limit(worker.attempt_timeout, worker.remote_provider.is_some())?;
     ensure!(
-        options.execution_profile.mcp_servers == options.mcp_catalog.capabilities()
-            && (options.execution_profile.mcp_servers.is_empty()
-                || (options.harness == HarnessKind::ClaudeCode
-                    && options.remote_provider.is_none())),
+        worker.execution_profile.mcp_servers == worker.mcp_catalog.capabilities()
+            && (worker.execution_profile.mcp_servers.is_empty()
+                || (worker.harness == HarnessKind::ClaudeCode && worker.remote_provider.is_none())),
         "MCP tools require a local Claude Code Worker Host with the matching catalog"
     );
-    provider_environment_for(options.harness, options.provider_model.as_deref())?;
+    provider_environment_for(worker.harness, worker.provider_model.as_deref())?;
     let labels = readiness::host_labels(&options.labels)?;
     ensure!(
-        options.execution_profile.remote_file_workspace == options.remote_provider.is_some()
-            && (options.remote_provider.is_none()
+        worker.execution_profile.remote_file_workspace == worker.remote_provider.is_some()
+            && (worker.remote_provider.is_none()
                 || (matches!(
-                    options.harness,
+                    worker.harness,
                     HarnessKind::Cursor
                         | HarnessKind::ClaudeCode
                         | HarnessKind::Opencode
                         | HarnessKind::Codex
                 ) && !options.workspaces.is_empty()
-                    && !options.execution_profile.allow_unsandboxed_commands)),
+                    && !worker.execution_profile.allow_unsandboxed_commands)),
         "invalid Worker Host remote Workspace profile"
     );
     ensure!(
-        options.execution_profile.shared_execution.as_ref()
-            == options
+        worker.execution_profile.shared_execution.as_ref()
+            == worker
                 .shared_execution
                 .as_ref()
                 .map(SharedExecutionConfig::capability)
-            && (options.shared_execution.is_none()
-                || (options.harness == HarnessKind::Cursor
+            && (worker.shared_execution.is_none()
+                || (worker.harness == HarnessKind::Cursor
                     && options.workspaces.is_empty()
-                    && options.remote_provider.is_none()
-                    && options.execution_profile.mcp_servers.is_empty()
-                    && !options.execution_profile.allow_unsandboxed_commands)),
+                    && worker.remote_provider.is_none()
+                    && worker.execution_profile.mcp_servers.is_empty()
+                    && !worker.execution_profile.allow_unsandboxed_commands)),
         "shared execution requires a Cursor Worker Host with the exact provider profile"
     );
     ensure!(
         !matches!(
-            options.harness,
+            worker.harness,
             HarnessKind::Opencode | HarnessKind::OpenaiAgents | HarnessKind::Cursor
-        ) || options.context_catalog.supported_contracts().is_empty(),
+        ) || worker.context_catalog.supported_contracts().is_empty(),
         "the selected harness does not load Skills"
     );
     let shutdown = shutdown.child_token();
@@ -101,12 +101,12 @@ pub(crate) async fn run(
         .map(std::path::Path::to_path_buf)
         .collect();
     let local_roots: Vec<&std::path::Path> = local_roots.iter().map(PathBuf::as_path).collect();
-    if !options.workspace_mounts.is_empty() {
+    if !worker.workspace_mounts.is_empty() {
         ensure!(
-            supertag_protocol::workspace_mounts::mount_harness(options.harness)
+            supertag_protocol::workspace_mounts::mount_harness(worker.harness)
                 && !options.workspaces.is_empty()
                 && local_roots.len() == options.workspaces.len()
-                && options.shared_execution.is_none(),
+                && worker.shared_execution.is_none(),
             "Workspace copy mounts require a Codex, Claude Code, Cursor, or OpenCode Worker Host with local Workspace mappings"
         );
         let state_directory = options.state_directory.clone();
@@ -115,7 +115,7 @@ pub(crate) async fn run(
             .as_ref()
             .map(|source| source.directory.clone())
             .unwrap_or_else(|| state_directory.join("artifacts"));
-        options.workspace_mounts.protect(
+        worker.workspace_mounts.protect(
             &state_directory,
             &local_roots,
             Some(artifact_storage.as_path()),
@@ -235,8 +235,8 @@ pub(crate) async fn run(
     if let Some(warning) = environment::low_disk_warning(options.disk_space.sample().as_ref()) {
         supertag_protocol::terminal_text::warn(&warning);
     }
-    if options.execution_profile.allow_unsandboxed_commands {
-        let name = match options.harness {
+    if worker.execution_profile.allow_unsandboxed_commands {
+        let name = match worker.harness {
             HarnessKind::ClaudeCode => "Claude Code",
             HarnessKind::Opencode => "OpenCode",
             HarnessKind::Cursor => "Cursor",
@@ -245,7 +245,7 @@ pub(crate) async fn run(
         supertag_protocol::terminal_text::warn(&adapter::unsandboxed_caveat(name));
     }
     // A sign-in the provider proxy can't hold stays readable to commands run unsandboxed.
-    if let Some(warning) = adapter::unproxied_key_warning(&options) {
+    if let Some(warning) = adapter::unproxied_key_warning(&worker) {
         supertag_protocol::terminal_text::warn(&warning);
     }
     let keep_awake = environment::KeepAwake::start(options.keep_awake.clone(), shutdown.clone());
@@ -257,7 +257,7 @@ pub(crate) async fn run(
             options.disk_space.clone(),
             host.clone(),
             token.clone(),
-            options.harness as i32,
+            worker.harness as i32,
             workspaces
                 .ids()
                 .into_iter()
@@ -265,8 +265,8 @@ pub(crate) async fn run(
                 .collect(),
             (
                 {
-                    let profile = options.execution_profile.clone();
-                    let catalog = options.mcp_catalog.clone();
+                    let profile = worker.execution_profile.clone();
+                    let catalog = worker.mcp_catalog.clone();
                     Arc::new(move || McpCatalog::advertised(&profile, &catalog.lapsed_logins()))
                 },
                 labels,
@@ -288,7 +288,7 @@ pub(crate) async fn run(
             }
             None => {
                 let operation_id = Uuid::new_v4().to_string();
-                let claim = claim_request(&options, &workspaces, operation_id.clone());
+                let claim = claim_request(&options, &worker, &workspaces, operation_id.clone());
                 let entry = Entry::Claim {
                     operation_id,
                     request: claim.encode_to_vec(),
@@ -313,7 +313,7 @@ pub(crate) async fn run(
                 let claim = ClaimTaskRequest::decode(saved.as_slice())
                     .context("stored Claim is invalid")?;
                 ensure!(claim.operation_id == operation_id, "stored Claim identity differs");
-                if claim != claim_request(&options, &workspaces, operation_id) {
+                if claim != claim_request(&options, &worker, &workspaces, operation_id) {
                     // Never submit an unsent Claim with a superseded profile. A
                     // previously allocated reservation expires on its existing lease.
                     journal.clear()?;
@@ -386,7 +386,13 @@ pub(crate) async fn run(
             }
             Entry::Starting { attempt } | Entry::PreparingInputs { attempt, .. } => {
                 run_assignment(
-                    &options,
+                    (
+                        &crate::worker::Settings {
+                            options: &worker,
+                            state_directory: &options.state_directory,
+                        },
+                        options.once,
+                    ),
                     &journal,
                     &workspaces,
                     (&mut host, &inputs, &coordination, &transfers, &token, &registration),
@@ -401,7 +407,7 @@ pub(crate) async fn run(
                 .await?;
             }
             Entry::Executing { attempt, prepared } => {
-                ensure_providers_stopped(&options, &journal, &attempt, &registration)
+                ensure_providers_stopped(&worker, &journal, &attempt, &registration)
                     .await
                     .context(cleanup_failure::CleanupUnconfirmed::default())?;
                 match resolved(&mut host, &attempt, &token).await {
@@ -454,7 +460,7 @@ pub(crate) async fn run(
                 // Exact finalization can safely resume after a Host restart.
                 with_cleanup_authority(
                     &mut host, &attempt, &token, &shutdown,
-                    ensure_providers_stopped(&options, &journal, &attempt, &registration),
+                    ensure_providers_stopped(&worker, &journal, &attempt, &registration),
                 ).await?;
                 if let Some(pending) = outputs.as_ref().filter(|output| succeeded && !output.frozen).cloned() {
                     if remote_tree.is_some() {
@@ -504,11 +510,11 @@ pub(crate) async fn run(
                     }
                     continue;
                 }
-                if succeeded && !options.workspace_mounts.is_empty() {
+                if succeeded && !worker.workspace_mounts.is_empty() {
                     // Read-write copies are written back directly to their
                     // Volumes; the Control Plane records only the summary.
                     let cancellation = shutdown.child_token();
-                    let mounts = options.workspace_mounts.clone();
+                    let mounts = worker.workspace_mounts.clone();
                     let state = options.state_directory.clone();
                     let attempt_id = attempt.attempt_id.clone();
                     let copy_cancel = cancellation.clone();
@@ -648,7 +654,7 @@ pub(crate) async fn run(
             } => {
                 with_cleanup_authority(
                     &mut host, &attempt, &token, &shutdown,
-                    ensure_providers_stopped(&options, &journal, &attempt, &registration),
+                    ensure_providers_stopped(&worker, &journal, &attempt, &registration),
                 ).await?;
                 let prepared = prepared.or_else(|| {
                     workspace.as_ref().map(|pending| {

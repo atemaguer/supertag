@@ -33,10 +33,8 @@ use tonic::{
 };
 use uuid::Uuid;
 
-use crate::{
-    HostOptions,
-    worklet::journal::{Attempt, Journal},
-};
+use crate::worker::WorkerOptions;
+use crate::worklet::journal::{Attempt, Journal};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_FILE_BYTES: usize = 256 * 1024;
@@ -319,7 +317,7 @@ pub(crate) async fn prepare(
 }
 
 pub(crate) async fn ensure_released(
-    options: &HostOptions,
+    options: &WorkerOptions,
     journal: &Journal,
     attempt: &Attempt,
     registration: &HostRecord,

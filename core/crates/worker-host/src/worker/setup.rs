@@ -9,8 +9,9 @@ use supertag_protocol::v2::{
 use tokio_util::sync::CancellationToken;
 use tonic::{Status, service::interceptor::InterceptedService, transport::Channel};
 
+use crate::worker::Settings;
 use crate::{
-    HostHeaders, HostOptions, RegisteredHost, request,
+    HostHeaders, RegisteredHost, request,
     worker::mcp,
     worklet::{journal::Attempt, workspaces},
 };
@@ -64,7 +65,7 @@ pub(crate) async fn workspace_mcp(
 }
 
 pub(crate) async fn prepare_context(
-    options: &HostOptions,
+    options: &Settings<'_>,
     task: &Task,
     attempt: &Attempt,
     mut host: RegisteredHost,
@@ -80,7 +81,7 @@ pub(crate) async fn prepare_context(
         .context_catalog
         .prepare(
             task,
-            &options.state_directory,
+            options.state_directory,
             &attempt.attempt_id,
             &expected,
             cancel,

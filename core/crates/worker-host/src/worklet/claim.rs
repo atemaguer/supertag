@@ -4,10 +4,11 @@ use std::time::Duration;
 
 use supertag_protocol::v2::ClaimTaskRequest;
 
-use crate::{HostOptions, McpCatalog, worklet::workspaces};
+use crate::{McpCatalog, WorkerOptions, WorkletOptions, worklet::workspaces};
 
 pub(crate) fn claim_request(
-    options: &HostOptions,
+    options: &WorkletOptions,
+    worker: &WorkerOptions,
     workspaces: &workspaces::Workspaces,
     operation_id: String,
 ) -> ClaimTaskRequest {
@@ -15,11 +16,11 @@ pub(crate) fn claim_request(
         operation_id,
         workspace_ids: workspaces.ids(),
         gateway_workspace_ids: workspaces.control_plane_ids(),
-        harness_kind: options.harness as i32,
-        context_contracts: options.context_catalog.supported_contracts(),
+        harness_kind: worker.harness as i32,
+        context_contracts: worker.context_catalog.supported_contracts(),
         execution_profile: Some(McpCatalog::advertised(
-            &options.execution_profile,
-            &options.mcp_catalog.lapsed_logins(),
+            &worker.execution_profile,
+            &worker.mcp_catalog.lapsed_logins(),
         )),
         // `--once` answers whether there is work now; otherwise the Control Plane holds an empty
         // claim until a Task can be claimed.

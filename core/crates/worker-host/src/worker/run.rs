@@ -11,6 +11,7 @@ use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
 use tonic::{Code, Status};
 
+use crate::worker::Settings;
 use crate::worker::milestones::{WORKSPACE_READY, report_harness_finished, report_milestone};
 use crate::worker::setup::{prepare_context, workspace_mcp};
 use crate::worklet::authority::{
@@ -19,8 +20,8 @@ use crate::worklet::authority::{
 use crate::worklet::finish::{record_finish, save_finish};
 use crate::worklet::recovery::{cleanup_terminal, purge_discarded};
 use crate::{
-    CoordinationClients, HostOptions, ProviderConfig, RegisteredHost, RegisteredInputs,
-    ensure_attempt, failures, lost_ownership, request, retryable, wait_for_work,
+    CoordinationClients, ProviderConfig, RegisteredHost, RegisteredInputs, ensure_attempt,
+    failures, lost_ownership, request, retryable, wait_for_work,
     worker::{
         adapter, changed_paths, egress, mcp, remote, remote_provider, shared_execution,
         task_artifact_inputs, task_outputs,
@@ -40,7 +41,7 @@ pub(crate) const OUTPUT_DIRECTORY_USE: &str = "Make every change to the reposito
 pub(crate) const DEVCONTAINER_REFUSAL: &str = "Remote Workspace devcontainer: ";
 
 pub(crate) fn discard_prelaunch(
-    options: &HostOptions,
+    (options, once): (&Settings<'_>, bool),
     journal: &Journal,
     workspaces: &workspaces::Workspaces,
     attempt: &Attempt,
@@ -53,16 +54,16 @@ pub(crate) fn discard_prelaunch(
     let discarded = cleanup_terminal(
         journal,
         workspaces,
-        &options.state_directory,
+        options.state_directory,
         attempt,
         prepared.as_deref(),
     )?;
-    purge_discarded(discarded, options.once);
+    purge_discarded(discarded, once);
     Ok(())
 }
 
 pub(crate) async fn run_assignment(
-    options: &HostOptions,
+    (options, once): (&Settings<'_>, bool),
     journal: &Journal,
     workspaces: &workspaces::Workspaces,
     connection: (
@@ -119,7 +120,7 @@ pub(crate) async fn run_assignment(
                 // No adapter was launched for Starting. The Control Plane can
                 // safely retire a reservation that expired before start.
                 Err(error) if lost_ownership(&error) => {
-                    return discard_prelaunch(options, journal, workspaces, &attempt);
+                    return discard_prelaunch((options, once), journal, workspaces, &attempt);
                 }
                 Err(error) => return Err(error.into()),
             }
@@ -169,7 +170,7 @@ pub(crate) async fn run_assignment(
             return Ok(());
         }
         Err(error) if lost_ownership(&error) => {
-            return discard_prelaunch(options, journal, workspaces, &attempt);
+            return discard_prelaunch((options, once), journal, workspaces, &attempt);
         }
         Err(error) => return Err(error.into()),
     };
@@ -214,7 +215,7 @@ pub(crate) async fn run_assignment(
                 return Ok(());
             }
             Err(error) if lost_ownership(&error) => {
-                return discard_prelaunch(options, journal, workspaces, &attempt);
+                return discard_prelaunch((options, once), journal, workspaces, &attempt);
             }
             Err(error) => return Err(error.into()),
         }
@@ -455,7 +456,7 @@ pub(crate) async fn run_assignment(
             shutdown,
             &cancel,
             task_artifact_inputs::prepare(
-                (&options.state_directory, &prepared.checkout.path),
+                (options.state_directory, &prepared.checkout.path),
                 &task,
                 &attempt,
                 coordination,
@@ -650,7 +651,7 @@ pub(crate) async fn run_assignment(
             egress::start_for_attempt(
                 scope,
                 &options.network_credentials,
-                &options.state_directory,
+                options.state_directory,
                 &attempt.attempt_id,
                 options.harness,
                 options.remote_provider.is_some(),
@@ -1254,7 +1255,7 @@ pub(crate) async fn run_assignment(
                     (workspace, workspaces, has_inputs),
                     outputs.take(),
                     (
-                        &options.state_directory,
+                        options.state_directory,
                         mounted
                             .as_ref()
                             .map(|mounted| (mounted, &options.workspace_mounts)),

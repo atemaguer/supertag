@@ -6,7 +6,7 @@ use supertag_protocol::v2::{HarnessCompleteRequest, HostRecord};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    HostOptions, RegisteredHost, failures, request,
+    RegisteredHost, WorkerOptions, failures, request,
     worker::{remote, shared_execution},
     worklet::{
         journal::{Attempt, Entry, Journal},
@@ -65,7 +65,7 @@ pub(crate) fn record_finish(
 }
 
 pub(crate) async fn ensure_providers_stopped(
-    options: &HostOptions,
+    options: &WorkerOptions,
     journal: &Journal,
     attempt: &Attempt,
     registration: &HostRecord,
