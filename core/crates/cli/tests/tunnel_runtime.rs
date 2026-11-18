@@ -2264,7 +2264,7 @@ fn shell_word(path: &Path) -> Result<String> {
 /// loads it back as history, and keeps the same tunnel through 65 idle seconds.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
-async fn go_tui_reaches_the_control_plane_through_a_wss_tunnel() -> Result<()> {
+async fn go_tui_reaches_the_control_plane_through_the_gateways_wss_tunnel() -> Result<()> {
     let Some(tui) = prerequisites::env("tui", "SUPERTAG_RUST_TEST_TUI")? else {
         return Ok(());
     };
@@ -2275,10 +2275,12 @@ async fn go_tui_reaches_the_control_plane_through_a_wss_tunnel() -> Result<()> {
     let database = format!("sqlite://{}?mode=rwc", root.join("control.db").display());
     let mut deployment = Deployment::start(&database, root).await?;
     let public = deployment.control_edge.url();
+    // The terminal UI talks to the Gateway, which forwards to the Control Plane.
+    let gateway = deployment.gateway_edge.url();
     run_json(deployment.operator(&["tag", "put", "builder", "--instructions", "Build"])).await?;
     let home = root.join("home");
     std::fs::create_dir(&home)?;
-    save_tunnel_control_plane(&deployment, &home, &public).await?;
+    save_tunnel_control_plane(&deployment, &home, &gateway).await?;
 
     let base = format!(
         "env -i PATH=/usr/bin:/bin TERM=xterm-256color HOME={} SUPERTAG_TUI_BINARY={}",
@@ -2289,8 +2291,8 @@ async fn go_tui_reaches_the_control_plane_through_a_wss_tunnel() -> Result<()> {
     let tmux = Tmux {
         socket: root.join("tmux.sock"),
     };
-    // The TUI has only the wss:// URL, so its connections cross the edge.
-    let accepted = deployment.control_edge.accepted();
+    // The TUI has only the Gateway's wss:// URL, so its connections cross the Gateway's edge.
+    let accepted = deployment.gateway_edge.accepted();
     tmux.run(&[
         "new-session",
         "-d",
@@ -2310,14 +2312,14 @@ async fn go_tui_reaches_the_control_plane_through_a_wss_tunnel() -> Result<()> {
     ])
     .await?;
     tmux.wait_for("Say something to builder.").await?;
-    ensure!(deployment.control_edge.accepted() > accepted);
+    ensure!(deployment.gateway_edge.accepted() > accepted);
     tmux.run(&["send-keys", "-t", "tunnel", "-l", "Through the tunnel"])
         .await?;
     tmux.run(&["send-keys", "-t", "tunnel", "Enter"]).await?;
     let mut conversations = ConversationsClient::new(deployment.operator_channel(&public).await?);
     wait_for_prompt(&mut conversations, &deployment, "Through the tunnel").await?;
 
-    let accepted = deployment.control_edge.accepted();
+    let accepted = deployment.gateway_edge.accepted();
     let handed = format!(
         "{base} SUPERTAG_OPERATOR_TOKEN={} SUPERTAG_SERVER_CA_FILE={} SUPERTAG_CLIENT_CERT_FILE={} SUPERTAG_CLIENT_KEY_FILE={} {} tui --gateway {}",
         deployment.tokens.operator,
@@ -2325,17 +2327,17 @@ async fn go_tui_reaches_the_control_plane_through_a_wss_tunnel() -> Result<()> {
         shell_word(&deployment.operator_leaf.cert)?,
         shell_word(&deployment.operator_leaf.key)?,
         shell_word(Path::new(BINARY))?,
-        public,
+        gateway,
     );
     tmux.run(&["respawn-pane", "-k", "-t", "tunnel", &handed])
         .await?;
     // The conversation history loads through the tunnel.
     tmux.wait_for("Through the tunnel").await?;
     tmux.wait_for("connected").await?;
-    ensure!(deployment.control_edge.accepted() > accepted);
+    ensure!(deployment.gateway_edge.accepted() > accepted);
     // An idle tunnel outlives the 60 s silent-peer limit on both sides: the Go client and the
     // Rust listener ping each other every 20 s and answer each other's pings.
-    let accepted = deployment.control_edge.accepted();
+    let accepted = deployment.gateway_edge.accepted();
     sleep(Duration::from_secs(65)).await;
     tmux.run(&[
         "send-keys",
@@ -2348,7 +2350,7 @@ async fn go_tui_reaches_the_control_plane_through_a_wss_tunnel() -> Result<()> {
     tmux.run(&["send-keys", "-t", "tunnel", "Enter"]).await?;
     wait_for_prompt(&mut conversations, &deployment, "Still through the tunnel").await?;
     ensure!(
-        deployment.control_edge.accepted() == accepted,
+        deployment.gateway_edge.accepted() == accepted,
         "the idle tunnel was dropped and redialed"
     );
     tmux.run(&["send-keys", "-t", "tunnel", "C-c"]).await?;
