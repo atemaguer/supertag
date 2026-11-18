@@ -69,7 +69,7 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
         setHarness(
           Object.keys(HARNESSES).find((kind) => offered.harnesses.includes(kind)) ??
             offered.harnesses[0] ??
-            "claude_code",
+            "codex",
         );
         if (offered.workspaces.length === 1) setWorkspace(offered.workspaces[0] ?? "");
       },
@@ -77,7 +77,7 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
         // Without the hosts' offer, every harness and no Workspace can still be chosen.
         if (!live) return;
         setOptions({ harnesses: [], workspaces: [] });
-        setHarness("claude_code");
+        setHarness("codex");
       },
     );
     return () => {
@@ -86,7 +86,11 @@ function NewTagForm({ admin, onCreated }: { admin: TagAdmin; onCreated(tag: Tag)
   }, [admin]);
 
   const tagId = tagIdFor(name);
-  const harnesses = options?.harnesses.length ? options.harnesses : Object.keys(HARNESSES);
+  const known = Object.keys(HARNESSES);
+  const rank = (kind: string) => (known.includes(kind) ? known.indexOf(kind) : known.length);
+  const harnesses = options?.harnesses.length
+    ? [...options.harnesses].sort((a, b) => rank(a) - rank(b))
+    : known;
   async function create() {
     if (!tagId || !harness || busy) return;
     setBusy(true);

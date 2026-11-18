@@ -31,9 +31,10 @@ export function tagAdminSession(connectionId: string): TagAdmin {
 }
 
 /** The harnesses a Tag can name, in the order they are offered. */
+/** The harnesses a Tag can run on, in the order the app offers them: Codex and Claude Code first. */
 export const HARNESSES: Record<string, string> = {
-  claude_code: "Claude Code",
   codex: "Codex",
+  claude_code: "Claude Code",
   opencode: "OpenCode",
   cursor: "Cursor",
   openai_agents: "OpenAI Agents",

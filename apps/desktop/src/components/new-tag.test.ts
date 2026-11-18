@@ -52,12 +52,20 @@ function choose(select: HTMLSelectElement, value: string) {
 
 it("creates a Tag from a name, an offered harness, and the only Workspace", async () => {
   const admin: TagAdmin = {
-    options: async () => ({ harnesses: ["codex", "opencode"], workspaces: ["supertag"] }),
+    // The Worker Hosts' harnesses arrive sorted by name; Codex and Claude Code are offered first.
+    options: async () => ({
+      harnesses: ["claude_code", "codex", "opencode"],
+      workspaces: ["supertag"],
+    }),
     create: vi.fn(async () => created),
   };
   const { onCreated, onOpenChange } = await open(admin);
   const harness = field<HTMLSelectElement>("#tag-harness");
-  expect([...harness.options].map((option) => option.textContent)).toEqual(["Codex", "OpenCode"]);
+  expect([...harness.options].map((option) => option.textContent)).toEqual([
+    "Codex",
+    "Claude Code",
+    "OpenCode",
+  ]);
   expect(harness.value).toBe("codex");
   expect(field<HTMLSelectElement>("#tag-workspace").value).toBe("supertag");
 
@@ -89,7 +97,7 @@ it("offers every harness when no Worker Host is connected, and shows a refusal",
   const { onCreated } = await open(admin);
   const harness = field<HTMLSelectElement>("#tag-harness");
   expect(harness.options.length).toBeGreaterThanOrEqual(4);
-  expect(harness.value).toBe("claude_code");
+  expect(harness.value).toBe("codex");
   expect(document.querySelector("#tag-workspace")).toBeNull();
   expect(document.body.textContent).toContain("No Worker Host is connected.");
 
@@ -100,7 +108,7 @@ it("offers every harness when no Worker Host is connected, and shows a refusal",
   expect(admin.create).toHaveBeenCalledWith({
     tagId: "lead",
     name: "lead",
-    harness: "claude_code",
+    harness: "codex",
     workspaceId: undefined,
     maxWorkSessions: 8,
   });
