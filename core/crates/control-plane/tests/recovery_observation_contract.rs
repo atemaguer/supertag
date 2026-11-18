@@ -284,3 +284,112 @@ async fn postgres_uncertain_attempts_are_listed_counted_and_hold_their_slots() {
     admin.close().await.unwrap();
     outcome.expect("PostgreSQL recovery observation contract failed");
 }
+
+/// The path to an Attempt's first model token: the Control Plane stamps when its Workspace was
+/// ready, its adapter attached, and its first event arrived, by its own clock, first stamp wins.
+async fn milestones(url: String) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let store = open(&url, &clock).await;
+    let host = support::register_host(&store, "laptop").await;
+    store.put_tag("fixture", "Fixture", vec![]).await.unwrap();
+    store.report_host(&host, &report(1)).await.unwrap();
+    let (task_id, attempt_id, lease_token) = started(&store, &host, "timed").await;
+    let attempt = InspectAttemptRequest {
+        task_id: task_id.clone(),
+        attempt_id: attempt_id.clone(),
+        lease_token: lease_token.clone(),
+    };
+    let reach = |milestone: AttemptMilestone| ReportAttemptMilestoneRequest {
+        attempt: Some(attempt.clone()),
+        milestone: milestone as i32,
+    };
+    assert!(
+        store
+            .report_attempt_milestone(&host, &reach(AttemptMilestone::Unspecified))
+            .await
+            .is_err()
+    );
+    let mut forged = reach(AttemptMilestone::WorkspaceReady);
+    forged.attempt.as_mut().unwrap().lease_token = "forged".into();
+    assert!(
+        store
+            .report_attempt_milestone(&host, &forged)
+            .await
+            .is_err()
+    );
+
+    clock.store(NOW + 100, Ordering::SeqCst);
+    store
+        .report_attempt_milestone(&host, &reach(AttemptMilestone::WorkspaceReady))
+        .await
+        .unwrap();
+    clock.store(NOW + 250, Ordering::SeqCst);
+    for _ in 0..2 {
+        store
+            .report_attempt_milestone(&host, &reach(AttemptMilestone::AdapterAttached))
+            .await
+            .unwrap();
+        // A repeated report keeps the first time.
+        clock.store(NOW + 900, Ordering::SeqCst);
+    }
+    for (sequence, at) in [(1, NOW + 400), (2, NOW + 1_000)] {
+        clock.store(at, Ordering::SeqCst);
+        store
+            .append_event(
+                &host,
+                &AppendEventRequest {
+                    task_id: task_id.clone(),
+                    attempt_id: attempt_id.clone(),
+                    lease_token: lease_token.clone(),
+                    sequence,
+                    text: format!("event {sequence}"),
+                    kind: TaskEventKind::Activity as i32,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let scheduling = store.metrics().await.unwrap().scheduling.unwrap();
+    let phase = |phase: Option<MetricPhase>| {
+        let phase = phase.unwrap();
+        (phase.attempts, phase.median_ms, phase.maximum_ms)
+    };
+    assert_eq!(phase(scheduling.workspace_ready), (1, 100, 100));
+    assert_eq!(phase(scheduling.adapter_attached), (1, 250, 250));
+    assert_eq!(phase(scheduling.first_event), (1, 400, 400));
+    store.close().await;
+}
+
+#[tokio::test]
+async fn sqlite_attempt_milestones_are_stamped_once() {
+    let dir = tempfile::tempdir().unwrap();
+    milestones(format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("milestones.db").display()
+    ))
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL test server"]
+async fn postgres_attempt_milestones_are_stamped_once() {
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .expect("dedicated PostgreSQL URL file required");
+    let admin_url = std::fs::read_to_string(path).unwrap();
+    let mut url = url::Url::parse(admin_url.trim()).unwrap();
+    let name = format!("supertag_rust_milestones_{}", Uuid::new_v4().simple());
+    let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
+    admin
+        .execute(format!("CREATE DATABASE {name}").as_str())
+        .await
+        .unwrap();
+    url.set_path(&name);
+    let outcome = tokio::task::LocalSet::new()
+        .run_until(async move { tokio::task::spawn_local(milestones(url.to_string())).await })
+        .await;
+    admin
+        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+        .await
+        .unwrap();
+    outcome.unwrap();
+}

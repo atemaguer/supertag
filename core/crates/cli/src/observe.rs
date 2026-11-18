@@ -9,8 +9,8 @@ use supertag_control_plane::objective_limits::Timestamp;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        GetMetricsRequest, GetSpendRequest, HostPhase, MetricSnapshot, SpendGrouping, SpendReport,
-        WatchEvent, WatchKind, WatchRequest, metrics_client::MetricsClient,
+        GetMetricsRequest, GetSpendRequest, HostPhase, MetricPhase, MetricSnapshot, SpendGrouping,
+        SpendReport, WatchEvent, WatchKind, WatchRequest, metrics_client::MetricsClient,
         operator_events_client::OperatorEventsClient, spend_client::SpendClient,
         watch_event::Update,
     },
@@ -164,6 +164,9 @@ fn metrics_json(snapshot: &MetricSnapshot) -> Value {
             "started_attempts": scheduling.started_attempts,
             "average_start_wait_ms": scheduling.average_start_wait_ms,
             "maximum_start_wait_ms": scheduling.maximum_start_wait_ms,
+            "workspace_ready": phase_json(scheduling.workspace_ready.as_ref()),
+            "adapter_attached": phase_json(scheduling.adapter_attached.as_ref()),
+            "first_event": phase_json(scheduling.first_event.as_ref()),
             "worker_hosts": scheduling.worker_hosts.iter().map(|host| json!({
                 "id": host.host_id,
                 "phase": host_phase(host.phase()),
@@ -261,6 +264,26 @@ fn wait(ms: i64) -> String {
     }
 }
 
+fn phase_json(phase: Option<&MetricPhase>) -> Value {
+    let phase = phase.cloned().unwrap_or_default();
+    json!({
+        "attempts": phase.attempts,
+        "median_ms": phase.median_ms,
+        "maximum_ms": phase.maximum_ms,
+    })
+}
+
+/// One phase from an Attempt's start, as "median 1.2s, at most 4.0s over 12 Attempts".
+fn phase_text(name: &str, phase: Option<&MetricPhase>) -> Option<String> {
+    let phase = phase.filter(|phase| phase.attempts > 0)?;
+    Some(format!(
+        "{name} median {}, at most {} over {}",
+        wait(phase.median_ms),
+        wait(phase.maximum_ms),
+        phase.attempts
+    ))
+}
+
 fn metrics_text(snapshot: &MetricSnapshot) -> String {
     let resources = snapshot.resources.unwrap_or_default();
     let tasks = snapshot.tasks.unwrap_or_default();
@@ -280,6 +303,7 @@ fn metrics_text(snapshot: &MetricSnapshot) -> String {
          Attempts {}: tokens {}, cost {}\n\
          Worker Hosts {}: {} active of {} slots\n\
          Queue: {} placed, waited {} on average and {} at most before a claim; started {} on average and {} at most after it{}\n\
+         {}\
          Recovery: {} Attempts await a decision, {} cancelled Attempts await cleanup; {} resolved as failed, {} retried; {} Sessions wait behind an unfinished Task; {} live inputs have an unknown delivery\n\
          Mailbox backlog {}, reply backlog {}, failed replies {}\n",
         resources.tags,
@@ -329,6 +353,21 @@ fn metrics_text(snapshot: &MetricSnapshot) -> String {
                 "; oldest queued Task accepted {at}, {} ago",
                 wait(age_seconds(snapshot.captured_at_ms, ms) * 1_000)
             )),
+        {
+            let phases = [
+                phase_text("Workspace ready", scheduling.workspace_ready.as_ref()),
+                phase_text("adapter attached", scheduling.adapter_attached.as_ref()),
+                phase_text("first harness event", scheduling.first_event.as_ref()),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+            if phases.is_empty() {
+                String::new()
+            } else {
+                format!("From start (recent Attempts): {}\n", phases.join("; "))
+            }
+        },
         recovery.awaiting_decision,
         recovery.cleanup_unconfirmed,
         recovery.resolved_failed,

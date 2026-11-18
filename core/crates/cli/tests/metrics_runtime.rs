@@ -219,6 +219,21 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
             "{average}/{maximum} beyond {elapsed}ms: {snapshot}"
         );
     }
+    // The run Attempt's phases from its start: the fixture's first event is stamped as it is
+    // appended; the Workspace and attach reports are best-effort, so at most one each.
+    assert_eq!(
+        snapshot["scheduling"]["first_event"]["attempts"], 1,
+        "{snapshot}"
+    );
+    for phase in ["workspace_ready", "adapter_attached", "first_event"] {
+        let value = |name: &str| snapshot["scheduling"][phase][name].as_i64().unwrap_or(-1);
+        ensure!(
+            (0..=1).contains(&value("attempts"))
+                && (0..=value("maximum_ms")).contains(&value("median_ms"))
+                && value("maximum_ms") <= elapsed,
+            "{phase} beyond {elapsed}ms: {snapshot}"
+        );
+    }
     ensure!(
         snapshot["scheduling"]["oldest_queued_at"]
             .as_str()

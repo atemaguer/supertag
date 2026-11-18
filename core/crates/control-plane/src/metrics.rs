@@ -221,7 +221,34 @@ impl Store {
         };
         let (placed_tasks, average_queue_wait_ms, maximum_queue_wait_ms) = summary(&queue)?;
         let (started_attempts, average_start_wait_ms, maximum_start_wait_ms) = summary(&start)?;
+        // The most recent started Attempts, bounded so the medians are computed here: SQLite has
+        // no percentile function.
+        let rows = sqlx::query(
+            "SELECT started_at_ms, workspace_ready_at_ms, attached_at_ms, first_event_at_ms \
+             FROM supertag_v2_claims WHERE started_at_ms IS NOT NULL AND attempt_id IS NOT NULL \
+             ORDER BY started_at_ms DESC LIMIT $1",
+        )
+        .bind(RECENT_PHASE_ATTEMPTS)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut phases: [Vec<i64>; 3] = Default::default();
+        for row in &rows {
+            let started: i64 = row.try_get("started_at_ms")?;
+            for (phase, column) in phases.iter_mut().zip([
+                "workspace_ready_at_ms",
+                "attached_at_ms",
+                "first_event_at_ms",
+            ]) {
+                if let Some(at) = row.try_get::<Option<i64>, _>(column)? {
+                    phase.push((at - started).max(0));
+                }
+            }
+        }
+        let [workspace_ready, adapter_attached, first_event] = phases.map(metric_phase);
         Ok(MetricScheduling {
+            workspace_ready: Some(workspace_ready),
+            adapter_attached: Some(adapter_attached),
+            first_event: Some(first_event),
             oldest_queued_at_ms,
             placed_tasks,
             average_queue_wait_ms,
@@ -231,6 +258,24 @@ impl Store {
             maximum_start_wait_ms,
             ..Default::default()
         })
+    }
+}
+
+/// How many recent started Attempts the phase medians cover.
+const RECENT_PHASE_ATTEMPTS: i64 = 500;
+
+fn metric_phase(mut waits: Vec<i64>) -> MetricPhase {
+    waits.sort_unstable();
+    let attempts = waits.len();
+    let median_ms = match attempts {
+        0 => 0,
+        n if n % 2 == 1 => waits[n / 2],
+        n => (waits[n / 2 - 1] + waits[n / 2]) / 2,
+    };
+    MetricPhase {
+        attempts: attempts as i64,
+        median_ms,
+        maximum_ms: waits.last().copied().unwrap_or(0),
     }
 }
 
@@ -252,5 +297,29 @@ impl metrics_server::Metrics for ControlPlane {
         let mut snapshot = self.store.metrics().await?;
         snapshot.admission = Some(self.admissions.snapshot());
         Ok(Response::new(snapshot))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::metric_phase;
+
+    #[test]
+    fn phase_median_is_the_middle_of_the_sorted_waits() {
+        let phase = metric_phase(vec![]);
+        assert_eq!(
+            (phase.attempts, phase.median_ms, phase.maximum_ms),
+            (0, 0, 0)
+        );
+        let phase = metric_phase(vec![30, 10, 20]);
+        assert_eq!(
+            (phase.attempts, phase.median_ms, phase.maximum_ms),
+            (3, 20, 30)
+        );
+        let phase = metric_phase(vec![40, 10, 20, 30]);
+        assert_eq!(
+            (phase.attempts, phase.median_ms, phase.maximum_ms),
+            (4, 25, 40)
+        );
     }
 }

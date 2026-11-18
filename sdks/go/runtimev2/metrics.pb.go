@@ -703,8 +703,13 @@ type MetricScheduling struct {
 	StartedAttempts    int64 `protobuf:"varint,5404,opt,name=started_attempts,json=startedAttempts,proto3" json:"started_attempts,omitempty"`
 	AverageStartWaitMs int64 `protobuf:"varint,5405,opt,name=average_start_wait_ms,json=averageStartWaitMs,proto3" json:"average_start_wait_ms,omitempty"`
 	MaximumStartWaitMs int64 `protobuf:"varint,5406,opt,name=maximum_start_wait_ms,json=maximumStartWaitMs,proto3" json:"maximum_start_wait_ms,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// From a recent Attempt's start to when its Workspace was ready, its harness adapter attached,
+	// and its harness's first event: the path to the first model token.
+	WorkspaceReady  *MetricPhase `protobuf:"bytes,5407,opt,name=workspace_ready,json=workspaceReady,proto3" json:"workspace_ready,omitempty"`
+	AdapterAttached *MetricPhase `protobuf:"bytes,5408,opt,name=adapter_attached,json=adapterAttached,proto3" json:"adapter_attached,omitempty"`
+	FirstEvent      *MetricPhase `protobuf:"bytes,5409,opt,name=first_event,json=firstEvent,proto3" json:"first_event,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *MetricScheduling) Reset() {
@@ -800,6 +805,88 @@ func (x *MetricScheduling) GetMaximumStartWaitMs() int64 {
 	return 0
 }
 
+func (x *MetricScheduling) GetWorkspaceReady() *MetricPhase {
+	if x != nil {
+		return x.WorkspaceReady
+	}
+	return nil
+}
+
+func (x *MetricScheduling) GetAdapterAttached() *MetricPhase {
+	if x != nil {
+		return x.AdapterAttached
+	}
+	return nil
+}
+
+func (x *MetricScheduling) GetFirstEvent() *MetricPhase {
+	if x != nil {
+		return x.FirstEvent
+	}
+	return nil
+}
+
+// One phase of recent Attempts (at most the last 500 started), measured from start.
+type MetricPhase struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Attempts      int64                  `protobuf:"varint,1,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	MedianMs      int64                  `protobuf:"varint,2,opt,name=median_ms,json=medianMs,proto3" json:"median_ms,omitempty"`
+	MaximumMs     int64                  `protobuf:"varint,3,opt,name=maximum_ms,json=maximumMs,proto3" json:"maximum_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MetricPhase) Reset() {
+	*x = MetricPhase{}
+	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MetricPhase) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MetricPhase) ProtoMessage() {}
+
+func (x *MetricPhase) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MetricPhase.ProtoReflect.Descriptor instead.
+func (*MetricPhase) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_metrics_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *MetricPhase) GetAttempts() int64 {
+	if x != nil {
+		return x.Attempts
+	}
+	return 0
+}
+
+func (x *MetricPhase) GetMedianMs() int64 {
+	if x != nil {
+		return x.MedianMs
+	}
+	return 0
+}
+
+func (x *MetricPhase) GetMaximumMs() int64 {
+	if x != nil {
+		return x.MaximumMs
+	}
+	return 0
+}
+
 // One Worker Host's capacity, from its latest report.
 type MetricWorkerHost struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -815,7 +902,7 @@ type MetricWorkerHost struct {
 
 func (x *MetricWorkerHost) Reset() {
 	*x = MetricWorkerHost{}
-	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -827,7 +914,7 @@ func (x *MetricWorkerHost) String() string {
 func (*MetricWorkerHost) ProtoMessage() {}
 
 func (x *MetricWorkerHost) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -840,7 +927,7 @@ func (x *MetricWorkerHost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricWorkerHost.ProtoReflect.Descriptor instead.
 func (*MetricWorkerHost) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_metrics_proto_rawDescGZIP(), []int{9}
+	return file_supertag_runtime_v2_metrics_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *MetricWorkerHost) GetHostId() string {
@@ -896,7 +983,7 @@ type MetricBacklog struct {
 
 func (x *MetricBacklog) Reset() {
 	*x = MetricBacklog{}
-	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +995,7 @@ func (x *MetricBacklog) String() string {
 func (*MetricBacklog) ProtoMessage() {}
 
 func (x *MetricBacklog) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +1008,7 @@ func (x *MetricBacklog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricBacklog.ProtoReflect.Descriptor instead.
 func (*MetricBacklog) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_metrics_proto_rawDescGZIP(), []int{10}
+	return file_supertag_runtime_v2_metrics_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MetricBacklog) GetPending() int64 {
@@ -950,7 +1037,7 @@ type MetricReplyDelivery struct {
 
 func (x *MetricReplyDelivery) Reset() {
 	*x = MetricReplyDelivery{}
-	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -962,7 +1049,7 @@ func (x *MetricReplyDelivery) String() string {
 func (*MetricReplyDelivery) ProtoMessage() {}
 
 func (x *MetricReplyDelivery) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_metrics_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -975,7 +1062,7 @@ func (x *MetricReplyDelivery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricReplyDelivery.ProtoReflect.Descriptor instead.
 func (*MetricReplyDelivery) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_metrics_proto_rawDescGZIP(), []int{11}
+	return file_supertag_runtime_v2_metrics_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *MetricReplyDelivery) GetBacklog() int64 {
@@ -1053,7 +1140,7 @@ const file_supertag_runtime_v2_metrics_proto_rawDesc = "" +
 	"\rreported_cost\x18\x04 \x03(\v2 .supertag.runtime.v2.SpendAmountR\freportedCost\x122\n" +
 	"\x15unknown_cost_attempts\x18\x05 \x01(\x03R\x13unknownCostAttempts\x126\n" +
 	"\x17estimated_cost_attempts\x18\x06 \x01(\x03R\x15estimatedCostAttemptsB\x12\n" +
-	"\x10_reported_tokens\"\xe1\x03\n" +
+	"\x10_reported_tokens\"\xbf\x05\n" +
 	"\x10MetricScheduling\x12\x16\n" +
 	"\x06queued\x18\x01 \x01(\x03R\x06queued\x12H\n" +
 	"\fworker_hosts\x18\x02 \x03(\v2%.supertag.runtime.v2.MetricWorkerHostR\vworkerHosts\x123\n" +
@@ -1063,8 +1150,17 @@ const file_supertag_runtime_v2_metrics_proto_rawDesc = "" +
 	"\x15maximum_queue_wait_ms\x18\x9b* \x01(\x03R\x12maximumQueueWaitMs\x12*\n" +
 	"\x10started_attempts\x18\x9c* \x01(\x03R\x0fstartedAttempts\x122\n" +
 	"\x15average_start_wait_ms\x18\x9d* \x01(\x03R\x12averageStartWaitMs\x122\n" +
-	"\x15maximum_start_wait_ms\x18\x9e* \x01(\x03R\x12maximumStartWaitMsB\x16\n" +
-	"\x14_oldest_queued_at_ms\"\xeb\x01\n" +
+	"\x15maximum_start_wait_ms\x18\x9e* \x01(\x03R\x12maximumStartWaitMs\x12J\n" +
+	"\x0fworkspace_ready\x18\x9f* \x01(\v2 .supertag.runtime.v2.MetricPhaseR\x0eworkspaceReady\x12L\n" +
+	"\x10adapter_attached\x18\xa0* \x01(\v2 .supertag.runtime.v2.MetricPhaseR\x0fadapterAttached\x12B\n" +
+	"\vfirst_event\x18\xa1* \x01(\v2 .supertag.runtime.v2.MetricPhaseR\n" +
+	"firstEventB\x16\n" +
+	"\x14_oldest_queued_at_ms\"e\n" +
+	"\vMetricPhase\x12\x1a\n" +
+	"\battempts\x18\x01 \x01(\x03R\battempts\x12\x1b\n" +
+	"\tmedian_ms\x18\x02 \x01(\x03R\bmedianMs\x12\x1d\n" +
+	"\n" +
+	"maximum_ms\x18\x03 \x01(\x03R\tmaximumMs\"\xeb\x01\n" +
 	"\x10MetricWorkerHost\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x124\n" +
 	"\x05phase\x18\x02 \x01(\x0e2\x1e.supertag.runtime.v2.HostPhaseR\x05phase\x12\x1a\n" +
@@ -1095,7 +1191,7 @@ func file_supertag_runtime_v2_metrics_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_metrics_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_metrics_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_supertag_runtime_v2_metrics_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_supertag_runtime_v2_metrics_proto_goTypes = []any{
 	(*GetMetricsRequest)(nil),      // 0: supertag.runtime.v2.GetMetricsRequest
 	(*MetricSnapshot)(nil),         // 1: supertag.runtime.v2.MetricSnapshot
@@ -1106,32 +1202,36 @@ var file_supertag_runtime_v2_metrics_proto_goTypes = []any{
 	(*MetricTaskCounts)(nil),       // 6: supertag.runtime.v2.MetricTaskCounts
 	(*MetricUsage)(nil),            // 7: supertag.runtime.v2.MetricUsage
 	(*MetricScheduling)(nil),       // 8: supertag.runtime.v2.MetricScheduling
-	(*MetricWorkerHost)(nil),       // 9: supertag.runtime.v2.MetricWorkerHost
-	(*MetricBacklog)(nil),          // 10: supertag.runtime.v2.MetricBacklog
-	(*MetricReplyDelivery)(nil),    // 11: supertag.runtime.v2.MetricReplyDelivery
-	(*SpendAmount)(nil),            // 12: supertag.runtime.v2.SpendAmount
-	(HostPhase)(0),                 // 13: supertag.runtime.v2.HostPhase
+	(*MetricPhase)(nil),            // 9: supertag.runtime.v2.MetricPhase
+	(*MetricWorkerHost)(nil),       // 10: supertag.runtime.v2.MetricWorkerHost
+	(*MetricBacklog)(nil),          // 11: supertag.runtime.v2.MetricBacklog
+	(*MetricReplyDelivery)(nil),    // 12: supertag.runtime.v2.MetricReplyDelivery
+	(*SpendAmount)(nil),            // 13: supertag.runtime.v2.SpendAmount
+	(HostPhase)(0),                 // 14: supertag.runtime.v2.HostPhase
 }
 var file_supertag_runtime_v2_metrics_proto_depIdxs = []int32{
 	5,  // 0: supertag.runtime.v2.MetricSnapshot.resources:type_name -> supertag.runtime.v2.MetricResources
 	6,  // 1: supertag.runtime.v2.MetricSnapshot.tasks:type_name -> supertag.runtime.v2.MetricTaskCounts
 	7,  // 2: supertag.runtime.v2.MetricSnapshot.usage:type_name -> supertag.runtime.v2.MetricUsage
 	8,  // 3: supertag.runtime.v2.MetricSnapshot.scheduling:type_name -> supertag.runtime.v2.MetricScheduling
-	10, // 4: supertag.runtime.v2.MetricSnapshot.mailbox:type_name -> supertag.runtime.v2.MetricBacklog
-	11, // 5: supertag.runtime.v2.MetricSnapshot.reply_delivery:type_name -> supertag.runtime.v2.MetricReplyDelivery
+	11, // 4: supertag.runtime.v2.MetricSnapshot.mailbox:type_name -> supertag.runtime.v2.MetricBacklog
+	12, // 5: supertag.runtime.v2.MetricSnapshot.reply_delivery:type_name -> supertag.runtime.v2.MetricReplyDelivery
 	4,  // 6: supertag.runtime.v2.MetricSnapshot.recovery:type_name -> supertag.runtime.v2.MetricRecovery
 	2,  // 7: supertag.runtime.v2.MetricSnapshot.admission:type_name -> supertag.runtime.v2.MetricAdmission
 	3,  // 8: supertag.runtime.v2.MetricAdmission.surfaces:type_name -> supertag.runtime.v2.MetricSurfaceAdmission
-	12, // 9: supertag.runtime.v2.MetricUsage.reported_cost:type_name -> supertag.runtime.v2.SpendAmount
-	9,  // 10: supertag.runtime.v2.MetricScheduling.worker_hosts:type_name -> supertag.runtime.v2.MetricWorkerHost
-	13, // 11: supertag.runtime.v2.MetricWorkerHost.phase:type_name -> supertag.runtime.v2.HostPhase
-	0,  // 12: supertag.runtime.v2.Metrics.GetMetrics:input_type -> supertag.runtime.v2.GetMetricsRequest
-	1,  // 13: supertag.runtime.v2.Metrics.GetMetrics:output_type -> supertag.runtime.v2.MetricSnapshot
-	13, // [13:14] is the sub-list for method output_type
-	12, // [12:13] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	13, // 9: supertag.runtime.v2.MetricUsage.reported_cost:type_name -> supertag.runtime.v2.SpendAmount
+	10, // 10: supertag.runtime.v2.MetricScheduling.worker_hosts:type_name -> supertag.runtime.v2.MetricWorkerHost
+	9,  // 11: supertag.runtime.v2.MetricScheduling.workspace_ready:type_name -> supertag.runtime.v2.MetricPhase
+	9,  // 12: supertag.runtime.v2.MetricScheduling.adapter_attached:type_name -> supertag.runtime.v2.MetricPhase
+	9,  // 13: supertag.runtime.v2.MetricScheduling.first_event:type_name -> supertag.runtime.v2.MetricPhase
+	14, // 14: supertag.runtime.v2.MetricWorkerHost.phase:type_name -> supertag.runtime.v2.HostPhase
+	0,  // 15: supertag.runtime.v2.Metrics.GetMetrics:input_type -> supertag.runtime.v2.GetMetricsRequest
+	1,  // 16: supertag.runtime.v2.Metrics.GetMetrics:output_type -> supertag.runtime.v2.MetricSnapshot
+	16, // [16:17] is the sub-list for method output_type
+	15, // [15:16] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_metrics_proto_init() }
@@ -1143,14 +1243,14 @@ func file_supertag_runtime_v2_metrics_proto_init() {
 	file_supertag_runtime_v2_spend_proto_init()
 	file_supertag_runtime_v2_metrics_proto_msgTypes[7].OneofWrappers = []any{}
 	file_supertag_runtime_v2_metrics_proto_msgTypes[8].OneofWrappers = []any{}
-	file_supertag_runtime_v2_metrics_proto_msgTypes[10].OneofWrappers = []any{}
+	file_supertag_runtime_v2_metrics_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_metrics_proto_rawDesc), len(file_supertag_runtime_v2_metrics_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

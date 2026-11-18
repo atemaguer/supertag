@@ -202,7 +202,14 @@ impl Harness for Bridge {
             })
             .await?
             .entries;
-        self.attached.store(true, Ordering::Release);
+        if !self.attached.swap(true, Ordering::AcqRel) {
+            crate::report_milestone(
+                &self.host,
+                &self.attempt(),
+                &self.host_token,
+                supertag_protocol::v2::AttemptMilestone::AdapterAttached,
+            );
+        }
         Ok(Response::new(HarnessRun {
             task: self.assignment.task.clone(),
             attempt_id: self.assignment.attempt_id.clone(),

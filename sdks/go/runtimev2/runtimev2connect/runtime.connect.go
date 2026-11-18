@@ -320,6 +320,9 @@ const (
 	// WorkerHostListHeldCheckpointsProcedure is the fully-qualified name of the WorkerHost's
 	// ListHeldCheckpoints RPC.
 	WorkerHostListHeldCheckpointsProcedure = "/supertag.runtime.v2.WorkerHost/ListHeldCheckpoints"
+	// WorkerHostReportAttemptMilestoneProcedure is the fully-qualified name of the WorkerHost's
+	// ReportAttemptMilestone RPC.
+	WorkerHostReportAttemptMilestoneProcedure = "/supertag.runtime.v2.WorkerHost/ReportAttemptMilestone"
 	// LiveInputsQueueInputProcedure is the fully-qualified name of the LiveInputs's QueueInput RPC.
 	LiveInputsQueueInputProcedure = "/supertag.runtime.v2.LiveInputs/QueueInput"
 	// LiveInputsGetInputProcedure is the fully-qualified name of the LiveInputs's GetInput RPC.
@@ -2823,6 +2826,9 @@ type WorkerHostClient interface {
 	// The digests of the checkpoints the calling host holds that a Session still resumes, so it
 	// deletes every other file it holds. Paged by digest.
 	ListHeldCheckpoints(context.Context, *connect.Request[runtimev2.ListHeldCheckpointsRequest]) (*connect.Response[runtimev2.ListHeldCheckpointsResponse], error)
+	// A point the running Attempt reached, which the Control Plane stamps with its own clock for
+	// `supertag metrics`. The first stamp of each milestone wins.
+	ReportAttemptMilestone(context.Context, *connect.Request[runtimev2.ReportAttemptMilestoneRequest]) (*connect.Response[runtimev2.ReportAttemptMilestoneResponse], error)
 }
 
 // NewWorkerHostClient constructs a client for the supertag.runtime.v2.WorkerHost service. By
@@ -2992,6 +2998,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("ListHeldCheckpoints")),
 			connect.WithClientOptions(opts...),
 		),
+		reportAttemptMilestone: connect.NewClient[runtimev2.ReportAttemptMilestoneRequest, runtimev2.ReportAttemptMilestoneResponse](
+			httpClient,
+			baseURL+WorkerHostReportAttemptMilestoneProcedure,
+			connect.WithSchema(workerHostMethods.ByName("ReportAttemptMilestone")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -3023,6 +3035,7 @@ type workerHostClient struct {
 	reserveCheckpoint       *connect.Client[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference]
 	commitCheckpoint        *connect.Client[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference]
 	listHeldCheckpoints     *connect.Client[runtimev2.ListHeldCheckpointsRequest, runtimev2.ListHeldCheckpointsResponse]
+	reportAttemptMilestone  *connect.Client[runtimev2.ReportAttemptMilestoneRequest, runtimev2.ReportAttemptMilestoneResponse]
 }
 
 // RegisterHost calls supertag.runtime.v2.WorkerHost.RegisterHost.
@@ -3155,6 +3168,11 @@ func (c *workerHostClient) ListHeldCheckpoints(ctx context.Context, req *connect
 	return c.listHeldCheckpoints.CallUnary(ctx, req)
 }
 
+// ReportAttemptMilestone calls supertag.runtime.v2.WorkerHost.ReportAttemptMilestone.
+func (c *workerHostClient) ReportAttemptMilestone(ctx context.Context, req *connect.Request[runtimev2.ReportAttemptMilestoneRequest]) (*connect.Response[runtimev2.ReportAttemptMilestoneResponse], error) {
+	return c.reportAttemptMilestone.CallUnary(ctx, req)
+}
+
 // WorkerHostHandler is an implementation of the supertag.runtime.v2.WorkerHost service.
 type WorkerHostHandler interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
@@ -3203,6 +3221,9 @@ type WorkerHostHandler interface {
 	// The digests of the checkpoints the calling host holds that a Session still resumes, so it
 	// deletes every other file it holds. Paged by digest.
 	ListHeldCheckpoints(context.Context, *connect.Request[runtimev2.ListHeldCheckpointsRequest]) (*connect.Response[runtimev2.ListHeldCheckpointsResponse], error)
+	// A point the running Attempt reached, which the Control Plane stamps with its own clock for
+	// `supertag metrics`. The first stamp of each milestone wins.
+	ReportAttemptMilestone(context.Context, *connect.Request[runtimev2.ReportAttemptMilestoneRequest]) (*connect.Response[runtimev2.ReportAttemptMilestoneResponse], error)
 }
 
 // NewWorkerHostHandler builds an HTTP handler from the service implementation. It returns the path
@@ -3368,6 +3389,12 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(workerHostMethods.ByName("ListHeldCheckpoints")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workerHostReportAttemptMilestoneHandler := connect.NewUnaryHandler(
+		WorkerHostReportAttemptMilestoneProcedure,
+		svc.ReportAttemptMilestone,
+		connect.WithSchema(workerHostMethods.ByName("ReportAttemptMilestone")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.WorkerHost/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkerHostRegisterHostProcedure:
@@ -3422,6 +3449,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostCommitCheckpointHandler.ServeHTTP(w, r)
 		case WorkerHostListHeldCheckpointsProcedure:
 			workerHostListHeldCheckpointsHandler.ServeHTTP(w, r)
+		case WorkerHostReportAttemptMilestoneProcedure:
+			workerHostReportAttemptMilestoneHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3533,6 +3562,10 @@ func (UnimplementedWorkerHostHandler) CommitCheckpoint(context.Context, *connect
 
 func (UnimplementedWorkerHostHandler) ListHeldCheckpoints(context.Context, *connect.Request[runtimev2.ListHeldCheckpointsRequest]) (*connect.Response[runtimev2.ListHeldCheckpointsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ListHeldCheckpoints is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) ReportAttemptMilestone(context.Context, *connect.Request[runtimev2.ReportAttemptMilestoneRequest]) (*connect.Response[runtimev2.ReportAttemptMilestoneResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ReportAttemptMilestone is not implemented"))
 }
 
 // LiveInputsClient is a client for the supertag.runtime.v2.LiveInputs service.

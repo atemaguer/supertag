@@ -3390,6 +3390,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsResponse.FromString,
                 _registered_method=True)
+        self.ReportAttemptMilestone = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/ReportAttemptMilestone',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptMilestoneRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptMilestoneResponse.FromString,
+                _registered_method=True)
 
 
 class WorkerHostServicer:
@@ -3571,6 +3576,14 @@ class WorkerHostServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReportAttemptMilestone(self, request, context):
+        """A point the running Attempt reached, which the Control Plane stamps with its own clock for
+        `supertag metrics`. The first stamp of each milestone wins.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerHostServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -3703,6 +3716,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.ListHeldCheckpoints,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsResponse.SerializeToString,
+            ),
+            'ReportAttemptMilestone': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportAttemptMilestone,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptMilestoneRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptMilestoneResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -4407,6 +4425,33 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/ListHeldCheckpoints',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListHeldCheckpointsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportAttemptMilestone(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/ReportAttemptMilestone',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptMilestoneRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptMilestoneResponse.FromString,
             options,
             channel_credentials,
             insecure,

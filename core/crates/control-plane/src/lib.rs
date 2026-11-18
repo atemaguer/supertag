@@ -775,6 +775,17 @@ impl worker_host_server::WorkerHost for ControlPlane {
         ))
     }
 
+    async fn report_attempt_milestone(
+        &self,
+        request: Request<ReportAttemptMilestoneRequest>,
+    ) -> Result<Response<ReportAttemptMilestoneResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        self.store
+            .report_attempt_milestone(&host, &request.into_inner())
+            .await?;
+        Ok(Response::new(ReportAttemptMilestoneResponse {}))
+    }
+
     async fn resolve_workspace_ref(
         &self,
         request: Request<ResolveWorkspaceRefRequest>,

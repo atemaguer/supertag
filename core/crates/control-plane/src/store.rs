@@ -41,10 +41,11 @@ use sqlx::{
 };
 use supertag_protocol::{
     v2::{
-        AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, ContextContract,
-        ExecutionLimits, ExecutionSelection, FinishTaskRequest, HarnessExecutionProfile,
-        HarnessKind, PolicyExecutionSettings, PutTagRequest, Reply, ReplyDestination, ReplyState,
-        StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent, TaskState, WorkspaceSpec,
+        AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, AttemptMilestone,
+        ContextContract, ExecutionLimits, ExecutionSelection, FinishTaskRequest,
+        HarnessExecutionProfile, HarnessKind, PolicyExecutionSettings, PutTagRequest, Reply,
+        ReplyDestination, ReplyState, ReportAttemptMilestoneRequest, StartTaskRequest,
+        SubmitTaskRequest, Tag, Task, TaskEvent, TaskState, WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
 };
@@ -102,7 +103,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 104;
+        const SCHEMA_VERSION: i64 = 105;
         /// `pg_advisory_xact_lock` key that serializes schema checks and migrations.
         const SCHEMA_LOCK: i64 = 0x5375_7065_7254_6167;
         sqlx::any::install_default_drivers();
@@ -303,6 +304,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0102_tag_volume.sql"),
                 include_str!("../migrations/sqlite/0103_checkpoint_volume.sql"),
                 include_str!("../migrations/sqlite/0104_objective_idle_since.sql"),
+                include_str!("../migrations/sqlite/0105_attempt_milestones.sql"),
             ]
         } else {
             [
@@ -412,6 +414,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0102_tag_volume.sql"),
                 include_str!("../migrations/postgresql/0103_checkpoint_volume.sql"),
                 include_str!("../migrations/postgresql/0104_objective_idle_since.sql"),
+                include_str!("../migrations/postgresql/0105_attempt_milestones.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1249,6 +1252,44 @@ impl Store {
         Ok(task)
     }
 
+    /// Stamps when the running Attempt reached `milestone`, by this Control Plane's clock. The first
+    /// stamp wins, so a retried report keeps the original time.
+    pub async fn report_attempt_milestone(
+        &self,
+        host: &HostAuthority,
+        input: &ReportAttemptMilestoneRequest,
+    ) -> Result<()> {
+        let column = match AttemptMilestone::try_from(input.milestone) {
+            Ok(AttemptMilestone::WorkspaceReady) => "workspace_ready_at_ms",
+            Ok(AttemptMilestone::AdapterAttached) => "attached_at_ms",
+            Ok(AttemptMilestone::Unspecified) | Err(_) => {
+                return Err(invalid("Attempt milestone is required"));
+            }
+        };
+        let attempt = input
+            .attempt
+            .as_ref()
+            .ok_or_else(|| invalid("Attempt is required"))?;
+        let (mut transaction, _) = self.write().await?;
+        owned(
+            &mut transaction,
+            host,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
+        )
+        .await?;
+        sqlx::query(&format!(
+            "UPDATE supertag_v2_claims SET {column} = $1 WHERE attempt_id = $2 AND {column} IS NULL"
+        ))
+        .bind(self.execution_now_ms())
+        .bind(&attempt.attempt_id)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn append_event(
         &self,
         host: &HostAuthority,
@@ -1322,6 +1363,14 @@ impl Store {
                 "UPDATE supertag_v2_tasks SET next_sequence = next_sequence + 1 WHERE task_id = $1",
             )
             .bind(&input.task_id)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "UPDATE supertag_v2_claims SET first_event_at_ms = $1 \
+                 WHERE attempt_id = $2 AND first_event_at_ms IS NULL",
+            )
+            .bind(self.execution_now_ms())
+            .bind(&input.attempt_id)
             .execute(&mut *transaction)
             .await?;
             supertag_protocol::crash_point("control-plane.append-event", "before-commit");

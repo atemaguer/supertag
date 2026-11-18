@@ -99,6 +99,12 @@ class CommitReviewDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     COMMIT_REVIEW_DECISION_APPROVED: _ClassVar[CommitReviewDecision]
     COMMIT_REVIEW_DECISION_CHANGES_REQUESTED: _ClassVar[CommitReviewDecision]
 
+class AttemptMilestone(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ATTEMPT_MILESTONE_UNSPECIFIED: _ClassVar[AttemptMilestone]
+    ATTEMPT_MILESTONE_WORKSPACE_READY: _ClassVar[AttemptMilestone]
+    ATTEMPT_MILESTONE_ADAPTER_ATTACHED: _ClassVar[AttemptMilestone]
+
 class HostPhase(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     HOST_PHASE_UNSPECIFIED: _ClassVar[HostPhase]
@@ -378,6 +384,9 @@ TAG_MESSAGE_STATE_FAILED: TagMessageState
 COMMIT_REVIEW_DECISION_UNSPECIFIED: CommitReviewDecision
 COMMIT_REVIEW_DECISION_APPROVED: CommitReviewDecision
 COMMIT_REVIEW_DECISION_CHANGES_REQUESTED: CommitReviewDecision
+ATTEMPT_MILESTONE_UNSPECIFIED: AttemptMilestone
+ATTEMPT_MILESTONE_WORKSPACE_READY: AttemptMilestone
+ATTEMPT_MILESTONE_ADAPTER_ATTACHED: AttemptMilestone
 HOST_PHASE_UNSPECIFIED: HostPhase
 HOST_PHASE_PENDING: HostPhase
 HOST_PHASE_READY: HostPhase
@@ -1333,6 +1342,18 @@ class ReadMailboxRequest(_message.Message):
     limit: int
     cursor: str
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ReportAttemptMilestoneRequest(_message.Message):
+    __slots__ = ("attempt", "milestone")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    MILESTONE_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    milestone: AttemptMilestone
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., milestone: _Optional[_Union[AttemptMilestone, str]] = ...) -> None: ...
+
+class ReportAttemptMilestoneResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class ListHeldCheckpointsRequest(_message.Message):
     __slots__ = ("after_sha256", "limit")

@@ -1744,6 +1744,10 @@ async fn run_assignment(
             if task.waiting_for_holder.is_some() {
                 report_waiting_for_holder(host, &attempt, token, false).await;
             }
+            // A remote Attempt's Workspace is ready once its sandbox is.
+            if options.remote_provider.is_none() {
+                report_milestone(host, &attempt.inspect(), token, WORKSPACE_READY);
+            }
             prepared
         }
         Err(error) if retryable(&error) && !shutdown.is_cancelled() => {
@@ -2060,6 +2064,7 @@ async fn run_assignment(
         .await;
         match prepared {
             Ok(((provider, instructions, execution_ends, restart), expires)) => {
+                report_milestone(host, &attempt.inspect(), token, WORKSPACE_READY);
                 if let Some(instructions) = instructions {
                     task.instructions.push_str(&instructions);
                 }
@@ -2364,6 +2369,7 @@ async fn run_assignment(
         // Whether it failed while the Harness still ran, rather than being stopped after.
         let while_running = !sandbox_cancel.is_cancelled();
         if let Ok((_, _, _, restart)) = &result {
+            report_milestone(host, &attempt.inspect(), token, WORKSPACE_READY);
             restart_ready.send_replace(Some(restart.clone()));
         }
         let _ = ready.send(Some(match &result {
@@ -2943,6 +2949,31 @@ fn retryable(error: &Status) -> bool {
 
 /// Records on the Task whether its Attempt waits for the Worker Host holding its Session's last
 /// delivery. Best effort: a lost report only leaves the reason unshown until the next try.
+/// Tells the Control Plane, in the background and best-effort, that the Attempt reached
+/// `milestone`, for `supertag metrics`. The run never waits on it.
+pub(crate) fn report_milestone(
+    host: &RegisteredHost,
+    attempt: &supertag_protocol::v2::InspectAttemptRequest,
+    token: &str,
+    milestone: supertag_protocol::v2::AttemptMilestone,
+) {
+    let Ok(report) = request(
+        supertag_protocol::v2::ReportAttemptMilestoneRequest {
+            attempt: Some(attempt.clone()),
+            milestone: milestone as i32,
+        },
+        token,
+    ) else {
+        return;
+    };
+    let mut host = host.clone();
+    tokio::spawn(async move {
+        if let Err(error) = host.report_attempt_milestone(report).await {
+            tracing::debug!("could not report an Attempt milestone: {error}");
+        }
+    });
+}
+
 async fn report_waiting_for_holder(
     host: &mut RegisteredHost,
     attempt: &Attempt,
@@ -2962,6 +2993,9 @@ async fn report_waiting_for_holder(
         tracing::debug!("could not report waiting for the delivery holder: {error}");
     }
 }
+
+const WORKSPACE_READY: supertag_protocol::v2::AttemptMilestone =
+    supertag_protocol::v2::AttemptMilestone::WorkspaceReady;
 
 async fn wait_for_work(shutdown: &CancellationToken) {
     tokio::select! {

@@ -833,7 +833,25 @@ service WorkerHost {
   // The digests of the checkpoints the calling host holds that a Session still resumes, so it
   // deletes every other file it holds. Paged by digest.
   rpc ListHeldCheckpoints(ListHeldCheckpointsRequest) returns (ListHeldCheckpointsResponse);
+  // A point the running Attempt reached, which the Control Plane stamps with its own clock for
+  // `supertag metrics`. The first stamp of each milestone wins.
+  rpc ReportAttemptMilestone(ReportAttemptMilestoneRequest) returns (ReportAttemptMilestoneResponse);
 }
+
+enum AttemptMilestone {
+  ATTEMPT_MILESTONE_UNSPECIFIED = 0;
+  // The Attempt's Workspace (checkout or sandbox) is ready for its tools.
+  ATTEMPT_MILESTONE_WORKSPACE_READY = 1;
+  // Its harness adapter attached to the Worker Host.
+  ATTEMPT_MILESTONE_ADAPTER_ATTACHED = 2;
+}
+
+message ReportAttemptMilestoneRequest {
+  InspectAttemptRequest attempt = 1;
+  AttemptMilestone milestone = 2;
+}
+
+message ReportAttemptMilestoneResponse {}
 
 message ListHeldCheckpointsRequest {
   // Digests after this one; empty for the first page.
