@@ -300,7 +300,7 @@ async fn exercise(url: &str) {
             attempt: Some(attempt.clone()),
             purpose: VolumeObjectPurpose::SessionCheckpoint as i32,
             access: access as i32,
-            native_memory_blob: None,
+            ..Default::default()
         };
     let write = grant_request(&first, VolumeAccess::Write);
     let checkpoint = CheckpointReference {
@@ -397,6 +397,58 @@ async fn exercise(url: &str) {
         (key.as_str(), Some(&blob))
     );
     store.put_tag_spec(tag(Some(""))).await.unwrap();
+    // A later Attempt that acquires the capture may read a file from its verified Volume copy,
+    // for when the producing host cannot serve it.
+    let acquisition = store
+        .acquire_artifact(
+            &host,
+            &AcquireArtifactRequest {
+                attempt: Some(next.clone()),
+                operation_id: "read-capture".into(),
+                artifact_id: artifact_id.clone(),
+                paths: vec!["a.txt".into()],
+                delivery: ArtifactDelivery::Read as i32,
+                destination: None,
+            },
+        )
+        .await
+        .unwrap();
+    let acquired = |path: &str, access: VolumeAccess| VolumeObjectGrantRequest {
+        attempt: Some(next.clone()),
+        purpose: VolumeObjectPurpose::AcquiredFile as i32,
+        access: access as i32,
+        acquisition_id: acquisition.acquisition_id.clone(),
+        path: path.into(),
+        native_memory_blob: None,
+    };
+    let file = store
+        .grant_volume_object(&host, &acquired("a.txt", VolumeAccess::Read))
+        .await
+        .unwrap();
+    assert_eq!(file.volume.as_ref(), Some(&vault));
+    assert_eq!(file.blob, reserved.files[0].blob);
+    assert_eq!(
+        file.key,
+        format!(
+            "tags/{:x}/attempts/{}/sha256/{}",
+            sha2::Sha256::digest("keeper"),
+            first.attempt_id,
+            reserved.files[0].blob.as_ref().unwrap().sha256
+        )
+    );
+    // Only a read, and only of a file the acquisition selected.
+    assert!(
+        store
+            .grant_volume_object(&host, &acquired("a.txt", VolumeAccess::Write))
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .grant_volume_object(&host, &acquired("b.txt", VolumeAccess::Read))
+            .await
+            .is_err()
+    );
     let plain = capture(&next, "plain", 'e');
     assert!(
         store
@@ -412,6 +464,96 @@ async fn exercise(url: &str) {
             .await
             .unwrap()
             .volume_copies
+            .is_empty()
+    );
+
+    // A turn that ends without a checkpoint drops the Session's: its object on the Volume becomes
+    // garbage for a host that maps the file Volume to delete. The Control Plane deletes only S3
+    // Volumes' objects.
+    store
+        .finish_task(
+            &host,
+            &FinishTaskRequest {
+                task_id: next.task_id.clone(),
+                attempt_id: next.attempt_id.clone(),
+                lease_token: next.lease_token.clone(),
+                result: "Done".into(),
+                succeeded: true,
+                objective_signal: ObjectiveSignal::Progress.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mapped = ListVolumeGarbageRequest {
+        volume_id: "vault".into(),
+        source: "file:///srv/vault".into(),
+        limit: 0,
+    };
+    let garbage = store.list_volume_garbage(&host, &mapped).await.unwrap();
+    assert_eq!(garbage.objects.len(), 1, "{garbage:?}");
+    assert_eq!(garbage.objects[0].key, key);
+    assert_eq!(garbage.objects[0].blob.as_ref(), Some(&blob));
+    assert!(store.take_s3_volume_garbage(0).await.unwrap().is_empty());
+    // Another storage lists nothing; a source that is not a file Volume is refused.
+    assert!(
+        store
+            .list_volume_garbage(
+                &host,
+                &ListVolumeGarbageRequest {
+                    source: "file:///srv/elsewhere".into(),
+                    ..mapped.clone()
+                }
+            )
+            .await
+            .unwrap()
+            .objects
+            .is_empty()
+    );
+    assert!(
+        store
+            .list_volume_garbage(
+                &host,
+                &ListVolumeGarbageRequest {
+                    source: "s3://bucket/prefix".into(),
+                    ..mapped.clone()
+                }
+            )
+            .await
+            .is_err()
+    );
+    // Forgetting needs the object as listed: one queued again since stays.
+    let forget = |queued_at_ms: i64| ForgetVolumeGarbageRequest {
+        volume_id: "vault".into(),
+        source: "file:///srv/vault".into(),
+        objects: vec![VolumeGarbageObject {
+            queued_at_ms,
+            ..garbage.objects[0].clone()
+        }],
+    };
+    store
+        .forget_volume_garbage(&host, &forget(garbage.objects[0].queued_at_ms + 1))
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .list_volume_garbage(&host, &mapped)
+            .await
+            .unwrap()
+            .objects
+            .len(),
+        1
+    );
+    store
+        .forget_volume_garbage(&host, &forget(garbage.objects[0].queued_at_ms))
+        .await
+        .unwrap();
+    assert!(
+        store
+            .list_volume_garbage(&host, &mapped)
+            .await
+            .unwrap()
+            .objects
             .is_empty()
     );
 }

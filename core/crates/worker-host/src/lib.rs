@@ -171,6 +171,7 @@ pub(crate) struct CoordinationClients {
     artifact_source: Option<artifact_direct::SourceStorage>,
     artifact_peers: ArtifactPeers,
     volumes: volume_objects::HostVolumes,
+    volume_objects: volume_objects::VolumeObjects,
     workspace_mounts: AttemptWorkspaceMountsClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
@@ -481,6 +482,13 @@ pub async fn run(
         artifact_source: Some(serving.storage.clone()),
         artifact_peers: options.artifact_peers.clone(),
         volumes: std::sync::Arc::new(options.volumes.clone()),
+        volume_objects:
+            supertag_protocol::v2::volume_objects_client::VolumeObjectsClient::with_interceptor(
+                channel.clone(),
+                headers.clone(),
+            )
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
         transfers: checkpoints::Transfers::new(channel.clone(), headers.clone())
             .with_storage(serving.storage.clone()),
         workstreams: AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
@@ -545,6 +553,27 @@ pub async fn run(
                 tokio::select! {
                     () = shutdown.cancelled() => break,
                     () = tokio::time::sleep(Duration::from_secs(60 * 60)) => {}
+                }
+            }
+        });
+    }
+    // At start and every 10 minutes, delete the objects nothing keeps from the file Volumes this
+    // host maps.
+    if !options.volumes.is_empty() {
+        let volumes = std::sync::Arc::new(options.volumes.clone());
+        let client = coordination.volume_objects.clone();
+        let token = token.clone();
+        let shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) =
+                    volume_objects::collect_garbage(client.clone(), &token, &volumes).await
+                {
+                    crate::failures::note("Volume garbage could not be deleted", &error);
+                }
+                tokio::select! {
+                    () = shutdown.cancelled() => break,
+                    () = tokio::time::sleep(volume_objects::GARBAGE_INTERVAL) => {}
                 }
             }
         });

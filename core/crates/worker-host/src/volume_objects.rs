@@ -3,16 +3,34 @@
 //! Volume byte passes through the Control Plane.
 //!
 //! Captures get their grants from `AttemptArtifacts.ReserveCapture` (see `capture_volumes`); other
-//! objects, such as a Session's checkpoint, from `VolumeObjects.Grant`.
+//! objects, such as a Session's checkpoint or an acquired file, from `VolumeObjects.Grant`. A host
+//! that maps a file Volume also deletes the objects on it that nothing keeps any more.
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use sha2::{Digest, Sha256};
-use supertag_protocol::v2::{ArtifactVolumeUpload, BlobReference};
+use supertag_protocol::{
+    authenticated_request,
+    v2::{
+        ArtifactVolumeUpload, BlobReference, ForgetVolumeGarbageRequest, InspectAttemptRequest,
+        ListVolumeGarbageRequest, VolumeAccess, VolumeObjectGrantRequest, VolumeObjectPurpose,
+        volume_objects_client::VolumeObjectsClient,
+    },
+};
 use supertag_workspaces::artifact_volumes::FileVolume;
-use tonic::Status;
+use tonic::{Status, service::interceptor::InterceptedService, transport::Channel};
 
 /// The file Volumes this host maps, by Volume ID.
 pub type HostVolumes = Arc<BTreeMap<String, FileVolume>>;
+
+/// The Control Plane's Volume object grants, as this host.
+pub(crate) type VolumeObjects =
+    VolumeObjectsClient<InterceptedService<Channel, crate::HostHeaders>>;
+
+/// How often a host deletes its file Volumes' garbage.
+pub(crate) const GARBAGE_INTERVAL: Duration = Duration::from_secs(10 * 60);
+/// Objects per listed page, and pages per Volume in one pass.
+const GARBAGE_PAGE: u32 = 200;
+const GARBAGE_PAGES: usize = 50;
 
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -146,6 +164,108 @@ pub(crate) async fn get(
         .then_some(bytes))
 }
 
+/// An acquired file from its producer's verified Volume copy: through a presigned GET for an S3
+/// Volume, or this host's own mapping of a file Volume. `None` when there is no such copy, this
+/// host cannot reach it, or the bytes there differ, so the caller falls back.
+pub(crate) async fn acquired(
+    client: VolumeObjects,
+    token: &str,
+    attempt: &InspectAttemptRequest,
+    (acquisition_id, path): (&str, &str),
+    volumes: &HostVolumes,
+) -> Option<Vec<u8>> {
+    let request = authenticated_request(
+        VolumeObjectGrantRequest {
+            attempt: Some(attempt.clone()),
+            purpose: VolumeObjectPurpose::AcquiredFile as i32,
+            access: VolumeAccess::Read as i32,
+            acquisition_id: acquisition_id.to_owned(),
+            path: path.to_owned(),
+            native_memory_blob: None,
+        },
+        token,
+        None,
+    )
+    .ok()?;
+    let grant = client.clone().grant(request).await.ok()?.into_inner();
+    let volume = grant.volume.as_ref()?;
+    let blob = grant.blob.as_ref()?;
+    let object = ObjectGrant {
+        volume_id: &volume.volume_id,
+        source: &volume.source,
+        key: &grant.key,
+        blob,
+        presigned: grant.presigned.as_ref(),
+    };
+    get(&object, volumes).await.ok().flatten()
+}
+
+/// Deletes the objects nothing keeps from every file Volume this host maps, then tells the
+/// Control Plane which went. Returns how many.
+pub(crate) async fn collect_garbage(
+    client: VolumeObjects,
+    token: &str,
+    volumes: &HostVolumes,
+) -> Result<usize, Status> {
+    let mut deleted = 0;
+    for (volume_id, mapping) in volumes.iter() {
+        for _ in 0..GARBAGE_PAGES {
+            let listed = client
+                .clone()
+                .list_garbage(authenticated_request(
+                    ListVolumeGarbageRequest {
+                        volume_id: volume_id.clone(),
+                        source: mapping.source.clone(),
+                        limit: GARBAGE_PAGE,
+                    },
+                    token,
+                    None,
+                )?)
+                .await?
+                .into_inner()
+                .objects;
+            if listed.is_empty() {
+                break;
+            }
+            let full = listed.len() as u32 == GARBAGE_PAGE;
+            let mapping = mapping.clone();
+            let gone = tokio::task::spawn_blocking(move || {
+                listed
+                    .into_iter()
+                    .filter(|object| {
+                        object
+                            .blob
+                            .as_ref()
+                            .is_some_and(|blob| mapping.remove(&object.key, blob).is_ok())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .map_err(|_| Status::internal("Volume garbage deletion stopped"))?;
+            if gone.is_empty() {
+                break;
+            }
+            deleted += gone.len();
+            client
+                .clone()
+                .forget_garbage(authenticated_request(
+                    ForgetVolumeGarbageRequest {
+                        volume_id: volume_id.clone(),
+                        source: volumes[volume_id].source.clone(),
+                        objects: gone,
+                    },
+                    token,
+                    None,
+                )?)
+                .await?;
+            if !full {
+                break;
+            }
+        }
+    }
+    Ok(deleted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +312,200 @@ mod tests {
             ..grant
         };
         assert!(put(&elsewhere, bytes, &volumes).await.is_err());
+    }
+
+    /// Lists one page of garbage, then nothing, and records what the host forgot.
+    struct FakeGarbage {
+        granted: Option<supertag_protocol::v2::VolumeObjectGrant>,
+        listed: std::sync::Mutex<Vec<supertag_protocol::v2::VolumeGarbageObject>>,
+        forgotten: tokio::sync::mpsc::UnboundedSender<ForgetVolumeGarbageRequest>,
+    }
+
+    #[tonic::async_trait]
+    impl supertag_protocol::v2::volume_objects_server::VolumeObjects for FakeGarbage {
+        async fn grant(
+            &self,
+            request: tonic::Request<VolumeObjectGrantRequest>,
+        ) -> Result<tonic::Response<supertag_protocol::v2::VolumeObjectGrant>, Status> {
+            let request = request.into_inner();
+            assert_eq!(request.purpose(), VolumeObjectPurpose::AcquiredFile);
+            assert_eq!(request.access(), VolumeAccess::Read);
+            self.granted
+                .clone()
+                .map(tonic::Response::new)
+                .ok_or_else(|| Status::not_found("no Volume copy"))
+        }
+        async fn list_garbage(
+            &self,
+            request: tonic::Request<ListVolumeGarbageRequest>,
+        ) -> Result<tonic::Response<supertag_protocol::v2::ListVolumeGarbageResponse>, Status>
+        {
+            assert_eq!(request.get_ref().volume_id, "vault");
+            Ok(tonic::Response::new(
+                supertag_protocol::v2::ListVolumeGarbageResponse {
+                    objects: std::mem::take(&mut *self.listed.lock().unwrap()),
+                },
+            ))
+        }
+        async fn forget_garbage(
+            &self,
+            request: tonic::Request<ForgetVolumeGarbageRequest>,
+        ) -> Result<tonic::Response<supertag_protocol::v2::ForgetVolumeGarbageResponse>, Status>
+        {
+            let _ = self.forgotten.send(request.into_inner());
+            Ok(tonic::Response::new(
+                supertag_protocol::v2::ForgetVolumeGarbageResponse {},
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn an_acquired_file_is_read_from_a_mapped_volume_copy_or_left_to_the_fallback() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().canonicalize().unwrap().join("volume");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mapping = FileVolume::open(&path).unwrap();
+        let bytes = b"captured report";
+        let blob = BlobReference {
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+            byte_length: bytes.len() as u64,
+        };
+        let key = format!(
+            "tags/{}/attempts/producer/sha256/{}",
+            "a".repeat(64),
+            blob.sha256
+        );
+        mapping.persist(&key, &blob, Some(bytes), true).unwrap();
+        let grant = supertag_protocol::v2::VolumeObjectGrant {
+            volume: Some(supertag_protocol::v2::ArtifactVolume {
+                volume_id: "vault".into(),
+                source: mapping.source.clone(),
+                revision: 1,
+            }),
+            key,
+            blob: Some(blob),
+            presigned: None,
+        };
+        let volumes: HostVolumes = Arc::new(BTreeMap::from([("vault".to_owned(), mapping)]));
+        let attempt = InspectAttemptRequest::default();
+        for (granted, expected) in [
+            (Some(grant), Some(bytes.to_vec())),
+            // No copy, or a copy this host does not map: the caller falls back.
+            (None, None),
+        ] {
+            let (forgotten, _) = tokio::sync::mpsc::unbounded_channel();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            tokio::spawn(
+                tonic::transport::Server::builder()
+                    .add_service(
+                        supertag_protocol::v2::volume_objects_server::VolumeObjectsServer::new(
+                            FakeGarbage {
+                                granted,
+                                listed: Default::default(),
+                                forgotten,
+                            },
+                        ),
+                    )
+                    .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+            );
+            let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+                .unwrap()
+                .connect()
+                .await
+                .unwrap();
+            let client =
+                VolumeObjectsClient::with_interceptor(channel, crate::HostHeaders::new(1, 2));
+            let read = acquired(
+                client,
+                "token",
+                &attempt,
+                ("acquisition", "report.txt"),
+                &volumes,
+            )
+            .await;
+            assert_eq!(read, expected);
+            assert_eq!(
+                acquired(
+                    VolumeObjectsClient::with_interceptor(
+                        tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+                            .unwrap()
+                            .connect()
+                            .await
+                            .unwrap(),
+                        crate::HostHeaders::new(1, 2),
+                    ),
+                    "token",
+                    &attempt,
+                    ("acquisition", "report.txt"),
+                    &HostVolumes::default(),
+                )
+                .await,
+                None,
+                "a host without the mapping falls back"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_host_deletes_listed_garbage_from_its_file_volume_and_forgets_it() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().canonicalize().unwrap().join("volume");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mapping = FileVolume::open(&path).unwrap();
+        let source = mapping.source.clone();
+        let bytes = b"dropped checkpoint";
+        let blob = BlobReference {
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+            byte_length: bytes.len() as u64,
+        };
+        let key = format!(
+            "tags/{}/sessions/{}/checkpoint/{}.bin",
+            "a".repeat(64),
+            "b".repeat(64),
+            blob.sha256
+        );
+        mapping.persist(&key, &blob, Some(bytes), true).unwrap();
+        let volumes: HostVolumes = Arc::new(BTreeMap::from([("vault".to_owned(), mapping)]));
+        let object = supertag_protocol::v2::VolumeGarbageObject {
+            key: key.clone(),
+            blob: Some(blob),
+            queued_at_ms: 7,
+        };
+        let (forgotten, mut seen) = tokio::sync::mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(
+            tonic::transport::Server::builder()
+                .add_service(
+                    supertag_protocol::v2::volume_objects_server::VolumeObjectsServer::new(
+                        FakeGarbage {
+                            granted: None,
+                            listed: std::sync::Mutex::new(vec![object.clone()]),
+                            forgotten,
+                        },
+                    ),
+                )
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+        );
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
+        let client = VolumeObjectsClient::with_interceptor(channel, crate::HostHeaders::new(1, 2));
+        assert_eq!(collect_garbage(client, "token", &volumes).await.unwrap(), 1);
+        assert!(!path.join(&key).exists());
+        let forget = seen.recv().await.unwrap();
+        assert_eq!(
+            (
+                forget.volume_id.as_str(),
+                forget.source.as_str(),
+                forget.objects
+            ),
+            ("vault", source.as_str(), vec![object])
+        );
     }
 }

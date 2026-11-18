@@ -33,6 +33,7 @@ class VolumeObjectPurpose(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     VOLUME_OBJECT_PURPOSE_UNSPECIFIED: _ClassVar[VolumeObjectPurpose]
     VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT: _ClassVar[VolumeObjectPurpose]
     VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB: _ClassVar[VolumeObjectPurpose]
+    VOLUME_OBJECT_PURPOSE_ACQUIRED_FILE: _ClassVar[VolumeObjectPurpose]
 
 class VolumeAccess(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -59,6 +60,7 @@ ARTIFACT_VOLUME_COPY_STATE_VERIFIED: ArtifactVolumeCopyState
 VOLUME_OBJECT_PURPOSE_UNSPECIFIED: VolumeObjectPurpose
 VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT: VolumeObjectPurpose
 VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB: VolumeObjectPurpose
+VOLUME_OBJECT_PURPOSE_ACQUIRED_FILE: VolumeObjectPurpose
 VOLUME_ACCESS_UNSPECIFIED: VolumeAccess
 VOLUME_ACCESS_WRITE: VolumeAccess
 VOLUME_ACCESS_READ: VolumeAccess
@@ -459,16 +461,60 @@ class ArtifactVolumeCopy(_message.Message):
     def __init__(self, copy_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., volume: _Optional[_Union[ArtifactVolume, _Mapping]] = ..., artifact_id: _Optional[str] = ..., file: _Optional[_Union[ArtifactFile, _Mapping]] = ..., storage_key: _Optional[str] = ..., state: _Optional[_Union[ArtifactVolumeCopyState, str]] = ..., created_at_ms: _Optional[int] = ..., verified_at_ms: _Optional[int] = ..., upload: _Optional[_Union[ArtifactVolumeUpload, _Mapping]] = ..., host_attested: _Optional[bool] = ...) -> None: ...
 
 class VolumeObjectGrantRequest(_message.Message):
-    __slots__ = ("attempt", "purpose", "access", "native_memory_blob")
+    __slots__ = ("attempt", "purpose", "access", "native_memory_blob", "acquisition_id", "path")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     PURPOSE_FIELD_NUMBER: _ClassVar[int]
     ACCESS_FIELD_NUMBER: _ClassVar[int]
     NATIVE_MEMORY_BLOB_FIELD_NUMBER: _ClassVar[int]
+    ACQUISITION_ID_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
     attempt: _runtime_pb2.InspectAttemptRequest
     purpose: VolumeObjectPurpose
     access: VolumeAccess
     native_memory_blob: _runtime_pb2.BlobReference
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., purpose: _Optional[_Union[VolumeObjectPurpose, str]] = ..., access: _Optional[_Union[VolumeAccess, str]] = ..., native_memory_blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ...) -> None: ...
+    acquisition_id: str
+    path: str
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., purpose: _Optional[_Union[VolumeObjectPurpose, str]] = ..., access: _Optional[_Union[VolumeAccess, str]] = ..., native_memory_blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., acquisition_id: _Optional[str] = ..., path: _Optional[str] = ...) -> None: ...
+
+class ListVolumeGarbageRequest(_message.Message):
+    __slots__ = ("volume_id", "source", "limit")
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    volume_id: str
+    source: str
+    limit: int
+    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ..., limit: _Optional[int] = ...) -> None: ...
+
+class VolumeGarbageObject(_message.Message):
+    __slots__ = ("key", "blob", "queued_at_ms")
+    KEY_FIELD_NUMBER: _ClassVar[int]
+    BLOB_FIELD_NUMBER: _ClassVar[int]
+    QUEUED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    key: str
+    blob: _runtime_pb2.BlobReference
+    queued_at_ms: int
+    def __init__(self, key: _Optional[str] = ..., blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., queued_at_ms: _Optional[int] = ...) -> None: ...
+
+class ListVolumeGarbageResponse(_message.Message):
+    __slots__ = ("objects",)
+    OBJECTS_FIELD_NUMBER: _ClassVar[int]
+    objects: _containers.RepeatedCompositeFieldContainer[VolumeGarbageObject]
+    def __init__(self, objects: _Optional[_Iterable[_Union[VolumeGarbageObject, _Mapping]]] = ...) -> None: ...
+
+class ForgetVolumeGarbageRequest(_message.Message):
+    __slots__ = ("volume_id", "source", "objects")
+    VOLUME_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    OBJECTS_FIELD_NUMBER: _ClassVar[int]
+    volume_id: str
+    source: str
+    objects: _containers.RepeatedCompositeFieldContainer[VolumeGarbageObject]
+    def __init__(self, volume_id: _Optional[str] = ..., source: _Optional[str] = ..., objects: _Optional[_Iterable[_Union[VolumeGarbageObject, _Mapping]]] = ...) -> None: ...
+
+class ForgetVolumeGarbageResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class VolumeObjectGrant(_message.Message):
     __slots__ = ("volume", "key", "blob", "presigned")

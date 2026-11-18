@@ -173,6 +173,10 @@ mod tests {
                 artifact_source: None,
                 artifact_peers: crate::ArtifactPeers::default(),
                 volumes: Default::default(),
+                volume_objects: supertag_protocol::v2::volume_objects_client::VolumeObjectsClient::with_interceptor(
+                    channel.clone(),
+                    headers.clone(),
+                ),
                 workspace_mounts: supertag_protocol::v2::attempt_workspace_mounts_client::AttemptWorkspaceMountsClient::with_interceptor(channel.clone(), headers.clone()),
                 workstreams: attempt_workstreams_client::AttemptWorkstreamsClient::with_interceptor(
                     channel.clone(),

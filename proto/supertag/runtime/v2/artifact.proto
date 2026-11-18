@@ -265,6 +265,8 @@ service ArtifactVolumeDirectory {
   rpc Delete(DeleteArtifactVolumeRequest) returns (DeleteArtifactVolumeResponse);
   // Authorizes one Volume object for a live Attempt of the calling host (VolumeObjects.Grant).
   rpc GrantObject(VolumeObjectGrantRequest) returns (VolumeObjectGrant);
+  rpc ListGarbage(ListVolumeGarbageRequest) returns (ListVolumeGarbageResponse);
+  rpc ForgetGarbage(ForgetVolumeGarbageRequest) returns (ForgetVolumeGarbageResponse);
   rpc GetCopy(GetArtifactVolumeCopyRequest) returns (ArtifactVolumeCopy);
   rpc ListCopies(ListArtifactVolumeCopiesRequest) returns (ListArtifactVolumeCopiesResponse);
 }
@@ -322,6 +324,11 @@ service VolumeObjects {
   // a host never names one. An S3 Volume's grant carries a presigned URL; a file Volume's is
   // written or read through the host's own mapping.
   rpc Grant(VolumeObjectGrantRequest) returns (VolumeObjectGrant);
+  // The objects on a file Volume nothing keeps any more, for a Worker Host that maps the Volume
+  // at `source` to delete. The Control Plane deletes an S3 Volume's objects itself.
+  rpc ListGarbage(ListVolumeGarbageRequest) returns (ListVolumeGarbageResponse);
+  // Records that the host deleted these objects, or found them already gone.
+  rpc ForgetGarbage(ForgetVolumeGarbageRequest) returns (ForgetVolumeGarbageResponse);
 }
 
 message VolumeObjectGrantRequest {
@@ -331,6 +338,9 @@ message VolumeObjectGrantRequest {
   // With VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB: the object's bytes. Native memory objects have
   // no record of their own, so the host names them; the key is their own SHA-256.
   BlobReference native_memory_blob = 4;
+  // VOLUME_OBJECT_PURPOSE_ACQUIRED_FILE: the acquisition and the file's path in it.
+  string acquisition_id = 5;
+  string path = 6;
 }
 
 // What the object is. The Control Plane resolves its bytes from its own records, so a host never
@@ -346,7 +356,37 @@ enum VolumeObjectPurpose {
   // `tags/<sha256(tag)>/native-memory/<harness>/<scope>/`. The Control Plane derives the store
   // from the Attempt's harness and audience scope.
   VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB = 2;
+  // READ only: a file of an artifact this Attempt acquired, from the producer's verified Volume
+  // copy, for when the producing Worker Host cannot serve it. NotFound when it has no such copy.
+  VOLUME_OBJECT_PURPOSE_ACQUIRED_FILE = 3;
 }
+
+message ListVolumeGarbageRequest {
+  string volume_id = 1;
+  // The file Volume's source as the host maps it; only that storage's objects are listed.
+  string source = 2;
+  // At most 1000; 0 means 100.
+  uint32 limit = 3;
+}
+
+message VolumeGarbageObject {
+  string key = 1;
+  BlobReference blob = 2;
+  int64 queued_at_ms = 3;
+}
+
+message ListVolumeGarbageResponse {
+  repeated VolumeGarbageObject objects = 1;
+}
+
+message ForgetVolumeGarbageRequest {
+  string volume_id = 1;
+  string source = 2;
+  // As listed: an object queued again since is kept.
+  repeated VolumeGarbageObject objects = 3;
+}
+
+message ForgetVolumeGarbageResponse {}
 
 enum VolumeAccess {
   VOLUME_ACCESS_UNSPECIFIED = 0;

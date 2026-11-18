@@ -207,6 +207,77 @@ impl volume_objects_server::VolumeObjects for ApiTransfers {
         }
         Ok(Response::new(grant))
     }
+
+    async fn list_garbage(
+        &self,
+        request: Request<ListVolumeGarbageRequest>,
+    ) -> Result<Response<ListVolumeGarbageResponse>, Status> {
+        self.authorize_upload(&request).await?;
+        self.api
+            .forward_host(request, true, |channel, request| async move {
+                client(channel).list_garbage(request).await
+            })
+            .await
+    }
+
+    async fn forget_garbage(
+        &self,
+        request: Request<ForgetVolumeGarbageRequest>,
+    ) -> Result<Response<ForgetVolumeGarbageResponse>, Status> {
+        self.authorize_upload(&request).await?;
+        self.api
+            .forward_host(request, true, |channel, request| async move {
+                client(channel).forget_garbage(request).await
+            })
+            .await
+    }
+}
+
+/// The state owner's queue of S3 Volume objects nothing keeps any more, for the API tier, which
+/// holds the signing credentials, to delete.
+#[tonic::async_trait]
+pub trait VolumeGarbage: Send + Sync + 'static {
+    /// Up to `limit` objects, each as the request that forgets it.
+    async fn take(&self, limit: u32) -> anyhow::Result<Vec<ForgetVolumeGarbageRequest>>;
+    /// Forgets objects that are gone.
+    async fn forget(&self, objects: &ForgetVolumeGarbageRequest) -> anyhow::Result<()>;
+}
+
+/// How many S3 Volume objects one collection pass deletes at most.
+const GARBAGE_PASS: u32 = 200;
+
+impl ApiTransfers {
+    /// Deletes S3 Volume objects nothing keeps any more and forgets each one S3 confirms gone. An
+    /// object whose Volume has no usable credential waits for one. Returns how many went.
+    pub async fn collect_volume_garbage(
+        &self,
+        garbage: &dyn VolumeGarbage,
+    ) -> anyhow::Result<usize> {
+        let mut deleted = 0;
+        for entry in garbage.take(GARBAGE_PASS).await? {
+            let Ok(Some(signer)) = self.signers.signer(&entry.volume_id, &entry.source).await
+            else {
+                continue;
+            };
+            let mut gone = Vec::new();
+            for object in &entry.objects {
+                let Some(blob) = &object.blob else { continue };
+                if signer.delete(&object.key, blob).await.is_ok() {
+                    gone.push(object.clone());
+                }
+            }
+            if !gone.is_empty() {
+                deleted += gone.len();
+                garbage
+                    .forget(&ForgetVolumeGarbageRequest {
+                        objects: gone,
+                        ..entry
+                    })
+                    .await?;
+            }
+        }
+        Ok(deleted)
+    }
 }
 
 #[tonic::async_trait]

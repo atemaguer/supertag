@@ -54,6 +54,7 @@ mod tags;
 mod task_artifact_inputs;
 mod teams;
 mod usage;
+mod volume_garbage;
 mod watch;
 mod work_sessions;
 mod workspace_credentials;

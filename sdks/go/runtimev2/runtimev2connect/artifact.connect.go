@@ -152,6 +152,12 @@ const (
 	// ArtifactVolumeDirectoryGrantObjectProcedure is the fully-qualified name of the
 	// ArtifactVolumeDirectory's GrantObject RPC.
 	ArtifactVolumeDirectoryGrantObjectProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/GrantObject"
+	// ArtifactVolumeDirectoryListGarbageProcedure is the fully-qualified name of the
+	// ArtifactVolumeDirectory's ListGarbage RPC.
+	ArtifactVolumeDirectoryListGarbageProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/ListGarbage"
+	// ArtifactVolumeDirectoryForgetGarbageProcedure is the fully-qualified name of the
+	// ArtifactVolumeDirectory's ForgetGarbage RPC.
+	ArtifactVolumeDirectoryForgetGarbageProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/ForgetGarbage"
 	// ArtifactVolumeDirectoryGetCopyProcedure is the fully-qualified name of the
 	// ArtifactVolumeDirectory's GetCopy RPC.
 	ArtifactVolumeDirectoryGetCopyProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/GetCopy"
@@ -160,6 +166,12 @@ const (
 	ArtifactVolumeDirectoryListCopiesProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/ListCopies"
 	// VolumeObjectsGrantProcedure is the fully-qualified name of the VolumeObjects's Grant RPC.
 	VolumeObjectsGrantProcedure = "/supertag.runtime.v2.VolumeObjects/Grant"
+	// VolumeObjectsListGarbageProcedure is the fully-qualified name of the VolumeObjects's ListGarbage
+	// RPC.
+	VolumeObjectsListGarbageProcedure = "/supertag.runtime.v2.VolumeObjects/ListGarbage"
+	// VolumeObjectsForgetGarbageProcedure is the fully-qualified name of the VolumeObjects's
+	// ForgetGarbage RPC.
+	VolumeObjectsForgetGarbageProcedure = "/supertag.runtime.v2.VolumeObjects/ForgetGarbage"
 	// WorkerArtifactTransfersDownloadProcedure is the fully-qualified name of the
 	// WorkerArtifactTransfers's Download RPC.
 	WorkerArtifactTransfersDownloadProcedure = "/supertag.runtime.v2.WorkerArtifactTransfers/Download"
@@ -1320,6 +1332,8 @@ type ArtifactVolumeDirectoryClient interface {
 	Delete(context.Context, *connect.Request[runtimev2.DeleteArtifactVolumeRequest]) (*connect.Response[runtimev2.DeleteArtifactVolumeResponse], error)
 	// Authorizes one Volume object for a live Attempt of the calling host (VolumeObjects.Grant).
 	GrantObject(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error)
+	ListGarbage(context.Context, *connect.Request[runtimev2.ListVolumeGarbageRequest]) (*connect.Response[runtimev2.ListVolumeGarbageResponse], error)
+	ForgetGarbage(context.Context, *connect.Request[runtimev2.ForgetVolumeGarbageRequest]) (*connect.Response[runtimev2.ForgetVolumeGarbageResponse], error)
 	GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error)
 }
@@ -1366,6 +1380,18 @@ func NewArtifactVolumeDirectoryClient(httpClient connect.HTTPClient, baseURL str
 			connect.WithSchema(artifactVolumeDirectoryMethods.ByName("GrantObject")),
 			connect.WithClientOptions(opts...),
 		),
+		listGarbage: connect.NewClient[runtimev2.ListVolumeGarbageRequest, runtimev2.ListVolumeGarbageResponse](
+			httpClient,
+			baseURL+ArtifactVolumeDirectoryListGarbageProcedure,
+			connect.WithSchema(artifactVolumeDirectoryMethods.ByName("ListGarbage")),
+			connect.WithClientOptions(opts...),
+		),
+		forgetGarbage: connect.NewClient[runtimev2.ForgetVolumeGarbageRequest, runtimev2.ForgetVolumeGarbageResponse](
+			httpClient,
+			baseURL+ArtifactVolumeDirectoryForgetGarbageProcedure,
+			connect.WithSchema(artifactVolumeDirectoryMethods.ByName("ForgetGarbage")),
+			connect.WithClientOptions(opts...),
+		),
 		getCopy: connect.NewClient[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy](
 			httpClient,
 			baseURL+ArtifactVolumeDirectoryGetCopyProcedure,
@@ -1383,13 +1409,15 @@ func NewArtifactVolumeDirectoryClient(httpClient connect.HTTPClient, baseURL str
 
 // artifactVolumeDirectoryClient implements ArtifactVolumeDirectoryClient.
 type artifactVolumeDirectoryClient struct {
-	put         *connect.Client[runtimev2.PutArtifactVolumeRequest, runtimev2.ArtifactVolume]
-	get         *connect.Client[runtimev2.GetArtifactVolumeRequest, runtimev2.ArtifactVolume]
-	list        *connect.Client[runtimev2.ListArtifactVolumesRequest, runtimev2.ListArtifactVolumesResponse]
-	delete      *connect.Client[runtimev2.DeleteArtifactVolumeRequest, runtimev2.DeleteArtifactVolumeResponse]
-	grantObject *connect.Client[runtimev2.VolumeObjectGrantRequest, runtimev2.VolumeObjectGrant]
-	getCopy     *connect.Client[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy]
-	listCopies  *connect.Client[runtimev2.ListArtifactVolumeCopiesRequest, runtimev2.ListArtifactVolumeCopiesResponse]
+	put           *connect.Client[runtimev2.PutArtifactVolumeRequest, runtimev2.ArtifactVolume]
+	get           *connect.Client[runtimev2.GetArtifactVolumeRequest, runtimev2.ArtifactVolume]
+	list          *connect.Client[runtimev2.ListArtifactVolumesRequest, runtimev2.ListArtifactVolumesResponse]
+	delete        *connect.Client[runtimev2.DeleteArtifactVolumeRequest, runtimev2.DeleteArtifactVolumeResponse]
+	grantObject   *connect.Client[runtimev2.VolumeObjectGrantRequest, runtimev2.VolumeObjectGrant]
+	listGarbage   *connect.Client[runtimev2.ListVolumeGarbageRequest, runtimev2.ListVolumeGarbageResponse]
+	forgetGarbage *connect.Client[runtimev2.ForgetVolumeGarbageRequest, runtimev2.ForgetVolumeGarbageResponse]
+	getCopy       *connect.Client[runtimev2.GetArtifactVolumeCopyRequest, runtimev2.ArtifactVolumeCopy]
+	listCopies    *connect.Client[runtimev2.ListArtifactVolumeCopiesRequest, runtimev2.ListArtifactVolumeCopiesResponse]
 }
 
 // Put calls supertag.runtime.v2.ArtifactVolumeDirectory.Put.
@@ -1417,6 +1445,16 @@ func (c *artifactVolumeDirectoryClient) GrantObject(ctx context.Context, req *co
 	return c.grantObject.CallUnary(ctx, req)
 }
 
+// ListGarbage calls supertag.runtime.v2.ArtifactVolumeDirectory.ListGarbage.
+func (c *artifactVolumeDirectoryClient) ListGarbage(ctx context.Context, req *connect.Request[runtimev2.ListVolumeGarbageRequest]) (*connect.Response[runtimev2.ListVolumeGarbageResponse], error) {
+	return c.listGarbage.CallUnary(ctx, req)
+}
+
+// ForgetGarbage calls supertag.runtime.v2.ArtifactVolumeDirectory.ForgetGarbage.
+func (c *artifactVolumeDirectoryClient) ForgetGarbage(ctx context.Context, req *connect.Request[runtimev2.ForgetVolumeGarbageRequest]) (*connect.Response[runtimev2.ForgetVolumeGarbageResponse], error) {
+	return c.forgetGarbage.CallUnary(ctx, req)
+}
+
 // GetCopy calls supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy.
 func (c *artifactVolumeDirectoryClient) GetCopy(ctx context.Context, req *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
 	return c.getCopy.CallUnary(ctx, req)
@@ -1436,6 +1474,8 @@ type ArtifactVolumeDirectoryHandler interface {
 	Delete(context.Context, *connect.Request[runtimev2.DeleteArtifactVolumeRequest]) (*connect.Response[runtimev2.DeleteArtifactVolumeResponse], error)
 	// Authorizes one Volume object for a live Attempt of the calling host (VolumeObjects.Grant).
 	GrantObject(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error)
+	ListGarbage(context.Context, *connect.Request[runtimev2.ListVolumeGarbageRequest]) (*connect.Response[runtimev2.ListVolumeGarbageResponse], error)
+	ForgetGarbage(context.Context, *connect.Request[runtimev2.ForgetVolumeGarbageRequest]) (*connect.Response[runtimev2.ForgetVolumeGarbageResponse], error)
 	GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error)
 	ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error)
 }
@@ -1477,6 +1517,18 @@ func NewArtifactVolumeDirectoryHandler(svc ArtifactVolumeDirectoryHandler, opts 
 		connect.WithSchema(artifactVolumeDirectoryMethods.ByName("GrantObject")),
 		connect.WithHandlerOptions(opts...),
 	)
+	artifactVolumeDirectoryListGarbageHandler := connect.NewUnaryHandler(
+		ArtifactVolumeDirectoryListGarbageProcedure,
+		svc.ListGarbage,
+		connect.WithSchema(artifactVolumeDirectoryMethods.ByName("ListGarbage")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactVolumeDirectoryForgetGarbageHandler := connect.NewUnaryHandler(
+		ArtifactVolumeDirectoryForgetGarbageProcedure,
+		svc.ForgetGarbage,
+		connect.WithSchema(artifactVolumeDirectoryMethods.ByName("ForgetGarbage")),
+		connect.WithHandlerOptions(opts...),
+	)
 	artifactVolumeDirectoryGetCopyHandler := connect.NewUnaryHandler(
 		ArtifactVolumeDirectoryGetCopyProcedure,
 		svc.GetCopy,
@@ -1501,6 +1553,10 @@ func NewArtifactVolumeDirectoryHandler(svc ArtifactVolumeDirectoryHandler, opts 
 			artifactVolumeDirectoryDeleteHandler.ServeHTTP(w, r)
 		case ArtifactVolumeDirectoryGrantObjectProcedure:
 			artifactVolumeDirectoryGrantObjectHandler.ServeHTTP(w, r)
+		case ArtifactVolumeDirectoryListGarbageProcedure:
+			artifactVolumeDirectoryListGarbageHandler.ServeHTTP(w, r)
+		case ArtifactVolumeDirectoryForgetGarbageProcedure:
+			artifactVolumeDirectoryForgetGarbageHandler.ServeHTTP(w, r)
 		case ArtifactVolumeDirectoryGetCopyProcedure:
 			artifactVolumeDirectoryGetCopyHandler.ServeHTTP(w, r)
 		case ArtifactVolumeDirectoryListCopiesProcedure:
@@ -1534,6 +1590,14 @@ func (UnimplementedArtifactVolumeDirectoryHandler) GrantObject(context.Context, 
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject is not implemented"))
 }
 
+func (UnimplementedArtifactVolumeDirectoryHandler) ListGarbage(context.Context, *connect.Request[runtimev2.ListVolumeGarbageRequest]) (*connect.Response[runtimev2.ListVolumeGarbageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.ListGarbage is not implemented"))
+}
+
+func (UnimplementedArtifactVolumeDirectoryHandler) ForgetGarbage(context.Context, *connect.Request[runtimev2.ForgetVolumeGarbageRequest]) (*connect.Response[runtimev2.ForgetVolumeGarbageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.ForgetGarbage is not implemented"))
+}
+
 func (UnimplementedArtifactVolumeDirectoryHandler) GetCopy(context.Context, *connect.Request[runtimev2.GetArtifactVolumeCopyRequest]) (*connect.Response[runtimev2.ArtifactVolumeCopy], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy is not implemented"))
 }
@@ -1548,6 +1612,11 @@ type VolumeObjectsClient interface {
 	// a host never names one. An S3 Volume's grant carries a presigned URL; a file Volume's is
 	// written or read through the host's own mapping.
 	Grant(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error)
+	// The objects on a file Volume nothing keeps any more, for a Worker Host that maps the Volume
+	// at `source` to delete. The Control Plane deletes an S3 Volume's objects itself.
+	ListGarbage(context.Context, *connect.Request[runtimev2.ListVolumeGarbageRequest]) (*connect.Response[runtimev2.ListVolumeGarbageResponse], error)
+	// Records that the host deleted these objects, or found them already gone.
+	ForgetGarbage(context.Context, *connect.Request[runtimev2.ForgetVolumeGarbageRequest]) (*connect.Response[runtimev2.ForgetVolumeGarbageResponse], error)
 }
 
 // NewVolumeObjectsClient constructs a client for the supertag.runtime.v2.VolumeObjects service. By
@@ -1567,17 +1636,41 @@ func NewVolumeObjectsClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(volumeObjectsMethods.ByName("Grant")),
 			connect.WithClientOptions(opts...),
 		),
+		listGarbage: connect.NewClient[runtimev2.ListVolumeGarbageRequest, runtimev2.ListVolumeGarbageResponse](
+			httpClient,
+			baseURL+VolumeObjectsListGarbageProcedure,
+			connect.WithSchema(volumeObjectsMethods.ByName("ListGarbage")),
+			connect.WithClientOptions(opts...),
+		),
+		forgetGarbage: connect.NewClient[runtimev2.ForgetVolumeGarbageRequest, runtimev2.ForgetVolumeGarbageResponse](
+			httpClient,
+			baseURL+VolumeObjectsForgetGarbageProcedure,
+			connect.WithSchema(volumeObjectsMethods.ByName("ForgetGarbage")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // volumeObjectsClient implements VolumeObjectsClient.
 type volumeObjectsClient struct {
-	grant *connect.Client[runtimev2.VolumeObjectGrantRequest, runtimev2.VolumeObjectGrant]
+	grant         *connect.Client[runtimev2.VolumeObjectGrantRequest, runtimev2.VolumeObjectGrant]
+	listGarbage   *connect.Client[runtimev2.ListVolumeGarbageRequest, runtimev2.ListVolumeGarbageResponse]
+	forgetGarbage *connect.Client[runtimev2.ForgetVolumeGarbageRequest, runtimev2.ForgetVolumeGarbageResponse]
 }
 
 // Grant calls supertag.runtime.v2.VolumeObjects.Grant.
 func (c *volumeObjectsClient) Grant(ctx context.Context, req *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error) {
 	return c.grant.CallUnary(ctx, req)
+}
+
+// ListGarbage calls supertag.runtime.v2.VolumeObjects.ListGarbage.
+func (c *volumeObjectsClient) ListGarbage(ctx context.Context, req *connect.Request[runtimev2.ListVolumeGarbageRequest]) (*connect.Response[runtimev2.ListVolumeGarbageResponse], error) {
+	return c.listGarbage.CallUnary(ctx, req)
+}
+
+// ForgetGarbage calls supertag.runtime.v2.VolumeObjects.ForgetGarbage.
+func (c *volumeObjectsClient) ForgetGarbage(ctx context.Context, req *connect.Request[runtimev2.ForgetVolumeGarbageRequest]) (*connect.Response[runtimev2.ForgetVolumeGarbageResponse], error) {
+	return c.forgetGarbage.CallUnary(ctx, req)
 }
 
 // VolumeObjectsHandler is an implementation of the supertag.runtime.v2.VolumeObjects service.
@@ -1586,6 +1679,11 @@ type VolumeObjectsHandler interface {
 	// a host never names one. An S3 Volume's grant carries a presigned URL; a file Volume's is
 	// written or read through the host's own mapping.
 	Grant(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error)
+	// The objects on a file Volume nothing keeps any more, for a Worker Host that maps the Volume
+	// at `source` to delete. The Control Plane deletes an S3 Volume's objects itself.
+	ListGarbage(context.Context, *connect.Request[runtimev2.ListVolumeGarbageRequest]) (*connect.Response[runtimev2.ListVolumeGarbageResponse], error)
+	// Records that the host deleted these objects, or found them already gone.
+	ForgetGarbage(context.Context, *connect.Request[runtimev2.ForgetVolumeGarbageRequest]) (*connect.Response[runtimev2.ForgetVolumeGarbageResponse], error)
 }
 
 // NewVolumeObjectsHandler builds an HTTP handler from the service implementation. It returns the
@@ -1601,10 +1699,26 @@ func NewVolumeObjectsHandler(svc VolumeObjectsHandler, opts ...connect.HandlerOp
 		connect.WithSchema(volumeObjectsMethods.ByName("Grant")),
 		connect.WithHandlerOptions(opts...),
 	)
+	volumeObjectsListGarbageHandler := connect.NewUnaryHandler(
+		VolumeObjectsListGarbageProcedure,
+		svc.ListGarbage,
+		connect.WithSchema(volumeObjectsMethods.ByName("ListGarbage")),
+		connect.WithHandlerOptions(opts...),
+	)
+	volumeObjectsForgetGarbageHandler := connect.NewUnaryHandler(
+		VolumeObjectsForgetGarbageProcedure,
+		svc.ForgetGarbage,
+		connect.WithSchema(volumeObjectsMethods.ByName("ForgetGarbage")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.VolumeObjects/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case VolumeObjectsGrantProcedure:
 			volumeObjectsGrantHandler.ServeHTTP(w, r)
+		case VolumeObjectsListGarbageProcedure:
+			volumeObjectsListGarbageHandler.ServeHTTP(w, r)
+		case VolumeObjectsForgetGarbageProcedure:
+			volumeObjectsForgetGarbageHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1616,6 +1730,14 @@ type UnimplementedVolumeObjectsHandler struct{}
 
 func (UnimplementedVolumeObjectsHandler) Grant(context.Context, *connect.Request[runtimev2.VolumeObjectGrantRequest]) (*connect.Response[runtimev2.VolumeObjectGrant], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.VolumeObjects.Grant is not implemented"))
+}
+
+func (UnimplementedVolumeObjectsHandler) ListGarbage(context.Context, *connect.Request[runtimev2.ListVolumeGarbageRequest]) (*connect.Response[runtimev2.ListVolumeGarbageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.VolumeObjects.ListGarbage is not implemented"))
+}
+
+func (UnimplementedVolumeObjectsHandler) ForgetGarbage(context.Context, *connect.Request[runtimev2.ForgetVolumeGarbageRequest]) (*connect.Response[runtimev2.ForgetVolumeGarbageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.VolumeObjects.ForgetGarbage is not implemented"))
 }
 
 // WorkerArtifactTransfersClient is a client for the supertag.runtime.v2.WorkerArtifactTransfers

@@ -155,6 +155,45 @@ pub(crate) async fn backfill_file_paths(tx: &mut Transaction<'_, Any>) -> Result
     }
 }
 
+/// The oldest verified copy of a capture's file on a registered Volume that still names the same
+/// storage.
+async fn verified_location_in(
+    tx: &mut Transaction<'_, Any>,
+    artifact: &CapturedArtifact,
+    file: &ArtifactFile,
+) -> Result<Option<ArtifactVolumeLocation>> {
+    let summary = artifact.summary.as_ref().ok_or_else(missing)?;
+    let rows = sqlx::query(
+        "SELECT c.payload, v.volume_id, v.source, v.revision
+         FROM supertag_v2_artifact_volume_copies c
+         JOIN supertag_v2_artifact_volumes v ON v.volume_id=c.volume_id
+         WHERE c.artifact_id=$1 AND c.file_path=$2 AND c.state=2 AND v.deleted=0
+         ORDER BY c.created_order LIMIT 8",
+    )
+    .bind(&summary.artifact_id)
+    .bind(&file.path)
+    .fetch_all(&mut **tx)
+    .await?;
+    for row in rows {
+        let copy: ArtifactVolumeCopy = decode(&row.try_get::<Vec<u8>, _>("payload")?)?;
+        let active = volume(&row)?;
+        if copy.artifact_id == summary.artifact_id
+            && copy.state() == ArtifactVolumeCopyState::Verified
+            && copy
+                .volume
+                .as_ref()
+                .is_some_and(|volume| same_storage(volume, &active))
+            && copy.file.as_ref() == Some(file)
+        {
+            return Ok(Some(ArtifactVolumeLocation {
+                volume: Some(active),
+                storage_key: copy.storage_key,
+            }));
+        }
+    }
+    Ok(None)
+}
+
 pub(crate) async fn locations_in(
     tx: &mut Transaction<'_, Any>,
     artifact: &CapturedArtifact,
@@ -498,15 +537,16 @@ impl Store {
             .attempt
             .as_ref()
             .ok_or_else(|| invalid("a Volume grant names its Attempt"))?;
-        if !matches!(
-            input.purpose(),
-            VolumeObjectPurpose::SessionCheckpoint | VolumeObjectPurpose::NativeMemoryBlob
-        ) {
-            return Err(invalid("a Volume grant needs a purpose"));
-        }
         let access = input.access();
         if !matches!(access, VolumeAccess::Write | VolumeAccess::Read) {
             return Err(invalid("a Volume grant is for writing or reading"));
+        }
+        match input.purpose() {
+            VolumeObjectPurpose::SessionCheckpoint | VolumeObjectPurpose::NativeMemoryBlob => {}
+            VolumeObjectPurpose::AcquiredFile if access == VolumeAccess::Read => {
+                return self.grant_acquired_file(host, attempt, input).await;
+            }
+            _ => return Err(invalid("a Volume grant needs a purpose")),
         }
         let (mut tx, _) = self.write().await?;
         let row = crate::store::owned(
@@ -578,6 +618,48 @@ impl Store {
                 sha256: reference.sha256,
                 byte_length: reference.byte_length,
             }),
+            presigned: None,
+        })
+    }
+
+    /// A file of an artifact the Attempt acquired, read from the oldest verified copy on a
+    /// registered Volume, for when the producing Worker Host cannot serve it.
+    async fn grant_acquired_file(
+        &self,
+        host: &crate::HostAuthority,
+        attempt: &InspectAttemptRequest,
+        input: &VolumeObjectGrantRequest,
+    ) -> Result<VolumeObjectGrant> {
+        validate_artifact_path(&input.path).map_err(|error| invalid(error.message()))?;
+        let mut tx = self.pool.begin().await?;
+        let row = crate::store::owned(
+            &mut tx,
+            host,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
+        )
+        .await?;
+        crate::artifact_captures::running(&row, self.execution_now_ms())?;
+        let (capture, file) = self
+            .acquired_source_in(
+                &mut tx,
+                host,
+                &GetAcquiredArtifactFileRequest {
+                    attempt: Some(attempt.clone()),
+                    acquisition_id: input.acquisition_id.clone(),
+                    path: input.path.clone(),
+                },
+            )
+            .await?;
+        let location = verified_location_in(&mut tx, &capture, &file)
+            .await?
+            .ok_or_else(|| StoreError::NotFound("the file has no verified Volume copy".into()))?;
+        tx.commit().await?;
+        Ok(VolumeObjectGrant {
+            volume: location.volume,
+            key: location.storage_key,
+            blob: file.blob,
             presigned: None,
         })
     }
@@ -790,6 +872,18 @@ impl artifact_volume_directory_server::ArtifactVolumeDirectory for ControlPlane 
                 .grant_volume_object(&host, request.get_ref())
                 .await?,
         ))
+    }
+    async fn list_garbage(
+        &self,
+        request: Request<ListVolumeGarbageRequest>,
+    ) -> std::result::Result<Response<ListVolumeGarbageResponse>, Status> {
+        self.list_volume_garbage(request).await
+    }
+    async fn forget_garbage(
+        &self,
+        request: Request<ForgetVolumeGarbageRequest>,
+    ) -> std::result::Result<Response<ForgetVolumeGarbageResponse>, Status> {
+        self.forget_volume_garbage(request).await
     }
     async fn get_copy(
         &self,

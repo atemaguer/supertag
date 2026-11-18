@@ -272,7 +272,32 @@ impl AcquisitionClient<'_> {
             path: file.path.clone(),
         };
         // The Control Plane passes no files. The bytes come from this host's own artifact storage
-        // when it holds them, otherwise straight from the producing Worker Host.
+        // when it holds them, otherwise straight from the producing Worker Host. When neither can
+        // serve them, as when the producer is gone, a verified copy on a Volume can: presigned
+        // for S3, or through this host's own mapping of a file Volume.
+        match self.read_from_hosts(acquisition, input, file).await {
+            Ok(bytes) => Ok(bytes),
+            Err(status) => match crate::volume_objects::acquired(
+                self.coordination.volume_objects.clone(),
+                self.host_token,
+                &self.attempt,
+                (&acquisition.acquisition_id, &file.path),
+                &self.coordination.volumes,
+            )
+            .await
+            {
+                Some(bytes) => Ok(bytes),
+                None => Err(status),
+            },
+        }
+    }
+
+    async fn read_from_hosts(
+        &self,
+        acquisition: &ArtifactAcquisition,
+        input: GetAcquiredArtifactFileRequest,
+        file: &ArtifactFile,
+    ) -> Result<Vec<u8>, Status> {
         let sent = tokio::time::Instant::now();
         let grant = self
             .coordination

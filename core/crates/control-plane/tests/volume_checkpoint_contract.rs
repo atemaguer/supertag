@@ -74,6 +74,7 @@ fn grant(attempt: &InspectAttemptRequest, access: VolumeAccess) -> VolumeObjectG
         purpose: VolumeObjectPurpose::SessionCheckpoint.into(),
         access: access.into(),
         native_memory_blob: None,
+        ..Default::default()
     }
 }
 
@@ -195,6 +196,7 @@ async fn exercise(url: &str) {
             sha256: sha256.into(),
             byte_length: 12,
         }),
+        ..Default::default()
     };
     let object = store
         .grant_volume_object(&server, &memory(&"d".repeat(64)))

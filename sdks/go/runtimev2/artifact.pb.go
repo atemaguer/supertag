@@ -189,6 +189,9 @@ const (
 	// `tags/<sha256(tag)>/native-memory/<harness>/<scope>/`. The Control Plane derives the store
 	// from the Attempt's harness and audience scope.
 	VolumeObjectPurpose_VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB VolumeObjectPurpose = 2
+	// READ only: a file of an artifact this Attempt acquired, from the producer's verified Volume
+	// copy, for when the producing Worker Host cannot serve it. NotFound when it has no such copy.
+	VolumeObjectPurpose_VOLUME_OBJECT_PURPOSE_ACQUIRED_FILE VolumeObjectPurpose = 3
 )
 
 // Enum value maps for VolumeObjectPurpose.
@@ -197,11 +200,13 @@ var (
 		0: "VOLUME_OBJECT_PURPOSE_UNSPECIFIED",
 		1: "VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT",
 		2: "VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB",
+		3: "VOLUME_OBJECT_PURPOSE_ACQUIRED_FILE",
 	}
 	VolumeObjectPurpose_value = map[string]int32{
 		"VOLUME_OBJECT_PURPOSE_UNSPECIFIED":        0,
 		"VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT": 1,
 		"VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB": 2,
+		"VOLUME_OBJECT_PURPOSE_ACQUIRED_FILE":      3,
 	}
 )
 
@@ -2591,8 +2596,11 @@ type VolumeObjectGrantRequest struct {
 	// With VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB: the object's bytes. Native memory objects have
 	// no record of their own, so the host names them; the key is their own SHA-256.
 	NativeMemoryBlob *BlobReference `protobuf:"bytes,4,opt,name=native_memory_blob,json=nativeMemoryBlob,proto3" json:"native_memory_blob,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// VOLUME_OBJECT_PURPOSE_ACQUIRED_FILE: the acquisition and the file's path in it.
+	AcquisitionId string `protobuf:"bytes,5,opt,name=acquisition_id,json=acquisitionId,proto3" json:"acquisition_id,omitempty"`
+	Path          string `protobuf:"bytes,6,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *VolumeObjectGrantRequest) Reset() {
@@ -2653,6 +2661,283 @@ func (x *VolumeObjectGrantRequest) GetNativeMemoryBlob() *BlobReference {
 	return nil
 }
 
+func (x *VolumeObjectGrantRequest) GetAcquisitionId() string {
+	if x != nil {
+		return x.AcquisitionId
+	}
+	return ""
+}
+
+func (x *VolumeObjectGrantRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+type ListVolumeGarbageRequest struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	VolumeId string                 `protobuf:"bytes,1,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
+	// The file Volume's source as the host maps it; only that storage's objects are listed.
+	Source string `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	// At most 1000; 0 means 100.
+	Limit         uint32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListVolumeGarbageRequest) Reset() {
+	*x = ListVolumeGarbageRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListVolumeGarbageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListVolumeGarbageRequest) ProtoMessage() {}
+
+func (x *ListVolumeGarbageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListVolumeGarbageRequest.ProtoReflect.Descriptor instead.
+func (*ListVolumeGarbageRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *ListVolumeGarbageRequest) GetVolumeId() string {
+	if x != nil {
+		return x.VolumeId
+	}
+	return ""
+}
+
+func (x *ListVolumeGarbageRequest) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *ListVolumeGarbageRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type VolumeGarbageObject struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Blob          *BlobReference         `protobuf:"bytes,2,opt,name=blob,proto3" json:"blob,omitempty"`
+	QueuedAtMs    int64                  `protobuf:"varint,3,opt,name=queued_at_ms,json=queuedAtMs,proto3" json:"queued_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VolumeGarbageObject) Reset() {
+	*x = VolumeGarbageObject{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VolumeGarbageObject) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VolumeGarbageObject) ProtoMessage() {}
+
+func (x *VolumeGarbageObject) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VolumeGarbageObject.ProtoReflect.Descriptor instead.
+func (*VolumeGarbageObject) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *VolumeGarbageObject) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *VolumeGarbageObject) GetBlob() *BlobReference {
+	if x != nil {
+		return x.Blob
+	}
+	return nil
+}
+
+func (x *VolumeGarbageObject) GetQueuedAtMs() int64 {
+	if x != nil {
+		return x.QueuedAtMs
+	}
+	return 0
+}
+
+type ListVolumeGarbageResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Objects       []*VolumeGarbageObject `protobuf:"bytes,1,rep,name=objects,proto3" json:"objects,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListVolumeGarbageResponse) Reset() {
+	*x = ListVolumeGarbageResponse{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListVolumeGarbageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListVolumeGarbageResponse) ProtoMessage() {}
+
+func (x *ListVolumeGarbageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListVolumeGarbageResponse.ProtoReflect.Descriptor instead.
+func (*ListVolumeGarbageResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ListVolumeGarbageResponse) GetObjects() []*VolumeGarbageObject {
+	if x != nil {
+		return x.Objects
+	}
+	return nil
+}
+
+type ForgetVolumeGarbageRequest struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	VolumeId string                 `protobuf:"bytes,1,opt,name=volume_id,json=volumeId,proto3" json:"volume_id,omitempty"`
+	Source   string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	// As listed: an object queued again since is kept.
+	Objects       []*VolumeGarbageObject `protobuf:"bytes,3,rep,name=objects,proto3" json:"objects,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForgetVolumeGarbageRequest) Reset() {
+	*x = ForgetVolumeGarbageRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForgetVolumeGarbageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForgetVolumeGarbageRequest) ProtoMessage() {}
+
+func (x *ForgetVolumeGarbageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForgetVolumeGarbageRequest.ProtoReflect.Descriptor instead.
+func (*ForgetVolumeGarbageRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *ForgetVolumeGarbageRequest) GetVolumeId() string {
+	if x != nil {
+		return x.VolumeId
+	}
+	return ""
+}
+
+func (x *ForgetVolumeGarbageRequest) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *ForgetVolumeGarbageRequest) GetObjects() []*VolumeGarbageObject {
+	if x != nil {
+		return x.Objects
+	}
+	return nil
+}
+
+type ForgetVolumeGarbageResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForgetVolumeGarbageResponse) Reset() {
+	*x = ForgetVolumeGarbageResponse{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForgetVolumeGarbageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForgetVolumeGarbageResponse) ProtoMessage() {}
+
+func (x *ForgetVolumeGarbageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForgetVolumeGarbageResponse.ProtoReflect.Descriptor instead.
+func (*ForgetVolumeGarbageResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{37}
+}
+
 type VolumeObjectGrant struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Volume *ArtifactVolume        `protobuf:"bytes,1,opt,name=volume,proto3" json:"volume,omitempty"`
@@ -2667,7 +2952,7 @@ type VolumeObjectGrant struct {
 
 func (x *VolumeObjectGrant) Reset() {
 	*x = VolumeObjectGrant{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[33]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2679,7 +2964,7 @@ func (x *VolumeObjectGrant) String() string {
 func (*VolumeObjectGrant) ProtoMessage() {}
 
 func (x *VolumeObjectGrant) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[33]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2692,7 +2977,7 @@ func (x *VolumeObjectGrant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VolumeObjectGrant.ProtoReflect.Descriptor instead.
 func (*VolumeObjectGrant) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{33}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *VolumeObjectGrant) GetVolume() *ArtifactVolume {
@@ -2736,7 +3021,7 @@ type ArtifactVolumeUpload struct {
 
 func (x *ArtifactVolumeUpload) Reset() {
 	*x = ArtifactVolumeUpload{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[34]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2748,7 +3033,7 @@ func (x *ArtifactVolumeUpload) String() string {
 func (*ArtifactVolumeUpload) ProtoMessage() {}
 
 func (x *ArtifactVolumeUpload) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[34]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2761,7 +3046,7 @@ func (x *ArtifactVolumeUpload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactVolumeUpload.ProtoReflect.Descriptor instead.
 func (*ArtifactVolumeUpload) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{34}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ArtifactVolumeUpload) GetUrl() string {
@@ -2795,7 +3080,7 @@ type ArtifactVolumeUploadHeader struct {
 
 func (x *ArtifactVolumeUploadHeader) Reset() {
 	*x = ArtifactVolumeUploadHeader{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[35]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2807,7 +3092,7 @@ func (x *ArtifactVolumeUploadHeader) String() string {
 func (*ArtifactVolumeUploadHeader) ProtoMessage() {}
 
 func (x *ArtifactVolumeUploadHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[35]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2820,7 +3105,7 @@ func (x *ArtifactVolumeUploadHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactVolumeUploadHeader.ProtoReflect.Descriptor instead.
 func (*ArtifactVolumeUploadHeader) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{35}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ArtifactVolumeUploadHeader) GetName() string {
@@ -2846,7 +3131,7 @@ type GetArtifactVolumeCopyRequest struct {
 
 func (x *GetArtifactVolumeCopyRequest) Reset() {
 	*x = GetArtifactVolumeCopyRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[36]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2858,7 +3143,7 @@ func (x *GetArtifactVolumeCopyRequest) String() string {
 func (*GetArtifactVolumeCopyRequest) ProtoMessage() {}
 
 func (x *GetArtifactVolumeCopyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[36]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2871,7 +3156,7 @@ func (x *GetArtifactVolumeCopyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetArtifactVolumeCopyRequest.ProtoReflect.Descriptor instead.
 func (*GetArtifactVolumeCopyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{36}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *GetArtifactVolumeCopyRequest) GetCopyId() string {
@@ -2892,7 +3177,7 @@ type ListArtifactVolumeCopiesRequest struct {
 
 func (x *ListArtifactVolumeCopiesRequest) Reset() {
 	*x = ListArtifactVolumeCopiesRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[37]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2904,7 +3189,7 @@ func (x *ListArtifactVolumeCopiesRequest) String() string {
 func (*ListArtifactVolumeCopiesRequest) ProtoMessage() {}
 
 func (x *ListArtifactVolumeCopiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[37]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2917,7 +3202,7 @@ func (x *ListArtifactVolumeCopiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListArtifactVolumeCopiesRequest.ProtoReflect.Descriptor instead.
 func (*ListArtifactVolumeCopiesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{37}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ListArtifactVolumeCopiesRequest) GetVolumeId() string {
@@ -2951,7 +3236,7 @@ type ListArtifactVolumeCopiesResponse struct {
 
 func (x *ListArtifactVolumeCopiesResponse) Reset() {
 	*x = ListArtifactVolumeCopiesResponse{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[38]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2963,7 +3248,7 @@ func (x *ListArtifactVolumeCopiesResponse) String() string {
 func (*ListArtifactVolumeCopiesResponse) ProtoMessage() {}
 
 func (x *ListArtifactVolumeCopiesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[38]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2976,7 +3261,7 @@ func (x *ListArtifactVolumeCopiesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListArtifactVolumeCopiesResponse.ProtoReflect.Descriptor instead.
 func (*ListArtifactVolumeCopiesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{38}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ListArtifactVolumeCopiesResponse) GetCopies() []*ArtifactVolumeCopy {
@@ -3007,7 +3292,7 @@ type LocateArtifactCopiesRequest struct {
 
 func (x *LocateArtifactCopiesRequest) Reset() {
 	*x = LocateArtifactCopiesRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[39]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3019,7 +3304,7 @@ func (x *LocateArtifactCopiesRequest) String() string {
 func (*LocateArtifactCopiesRequest) ProtoMessage() {}
 
 func (x *LocateArtifactCopiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[39]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3032,7 +3317,7 @@ func (x *LocateArtifactCopiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LocateArtifactCopiesRequest.ProtoReflect.Descriptor instead.
 func (*LocateArtifactCopiesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{39}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *LocateArtifactCopiesRequest) GetTarget() isLocateArtifactCopiesRequest_Target {
@@ -3078,7 +3363,7 @@ type ArtifactVolumeLocation struct {
 
 func (x *ArtifactVolumeLocation) Reset() {
 	*x = ArtifactVolumeLocation{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[40]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3090,7 +3375,7 @@ func (x *ArtifactVolumeLocation) String() string {
 func (*ArtifactVolumeLocation) ProtoMessage() {}
 
 func (x *ArtifactVolumeLocation) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[40]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3103,7 +3388,7 @@ func (x *ArtifactVolumeLocation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactVolumeLocation.ProtoReflect.Descriptor instead.
 func (*ArtifactVolumeLocation) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{40}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ArtifactVolumeLocation) GetVolume() *ArtifactVolume {
@@ -3131,7 +3416,7 @@ type LocateArtifactCopiesResponse struct {
 
 func (x *LocateArtifactCopiesResponse) Reset() {
 	*x = LocateArtifactCopiesResponse{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[41]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3143,7 +3428,7 @@ func (x *LocateArtifactCopiesResponse) String() string {
 func (*LocateArtifactCopiesResponse) ProtoMessage() {}
 
 func (x *LocateArtifactCopiesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[41]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3156,7 +3441,7 @@ func (x *LocateArtifactCopiesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LocateArtifactCopiesResponse.ProtoReflect.Descriptor instead.
 func (*LocateArtifactCopiesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{41}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *LocateArtifactCopiesResponse) GetLocations() []*ArtifactVolumeLocation {
@@ -3182,7 +3467,7 @@ type RegisterArtifactSourceRequest struct {
 
 func (x *RegisterArtifactSourceRequest) Reset() {
 	*x = RegisterArtifactSourceRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[42]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3194,7 +3479,7 @@ func (x *RegisterArtifactSourceRequest) String() string {
 func (*RegisterArtifactSourceRequest) ProtoMessage() {}
 
 func (x *RegisterArtifactSourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[42]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3207,7 +3492,7 @@ func (x *RegisterArtifactSourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterArtifactSourceRequest.ProtoReflect.Descriptor instead.
 func (*RegisterArtifactSourceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{42}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *RegisterArtifactSourceRequest) GetStorageId() string {
@@ -3226,7 +3511,7 @@ type RegisterArtifactSourceResponse struct {
 
 func (x *RegisterArtifactSourceResponse) Reset() {
 	*x = RegisterArtifactSourceResponse{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[43]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3238,7 +3523,7 @@ func (x *RegisterArtifactSourceResponse) String() string {
 func (*RegisterArtifactSourceResponse) ProtoMessage() {}
 
 func (x *RegisterArtifactSourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[43]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3251,7 +3536,7 @@ func (x *RegisterArtifactSourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterArtifactSourceResponse.ProtoReflect.Descriptor instead.
 func (*RegisterArtifactSourceResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{43}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *RegisterArtifactSourceResponse) GetStorageId() string {
@@ -3273,7 +3558,7 @@ type ArtifactTransferGrant struct {
 
 func (x *ArtifactTransferGrant) Reset() {
 	*x = ArtifactTransferGrant{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[44]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3285,7 +3570,7 @@ func (x *ArtifactTransferGrant) String() string {
 func (*ArtifactTransferGrant) ProtoMessage() {}
 
 func (x *ArtifactTransferGrant) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[44]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3298,7 +3583,7 @@ func (x *ArtifactTransferGrant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactTransferGrant.ProtoReflect.Descriptor instead.
 func (*ArtifactTransferGrant) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{44}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ArtifactTransferGrant) GetToken() string {
@@ -3340,7 +3625,7 @@ type WorkerArtifactDownloadRequest struct {
 
 func (x *WorkerArtifactDownloadRequest) Reset() {
 	*x = WorkerArtifactDownloadRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[45]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3352,7 +3637,7 @@ func (x *WorkerArtifactDownloadRequest) String() string {
 func (*WorkerArtifactDownloadRequest) ProtoMessage() {}
 
 func (x *WorkerArtifactDownloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[45]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3365,7 +3650,7 @@ func (x *WorkerArtifactDownloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerArtifactDownloadRequest.ProtoReflect.Descriptor instead.
 func (*WorkerArtifactDownloadRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{45}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *WorkerArtifactDownloadRequest) GetArtifactId() string {
@@ -3399,7 +3684,7 @@ type AuthorizeArtifactTransferRequest struct {
 
 func (x *AuthorizeArtifactTransferRequest) Reset() {
 	*x = AuthorizeArtifactTransferRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[46]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3411,7 +3696,7 @@ func (x *AuthorizeArtifactTransferRequest) String() string {
 func (*AuthorizeArtifactTransferRequest) ProtoMessage() {}
 
 func (x *AuthorizeArtifactTransferRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[46]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3424,7 +3709,7 @@ func (x *AuthorizeArtifactTransferRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeArtifactTransferRequest.ProtoReflect.Descriptor instead.
 func (*AuthorizeArtifactTransferRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{46}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *AuthorizeArtifactTransferRequest) GetToken() string {
@@ -3452,7 +3737,7 @@ type AuthorizedArtifactTransfer struct {
 
 func (x *AuthorizedArtifactTransfer) Reset() {
 	*x = AuthorizedArtifactTransfer{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[47]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3464,7 +3749,7 @@ func (x *AuthorizedArtifactTransfer) String() string {
 func (*AuthorizedArtifactTransfer) ProtoMessage() {}
 
 func (x *AuthorizedArtifactTransfer) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[47]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3477,7 +3762,7 @@ func (x *AuthorizedArtifactTransfer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizedArtifactTransfer.ProtoReflect.Descriptor instead.
 func (*AuthorizedArtifactTransfer) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{47}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *AuthorizedArtifactTransfer) GetProducerAttemptId() string {
@@ -3524,7 +3809,7 @@ type ArtifactPublication struct {
 
 func (x *ArtifactPublication) Reset() {
 	*x = ArtifactPublication{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[48]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3536,7 +3821,7 @@ func (x *ArtifactPublication) String() string {
 func (*ArtifactPublication) ProtoMessage() {}
 
 func (x *ArtifactPublication) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[48]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3549,7 +3834,7 @@ func (x *ArtifactPublication) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactPublication.ProtoReflect.Descriptor instead.
 func (*ArtifactPublication) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{48}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ArtifactPublication) GetPublicationId() string {
@@ -3673,7 +3958,7 @@ type ArtifactPublicationView struct {
 
 func (x *ArtifactPublicationView) Reset() {
 	*x = ArtifactPublicationView{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[49]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3685,7 +3970,7 @@ func (x *ArtifactPublicationView) String() string {
 func (*ArtifactPublicationView) ProtoMessage() {}
 
 func (x *ArtifactPublicationView) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[49]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3698,7 +3983,7 @@ func (x *ArtifactPublicationView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactPublicationView.ProtoReflect.Descriptor instead.
 func (*ArtifactPublicationView) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{49}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ArtifactPublicationView) GetPublicationId() string {
@@ -3767,7 +4052,7 @@ type ArtifactConsumptionApproval struct {
 
 func (x *ArtifactConsumptionApproval) Reset() {
 	*x = ArtifactConsumptionApproval{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[50]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3779,7 +4064,7 @@ func (x *ArtifactConsumptionApproval) String() string {
 func (*ArtifactConsumptionApproval) ProtoMessage() {}
 
 func (x *ArtifactConsumptionApproval) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[50]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3792,7 +4077,7 @@ func (x *ArtifactConsumptionApproval) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactConsumptionApproval.ProtoReflect.Descriptor instead.
 func (*ArtifactConsumptionApproval) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{50}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ArtifactConsumptionApproval) GetConsumptionId() string {
@@ -3871,7 +4156,7 @@ type PublishArtifactRequest struct {
 
 func (x *PublishArtifactRequest) Reset() {
 	*x = PublishArtifactRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[51]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3883,7 +4168,7 @@ func (x *PublishArtifactRequest) String() string {
 func (*PublishArtifactRequest) ProtoMessage() {}
 
 func (x *PublishArtifactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[51]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3896,7 +4181,7 @@ func (x *PublishArtifactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishArtifactRequest.ProtoReflect.Descriptor instead.
 func (*PublishArtifactRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{51}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *PublishArtifactRequest) GetPublicationId() string {
@@ -3945,7 +4230,7 @@ type ConsumeArtifactPublicationRequest struct {
 
 func (x *ConsumeArtifactPublicationRequest) Reset() {
 	*x = ConsumeArtifactPublicationRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[52]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3957,7 +4242,7 @@ func (x *ConsumeArtifactPublicationRequest) String() string {
 func (*ConsumeArtifactPublicationRequest) ProtoMessage() {}
 
 func (x *ConsumeArtifactPublicationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[52]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3970,7 +4255,7 @@ func (x *ConsumeArtifactPublicationRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ConsumeArtifactPublicationRequest.ProtoReflect.Descriptor instead.
 func (*ConsumeArtifactPublicationRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{52}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *ConsumeArtifactPublicationRequest) GetConsumptionId() string {
@@ -4004,7 +4289,7 @@ type WithdrawArtifactApprovalRequest struct {
 
 func (x *WithdrawArtifactApprovalRequest) Reset() {
 	*x = WithdrawArtifactApprovalRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[53]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4016,7 +4301,7 @@ func (x *WithdrawArtifactApprovalRequest) String() string {
 func (*WithdrawArtifactApprovalRequest) ProtoMessage() {}
 
 func (x *WithdrawArtifactApprovalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[53]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4029,7 +4314,7 @@ func (x *WithdrawArtifactApprovalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WithdrawArtifactApprovalRequest.ProtoReflect.Descriptor instead.
 func (*WithdrawArtifactApprovalRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{53}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *WithdrawArtifactApprovalRequest) GetApprovalId() string {
@@ -4055,7 +4340,7 @@ type GetArtifactApprovalRequest struct {
 
 func (x *GetArtifactApprovalRequest) Reset() {
 	*x = GetArtifactApprovalRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[54]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4067,7 +4352,7 @@ func (x *GetArtifactApprovalRequest) String() string {
 func (*GetArtifactApprovalRequest) ProtoMessage() {}
 
 func (x *GetArtifactApprovalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[54]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4080,7 +4365,7 @@ func (x *GetArtifactApprovalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetArtifactApprovalRequest.ProtoReflect.Descriptor instead.
 func (*GetArtifactApprovalRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{54}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *GetArtifactApprovalRequest) GetApprovalId() string {
@@ -4101,7 +4386,7 @@ type ListObjectiveArtifactApprovalsRequest struct {
 
 func (x *ListObjectiveArtifactApprovalsRequest) Reset() {
 	*x = ListObjectiveArtifactApprovalsRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[55]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4113,7 +4398,7 @@ func (x *ListObjectiveArtifactApprovalsRequest) String() string {
 func (*ListObjectiveArtifactApprovalsRequest) ProtoMessage() {}
 
 func (x *ListObjectiveArtifactApprovalsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[55]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4126,7 +4411,7 @@ func (x *ListObjectiveArtifactApprovalsRequest) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use ListObjectiveArtifactApprovalsRequest.ProtoReflect.Descriptor instead.
 func (*ListObjectiveArtifactApprovalsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{55}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *ListObjectiveArtifactApprovalsRequest) GetObjectiveId() string {
@@ -4160,7 +4445,7 @@ type ListArtifactPublicationsResponse struct {
 
 func (x *ListArtifactPublicationsResponse) Reset() {
 	*x = ListArtifactPublicationsResponse{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[56]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4172,7 +4457,7 @@ func (x *ListArtifactPublicationsResponse) String() string {
 func (*ListArtifactPublicationsResponse) ProtoMessage() {}
 
 func (x *ListArtifactPublicationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[56]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4185,7 +4470,7 @@ func (x *ListArtifactPublicationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListArtifactPublicationsResponse.ProtoReflect.Descriptor instead.
 func (*ListArtifactPublicationsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{56}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *ListArtifactPublicationsResponse) GetPublications() []*ArtifactPublicationView {
@@ -4212,7 +4497,7 @@ type ListArtifactConsumptionsResponse struct {
 
 func (x *ListArtifactConsumptionsResponse) Reset() {
 	*x = ListArtifactConsumptionsResponse{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[57]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4224,7 +4509,7 @@ func (x *ListArtifactConsumptionsResponse) String() string {
 func (*ListArtifactConsumptionsResponse) ProtoMessage() {}
 
 func (x *ListArtifactConsumptionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[57]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4237,7 +4522,7 @@ func (x *ListArtifactConsumptionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListArtifactConsumptionsResponse.ProtoReflect.Descriptor instead.
 func (*ListArtifactConsumptionsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{57}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *ListArtifactConsumptionsResponse) GetConsumptions() []*ArtifactConsumptionApproval {
@@ -4269,7 +4554,7 @@ type ArtifactApprovalAuditEvent struct {
 
 func (x *ArtifactApprovalAuditEvent) Reset() {
 	*x = ArtifactApprovalAuditEvent{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[58]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4281,7 +4566,7 @@ func (x *ArtifactApprovalAuditEvent) String() string {
 func (*ArtifactApprovalAuditEvent) ProtoMessage() {}
 
 func (x *ArtifactApprovalAuditEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[58]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4294,7 +4579,7 @@ func (x *ArtifactApprovalAuditEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactApprovalAuditEvent.ProtoReflect.Descriptor instead.
 func (*ArtifactApprovalAuditEvent) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{58}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ArtifactApprovalAuditEvent) GetApprovalType() string {
@@ -4356,7 +4641,7 @@ type ListArtifactApprovalAuditRequest struct {
 
 func (x *ListArtifactApprovalAuditRequest) Reset() {
 	*x = ListArtifactApprovalAuditRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[59]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4368,7 +4653,7 @@ func (x *ListArtifactApprovalAuditRequest) String() string {
 func (*ListArtifactApprovalAuditRequest) ProtoMessage() {}
 
 func (x *ListArtifactApprovalAuditRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[59]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4381,7 +4666,7 @@ func (x *ListArtifactApprovalAuditRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListArtifactApprovalAuditRequest.ProtoReflect.Descriptor instead.
 func (*ListArtifactApprovalAuditRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{59}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *ListArtifactApprovalAuditRequest) GetApprovalType() string {
@@ -4407,7 +4692,7 @@ type ListArtifactApprovalAuditResponse struct {
 
 func (x *ListArtifactApprovalAuditResponse) Reset() {
 	*x = ListArtifactApprovalAuditResponse{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[60]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4419,7 +4704,7 @@ func (x *ListArtifactApprovalAuditResponse) String() string {
 func (*ListArtifactApprovalAuditResponse) ProtoMessage() {}
 
 func (x *ListArtifactApprovalAuditResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[60]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4432,7 +4717,7 @@ func (x *ListArtifactApprovalAuditResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ListArtifactApprovalAuditResponse.ProtoReflect.Descriptor instead.
 func (*ListArtifactApprovalAuditResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{60}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *ListArtifactApprovalAuditResponse) GetEvents() []*ArtifactApprovalAuditEvent {
@@ -4643,12 +4928,30 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\x06upload\x18\v \x01(\v2).supertag.runtime.v2.ArtifactVolumeUploadR\x06upload\x12#\n" +
 	"\rhost_attested\x18\f \x01(\bR\fhostAttestedB\x11\n" +
 	"\x0f_verified_at_msJ\x04\b\n" +
-	"\x10\v\"\xb1\x02\n" +
+	"\x10\v\"\xec\x02\n" +
 	"\x18VolumeObjectGrantRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12B\n" +
 	"\apurpose\x18\x02 \x01(\x0e2(.supertag.runtime.v2.VolumeObjectPurposeR\apurpose\x129\n" +
 	"\x06access\x18\x03 \x01(\x0e2!.supertag.runtime.v2.VolumeAccessR\x06access\x12P\n" +
-	"\x12native_memory_blob\x18\x04 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\x10nativeMemoryBlob\"\xe3\x01\n" +
+	"\x12native_memory_blob\x18\x04 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\x10nativeMemoryBlob\x12%\n" +
+	"\x0eacquisition_id\x18\x05 \x01(\tR\racquisitionId\x12\x12\n" +
+	"\x04path\x18\x06 \x01(\tR\x04path\"e\n" +
+	"\x18ListVolumeGarbageRequest\x12\x1b\n" +
+	"\tvolume_id\x18\x01 \x01(\tR\bvolumeId\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\rR\x05limit\"\x81\x01\n" +
+	"\x13VolumeGarbageObject\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
+	"\x04blob\x18\x02 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\x04blob\x12 \n" +
+	"\fqueued_at_ms\x18\x03 \x01(\x03R\n" +
+	"queuedAtMs\"_\n" +
+	"\x19ListVolumeGarbageResponse\x12B\n" +
+	"\aobjects\x18\x01 \x03(\v2(.supertag.runtime.v2.VolumeGarbageObjectR\aobjects\"\x95\x01\n" +
+	"\x1aForgetVolumeGarbageRequest\x12\x1b\n" +
+	"\tvolume_id\x18\x01 \x01(\tR\bvolumeId\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12B\n" +
+	"\aobjects\x18\x03 \x03(\v2(.supertag.runtime.v2.VolumeGarbageObjectR\aobjects\"\x1d\n" +
+	"\x1bForgetVolumeGarbageResponse\"\xe3\x01\n" +
 	"\x11VolumeObjectGrant\x12;\n" +
 	"\x06volume\x18\x01 \x01(\v2#.supertag.runtime.v2.ArtifactVolumeR\x06volume\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x126\n" +
@@ -4811,11 +5114,12 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\x17ArtifactVolumeCopyState\x12*\n" +
 	"&ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED\x10\x00\x12'\n" +
 	"#ARTIFACT_VOLUME_COPY_STATE_RESERVED\x10\x01\x12'\n" +
-	"#ARTIFACT_VOLUME_COPY_STATE_VERIFIED\x10\x02*\x98\x01\n" +
+	"#ARTIFACT_VOLUME_COPY_STATE_VERIFIED\x10\x02*\xc1\x01\n" +
 	"\x13VolumeObjectPurpose\x12%\n" +
 	"!VOLUME_OBJECT_PURPOSE_UNSPECIFIED\x10\x00\x12,\n" +
 	"(VOLUME_OBJECT_PURPOSE_SESSION_CHECKPOINT\x10\x01\x12,\n" +
-	"(VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB\x10\x02*^\n" +
+	"(VOLUME_OBJECT_PURPOSE_NATIVE_MEMORY_BLOB\x10\x02\x12'\n" +
+	"#VOLUME_OBJECT_PURPOSE_ACQUIRED_FILE\x10\x03*^\n" +
 	"\fVolumeAccess\x12\x1d\n" +
 	"\x19VOLUME_ACCESS_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13VOLUME_ACCESS_WRITE\x10\x01\x12\x16\n" +
@@ -4864,18 +5168,22 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\x06Delete\x120.supertag.runtime.v2.DeleteArtifactVolumeRequest\x1a1.supertag.runtime.v2.DeleteArtifactVolumeResponse\x12e\n" +
 	"\aGetCopy\x121.supertag.runtime.v2.GetArtifactVolumeCopyRequest\x1a'.supertag.runtime.v2.ArtifactVolumeCopy\x12y\n" +
 	"\n" +
-	"ListCopies\x124.supertag.runtime.v2.ListArtifactVolumeCopiesRequest\x1a5.supertag.runtime.v2.ListArtifactVolumeCopiesResponse2\xf1\x05\n" +
+	"ListCopies\x124.supertag.runtime.v2.ListArtifactVolumeCopiesRequest\x1a5.supertag.runtime.v2.ListArtifactVolumeCopiesResponse2\xd3\a\n" +
 	"\x17ArtifactVolumeDirectory\x12Y\n" +
 	"\x03Put\x12-.supertag.runtime.v2.PutArtifactVolumeRequest\x1a#.supertag.runtime.v2.ArtifactVolume\x12Y\n" +
 	"\x03Get\x12-.supertag.runtime.v2.GetArtifactVolumeRequest\x1a#.supertag.runtime.v2.ArtifactVolume\x12i\n" +
 	"\x04List\x12/.supertag.runtime.v2.ListArtifactVolumesRequest\x1a0.supertag.runtime.v2.ListArtifactVolumesResponse\x12m\n" +
 	"\x06Delete\x120.supertag.runtime.v2.DeleteArtifactVolumeRequest\x1a1.supertag.runtime.v2.DeleteArtifactVolumeResponse\x12d\n" +
-	"\vGrantObject\x12-.supertag.runtime.v2.VolumeObjectGrantRequest\x1a&.supertag.runtime.v2.VolumeObjectGrant\x12e\n" +
+	"\vGrantObject\x12-.supertag.runtime.v2.VolumeObjectGrantRequest\x1a&.supertag.runtime.v2.VolumeObjectGrant\x12l\n" +
+	"\vListGarbage\x12-.supertag.runtime.v2.ListVolumeGarbageRequest\x1a..supertag.runtime.v2.ListVolumeGarbageResponse\x12r\n" +
+	"\rForgetGarbage\x12/.supertag.runtime.v2.ForgetVolumeGarbageRequest\x1a0.supertag.runtime.v2.ForgetVolumeGarbageResponse\x12e\n" +
 	"\aGetCopy\x121.supertag.runtime.v2.GetArtifactVolumeCopyRequest\x1a'.supertag.runtime.v2.ArtifactVolumeCopy\x12y\n" +
 	"\n" +
-	"ListCopies\x124.supertag.runtime.v2.ListArtifactVolumeCopiesRequest\x1a5.supertag.runtime.v2.ListArtifactVolumeCopiesResponse2o\n" +
+	"ListCopies\x124.supertag.runtime.v2.ListArtifactVolumeCopiesRequest\x1a5.supertag.runtime.v2.ListArtifactVolumeCopiesResponse2\xd1\x02\n" +
 	"\rVolumeObjects\x12^\n" +
-	"\x05Grant\x12-.supertag.runtime.v2.VolumeObjectGrantRequest\x1a&.supertag.runtime.v2.VolumeObjectGrant2\x82\x01\n" +
+	"\x05Grant\x12-.supertag.runtime.v2.VolumeObjectGrantRequest\x1a&.supertag.runtime.v2.VolumeObjectGrant\x12l\n" +
+	"\vListGarbage\x12-.supertag.runtime.v2.ListVolumeGarbageRequest\x1a..supertag.runtime.v2.ListVolumeGarbageResponse\x12r\n" +
+	"\rForgetGarbage\x12/.supertag.runtime.v2.ForgetVolumeGarbageRequest\x1a0.supertag.runtime.v2.ForgetVolumeGarbageResponse2\x82\x01\n" +
 	"\x17WorkerArtifactTransfers\x12g\n" +
 	"\bDownload\x122.supertag.runtime.v2.WorkerArtifactDownloadRequest\x1a%.supertag.runtime.v2.ArtifactDownload0\x012\xd1\b\n" +
 	"\x14ArtifactPublications\x12`\n" +
@@ -4902,7 +5210,7 @@ func file_supertag_runtime_v2_artifact_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_supertag_runtime_v2_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
+var file_supertag_runtime_v2_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 66)
 var file_supertag_runtime_v2_artifact_proto_goTypes = []any{
 	(ArtifactDelivery)(0),                         // 0: supertag.runtime.v2.ArtifactDelivery
 	(ArtifactAcquisitionState)(0),                 // 1: supertag.runtime.v2.ArtifactAcquisitionState
@@ -4943,64 +5251,69 @@ var file_supertag_runtime_v2_artifact_proto_goTypes = []any{
 	(*DeleteArtifactVolumeResponse)(nil),          // 36: supertag.runtime.v2.DeleteArtifactVolumeResponse
 	(*ArtifactVolumeCopy)(nil),                    // 37: supertag.runtime.v2.ArtifactVolumeCopy
 	(*VolumeObjectGrantRequest)(nil),              // 38: supertag.runtime.v2.VolumeObjectGrantRequest
-	(*VolumeObjectGrant)(nil),                     // 39: supertag.runtime.v2.VolumeObjectGrant
-	(*ArtifactVolumeUpload)(nil),                  // 40: supertag.runtime.v2.ArtifactVolumeUpload
-	(*ArtifactVolumeUploadHeader)(nil),            // 41: supertag.runtime.v2.ArtifactVolumeUploadHeader
-	(*GetArtifactVolumeCopyRequest)(nil),          // 42: supertag.runtime.v2.GetArtifactVolumeCopyRequest
-	(*ListArtifactVolumeCopiesRequest)(nil),       // 43: supertag.runtime.v2.ListArtifactVolumeCopiesRequest
-	(*ListArtifactVolumeCopiesResponse)(nil),      // 44: supertag.runtime.v2.ListArtifactVolumeCopiesResponse
-	(*LocateArtifactCopiesRequest)(nil),           // 45: supertag.runtime.v2.LocateArtifactCopiesRequest
-	(*ArtifactVolumeLocation)(nil),                // 46: supertag.runtime.v2.ArtifactVolumeLocation
-	(*LocateArtifactCopiesResponse)(nil),          // 47: supertag.runtime.v2.LocateArtifactCopiesResponse
-	(*RegisterArtifactSourceRequest)(nil),         // 48: supertag.runtime.v2.RegisterArtifactSourceRequest
-	(*RegisterArtifactSourceResponse)(nil),        // 49: supertag.runtime.v2.RegisterArtifactSourceResponse
-	(*ArtifactTransferGrant)(nil),                 // 50: supertag.runtime.v2.ArtifactTransferGrant
-	(*WorkerArtifactDownloadRequest)(nil),         // 51: supertag.runtime.v2.WorkerArtifactDownloadRequest
-	(*AuthorizeArtifactTransferRequest)(nil),      // 52: supertag.runtime.v2.AuthorizeArtifactTransferRequest
-	(*AuthorizedArtifactTransfer)(nil),            // 53: supertag.runtime.v2.AuthorizedArtifactTransfer
-	(*ArtifactPublication)(nil),                   // 54: supertag.runtime.v2.ArtifactPublication
-	(*ArtifactPublicationView)(nil),               // 55: supertag.runtime.v2.ArtifactPublicationView
-	(*ArtifactConsumptionApproval)(nil),           // 56: supertag.runtime.v2.ArtifactConsumptionApproval
-	(*PublishArtifactRequest)(nil),                // 57: supertag.runtime.v2.PublishArtifactRequest
-	(*ConsumeArtifactPublicationRequest)(nil),     // 58: supertag.runtime.v2.ConsumeArtifactPublicationRequest
-	(*WithdrawArtifactApprovalRequest)(nil),       // 59: supertag.runtime.v2.WithdrawArtifactApprovalRequest
-	(*GetArtifactApprovalRequest)(nil),            // 60: supertag.runtime.v2.GetArtifactApprovalRequest
-	(*ListObjectiveArtifactApprovalsRequest)(nil), // 61: supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
-	(*ListArtifactPublicationsResponse)(nil),      // 62: supertag.runtime.v2.ListArtifactPublicationsResponse
-	(*ListArtifactConsumptionsResponse)(nil),      // 63: supertag.runtime.v2.ListArtifactConsumptionsResponse
-	(*ArtifactApprovalAuditEvent)(nil),            // 64: supertag.runtime.v2.ArtifactApprovalAuditEvent
-	(*ListArtifactApprovalAuditRequest)(nil),      // 65: supertag.runtime.v2.ListArtifactApprovalAuditRequest
-	(*ListArtifactApprovalAuditResponse)(nil),     // 66: supertag.runtime.v2.ListArtifactApprovalAuditResponse
-	(*BlobReference)(nil),                         // 67: supertag.runtime.v2.BlobReference
-	(HarnessKind)(0),                              // 68: supertag.runtime.v2.HarnessKind
-	(*ArtifactSelection)(nil),                     // 69: supertag.runtime.v2.ArtifactSelection
-	(*InspectAttemptRequest)(nil),                 // 70: supertag.runtime.v2.InspectAttemptRequest
-	(*BlobHolder)(nil),                            // 71: supertag.runtime.v2.BlobHolder
+	(*ListVolumeGarbageRequest)(nil),              // 39: supertag.runtime.v2.ListVolumeGarbageRequest
+	(*VolumeGarbageObject)(nil),                   // 40: supertag.runtime.v2.VolumeGarbageObject
+	(*ListVolumeGarbageResponse)(nil),             // 41: supertag.runtime.v2.ListVolumeGarbageResponse
+	(*ForgetVolumeGarbageRequest)(nil),            // 42: supertag.runtime.v2.ForgetVolumeGarbageRequest
+	(*ForgetVolumeGarbageResponse)(nil),           // 43: supertag.runtime.v2.ForgetVolumeGarbageResponse
+	(*VolumeObjectGrant)(nil),                     // 44: supertag.runtime.v2.VolumeObjectGrant
+	(*ArtifactVolumeUpload)(nil),                  // 45: supertag.runtime.v2.ArtifactVolumeUpload
+	(*ArtifactVolumeUploadHeader)(nil),            // 46: supertag.runtime.v2.ArtifactVolumeUploadHeader
+	(*GetArtifactVolumeCopyRequest)(nil),          // 47: supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	(*ListArtifactVolumeCopiesRequest)(nil),       // 48: supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	(*ListArtifactVolumeCopiesResponse)(nil),      // 49: supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	(*LocateArtifactCopiesRequest)(nil),           // 50: supertag.runtime.v2.LocateArtifactCopiesRequest
+	(*ArtifactVolumeLocation)(nil),                // 51: supertag.runtime.v2.ArtifactVolumeLocation
+	(*LocateArtifactCopiesResponse)(nil),          // 52: supertag.runtime.v2.LocateArtifactCopiesResponse
+	(*RegisterArtifactSourceRequest)(nil),         // 53: supertag.runtime.v2.RegisterArtifactSourceRequest
+	(*RegisterArtifactSourceResponse)(nil),        // 54: supertag.runtime.v2.RegisterArtifactSourceResponse
+	(*ArtifactTransferGrant)(nil),                 // 55: supertag.runtime.v2.ArtifactTransferGrant
+	(*WorkerArtifactDownloadRequest)(nil),         // 56: supertag.runtime.v2.WorkerArtifactDownloadRequest
+	(*AuthorizeArtifactTransferRequest)(nil),      // 57: supertag.runtime.v2.AuthorizeArtifactTransferRequest
+	(*AuthorizedArtifactTransfer)(nil),            // 58: supertag.runtime.v2.AuthorizedArtifactTransfer
+	(*ArtifactPublication)(nil),                   // 59: supertag.runtime.v2.ArtifactPublication
+	(*ArtifactPublicationView)(nil),               // 60: supertag.runtime.v2.ArtifactPublicationView
+	(*ArtifactConsumptionApproval)(nil),           // 61: supertag.runtime.v2.ArtifactConsumptionApproval
+	(*PublishArtifactRequest)(nil),                // 62: supertag.runtime.v2.PublishArtifactRequest
+	(*ConsumeArtifactPublicationRequest)(nil),     // 63: supertag.runtime.v2.ConsumeArtifactPublicationRequest
+	(*WithdrawArtifactApprovalRequest)(nil),       // 64: supertag.runtime.v2.WithdrawArtifactApprovalRequest
+	(*GetArtifactApprovalRequest)(nil),            // 65: supertag.runtime.v2.GetArtifactApprovalRequest
+	(*ListObjectiveArtifactApprovalsRequest)(nil), // 66: supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
+	(*ListArtifactPublicationsResponse)(nil),      // 67: supertag.runtime.v2.ListArtifactPublicationsResponse
+	(*ListArtifactConsumptionsResponse)(nil),      // 68: supertag.runtime.v2.ListArtifactConsumptionsResponse
+	(*ArtifactApprovalAuditEvent)(nil),            // 69: supertag.runtime.v2.ArtifactApprovalAuditEvent
+	(*ListArtifactApprovalAuditRequest)(nil),      // 70: supertag.runtime.v2.ListArtifactApprovalAuditRequest
+	(*ListArtifactApprovalAuditResponse)(nil),     // 71: supertag.runtime.v2.ListArtifactApprovalAuditResponse
+	(*BlobReference)(nil),                         // 72: supertag.runtime.v2.BlobReference
+	(HarnessKind)(0),                              // 73: supertag.runtime.v2.HarnessKind
+	(*ArtifactSelection)(nil),                     // 74: supertag.runtime.v2.ArtifactSelection
+	(*InspectAttemptRequest)(nil),                 // 75: supertag.runtime.v2.InspectAttemptRequest
+	(*BlobHolder)(nil),                            // 76: supertag.runtime.v2.BlobHolder
 }
 var file_supertag_runtime_v2_artifact_proto_depIdxs = []int32{
-	67,  // 0: supertag.runtime.v2.ArtifactFile.blob:type_name -> supertag.runtime.v2.BlobReference
+	72,  // 0: supertag.runtime.v2.ArtifactFile.blob:type_name -> supertag.runtime.v2.BlobReference
 	8,   // 1: supertag.runtime.v2.ArtifactFile.git_output:type_name -> supertag.runtime.v2.GitOutputSnapshot
-	68,  // 2: supertag.runtime.v2.ArtifactProducer.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	73,  // 2: supertag.runtime.v2.ArtifactProducer.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
 	6,   // 3: supertag.runtime.v2.ArtifactSummary.description:type_name -> supertag.runtime.v2.ArtifactDescription
 	9,   // 4: supertag.runtime.v2.ArtifactSummary.producer:type_name -> supertag.runtime.v2.ArtifactProducer
 	10,  // 5: supertag.runtime.v2.CapturedArtifact.summary:type_name -> supertag.runtime.v2.ArtifactSummary
 	7,   // 6: supertag.runtime.v2.CapturedArtifact.files:type_name -> supertag.runtime.v2.ArtifactFile
-	69,  // 7: supertag.runtime.v2.CapturedArtifact.inputs:type_name -> supertag.runtime.v2.ArtifactSelection
+	74,  // 7: supertag.runtime.v2.CapturedArtifact.inputs:type_name -> supertag.runtime.v2.ArtifactSelection
 	37,  // 8: supertag.runtime.v2.CapturedArtifact.volume_copies:type_name -> supertag.runtime.v2.ArtifactVolumeCopy
 	7,   // 9: supertag.runtime.v2.ArtifactAcquisition.files:type_name -> supertag.runtime.v2.ArtifactFile
 	0,   // 10: supertag.runtime.v2.ArtifactAcquisition.delivery:type_name -> supertag.runtime.v2.ArtifactDelivery
 	1,   // 11: supertag.runtime.v2.ArtifactAcquisition.state:type_name -> supertag.runtime.v2.ArtifactAcquisitionState
-	70,  // 12: supertag.runtime.v2.FindAttemptArtifactsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	70,  // 13: supertag.runtime.v2.InspectAttemptArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	70,  // 14: supertag.runtime.v2.AcquireArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	75,  // 12: supertag.runtime.v2.FindAttemptArtifactsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	75,  // 13: supertag.runtime.v2.InspectAttemptArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	75,  // 14: supertag.runtime.v2.AcquireArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	0,   // 15: supertag.runtime.v2.AcquireArtifactRequest.delivery:type_name -> supertag.runtime.v2.ArtifactDelivery
-	70,  // 16: supertag.runtime.v2.SettleArtifactAcquisitionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	75,  // 16: supertag.runtime.v2.SettleArtifactAcquisitionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	1,   // 17: supertag.runtime.v2.SettleArtifactAcquisitionRequest.state:type_name -> supertag.runtime.v2.ArtifactAcquisitionState
-	70,  // 18: supertag.runtime.v2.GetAcquiredArtifactFileRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	75,  // 18: supertag.runtime.v2.GetAcquiredArtifactFileRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	12,  // 19: supertag.runtime.v2.HarnessArtifactPage.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
 	12,  // 20: supertag.runtime.v2.HarnessAttachedArtifact.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
 	6,   // 21: supertag.runtime.v2.HarnessCaptureArtifactRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	70,  // 22: supertag.runtime.v2.CommitArtifactCaptureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	75,  // 22: supertag.runtime.v2.CommitArtifactCaptureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	6,   // 23: supertag.runtime.v2.CommitArtifactCaptureRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
 	7,   // 24: supertag.runtime.v2.CommitArtifactCaptureRequest.files:type_name -> supertag.runtime.v2.ArtifactFile
 	10,  // 25: supertag.runtime.v2.ListCapturedArtifactsResponse.artifacts:type_name -> supertag.runtime.v2.ArtifactSummary
@@ -5009,142 +5322,153 @@ var file_supertag_runtime_v2_artifact_proto_depIdxs = []int32{
 	30,  // 28: supertag.runtime.v2.ArtifactVolumeCopy.volume:type_name -> supertag.runtime.v2.ArtifactVolume
 	7,   // 29: supertag.runtime.v2.ArtifactVolumeCopy.file:type_name -> supertag.runtime.v2.ArtifactFile
 	2,   // 30: supertag.runtime.v2.ArtifactVolumeCopy.state:type_name -> supertag.runtime.v2.ArtifactVolumeCopyState
-	40,  // 31: supertag.runtime.v2.ArtifactVolumeCopy.upload:type_name -> supertag.runtime.v2.ArtifactVolumeUpload
-	70,  // 32: supertag.runtime.v2.VolumeObjectGrantRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	45,  // 31: supertag.runtime.v2.ArtifactVolumeCopy.upload:type_name -> supertag.runtime.v2.ArtifactVolumeUpload
+	75,  // 32: supertag.runtime.v2.VolumeObjectGrantRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	3,   // 33: supertag.runtime.v2.VolumeObjectGrantRequest.purpose:type_name -> supertag.runtime.v2.VolumeObjectPurpose
 	4,   // 34: supertag.runtime.v2.VolumeObjectGrantRequest.access:type_name -> supertag.runtime.v2.VolumeAccess
-	67,  // 35: supertag.runtime.v2.VolumeObjectGrantRequest.native_memory_blob:type_name -> supertag.runtime.v2.BlobReference
-	30,  // 36: supertag.runtime.v2.VolumeObjectGrant.volume:type_name -> supertag.runtime.v2.ArtifactVolume
-	67,  // 37: supertag.runtime.v2.VolumeObjectGrant.blob:type_name -> supertag.runtime.v2.BlobReference
-	40,  // 38: supertag.runtime.v2.VolumeObjectGrant.presigned:type_name -> supertag.runtime.v2.ArtifactVolumeUpload
-	41,  // 39: supertag.runtime.v2.ArtifactVolumeUpload.headers:type_name -> supertag.runtime.v2.ArtifactVolumeUploadHeader
-	37,  // 40: supertag.runtime.v2.ListArtifactVolumeCopiesResponse.copies:type_name -> supertag.runtime.v2.ArtifactVolumeCopy
-	28,  // 41: supertag.runtime.v2.LocateArtifactCopiesRequest.operator:type_name -> supertag.runtime.v2.DownloadArtifactFileRequest
-	30,  // 42: supertag.runtime.v2.ArtifactVolumeLocation.volume:type_name -> supertag.runtime.v2.ArtifactVolume
-	46,  // 43: supertag.runtime.v2.LocateArtifactCopiesResponse.locations:type_name -> supertag.runtime.v2.ArtifactVolumeLocation
-	71,  // 44: supertag.runtime.v2.LocateArtifactCopiesResponse.holder:type_name -> supertag.runtime.v2.BlobHolder
-	7,   // 45: supertag.runtime.v2.ArtifactTransferGrant.file:type_name -> supertag.runtime.v2.ArtifactFile
-	67,  // 46: supertag.runtime.v2.WorkerArtifactDownloadRequest.blob:type_name -> supertag.runtime.v2.BlobReference
-	51,  // 47: supertag.runtime.v2.AuthorizeArtifactTransferRequest.file:type_name -> supertag.runtime.v2.WorkerArtifactDownloadRequest
-	7,   // 48: supertag.runtime.v2.AuthorizedArtifactTransfer.file:type_name -> supertag.runtime.v2.ArtifactFile
-	9,   // 49: supertag.runtime.v2.ArtifactPublication.producer:type_name -> supertag.runtime.v2.ArtifactProducer
-	7,   // 50: supertag.runtime.v2.ArtifactPublication.files:type_name -> supertag.runtime.v2.ArtifactFile
-	5,   // 51: supertag.runtime.v2.ArtifactPublication.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
-	7,   // 52: supertag.runtime.v2.ArtifactPublicationView.files:type_name -> supertag.runtime.v2.ArtifactFile
-	5,   // 53: supertag.runtime.v2.ArtifactPublicationView.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
-	5,   // 54: supertag.runtime.v2.ArtifactConsumptionApproval.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
-	55,  // 55: supertag.runtime.v2.ListArtifactPublicationsResponse.publications:type_name -> supertag.runtime.v2.ArtifactPublicationView
-	56,  // 56: supertag.runtime.v2.ListArtifactConsumptionsResponse.consumptions:type_name -> supertag.runtime.v2.ArtifactConsumptionApproval
-	64,  // 57: supertag.runtime.v2.ListArtifactApprovalAuditResponse.events:type_name -> supertag.runtime.v2.ArtifactApprovalAuditEvent
-	25,  // 58: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	26,  // 59: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	24,  // 60: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	24,  // 61: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	25,  // 62: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	26,  // 63: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	13,  // 64: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
-	14,  // 65: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
-	15,  // 66: supertag.runtime.v2.ArtifactDirectory.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
-	16,  // 67: supertag.runtime.v2.ArtifactDirectory.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	45,  // 68: supertag.runtime.v2.ArtifactDirectory.LocateCopies:input_type -> supertag.runtime.v2.LocateArtifactCopiesRequest
-	48,  // 69: supertag.runtime.v2.ArtifactDirectory.RegisterArtifactSource:input_type -> supertag.runtime.v2.RegisterArtifactSourceRequest
-	17,  // 70: supertag.runtime.v2.ArtifactDirectory.IssueArtifactTransfer:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	52,  // 71: supertag.runtime.v2.ArtifactDirectory.AuthorizeArtifactTransfer:input_type -> supertag.runtime.v2.AuthorizeArtifactTransferRequest
-	24,  // 72: supertag.runtime.v2.AttemptArtifacts.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	24,  // 73: supertag.runtime.v2.AttemptArtifacts.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	13,  // 74: supertag.runtime.v2.AttemptArtifacts.Find:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
-	14,  // 75: supertag.runtime.v2.AttemptArtifacts.Inspect:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
-	15,  // 76: supertag.runtime.v2.AttemptArtifacts.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
-	16,  // 77: supertag.runtime.v2.AttemptArtifacts.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	48,  // 78: supertag.runtime.v2.AttemptArtifacts.RegisterArtifactSource:input_type -> supertag.runtime.v2.RegisterArtifactSourceRequest
-	17,  // 79: supertag.runtime.v2.AttemptArtifacts.IssueArtifactTransfer:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	52,  // 80: supertag.runtime.v2.AttemptArtifacts.AuthorizeArtifactTransfer:input_type -> supertag.runtime.v2.AuthorizeArtifactTransferRequest
-	23,  // 81: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
-	18,  // 82: supertag.runtime.v2.HarnessArtifacts.Find:input_type -> supertag.runtime.v2.HarnessFindArtifactsRequest
-	25,  // 83: supertag.runtime.v2.HarnessArtifacts.Inspect:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	19,  // 84: supertag.runtime.v2.HarnessArtifacts.Read:input_type -> supertag.runtime.v2.HarnessReadArtifactRequest
-	21,  // 85: supertag.runtime.v2.HarnessArtifacts.Attach:input_type -> supertag.runtime.v2.HarnessAttachArtifactRequest
-	31,  // 86: supertag.runtime.v2.ArtifactVolumes.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
-	32,  // 87: supertag.runtime.v2.ArtifactVolumes.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
-	33,  // 88: supertag.runtime.v2.ArtifactVolumes.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
-	35,  // 89: supertag.runtime.v2.ArtifactVolumes.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
-	42,  // 90: supertag.runtime.v2.ArtifactVolumes.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
-	43,  // 91: supertag.runtime.v2.ArtifactVolumes.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
-	31,  // 92: supertag.runtime.v2.ArtifactVolumeDirectory.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
-	32,  // 93: supertag.runtime.v2.ArtifactVolumeDirectory.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
-	33,  // 94: supertag.runtime.v2.ArtifactVolumeDirectory.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
-	35,  // 95: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
-	38,  // 96: supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject:input_type -> supertag.runtime.v2.VolumeObjectGrantRequest
-	42,  // 97: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
-	43,  // 98: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
-	38,  // 99: supertag.runtime.v2.VolumeObjects.Grant:input_type -> supertag.runtime.v2.VolumeObjectGrantRequest
-	51,  // 100: supertag.runtime.v2.WorkerArtifactTransfers.Download:input_type -> supertag.runtime.v2.WorkerArtifactDownloadRequest
-	57,  // 101: supertag.runtime.v2.ArtifactPublications.Publish:input_type -> supertag.runtime.v2.PublishArtifactRequest
-	58,  // 102: supertag.runtime.v2.ArtifactPublications.Consume:input_type -> supertag.runtime.v2.ConsumeArtifactPublicationRequest
-	59,  // 103: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
-	59,  // 104: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
-	60,  // 105: supertag.runtime.v2.ArtifactPublications.GetPublication:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
-	60,  // 106: supertag.runtime.v2.ArtifactPublications.GetConsumption:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
-	61,  // 107: supertag.runtime.v2.ArtifactPublications.ListPublications:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
-	61,  // 108: supertag.runtime.v2.ArtifactPublications.ListConsumptions:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
-	65,  // 109: supertag.runtime.v2.ArtifactPublications.ListAudit:input_type -> supertag.runtime.v2.ListArtifactApprovalAuditRequest
-	11,  // 110: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	27,  // 111: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	11,  // 112: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	11,  // 113: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	11,  // 114: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	27,  // 115: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	27,  // 116: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	11,  // 117: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:output_type -> supertag.runtime.v2.CapturedArtifact
-	12,  // 118: supertag.runtime.v2.ArtifactDirectory.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	12,  // 119: supertag.runtime.v2.ArtifactDirectory.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	47,  // 120: supertag.runtime.v2.ArtifactDirectory.LocateCopies:output_type -> supertag.runtime.v2.LocateArtifactCopiesResponse
-	49,  // 121: supertag.runtime.v2.ArtifactDirectory.RegisterArtifactSource:output_type -> supertag.runtime.v2.RegisterArtifactSourceResponse
-	50,  // 122: supertag.runtime.v2.ArtifactDirectory.IssueArtifactTransfer:output_type -> supertag.runtime.v2.ArtifactTransferGrant
-	53,  // 123: supertag.runtime.v2.ArtifactDirectory.AuthorizeArtifactTransfer:output_type -> supertag.runtime.v2.AuthorizedArtifactTransfer
-	11,  // 124: supertag.runtime.v2.AttemptArtifacts.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	11,  // 125: supertag.runtime.v2.AttemptArtifacts.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	27,  // 126: supertag.runtime.v2.AttemptArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	11,  // 127: supertag.runtime.v2.AttemptArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
-	12,  // 128: supertag.runtime.v2.AttemptArtifacts.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	12,  // 129: supertag.runtime.v2.AttemptArtifacts.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	49,  // 130: supertag.runtime.v2.AttemptArtifacts.RegisterArtifactSource:output_type -> supertag.runtime.v2.RegisterArtifactSourceResponse
-	50,  // 131: supertag.runtime.v2.AttemptArtifacts.IssueArtifactTransfer:output_type -> supertag.runtime.v2.ArtifactTransferGrant
-	53,  // 132: supertag.runtime.v2.AttemptArtifacts.AuthorizeArtifactTransfer:output_type -> supertag.runtime.v2.AuthorizedArtifactTransfer
-	11,  // 133: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
-	27,  // 134: supertag.runtime.v2.HarnessArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	11,  // 135: supertag.runtime.v2.HarnessArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
-	20,  // 136: supertag.runtime.v2.HarnessArtifacts.Read:output_type -> supertag.runtime.v2.HarnessArtifactPage
-	22,  // 137: supertag.runtime.v2.HarnessArtifacts.Attach:output_type -> supertag.runtime.v2.HarnessAttachedArtifact
-	30,  // 138: supertag.runtime.v2.ArtifactVolumes.Put:output_type -> supertag.runtime.v2.ArtifactVolume
-	30,  // 139: supertag.runtime.v2.ArtifactVolumes.Get:output_type -> supertag.runtime.v2.ArtifactVolume
-	34,  // 140: supertag.runtime.v2.ArtifactVolumes.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
-	36,  // 141: supertag.runtime.v2.ArtifactVolumes.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
-	37,  // 142: supertag.runtime.v2.ArtifactVolumes.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
-	44,  // 143: supertag.runtime.v2.ArtifactVolumes.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
-	30,  // 144: supertag.runtime.v2.ArtifactVolumeDirectory.Put:output_type -> supertag.runtime.v2.ArtifactVolume
-	30,  // 145: supertag.runtime.v2.ArtifactVolumeDirectory.Get:output_type -> supertag.runtime.v2.ArtifactVolume
-	34,  // 146: supertag.runtime.v2.ArtifactVolumeDirectory.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
-	36,  // 147: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
-	39,  // 148: supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject:output_type -> supertag.runtime.v2.VolumeObjectGrant
-	37,  // 149: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
-	44,  // 150: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
-	39,  // 151: supertag.runtime.v2.VolumeObjects.Grant:output_type -> supertag.runtime.v2.VolumeObjectGrant
-	29,  // 152: supertag.runtime.v2.WorkerArtifactTransfers.Download:output_type -> supertag.runtime.v2.ArtifactDownload
-	54,  // 153: supertag.runtime.v2.ArtifactPublications.Publish:output_type -> supertag.runtime.v2.ArtifactPublication
-	56,  // 154: supertag.runtime.v2.ArtifactPublications.Consume:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
-	54,  // 155: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:output_type -> supertag.runtime.v2.ArtifactPublication
-	56,  // 156: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
-	54,  // 157: supertag.runtime.v2.ArtifactPublications.GetPublication:output_type -> supertag.runtime.v2.ArtifactPublication
-	56,  // 158: supertag.runtime.v2.ArtifactPublications.GetConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
-	62,  // 159: supertag.runtime.v2.ArtifactPublications.ListPublications:output_type -> supertag.runtime.v2.ListArtifactPublicationsResponse
-	63,  // 160: supertag.runtime.v2.ArtifactPublications.ListConsumptions:output_type -> supertag.runtime.v2.ListArtifactConsumptionsResponse
-	66,  // 161: supertag.runtime.v2.ArtifactPublications.ListAudit:output_type -> supertag.runtime.v2.ListArtifactApprovalAuditResponse
-	110, // [110:162] is the sub-list for method output_type
-	58,  // [58:110] is the sub-list for method input_type
-	58,  // [58:58] is the sub-list for extension type_name
-	58,  // [58:58] is the sub-list for extension extendee
-	0,   // [0:58] is the sub-list for field type_name
+	72,  // 35: supertag.runtime.v2.VolumeObjectGrantRequest.native_memory_blob:type_name -> supertag.runtime.v2.BlobReference
+	72,  // 36: supertag.runtime.v2.VolumeGarbageObject.blob:type_name -> supertag.runtime.v2.BlobReference
+	40,  // 37: supertag.runtime.v2.ListVolumeGarbageResponse.objects:type_name -> supertag.runtime.v2.VolumeGarbageObject
+	40,  // 38: supertag.runtime.v2.ForgetVolumeGarbageRequest.objects:type_name -> supertag.runtime.v2.VolumeGarbageObject
+	30,  // 39: supertag.runtime.v2.VolumeObjectGrant.volume:type_name -> supertag.runtime.v2.ArtifactVolume
+	72,  // 40: supertag.runtime.v2.VolumeObjectGrant.blob:type_name -> supertag.runtime.v2.BlobReference
+	45,  // 41: supertag.runtime.v2.VolumeObjectGrant.presigned:type_name -> supertag.runtime.v2.ArtifactVolumeUpload
+	46,  // 42: supertag.runtime.v2.ArtifactVolumeUpload.headers:type_name -> supertag.runtime.v2.ArtifactVolumeUploadHeader
+	37,  // 43: supertag.runtime.v2.ListArtifactVolumeCopiesResponse.copies:type_name -> supertag.runtime.v2.ArtifactVolumeCopy
+	28,  // 44: supertag.runtime.v2.LocateArtifactCopiesRequest.operator:type_name -> supertag.runtime.v2.DownloadArtifactFileRequest
+	30,  // 45: supertag.runtime.v2.ArtifactVolumeLocation.volume:type_name -> supertag.runtime.v2.ArtifactVolume
+	51,  // 46: supertag.runtime.v2.LocateArtifactCopiesResponse.locations:type_name -> supertag.runtime.v2.ArtifactVolumeLocation
+	76,  // 47: supertag.runtime.v2.LocateArtifactCopiesResponse.holder:type_name -> supertag.runtime.v2.BlobHolder
+	7,   // 48: supertag.runtime.v2.ArtifactTransferGrant.file:type_name -> supertag.runtime.v2.ArtifactFile
+	72,  // 49: supertag.runtime.v2.WorkerArtifactDownloadRequest.blob:type_name -> supertag.runtime.v2.BlobReference
+	56,  // 50: supertag.runtime.v2.AuthorizeArtifactTransferRequest.file:type_name -> supertag.runtime.v2.WorkerArtifactDownloadRequest
+	7,   // 51: supertag.runtime.v2.AuthorizedArtifactTransfer.file:type_name -> supertag.runtime.v2.ArtifactFile
+	9,   // 52: supertag.runtime.v2.ArtifactPublication.producer:type_name -> supertag.runtime.v2.ArtifactProducer
+	7,   // 53: supertag.runtime.v2.ArtifactPublication.files:type_name -> supertag.runtime.v2.ArtifactFile
+	5,   // 54: supertag.runtime.v2.ArtifactPublication.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
+	7,   // 55: supertag.runtime.v2.ArtifactPublicationView.files:type_name -> supertag.runtime.v2.ArtifactFile
+	5,   // 56: supertag.runtime.v2.ArtifactPublicationView.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
+	5,   // 57: supertag.runtime.v2.ArtifactConsumptionApproval.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
+	60,  // 58: supertag.runtime.v2.ListArtifactPublicationsResponse.publications:type_name -> supertag.runtime.v2.ArtifactPublicationView
+	61,  // 59: supertag.runtime.v2.ListArtifactConsumptionsResponse.consumptions:type_name -> supertag.runtime.v2.ArtifactConsumptionApproval
+	69,  // 60: supertag.runtime.v2.ListArtifactApprovalAuditResponse.events:type_name -> supertag.runtime.v2.ArtifactApprovalAuditEvent
+	25,  // 61: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	26,  // 62: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	24,  // 63: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	24,  // 64: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	25,  // 65: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	26,  // 66: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	13,  // 67: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	14,  // 68: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	15,  // 69: supertag.runtime.v2.ArtifactDirectory.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	16,  // 70: supertag.runtime.v2.ArtifactDirectory.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	50,  // 71: supertag.runtime.v2.ArtifactDirectory.LocateCopies:input_type -> supertag.runtime.v2.LocateArtifactCopiesRequest
+	53,  // 72: supertag.runtime.v2.ArtifactDirectory.RegisterArtifactSource:input_type -> supertag.runtime.v2.RegisterArtifactSourceRequest
+	17,  // 73: supertag.runtime.v2.ArtifactDirectory.IssueArtifactTransfer:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	57,  // 74: supertag.runtime.v2.ArtifactDirectory.AuthorizeArtifactTransfer:input_type -> supertag.runtime.v2.AuthorizeArtifactTransferRequest
+	24,  // 75: supertag.runtime.v2.AttemptArtifacts.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	24,  // 76: supertag.runtime.v2.AttemptArtifacts.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	13,  // 77: supertag.runtime.v2.AttemptArtifacts.Find:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	14,  // 78: supertag.runtime.v2.AttemptArtifacts.Inspect:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	15,  // 79: supertag.runtime.v2.AttemptArtifacts.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	16,  // 80: supertag.runtime.v2.AttemptArtifacts.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	53,  // 81: supertag.runtime.v2.AttemptArtifacts.RegisterArtifactSource:input_type -> supertag.runtime.v2.RegisterArtifactSourceRequest
+	17,  // 82: supertag.runtime.v2.AttemptArtifacts.IssueArtifactTransfer:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	57,  // 83: supertag.runtime.v2.AttemptArtifacts.AuthorizeArtifactTransfer:input_type -> supertag.runtime.v2.AuthorizeArtifactTransferRequest
+	23,  // 84: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
+	18,  // 85: supertag.runtime.v2.HarnessArtifacts.Find:input_type -> supertag.runtime.v2.HarnessFindArtifactsRequest
+	25,  // 86: supertag.runtime.v2.HarnessArtifacts.Inspect:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	19,  // 87: supertag.runtime.v2.HarnessArtifacts.Read:input_type -> supertag.runtime.v2.HarnessReadArtifactRequest
+	21,  // 88: supertag.runtime.v2.HarnessArtifacts.Attach:input_type -> supertag.runtime.v2.HarnessAttachArtifactRequest
+	31,  // 89: supertag.runtime.v2.ArtifactVolumes.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
+	32,  // 90: supertag.runtime.v2.ArtifactVolumes.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
+	33,  // 91: supertag.runtime.v2.ArtifactVolumes.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
+	35,  // 92: supertag.runtime.v2.ArtifactVolumes.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
+	47,  // 93: supertag.runtime.v2.ArtifactVolumes.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	48,  // 94: supertag.runtime.v2.ArtifactVolumes.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	31,  // 95: supertag.runtime.v2.ArtifactVolumeDirectory.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
+	32,  // 96: supertag.runtime.v2.ArtifactVolumeDirectory.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
+	33,  // 97: supertag.runtime.v2.ArtifactVolumeDirectory.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
+	35,  // 98: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
+	38,  // 99: supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject:input_type -> supertag.runtime.v2.VolumeObjectGrantRequest
+	39,  // 100: supertag.runtime.v2.ArtifactVolumeDirectory.ListGarbage:input_type -> supertag.runtime.v2.ListVolumeGarbageRequest
+	42,  // 101: supertag.runtime.v2.ArtifactVolumeDirectory.ForgetGarbage:input_type -> supertag.runtime.v2.ForgetVolumeGarbageRequest
+	47,  // 102: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	48,  // 103: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	38,  // 104: supertag.runtime.v2.VolumeObjects.Grant:input_type -> supertag.runtime.v2.VolumeObjectGrantRequest
+	39,  // 105: supertag.runtime.v2.VolumeObjects.ListGarbage:input_type -> supertag.runtime.v2.ListVolumeGarbageRequest
+	42,  // 106: supertag.runtime.v2.VolumeObjects.ForgetGarbage:input_type -> supertag.runtime.v2.ForgetVolumeGarbageRequest
+	56,  // 107: supertag.runtime.v2.WorkerArtifactTransfers.Download:input_type -> supertag.runtime.v2.WorkerArtifactDownloadRequest
+	62,  // 108: supertag.runtime.v2.ArtifactPublications.Publish:input_type -> supertag.runtime.v2.PublishArtifactRequest
+	63,  // 109: supertag.runtime.v2.ArtifactPublications.Consume:input_type -> supertag.runtime.v2.ConsumeArtifactPublicationRequest
+	64,  // 110: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
+	64,  // 111: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
+	65,  // 112: supertag.runtime.v2.ArtifactPublications.GetPublication:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
+	65,  // 113: supertag.runtime.v2.ArtifactPublications.GetConsumption:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
+	66,  // 114: supertag.runtime.v2.ArtifactPublications.ListPublications:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
+	66,  // 115: supertag.runtime.v2.ArtifactPublications.ListConsumptions:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
+	70,  // 116: supertag.runtime.v2.ArtifactPublications.ListAudit:input_type -> supertag.runtime.v2.ListArtifactApprovalAuditRequest
+	11,  // 117: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	27,  // 118: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	11,  // 119: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	11,  // 120: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	11,  // 121: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	27,  // 122: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	27,  // 123: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	11,  // 124: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:output_type -> supertag.runtime.v2.CapturedArtifact
+	12,  // 125: supertag.runtime.v2.ArtifactDirectory.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	12,  // 126: supertag.runtime.v2.ArtifactDirectory.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	52,  // 127: supertag.runtime.v2.ArtifactDirectory.LocateCopies:output_type -> supertag.runtime.v2.LocateArtifactCopiesResponse
+	54,  // 128: supertag.runtime.v2.ArtifactDirectory.RegisterArtifactSource:output_type -> supertag.runtime.v2.RegisterArtifactSourceResponse
+	55,  // 129: supertag.runtime.v2.ArtifactDirectory.IssueArtifactTransfer:output_type -> supertag.runtime.v2.ArtifactTransferGrant
+	58,  // 130: supertag.runtime.v2.ArtifactDirectory.AuthorizeArtifactTransfer:output_type -> supertag.runtime.v2.AuthorizedArtifactTransfer
+	11,  // 131: supertag.runtime.v2.AttemptArtifacts.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	11,  // 132: supertag.runtime.v2.AttemptArtifacts.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	27,  // 133: supertag.runtime.v2.AttemptArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	11,  // 134: supertag.runtime.v2.AttemptArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	12,  // 135: supertag.runtime.v2.AttemptArtifacts.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	12,  // 136: supertag.runtime.v2.AttemptArtifacts.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	54,  // 137: supertag.runtime.v2.AttemptArtifacts.RegisterArtifactSource:output_type -> supertag.runtime.v2.RegisterArtifactSourceResponse
+	55,  // 138: supertag.runtime.v2.AttemptArtifacts.IssueArtifactTransfer:output_type -> supertag.runtime.v2.ArtifactTransferGrant
+	58,  // 139: supertag.runtime.v2.AttemptArtifacts.AuthorizeArtifactTransfer:output_type -> supertag.runtime.v2.AuthorizedArtifactTransfer
+	11,  // 140: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
+	27,  // 141: supertag.runtime.v2.HarnessArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	11,  // 142: supertag.runtime.v2.HarnessArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	20,  // 143: supertag.runtime.v2.HarnessArtifacts.Read:output_type -> supertag.runtime.v2.HarnessArtifactPage
+	22,  // 144: supertag.runtime.v2.HarnessArtifacts.Attach:output_type -> supertag.runtime.v2.HarnessAttachedArtifact
+	30,  // 145: supertag.runtime.v2.ArtifactVolumes.Put:output_type -> supertag.runtime.v2.ArtifactVolume
+	30,  // 146: supertag.runtime.v2.ArtifactVolumes.Get:output_type -> supertag.runtime.v2.ArtifactVolume
+	34,  // 147: supertag.runtime.v2.ArtifactVolumes.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
+	36,  // 148: supertag.runtime.v2.ArtifactVolumes.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
+	37,  // 149: supertag.runtime.v2.ArtifactVolumes.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	49,  // 150: supertag.runtime.v2.ArtifactVolumes.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	30,  // 151: supertag.runtime.v2.ArtifactVolumeDirectory.Put:output_type -> supertag.runtime.v2.ArtifactVolume
+	30,  // 152: supertag.runtime.v2.ArtifactVolumeDirectory.Get:output_type -> supertag.runtime.v2.ArtifactVolume
+	34,  // 153: supertag.runtime.v2.ArtifactVolumeDirectory.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
+	36,  // 154: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
+	44,  // 155: supertag.runtime.v2.ArtifactVolumeDirectory.GrantObject:output_type -> supertag.runtime.v2.VolumeObjectGrant
+	41,  // 156: supertag.runtime.v2.ArtifactVolumeDirectory.ListGarbage:output_type -> supertag.runtime.v2.ListVolumeGarbageResponse
+	43,  // 157: supertag.runtime.v2.ArtifactVolumeDirectory.ForgetGarbage:output_type -> supertag.runtime.v2.ForgetVolumeGarbageResponse
+	37,  // 158: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	49,  // 159: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	44,  // 160: supertag.runtime.v2.VolumeObjects.Grant:output_type -> supertag.runtime.v2.VolumeObjectGrant
+	41,  // 161: supertag.runtime.v2.VolumeObjects.ListGarbage:output_type -> supertag.runtime.v2.ListVolumeGarbageResponse
+	43,  // 162: supertag.runtime.v2.VolumeObjects.ForgetGarbage:output_type -> supertag.runtime.v2.ForgetVolumeGarbageResponse
+	29,  // 163: supertag.runtime.v2.WorkerArtifactTransfers.Download:output_type -> supertag.runtime.v2.ArtifactDownload
+	59,  // 164: supertag.runtime.v2.ArtifactPublications.Publish:output_type -> supertag.runtime.v2.ArtifactPublication
+	61,  // 165: supertag.runtime.v2.ArtifactPublications.Consume:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
+	59,  // 166: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:output_type -> supertag.runtime.v2.ArtifactPublication
+	61,  // 167: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
+	59,  // 168: supertag.runtime.v2.ArtifactPublications.GetPublication:output_type -> supertag.runtime.v2.ArtifactPublication
+	61,  // 169: supertag.runtime.v2.ArtifactPublications.GetConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
+	67,  // 170: supertag.runtime.v2.ArtifactPublications.ListPublications:output_type -> supertag.runtime.v2.ListArtifactPublicationsResponse
+	68,  // 171: supertag.runtime.v2.ArtifactPublications.ListConsumptions:output_type -> supertag.runtime.v2.ListArtifactConsumptionsResponse
+	71,  // 172: supertag.runtime.v2.ArtifactPublications.ListAudit:output_type -> supertag.runtime.v2.ListArtifactApprovalAuditResponse
+	117, // [117:173] is the sub-list for method output_type
+	61,  // [61:117] is the sub-list for method input_type
+	61,  // [61:61] is the sub-list for extension type_name
+	61,  // [61:61] is the sub-list for extension extendee
+	0,   // [0:61] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_artifact_proto_init() }
@@ -5165,20 +5489,20 @@ func file_supertag_runtime_v2_artifact_proto_init() {
 		(*ArtifactDownload_Chunk)(nil),
 	}
 	file_supertag_runtime_v2_artifact_proto_msgTypes[31].OneofWrappers = []any{}
-	file_supertag_runtime_v2_artifact_proto_msgTypes[39].OneofWrappers = []any{
+	file_supertag_runtime_v2_artifact_proto_msgTypes[44].OneofWrappers = []any{
 		(*LocateArtifactCopiesRequest_Operator)(nil),
 	}
-	file_supertag_runtime_v2_artifact_proto_msgTypes[48].OneofWrappers = []any{}
-	file_supertag_runtime_v2_artifact_proto_msgTypes[49].OneofWrappers = []any{}
-	file_supertag_runtime_v2_artifact_proto_msgTypes[50].OneofWrappers = []any{}
-	file_supertag_runtime_v2_artifact_proto_msgTypes[51].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[53].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[54].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[55].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[56].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_artifact_proto_rawDesc), len(file_supertag_runtime_v2_artifact_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   61,
+			NumMessages:   66,
 			NumExtensions: 0,
 			NumServices:   9,
 		},

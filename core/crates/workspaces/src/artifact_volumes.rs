@@ -151,13 +151,20 @@ pub fn key_parts<'a>(key: &'a str, blob: &BlobReference) -> Result<Vec<&'a str>>
     );
     Ok(parts)
 }
-fn parent(mapping: &FileVolume, key: &str, blob: &BlobReference, create: bool) -> Result<File> {
+/// The directory holding `key`'s object and the object's own name, the key's last segment.
+fn parent(
+    mapping: &FileVolume,
+    key: &str,
+    blob: &BlobReference,
+    create: bool,
+) -> Result<(File, CString)> {
     let parts = key_parts(key, blob)?;
+    let (name, directories) = parts.split_last().context("invalid Volume object key")?;
     let mut directory = mapping.directory.try_clone()?;
-    for part in &parts[..parts.len() - 1] {
+    for part in directories {
         directory = child_directory(&directory, part, create)?;
     }
-    Ok(directory)
+    Ok((directory, CString::new(*name)?))
 }
 pub fn verify_bytes(bytes: &[u8], blob: &BlobReference) -> Result<()> {
     ensure!(
@@ -167,8 +174,12 @@ pub fn verify_bytes(bytes: &[u8], blob: &BlobReference) -> Result<()> {
     );
     Ok(())
 }
-fn verify_at(parent: &File, blob: &BlobReference, mut output: impl Write) -> Result<()> {
-    let name = CString::new(blob.sha256.clone())?;
+fn verify_at(
+    parent: &File,
+    name: &CString,
+    blob: &BlobReference,
+    mut output: impl Write,
+) -> Result<()> {
     let fd = unsafe {
         libc::openat(
             parent.as_raw_fd(),
@@ -249,8 +260,7 @@ impl FileVolume {
     ) -> Result<()> {
         let mapping = self;
         current(mapping)?;
-        let destination = parent(mapping, key, blob, true)?;
-        let final_name = CString::new(blob.sha256.clone())?;
+        let (destination, final_name) = parent(mapping, key, blob, true)?;
         let exists = unsafe {
             libc::faccessat(
                 destination.as_raw_fd(),
@@ -260,7 +270,7 @@ impl FileVolume {
             )
         };
         if exists == 0 {
-            verify_at(&destination, blob, std::io::sink())?;
+            verify_at(&destination, &final_name, blob, std::io::sink())?;
         } else {
             if std::io::Error::last_os_error().kind() != ErrorKind::NotFound {
                 return Err(std::io::Error::last_os_error().into());
@@ -310,8 +320,8 @@ impl FileVolume {
         }
         // Reopen from the registered root, not only the descriptor used for staging.
         current(mapping)?;
-        let reopened = parent(mapping, key, blob, false)?;
-        verify_at(&reopened, blob, std::io::sink())?;
+        let (reopened, name) = parent(mapping, key, blob, false)?;
+        verify_at(&reopened, &name, blob, std::io::sink())?;
         current(mapping)?;
         Ok(())
     }
@@ -319,10 +329,59 @@ impl FileVolume {
     /// Copies the exact object at `key` to `output`, verifying its length and SHA-256.
     pub fn read_verified(&self, key: &str, blob: &BlobReference, output: impl Write) -> Result<()> {
         current(self)?;
-        let directory = parent(self, key, blob, false)?;
-        verify_at(&directory, blob, output)?;
+        let (directory, name) = parent(self, key, blob, false)?;
+        verify_at(&directory, &name, blob, output)?;
         current(self)
     }
+
+    /// Deletes the object at `key`, which a missing object or directory already satisfies. Only
+    /// an owned regular file is removed; anything else at the key fails.
+    pub fn remove(&self, key: &str, blob: &BlobReference) -> Result<()> {
+        current(self)?;
+        let (directory, name) = match parent(self, key, blob, false) {
+            Ok(found) => found,
+            Err(error) if missing(&error) => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        let found = unsafe {
+            libc::fstatat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                stat.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        if found < 0 {
+            let error = std::io::Error::last_os_error();
+            return if error.kind() == ErrorKind::NotFound {
+                Ok(())
+            } else {
+                Err(error.into())
+            };
+        }
+        let stat = unsafe { stat.assume_init() };
+        ensure!(
+            stat.st_mode & libc::S_IFMT == libc::S_IFREG
+                && stat.st_uid == unsafe { libc::geteuid() },
+            "artifact Volume object is not an owned regular file"
+        );
+        if unsafe { libc::unlinkat(directory.as_raw_fd(), name.as_ptr(), 0) } < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() != ErrorKind::NotFound {
+                return Err(error.into());
+            }
+        }
+        directory.sync_all()?;
+        current(self)
+    }
+}
+
+/// Whether `error` says a path on the way to an object does not exist.
+fn missing(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|error| error.kind() == ErrorKind::NotFound)
 }
 
 #[cfg(test)]
@@ -374,6 +433,28 @@ mod tests {
         );
         assert!(volume.persist(&key, &blob, Some(BYTES), false).is_err());
         assert!(volume.persist(&key, &blob, Some(b"other"), true).is_err());
+    }
+
+    #[test]
+    fn a_checkpoint_object_is_named_by_its_key_and_removed_once_garbage() {
+        let (_temporary, volume, _, blob) = fixture();
+        let key = format!(
+            "tags/{}/sessions/{}/checkpoint/{}.bin",
+            "a".repeat(64),
+            "b".repeat(64),
+            blob.sha256
+        );
+        volume.persist(&key, &blob, Some(BYTES), true).unwrap();
+        assert_eq!(std::fs::read(volume.root.join(&key)).unwrap(), BYTES);
+        volume.remove(&key, &blob).unwrap();
+        assert!(!volume.root.join(&key).exists());
+        // Removing what is already gone, or was never written, succeeds.
+        volume.remove(&key, &blob).unwrap();
+        let elsewhere = key.replace(&"a".repeat(64), &"c".repeat(64));
+        volume.remove(&elsewhere, &blob).unwrap();
+        // Only an owned regular file is removed.
+        std::fs::create_dir(volume.root.join(&key)).unwrap();
+        assert!(volume.remove(&key, &blob).is_err());
     }
 
     #[test]

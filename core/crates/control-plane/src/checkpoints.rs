@@ -385,10 +385,14 @@ async fn prune_session_in(
     discard_in(tx, &rows).await
 }
 
+/// Deletes checkpoint rows. A checkpoint a Worker Host wrote to a Volume leaves its object there
+/// as Volume garbage, deleted once no row of its Session names the same bytes on that Volume.
 async fn discard_in(tx: &mut Transaction<'_, Any>, rows: &[AnyRow]) -> Result<()> {
     for row in rows {
+        let attempt: String = row.try_get("attempt_id")?;
+        crate::volume_garbage::queue_checkpoint_in(tx, &attempt).await?;
         sqlx::query("DELETE FROM supertag_v2_checkpoints WHERE attempt_id=$1")
-            .bind(row.try_get::<String, _>("attempt_id")?)
+            .bind(&attempt)
             .execute(&mut **tx)
             .await?;
     }

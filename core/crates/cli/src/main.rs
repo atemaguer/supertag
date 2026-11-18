@@ -1615,13 +1615,23 @@ async fn control_plane(
     outln!("{}", listener.local_addr()?);
     let tunnel = bind_websocket(websocket).await?;
     let maintenance = plane.clone();
+    let volume_objects = transfers.clone();
     let sweep = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let garbage = VolumeGarbage(maintenance.clone());
+        let mut tick = 0u64;
         loop {
             interval.tick().await;
             if let Err(error) = maintenance.maintain(Duration::from_secs(1)).await {
                 errln!("Control Plane maintenance failed: {error}");
+            }
+            // S3 Volume objects nothing keeps go every 10 seconds; hosts delete file Volumes'.
+            tick += 1;
+            if tick.is_multiple_of(10)
+                && let Err(error) = volume_objects.collect_volume_garbage(&garbage).await
+            {
+                errln!("Control Plane Volume cleanup failed: {error}");
             }
         }
     });
@@ -1715,6 +1725,26 @@ async fn control_plane(
     sweep.abort();
     let _ = sweep.await;
     result
+}
+
+/// The state owner's queue of S3 Volume objects to delete, for the API tier that signs for them.
+struct VolumeGarbage(ControlPlane);
+
+#[tonic::async_trait]
+impl supertag_api::transfers::volumes::VolumeGarbage for VolumeGarbage {
+    async fn take(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<supertag_protocol::v2::ForgetVolumeGarbageRequest>> {
+        self.0.take_s3_volume_garbage(limit).await
+    }
+
+    async fn forget(
+        &self,
+        objects: &supertag_protocol::v2::ForgetVolumeGarbageRequest,
+    ) -> Result<()> {
+        self.0.forget_s3_volume_garbage(objects).await
+    }
 }
 
 /// Git delivery for the API tier: remote Workspace sources and checks.

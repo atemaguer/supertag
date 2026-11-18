@@ -290,6 +290,20 @@ impl S3Mapping {
         })
     }
 
+    /// Deletes the object at this key; one already gone counts as deleted.
+    pub(super) async fn delete(&self, storage_key: &str, blob: &BlobReference) -> Result<()> {
+        let response = self
+            .request(Method::DELETE, storage_key, blob, false)?
+            .send()
+            .await
+            .map_err(|_| anyhow::anyhow!("S3 Volume delete failed"))?;
+        ensure!(
+            response.status().is_success() || response.status() == StatusCode::NOT_FOUND,
+            "the S3 Volume refused the delete"
+        );
+        Ok(())
+    }
+
     /// Checks that the object at this key is exactly the receipt's bytes from S3's own record: its
     /// length and the SHA-256 checksum S3 verified when it accepted the upload. No bytes are read.
     pub(super) async fn verify_head(&self, storage_key: &str, blob: &BlobReference) -> Result<()> {

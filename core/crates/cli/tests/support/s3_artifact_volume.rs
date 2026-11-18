@@ -71,6 +71,8 @@ struct Bucket {
     presigned_puts: usize,
     heads: usize,
     gets: usize,
+    presigned_gets: usize,
+    deletes: usize,
     refused: usize,
     /// Answer an upload with success but keep nothing, as a store that lost it.
     lose_uploads: bool,
@@ -103,6 +105,22 @@ fn sigv4_signature(date: &str, to_sign: &str) -> Option<String> {
 /// A presigned PUT, checked as S3 checks it: the query signature over the signed headers with an
 /// unsigned payload, then the body against the signed length and SHA-256 checksum.
 fn presigned_put_is_valid(path: &str, query: &str, headers: &HeaderMap, body: &[u8]) -> bool {
+    presigned_is_valid(Method::PUT, path, query, headers, body)
+}
+
+/// A presigned GET: the query signature over the host header, with an unsigned payload.
+fn presigned_get_is_valid(path: &str, query: &str, headers: &HeaderMap) -> bool {
+    presigned_is_valid(Method::GET, path, query, headers, &[])
+}
+
+fn presigned_is_valid(
+    method: Method,
+    path: &str,
+    query: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> bool {
+    let put = method == Method::PUT;
     let check = || -> Option<bool> {
         let params: std::collections::BTreeMap<String, String> =
             url::form_urlencoded::parse(query.as_bytes())
@@ -110,13 +128,18 @@ fn presigned_put_is_valid(path: &str, query: &str, headers: &HeaderMap, body: &[
                 .collect();
         let signed = params.get("X-Amz-SignedHeaders")?;
         let names: Vec<&str> = signed.split(';').collect();
-        for required in [
-            "content-length",
-            "host",
-            "if-none-match",
-            "x-amz-checksum-sha256",
-        ] {
-            if !names.contains(&required) {
+        let required: &[&str] = if put {
+            &[
+                "content-length",
+                "host",
+                "if-none-match",
+                "x-amz-checksum-sha256",
+            ]
+        } else {
+            &["host"]
+        };
+        for required in required {
+            if !names.contains(required) {
                 return Some(false);
             }
         }
@@ -141,7 +164,7 @@ fn presigned_put_is_valid(path: &str, query: &str, headers: &HeaderMap, body: &[
             canonical_headers.push_str(&format!("{name}:{}\n", get(name)?.trim()));
         }
         let canonical = format!(
-            "PUT\n{path}\n{canonical_query}\n{canonical_headers}\n{signed}\nUNSIGNED-PAYLOAD"
+            "{method}\n{path}\n{canonical_query}\n{canonical_headers}\n{signed}\nUNSIGNED-PAYLOAD"
         );
         let to_sign = format!(
             "AWS4-HMAC-SHA256\n{}\n{scope}\n{:x}",
@@ -154,8 +177,9 @@ fn presigned_put_is_valid(path: &str, query: &str, headers: &HeaderMap, body: &[
         );
         Some(
             params.get("X-Amz-Signature")? == &sigv4_signature(date, &to_sign)?
-                && get("content-length")? == body.len().to_string()
-                && get("x-amz-checksum-sha256")? == checksum,
+                && (!put
+                    || (get("content-length")? == body.len().to_string()
+                        && get("x-amz-checksum-sha256")? == checksum)),
         )
     };
     check().unwrap_or(false)
@@ -193,6 +217,24 @@ async fn bucket(
                 bucket.objects.insert(path, (bytes.to_vec(), checksum));
             }
             StatusCode::OK.into_response()
+        }
+        (&Method::GET, Some(query)) => {
+            if !presigned_get_is_valid(&path, query, &request.headers) {
+                bucket.refused += 1;
+                return StatusCode::BAD_REQUEST.into_response();
+            }
+            bucket.presigned_gets += 1;
+            match bucket.objects.get(&path) {
+                Some((bytes, _)) => (StatusCode::OK, bytes.clone()).into_response(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+        (&Method::DELETE, None)
+            if signature_is_valid(&request.method, &path, &request.headers, &[]) =>
+        {
+            bucket.deletes += 1;
+            bucket.objects.remove(&path);
+            StatusCode::NO_CONTENT.into_response()
         }
         (&Method::HEAD | &Method::GET, None)
             if signature_is_valid(&request.method, &path, &request.headers, &[])
@@ -288,7 +330,7 @@ async fn s3_capture_copy_is_uploaded_by_the_host_with_a_presigned_put(
     ))
     .await?;
     // An S3 Volume needs no host mapping: the reservation carries a presigned PUT.
-    let (_artifact_id, bytes, _blob, mut held) =
+    let (artifact_id, bytes, _blob, mut held) =
         capture(&credentials, &public, Some("object"), None).await?;
     {
         let bucket = state.lock().unwrap();
@@ -311,6 +353,7 @@ async fn s3_capture_copy_is_uploaded_by_the_host_with_a_presigned_put(
     }
     held.disconnect();
     drop(held);
+    after_the_producer(&credentials, &public, &state, &artifact_id, &bytes).await?;
     stop(&mut control).await?;
 
     // Without its credential in the vault the Control Plane cannot sign, and the capture fails.
@@ -383,5 +426,166 @@ async fn s3_capture_copy_is_uploaded_by_the_host_with_a_presigned_put(
     );
     stop(&mut lossy).await?;
     server.abort();
+    Ok(())
+}
+
+/// Sends a presigned S3 request exactly as granted.
+async fn presigned(
+    method: reqwest::Method,
+    grant: &VolumeObjectGrant,
+    body: Option<Vec<u8>>,
+) -> Result<reqwest::Response> {
+    let upload = grant
+        .presigned
+        .as_ref()
+        .context("the grant is not presigned")?;
+    let mut request = reqwest::Client::new().request(method, &upload.url);
+    for header in &upload.headers {
+        request = request.header(&header.name, &header.value);
+    }
+    if let Some(body) = body {
+        request = request.body(body);
+    }
+    Ok(request.send().await?)
+}
+
+/// With the producing host gone, a later turn reads the capture back from the S3 Volume through a
+/// presigned GET, keeps its Session checkpoint there through a presigned PUT, and once a turn
+/// drops that checkpoint the Control Plane deletes its object.
+async fn after_the_producer(
+    credentials: &Credentials,
+    public: &str,
+    state: &Arc<Mutex<Bucket>>,
+    artifact_id: &str,
+    bytes: &[u8],
+) -> Result<()> {
+    let channel =
+        protocol::negotiated(Channel::from_shared(public.to_owned())?.connect().await?).await?;
+    let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
+    let mut artifacts = attempt_artifacts_client::AttemptArtifactsClient::new(channel.clone());
+    let mut objects = volume_objects_client::VolumeObjectsClient::new(channel.clone());
+    let generation = host
+        .register_host(authenticated_request(
+            RegisterHostRequest {
+                incarnation_id: "volume-reader".into(),
+            },
+            &credentials.host,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .generation;
+    let reader = turn(credentials, &channel, generation, "read", None).await?;
+    let acquisition = artifacts
+        .acquire(credentials.host(
+            AcquireArtifactRequest {
+                attempt: Some(reader.clone()),
+                operation_id: "acquire".into(),
+                artifact_id: artifact_id.into(),
+                paths: vec!["report.txt".into()],
+                delivery: ArtifactDelivery::Read as i32,
+                destination: None,
+            },
+            generation,
+        ))
+        .await?
+        .into_inner();
+    let file = objects
+        .grant(credentials.host(
+            VolumeObjectGrantRequest {
+                attempt: Some(reader.clone()),
+                purpose: VolumeObjectPurpose::AcquiredFile as i32,
+                access: VolumeAccess::Read as i32,
+                acquisition_id: acquisition.acquisition_id,
+                path: "report.txt".into(),
+                native_memory_blob: None,
+            },
+            generation,
+        ))
+        .await?
+        .into_inner();
+    let read = presigned(reqwest::Method::GET, &file, None).await?;
+    ensure!(read.status().is_success(), "{}", read.status());
+    ensure!(read.bytes().await? == bytes);
+
+    // The turn keeps its checkpoint on the Volume.
+    let payload = b"session checkpoint on the Volume".to_vec();
+    let reference = CheckpointReference {
+        harness: "codex".into(),
+        format: "codex-session-v1".into(),
+        byte_length: payload.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(&payload)),
+    };
+    let checkpoint = CommitCheckpointRequest {
+        attempt: Some(reader.clone()),
+        reference: Some(reference.clone()),
+    };
+    host.reserve_checkpoint(credentials.host(checkpoint.clone(), generation))
+        .await?;
+    let written = objects
+        .grant(credentials.host(
+            VolumeObjectGrantRequest {
+                attempt: Some(reader.clone()),
+                purpose: VolumeObjectPurpose::SessionCheckpoint as i32,
+                access: VolumeAccess::Write as i32,
+                ..Default::default()
+            },
+            generation,
+        ))
+        .await?
+        .into_inner();
+    let put = presigned(reqwest::Method::PUT, &written, Some(payload.clone())).await?;
+    ensure!(put.status().is_success(), "{}", put.status());
+    let object = format!("/evidence-bucket/teams/core/{}", written.key);
+    ensure!(object.ends_with(&format!("/checkpoint/{}.bin", reference.sha256)));
+    ensure!(state.lock().unwrap().objects.contains_key(&object));
+    host.commit_checkpoint(credentials.host(checkpoint, generation))
+        .await?;
+    let finish = |attempt: &InspectAttemptRequest, checkpoint: Option<String>| {
+        credentials.host(
+            FinishTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+                succeeded: true,
+                result: "Done".into(),
+                checkpoint_sha256: checkpoint,
+                ..Default::default()
+            },
+            generation,
+        )
+    };
+    host.finish_task(finish(&reader, Some(reference.sha256.clone())))
+        .await?;
+
+    // The next turn reads it back, then ends without one: the Session's checkpoint is dropped and
+    // the Control Plane deletes its object.
+    let next = turn(credentials, &channel, generation, "next", None).await?;
+    let resumed = objects
+        .grant(credentials.host(
+            VolumeObjectGrantRequest {
+                attempt: Some(next.clone()),
+                purpose: VolumeObjectPurpose::SessionCheckpoint as i32,
+                access: VolumeAccess::Read as i32,
+                ..Default::default()
+            },
+            generation,
+        ))
+        .await?
+        .into_inner();
+    ensure!(resumed.key == written.key);
+    let back = presigned(reqwest::Method::GET, &resumed, None).await?;
+    ensure!(back.bytes().await? == payload);
+    host.finish_task(finish(&next, None)).await?;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while state.lock().unwrap().objects.contains_key(&object) {
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the dropped checkpoint's object was never deleted"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let bucket = state.lock().unwrap();
+    ensure!(bucket.deletes == 1 && bucket.presigned_gets == 2 && bucket.refused == 0);
     Ok(())
 }

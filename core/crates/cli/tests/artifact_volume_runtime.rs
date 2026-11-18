@@ -251,6 +251,61 @@ async fn capture(
     Ok((artifact.summary.unwrap().artifact_id, bytes, blob, held))
 }
 
+/// Submits, claims, and starts one turn of the writer's Session.
+async fn turn(
+    credentials: &Credentials,
+    channel: &supertag_protocol::negotiation::ProtocolChannel,
+    generation: u64,
+    operation: &str,
+    profile: Option<HarnessExecutionProfile>,
+) -> Result<InspectAttemptRequest> {
+    let mut operator = operator_client::OperatorClient::new(channel.clone());
+    let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
+    let task = operator
+        .submit_task(authenticated_request(
+            SubmitTaskRequest {
+                tag_id: "writer".into(),
+                session_id: "source".into(),
+                operation_id: operation.into(),
+                prompt: operation.into(),
+                ..Default::default()
+            },
+            &credentials.operator,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let assignment = host
+        .claim_task(credentials.host(
+            ClaimTaskRequest {
+                operation_id: format!("{operation}-claim"),
+                execution_profile: profile,
+                ..Default::default()
+            },
+            generation,
+        ))
+        .await?
+        .into_inner()
+        .assignment
+        .context("no assignment")?;
+    ensure!(assignment.task.as_ref().unwrap().task_id == task.task_id);
+    let attempt = InspectAttemptRequest {
+        task_id: task.task_id,
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    host.start_task(credentials.host(
+        StartTaskRequest {
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            lease_token: attempt.lease_token.clone(),
+        },
+        generation,
+    ))
+    .await?;
+    Ok(attempt)
+}
+
 /// A private, owner-only directory a Worker Host may map as a file Volume.
 fn volume_directory(root: &Path) -> Result<std::path::PathBuf> {
     let path = root.join("volume");
@@ -322,7 +377,7 @@ async fn a_tag_volume_keeps_each_capture_written_by_the_host_that_maps_it(
         "{unplaced:#}"
     );
     // The host that maps it writes the copy and attests it; the Control Plane never opens it.
-    let (_artifact_id, bytes, blob, mut held) =
+    let (artifact_id, bytes, blob, mut held) =
         capture(&credentials, &public, Some("durable"), Some(&volume_path)).await?;
     let copies = json(resource(
         &credentials,
@@ -344,6 +399,7 @@ async fn a_tag_volume_keeps_each_capture_written_by_the_host_that_maps_it(
     drop(held);
     ensure!(std::fs::read(volume_path.join(key))? == bytes);
     ensure!(format!("{:x}", Sha256::digest(&bytes)) == blob.sha256);
+    after_the_producer(&credentials, &public, &volume_path, &artifact_id, &bytes).await?;
     // A Volume a Tag names cannot be deleted.
     let deletion = resource(
         &credentials,
@@ -363,5 +419,184 @@ async fn a_tag_volume_keeps_each_capture_written_by_the_host_that_maps_it(
     ensure!(!deletion.status.success());
     ensure!(String::from_utf8_lossy(&deletion.stderr).contains("a Tag keeps its work"));
     stop(&mut control).await?;
+    Ok(())
+}
+
+/// With the producing host gone, a host that maps the file Volume reads the capture back through
+/// its own mapping, keeps its Session checkpoint there, and deletes the object once a turn drops
+/// that checkpoint, as a Worker Host's Volume garbage pass does.
+async fn after_the_producer(
+    credentials: &Credentials,
+    public: &str,
+    volume_path: &Path,
+    artifact_id: &str,
+    bytes: &[u8],
+) -> Result<()> {
+    let channel =
+        protocol::negotiated(Channel::from_shared(public.to_owned())?.connect().await?).await?;
+    let mut host = worker_host_client::WorkerHostClient::new(channel.clone());
+    let mut artifacts = attempt_artifacts_client::AttemptArtifactsClient::new(channel.clone());
+    let mut objects = volume_objects_client::VolumeObjectsClient::new(channel.clone());
+    let mapping = supertag_workspaces::artifact_volumes::FileVolume::open(volume_path)?;
+    let profile = || {
+        Some(HarnessExecutionProfile {
+            volumes: vec![VolumeMapping {
+                volume_id: "durable".into(),
+                source: mapping.source.clone(),
+            }],
+            ..Default::default()
+        })
+    };
+    let generation = host
+        .register_host(authenticated_request(
+            RegisterHostRequest {
+                incarnation_id: "volume-reader".into(),
+            },
+            &credentials.host,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .generation;
+    let reader = turn(credentials, &channel, generation, "read", profile()).await?;
+    let acquisition = artifacts
+        .acquire(credentials.host(
+            AcquireArtifactRequest {
+                attempt: Some(reader.clone()),
+                operation_id: "acquire".into(),
+                artifact_id: artifact_id.into(),
+                paths: vec!["report.txt".into()],
+                delivery: ArtifactDelivery::Read as i32,
+                destination: None,
+            },
+            generation,
+        ))
+        .await?
+        .into_inner();
+    let file = objects
+        .grant(credentials.host(
+            VolumeObjectGrantRequest {
+                attempt: Some(reader.clone()),
+                purpose: VolumeObjectPurpose::AcquiredFile as i32,
+                access: VolumeAccess::Read as i32,
+                acquisition_id: acquisition.acquisition_id,
+                path: "report.txt".into(),
+                native_memory_blob: None,
+            },
+            generation,
+        ))
+        .await?
+        .into_inner();
+    ensure!(file.presigned.is_none());
+    ensure!(
+        file.volume
+            .as_ref()
+            .is_some_and(|volume| volume.source == mapping.source)
+    );
+    let mut read = Vec::new();
+    mapping.read_verified(&file.key, file.blob.as_ref().unwrap(), &mut read)?;
+    ensure!(read == bytes);
+
+    let payload = b"session checkpoint on the file Volume".to_vec();
+    let reference = CheckpointReference {
+        harness: "codex".into(),
+        format: "codex-session-v1".into(),
+        byte_length: payload.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(&payload)),
+    };
+    let checkpoint = CommitCheckpointRequest {
+        attempt: Some(reader.clone()),
+        reference: Some(reference.clone()),
+    };
+    host.reserve_checkpoint(credentials.host(checkpoint.clone(), generation))
+        .await?;
+    let grant = |attempt: &InspectAttemptRequest, access: VolumeAccess| {
+        credentials.host(
+            VolumeObjectGrantRequest {
+                attempt: Some(attempt.clone()),
+                purpose: VolumeObjectPurpose::SessionCheckpoint as i32,
+                access: access as i32,
+                ..Default::default()
+            },
+            generation,
+        )
+    };
+    let written = objects
+        .grant(grant(&reader, VolumeAccess::Write))
+        .await?
+        .into_inner();
+    let blob = written.blob.clone().unwrap();
+    mapping.persist(&written.key, &blob, Some(&payload), true)?;
+    ensure!(std::fs::read(volume_path.join(&written.key))? == payload);
+    host.commit_checkpoint(credentials.host(checkpoint, generation))
+        .await?;
+    let finish = |attempt: &InspectAttemptRequest, checkpoint: Option<String>| {
+        credentials.host(
+            FinishTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+                succeeded: true,
+                result: "Done".into(),
+                checkpoint_sha256: checkpoint,
+                ..Default::default()
+            },
+            generation,
+        )
+    };
+    host.finish_task(finish(&reader, Some(reference.sha256.clone())))
+        .await?;
+    let next = turn(credentials, &channel, generation, "next", profile()).await?;
+    let resumed = objects
+        .grant(grant(&next, VolumeAccess::Read))
+        .await?
+        .into_inner();
+    ensure!(resumed.key == written.key);
+    let listing = ListVolumeGarbageRequest {
+        volume_id: "durable".into(),
+        source: mapping.source.clone(),
+        limit: 0,
+    };
+    // Kept while the Session still points at it.
+    ensure!(
+        objects
+            .list_garbage(credentials.host(listing.clone(), generation))
+            .await?
+            .into_inner()
+            .objects
+            .is_empty()
+    );
+    host.finish_task(finish(&next, None)).await?;
+    let garbage = objects
+        .list_garbage(credentials.host(listing.clone(), generation))
+        .await?
+        .into_inner()
+        .objects;
+    ensure!(
+        garbage.len() == 1 && garbage[0].key == written.key,
+        "{garbage:?}"
+    );
+    mapping.remove(&garbage[0].key, garbage[0].blob.as_ref().unwrap())?;
+    ensure!(!volume_path.join(&written.key).exists());
+    objects
+        .forget_garbage(credentials.host(
+            ForgetVolumeGarbageRequest {
+                volume_id: "durable".into(),
+                source: mapping.source.clone(),
+                objects: garbage,
+            },
+            generation,
+        ))
+        .await?;
+    ensure!(
+        objects
+            .list_garbage(credentials.host(listing, generation))
+            .await?
+            .into_inner()
+            .objects
+            .is_empty()
+    );
+    // The capture itself stays: artifacts are kept.
+    ensure!(volume_path.join(&file.key).exists());
     Ok(())
 }
