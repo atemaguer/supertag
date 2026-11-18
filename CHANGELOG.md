@@ -162,6 +162,15 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Workspaces deliver through git to any remote. A remote Workspace names a git URL, read and
+  push Workspace Credentials (`supertag workspace credential add`: SSH key, HTTPS token or
+  credential helper, kept on the Control Plane machine and never sent to Worker Hosts), and how
+  work lands: `branch` (a `supertag/session/...` branch per Session) or `merge` into a target
+  when a work Session closes, fast-forward only; a merge conflict returns to the Session as a
+  follow-up Task. `supertag workspace check` tests the whole path without changing the remote.
+  Local Workspaces take `land:` in supertag.yaml. Commits are authored by the Tag, with the
+  requester as co-author. The protocol is now 4: upgrade every client, Gateway and Worker Host
+  together.
 - `stay_quiet` tells a Tag to stay quiet only when nothing changed since its last report: a small
   change or a resolved problem is still reported, and a known problem someone is handling is not.
 - A turn that stays quiet records its `stay_quiet` note as its result in every harness, rather
@@ -240,6 +249,11 @@ within the pre-1.0 compatibility policy described in
 
 ### Removed
 
+- GitHub Workspaces (`github:` spec, `--account`, `--repository-id`, `--pull-request-base`,
+  the `SUPERTAG_GITHUB_*` publisher settings), draft pull request publication and its approval,
+  closing a work Session when its pull request merges, and choosing a repository from a surface
+  message. A GitHub repository works as a plain remote with an HTTPS token Workspace Credential;
+  pull requests return with the GitHub review adapter.
 - The Gateway's `desktop` notification destination, which notified the Gateway's own machine.
   `notify: desktop` is now refused; the desktop app and terminal UI notify on their device, and
   `webhook:` and `slack:` reach people away from them. A local `supertag up` configures no
