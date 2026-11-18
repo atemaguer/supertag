@@ -21,6 +21,7 @@ import {
 } from "../lib/conversation-cache";
 import { nativeNotifier, silentNotifier, useDesktopNotifications } from "../lib/notifications";
 import { describe } from "../lib/polling";
+import { previewLine } from "../lib/preview-line";
 import { useGatewayWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { harnessLabel, type TagAdmin } from "../tag-admin";
 import {
@@ -491,7 +492,7 @@ const rosterChanged = (update: WatchUpdate) => update.kind === "tag";
 
 /** What the sidebar shows for a conversation the Gateway lists. */
 export function rowSummary(conversation: Conversation): TagSummary {
-  const line = conversation.preview.split("\n")[0]?.trim();
+  const line = previewLine(conversation.preview);
   return {
     ...(line ? { preview: conversation.previewFromTag ? line : `You: ${line}` } : {}),
     ...(conversation.lastActivityAtMs ? { lastActivityMs: conversation.lastActivityAtMs } : {}),

@@ -7,6 +7,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Conversation } from "../gateway";
+import { previewLine } from "./preview-line";
 
 /**
  * Native notifications and the Dock badge, computed here from the conversation list the watch
@@ -97,7 +98,7 @@ export function alertsFor(
     const reply = newer && conversation.unreadCount > (before?.unreadCount ?? 0);
     if (!question && (!reply || context.level === "questions")) continue;
     const name = context.name(conversation.tagId);
-    const preview = conversation.preview.split("\n")[0]?.trim() || "New message";
+    const preview = previewLine(conversation.preview) || "New message";
     alerts.push({
       key: `${question ? "question" : "reply"}:${conversation.tagId}`,
       tagId: conversation.tagId,
