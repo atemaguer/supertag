@@ -127,11 +127,16 @@ func divider(label string, width int) string {
 	return faint.Render(strings.Repeat("─", side) + label + strings.Repeat("─", max(width-side-lipgloss.Width(label), 2)))
 }
 
+// clockTime is a time of day as the terminal UI shows it everywhere: "4:01 PM".
+func clockTime(t time.Time) string {
+	return t.Format("3:04 PM")
+}
+
 // timeLabel is when a message was sent, as a messaging app says it: "Today 10:16 PM",
 // "Yesterday 9:02 AM", the weekday within a week, else the date.
 func timeLabel(t, now time.Time) string {
 	t, now = t.Local(), now.Local()
-	clock := t.Format("3:04 PM")
+	clock := clockTime(t)
 	day := func(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()) }
 	days := int(day(now).Sub(day(t)).Round(time.Hour).Hours() / 24)
 	switch {

@@ -107,7 +107,7 @@ func TestTheSchedulesDialogPausesResumesAndDeletesTheTagsSchedules(t *testing.T)
 	deliver(t, a, cmd)
 	s := appScreen(a)
 	if !strings.Contains(s, "Schedules · Engineering Lead") ||
-		!strings.Contains(s, "Summarise the week  ·  every 0 9 * * 1 (Europe/Berlin)  ·  next Mon Nov 23 09:00  ·  by operator:local") {
+		!strings.Contains(s, "Summarise the week  ·  every 0 9 * * 1 (Europe/Berlin)  ·  next Mon Nov 23 9:00 AM  ·  by operator:local") {
 		t.Fatalf("Schedule not shown:\n%s", s)
 	}
 	if strings.Contains(s, "Done once") || strings.Contains(s, "Someone else's") {

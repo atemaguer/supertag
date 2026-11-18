@@ -186,7 +186,8 @@ func scheduleLine(schedule client.Schedule) string {
 	if schedule.State == "paused" {
 		parts = append(parts, "paused")
 	} else if !schedule.NextDue.IsZero() {
-		parts = append(parts, "next "+schedule.NextDue.Local().Format("Mon Jan 2 15:04"))
+		next := schedule.NextDue.Local()
+		parts = append(parts, "next "+next.Format("Mon Jan 2")+" "+clockTime(next))
 	}
 	return strings.Join(append(parts, "by "+terminalText(schedule.CreatedBy)), "  ·  ")
 }

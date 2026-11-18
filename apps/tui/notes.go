@@ -177,7 +177,7 @@ func noteCaption(note client.Note, now time.Time) string {
 func noteTime(at, now time.Time) string {
 	at = at.Local()
 	if y, m, d := at.Date(); y == now.Local().Year() && m == now.Local().Month() && d == now.Local().Day() {
-		return at.Format("15:04")
+		return clockTime(at)
 	}
 	return at.Format("Mon Jan 2")
 }

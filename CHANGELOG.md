@@ -162,6 +162,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- The terminal UI shows times of day on one 12-hour clock, "4:01 PM", in its Tag list, notes, and
+  Schedules as in its conversation dividers. Esc closes the desktop app's Tag details panel.
 - Workspaces deliver through git to any remote. A remote Workspace names a git URL, read and
   push Workspace Credentials (`supertag workspace credential add`: SSH key, HTTPS token or
   credential helper, kept on the Control Plane machine and never sent to Worker Hosts), and how

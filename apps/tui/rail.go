@@ -204,7 +204,7 @@ func railTime(ms int64, now time.Time) string {
 	day := func(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()) }
 	switch days := int(day(now).Sub(day(t)).Round(time.Hour).Hours() / 24); {
 	case days <= 0:
-		return t.Format("15:04")
+		return clockTime(t)
 	case days == 1:
 		return "Yday"
 	case days < 7:
