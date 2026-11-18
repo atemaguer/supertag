@@ -367,6 +367,10 @@ export const nativeGateway = {
     invoke<GatewayActivation>("save_gateway", { gateway, name, token }),
   select: (origin: string) => invoke<GatewayActivation>("select_gateway", { origin }),
   connectLocal: () => invoke<GatewayActivation>("connect_local_gateway"),
+  /** Whether SuperTag is set up on this machine but its local services are stopped. */
+  localStartNeeded: () => invoke<boolean>("local_start_needed"),
+  /** Starts the stopped local services with `supertag up`; false when nothing needed starting. */
+  startLocal: () => invoke<boolean>("start_local_services"),
   clear: (forget?: string) => invoke<GatewayList>("clear_gateway", { forget }),
   async watch(connectionId: string, watchEpoch: number, receive: (update: WatchUpdate) => void) {
     const onUpdate = new Channel<WatchUpdate>(receive);

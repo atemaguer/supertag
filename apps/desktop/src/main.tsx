@@ -39,6 +39,8 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
   const [editor, setEditor] = useState<{ profile?: GatewayProfile }>();
   const [error, setError] = useState("");
   const [switching, setSwitching] = useState(!initialConnection);
+  // A later launch whose local services were stopped starts them before connecting.
+  const [starting, setStarting] = useState(false);
   const [writing, setWriting] = useState(false);
   const pendingSwitch = useRef(!initialConnection);
   const pendingWrites = useRef(0);
@@ -67,9 +69,21 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     let live = true;
     async function restore() {
       try {
-        const saved = await nativeGateway.list();
+        let saved = await nativeGateway.list();
         if (!live) return;
         setGateways(saved);
+        // SuperTag set up on this machine, its services stopped: start them, then connect.
+        if (!saved.active && !saved.local?.origin && (await nativeGateway.localStartNeeded())) {
+          setStarting(true);
+          try {
+            await nativeGateway.startLocal();
+          } finally {
+            if (live) setStarting(false);
+          }
+          saved = await nativeGateway.list();
+          if (!live) return;
+          setGateways(saved);
+        }
         // The last saved Gateway used wins; with none, the local one when it runs.
         const next = saved.active
           ? await nativeGateway.select(saved.active)
@@ -201,6 +215,7 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
         >
           <EmptyWorkspace
             switching={switching}
+            starting={starting}
             onSettings={(event) => open(undefined, event.currentTarget)}
             localProblem={gateways.local?.problem}
             onLocal={

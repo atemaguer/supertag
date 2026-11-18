@@ -201,6 +201,10 @@ The terminal UI and the desktop app find the local Control Plane on their own. W
 and connects with the local operator token, with nothing to enter. With no saved Control Plane
 last used, each opens Local at launch. The token is read at each connect and never saved. When no
 local Control Plane runs, they say so, name `supertag up`, and offer the saved Control Planes.
+The desktop app goes one step further at launch: when SuperTag is set up in that state directory
+but its services are stopped, and no saved Control Plane was last used, it shows "Starting
+SuperTag…", runs `supertag up` itself (the copy bundled with the app, else the one on `PATH`),
+and connects. If `up` fails, the app shows what it printed and where the logs are.
 
 ## Send messages from the CLI
 

@@ -763,6 +763,8 @@ button:disabled {
   color: #ffcbba;
   font-size: 12px;
   overflow-wrap: anywhere;
+  /* An error from supertag up keeps its lines: what it printed, then where its logs are. */
+  white-space: pre-line;
 }
 .work-area {
   display: flex;

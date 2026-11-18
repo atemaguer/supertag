@@ -1,4 +1,5 @@
 mod gateway;
+mod local_start;
 
 use std::path::PathBuf;
 
@@ -32,6 +33,39 @@ fn local_state_directory() -> Option<PathBuf> {
 #[cfg(not(unix))]
 fn local_state_directory() -> Option<PathBuf> {
     None
+}
+
+/// Whether a local Gateway runs from `state` now.
+#[cfg(unix)]
+fn local_gateway_running(state: &std::path::Path) -> bool {
+    matches!(supertag_local_state::gateway(state), Ok(Some(_)))
+}
+
+#[cfg(not(unix))]
+fn local_gateway_running(_: &std::path::Path) -> bool {
+    false
+}
+
+/// Whether this launch should start the local services: SuperTag is set up on this machine, but
+/// they are stopped. The window shows "Starting SuperTag…" while `start_local_services` runs.
+#[tauri::command]
+fn local_start_needed() -> bool {
+    let state = local_state_directory();
+    let running = state.as_deref().is_some_and(local_gateway_running);
+    local_start::should_start(state.as_deref(), running)
+}
+
+/// Starts the stopped local services with `supertag up`; false when there was nothing to start.
+#[tauri::command]
+async fn start_local_services() -> Result<bool, String> {
+    let Some(state) = local_state_directory() else {
+        return Ok(false);
+    };
+    if !local_start::should_start(Some(&state), local_gateway_running(&state)) {
+        return Ok(false);
+    }
+    local_start::start(&state).await?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -370,6 +404,8 @@ fn builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             list_gateways,
             save_gateway,
             connect_local_gateway,
+            local_start_needed,
+            start_local_services,
             select_gateway,
             clear_gateway,
             start_gateway_watch,

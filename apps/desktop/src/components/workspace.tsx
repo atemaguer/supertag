@@ -216,8 +216,11 @@ export function EmptyWorkspace({
   onSettings,
   localProblem,
   onLocal,
+  starting,
 }: {
   connected?: boolean;
+  /** The app is starting this machine's stopped SuperTag services before it connects. */
+  starting?: boolean;
   /** Opens the New Tag dialog, when this connection may create Tags. */
   onNewTag?(): void;
   switching?: boolean;
@@ -230,7 +233,9 @@ export function EmptyWorkspace({
   return (
     <div className="work-area">
       <div className="empty">
-        {switching ? (
+        {starting ? (
+          <p role="status">Starting SuperTag…</p>
+        ) : switching ? (
           <p role="status">Connecting to Gateway…</p>
         ) : connected ? (
           <>
