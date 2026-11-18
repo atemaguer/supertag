@@ -140,11 +140,17 @@ export function Onboarding({
   if (check.cli === null)
     return (
       <section className="onboarding" aria-labelledby="onboarding-heading">
-        <h2 id="onboarding-heading">{check.outdated ? "Update SuperTag" : "Install SuperTag"}</h2>
+        <h2 id="onboarding-heading">
+          {check.outdated || check.problem?.includes("Update with")
+            ? "Update SuperTag"
+            : "Install SuperTag"}
+        </h2>
         <p>
-          {check.outdated
-            ? `The supertag command-line tool at ${check.outdated} is older than this app. Run this in Terminal to update it, then check again:`
-            : "SuperTag runs on this Mac through its command-line tool. Run this in Terminal, then check again:"}
+          {check.problem
+            ? `${check.problem.split("\n")[0]?.split(" Install it with:")[0]?.split(" Update with:")[0]} Run this in Terminal, then check again:`
+            : check.outdated
+              ? `The supertag command-line tool at ${check.outdated} is older than this app. Run this in Terminal to update it, then check again:`
+              : "SuperTag runs on this Mac through its command-line tool. Run this in Terminal, then check again:"}
         </p>
         {check.install && (
           <div className="branch-command">

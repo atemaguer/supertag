@@ -163,3 +163,24 @@ it("never checks on its own, however often it renders, and runs one check at a t
   await act(async () => finish?.());
   expect(api.check).toHaveBeenCalledTimes(1);
 });
+
+it("names a CLI of another version than the app and how to update it", async () => {
+  const install = "curl -fsSL https://example.com/install.sh | sh";
+  await act(async () => {
+    root.render(
+      createElement(Onboarding, {
+        api: { check: vi.fn(), chooseFolder: vi.fn(), setUp: vi.fn() },
+        initial: {
+          cli: null,
+          install,
+          problem: `This SuperTag CLI is 0.2.0, the app expects 0.3.1. Update with: ${install}\n(It is /usr/local/bin/supertag.)`,
+        },
+        onReady: vi.fn(),
+      }),
+    );
+  });
+  expect(document.body.textContent).toContain("Update SuperTag");
+  expect(document.body.textContent).toContain(
+    "This SuperTag CLI is 0.2.0, the app expects 0.3.1. Run this in Terminal",
+  );
+});

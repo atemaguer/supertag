@@ -7,16 +7,14 @@ use std::{path::Path, process::Stdio, time::Duration};
 use serde_json::Value;
 use tokio::process::Command;
 
+use crate::local_start::INSTALL_COMMAND;
+
 /// How long the checks may take: a harness sign-in check runs one short turn.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long init may take: it writes the configuration and starts the services.
 const SETUP_TIMEOUT: Duration = Duration::from_secs(600);
 /// The most of a failed command's output the app shows.
 const MAX_REASON_CHARS: usize = 600;
-
-/// How to install the CLI, for a Mac with none.
-pub const INSTALL_COMMAND: &str =
-    "curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh";
 
 /// What a finished CLI run printed.
 struct Ran {
@@ -102,9 +100,16 @@ fn json_of(stdout: &str) -> Option<Value> {
 /// Whether SuperTag can be set up, as `supertag init --check --json` says, for `directory` and,
 /// when given, only `harness`. With no CLI, says how to install it.
 pub async fn check(directory: Option<String>, harness: Option<String>) -> Result<Value, String> {
-    let (cli, path) = crate::local_start::environment().await;
-    let Some(cli) = cli else {
-        return Ok(serde_json::json!({ "cli": null, "install": INSTALL_COMMAND }));
+    // No CLI, or one of another version than the app: say what to do instead of running it.
+    let (cli, path) = match crate::local_start::usable_cli().await {
+        Ok(found) => found,
+        Err(problem) => {
+            return Ok(serde_json::json!({
+                "cli": null,
+                "problem": problem,
+                "install": INSTALL_COMMAND,
+            }));
+        }
     };
     check_with(&cli, path.as_deref(), directory, harness).await
 }
@@ -147,8 +152,7 @@ async fn check_with(
 
 /// Sets SuperTag up for the project in `directory` with `harness`, and starts it.
 pub async fn set_up(directory: String, harness: String) -> Result<Value, String> {
-    let (cli, path) = crate::local_start::environment().await;
-    let cli = cli.ok_or("Install the supertag CLI first.")?;
+    let (cli, path) = crate::local_start::usable_cli().await?;
     let args = [
         "init",
         "--yes",

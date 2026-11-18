@@ -381,6 +381,8 @@ export interface SetupCheck {
   cli?: string | null;
   /** The CLI found is too old to set SuperTag up from the app; `install` updates it. */
   outdated?: string;
+  /** Why the app can't run the CLI it found, or found none, as one message to show. */
+  problem?: string;
   install?: string;
   ready?: boolean;
   repository?: {
