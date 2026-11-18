@@ -16,7 +16,9 @@ const UP_LIMIT: Duration = Duration::from_secs(180);
 /// the system PATH, which never holds the installer's `~/.local/bin`. Only an executable regular
 /// file counts.
 pub fn cli(bundled: Option<&Path>, path: Option<&OsStr>, installed: &[PathBuf]) -> Option<PathBuf> {
-    if let Some(bundled) = bundled.filter(|candidate| executable(candidate)) {
+    // The app itself never counts, whatever its name: running it as the CLI would start the app.
+    let usable = |candidate: &Path| executable(candidate) && !is_this_app(candidate);
+    if let Some(bundled) = bundled.filter(|candidate| usable(candidate)) {
         return Some(bundled.to_owned());
     }
     path.into_iter()
@@ -24,7 +26,7 @@ pub fn cli(bundled: Option<&Path>, path: Option<&OsStr>, installed: &[PathBuf]) 
         .chain(installed.iter().cloned())
         .filter(|directory| directory.is_absolute())
         .map(|directory| directory.join("supertag"))
-        .find(|candidate| executable(candidate))
+        .find(|candidate| usable(candidate))
 }
 
 /// Where the installer links `supertag`: `$XDG_BIN_HOME`, else `~/.local/bin`.
@@ -57,9 +59,37 @@ pub fn should_start(state: Option<&Path>, running: bool) -> bool {
     !running && state.is_some_and(|state| state.join("supertag.yaml").is_file())
 }
 
-/// The copy of `supertag` bundled beside this app's executable, where Tauri puts its sidecars.
+/// The copy of `supertag` bundled in this app's resources (`Contents/Resources/supertag/` on
+/// macOS), in the release archive's layout. Never beside the app's own executable: macOS file
+/// systems ignore case, so `Contents/MacOS/supertag` is the app itself, `SuperTag`, and running
+/// it as the CLI started the app again, which ran itself again.
 fn bundled() -> Option<PathBuf> {
-    Some(std::env::current_exe().ok()?.parent()?.join("supertag"))
+    let exe = std::env::current_exe().ok()?;
+    Some(
+        exe.parent()?
+            .parent()?
+            .join("Resources")
+            .join("supertag")
+            .join("supertag"),
+    )
+}
+
+/// Whether `candidate` is the running app's own executable, by file identity, whatever its name.
+#[cfg(unix)]
+fn is_this_app(candidate: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    let (Ok(exe), Ok(candidate)) = (
+        std::env::current_exe().and_then(std::fs::metadata),
+        std::fs::metadata(candidate),
+    ) else {
+        return false;
+    };
+    exe.dev() == candidate.dev() && exe.ino() == candidate.ino()
+}
+
+#[cfg(not(unix))]
+fn is_this_app(_: &Path) -> bool {
+    false
 }
 
 /// Starts the local services from `state` with `supertag up`. On failure, says what `up` printed
@@ -215,6 +245,17 @@ mod tests {
             cli(None, Some(&path), std::slice::from_ref(&installed)),
             Some(second.join("supertag"))
         );
+    }
+
+    #[test]
+    fn never_runs_the_app_itself_as_the_cli() {
+        // The test binary stands in for the app: a link to it named supertag is refused.
+        let directory = tempfile::tempdir().unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let link = directory.path().join("supertag");
+        std::os::unix::fs::symlink(&exe, &link).unwrap();
+        assert_eq!(cli(Some(&link), None, &[]), None);
+        assert_eq!(cli(None, Some(directory.path().as_os_str()), &[]), None);
     }
 
     #[test]
