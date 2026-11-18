@@ -219,3 +219,18 @@ func minor(value *uint64) *int64 {
 	minor := int64(*value)
 	return &minor
 }
+
+func (c *runtimeClient) reviewObjective(ctx context.Context, id string, approved bool, feedback string) (*views.Objective, error) {
+	key, err := idempotencyKey()
+	if err != nil {
+		return nil, err
+	}
+	body := &v2.ReviewObjectiveRequest{ObjectiveId: id, OperationId: key, Approved: approved, Feedback: feedback}
+	return retrying(ctx, func(ctx context.Context) (*views.Objective, error) {
+		res, err := c.objectives.ReviewObjective(ctx, connect.NewRequest(body))
+		if err != nil {
+			return nil, err
+		}
+		return runtimeObjective(res.Msg), nil
+	})
+}

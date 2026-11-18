@@ -58,6 +58,12 @@ func (c *Client) DescribeObjective(ctx context.Context, id string) (*views.Objec
 	return c.runtime.describeObjective(ctx, id)
 }
 
+// ReviewObjective approves the owner's assessment of an Objective ready for review, or requests
+// changes with feedback the owner works from. A retry reuses the same operation.
+func (c *Client) ReviewObjective(ctx context.Context, id string, approved bool, feedback string) (*views.Objective, error) {
+	return c.runtime.reviewObjective(ctx, id, approved, feedback)
+}
+
 // MessageObjective sends a follow-up to the owner in the Objective's own conversation.
 func (c *Client) MessageObjective(ctx context.Context, id, text string) (*views.MessageObjectiveResponse, error) {
 	return c.runtime.messageObjective(ctx, id, text)

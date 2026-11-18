@@ -241,8 +241,10 @@ conversation. When the outcome is met, it calls `report_objective` with `complet
 `ready_for_review` and a summary, and the Objective finishes with that summary. The owner can also
 report `blocked`. You can record the result yourself with `supertag objective complete`.
 
-If the owner stopped at `ready_for_review`, open the Objective in the terminal UI to read its
-assessment. To request changes, run
+If the owner stopped at `ready_for_review`, the Objective counts under **Waiting on you** in the
+terminal UI. Open it to read the owner's assessment and the branch each Session delivered, then
+press `a` to approve or `c` to request changes with your feedback. From the CLI, request changes
+with
 `supertag objective review usage-billing request-changes --feedback TEXT`. The Objective returns
 to `working` and the owner acts on your text. To approve, run
 `supertag objective review usage-billing approve`; approval completes the Objective with the

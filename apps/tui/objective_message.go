@@ -215,3 +215,75 @@ func (m model) objectiveMessageText() string {
 }
 
 func objectivePaneKey(id string) string { return "objective:" + id }
+
+// objectiveReviewable says whether the shown Objective waits for the operator's review.
+func (m model) objectiveReviewable() bool {
+	objective := m.overviews[m.objectiveID].GetObjective()
+	if objective == nil {
+		objective = m.openObjective(m.objectiveID)
+	}
+	return objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW && !m.reviewing
+}
+
+// composeObjectiveChanges opens the input for the feedback a request for changes sends.
+func (m *model) composeObjectiveChanges() tea.Cmd {
+	m.objectiveReview = "changes"
+	m.objectiveCompose, m.focus = true, focusInput
+	m.input.Placeholder = "What should the owner change? · enter sends · esc cancels"
+	m.input.Reset()
+	m.refresh()
+	return m.syncInput()
+}
+
+type objectiveReviewedMsg struct {
+	id        string
+	approved  bool
+	objective *views.Objective
+	err       error
+}
+
+// reviewObjective approves the shown Objective, or requests changes with feedback.
+func (m *model) reviewObjective(approved bool, feedback string) tea.Cmd {
+	id := m.objectiveID
+	m.reviewing, m.objectiveReview, m.objectiveCompose = true, "", false
+	m.input.Reset()
+	m.notice = note{text: "Sending your review…"}
+	m.refresh()
+	c, ctx := m.client, m.ctx
+	return tea.Batch(m.syncInput(), func() tea.Msg {
+		objective, err := c.ReviewObjective(ctx, id, approved, feedback)
+		return objectiveReviewedMsg{id: id, approved: approved, objective: objective, err: err}
+	})
+}
+
+// objectiveReviewed says how the review went and rereads the Objective.
+func (m *model) objectiveReviewed(msg objectiveReviewedMsg) tea.Cmd {
+	m.reviewing = false
+	if msg.err != nil {
+		m.notice = note{text: "Could not send your review. " + terminalText(msg.err.Error()), err: true}
+		m.refresh()
+		return nil
+	}
+	if msg.approved {
+		m.notice = note{text: "Approved. The Objective is complete."}
+	} else {
+		m.notice = note{text: "Changes requested. The owner works from your feedback."}
+	}
+	m.refresh()
+	var overview tea.Cmd
+	if m.pane == paneObjective && m.objectiveID == msg.id {
+		overview = m.reloadOverview()
+	}
+	return tea.Batch(overview, m.reloadObjectives())
+}
+
+// reviewsWaiting counts the open Objectives ready for the operator's review.
+func (m model) reviewsWaiting() int {
+	count := 0
+	for _, objective := range m.objectives {
+		if objective.GetStatus() == views.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
+			count++
+		}
+	}
+	return count
+}

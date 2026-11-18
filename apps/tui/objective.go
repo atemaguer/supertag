@@ -220,6 +220,10 @@ func describeObjective(view *views.ObjectiveOverview, inbox []*views.InboxItem) 
 		delivered++
 		add(fmt.Sprintf("  %s (%s, Task %s)", sessionLabel(session), tag(session.GetTagId()), task.GetId()))
 		add(deliveryLines(task.GetDelivery(), "    ")...)
+		if task.GetDelivery().GetWorkspace() != nil && session.GetId() != "" {
+			branch := client.SessionBranch(session.GetTagId(), session.GetId())
+			add("    Branch: "+branch, "      Merge it with: git merge "+branch)
+		}
 	}
 	if delivered == 0 {
 		if closed {
@@ -258,8 +262,7 @@ func describeObjective(view *views.ObjectiveOverview, inbox []*views.InboxItem) 
 		switch item.GetKind() {
 		case views.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_REVIEW:
 			needs = append(needs, "  The owner submitted the Objective for review.",
-				"    Approve: supertag approve objective "+id,
-				"    Press m to ask for changes.")
+				"    Press a to approve it, or c to request changes.")
 		case views.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_NOT_STARTED, views.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_PAUSED:
 			needs = append(needs, "  "+item.GetMessage(), "    "+item.GetNextAction())
 		}

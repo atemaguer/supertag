@@ -327,10 +327,15 @@ type model struct {
 	pane   pane
 	// objectiveID is the Objective the Objective pane shows, and overviews what was last read of
 	// each Objective shown.
-	objectiveID       string
-	overviews         map[string]*views.ObjectiveOverview
-	overviewErrs      map[string]string
-	objectiveCompose  bool
+	objectiveID      string
+	overviews        map[string]*views.ObjectiveOverview
+	overviewErrs     map[string]string
+	objectiveCompose bool
+	// reviewing: a review of the shown Objective is on its way.
+	reviewing bool
+	// objectiveReview is how the shown Objective's review is being decided: "approve" waits for
+	// enter, "changes" composes the feedback; empty otherwise.
+	objectiveReview   string
 	objectiveMessages map[string]*objectiveMessage
 	// item is the inbox item the inbox pane shows, kept after it leaves the inbox; itemNote is
 	// what came of acting on it.
@@ -697,6 +702,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case objectiveSentMsg:
 		return m, m.objectiveMessageSent(msg)
 
+	case objectiveReviewedMsg:
+		return m, m.objectiveReviewed(msg)
+
 	case objectiveReplyMsg:
 		return m, m.objectiveReplyRead(msg)
 
@@ -1043,8 +1051,14 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		if m.pane == paneObjective && m.objectiveCompose {
 			m.saveDraft()
+			m.objectiveReview = ""
 			m.refresh()
 			return m, m.syncInput()
+		}
+		if m.pane == paneObjective && m.objectiveReview != "" {
+			m.objectiveReview = ""
+			m.refresh()
+			return m, nil
 		}
 		if m.decision == decisionConfirm || m.decision == decisionReason {
 			m.decision = decisionNone
@@ -1083,6 +1097,18 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.String() == "m" && m.pane == paneObjective && !m.objectiveCompose {
 		return m, m.composeObjectiveMessage()
+	}
+	if m.pane == paneObjective && !m.objectiveCompose {
+		switch {
+		case m.objectiveReview == "approve" && msg.String() == "enter":
+			return m, m.reviewObjective(true, "")
+		case msg.String() == "a" && m.objectiveReviewable():
+			m.objectiveReview = "approve"
+			m.refresh()
+			return m, nil
+		case msg.String() == "c" && m.objectiveReviewable():
+			return m, m.composeObjectiveChanges()
+		}
 	}
 	if msg.String() == "r" && m.pane == paneInbox && m.approvalDetails.err != nil &&
 		m.inboxItem(m.item.GetOccurrence()) != nil {
@@ -1213,6 +1239,9 @@ func (m *model) submit() tea.Cmd {
 		m.input.Reset()
 		return m.sendConversation(tag, text)
 	case paneObjective:
+		if m.objectiveReview == "changes" {
+			return m.reviewObjective(false, text)
+		}
 		return m.sendObjectiveMessage(text)
 	case paneInbox:
 		item := m.item

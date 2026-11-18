@@ -75,6 +75,8 @@ type fakeGateway struct {
 	hostReads     int
 	// marks are the MarkConversationRead requests, in order.
 	marks []*v2.MarkConversationReadRequest
+	// reviews are the ReviewObjective requests, in order.
+	reviews []*v2.ReviewObjectiveRequest
 	// memories answers ListMemories, newest first; deleted are the DeleteMemory requests.
 	memories []*v2.Memory
 	deleted  []string
@@ -353,6 +355,17 @@ func (f *fakeGateway) readMarks() []*v2.MarkConversationReadRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.marks)
+}
+
+func (f *fakeGateway) ReviewObjective(_ context.Context, req *connect.Request[v2.ReviewObjectiveRequest]) (*connect.Response[v2.Objective], error) {
+	f.mu.Lock()
+	f.reviews = append(f.reviews, req.Msg)
+	f.mu.Unlock()
+	status := v2.ObjectiveStatus_OBJECTIVE_STATUS_WORKING
+	if req.Msg.GetApproved() {
+		status = v2.ObjectiveStatus_OBJECTIVE_STATUS_COMPLETED
+	}
+	return connect.NewResponse(&v2.Objective{ObjectiveId: req.Msg.GetObjectiveId(), OwnerTagId: "lead", Status: status}), nil
 }
 
 func (f *fakeGateway) ListObjectives(context.Context, *connect.Request[v2.ListObjectivesRequest]) (*connect.Response[v2.ListObjectivesResponse], error) {

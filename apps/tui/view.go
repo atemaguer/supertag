@@ -253,10 +253,12 @@ func (m model) railLines(height int) string {
 			add(row{rowObjective, i}, objectiveName(objective), state)
 		}
 	}
-	waiting := fmt.Sprintf("Waiting on you (%d)", len(m.inbox.Items))
-	short := fmt.Sprintf("?%d", len(m.inbox.Items))
+	// Objectives ready for review wait on you too; they are decided in their own pane.
+	count := len(m.inbox.Items) + m.reviewsWaiting()
+	waiting := fmt.Sprintf("Waiting on you (%d)", count)
+	short := fmt.Sprintf("?%d", count)
 	if m.inbox.Truncated {
-		waiting = fmt.Sprintf("Waiting on you (%d+)", len(m.inbox.Items))
+		waiting = fmt.Sprintf("Waiting on you (%d+)", count)
 		short += "+"
 	}
 	section(waiting, short, m.inboxErr)
@@ -455,6 +457,14 @@ func (m model) paneTitle() string {
 func (m model) paneHint() string {
 	switch m.pane {
 	case paneObjective:
+		switch {
+		case m.objectiveReview == "approve":
+			return "enter approves the owner's assessment and completes the Objective · esc cancels"
+		case m.reviewing:
+			return "Sending your review…"
+		case m.objectiveReviewable():
+			return "a approve · c request changes · m message the owner"
+		}
 		if m.canMessageObjective() {
 			return "m message the owner · answer questions under Waiting on you"
 		}
