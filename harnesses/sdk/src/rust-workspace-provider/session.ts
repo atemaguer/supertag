@@ -442,7 +442,8 @@ export function createSandboxWorkspaceSession(
 ) {
   const preparedRoot = options.preparedRoot ?? PREPARED_ROOT;
   const allocateTimeoutMs = options.allocateTimeoutMs ?? ALLOCATE_TIMEOUT_MS;
-  const workspaceError = (message: string) => new Error(`${provider.label} Workspace ${message}`);
+  const workspaceError = (message: string, cause?: unknown) =>
+    new Error(`${provider.label} Workspace ${message}`, cause === undefined ? {} : { cause });
   const lifetime = new AbortController();
   let toolTail = Promise.resolve();
   let phase:
@@ -1134,7 +1135,7 @@ export function createSandboxWorkspaceSession(
           );
           if (!sealed.sealed) {
             uncertain = true;
-            throw workspaceError("could not be sealed");
+            throw workspaceError(`could not be sealed (exit ${sealed.exitCode})`);
           }
           result = sealed;
         } else {
@@ -1142,7 +1143,7 @@ export function createSandboxWorkspaceSession(
         }
         const receipt = /^([1-9][0-9]{0,8}) ([0-9a-f]{64})$/u.exec(lastLine(result.stdout));
         if (result.exitCode !== 0 || !receipt?.[1] || !receipt[2])
-          throw workspaceError("capture did not produce a receipt");
+          throw workspaceError(`capture did not produce a receipt (exit ${result.exitCode})`);
         const byteLength = Number(receipt[1]);
         if (byteLength < 13 || byteLength > MAX_TRANSFER)
           throw workspaceError("tree is out of range");
@@ -1153,8 +1154,9 @@ export function createSandboxWorkspaceSession(
         captured = { tree: { sha256: receipt[2], byteLength: BigInt(byteLength) }, bytes };
         phase = "captured";
         return captured;
-      } catch {
-        throw workspaceError("tree could not be captured");
+      } catch (error) {
+        // The cause stays in the provider's log; the caller sees only an internal error.
+        throw workspaceError("tree could not be captured", error);
       }
     },
     /** Records the staged preparation sandbox as a prepared artifact. */

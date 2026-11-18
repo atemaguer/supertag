@@ -201,6 +201,8 @@ async function withHarness(
   const server = await startRemoteWorkspaceTransport({
     ...createWorkspaceHandlers(under.session),
     token: TOKEN,
+    // The client sees only "internal"; the cause belongs in the test's log.
+    onError: (error) => console.error("Provider operation failed:", error),
   });
   const sessions = new Http2SessionManager(server.endpoint);
   const transport = createGrpcTransport({ baseUrl: server.endpoint, sessionManager: sessions });

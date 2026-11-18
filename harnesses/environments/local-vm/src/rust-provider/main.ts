@@ -11,10 +11,26 @@ function progress(line: string): void {
   process.stderr.write(`supertag-progress: ${line}\n`);
 }
 
+/** An error's message and its causes' messages, one line, bounded. */
+function causes(error: unknown): string {
+  const messages: string[] = [];
+  for (let at = error, depth = 0; at !== undefined && depth < 4; depth++) {
+    messages.push(at instanceof Error ? at.message : String(at));
+    at = at instanceof Error ? at.cause : undefined;
+  }
+  return messages
+    .join(": ")
+    .replace(/\p{Cc}+/gu, " ")
+    .slice(0, 500);
+}
+
 async function main(): Promise<void> {
   const session = createLocalVmWorkspaceSession(localVmOptions(), progress);
   try {
-    await runRemoteWorkspaceTransport(createWorkspaceHandlers(session));
+    await runRemoteWorkspaceTransport(createWorkspaceHandlers(session), {
+      // The Worker Host sees only an internal error; its log gets the cause.
+      onError: (error) => progress(`operation failed: ${causes(error)}`),
+    });
   } finally {
     await session.close();
   }

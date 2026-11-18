@@ -180,7 +180,12 @@ it("keeps the Host channel alive after one cancelled call and redacts untyped pr
     );
     return {};
   };
-  const server = await startRemoteWorkspaceTransport({ ...implementation, token });
+  const reported: unknown[] = [];
+  const server = await startRemoteWorkspaceTransport({
+    ...implementation,
+    token,
+    onError: (error) => reported.push(error),
+  });
   const calls = client(server.endpoint);
   const cancellation = new AbortController();
   try {
@@ -199,6 +204,9 @@ it("keeps the Host channel alive after one cancelled call and redacts untyped pr
       code: Code.Internal,
       rawMessage: "Remote workspace operation failed",
     });
+    // The cause reaches the provider's own log, never the wire; cancellation is not reported.
+    expect(reported).toHaveLength(1);
+    expect((reported[0] as Error).message).toBe(`provider credential ${token}`);
     // A configuration the operator must fix is named, as a failed precondition.
     implementation.provider.allocate = async () => {
       throw new WorkspaceConfigurationError("Provider app missing was not found");

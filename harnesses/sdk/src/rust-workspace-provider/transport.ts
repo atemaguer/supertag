@@ -49,7 +49,15 @@ interface TransportOptions extends RemoteWorkspaceHandlers {
   readonly signal?: AbortSignal;
   /** Optional tighter limits; never allows the wire's hard bounds to grow. */
   readonly limits?: Partial<typeof MAXIMUM>;
+  /**
+   * Hears the cause of every failure the caller sees only as an internal error, so the
+   * provider's own log can name it. The cause never crosses the wire.
+   */
+  readonly onError?: (error: unknown) => void;
 }
+
+/** Where a transport reports the causes of its internal errors. */
+type Report = (error: unknown) => void;
 
 function validToken(token: string): boolean {
   return /^[\x21-\x7e]{16,1024}$/.test(token);
@@ -112,20 +120,29 @@ function limitsFor(input: TransportOptions["limits"]) {
   return result;
 }
 
-function safeError(error: unknown, context: HandlerContext): ConnectError {
+function safeError(error: unknown, context: HandlerContext, report: Report): ConnectError {
   if (context.signal.aborted) return cancelled();
   if (error instanceof ConnectError) return error;
   // The operator's fix, such as a provider resource to create, reaches the Worker Host.
   if (error instanceof WorkspaceConfigurationError)
     return new ConnectError(error.message, Code.FailedPrecondition);
+  try {
+    report(error);
+  } catch {
+    /* a reporter's failure changes nothing on the wire */
+  }
   return new ConnectError("Remote workspace operation failed", Code.Internal);
 }
 
-async function invoke<T>(context: HandlerContext, call: () => T | Promise<T>): Promise<T> {
+async function invoke<T>(
+  context: HandlerContext,
+  call: () => T | Promise<T>,
+  report: Report,
+): Promise<T> {
   try {
     return await call();
   } catch (error) {
-    throw safeError(error, context);
+    throw safeError(error, context, report);
   }
 }
 
@@ -133,6 +150,7 @@ async function* boundedParts<T extends { part?: { case?: string | undefined; val
   source: AsyncIterable<T>,
   limits: typeof MAXIMUM,
   context: HandlerContext,
+  report: Report,
   stream = { bytes: limits.streamBytes, messages: MAX_STREAM_MESSAGES },
 ): AsyncGenerator<T> {
   let bytes = 0;
@@ -156,14 +174,19 @@ async function* boundedParts<T extends { part?: { case?: string | undefined; val
       yield part;
     }
   } catch (error) {
-    throw safeError(error, context);
+    throw safeError(error, context, report);
   }
 }
 
 /** A stdio server's stdin arrives in bounded chunks for as long as the server runs. */
 async function* boundedStdioInput<
   T extends { part?: { case?: string | undefined; value?: unknown } },
->(source: AsyncIterable<T>, limits: typeof MAXIMUM, context: HandlerContext): AsyncGenerator<T> {
+>(
+  source: AsyncIterable<T>,
+  limits: typeof MAXIMUM,
+  context: HandlerContext,
+  report: Report,
+): AsyncGenerator<T> {
   try {
     for await (const part of source) {
       if (context.signal.aborted) throw cancelled();
@@ -176,7 +199,7 @@ async function* boundedStdioInput<
       yield part;
     }
   } catch (error) {
-    throw safeError(error, context);
+    throw safeError(error, context, report);
   }
 }
 
@@ -187,6 +210,7 @@ export async function startRemoteWorkspaceTransport(
   if (!validToken(options.token)) throw new Error("Invalid remote workspace bootstrap");
   if (options.signal?.aborted) throw cancelled();
   const limits = limitsFor(options.limits);
+  const report: Report = options.onError ?? (() => {});
   const expected = Buffer.from(`Bearer ${options.token}`);
   const ending = new AbortController();
   const ended = Promise.withResolvers<void>();
@@ -229,26 +253,36 @@ export async function startRemoteWorkspaceTransport(
       routes(router) {
         router.service(RemoteWorkspaceProvider, {
           allocate: (request, context) =>
-            invoke(context, () => options.provider.allocate(request, context)),
+            invoke(context, () => options.provider.allocate(request, context), report),
           stage: (stream, context) =>
-            invoke(context, () =>
-              options.provider.stage(boundedParts(stream, limits, context), context),
+            invoke(
+              context,
+              () => options.provider.stage(boundedParts(stream, limits, context, report), context),
+              report,
             ),
           capture: async function* (request, context) {
             try {
-              yield* boundedParts(options.provider.capture(request, context), limits, context);
+              yield* boundedParts(
+                options.provider.capture(request, context),
+                limits,
+                context,
+                report,
+              );
             } catch (error) {
-              throw safeError(error, context);
+              throw safeError(error, context, report);
             }
           },
           stop: (request, context) =>
-            invoke(context, () => options.provider.stop(request, context)),
+            invoke(context, () => options.provider.stop(request, context), report),
           stageCopy: (stream, context) =>
-            invoke(context, () =>
-              options.provider.stageCopy(
-                boundedParts(stream, limits, context, COPY_STREAM),
-                context,
-              ),
+            invoke(
+              context,
+              () =>
+                options.provider.stageCopy(
+                  boundedParts(stream, limits, context, report, COPY_STREAM),
+                  context,
+                ),
+              report,
             ),
           captureCopy: async function* (request, context) {
             try {
@@ -256,30 +290,31 @@ export async function startRemoteWorkspaceTransport(
                 options.provider.captureCopy(request, context),
                 limits,
                 context,
+                report,
                 COPY_STREAM,
               );
             } catch (error) {
-              throw safeError(error, context);
+              throw safeError(error, context, report);
             }
           },
           snapshot: (request, context) =>
-            invoke(context, () => options.provider.snapshot(request, context)),
+            invoke(context, () => options.provider.snapshot(request, context), report),
           removeArtifact: (request, context) =>
-            invoke(context, () => options.provider.removeArtifact(request, context)),
+            invoke(context, () => options.provider.removeArtifact(request, context), report),
           runStdioServer: async function* (stream, context) {
             try {
               yield* options.provider.runStdioServer(
-                boundedStdioInput(stream, limits, context),
+                boundedStdioInput(stream, limits, context, report),
                 context,
               );
             } catch (error) {
-              throw safeError(error, context);
+              throw safeError(error, context, report);
             }
           },
         });
         router.service(HarnessWorkspace, {
           execute: (request, context) =>
-            invoke(context, () => options.workspace.execute(request, context)),
+            invoke(context, () => options.workspace.execute(request, context), report),
         });
       },
     }),
@@ -340,7 +375,12 @@ export async function startRemoteWorkspaceTransport(
 /** Only the endpoint is written to stdout; provider diagnostics belong on stderr. */
 export async function runRemoteWorkspaceTransport(
   handlers: RemoteWorkspaceHandlers,
-  options: { input?: AsyncIterable<Uint8Array>; output?: Writable; signal?: AbortSignal } = {},
+  options: {
+    input?: AsyncIterable<Uint8Array>;
+    output?: Writable;
+    signal?: AbortSignal;
+    onError?: (error: unknown) => void;
+  } = {},
 ): Promise<void> {
   const lifetime = new AbortController();
   const signal = options.signal
@@ -368,6 +408,7 @@ export async function runRemoteWorkspaceTransport(
       ...handlers,
       token: bootstrap.token,
       signal,
+      ...(options.onError ? { onError: options.onError } : {}),
     });
     const endpoint = transport.endpoint;
     await abortable(
