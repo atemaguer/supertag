@@ -134,6 +134,10 @@ like this.
 /goal Add a test for an uncovered edge case. Done when the new test and its suite pass. Ask me before changing application code.
 ```
 
+A Codex lead runs the tests. A Claude Code lead set up without Docker or the unsandboxed opt-in
+reads and edits files but runs no commands, so it reports that condition as unchecked; see
+[Let the lead run commands](docs/operations/cli.md#let-the-lead-run-commands).
+
 Questions the Tag asks you appear under **Waiting on you**. When the Objective is ready, the
 Objectives list in the sidebar shows it as `review`. Each delivered change arrives in your
 repository as a `supertag/session/...` branch. Review it, then approve the Objective or ask for a
