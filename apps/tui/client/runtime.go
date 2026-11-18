@@ -1,9 +1,13 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -356,6 +360,7 @@ func runtimeMessage(message *v2.ConversationMessage) *views.Message {
 		}
 	}
 	out.Reply = runtimeReply(task)
+	out.Delivery = delivery(task)
 	if out.Reply != nil {
 		out.Status = views.ReplyStatus_REPLY_STATUS_REPLIED
 		out.Activity = ""
@@ -409,4 +414,32 @@ func runtimeReply(task *v2.Task) *views.Reply {
 		return nil
 	}
 	return &views.Reply{Presentation: views.ReplyPresentation_REPLY_PRESENTATION_ERROR, Text: text}
+}
+
+// SessionBranch is the branch a Session's changes land on, as the Control Plane and Worker Host
+// name it: `supertag/session/` and the SHA-256 of the JSON pair [tag, session].
+func SessionBranch(tag, session string) string {
+	var pair bytes.Buffer
+	encoder := json.NewEncoder(&pair)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode([]string{tag, session}); err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(bytes.TrimSuffix(pair.Bytes(), []byte("\n")))
+	return "supertag/session/" + hex.EncodeToString(sum[:])
+}
+
+// delivery is where a finished turn's changes went, when it changed anything.
+func delivery(task *v2.Task) *views.Delivery {
+	delivered := task.GetWorkspaceDelivery()
+	if task.GetState() != v2.TaskState_TASK_STATE_SUCCEEDED || delivered == nil ||
+		delivered.GetHeadCommit() == "" || delivered.GetHeadCommit() == delivered.GetBaseCommit() {
+		return nil
+	}
+	branch := SessionBranch(task.GetTagId(), task.GetSessionId())
+	if branch == "" {
+		return nil
+	}
+	return &views.Delivery{Branch: branch, Workspace: task.GetWorkspace().GetWorkspaceId(),
+		Remote: task.GetWorkspace().GetRemote() != nil}
 }

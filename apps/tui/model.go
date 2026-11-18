@@ -1669,6 +1669,8 @@ func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd
 		dim(event.Text)
 	case client.EventStillWorking:
 		c.add(entryActivity, event.Text)
+	case client.EventDelivered:
+		dim("· " + terminalText(event.Text))
 	case client.EventJoined:
 		// The delivery status under the message says it was seen.
 	case client.EventError:

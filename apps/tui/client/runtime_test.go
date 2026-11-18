@@ -631,3 +631,51 @@ func TestAReplyShowsAtHarnessDoneAndAFailedDeliveryAddsItsError(t *testing.T) {
 		t.Fatalf("a delivered turn repeated its reply: %v", more)
 	}
 }
+
+func TestSessionBranchMatchesTheControlPlane(t *testing.T) {
+	// Values from supertag_protocol::session_branch: SHA-256 of serde_json's compact pair.
+	for _, c := range []struct{ tag, session, want string }{
+		{"lead", "5f0c", "supertag/session/fcd1201e9154747d83e3291951dd30cbc09383d35ea12c4bbe7e1d7e7e520185"},
+		{"a<b", `s&"x`, "supertag/session/81bbb4edb0deb2f4ce02a7b7a498959599918a9d3553a161fbf9b0125b56c914"},
+	} {
+		if got := SessionBranch(c.tag, c.session); got != c.want {
+			t.Errorf("SessionBranch(%q, %q) = %q, want %q", c.tag, c.session, got, c.want)
+		}
+	}
+}
+
+func TestAFinishedTurnSaysOnceWhereItsChangesWent(t *testing.T) {
+	task := &v2.Task{TagId: "lead", SessionId: "5f0c", State: v2.TaskState_TASK_STATE_SUCCEEDED,
+		Workspace:         &v2.WorkspaceSpec{WorkspaceId: "app"},
+		WorkspaceDelivery: &v2.WorkspaceDeliveryReference{BaseCommit: "a", HeadCommit: "b"}}
+	got := delivery(task)
+	if got == nil || got.Branch != SessionBranch("lead", "5f0c") || got.Workspace != "app" || got.Remote {
+		t.Fatalf("delivery = %v", got)
+	}
+	shown := newShown("lead")
+	events := shown.delivered(got)
+	if len(events) != 1 || events[0].Kind != EventDelivered ||
+		events[0].Text != "Changes are on branch "+got.Branch+" in Workspace app's repository. Merge them with: git merge "+got.Branch {
+		t.Fatalf("events = %v", events)
+	}
+	if again := shown.delivered(got); len(again) != 0 {
+		t.Fatalf("said twice: %v", again)
+	}
+	// Nothing changed, still running, or no delivery: nothing to say.
+	for _, other := range []*v2.Task{
+		{TagId: "lead", SessionId: "5f0c", State: v2.TaskState_TASK_STATE_SUCCEEDED,
+			WorkspaceDelivery: &v2.WorkspaceDeliveryReference{BaseCommit: "a", HeadCommit: "a"}},
+		{TagId: "lead", SessionId: "5f0c", State: v2.TaskState_TASK_STATE_RUNNING,
+			WorkspaceDelivery: &v2.WorkspaceDeliveryReference{BaseCommit: "a", HeadCommit: "b"}},
+		{TagId: "lead", SessionId: "5f0c", State: v2.TaskState_TASK_STATE_SUCCEEDED},
+	} {
+		if d := delivery(other); d != nil {
+			t.Fatalf("delivery(%v) = %v", other, d)
+		}
+	}
+	task.Workspace.Remote = &v2.Workspace{WorkspaceId: "app", Remote: "https://example.com/app.git"}
+	if remote := delivery(task); remote == nil || !remote.Remote ||
+		!strings.Contains(DeliveryText(remote), "git fetch origin "+remote.Branch) {
+		t.Fatalf("remote delivery = %v", remote)
+	}
+}

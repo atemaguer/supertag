@@ -258,6 +258,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 			state.text = ""
 			state.shown.finalizing = task.GetState() == v2.TaskState_TASK_STATE_RUNNING
 			emit(state.shown.reply(reply)...)
+			emit(state.shown.delivered(delivery(task))...)
 		} else if state.stream != nil {
 			// The message the Tag is writing shows as it is written, after the messages it
 			// recorded.

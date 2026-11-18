@@ -54,6 +54,8 @@ const (
 	// EventHostWait says why the queued turn still waits for a Worker Host (Text), once it has
 	// waited a moment; empty Text says the reason no longer holds.
 	EventHostWait
+	// EventDelivered says where the turn's changes went (Text), once it delivered them.
+	EventDelivered
 )
 
 // FollowEvent is one thing to show while following a message.
@@ -152,6 +154,24 @@ func (s *Shown) reply(reply *views.Reply) []FollowEvent {
 		return s.turnError(reply.GetText())
 	}
 	return []FollowEvent{{Kind: EventReply, Reply: reply}}
+}
+
+// delivered says once where the turn's changes went, when it delivered any.
+func (s *Shown) delivered(delivery *views.Delivery) []FollowEvent {
+	if delivery == nil || delivery.Branch == "" || !s.once("delivered") {
+		return nil
+	}
+	return []FollowEvent{{Kind: EventDelivered, Text: DeliveryText(delivery)}}
+}
+
+// DeliveryText tells where a turn's changes are and how to take them.
+func DeliveryText(delivery *views.Delivery) string {
+	if delivery.Remote {
+		return fmt.Sprintf("Changes are on branch %s on Workspace %s's git server. Fetch and merge them with: git fetch origin %s && git merge FETCH_HEAD",
+			delivery.Branch, delivery.Workspace, delivery.Branch)
+	}
+	return fmt.Sprintf("Changes are on branch %s in Workspace %s's repository. Merge them with: git merge %s",
+		delivery.Branch, delivery.Workspace, delivery.Branch)
 }
 
 func (s *Shown) turnError(text string) []FollowEvent {
@@ -314,6 +334,7 @@ func History(tag string, page []*views.Message, displayedTaskIDs ...string) []Hi
 			if message.GetStatus() == views.ReplyStatus_REPLY_STATUS_REPLIED {
 				shown.finalizing = message.GetFinalizing()
 				item.Events = append(item.Events, shown.reply(message.GetReply())...)
+				item.Events = append(item.Events, shown.delivered(message.GetDelivery())...)
 			} else {
 				item.Events = append(item.Events, shown.wait(message.GetWaitingReason())...)
 				if activity := message.GetActivity(); activity != "" {

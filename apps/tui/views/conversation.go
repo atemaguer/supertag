@@ -341,6 +341,24 @@ type Message struct {
 	// The running turn this message is on its way into, or was taken in by: that turn answers
 	// it. Empty when the message runs as its own turn.
 	Answering string
+	// Where the turn's changes went, once it delivered any: its Session's branch, in the
+	// Workspace's own repository or, for a remote Workspace, on its git server.
+	Delivery *Delivery
+}
+
+// Delivery is where a turn's changes went.
+type Delivery struct {
+	Branch    string
+	Workspace string
+	// The Workspace is remote: the branch is on its git server, not in a local repository.
+	Remote bool
+}
+
+func (x *Message) GetDelivery() *Delivery {
+	if x != nil {
+		return x.Delivery
+	}
+	return nil
 }
 
 // A message the Tag wrote while its turn ran.
