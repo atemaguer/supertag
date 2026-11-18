@@ -95,8 +95,9 @@ Permission Sets also control powerful tools supplied by a harness or execution e
 A Task never runs with an action its harness cannot enforce: it waits for a host that can run it,
 or fails. Current Codex models run commands only in Codex's code mode, which can reach
 the network. A Codex Tag therefore needs `web:fetch`, and the `files:write` that Codex requires
-with it, as well as `commands:execute` to run commands. Claude Code, OpenCode, and Cursor run commands only on a Worker Host that allows
-unsandboxed commands, or, for Cursor, in a shared execution environment.
+with it, as well as `commands:execute` to run commands. Claude Code and Cursor run commands in a sandbox such as a local-vm container. Otherwise
+Claude Code, OpenCode, and Cursor run commands only on a Worker Host that allows unsandboxed
+commands.
 
 ```yaml
 apiVersion: supertag/v1

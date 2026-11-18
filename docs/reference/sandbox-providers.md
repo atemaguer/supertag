@@ -192,6 +192,12 @@ It keeps an honest Task's leftovers, such as a dev server or a file watcher, fro
 What protects the host is rule 1 and rule 3: nothing runs on the host, and nothing returned is
 trusted.
 
+Where the Task can never become root, the seal is also a boundary. The local-vm container
+provider runs every Task process as an unprivileged user, with every capability dropped and no
+way to gain privileges, and refuses a root Workspace user. Only the seal and Capture run as root,
+each in a privileged process of its own. A Task process there cannot hide from the seal or replace
+the program that reads the tree. Rules 1 and 3 still protect the host.
+
 ### Planned additions
 
 These will become requirements when they ship. A provider written now should leave room for

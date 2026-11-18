@@ -37,8 +37,18 @@ shows the host, and `supertag logs -f studio` shows its log. See
 ### Harnesses without a sandbox
 
 Codex runs commands inside its own sandbox. Claude Code, OpenCode, and Cursor have no
-operating-system sandbox that SuperTag can enforce, so a host does not run their Tasks that may
-run commands until you consent:
+operating-system sandbox that SuperTag can enforce. For Claude Code and Cursor, run their Tasks in
+containers on this machine's Docker or Podman instead:
+
+```yaml
+    environment: local-vm
+```
+
+Their file tools and commands then run in a container with no network, and the harness and its
+keys stay on the host. `supertag init` sets this up when Docker or Podman is running. See
+[local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
+
+Otherwise a host does not run their Tasks that may run commands until you consent:
 
 ```yaml
     allow-unsandboxed-commands: [claude-code, cursor]
@@ -202,6 +212,7 @@ has no built-in tool that could run on the host:
 
 | Option | Runs the Workspace in |
 | --- | --- |
+| `--local-vm` (`environment: local-vm`) | A container on this machine's Docker or Podman per Task Attempt |
 | `--e2b-workspace-provider` | An E2B sandbox per Task Attempt |
 | `--modal-workspace-provider` | A Modal sandbox per Task Attempt, with `SUPERTAG_MODAL_WORKSPACE_APP` and optionally `SUPERTAG_MODAL_WORKSPACE_IMAGE` |
 | `--workspace-provider` | Your own provider's sandbox per Task Attempt, given only the variables you name with `--workspace-provider-env`; see [Run your own provider](../reference/sandbox-providers.md#run-your-own-provider) |
@@ -214,8 +225,8 @@ command stops at its own time limit inside the sandbox. Before the Workspace ret
 stops every process the Task left running there. Files your ignore rules match, such as
 `node_modules/`, and any `.git` directory a command creates stay in the sandbox and are not
 returned; the Task output directory is always returned. A Task whose Permission Sets hide paths
-can't run commands there, because the sandbox holds the whole checkout. A remote sandbox caps a
-Task Attempt at 3600 seconds, the longest those providers grant. A Tag
+can't run commands there, because the sandbox holds the whole checkout. A sandbox caps a
+Task Attempt at 3600 seconds, the longest E2B and Modal grant. A Tag
 requires a shared environment with `tag put --shared-execution-environment ID`. A repository's
 `.devcontainer` settings choose the sandbox's image, user, and setup commands; see
 [Devcontainer settings](../reference/devcontainer-subset.md).
@@ -309,8 +320,9 @@ confirm a reply.
 
 - **A Task stays queued.** Run `supertag placement explain TASK_ID`.
 - **The host stops with a sign-in error.** Run `supertag sign-in HARNESS` as the host's user.
-- **A Claude Code, Cursor, or OpenCode Task that may run commands stays queued.** Add the
-  harness to `allow-unsandboxed-commands`, or run Tasks that do not need commands.
+- **A Claude Code, Cursor, or OpenCode Task that may run commands stays queued.** Set
+  `environment: local-vm` on a Claude Code or Cursor host, add the harness to
+  `allow-unsandboxed-commands`, or run Tasks that do not need commands.
 - **A Codex Task fails because its model needs Codex code mode to run commands.** Grant the Tag
   `web:fetch` and `files:write` as well as `commands:execute`, or select a Codex model that is not code-mode-only.
   `allow-unsandboxed-commands` does not apply to Codex. See

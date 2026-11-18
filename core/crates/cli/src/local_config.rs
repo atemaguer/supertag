@@ -430,7 +430,11 @@ fn shape_digest(value: &serde_json::Value) -> String {
     ))
 }
 
-fn parse(bytes: &[u8], base: &Path, lookup: impl Fn(&str) -> Option<String>) -> Result<Config> {
+pub(crate) fn parse(
+    bytes: &[u8],
+    base: &Path,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Result<Config> {
     let invalid = || anyhow::anyhow!("invalid or unsupported local service configuration");
     let (value, environment) = resolved(bytes, base, lookup)?;
     let shape = shape_digest(&value);

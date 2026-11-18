@@ -18,6 +18,10 @@ Check this page before [installing SuperTag](install.md).
 - **npm**, included with Node.js, to install the TypeScript SDK. Source-development tools are
   listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - **git**, available on `PATH`, and a repository for your first Task.
+- **Docker or Podman**, running for the Worker Host's user, to keep Claude Code and Cursor Tasks in
+  [local-vm containers](../reference/supertag-yaml.md#local-vm-containers). On macOS, Docker
+  Desktop provides the Linux virtual machine. Allow about 1 GB for the container image and
+  Workspace copies.
 - **macOS on Apple silicon, or Linux on arm64 or amd64.** Linux needs glibc 2.36 or newer, as in
   Debian 12 or Ubuntu 24.04. Intel Macs have no release; [build the CLI](install.md#build-only-the-cli)
   there instead. Restarting background services uses launchd on macOS and systemd user services on
@@ -128,8 +132,9 @@ a Cursor Tag with a token, cost, or native agent limit is refused.
 For colocated local Tasks, SuperTag allows Cursor's read, search, list, and MCP tools.
 It adds edit only for `files:write` and enables web search only for `web:search`.
 Subagents and Cursor's built-in shell stay disabled. To run commands, grant both `files:write`
-and `commands:execute` and set `allow-unsandboxed-commands: [cursor]` on the host service.
-The adapter runs those commands on the host, with the host's network access, so a package manager
+and `commands:execute`, and set `environment: local-vm` on the host service to run them in a
+container, or `allow-unsandboxed-commands: [cursor]` to run them on the host.
+With `allow-unsandboxed-commands`, the adapter runs those commands on the host, with the host's network access, so a package manager
 can fetch the version pinned by the project. Use a trusted repository for local command access,
 or use a [remote environment](#cursor-with-a-remote-environment) to isolate its commands.
 
@@ -142,8 +147,8 @@ client. Sandboxed SDK runs reject inline MCP server tools because they cannot as
 
 ### Cursor with a remote environment
 
-A Worker Host run with `--e2b-workspace-provider`, `--modal-workspace-provider`, or
-`--workspace-provider` runs Cursor's
+A Worker Host run with `--local-vm`, `--e2b-workspace-provider`, `--modal-workspace-provider`,
+or `--workspace-provider` runs Cursor's
 SDK on the host and keeps the Workspace in a sandbox; see
 [Run a harness in a sandbox](../guides/workers.md#run-a-harness-in-a-sandbox). Its API key and native Session state stay there; provider keys never enter
 the sandbox's files, environment variables, or processes. Install your project's command

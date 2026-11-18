@@ -3,6 +3,8 @@
  * Host's own container runtime, which on macOS is a Linux virtual machine. The harness and its
  * keys stay on the host; file and command tools run in the container, with no network.
  */
+import { accessSync, constants } from "node:fs";
+import { delimiter, join } from "node:path";
 import {
   type ContainerProviderOptions,
   createContainerWorkspaceSession,
@@ -34,9 +36,23 @@ export interface LocalVmOptions {
   readonly memory: string;
 }
 
+/** Docker when its CLI is on PATH, then Podman; Docker otherwise, to name in the error. */
+function runtimeOnPath(path: string | undefined): string {
+  const found = (name: string) =>
+    (path ?? "").split(delimiter).some((directory) => {
+      try {
+        accessSync(join(directory, name), constants.X_OK);
+        return directory !== "";
+      } catch {
+        return false;
+      }
+    });
+  return ["docker", "podman"].find(found) ?? "docker";
+}
+
 /** The provider's settings, from the environment the Worker Host passes it. */
 export function localVmOptions(environment: NodeJS.ProcessEnv = process.env): LocalVmOptions {
-  const runtime = environment["SUPERTAG_LOCAL_VM_RUNTIME"] || "docker";
+  const runtime = environment["SUPERTAG_LOCAL_VM_RUNTIME"] || runtimeOnPath(environment["PATH"]);
   if (!RUNTIMES.has(runtime)) throw new Error("The local-vm runtime must be docker or podman");
   const image = environment["SUPERTAG_LOCAL_VM_IMAGE"] || undefined;
   const user = environment["SUPERTAG_LOCAL_VM_USER"] || "user";

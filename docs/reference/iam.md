@@ -281,7 +281,7 @@ Runtime actions are captured separately from collaboration surface resources in 
 | `files:read` | enables `Read`, `Glob`, and `Grep` | read-only sandbox | read, grep, glob, ls, and MCP tools |
 | no write permission | removes `Write` and `Edit` | read-only sandbox | no edit tool |
 | `files:write` | enables `Write` and `Edit` | Workspace writes in the `supertag` permission profile | adds edit |
-| `commands:execute` | enables `Bash` only with `allow-unsandboxed-commands: [claude-code]`; with an E2B or Modal Workspace, adds the sandbox's command tool instead; otherwise a Claude Code host does not run the Task | enables shell and unified execution features, and lets commands use loopback sockets. A code-mode-only model, which is every current Codex model, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) | adds shell only with `files:write`, and locally only with `allow-unsandboxed-commands: [cursor]`; with an E2B or Modal Workspace, commands run in the sandbox; otherwise the Task waits |
+| `commands:execute` | enables `Bash` only with `allow-unsandboxed-commands: [claude-code]`; with a local-vm, E2B, or Modal Workspace, adds the sandbox's command tool instead; otherwise a Claude Code host does not run the Task | enables shell and unified execution features, and lets commands use loopback sockets. A code-mode-only model, which is every current Codex model, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) | adds shell only with `files:write`, and locally only with `allow-unsandboxed-commands: [cursor]`; with an E2B or Modal Workspace, commands run in the sandbox; otherwise the Task waits |
 | `web:fetch` | enables `WebFetch` | requires `files:write`; enables outbound network in the `supertag` permission profile, for commands too, limited to the Task's [network scope](#network-scopes) | not supported: the Task waits |
 | `web:search` | enables `WebSearch` | enables live web search | adds `webSearch` |
 | `browser:use` | not supported | not supported | not supported: the Task waits |
@@ -666,8 +666,9 @@ Codex enforces the [harness-native tools](#harness-native-tools) runtime actions
 operating-system sandbox. Claude Code, OpenCode, and Cursor on a local Worker Host do not provide
 an enforced command boundary: their shell tools run commands as the Worker Host's user. SuperTag therefore
 places a Task with `commands:execute` on them only when the host service lists them in
-`allow-unsandboxed-commands`. Otherwise the Task goes to a Worker Host that may run commands, such
-as one serving Codex, or waits. See
+`allow-unsandboxed-commands`. On a host with `environment: local-vm`, Claude Code and Cursor run
+commands in a container instead. Otherwise the Task goes to a Worker Host that may run commands,
+such as one serving Codex, or waits. See
 [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).
 
 `files:write` alone needs no opt-in. The harness writes files through its own file tools, inside

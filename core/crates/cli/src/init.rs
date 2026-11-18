@@ -62,6 +62,39 @@ impl Found {
     }
 }
 
+/// Where a harness without its own sandbox runs commands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Commands {
+    /// In a container on this machine's Docker or Podman (`environment: local-vm`).
+    LocalVm,
+    /// On this machine, as the operator (`allow-unsandboxed-commands`).
+    Unsandboxed,
+    /// Neither: Codex sandboxes its own, and another harness's Tasks that run commands wait for
+    /// a host that may run them.
+    Unset,
+}
+
+/// The container runtime local-vm would use, when one answers and the local-vm provider is
+/// installed beside this CLI.
+fn container_runtime() -> Option<&'static str> {
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(runtime) = std::env::var("SUPERTAG_TEST_INIT_CONTAINER_RUNTIME") {
+        return ["docker", "podman"]
+            .into_iter()
+            .find(|candidate| *candidate == runtime);
+    }
+    crate::harness::local_vm_bridge().ok()?;
+    ["docker", "podman"].into_iter().find(|runtime| {
+        Command::new(runtime)
+            .arg("info")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    })
+}
+
 /// Harnesses this machine can run: claude, codex or opencode on PATH; Cursor through
 /// CURSOR_API_KEY.
 fn installed_harnesses() -> Vec<Found> {
@@ -367,7 +400,7 @@ struct Answers {
     port: u16,
     harness: Found,
     model: Option<String>,
-    unsandboxed: bool,
+    commands: Commands,
     workspace: String,
     tag: String,
 }
@@ -621,36 +654,29 @@ fn answers(
         (Found::Opencode, None) => unreachable!("--yes never selects OpenCode"),
         _ => None,
     };
-    let unsandboxed = match (harness, ask.as_deref_mut()) {
-        (Found::ClaudeCode | Found::Opencode | Found::Cursor, Some(prompter)) => {
+    let runtime = matches!(harness, Found::ClaudeCode | Found::Cursor)
+        .then(container_runtime)
+        .flatten();
+    let commands = match (runtime, ask.as_deref_mut()) {
+        (Some(runtime), Some(prompter)) => {
             let name = harness.harness();
             outln!(
-                "{name} runs commands as you, without a sandbox, so give its Tags only trusted work. Codex sandboxes its commands."
+                "{name} has no sandbox of its own. SuperTag can run its commands and file tools in a container on {runtime} (local-vm), with no network and none of your files but the Workspace."
             );
-            let allowed = prompter.confirm(
-                &format!("Allow {name} to run commands without a sandbox?"),
-                true,
-            )?;
-            if !allowed {
-                outln!(
-                    "  Tasks that run commands will not run on {name}. To allow it later, add allow-unsandboxed-commands to its host in supertag.yaml."
-                );
+            if prompter.confirm(&format!("Run {name}'s Tasks in local-vm containers?"), true)? {
+                Commands::LocalVm
+            } else {
+                unsandboxed(harness, Some(prompter))?
             }
-            allowed
         }
-        (Found::ClaudeCode | Found::Opencode | Found::Cursor, None) => {
+        (Some(runtime), None) => {
             outln!(
-                "  Allowed {} to run commands without a sandbox (allow-unsandboxed-commands in supertag.yaml); remove it there and run supertag up to undo.",
+                "  Runs {}'s commands and file tools in containers on {runtime} (environment: local-vm in supertag.yaml). The first Task builds the container image, which takes a few minutes.",
                 harness.harness()
             );
-            true
+            Commands::LocalVm
         }
-        (Found::Codex, _) => {
-            outln!(
-                "  Gave the Codex lead web:fetch in the local-tools Permission Set: current Codex models run commands only in Codex code mode, which SuperTag starts only for Tasks that may also fetch from the web, so its commands can reach the network. To keep them offline, remove web:fetch from supertag.yaml, select a Codex model that is not code-mode-only, and run supertag up."
-            );
-            false
-        }
+        (None, prompter) => unsandboxed(harness, prompter)?,
     };
     let workspace = match ask.as_deref_mut() {
         None => repository.name.clone(),
@@ -676,9 +702,51 @@ fn answers(
         port,
         harness,
         model,
-        unsandboxed,
+        commands,
         workspace,
         tag,
+    })
+}
+
+/// Whether a harness without a container runs commands on this machine, unsandboxed. Codex
+/// sandboxes its own.
+fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
+    Ok(match (harness, ask) {
+        (Found::ClaudeCode | Found::Opencode | Found::Cursor, Some(prompter)) => {
+            let name = harness.harness();
+            outln!(
+                "{name} runs commands as you, without a sandbox, so give its Tags only trusted work. Codex sandboxes its commands."
+            );
+            if harness != Found::Opencode {
+                outln!(
+                    "With Docker or Podman running, {name} can run them in containers instead: set environment: local-vm on its host in supertag.yaml."
+                );
+            }
+            if prompter.confirm(
+                &format!("Allow {name} to run commands without a sandbox?"),
+                true,
+            )? {
+                Commands::Unsandboxed
+            } else {
+                outln!(
+                    "  Tasks that run commands will not run on {name}. To allow it later, add allow-unsandboxed-commands to its host in supertag.yaml."
+                );
+                Commands::Unset
+            }
+        }
+        (Found::ClaudeCode | Found::Opencode | Found::Cursor, None) => {
+            outln!(
+                "  Allowed {} to run commands without a sandbox (allow-unsandboxed-commands in supertag.yaml); remove it there and run supertag up to undo.",
+                harness.harness()
+            );
+            Commands::Unsandboxed
+        }
+        (Found::Codex, _) => {
+            outln!(
+                "  Gave the Codex lead web:fetch in the local-tools Permission Set: current Codex models run commands only in Codex code mode, which SuperTag starts only for Tasks that may also fetch from the web, so its commands can reach the network. To keep them offline, remove web:fetch from supertag.yaml, select a Codex model that is not code-mode-only, and run supertag up."
+            );
+            Commands::Unset
+        }
     })
 }
 
@@ -697,8 +765,10 @@ fn document(answers: &Answers, repository: &Repository) -> Value {
     if let Some(model) = &answers.model {
         host["models"] = json!({ harness: model });
     }
-    if answers.unsandboxed {
-        host["allow-unsandboxed-commands"] = json!([harness]);
+    match answers.commands {
+        Commands::LocalVm => host["environment"] = json!("local-vm"),
+        Commands::Unsandboxed => host["allow-unsandboxed-commands"] = json!([harness]),
+        Commands::Unset => {}
     }
     let mut permissions = vec![
         json!({ "target": "runtime", "action": "commands:execute" }),
@@ -791,7 +861,7 @@ mod tests {
             port: DEFAULT_PORT,
             harness: Found::Codex,
             model: None,
-            unsandboxed: false,
+            commands: Commands::Unset,
             workspace: "app".into(),
             tag: "lead".into(),
         };
@@ -856,7 +926,7 @@ mod tests {
             port: DEFAULT_PORT,
             harness: Found::ClaudeCode,
             model: None,
-            unsandboxed: true,
+            commands: Commands::Unsandboxed,
             workspace: "app".into(),
             tag: "lead".into(),
         };
@@ -868,6 +938,34 @@ mod tests {
             !permissions.to_string().contains("web:fetch"),
             "{permissions}"
         );
+    }
+
+    #[test]
+    fn a_local_vm_host_runs_commands_in_containers_without_the_unsandboxed_opt_in() {
+        let repository = Repository {
+            root: PathBuf::from("/work/app"),
+            name: "app".into(),
+            start: Start::Branch("main".into()),
+        };
+        let answers = Answers {
+            port: DEFAULT_PORT,
+            harness: Found::ClaudeCode,
+            model: None,
+            commands: Commands::LocalVm,
+            workspace: "app".into(),
+            tag: "lead".into(),
+        };
+        let document = document(&answers, &repository);
+        let host = &document["services"][machine_name()];
+        assert_eq!(host["environment"], "local-vm");
+        assert!(host.get("allow-unsandboxed-commands").is_none(), "{host}");
+        let config = local_config::parse(
+            local_config::to_yaml(&document).as_bytes(),
+            Path::new("/work"),
+            |_| None,
+        )
+        .unwrap();
+        assert!(config.hosts[0].local_vm);
     }
 
     #[test]

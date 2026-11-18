@@ -91,8 +91,8 @@ turns. Reported tokens are not a billing cap. See [Budgets and allocation](coord
 | Harness | Adapter | Credentials it receives | Commands |
 | --- | --- | --- | --- |
 | `codex` | Built into `supertag`; drives Codex's app-server | `CODEX_API_KEY`, `OPENAI_API_KEY`, and a copy of a file-backed sign-in | In Codex's sandbox, writable only in the checkout and read-write Workspace Volume copies. A code-mode-only model, such as gpt-6-sol, runs commands only when the Task also has `web:fetch`; see [Codex commands and models](../operations/requirements.md#codex-commands-and-models) |
-| `claude-code` | Node bridge on the Claude Agent SDK | `ANTHROPIC_API_KEY` or the host user's sign-in | Without a sandbox, only with `--allow-unsandboxed-commands`; a permission hook keeps file tools in the Task's roots. On a host with an E2B or Modal Workspace, in the Task's sandbox, with no built-in tool |
-| `cursor` | Node bridge on the Cursor SDK | `CURSOR_API_KEY` | Without a sandbox, only with `--allow-unsandboxed-commands`; in the Task's sandbox on a host with an E2B or Modal Workspace; or in a shared execution environment |
+| `claude-code` | Node bridge on the Claude Agent SDK | `ANTHROPIC_API_KEY` or the host user's sign-in | In a container with `--local-vm`, or in the Task's sandbox on a host with an E2B or Modal Workspace, with no built-in tool. Without a sandbox, only with `--allow-unsandboxed-commands`; a permission hook keeps file tools in the Task's roots |
+| `cursor` | Node bridge on the Cursor SDK | `CURSOR_API_KEY` | In a container with `--local-vm`; in the Task's sandbox on a host with an E2B or Modal Workspace; in a shared execution environment; or without a sandbox, only with `--allow-unsandboxed-commands` |
 | `opencode` | Node bridge | The selected provider's API key, or `--opencode-auth-file` | Without a sandbox, only with `--allow-unsandboxed-commands` |
 | `openai-agents` | The `supertag` Python package | `OPENAI_API_KEY` | The tools the Task's permissions allow |
 

@@ -3,7 +3,7 @@ import { BASE_DOCKERFILE, localVmOptions } from "./src/index.js";
 
 describe("local-vm options", () => {
   it("builds the pinned base image by default", () => {
-    const options = localVmOptions({});
+    const options = localVmOptions({ PATH: "" });
     expect(options).toMatchObject({ runtime: "docker", user: "user", memory: "8g" });
     expect(options.image).toEqual({ dockerfile: BASE_DOCKERFILE });
     expect(BASE_DOCKERFILE).toMatch(/^FROM debian:bookworm-slim@sha256:[0-9a-f]{64}\n/u);
@@ -26,6 +26,15 @@ describe("local-vm options", () => {
       user: "dev",
       memory: "4g",
     });
+  });
+
+  it("finds Podman on PATH when Docker is absent", async () => {
+    const { mkdtemp, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const directory = await mkdtemp(join(tmpdir(), "local-vm-path-"));
+    await writeFile(join(directory, "podman"), "#!/bin/sh\n", { mode: 0o755 });
+    expect(localVmOptions({ PATH: directory }).runtime).toBe("podman");
   });
 
   it("refuses an unknown runtime, user, or memory", () => {

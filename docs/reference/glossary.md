@@ -129,11 +129,15 @@ whole system rather than another first-class resource.
   OpenAI Agents. See [Worker Hosts and harnesses](../concepts/workers.md).
 - <a id="harness-adapter"></a>**harness adapter** — the process a Worker Host starts for each Task Attempt to drive a
   harness through the harness protocol. See [Write a harness adapter](../guides/harness-adapters.md).
-- <a id="execution-environment"></a>**execution environment** — where a Task's files and commands live: a local checkout, an E2B
-  or Modal sandbox, or a shared execution environment.
+- <a id="execution-environment"></a>**execution environment** — where a Task's files and commands live: a local checkout, a
+  local-vm container, an E2B or Modal sandbox, or a shared execution environment.
+- <a id="local-vm"></a>**local-vm** — a Worker Host `environment` that keeps each Task Attempt's Workspace in a
+  container on the host's own Docker or Podman, with no network. See
+  [local-vm containers](supertag-yaml.md#local-vm-containers).
 - <a id="unsandboxed-harness"></a>**unsandboxed harness** — a harness that runs a Task's commands as the Worker Host's user,
   without an operating-system sandbox: Claude Code, Cursor, or OpenCode on a local host. A host runs their Tasks
-  that may run commands only after `allow-unsandboxed-commands` opts in. See
+  that may run commands only after `allow-unsandboxed-commands` opts in; a local-vm host runs
+  Claude Code and Cursor commands in containers instead. See
   [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).
 - <a id="task-attempt"></a>**Task Attempt** — one execution of a Task on a Worker Host; a retry is another Task Attempt.
   See [Scheduling and interrupted execution](scheduling-and-recovery.md).
