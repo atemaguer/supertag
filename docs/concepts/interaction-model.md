@@ -1,7 +1,7 @@
 # How you direct your Tags
 
 With most coding agents, you direct work one task at a time and coordinate the agents running in
-parallel yourself. SuperTag changes both: you define outcomes, not tasks. You talk to one Tag,
+parallel yourself. SuperTag changes both: you give Tags jobs, not tasks. You talk to one Tag,
 which keeps what it owns from one piece of work to the next, and for bigger work you define the
 outcome once and the Tag delivers it with its Team.
 

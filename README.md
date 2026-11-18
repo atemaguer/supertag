@@ -7,9 +7,11 @@
 
 **Persistent, proactive, multiplayer AI actors for engineering work.**
 
-**Define outcomes, not tasks.** Give a Tag — a persistent AI actor with its own identity, responsibilities, permissions, and work history — an engineering outcome or an enduring responsibility. It keeps the work going until it's done, acts on its responsibilities without being asked, and works alongside your teammates and their Tags, on Claude Code, Codex, Cursor, or OpenCode and on machines you choose.
+Open source and self-hosted, on the coding agents your team already uses.
 
-[Define outcomes](#define-outcomes-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [Run your first Tag](#run-your-first-tag) · [Documentation](docs/README.md)
+**Give them jobs, not tasks.** A Tag is a persistent AI actor with its own identity, permissions, and work history. Give it a job, the responsibilities it keeps up and the outcomes it delivers, and it keeps the work going, acts without being asked, and works alongside your teammates and their Tags, on Claude Code, Codex, Cursor, or OpenCode and on machines you choose.
+
+[Jobs, not tasks](#give-them-jobs-not-tasks) · [Persistent](#persistent) · [Proactive](#proactive) · [Multiplayer](#multiplayer) · [Run your first Tag](#run-your-first-tag) · [Documentation](docs/README.md)
 
 <p>
   <img src="assets/images/supertag-meet-the-tags.png" alt="Meet the Tags — nine SuperTag mascots with round and elongated builds, colorful jackets, hats, and glasses" width="900" height="360">
@@ -17,17 +19,30 @@
 
 </div>
 
-## Define outcomes, not tasks
+## Give them jobs, not tasks
 
-A coding agent takes one task at a time. It can investigate a bug, write a fix, and run tests.
-When the work is bigger than one task, you become its project manager: you split the work, start
-a coding agent on each piece, carry context between them, and decide what happens next.
+Today you give a coding agent a task: a prompt, a diff, a review, then the next prompt. It can
+investigate a bug, write a fix, and run tests. But you remember what happened last time, notice the
+next failure, and decide what happens next. When the work is bigger than one task, you become its
+project manager: you split the work, start a coding agent on each piece, and carry context between
+them.
 
-With SuperTag, you hand that job to a Tag. An **Objective** records an outcome, the evidence
-you'll use to decide when it's done, and any constraints, budget, or deadline you set. The owning
-Tag decides what work to start, hands pieces to the other Tags on its **Team**, reviews what comes
-back, and brings you findings, branches, and the decisions that need your approval. You steer the
-owning Tag; you don't manage its coding agents.
+A Tag has a job instead. A job is made of the responsibilities a Tag keeps up, such as keeping
+main green, and the outcomes it delivers, such as moving 12 services to short-lived credentials.
+
+| A task | A job |
+| --- | --- |
+| "Fix this flaky test" | "Keep main green", and deliver the outcomes you give it |
+| Starts when you prompt it | Acts when CI fails, an alert fires, or a teammate asks |
+| Ends when the diff merges | Continues, and remembers what it learned |
+| You check whether it worked | It brings the evidence: the checks it ran and what it verified |
+| Any coding agent session can take it | Has its own identity, permissions, and history |
+
+Each outcome is an **Objective**. It records the evidence you'll use to decide when it's done,
+and any constraints, budget, or deadline you set. The owning Tag decides what work to start,
+hands pieces to the other Tags on its **Team**, reviews what comes back, and brings you findings,
+branches, and the decisions that need your approval. You steer the owning Tag; you don't manage
+its coding agents.
 
 To move 12 services to short-lived credentials, give `lead` the rollout Objective. It coordinates
 Tags that update trust policy and service code, review tests and telemetry, and rehearse the
@@ -182,7 +197,7 @@ off.
 | **Coding agents** · [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://learn.chatgpt.com/docs/codex/cli), [OpenCode](https://opencode.ai/docs/) | Writing, fixing, and testing code while you work with them. | When you close the chat, the work stops. You have to remember the goal and start the next step yourself. | **The work keeps going.** A Tag remembers the goal and puts a coding agent on the next step itself. It also responds to new errors and alerts without you asking. Your coding agents still write the code. |
 | **Parallel agent tools** · [Paradev (formerly Superset)](https://docs.paradev.com/recipes/parallel-workstreams), [Conductor](https://www.conductor.build/docs/concepts/parallel-agents) ([winding down](https://www.conductor.build/announcement)) | Running several coding agents at once and showing you all the changes. | You still decide what each agent works on and check that the results fit together. | **Someone else manages the agents.** Tell a Tag what you want done and how to check it. It hands out the pieces, checks they fit, and sends you the results. |
 | **Agent projects** · [Cursor Projects](https://cursor.com/docs/agent/projects), [Claude Code Projects](https://code.claude.com/docs/en/claude-projects), [GitHub Copilot Projects](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-projects) | Several agents working toward one goal over weeks or months. In Cursor, teammates can join the same project. | Each project runs one company's agents, mostly on that company's cloud. | **Mix coding agents and machines.** Your Tag can run on Claude Code on your laptop while a teammate's runs on Codex on theirs, and they still work together. |
-| **Hosted AI teammates** · [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | An AI helper that's always available, remembers past work, and acts on its own. | It runs on the company's models and cloud computers, by the company's rules. | **Run it yourself.** Tags use the coding agents you already pay for, run on your own machines, and can only do what you allow. |
+| **Hosted AI teammates** · [Devin Bots](https://devin.ai/blog/introducing-devin-bots), [OpenAI dots](https://openai.com/index/introducing-dots/), [Grok Bot](https://x.ai/news/introducing-grok-bot) | An AI helper that's always available, remembers past work, and acts on its own. | It runs on the company's models and cloud computers, by the company's rules. | **Run it yourself.** Tags use the coding agents you already pay for, run on your own machines, and can only do what you allow. |
 | **Self-hosted agents** · [OpenClaw](https://docs.openclaw.ai/concepts/multi-agent), [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban) | Running your own AI agents with their own tools and memory, for any kind of task. | They're general assistants. They aren't built around your coding agents, code review, or checking that engineering work is done. | **Built for engineering work.** Tags run on Claude Code, Codex, Cursor, or OpenCode. Code changes come back as branches for your review, and each outcome comes with a way to check it's done. |
 
 [See how SuperTag fits with other agent systems](docs/concepts/supertag-and-other-agent-systems.md).

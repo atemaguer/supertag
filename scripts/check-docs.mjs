@@ -104,7 +104,7 @@ const problems = [
 ];
 // Explain the Objective-driven way of working before the quickstart.
 const readme = readFileSync(join(root, "README.md"), "utf8");
-const positioningHeading = "## Define outcomes, not tasks";
+const positioningHeading = "## Give them jobs, not tasks";
 const quickstartHeading = "## Run your first Tag";
 const positioningStart = readme.indexOf(positioningHeading);
 const quickstartStart = readme.indexOf(quickstartHeading);

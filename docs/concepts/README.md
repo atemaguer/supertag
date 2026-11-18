@@ -2,8 +2,8 @@
 
 Start here if you want to understand SuperTag before configuring it.
 
-SuperTag runs persistent, proactive, multiplayer AI actors for engineering work. You define
-outcomes, not tasks. A Tag is a persistent AI actor with a stable identity, responsibilities,
+SuperTag runs persistent, proactive, multiplayer AI actors for engineering work. You give them
+jobs, not tasks: the responsibilities they keep up and the outcomes they deliver. A Tag is a persistent AI actor with a stable identity, responsibilities,
 permissions, and work history. Give it an enduring responsibility and it acts on it without being
 asked; your teammates' Tags coordinate with it without involving you. You talk to a Tag or give it an outcome
 with success criteria, constraints, a budget, a deadline, and decisions that need a person. It

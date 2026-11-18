@@ -1,7 +1,7 @@
 # SuperTag documentation
 
-SuperTag runs persistent, proactive, multiplayer AI actors for engineering work: you define
-outcomes, not tasks. A **Tag** is a persistent AI actor with a stable identity, responsibilities,
+SuperTag runs persistent, proactive, multiplayer AI actors for engineering work: you give them
+jobs, not tasks. A **Tag** is a persistent AI actor with a stable identity, responsibilities,
 permissions, and work history. It exists independently of the
 model or harness executing its work. Talk to it in your terminal, in Slack, or on a GitHub issue.
 It runs work on your coding agents, asks when a decision is yours, and returns a git branch to
