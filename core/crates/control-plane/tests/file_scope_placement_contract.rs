@@ -301,7 +301,7 @@ async fn contract(url: &str) {
     assert!(
         waiting
             .summary
-            .contains("add opencode to allow-unsandboxed-commands"),
+            .contains("add opencode to its allow-unsandboxed-commands"),
         "{}",
         waiting.summary
     );

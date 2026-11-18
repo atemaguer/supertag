@@ -180,6 +180,7 @@ export type ScopedHarness =
   | "claude-code"
   | "claude-code-remote"
   | "opencode"
+  | "opencode-remote"
   | "cursor-local"
   | "cursor-remote"
   | "cursor-shared";
@@ -188,6 +189,7 @@ const HARNESS_NAMES: Record<ScopedHarness, string> = {
   "claude-code": "Claude Code",
   "claude-code-remote": "Claude Code",
   opencode: "OpenCode",
+  "opencode-remote": "OpenCode",
   "cursor-local": "Cursor",
   "cursor-remote": "Cursor",
   "cursor-shared": "Cursor",

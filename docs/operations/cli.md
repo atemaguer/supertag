@@ -52,12 +52,12 @@ Tag's name; for OpenCode it also asks for a `provider/model`. It writes
 - a `host` service named after this machine, which maps the repository as a Workspace and runs
   up to three Task Attempts at once (`concurrency: 3`), so one stuck Task does not hold every Tag.
 
-When you choose Claude Code or Cursor and Docker or Podman is running, `init` offers to run the
+When you choose Claude Code, Cursor, or OpenCode and Docker or Podman is running, `init` offers to run the
 harness's Tasks in containers on it, defaulting to yes; `--yes` accepts. The host then gets
 `environment: local-vm`, and the first Task builds the container image. See
 [local-vm containers](../reference/supertag-yaml.md#local-vm-containers).
 
-Otherwise, and for OpenCode, `init` explains that the harness runs commands as you,
+Otherwise `init` explains that the harness runs commands as you,
 without a sandbox, so its Tags should get only trusted work, and asks whether to allow that,
 defaulting to yes. The answer becomes the host's `allow-unsandboxed-commands`; without it, the
 lead Tag's Tasks that run commands wait. `--yes` allows it and prints how to undo it. See

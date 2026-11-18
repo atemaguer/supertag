@@ -314,6 +314,64 @@ export function openCodeConfigurationEnvironment(
   };
 }
 
+/**
+ * OpenCode in a remote Workspace, such as a local-vm container: every built-in tool is off,
+ * because each would run on the Worker Host, and the Task's tools are the MCP servers in `tools`,
+ * the Workspace's among them. No subagent runs.
+ */
+export function openCodeRemoteConfigurationEnvironment(
+  model: string,
+  tools: readonly OpenCodeMcpTool[],
+): Readonly<Record<string, string>> {
+  // The last matching rule wins: "*" denies every built-in, then each served tool is allowed.
+  const permission: Record<string, unknown> = { "*": "deny" };
+  const enabled: Record<string, boolean> = { "*": false };
+  const mcp: Record<string, unknown> = Object.create(null);
+  for (const tool of tools) {
+    if (!/^[\w-]+$/u.test(tool.name)) throw new Error("Invalid MCP server name");
+    const aliases = new Set([tool.name, tool.name.replace(/[^a-zA-Z0-9_]/gu, "_")]);
+    for (const alias of aliases)
+      for (const operation of tool.operations) {
+        permission[`${alias}_${operation}`] = "allow";
+        enabled[`${alias}_${operation}`] = true;
+      }
+    mcp[tool.name] = {
+      type: "remote",
+      url: tool.url,
+      headers: tool.headers,
+      enabled: true,
+      oauth: false,
+    };
+  }
+  const config = {
+    $schema: "https://opencode.ai/config.json",
+    model,
+    share: "disabled",
+    autoupdate: false,
+    plugin: [],
+    formatter: false,
+    lsp: false,
+    mcp,
+    tools: enabled,
+    permission,
+    agent: {
+      build: { mode: "primary", permission, tools: enabled },
+      plan: { disable: true },
+      general: { disable: true },
+      explore: { disable: true },
+    },
+  };
+  return {
+    OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
+    OPENCODE_PERMISSION: JSON.stringify(permission),
+    OPENCODE_DISABLE_AUTOUPDATE: "true",
+    OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
+    OPENCODE_DISABLE_CLAUDE_CODE: "true",
+    OPENCODE_DISABLE_PROJECT_CONFIG: "true",
+    OPENCODE_DISABLE_LSP_DOWNLOAD: "true",
+  };
+}
+
 export interface OpenCodeCompletionPart {
   readonly id: string;
   readonly text: string;

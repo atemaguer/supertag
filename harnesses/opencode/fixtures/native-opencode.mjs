@@ -102,9 +102,19 @@ assert.deepEqual(config.plugin, []);
 assert.equal(config.share, "disabled");
 assert.equal(config.autoupdate, false);
 assert.equal(config.permission["*"], "deny");
-assert.equal(config.permission.external_directory, "deny");
-assert.equal(config.permission.read, "allow");
-assert.equal(config.permission.edit, "deny");
+// A remote Workspace turns every built-in tool off; its tools are the workspace MCP server's.
+const remote = config.mcp?.workspace !== undefined;
+if (remote) {
+  assert.equal(config.tools["*"], false);
+  for (const tool of ["read", "edit", "bash", "external_directory", "webfetch", "task"])
+    assert.equal(config.permission[tool], undefined, `remote Workspace offered ${tool}`);
+  for (const agent of ["general", "explore", "plan"])
+    assert.equal(config.agent[agent].disable, true, `remote Workspace kept ${agent}`);
+} else {
+  assert.equal(config.permission.external_directory, "deny");
+  assert.equal(config.permission.read, "allow");
+  assert.equal(config.permission.edit, "deny");
+}
 let prompt = "";
 for await (const chunk of process.stdin) prompt += chunk.toString("utf8");
 assert.ok(prompt.includes("fixture:"));
@@ -124,6 +134,79 @@ if (mode === "bad-json") {
 if (mode === "native-error") {
   emit({ type: "error", error: { message: "synthetic failure" } });
   process.exit(0);
+}
+/** A minimal HTTP MCP client for `server`, as OpenCode's own. */
+function mcpClient(server) {
+  let sessionId;
+  let protocolVersion = "2024-11-05";
+  const rpc = async (id, method, params) => {
+    const response = await fetch(server.url, {
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(150_000),
+      headers: {
+        ...server.headers,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": protocolVersion,
+        ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+    });
+    sessionId = response.headers.get("mcp-session-id") ?? sessionId;
+    if (id === undefined) {
+      assert.equal(response.status, 202);
+      return;
+    }
+    assert.equal(response.status, 200);
+    const body = await response.text();
+    const json = body.startsWith("data:")
+      ? JSON.parse(
+          body
+            .split("\n")
+            .find((line) => line.startsWith("data:"))
+            .slice(5)
+            .trim(),
+        )
+      : JSON.parse(body);
+    assert.equal(json.error, undefined);
+    return json.result;
+  };
+  return {
+    rpc,
+    async initialize() {
+      const initialized = await rpc(1, "initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "supertag-fixture", version: "1" },
+      });
+      protocolVersion = initialized.protocolVersion;
+      await rpc(undefined, "notifications/initialized", {});
+    },
+  };
+}
+if (mode === "remote-command") {
+  assert.ok(remote, "the remote Workspace server is missing");
+  const server = config.mcp.workspace;
+  const endpoint = new URL(server.url);
+  assert.equal(endpoint.hostname, "127.0.0.1");
+  assert.equal(config.permission.workspace_command, "allow");
+  const client = mcpClient(server);
+  await client.initialize();
+  const listed = (await client.rpc(2, "tools/list", {})).tools.map(({ name }) => name);
+  const called = await client.rpc(3, "tools/call", {
+    name: "command",
+    arguments: {
+      command:
+        "{ id -u; uname -s; ls /sys/class/net; } > command-output.txt; cat command-output.txt",
+    },
+  });
+  emit({
+    type: "text",
+    part: {
+      text: `native-remote:${JSON.stringify({ listed, text: called.content[0].text, isError: called.isError })}`,
+    },
+  });
 }
 if (mode === "coordination") {
   const server = config.mcp?.supertag;

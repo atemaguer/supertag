@@ -15,6 +15,7 @@ import {
   resolveOutsideDirectories,
   sessionRecap,
   spawnOwnedProcess,
+  startRemoteWorkspaceHttp,
   type Task,
   TaskEventKind,
   TaskState,
@@ -29,6 +30,7 @@ import {
   type OpenCodeRunRequest,
   type OpenCodeScope,
   openCodeConfigurationEnvironment,
+  openCodeRemoteConfigurationEnvironment,
   readProviderApiKey,
   runOpenCode,
   shortenActivity,
@@ -91,11 +93,22 @@ export function taskModel(run: HarnessRun, configuration: AdapterOptions) {
     throw new SafeOpenCodeFailure("OpenCode Worker Host does not serve an accepted model.");
   if (!Number.isSafeInteger(configuration.timeoutMs) || configuration.timeoutMs <= 0)
     throw new SafeOpenCodeFailure("OpenCode Worker Host has an invalid execution timeout.");
-  if (task.allowedActions.includes("commands:execute") && !configuration.allowUnsandboxedCommands)
+  // In a remote Workspace, such as a local-vm container, commands run in the sandbox.
+  const remote = run.remoteWorkspace;
+  if (
+    task.allowedActions.includes("commands:execute") &&
+    !remote &&
+    !configuration.allowUnsandboxedCommands
+  )
     throw new SafeOpenCodeFailure(
       "OpenCode commands require the Worker Host's explicit unsandboxed opt-in. Native execution did not start.",
     );
-  const refusal = fileScopeRefusal(task, "opencode");
+  // Web tools would run on the Worker Host and its network; placement keeps them off remote lanes.
+  if (remote && task.allowedActions.some((action) => action.startsWith("web:")))
+    throw new SafeOpenCodeFailure(
+      "A remote Workspace cannot carry web actions yet. Native execution did not start.",
+    );
+  const refusal = fileScopeRefusal(task, remote ? "opencode-remote" : "opencode");
   if (refusal) throw new SafeOpenCodeFailure(`${refusal}. Native execution did not start.`);
   const limits = task.executionLimits;
   if (
@@ -221,6 +234,8 @@ export async function nativeRequest(
   context = "",
   /** Whether the turn has `read_session` and `read_turn` to reread the Session. */
   reread = false,
+  /** A remote Workspace: the host directory is empty, and every tool is an MCP server's. */
+  remote = false,
 ) {
   const environment = configuration.environment ?? process.env;
   const scratchPath = environment["SUPERTAG_ADAPTER_STATE_DIRECTORY"] ?? "";
@@ -237,7 +252,8 @@ export async function nativeRequest(
   const scratch = await realpath(scratchPath);
   const workspace = await realpath(workspacePath);
   if (!(await lstat(workspace)).isDirectory()) throw new Error("OpenCode Workspace is missing");
-  const copies = await workspaceCopies(task);
+  // A remote Workspace's Volume copies live in its sandbox, beside the checkout.
+  const copies = remote ? [] : await workspaceCopies(task);
   const fileScope = fileScopeOf(task);
   const rules = new FileScopeRules(fileScope);
   if (!(await verifyWorkspaceLinks(workspace, signal, rules)))
@@ -314,6 +330,11 @@ export async function nativeRequest(
           "Work in this Task's assigned Git worktree. SuperTag records Workspace changes after the Attempt. Do not push, rewrite history, or change other branches.",
         ]
       : []),
+    ...(remote
+      ? [
+          "The Task workspace is in a sandbox. Use the workspace tools, with paths relative to the workspace, for every file and command.",
+        ]
+      : []),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -341,15 +362,17 @@ export async function nativeRequest(
         environment: {
           ...environmentWithoutCredentials,
           ...(keyName && envKey ? { [keyName]: envKey } : {}),
-          ...openCodeConfigurationEnvironment(
-            model,
-            task.allowedActions,
-            tools,
-            true,
-            copies,
-            workspace,
-            scope,
-          ),
+          ...(remote
+            ? openCodeRemoteConfigurationEnvironment(model, tools)
+            : openCodeConfigurationEnvironment(
+                model,
+                task.allowedActions,
+                tools,
+                true,
+                copies,
+                workspace,
+                scope,
+              )),
         },
       };
     },
@@ -437,6 +460,7 @@ export async function runAdapter(
       cancellation,
       tagPortfolio(run),
       (run.coordination?.mayReadTagSessions || run.coordination?.mayReadOwnSession) ?? false,
+      run.remoteWorkspace,
     );
     secrets.push(...native.secrets);
     const coordination = await startCoordination(bridge, run, {
@@ -447,9 +471,27 @@ export async function runAdapter(
       signal: cancellation,
       active: () => active,
     });
+    let workspace: Awaited<ReturnType<typeof startRemoteWorkspaceHttp>> | undefined;
     try {
       secrets.push(...coordinationSecrets(coordination.tools));
-      const request = native.forTools(coordination.tools);
+      workspace = run.remoteWorkspace
+        ? await startRemoteWorkspaceHttp(bridge, task.allowedActions, cancellation)
+        : undefined;
+      secrets.push(...(workspace?.secrets ?? []));
+      const request = native.forTools([
+        ...(workspace
+          ? [
+              {
+                name: workspace.name,
+                url: workspace.url,
+                headers: workspace.headers,
+                operations: workspace.toolNames,
+                audience: "manager" as const,
+              },
+            ]
+          : []),
+        ...coordination.tools,
+      ]);
       const runtime = {
         spawn: (spec: Parameters<typeof spawnOwnedProcess>[0]["spec"], signal?: AbortSignal) => {
           started = true;
@@ -520,6 +562,7 @@ export async function runAdapter(
     } finally {
       active = false;
       await coordination.close();
+      await workspace?.close();
     }
   } catch (error) {
     if (error instanceof ExecutionCleanupError) throw error;

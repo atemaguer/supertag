@@ -242,3 +242,8 @@ so optional AI SDK tracing is off. It disables session sharing, automatic update
 configuration, and uses a Task-local home directory. Editing your personal `opencode.json`
 does not configure SuperTag's OpenCode Tasks. See [OpenCode configuration](https://opencode.ai/docs/config/);
 your selected model provider also has its own data policy.
+
+On a host with `environment: local-vm`, or an E2B or Modal Workspace, SuperTag turns off every
+built-in OpenCode tool and its subagents. The Task's read, write, edit, search, and command tools
+are a `workspace` MCP server whose calls run in the Task's container or sandbox. OpenCode itself,
+and its provider key, stay on the host, in an empty directory.

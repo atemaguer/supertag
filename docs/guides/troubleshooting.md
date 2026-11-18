@@ -80,7 +80,7 @@ and serves its harness and model. `placement explain` names which is missing:
 | No host serves the harness or model | Add the harness or model to a host's `harnesses` or `models` |
 | Hosts are busy or draining | Wait, raise `concurrency`, or `supertag host resume HOST` |
 | An uncertain Task Attempt keeps a host's slot | Confirm it stopped, then run the `supertag task resolve-attempt` command it names |
-| `unsandboxed-commands`: no host lets the harness run commands | Set `environment: local-vm` on a Claude Code or Cursor host, add the harness to a host's `allow-unsandboxed-commands`, or remove `commands:execute` |
+| `unsandboxed-commands`: no host lets the harness run commands | Set `environment: local-vm` on a host, add the harness to a host's `allow-unsandboxed-commands`, or remove `commands:execute` |
 | `file-scope`: the harness cannot enforce the Task's path scope | Run the Tag on a harness that can, or change the scope; see [Path scopes](../reference/iam.md#path-scopes) |
 | `workspace-holder`: a running Task waits for the Worker Host holding its Session's last delivery | Start the host it names, or cancel the Task |
 | `checkpoint-holder`: a queued Task waits up to 10 minutes for the Worker Host holding its Session's checkpoint | Nothing: the holder resumes it, or after the wait another host starts it from the recap |
@@ -103,7 +103,7 @@ supertag sign-in claude-code
 If it reports not signed in, follow the sign-in instructions it prints, as the same user that
 runs the host, and run `supertag up`. Keys belong in `~/.supertag/.env`: a service unit does not
 inherit your shell. Claude Code, Cursor, and OpenCode Tasks that may run commands also need
-`environment: local-vm` (Claude Code and Cursor) or `allow-unsandboxed-commands` on the host; see
+`environment: local-vm` or `allow-unsandboxed-commands` on the host; see
 [Run Worker Hosts](workers.md#harnesses-without-a-sandbox). A local-vm host whose Tasks fail to
 start needs Docker or Podman running for the host's user.
 A Codex Tag on a code-mode-only model needs `web:fetch` as well as `commands:execute` to run

@@ -37,8 +37,8 @@ shows the host, and `supertag logs -f studio` shows its log. See
 ### Harnesses without a sandbox
 
 Codex runs commands inside its own sandbox. Claude Code, OpenCode, and Cursor have no
-operating-system sandbox that SuperTag can enforce. For Claude Code and Cursor, run their Tasks in
-containers on this machine's Docker or Podman instead:
+operating-system sandbox that SuperTag can enforce. Run their Tasks in containers on this
+machine's Docker or Podman instead:
 
 ```yaml
     environment: local-vm
@@ -321,7 +321,7 @@ confirm a reply.
 - **A Task stays queued.** Run `supertag placement explain TASK_ID`.
 - **The host stops with a sign-in error.** Run `supertag sign-in HARNESS` as the host's user.
 - **A Claude Code, Cursor, or OpenCode Task that may run commands stays queued.** Set
-  `environment: local-vm` on a Claude Code or Cursor host, add the harness to
+  `environment: local-vm` on the host, add the harness to
   `allow-unsandboxed-commands`, or run Tasks that do not need commands.
 - **A Codex Task fails because its model needs Codex code mode to run commands.** Grant the Tag
   `web:fetch` and `files:write` as well as `commands:execute`, or select a Codex model that is not code-mode-only.

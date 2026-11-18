@@ -31,7 +31,8 @@ use supertag_protocol::{
         AssignRoleRequest, CancelTaskRequest, ClaimTaskRequest, ExecutionLimits, GetTaskRequest,
         HarnessExecutionProfile, HarnessKind, ListEventsRequest, ListTagsRequest, ModelSource,
         PolicyExecutionSettings, PutRoleRequest, PutTagRequest, Role, SubmitTaskRequest, Task,
-        TaskState, operator_client::OperatorClient, policy_catalog_client::PolicyCatalogClient,
+        TaskState, WorkspaceSpec, operator_client::OperatorClient,
+        policy_catalog_client::PolicyCatalogClient,
     },
 };
 use tokio::time::sleep;
@@ -403,6 +404,193 @@ database_tests! {
     put_tag_cli_preserves_model_and_effort_order_at_admission;
     #[tokio::test]
     opencode_manager_coordination_uses_real_private_harness_with_child_denials;
+    #[tokio::test]
+    opencode_runs_commands_in_a_local_vm_container;
+}
+
+/// OpenCode on a local-vm host: no built-in tool, and its workspace MCP tools reach a container on
+/// this machine's Docker, where the command runs unprivileged with no network. Runs only with
+/// SUPERTAG_TEST_LOCAL_VM=1, a running Docker, and the built local-vm provider.
+async fn opencode_runs_commands_in_a_local_vm_container(database: String) -> Result<()> {
+    if std::env::var("SUPERTAG_TEST_LOCAL_VM").as_deref() != Ok("1") {
+        return Ok(());
+    }
+    let docker = |args: &[&str]| {
+        Command::new("docker")
+            .args(args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+    };
+    ensure!(
+        docker(&["info"]).is_ok_and(|output| output.status.success()),
+        "SUPERTAG_TEST_LOCAL_VM=1 needs Docker"
+    );
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()?;
+    let provider = repository.join("harnesses/environments/local-vm/dist/rust-provider/main.js");
+    ensure!(
+        provider.is_file(),
+        "build the local-vm provider: pnpm --filter @supertag/worker-environment-local-vm build"
+    );
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("source");
+    std::fs::create_dir(&source)?;
+    let git = |args: &[&str]| -> Result<String> {
+        let output = Command::new("git")
+            .current_dir(&source)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+            ])
+            .args(args)
+            .output()?;
+        ensure!(output.status.success(), "git {args:?} failed");
+        Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    };
+    git(&["init", "--quiet"])?;
+    std::fs::write(source.join("workspace.txt"), b"initial\n")?;
+    git(&["add", "workspace.txt"])?;
+    git(&["commit", "--quiet", "-m", "Fixture source"])?;
+    let base = git(&["rev-parse", "HEAD"])?;
+    let mut runtime = Runtime::start(directory.path(), database).await?;
+    runtime
+        .operator
+        .put_tag(
+            runtime.credentials.request(PutTagRequest {
+                tag_id: "native".into(),
+                instructions: "Follow the fixture Task with the accepted permissions.".into(),
+                harness_kind: HarnessKind::Opencode as i32,
+                allowed_actions: ["files:read", "files:write", "commands:execute"]
+                    .map(String::from)
+                    .to_vec(),
+                workspace: Some(WorkspaceSpec {
+                    workspace_id: "local".into(),
+                    base_commit: base,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })?,
+        )
+        .await?;
+    let task = runtime
+        .submit("native", "local-vm", "remote-command", None)
+        .await?;
+    let mut host = runtime.credentials.command();
+    let home = directory.path().join("operator-home");
+    std::fs::create_dir_all(&home)?;
+    let docker_directory = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .find(|directory| directory.join("docker").is_file())
+        .context("docker is not on PATH")?;
+    host.args([
+        "worker-host",
+        "--control-plane",
+        &runtime.endpoint,
+        "--once",
+        "--harness",
+        "opencode",
+        "--harness-model",
+        FIXTURE_MODEL,
+        "--workspace-id",
+        "local",
+    ])
+    .arg("--workspace-source")
+    .arg(&source)
+    .arg("--opencode-node")
+    .arg(&runtime.node)
+    .arg("--opencode-adapter")
+    .arg(&runtime.entry)
+    .arg("--opencode-path")
+    .arg(&runtime.native)
+    .arg("--local-vm-workspace-provider")
+    .arg(&runtime.node)
+    .arg("--local-vm-workspace-provider-arg")
+    .arg(&provider)
+    .arg("--state-directory")
+    .arg(directory.path().join("host"))
+    .env("HOME", &home)
+    .env(
+        "PATH",
+        format!("{}:/usr/bin:/bin", docker_directory.display()),
+    )
+    .env("OPENAI_API_KEY", "synthetic-opencode-provider-key");
+    // The provider's docker CLI finds its daemon through the operator's own configuration.
+    if let Some(real) = std::env::var_os("HOME") {
+        host.env(
+            "DOCKER_CONFIG",
+            std::path::PathBuf::from(real).join(".docker"),
+        );
+    }
+    for name in ["DOCKER_HOST", "DOCKER_CONTEXT"] {
+        if let Some(value) = std::env::var_os(name) {
+            host.env(name, value);
+        }
+    }
+    let mut host = Process::spawn(host, directory.path(), "host", false)?;
+    // The first allocation on a machine builds the base image.
+    let deadline = Instant::now() + Duration::from_secs(1_200);
+    loop {
+        if let Some(status) = host.child.try_wait()? {
+            ensure!(
+                status.success(),
+                "worker exited with {status}: {}",
+                host.logs()
+            );
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "worker did not exit: {}",
+            host.logs()
+        );
+        sleep(Duration::from_millis(100)).await;
+    }
+    let result = runtime.task(&task.task_id).await?;
+    ensure!(
+        result.state() == TaskState::Succeeded,
+        "remote OpenCode failed: {:?}; native fixture: {}",
+        result.result,
+        runtime.native_errors()
+    );
+    let text = result.result.as_deref().unwrap_or_default();
+    let line = text
+        .lines()
+        .find_map(|line| line.strip_prefix("native-remote:"))
+        .context("the fixture never reached the workspace tools")?;
+    let remote: Value = serde_json::from_str(line)?;
+    ensure!(remote["isError"] == false, "{remote}");
+    ensure!(
+        remote["listed"]
+            == serde_json::json!(["read", "write", "edit", "glob", "grep", "ls", "command"]),
+        "{remote}"
+    );
+    let output = remote["text"].as_str().unwrap_or_default();
+    ensure!(
+        output
+            .lines()
+            .collect::<Vec<_>>()
+            .starts_with(&["1000", "Linux", "lo"]),
+        "the command ran outside an unprivileged, offline container: {output}"
+    );
+    ensure!(!source.join("command-output.txt").exists());
+    let left = docker(&[
+        "ps",
+        "-aq",
+        "--filter",
+        &format!("label=supertag.taskId={}", task.task_id),
+    ])?;
+    ensure!(
+        left.stdout.is_empty(),
+        "the Task's container was left running"
+    );
+    Ok(())
 }
 
 async fn opencode_stages_only_selected_provider_from_explicit_auth_file(

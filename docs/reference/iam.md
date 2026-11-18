@@ -666,7 +666,7 @@ Codex enforces the [harness-native tools](#harness-native-tools) runtime actions
 operating-system sandbox. Claude Code, OpenCode, and Cursor on a local Worker Host do not provide
 an enforced command boundary: their shell tools run commands as the Worker Host's user. SuperTag therefore
 places a Task with `commands:execute` on them only when the host service lists them in
-`allow-unsandboxed-commands`. On a host with `environment: local-vm`, Claude Code and Cursor run
+`allow-unsandboxed-commands`. On a host with `environment: local-vm`, they run
 commands in a container instead. Otherwise the Task goes to a Worker Host that may run commands,
 such as one serving Codex, or waits. See
 [Unsandboxed harnesses](supertag-yaml.md#unsandboxed-harnesses).

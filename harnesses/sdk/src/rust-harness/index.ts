@@ -45,4 +45,9 @@ export * from "./gen/supertag/runtime/v2/tag_sessions_pb.js";
 export { sessionRecap } from "./recap.js";
 export { redact } from "./redact.js";
 export { createRemoteWorkspaceExecutor } from "./remote-workspace.js";
+export {
+  REMOTE_WORKSPACE_HTTP_SERVER,
+  type RemoteWorkspaceHttpServer,
+  startRemoteWorkspaceHttp,
+} from "./remote-workspace-http.js";
 export { startTaskMcpHttp, type TaskMcpHttpServer } from "./task-mcp-http.js";

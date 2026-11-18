@@ -654,7 +654,7 @@ fn answers(
         (Found::Opencode, None) => unreachable!("--yes never selects OpenCode"),
         _ => None,
     };
-    let runtime = matches!(harness, Found::ClaudeCode | Found::Cursor)
+    let runtime = matches!(harness, Found::ClaudeCode | Found::Cursor | Found::Opencode)
         .then(container_runtime)
         .flatten();
     let commands = match (runtime, ask.as_deref_mut()) {
@@ -717,11 +717,9 @@ fn unsandboxed(harness: Found, ask: Option<&mut Prompter>) -> Result<Commands> {
             outln!(
                 "{name} runs commands as you, without a sandbox, so give its Tags only trusted work. Codex sandboxes its commands."
             );
-            if harness != Found::Opencode {
-                outln!(
-                    "With Docker or Podman running, {name} can run them in containers instead: set environment: local-vm on its host in supertag.yaml."
-                );
-            }
+            outln!(
+                "With Docker or Podman running, {name} can run them in containers instead: set environment: local-vm on its host in supertag.yaml."
+            );
             if prompter.confirm(
                 &format!("Allow {name} to run commands without a sandbox?"),
                 true,

@@ -151,10 +151,13 @@ pub(super) fn resolve_attempt(
     ) {
         return None;
     }
-    // Cursor and Claude Code run every Workspace tool in a remote sandbox through split execution.
+    // Cursor, Claude Code, and OpenCode run every Workspace tool in a remote sandbox through
+    // split execution.
     if profile.remote_file_workspace
-        && (!matches!(harness, HarnessKind::Cursor | HarnessKind::ClaudeCode)
-            || task.workspace.is_none())
+        && (!matches!(
+            harness,
+            HarnessKind::Cursor | HarnessKind::ClaudeCode | HarnessKind::Opencode
+        ) || task.workspace.is_none())
     {
         return None;
     }
@@ -239,15 +242,9 @@ pub(crate) fn lane_requirement(
         };
         (
             "unsandboxed-commands".into(),
-            if harness == HarnessKind::Opencode {
-                format!(
-                    "{label} runs commands without a sandbox, and no bound Worker Host allows it; add {name} to allow-unsandboxed-commands in a Worker Host's supertag.yaml service, or remove commands:execute"
-                )
-            } else {
-                format!(
-                    "{label} runs commands without a sandbox, and no bound Worker Host runs them in one; set environment: local-vm on a Worker Host's supertag.yaml service to run them in a container, add {name} to its allow-unsandboxed-commands, or remove commands:execute"
-                )
-            },
+            format!(
+                "{label} runs commands without a sandbox, and no bound Worker Host runs them in one; set environment: local-vm on a Worker Host's supertag.yaml service to run them in a container, add {name} to its allow-unsandboxed-commands, or remove commands:execute"
+            ),
         )
     })
 }
@@ -301,13 +298,16 @@ mod tests {
                 .unwrap()
                 .remote_file_workspace
         );
-        // Claude Code splits the same way; other harnesses never take a remote Workspace.
-        assert!(
-            resolve_attempt(&task, HarnessKind::ClaudeCode, &profile)
-                .unwrap()
-                .remote_file_workspace
-        );
-        assert!(resolve_attempt(&task, HarnessKind::Opencode, &profile).is_none());
+        // Claude Code and OpenCode split the same way; other harnesses never take a remote
+        // Workspace.
+        for harness in [HarnessKind::ClaudeCode, HarnessKind::Opencode] {
+            assert!(
+                resolve_attempt(&task, harness, &profile)
+                    .unwrap()
+                    .remote_file_workspace
+            );
+        }
+        assert!(resolve_attempt(&task, HarnessKind::OpenaiAgents, &profile).is_none());
         // Web tools would run on the Worker Host, outside the sandbox: refused there.
         for action in ["web:fetch", "web:search"] {
             let mut web = task.clone();

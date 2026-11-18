@@ -154,7 +154,7 @@ echoing secret values.
 | `workspaces` | none | Up to 128 Workspace names, each to a repository path or `{ path, land, setup }`. See [Workspaces](#workspaces) |
 | `skills` | none | Local Skill directory or JSON catalog file selected by Context Sets. Relative paths resolve from this file |
 | `labels` | none | Placement labels the host carries, such as `[gpu]`, for a Tag's `runsOn`. See [Worker Host labels](resource-model.md#worker-host-labels) |
-| `environment` | none | `local-vm` runs Claude Code and Cursor Tasks' commands and file tools in containers on this machine. See [local-vm containers](#local-vm-containers) |
+| `environment` | none | `local-vm` runs Claude Code, Cursor, and OpenCode Tasks' commands and file tools in containers on this machine. See [local-vm containers](#local-vm-containers) |
 | `allow-unsandboxed-commands` | none | `claude-code`, `cursor`, or `opencode` from `harnesses`. See [Unsandboxed harnesses](#unsandboxed-harnesses) |
 | `network-credentials` | none | Credential name to `{ secret, environment }`, added to a Task's requests by the egress proxy. Codex only. See [Network credentials](#network-credentials) |
 | `volumes` | none | Volume ID to an absolute, owner-only directory: a file Volume this host maps and writes directly, such as the copies of a Tag's captures. Tags on that Volume run only on hosts that map it. See [Keep every capture on a Volume](artifacts.md#keep-every-capture-on-a-volume) |
@@ -203,7 +203,7 @@ sets `concurrency: 3`.
 
 ### local-vm containers
 
-Claude Code and Cursor have no sandbox of their own that SuperTag can enforce. `environment:
+Claude Code, Cursor, and OpenCode have no sandbox of their own that SuperTag can enforce. `environment:
 local-vm` gives them one: each Task Attempt's Workspace lives in a container on this machine's
 Docker or Podman, and every file and command tool runs there. The harness and its keys stay on
 the host. This is the setup `supertag init` writes when Docker or Podman is running.
@@ -221,8 +221,7 @@ every process the Task left running; the Task cannot hide a process from that st
 Task Attempt on a machine builds the container image, which takes a few minutes; the host's log
 shows the progress.
 
-A local-vm host needs a Workspace and cannot take `allow-unsandboxed-commands`. It does not run
-OpenCode yet. When both a local-vm host and a host with `allow-unsandboxed-commands` could run a
+A local-vm host needs a Workspace and cannot take `allow-unsandboxed-commands`. When both a local-vm host and a host with `allow-unsandboxed-commands` could run a
 Task with `commands:execute`, the local-vm host gets it unless it is busy. These variables, in the
 shell or `env_file`, change the container:
 
@@ -240,7 +239,7 @@ A repository's `.devcontainer` settings add to the image; see
 ### Unsandboxed harnesses
 
 Codex runs commands in its own sandbox. Claude Code, Cursor, and OpenCode have none that SuperTag
-can enforce. Prefer [local-vm containers](#local-vm-containers) for Claude Code and Cursor.
+can enforce. Prefer [local-vm containers](#local-vm-containers) for them.
 Otherwise a host does not run their Tasks that may run commands (`commands:execute`) unless
 the harness is listed in `allow-unsandboxed-commands`; such a Task waits for a host that allows
 it. Commands then run as your user, with your files, network, and the environment the harness

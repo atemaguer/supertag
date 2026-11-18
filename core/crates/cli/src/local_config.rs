@@ -657,10 +657,10 @@ pub(crate) fn parse(
             ensure!(
                 adapter.is_none()
                     && !harnesses.is_empty()
-                    && harnesses
-                        .iter()
-                        .all(|harness| matches!(harness.as_str(), "claude-code" | "cursor")),
-                "host {name}: environment local-vm runs Claude Code and Cursor"
+                    && harnesses.iter().all(|harness| {
+                        matches!(harness.as_str(), "claude-code" | "cursor" | "opencode")
+                    }),
+                "host {name}: environment local-vm runs Claude Code, Cursor, and OpenCode"
             );
             ensure!(
                 unsandboxed.is_empty(),
@@ -1896,21 +1896,23 @@ secrets:
         }
     }
     #[test]
-    fn local_vm_hosts_run_claude_code_and_cursor_with_a_workspace() {
+    fn local_vm_hosts_run_claude_code_cursor_and_opencode_with_a_workspace() {
         let host = |fields: &str| {
             let input = format!(
                 "services: {{vm: {{type: host, control-plane: https://example.com, environment: local-vm{fields}}}}}"
             );
             parse(input.as_bytes(), Path::new("/trusted"), |_| None)
         };
-        let config =
-            host(", harnesses: [claude-code, cursor], workspaces: {repo: ./source}").unwrap();
+        let config = host(
+            ", harnesses: [claude-code, cursor, opencode], models: {opencode: openai/test}, workspaces: {repo: ./source}",
+        )
+        .unwrap();
         assert!(config.hosts[0].local_vm);
         for (fields, reason) in [
             (", harnesses: [claude-code]", "needs a Workspace"),
             (
-                ", harnesses: [opencode], workspaces: {repo: ./source}",
-                "runs Claude Code and Cursor",
+                ", harnesses: [codex], workspaces: {repo: ./source}",
+                "runs Claude Code, Cursor, and OpenCode",
             ),
             (
                 ", harnesses: [claude-code], workspaces: {repo: ./source}, allow-unsandboxed-commands: [claude-code]",

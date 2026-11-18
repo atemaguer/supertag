@@ -395,6 +395,66 @@ it("requires Worker Host opt-in before handing commands to native OpenCode", () 
   expect(taskModel(ownedRun(), configuration).model).toBe("openai/test");
 });
 
+it("runs commands in a remote Workspace without the opt-in, and never web tools there", () => {
+  const remote = ownedRun();
+  remote.remoteWorkspace = true;
+  // web:fetch would run on the Worker Host.
+  expect(() => taskModel(remote, { ...configuration, allowUnsandboxedCommands: false })).toThrow(
+    /cannot carry web actions/u,
+  );
+  if (!remote.task) throw new Error("Missing fixture Task");
+  remote.task.allowedActions = ["files:read", "files:write", "commands:execute"];
+  expect(taskModel(remote, { ...configuration, allowUnsandboxedCommands: false }).model).toBe(
+    "openai/test",
+  );
+});
+
+it("turns off every built-in tool in a remote Workspace and serves only the MCP tools", async () => {
+  const { workspace, environment } = await sandbox();
+  const run = ownedRun();
+  run.remoteWorkspace = true;
+  if (!run.task) throw new Error("Missing fixture Task");
+  run.task.allowedActions = ["files:read", "files:write", "commands:execute"];
+  const { task, model } = taskModel(run, configuration);
+  const { forTools } = await nativeRequest(
+    task,
+    model,
+    { ...configuration, environment: { ...environment, OPENAI_API_KEY: "key" } },
+    [],
+    [],
+    undefined,
+    "",
+    false,
+    true,
+  );
+  const request = forTools([
+    {
+      name: "workspace",
+      url: "http://127.0.0.1:3335/mcp/workspace",
+      headers: { Authorization: "Bearer workspace-secret" },
+      operations: ["read", "command"],
+      audience: "manager",
+    },
+  ]);
+  expect(request.workspace).toBe(workspace);
+  expect(request.prompt).toContain("The Task workspace is in a sandbox.");
+  const config = JSON.parse(request.environment["OPENCODE_CONFIG_CONTENT"] ?? "{}");
+  expect(config.permission).toEqual({
+    "*": "deny",
+    workspace_read: "allow",
+    workspace_command: "allow",
+  });
+  expect(config.tools).toEqual({ "*": false, workspace_read: true, workspace_command: true });
+  expect(config.agent).toMatchObject({
+    build: { mode: "primary", tools: config.tools, permission: config.permission },
+    general: { disable: true },
+    explore: { disable: true },
+    plan: { disable: true },
+  });
+  expect(config.mcp.workspace).toMatchObject({ type: "remote", oauth: false });
+  expect(request.environment["OPENCODE_DISABLE_PROJECT_CONFIG"]).toBe("true");
+});
+
 it("uses the frozen execution selection when a Work Session's current range has changed", () => {
   const run = ownedRun();
   if (!run.task) throw new Error("Missing fixture Task");
