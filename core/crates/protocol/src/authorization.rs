@@ -50,6 +50,7 @@ pub const TABLE: &[(&str, &str, u16)] = &[
     ("Operator", "GetTag", OC),
     ("Operator", "ListTags", OC),
     ("Operator", "GetTask", OC),
+    ("Operator", "ListTasks", OC),
     ("Operator", "GetSessionDelivery", OC),
     ("Operator", "ListNativeUsage", OC),
     ("Operator", "ListEvents", OC),

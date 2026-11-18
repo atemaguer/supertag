@@ -43,9 +43,10 @@ use supertag_protocol::{
     v2::{
         AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, AttemptMilestone,
         ContextContract, ExecutionLimits, ExecutionSelection, FinishTaskRequest,
-        HarnessExecutionProfile, HarnessKind, PolicyExecutionSettings, PutTagRequest, Reply,
-        ReplyDestination, ReplyState, ReportAttemptMilestoneRequest, StartTaskRequest,
-        SubmitTaskRequest, Tag, Task, TaskEvent, TaskState, WorkspaceSpec,
+        HarnessExecutionProfile, HarnessKind, ListTasksRequest, ListTasksResponse,
+        PolicyExecutionSettings, PutTagRequest, Reply, ReplyDestination, ReplyState,
+        ReportAttemptMilestoneRequest, StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent,
+        TaskState, WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
 };
@@ -837,6 +838,50 @@ impl Store {
         supertag_protocol::crash_point("control-plane.submit", "before-commit");
         transaction.commit().await?;
         Ok(task)
+    }
+
+    /// The Tasks `principal` may see, newest first, optionally of one Tag or Session.
+    pub async fn list_tasks(
+        &self,
+        principal: &str,
+        input: &ListTasksRequest,
+    ) -> Result<ListTasksResponse> {
+        let limit = match input.limit {
+            0 => 20,
+            1..=100 => input.limit,
+            _ => return Err(invalid("limit must be between 1 and 100")),
+        };
+        let before: i64 = if input.cursor.is_empty() {
+            i64::MAX
+        } else {
+            input
+                .cursor
+                .parse()
+                .map_err(|_| invalid("invalid Task list cursor"))?
+        };
+        let rows = sqlx::query(&format!(
+            "SELECT t.* FROM supertag_v2_tasks t
+             WHERE ($1='' OR t.tag_id=$1) AND ($2='' OR t.session_id=$2) AND t.accepted_order<$3
+               AND EXISTS (SELECT 1 FROM supertag_v2_task_audience a WHERE a.task_id=t.task_id AND {})
+             ORDER BY t.accepted_order DESC LIMIT $5",
+            sees_owner_sql("a.owner", "$4")
+        ))
+        .bind(&input.tag_id)
+        .bind(&input.session_id)
+        .bind(before)
+        .bind(principal)
+        .bind(i64::from(limit) + 1)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut response = ListTasksResponse::default();
+        for row in rows.iter().take(limit as usize) {
+            response.tasks.push(task_row(row)?);
+        }
+        if rows.len() > limit as usize {
+            let last: i64 = rows[limit as usize - 1].try_get("accepted_order")?;
+            response.next_cursor = last.to_string();
+        }
+        Ok(response)
     }
 
     pub async fn get_task(&self, task_id: &str) -> Result<Task> {

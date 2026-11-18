@@ -682,6 +682,16 @@ impl Operator for Api {
         Ok(task)
     }
 
+    async fn list_tasks(
+        &self,
+        request: Request<ListTasksRequest>,
+    ) -> Result<Response<ListTasksResponse>, Status> {
+        self.forward(request, |channel, request| async {
+            operator_client(channel).list_tasks(request).await
+        })
+        .await
+    }
+
     async fn get_task(&self, request: Request<GetTaskRequest>) -> Result<Response<Task>, Status> {
         self.forward(request, |channel, request| async {
             operator_client(channel).get_task(request).await

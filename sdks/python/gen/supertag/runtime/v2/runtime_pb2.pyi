@@ -2277,6 +2277,26 @@ class AttentionSummary(_message.Message):
     window_days: int
     def __init__(self, posted: _Optional[int] = ..., read: _Optional[int] = ..., answered: _Optional[int] = ..., quiet: _Optional[int] = ..., window_days: _Optional[int] = ...) -> None: ...
 
+class ListTasksRequest(_message.Message):
+    __slots__ = ("tag_id", "session_id", "limit", "cursor")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    session_id: str
+    limit: int
+    cursor: str
+    def __init__(self, tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListTasksResponse(_message.Message):
+    __slots__ = ("tasks", "next_cursor")
+    TASKS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    tasks: _containers.RepeatedCompositeFieldContainer[Task]
+    next_cursor: str
+    def __init__(self, tasks: _Optional[_Iterable[_Union[Task, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
 class ListTagsRequest(_message.Message):
     __slots__ = ("limit", "cursor", "include_retired")
     LIMIT_FIELD_NUMBER: _ClassVar[int]

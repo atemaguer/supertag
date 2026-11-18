@@ -108,6 +108,8 @@ const (
 	OperatorSubmitTaskProcedure = "/supertag.runtime.v2.Operator/SubmitTask"
 	// OperatorGetTaskProcedure is the fully-qualified name of the Operator's GetTask RPC.
 	OperatorGetTaskProcedure = "/supertag.runtime.v2.Operator/GetTask"
+	// OperatorListTasksProcedure is the fully-qualified name of the Operator's ListTasks RPC.
+	OperatorListTasksProcedure = "/supertag.runtime.v2.Operator/ListTasks"
 	// OperatorGetSessionDeliveryProcedure is the fully-qualified name of the Operator's
 	// GetSessionDelivery RPC.
 	OperatorGetSessionDeliveryProcedure = "/supertag.runtime.v2.Operator/GetSessionDelivery"
@@ -503,6 +505,8 @@ type OperatorClient interface {
 	ListTags(context.Context, *connect.Request[runtimev2.ListTagsRequest]) (*connect.Response[runtimev2.ListTagsResponse], error)
 	SubmitTask(context.Context, *connect.Request[runtimev2.SubmitTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	// The Tasks the caller may see, newest first, optionally of one Tag or Session.
+	ListTasks(context.Context, *connect.Request[runtimev2.ListTasksRequest]) (*connect.Response[runtimev2.ListTasksResponse], error)
 	GetSessionDelivery(context.Context, *connect.Request[runtimev2.GetSessionDeliveryRequest]) (*connect.Response[runtimev2.SessionDelivery], error)
 	ListNativeUsage(context.Context, *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error)
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
@@ -572,6 +576,12 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			httpClient,
 			baseURL+OperatorGetTaskProcedure,
 			connect.WithSchema(operatorMethods.ByName("GetTask")),
+			connect.WithClientOptions(opts...),
+		),
+		listTasks: connect.NewClient[runtimev2.ListTasksRequest, runtimev2.ListTasksResponse](
+			httpClient,
+			baseURL+OperatorListTasksProcedure,
+			connect.WithSchema(operatorMethods.ByName("ListTasks")),
 			connect.WithClientOptions(opts...),
 		),
 		getSessionDelivery: connect.NewClient[runtimev2.GetSessionDeliveryRequest, runtimev2.SessionDelivery](
@@ -647,6 +657,7 @@ type operatorClient struct {
 	listTags            *connect.Client[runtimev2.ListTagsRequest, runtimev2.ListTagsResponse]
 	submitTask          *connect.Client[runtimev2.SubmitTaskRequest, runtimev2.Task]
 	getTask             *connect.Client[runtimev2.GetTaskRequest, runtimev2.Task]
+	listTasks           *connect.Client[runtimev2.ListTasksRequest, runtimev2.ListTasksResponse]
 	getSessionDelivery  *connect.Client[runtimev2.GetSessionDeliveryRequest, runtimev2.SessionDelivery]
 	listNativeUsage     *connect.Client[runtimev2.ListNativeUsageRequest, runtimev2.ListNativeUsageResponse]
 	listEvents          *connect.Client[runtimev2.ListEventsRequest, runtimev2.ListEventsResponse]
@@ -697,6 +708,11 @@ func (c *operatorClient) SubmitTask(ctx context.Context, req *connect.Request[ru
 // GetTask calls supertag.runtime.v2.Operator.GetTask.
 func (c *operatorClient) GetTask(ctx context.Context, req *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error) {
 	return c.getTask.CallUnary(ctx, req)
+}
+
+// ListTasks calls supertag.runtime.v2.Operator.ListTasks.
+func (c *operatorClient) ListTasks(ctx context.Context, req *connect.Request[runtimev2.ListTasksRequest]) (*connect.Response[runtimev2.ListTasksResponse], error) {
+	return c.listTasks.CallUnary(ctx, req)
 }
 
 // GetSessionDelivery calls supertag.runtime.v2.Operator.GetSessionDelivery.
@@ -759,6 +775,8 @@ type OperatorHandler interface {
 	ListTags(context.Context, *connect.Request[runtimev2.ListTagsRequest]) (*connect.Response[runtimev2.ListTagsResponse], error)
 	SubmitTask(context.Context, *connect.Request[runtimev2.SubmitTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	// The Tasks the caller may see, newest first, optionally of one Tag or Session.
+	ListTasks(context.Context, *connect.Request[runtimev2.ListTasksRequest]) (*connect.Response[runtimev2.ListTasksResponse], error)
 	GetSessionDelivery(context.Context, *connect.Request[runtimev2.GetSessionDeliveryRequest]) (*connect.Response[runtimev2.SessionDelivery], error)
 	ListNativeUsage(context.Context, *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error)
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
@@ -824,6 +842,12 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		OperatorGetTaskProcedure,
 		svc.GetTask,
 		connect.WithSchema(operatorMethods.ByName("GetTask")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorListTasksHandler := connect.NewUnaryHandler(
+		OperatorListTasksProcedure,
+		svc.ListTasks,
+		connect.WithSchema(operatorMethods.ByName("ListTasks")),
 		connect.WithHandlerOptions(opts...),
 	)
 	operatorGetSessionDeliveryHandler := connect.NewUnaryHandler(
@@ -904,6 +928,8 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 			operatorSubmitTaskHandler.ServeHTTP(w, r)
 		case OperatorGetTaskProcedure:
 			operatorGetTaskHandler.ServeHTTP(w, r)
+		case OperatorListTasksProcedure:
+			operatorListTasksHandler.ServeHTTP(w, r)
 		case OperatorGetSessionDeliveryProcedure:
 			operatorGetSessionDeliveryHandler.ServeHTTP(w, r)
 		case OperatorListNativeUsageProcedure:
@@ -963,6 +989,10 @@ func (UnimplementedOperatorHandler) SubmitTask(context.Context, *connect.Request
 
 func (UnimplementedOperatorHandler) GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.GetTask is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) ListTasks(context.Context, *connect.Request[runtimev2.ListTasksRequest]) (*connect.Response[runtimev2.ListTasksResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ListTasks is not implemented"))
 }
 
 func (UnimplementedOperatorHandler) GetSessionDelivery(context.Context, *connect.Request[runtimev2.GetSessionDeliveryRequest]) (*connect.Response[runtimev2.SessionDelivery], error) {

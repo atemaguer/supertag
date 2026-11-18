@@ -217,10 +217,14 @@ prints one in readable text:
 
 ```sh
 supertag get tag
+supertag get task --tag lead
 supertag describe objective flaky-tests
 supertag get host
 supertag watch objective flaky-tests
 ```
+
+`get task` without an ID lists the Tasks you may see, newest first, 20 at a time; `--tag` and `--session`
+narrow it, and `--cursor` with the `next_cursor` it returns reads the next page.
 
 `watch` streams change notices and reconnects from its last resume token. `watch objective ID`
 follows one Objective as a timeline until it closes. `supertag metrics` prints counts of Tasks,

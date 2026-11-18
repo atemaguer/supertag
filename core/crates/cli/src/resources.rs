@@ -153,7 +153,7 @@ pub(crate) const KINDS: &[KindSpec] = &[
         "task",
         "tasks",
         "Task",
-        [true, false, false, true],
+        [true, true, false, true],
     ),
     kind(
         Kind::Objective,
@@ -316,11 +316,13 @@ pub enum GetCommand {
         #[command(flatten)]
         list: tags::ListArgs,
     },
-    /// Read a Task.
+    /// Read a Task, or list recent Tasks, newest first.
     #[command(visible_alias = "tasks")]
     Task {
-        /// Task ID.
-        id: String,
+        /// Task ID. Omit to list.
+        id: Option<String>,
+        #[command(flatten)]
+        list: tasks::ListArgs,
     },
     /// Read one Objective, or list Objectives.
     #[command(visible_alias = "objectives")]
@@ -677,7 +679,8 @@ pub async fn get(connection: Connection, command: GetCommand) -> Result<()> {
     let (kind, id) = match command {
         GetCommand::Tag { id: Some(id), .. } => (Kind::Tag, id),
         GetCommand::Tag { id: None, list } => return print(tags::list(connection, list)).await,
-        GetCommand::Task { id } => (Kind::Task, id),
+        GetCommand::Task { id: Some(id), .. } => (Kind::Task, id),
+        GetCommand::Task { id: None, list } => return print(tasks::list(connection, list)).await,
         GetCommand::Objective { id: Some(id), .. } => (Kind::Objective, id),
         GetCommand::Objective { id: None, list } => {
             return print(objectives::list(connection, list)).await;

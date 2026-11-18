@@ -3760,7 +3760,7 @@ mod tests {
         }
         assert!(enroll.gateway.is_none(), "no root --gateway was given");
         for arguments in [
-            ["supertag", "get", "task"].as_slice(),
+            ["supertag", "get", "task", "task-1", "--limit", "5"].as_slice(),
             &["supertag", "get", "tag", "builder", "--include-retired"],
             &["supertag", "get-task", "task-1"],
             &["supertag", "list-tags"],

@@ -173,6 +173,48 @@ async fn metrics_count_every_record_beyond_list_pages(database: String) -> Resul
     let status = timeout(WAIT, worker.status()).await??;
     ensure!(status.success(), "Worker Host exited with {status}");
 
+    // `get tasks` lists them newest first, a page at a time, and by Session.
+    let page: serde_json::Value =
+        serde_json::from_str(&output(operator(&["get", "tasks", "--limit", "50"])).await?)?;
+    let listed = page["tasks"].as_array().context("tasks")?;
+    assert_eq!(listed.len(), 50, "{page}");
+    assert_eq!(
+        listed[0]["task_id"],
+        submitted[TASKS - 1].as_str(),
+        "{page}"
+    );
+    let cursor = page["next_cursor"].as_str().context("cursor")?.to_owned();
+    ensure!(!cursor.is_empty(), "{page}");
+    let next: serde_json::Value = serde_json::from_str(
+        &output(operator(&[
+            "get", "tasks", "--limit", "50", "--cursor", &cursor,
+        ]))
+        .await?,
+    )?;
+    assert_eq!(
+        next["tasks"][0]["task_id"],
+        submitted[TASKS - 51].as_str(),
+        "{next}"
+    );
+    let session: serde_json::Value = serde_json::from_str(
+        &output(operator(&[
+            "get",
+            "tasks",
+            "--session",
+            "session-0",
+            "--limit",
+            "100",
+        ]))
+        .await?,
+    )?;
+    let in_session = session["tasks"].as_array().context("tasks")?;
+    assert_eq!(in_session.len(), TASKS.div_ceil(3), "{session}");
+    ensure!(
+        in_session
+            .iter()
+            .all(|task| task["session_id"] == "session-0"),
+        "{session}"
+    );
     let snapshot = metrics().await?;
     assert_eq!(snapshot["tags"], 2, "{snapshot}");
     assert_eq!(snapshot["sessions"], 3, "{snapshot}");

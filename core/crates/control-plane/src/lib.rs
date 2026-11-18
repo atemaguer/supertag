@@ -431,6 +431,16 @@ impl operator_server::Operator for ControlPlane {
         Ok(Response::new(task))
     }
 
+    async fn list_tasks(
+        &self,
+        request: Request<ListTasksRequest>,
+    ) -> Result<Response<ListTasksResponse>, Status> {
+        let principal = self.actor(&request)?;
+        Ok(Response::new(
+            self.store.list_tasks(&principal, request.get_ref()).await?,
+        ))
+    }
+
     async fn get_task(&self, request: Request<GetTaskRequest>) -> Result<Response<Task>, Status> {
         let principal = self.actor(&request)?;
         let task_id = request.into_inner().task_id;

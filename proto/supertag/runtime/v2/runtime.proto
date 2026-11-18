@@ -18,6 +18,8 @@ service Operator {
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
   rpc SubmitTask(SubmitTaskRequest) returns (Task);
   rpc GetTask(GetTaskRequest) returns (Task);
+  // The Tasks the caller may see, newest first, optionally of one Tag or Session.
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
   rpc GetSessionDelivery(GetSessionDeliveryRequest) returns (SessionDelivery);
   rpc ListNativeUsage(ListNativeUsageRequest) returns (ListNativeUsageResponse);
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
@@ -1772,6 +1774,21 @@ message AttentionSummary {
   uint32 answered = 3;
   uint32 quiet = 4;
   uint32 window_days = 5;
+}
+
+message ListTasksRequest {
+  string tag_id = 1;
+  string session_id = 2;
+  // Most Tasks on one page: 20 when 0, at most 100.
+  uint32 limit = 3;
+  // The cursor the previous page returned; empty for the first page.
+  string cursor = 4;
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+  // Empty on the last page.
+  string next_cursor = 2;
 }
 
 message ListTagsRequest {

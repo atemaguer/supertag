@@ -276,6 +276,43 @@ pub async fn run(connection: Connection, command: TaskCommand) -> Result<()> {
 
 /// A queued Task also names what keeps every bound Worker Host from taking it, as
 /// `supertag placement explain` does, when the caller may read placement.
+/// `supertag get tasks`: recent Tasks, newest first.
+#[derive(clap::Args)]
+pub struct ListArgs {
+    /// Only this Tag's Tasks.
+    #[arg(long, conflicts_with = "id")]
+    tag: Option<String>,
+    /// Only this Session's Tasks.
+    #[arg(long, conflicts_with = "id")]
+    session: Option<String>,
+    /// Most Tasks to return on one page, up to 100.
+    #[arg(long, default_value_t = 20, conflicts_with = "id")]
+    limit: u32,
+    /// Continue from the cursor the previous page returned.
+    #[arg(long, default_value = "", conflicts_with = "id")]
+    cursor: String,
+}
+
+pub(crate) async fn list(connection: crate::Connection, args: ListArgs) -> Result<Value> {
+    let (channel, token) = crate::connect_operator(connection).await?;
+    let page = client(channel)
+        .list_tasks(request(
+            supertag_protocol::v2::ListTasksRequest {
+                tag_id: args.tag.unwrap_or_default(),
+                session_id: args.session.unwrap_or_default(),
+                limit: args.limit,
+                cursor: args.cursor,
+            },
+            &token,
+        )?)
+        .await?
+        .into_inner();
+    Ok(serde_json::json!({
+        "tasks": page.tasks.iter().map(task_json).collect::<Vec<_>>(),
+        "next_cursor": page.next_cursor,
+    }))
+}
+
 pub(crate) async fn fetch(channel: ProtocolChannel, token: &str, task_id: String) -> Result<Value> {
     let task = client(channel.clone())
         .get_task(request(GetTaskRequest { task_id }, token)?)

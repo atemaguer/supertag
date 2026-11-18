@@ -3498,7 +3498,7 @@ Usage: supertag get [OPTIONS] <COMMAND>
 
 Commands:
   tag                   Read a Tag by its permanent ID, including after retirement, or list active Tags [alias: tags]
-  task                  Read a Task [alias: tasks]
+  task                  Read a Task, or list recent Tasks, newest first [alias: tasks]
   objective             Read one Objective, or list Objectives [alias: objectives]
   team                  Read one Team by ID or name, or list Teams, optionally for one member Tag [alias: teams]
   host                  Read one Worker Host, or list Worker Hosts and their readiness [alias: hosts]
@@ -3570,18 +3570,26 @@ Options:
 ## `supertag get task`
 
 ```text
-Read a Task
+Read a Task, or list recent Tasks, newest first
 
-Usage: supertag get task [OPTIONS] <ID>
+Usage: supertag get task [OPTIONS] [ID]
 
 Arguments:
-  <ID>  Task ID
+  [ID]  Task ID. Omit to list
 
 Options:
       --gateway <URL|NAME>
           Gateway URL or the name of a Gateway saved in the terminal UI or desktop app. A URL reads the operator token from SUPERTAG_OPERATOR_TOKEN
+      --tag <TAG>
+          Only this Tag's Tasks
+      --session <SESSION>
+          Only this Session's Tasks
       --state-directory <STATE_DIRECTORY>
           Use the local services `supertag up` runs from this state directory. Without either option, SUPERTAG_GATEWAY_URL, else the local services in SUPERTAG_STATE_DIR or ~/.supertag
+      --limit <LIMIT>
+          Most Tasks to return on one page, up to 100 [default: 20]
+      --cursor <CURSOR>
+          Continue from the cursor the previous page returned [default: ""]
   -h, --help
           Print help
 ```
