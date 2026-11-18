@@ -522,7 +522,7 @@ function EmptyConversation({ tag }: { tag: Tag }) {
   return (
     <div className="empty">
       <TagAvatar tagId={tag.tagId} large />
-      <h2>Message {tag.tagId}</h2>
+      <h2>Message {tag.name ?? tag.tagId}</h2>
       {tag.instructions && <p className="tag-instructions">{tag.instructions}</p>}
       <details className="permissions">
         <summary>Permissions</summary>
