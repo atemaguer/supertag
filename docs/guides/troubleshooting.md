@@ -23,6 +23,14 @@ supertag status
 `supertag logs control-plane`, `supertag logs gateway`, or `supertag logs HOST`. For a shared
 deployment, run `supertag verify deployment URL --env-file operator.env`.
 
+`supertag up` runs every local service under one supervisor. When any of them exits on its own,
+the supervisor stops the rest and exits too, so `ps` shows them all stopped and
+`supertag logs supervisor` names the service that exited first. Read that service's log, then
+run `supertag up` to start them all again. The desktop app shows **Not connected** meanwhile and
+reconnects on its own, and messages you sent in the meantime are sent once SuperTag runs again.
+To have SuperTag started again after a failure without you, set `restart: unless-stopped`; see
+[Run as a service](../operations/cli.md#run-as-a-service).
+
 If a command says `no local Control Plane is running`, start the local services with
 `supertag up`, or pass `--gateway URL` or the `--gateway NAME` of a saved Control
 Plane.
