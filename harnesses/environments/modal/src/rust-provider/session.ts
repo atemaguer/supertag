@@ -1,7 +1,13 @@
 import { sandboxExecutionEnvironment } from "@supertag/worker-sdk";
 import {
+  createEgressRelayHost,
   createSandboxWorkspaceSession,
+  EGRESS_CLIENT_PORT,
+  EGRESS_RELAY_PROGRAM,
+  type EgressRelayHost,
+  egressProxy,
   MAX_TRANSFER,
+  type SandboxEgress,
   type SandboxEnvironment,
   type SandboxWorkspaceSession,
   WorkspaceConfigurationError,
@@ -41,6 +47,7 @@ export interface ModalWorkspaceScope {
     readonly name: string;
     readonly tags: Record<string, string>;
     readonly timeoutMs: number;
+    /** No egress at all, DNS included; a network scope goes through the exec-stream relay. */
     readonly blockNetwork: true;
     /** A devcontainer image: Dockerfile layers on its registry image or the configured one. */
     readonly image?: Pick<SandboxEnvironment, "image" | "dockerfileCommands">;
@@ -215,6 +222,76 @@ async function readTransfer(
   });
 }
 
+/**
+ * Starts the egress relay as the sandbox's privileged user, before the session records the
+ * sandbox's own processes, as one long-lived exec whose standard input and output carry every
+ * Task connection to the egress proxy on the Worker Host. The sandbox keeps blockNetwork.
+ */
+async function startEgressRelay(
+  sandbox: ModalWorkspaceSandbox,
+  egress: SandboxEgress,
+): Promise<EgressRelayHost> {
+  const proxy = egressProxy(egress);
+  if (!sandbox.execPrivileged || !proxy)
+    throw new Error("Modal sandbox cannot run the egress relay");
+  const relay = await sandbox.execPrivileged(
+    [
+      "/usr/bin/env",
+      "-i",
+      "PATH=/usr/local/bin:/usr/bin:/bin",
+      "python3",
+      "-I",
+      "-S",
+      "-c",
+      EGRESS_RELAY_PROGRAM,
+      String(EGRESS_CLIENT_PORT),
+    ],
+    { mode: "binary" },
+  );
+  const encoder = new TextEncoder();
+  const reader = relay.stdout.getReader();
+  const host = createEgressRelayHost(
+    {
+      write: (line) => relay.stdin.writeBytes(encoder.encode(line)),
+      // Ending its input ends the relay; the reader stops taking its output.
+      abort: () => {
+        void reader.cancel().catch(() => undefined);
+        void (async () => relay.stdin.close())().catch(() => undefined);
+      },
+    },
+    proxy,
+  );
+  void (async () => {
+    const decoder = new TextDecoder();
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        host.receive(decoder.decode(value, { stream: true }));
+      }
+    } catch {
+      /* the sandbox stopped */
+    } finally {
+      host.close();
+    }
+  })();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      host.started,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Modal egress relay did not start")), 30_000);
+      }),
+    ]);
+  } catch (error) {
+    host.close();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+  return host;
+}
+
 async function runIn(
   exec: ModalSandboxClient["exec"],
   argv: string[],
@@ -247,11 +324,12 @@ export function createModalWorkspaceSession(
     appName: "workspace-provider",
     maxOutputCharacters: 65_536,
   }).options;
+  const relays = new Set<EgressRelayHost>();
   const session = createSandboxWorkspaceSession(
     {
       label: "Modal",
       validateOwner: sandboxOwnershipMetadata,
-      async allocate(owner, timeoutMs, signal, environment, artifact) {
+      async allocate(owner, timeoutMs, signal, environment, artifact, egress) {
         const connection = await withSignal(open, signal);
         const sandbox = await withSignal(
           () =>
@@ -278,6 +356,10 @@ export function createModalWorkspaceSession(
         const identity = await withSignal(() => connection.inventory.get(sandboxId), signal);
         if (identity.sandboxId !== sandboxId || !sandboxOwnershipMatches(owner, identity))
           throw new Error("Modal sandbox ownership could not be verified");
+        const egressRelay = egress
+          ? await withSignal(() => startEgressRelay(sandbox, egress), signal)
+          : undefined;
+        if (egressRelay) relays.add(egressRelay);
         return {
           sandboxId,
           environment: (root) =>
@@ -298,9 +380,12 @@ export function createModalWorkspaceSession(
           writeTransfer: (path, bytes, signal) => writeTransfer(sandbox, path, bytes, signal),
           readTransfer: (path, signal) => readTransfer(sandbox, path, signal),
           snapshot: (signal) => withSignal(() => sandbox.snapshotFilesystem(), signal),
+          ...(egressRelay ? { egressRelay: true as const } : {}),
         };
       },
       async stop(owner, sandboxId) {
+        for (const relay of relays) relay.close();
+        relays.clear();
         const connection = await open();
         return stopOwnedSandbox(connection.inventory, owner, sandboxId);
       },

@@ -1114,6 +1114,7 @@ mod tests {
                 network_credentials: vec![],
                 network_sandbox: false,
                 unverified_workspace_provider: false,
+                remote_egress_relay: false,
             }),
             ..Default::default()
         };

@@ -36,6 +36,7 @@ fn report(sequence: u64) -> ReportHostRequest {
             network_sandbox: false,
             unverified_workspace_provider: false,
             volumes: vec![],
+            remote_egress_relay: false,
             workspace_mounts: vec![],
             declared_task_outputs: false,
             model_ids: vec!["codex-alpha".into(), "codex-beta".into()],

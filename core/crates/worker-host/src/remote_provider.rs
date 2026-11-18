@@ -374,9 +374,17 @@ pub(crate) struct RemoteProvider {
     channel: Channel,
     token: String,
     allocate_timeout: Duration,
+    /// The Task's network through the sandbox's relay to the Attempt's egress proxy.
+    egress: Option<RemoteWorkspaceEgress>,
 }
 
 impl RemoteProvider {
+    /// Asks Allocate for the egress relay: the provider carries the sandbox's connections to
+    /// the egress proxy over its own exec stream.
+    pub(crate) fn set_egress(&mut self, egress: RemoteWorkspaceEgress) {
+        self.egress = Some(egress);
+    }
+
     pub async fn spawn(
         config: &ProviderConfig,
         scratch: &Path,
@@ -460,6 +468,7 @@ impl RemoteProvider {
                 channel,
                 token,
                 allocate_timeout: config.allocate_timeout(),
+                egress: None,
             }),
             Err(error) => {
                 reap(&mut child)
@@ -534,6 +543,7 @@ impl RemoteProvider {
                         environment,
                         prepared_artifact,
                         prepare,
+                        egress: self.egress.clone(),
                     },
                     deadline,
                 )?)

@@ -545,12 +545,19 @@ pub fn reason(
     harness: HarnessKind,
     profile: &HarnessExecutionProfile,
 ) -> Option<String> {
-    if let Some(reason) = harness_reason(task, harness) {
+    // A remote Workspace whose provider relays the sandbox's traffic to the Attempt's egress proxy:
+    // every command runs in the sandbox, whose only egress is that relay, and carries the
+    // proxy credential and placeholders, so the lane applies the scope and its credentials.
+    let relayed = profile.remote_file_workspace
+        && profile.remote_egress_relay
+        && matches!(harness, HarnessKind::Cursor | HarnessKind::ClaudeCode);
+    if !relayed && let Some(reason) = harness_reason(task, harness) {
         return Some(reason);
     }
     let scope = of_task(task)?;
-    // Claude Code checks WebFetch in its tool hook; commands need its sandbox.
+    // Claude Code checks WebFetch in its tool hook; local commands need its sandbox.
     if harness == HarnessKind::ClaudeCode
+        && !relayed
         && task
             .allowed_actions
             .iter()
@@ -566,7 +573,7 @@ pub fn reason(
             "this Worker Host's own sandbox provider is not verified to keep a network scope; run the Tag on a local Codex Worker Host".to_owned(),
         );
     }
-    if profile.remote_file_workspace || profile.shared_execution.is_some() {
+    if (profile.remote_file_workspace && !relayed) || profile.shared_execution.is_some() {
         return Some(
             "a remote or shared execution environment cannot send its traffic through SuperTag's egress proxy yet; run the Tag on a local Codex Worker Host".to_owned(),
         );
@@ -910,6 +917,20 @@ mod tests {
         assert!(supports(&task, HarnessKind::Codex, &profile));
         profile.remote_file_workspace = true;
         assert!(!supports(&task, HarnessKind::Codex, &profile));
+        // A remote sandbox whose provider relays its traffic to the egress proxy applies the
+        // scope, credentials included, for the split harnesses only.
+        assert!(!supports(&task, HarnessKind::Cursor, &profile));
+        profile.remote_egress_relay = true;
+        assert!(supports(&task, HarnessKind::Cursor, &profile));
+        assert!(supports(&task, HarnessKind::ClaudeCode, &profile));
+        assert!(!supports(&task, HarnessKind::Opencode, &profile));
+        profile.network_credentials.clear();
+        assert!(
+            reason(&task, HarnessKind::Cursor, &profile)
+                .unwrap()
+                .contains("no network credential github")
+        );
+        profile.network_credentials = strings(&["github"]);
         // Without web:fetch the scope no longer applies.
         task.allowed_actions = strings(&["files:read"]);
         assert!(of_task(&task).is_none());

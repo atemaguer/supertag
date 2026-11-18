@@ -366,6 +366,7 @@ async fn contract(url: &str) {
         network_sandbox: false,
         unverified_workspace_provider: false,
         volumes: vec![],
+        remote_egress_relay: false,
         workspace_mounts: vec![],
         declared_task_outputs: false,
         model_ids: vec!["fixture-model".into()],

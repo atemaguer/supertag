@@ -48,6 +48,8 @@ export interface WorkspaceOperationsOptions {
     readonly readOnly: readonly string[];
     readonly hidden: readonly string[];
   };
+  /** Variables every command gets, such as the egress relay's proxy URL and CA files. */
+  readonly commandEnvironment?: Readonly<Record<string, string>>;
   readonly limits?: {
     readonly maxOutputBytes?: number;
     readonly maxReadBytes?: number;
@@ -317,7 +319,11 @@ function cleanProcess(
   workspaceRoot: string,
   operation: WorkspaceOperation,
   outputBytes: number,
-  command?: { readonly deadlineMs: number; readonly record: string },
+  command?: {
+    readonly deadlineMs: number;
+    readonly record: string;
+    readonly environment?: Readonly<Record<string, string>>;
+  },
 ): ProcessSpec {
   if (spec.stdin !== undefined && Buffer.byteLength(spec.stdin) > MAX_EDIT_BYTES)
     throw new Error("Workspace input exceeds its byte limit");
@@ -331,6 +337,7 @@ function cleanProcess(
       "PATH=/usr/local/bin:/usr/bin:/bin",
       "LANG=C.UTF-8",
       ...(spec.environment?.["LC_ALL"] === "C" ? ["LC_ALL=C"] : []),
+      ...Object.entries(command?.environment ?? {}).map(([name, value]) => `${name}=${value}`),
       "python3",
       "-I",
       "-S",
@@ -422,6 +429,7 @@ export function createWorkspaceOperations(options: WorkspaceOperationsOptions) {
           cleanProcess(spec, sandboxRoot, workspaceRoot, operation, limits.maxOutputBytes, {
             deadlineMs,
             record,
+            ...(options.commandEnvironment ? { environment: options.commandEnvironment } : {}),
           }),
         );
         let settled = false;

@@ -561,7 +561,19 @@ export async function runAdapter(
     );
     // WebFetch and WebSearch would run here, on the Worker Host and its network, so a remote
     // Workspace offers none; placement keeps web actions off remote lanes.
-    if (remote && task.allowedActions.some((action) => action.startsWith("web:")))
+    // A scoped web:fetch is the exception: the sandbox's commands reach it through the relay.
+    if (
+      remote &&
+      task.allowedActions.some(
+        (action) =>
+          action.startsWith("web:") &&
+          !(
+            action === "web:fetch" &&
+            networkScopeOf(task) &&
+            task.allowedActions.includes("commands:execute")
+          ),
+      )
+    )
       throw new SafeAdapterFailure(
         "A remote Workspace cannot carry web actions yet. Native execution did not start.",
       );
@@ -570,7 +582,8 @@ export async function runAdapter(
     if (refusal) throw new SafeAdapterFailure(`${refusal}. Native execution did not start.`);
     const fileScope = fileScopeOf(task);
     const networkScope = networkScopeOf(task);
-    if (networkScope && networkCredentials(networkScope).length > 0)
+    // In a remote Workspace, commands carry the proxy credential through the sandbox's relay.
+    if (!remote && networkScope && networkCredentials(networkScope).length > 0)
       throw new SafeAdapterFailure(
         "Claude Code's sandbox cannot authenticate to SuperTag's egress proxy, so it cannot carry network credentials. Native execution did not start.",
       );

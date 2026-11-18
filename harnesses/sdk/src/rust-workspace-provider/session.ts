@@ -83,6 +83,8 @@ export interface SandboxWorkspace {
    * process-seal.ts). Workspace commands are admitted only in a sandbox that provides it.
    */
   runPrivileged?: PrivilegedRun;
+  /** True when the provider started the egress relay the allocation asked for. */
+  readonly egressRelay?: true;
 }
 
 /**
@@ -123,6 +125,42 @@ export function validSandboxEnvironment(environment: SandboxEnvironment): boolea
   );
 }
 
+/** A Task's network through the sandbox's egress relay; see egress-relay.ts. */
+export interface SandboxEgress {
+  /** The Attempt's egress proxy on the Worker Host's loopback, `127.0.0.1:PORT`. */
+  readonly proxy: string;
+  /** Variables every Workspace command gets: the proxy URL through the relay, placeholders. */
+  readonly variables: Readonly<Record<string, string>>;
+  readonly caPem: string;
+}
+
+/** The relay's loopback port in the sandbox, where Task clients connect. */
+export const EGRESS_CLIENT_PORT = 3128;
+
+/** The proxy's loopback address as a host and port, or undefined when it is anything else. */
+export function egressProxy(egress: SandboxEgress): { host: string; port: number } | undefined {
+  const match = /^127\.0\.0\.1:([0-9]{1,5})$/u.exec(egress.proxy);
+  const port = Number(match?.[1]);
+  return match && port >= 1 && port <= 65_535 ? { host: "127.0.0.1", port } : undefined;
+}
+
+function validEgress(egress: SandboxEgress): boolean {
+  const entries = Object.entries(egress.variables);
+  return (
+    egressProxy(egress) !== undefined &&
+    entries.length <= 64 &&
+    entries.every(
+      ([name, value]) =>
+        /^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(name) &&
+        value.length <= 4096 &&
+        !/[\0\r\n]/u.test(value),
+    ) &&
+    egress.caPem.length > 0 &&
+    egress.caPem.length <= 1_048_576 &&
+    egress.caPem.includes("-----BEGIN CERTIFICATE-----")
+  );
+}
+
 export interface SandboxWorkspaceProvider {
   readonly label: string;
   validateOwner(owner: SandboxOwner): void;
@@ -136,6 +174,11 @@ export interface SandboxWorkspaceProvider {
     signal: AbortSignal,
     environment?: SandboxEnvironment,
     artifact?: string,
+    /**
+     * When present, the sandbox allows no egress but the relay, which the provider starts before
+     * the session records the sandbox's own processes, so sealing spares it.
+     */
+    egress?: SandboxEgress,
   ): Promise<SandboxWorkspace>;
   stop(owner: SandboxOwner, sandboxId?: string): Promise<SandboxStopResult>;
   /**
@@ -395,6 +438,8 @@ export function createSandboxWorkspaceSession(
   let mcpStarted = false;
   /** The provider confirmed the sandbox gone: every later call reports it without asking again. */
   let sandboxLost = false;
+  /** The Task's network through the relay; its CA is written at Stage. */
+  let egress: SandboxEgress | undefined;
   /** This Attempt's Workspace copies, once the first is staged. */
   let copies: WorkspaceCopies | undefined;
   const mcpServers = new Set<ProcessHandle>();
@@ -536,6 +581,23 @@ export function createSandboxWorkspaceSession(
       ],
       allowedActions,
       ...(fileScope ? { fileScope } : {}),
+      ...(egress && root
+        ? {
+            commandEnvironment: {
+              ...egress.variables,
+              ...Object.fromEntries(
+                [
+                  "SSL_CERT_FILE",
+                  "REQUESTS_CA_BUNDLE",
+                  "CURL_CA_BUNDLE",
+                  "NODE_EXTRA_CA_CERTS",
+                  "GIT_SSL_CAINFO",
+                  "PIP_CERT",
+                ].map((name) => [name, `${root}/egress-ca.pem`]),
+              ),
+            },
+          }
+        : {}),
     });
   }
 
@@ -577,6 +639,7 @@ export function createSandboxWorkspaceSession(
         environment?: SandboxEnvironment;
         preparedArtifact?: string;
         prepare?: boolean;
+        egress?: SandboxEgress;
       },
       caller?: AbortSignal,
     ): Promise<{ sandboxId: string }> {
@@ -591,6 +654,12 @@ export function createSandboxWorkspaceSession(
         throw workspaceError("prepared artifact is invalid");
       if (request.fileScope !== undefined && !validFileScope(request.fileScope))
         throw workspaceError("path scope is invalid");
+      // Only commands use the network in the sandbox; the relay serves nothing else.
+      if (
+        request.egress !== undefined &&
+        (!validEgress(request.egress) || !request.allowedActions.includes("commands:execute"))
+      )
+        throw workspaceError("egress is invalid");
       // A preparation sandbox holds trusted content only and exposes no file tools.
       if (request.prepare && request.allowedActions.length > 0)
         throw workspaceError("preparation sandbox takes no file actions");
@@ -618,11 +687,15 @@ export function createSandboxWorkspaceSession(
           signal,
           environment,
           preparedArtifact,
+          request.egress,
         );
         signal.throwIfAborted();
         sandboxId = sandbox.sandboxId;
         if (!sandboxId || sandboxId.length > 256 || /\p{Cc}/u.test(sandboxId))
           throw new Error("Invalid sandbox identity");
+        if (request.egress && !sandbox.egressRelay)
+          throw new Error("Sandbox egress relay is unavailable");
+        egress = request.egress;
         // Commands and Workspace MCP servers are Task-driven processes that may outlive their
         // call, so every sandbox records its own processes first, before any of them exists.
         commands = request.allowedActions.includes("commands:execute");
@@ -723,6 +796,13 @@ export function createSandboxWorkspaceSession(
           throw new Error("Private sandbox root could not be created");
         root = physicalRoot;
         await sandbox.writeTransfer(`${root}/source.bundle`, bytes, signal);
+        // The proxy re-signs every TLS connection, so its CA alone is the commands' trust store.
+        if (egress)
+          await sandbox.writeTransfer(
+            `${root}/egress-ca.pem`,
+            new TextEncoder().encode(egress.caPem),
+            signal,
+          );
         if (files.length > 0) {
           const manifest = Buffer.from(
             JSON.stringify(

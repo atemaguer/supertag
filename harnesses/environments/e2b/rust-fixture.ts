@@ -30,6 +30,20 @@ export function wait(child: ChildProcess) {
  * A fake privileged run. It never executes anything: the seal program kills every process it
  * did not record, so it must never run on the machine running the tests.
  */
+/** The relay processes the E2B fake started; each announces itself and records its input. */
+export const relayStarts = vi.fn(async (argv: string[], onStdout: (text: string) => void) => {
+  const written: string[] = [];
+  queueMicrotask(() => onStdout("relay ready 3128\n"));
+  return {
+    written,
+    argv,
+    async write(text: string) {
+      written.push(text);
+    },
+    async kill() {},
+  };
+});
+
 export function fakePrivileged(sealExit = 0) {
   return vi.fn(async (argv: string[]) => {
     const seal = argv.findIndex((value) => value.includes("sealed %d"));
@@ -168,7 +182,7 @@ export async function fixture(
         writeTransfer,
         readTransfer,
         snapshot,
-        ...(privileged ? { runPrivileged: privileged } : {}),
+        ...(privileged ? { runPrivileged: privileged, startPrivileged: relayStarts } : {}),
       };
     }),
     deleteSnapshot: vi.fn(async (_snapshotId: string) => {}),

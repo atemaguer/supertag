@@ -438,6 +438,7 @@ async fn contract(url: &str) {
         network_sandbox: true,
         unverified_workspace_provider: false,
         volumes: vec![],
+        remote_egress_relay: false,
         ..Default::default()
     };
     report(

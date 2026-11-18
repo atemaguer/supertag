@@ -860,6 +860,29 @@ async function turn(message) {
       throw new Error("Work Session capability was not required");
   }
   if (prompt === "inspect-skill-package") result = await inspectSkillPackage();
+  if (prompt === "remote-fetch") {
+    // A network-scoped Task in a remote Workspace: its command reaches the web only through the
+    // sandbox's relay and the Worker Host's egress proxy.
+    const metadata = { mcp_server: { name: "workspace", source: "sdk" } };
+    const run = async (command) => {
+      if (!(await hook("mcp__workspace__command", { command }, metadata)))
+        throw new Error("Admitted workspace command was denied");
+      return (await sdkMcp("tools/call", { name: "command", arguments: { command } }, "workspace"))
+        .result.content[0].text;
+    };
+    result = JSON.stringify({
+      allowed: await run("curl -sS -o /dev/null -w '%{http_code}' https://pypi.org/simple/ 2>&1"),
+      refused: await run(
+        "curl -sS -o /dev/null -w '%{http_code}' https://example.com/ 2>&1 | tail -1",
+      ),
+      dns: await run(
+        `python3 -c "import socket\nfor n in ('example.com', 'zq8x3kq1.example.com'):\n  try: print(n, socket.getaddrinfo(n, 443)[0][4][0])\n  except OSError as e: print(n, 'error', e.errno)"`,
+      ),
+      direct: await run(
+        "curl -sS --noproxy '*' --max-time 5 -o /dev/null -w '%{http_code}' https://pypi.org/simple/ 2>&1 | tail -1",
+      ),
+    });
+  }
   if (prompt === "remote-command") {
     // In a remote Workspace, Claude Code keeps no built-in tool: every file and command tool is
     // the in-process workspace server, whose calls go to the sandbox.

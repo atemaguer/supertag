@@ -1303,6 +1303,8 @@ message RemoteWorkspaceAllocateRequest {
   bool prepare = 3501;
   // The Task's path scope, which the provider's file tools apply after resolving symlinks.
   FileScope file_scope = 3600;
+  // Present only for a Task with a network scope on a provider that offers the relay.
+  optional RemoteWorkspaceEgress egress = 3700;
 }
 
 // A sandbox image and setup derived only from the trusted commit's devcontainer subset.
@@ -1322,6 +1324,20 @@ message RemoteWorkspaceEnvironment {
 
 message RemoteWorkspaceAllocation {
   string sandbox_id = 1;
+}
+
+// Network for a Task with a network scope. The sandbox keeps the provider's no-network policy, DNS
+// included. A relay in the sandbox accepts the Task's clients on loopback and carries each
+// connection over the provider's own exec stream to the provider helper, which connects it to the
+// Attempt's egress proxy on the Worker Host. No real secret is here.
+message RemoteWorkspaceEgress {
+  // The Attempt's egress proxy on the Worker Host's loopback, as `127.0.0.1:PORT`.
+  string proxy = 1;
+  // Variables every Workspace command gets: the proxy URL through the relay with the Attempt's
+  // proxy credential, and each network credential's placeholder.
+  map<string, string> variables = 2;
+  // The egress proxy's CA certificate, which the sandbox's clients trust.
+  string ca_pem = 3;
 }
 
 message RemoteWorkspaceSnapshotRequest {}
@@ -2263,6 +2279,9 @@ message HarnessExecutionProfile {
   // (`--workspace-provider`), not E2B or Modal. SuperTag has not verified that it keeps a
   // network scope, so placement never gives it a Task with one.
   bool unverified_workspace_provider = 2000;
+  // This host's remote Workspace provider relays sandbox traffic to the Attempt's egress proxy,
+  // so a remote lane can apply a network scope.
+  bool remote_egress_relay = 1902;
   // File Volumes this host maps and writes to directly. The Control Plane derives the label
   // `volume:ID` for each; the host checks its mapping against the registered source before it
   // writes.

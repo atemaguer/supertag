@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sandboxExecutionEnvironment } from "@supertag/worker-sdk";
 import {
+  createEgressRelayHost,
   createSandboxWorkspaceSession,
+  EGRESS_CLIENT_PORT,
+  EGRESS_RELAY_PROGRAM,
+  type EgressRelayHost,
+  egressProxy,
+  type SandboxEgress,
   type SandboxEnvironment,
   type SandboxWorkspaceSession,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
@@ -39,6 +45,14 @@ export interface E2BWorkspaceSandbox {
     timeoutMs: number,
     signal: AbortSignal,
   ): Promise<{ readonly exitCode: number | null; readonly stdout: string }>;
+  /**
+   * Starts a long-lived privileged process whose standard output arrives through `onStdout` and
+   * whose standard input `write` feeds: the carrier of the egress relay.
+   */
+  startPrivileged?(
+    argv: string[],
+    onStdout: (text: string) => void,
+  ): Promise<{ write(text: string): Promise<void>; kill(): Promise<void> }>;
 }
 
 /**
@@ -157,6 +171,22 @@ const nativeFactory = {
           throw error;
         }
       },
+      async startPrivileged(argv, onStdout) {
+        const handle = await client.commands.run(argv.map(shellQuote).join(" "), {
+          cwd: "/tmp",
+          user: "root",
+          background: true,
+          stdin: true,
+          timeoutMs: 0,
+          onStdout,
+        });
+        return {
+          write: (text) => handle.sendStdin(text),
+          kill: async () => {
+            await handle.kill();
+          },
+        };
+      },
     };
   },
   async deleteSnapshot(snapshotId: string) {
@@ -164,6 +194,60 @@ const nativeFactory = {
     await Sandbox.deleteSnapshot(snapshotId, { requestTimeoutMs: API_TIMEOUT_MS });
   },
 };
+
+/**
+ * Starts the egress relay as root, before the session records the sandbox's own processes, as
+ * one long-lived command whose standard input and output carry every Task connection to the
+ * egress proxy on the Worker Host. The sandbox keeps allowInternetAccess off.
+ */
+async function startEgressRelay(
+  sandbox: E2BWorkspaceSandbox,
+  egress: SandboxEgress,
+): Promise<EgressRelayHost> {
+  const proxy = egressProxy(egress);
+  if (!sandbox.startPrivileged || !proxy)
+    throw new Error("E2B sandbox cannot run the egress relay");
+  let host: EgressRelayHost | undefined;
+  const pending: string[] = [];
+  const process = await sandbox.startPrivileged(
+    [
+      "/usr/bin/env",
+      "-i",
+      "PATH=/usr/local/bin:/usr/bin:/bin",
+      "python3",
+      "-I",
+      "-S",
+      "-c",
+      EGRESS_RELAY_PROGRAM,
+      String(EGRESS_CLIENT_PORT),
+    ],
+    (text) => (host ? host.receive(text) : pending.push(text)),
+  );
+  host = createEgressRelayHost(
+    {
+      write: (line) => process.write(line),
+      abort: () => void process.kill().catch(() => undefined),
+    },
+    proxy,
+  );
+  for (const text of pending.splice(0)) host.receive(text);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      host.started,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("E2B egress relay did not start")), 30_000);
+      }),
+    ]);
+  } catch (error) {
+    host.close();
+    await process.kill().catch(() => undefined);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+  return host;
+}
 
 export function createE2BWorkspaceSession(
   options: E2BWorkspaceSessionOptions = {},
@@ -174,11 +258,12 @@ export function createE2BWorkspaceSession(
   const factory = options.factory ?? nativeFactory;
   const templates = options.templates ?? nativeWorkspaceTemplates;
   const inventory = options.inventory ?? e2bSandboxInventory({ requestTimeoutMs: API_TIMEOUT_MS });
+  const relays = new Set<EgressRelayHost>();
   return createSandboxWorkspaceSession(
     {
       label: "E2B",
       validateOwner: sandboxOwnershipMetadata,
-      async allocate(owner, timeoutMs, signal, environment, artifact) {
+      async allocate(owner, timeoutMs, signal, environment, artifact, egress) {
         const metadata = sandboxOwnershipMetadata(owner);
         // A prepared snapshot already holds the devcontainer's image and setup.
         const build =
@@ -207,6 +292,8 @@ export function createE2BWorkspaceSession(
           !Object.entries(metadata).every(([key, value]) => identity.metadata[key] === value)
         )
           throw new Error("Unexpected sandbox ownership");
+        const egressRelay = egress ? await startEgressRelay(sandbox, egress) : undefined;
+        if (egressRelay) relays.add(egressRelay);
         return {
           sandboxId,
           environment: (root) =>
@@ -235,9 +322,14 @@ export function createE2BWorkspaceSession(
                   ),
               }
             : {}),
+          ...(egressRelay ? { egressRelay: true as const } : {}),
         };
       },
-      stop: (owner, sandboxId) => stopOwnedSandbox(inventory, owner, sandboxId),
+      stop: (owner, sandboxId) => {
+        for (const relay of relays) relay.close();
+        relays.clear();
+        return stopOwnedSandbox(inventory, owner, sandboxId);
+      },
       sandboxGone: (owner, sandboxId) => e2bSandboxGone(inventory, owner, sandboxId),
       removeArtifact: (artifact) => factory.deleteSnapshot(artifact),
     },

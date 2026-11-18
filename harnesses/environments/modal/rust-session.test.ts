@@ -1,12 +1,21 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkspaceConfigurationError } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { NotFoundError } from "modal";
 import { afterEach, expect, it, vi } from "vitest";
-import { collected, fakePrivileged, sandboxId, fixture as sharedFixture } from "./rust-fixture.ts";
+import {
+  collected,
+  fakePrivileged,
+  relayInputs,
+  relayOutput,
+  sandboxId,
+  fixture as sharedFixture,
+} from "./rust-fixture.ts";
 import { sandboxOwnershipMetadata, sandboxOwnershipName } from "./src/rust-provider/ownership.ts";
 import { missingApp } from "./src/rust-provider/session.ts";
 
@@ -559,3 +568,65 @@ it("names a missing Modal app instead of an unverified allocation", async () => 
   ).rejects.toThrow(/^Modal app live was not found in environment main/);
   await f.session.close();
 }, 15_000);
+it("keeps blockNetwork and carries a network-scoped Task's connections over the relay's exec", async () => {
+  // The Attempt's egress proxy, on this host's loopback.
+  const seen: string[] = [];
+  const proxy = createServer((socket) => {
+    socket.once("data", (data) => {
+      seen.push(data.toString());
+      socket.write("HTTP/1.1 200 Connection established\r\n\r\n");
+    });
+  }).listen(0, "127.0.0.1");
+  await once(proxy, "listening");
+  cleanups.push(async () => {
+    proxy.close();
+  });
+  const privileged = fakePrivileged();
+  const f = await fixture(privileged);
+  const { header, bytes } = await bundle();
+  const egress = {
+    proxy: `127.0.0.1:${(proxy.address() as { port: number }).port}`,
+    variables: { HTTPS_PROXY: "http://attempt:secret@127.0.0.1:3128" },
+    caPem: "-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n",
+  };
+  // The relay serves commands only, and the proxy is only ever this host's loopback.
+  for (const [actions, value] of [
+    [["files:read"], egress],
+    [["files:write", "commands:execute"], { ...egress, proxy: "10.0.0.1:3128" }],
+  ] as const)
+    await expect(
+      fixture(fakePrivileged()).then(({ session }) =>
+        session.allocate({ owner, timeoutMs: 60_000, allowedActions: [...actions], egress: value }),
+      ),
+    ).rejects.toThrow(/egress/u);
+  await f.session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write", "commands:execute"],
+    egress,
+  });
+  // No tunnel and no allow-list: the sandbox has no network at all, DNS included.
+  expect(f.create.mock.calls[0]?.[0].blockNetwork).toBe(true);
+  // The relay started first, before the process record, so sealing spares it.
+  expect(privileged.mock.calls[0]?.[0].join(" ")).toContain("3128");
+  // A Task client connects to the relay, which sends its bytes as lines.
+  relayOutput.send?.("O 1");
+  relayOutput.send?.(
+    `D 1 ${Buffer.from("CONNECT pypi.org:443 HTTP/1.1\r\n\r\n").toString("base64")}`,
+  );
+  await vi.waitFor(() => expect(seen).toEqual(["CONNECT pypi.org:443 HTTP/1.1\r\n\r\n"]));
+  await vi.waitFor(() =>
+    expect(relayInputs.join("")).toContain(
+      `D 1 ${Buffer.from("HTTP/1.1 200 Connection established\r\n\r\n").toString("base64")}`,
+    ),
+  );
+  await f.session.stage(header, bytes);
+  const variables = await f.session.execute({
+    kind: "command",
+    command: 'printf "%s|" "$HTTPS_PROXY"; cat "$SSL_CERT_FILE"',
+  });
+  expect(variables.text).toContain("http://attempt:secret@127.0.0.1:3128|");
+  expect(variables.text).toContain("-----BEGIN CERTIFICATE-----");
+  await f.session.capture();
+  await f.session.stop({ owner });
+}, 30_000);

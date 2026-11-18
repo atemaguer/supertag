@@ -75,7 +75,7 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
       async allocate(request, context) {
         if (!request.owner)
           throw new ConnectError("Workspace owner is required", Code.InvalidArgument);
-        const { owner, timeoutMs, allowedActions, environment, preparedArtifact, prepare } =
+        const { owner, timeoutMs, allowedActions, environment, preparedArtifact, prepare, egress } =
           request;
         const fileScope = request.fileScope;
         return session.allocate(
@@ -95,6 +95,15 @@ export function createWorkspaceHandlers(session: Session): RemoteWorkspaceHandle
               : {}),
             ...(preparedArtifact === undefined ? {} : { preparedArtifact }),
             prepare,
+            ...(egress === undefined
+              ? {}
+              : {
+                  egress: {
+                    proxy: egress.proxy,
+                    variables: { ...egress.variables },
+                    caPem: egress.caPem,
+                  },
+                }),
             ...(environment === undefined
               ? {}
               : {

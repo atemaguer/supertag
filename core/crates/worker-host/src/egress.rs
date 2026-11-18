@@ -1033,6 +1033,7 @@ pub(crate) async fn start_for_attempt(
     state_directory: &std::path::Path,
     attempt_id: &str,
     harness: supertag_protocol::v2::HarnessKind,
+    remote: bool,
 ) -> Result<AttemptEgress> {
     let bound = supertag_protocol::network_scope::credentials(scope);
     let mut selected = Vec::new();
@@ -1044,7 +1045,9 @@ pub(crate) async fn start_for_attempt(
         selected.push(credential.for_attempt());
     }
     let mut config = Config::new(scope.clone(), selected);
-    config.require_password = harness != supertag_protocol::v2::HarnessKind::ClaudeCode;
+    // A remote sandbox's commands reach the proxy through the relay with the password; only
+    // Claude Code's local sandbox cannot send it.
+    config.require_password = remote || harness != supertag_protocol::v2::HarnessKind::ClaudeCode;
     ensure!(
         config.require_password || config.credentials.is_empty(),
         "Claude Code's sandbox cannot authenticate to the egress proxy, so it carries no network credentials"
@@ -1064,6 +1067,28 @@ pub(crate) async fn start_for_attempt(
 }
 
 impl AttemptEgress {
+    /// What a remote sandbox needs for this Attempt's network: a fresh relay token, the proxy
+    /// URL through the relay on loopback (with the Attempt's proxy password), each credential's
+    /// placeholder, and the CA. No secret: the proxy swaps placeholders on this host.
+    pub(crate) fn remote(&self, client_port: u16) -> supertag_protocol::v2::RemoteWorkspaceEgress {
+        let proxy = self.proxy.url().replace(
+            &self.proxy.address().to_string(),
+            &format!("127.0.0.1:{client_port}"),
+        );
+        let mut variables = std::collections::HashMap::new();
+        for name in ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"] {
+            variables.insert(name.to_owned(), proxy.clone());
+        }
+        for credential in self.proxy.credentials() {
+            variables.insert(credential.variable.clone(), credential.placeholder.clone());
+        }
+        supertag_protocol::v2::RemoteWorkspaceEgress {
+            proxy: format!("127.0.0.1:{}", self.proxy.address().port()),
+            variables,
+            ca_pem: self.proxy.ca_pem(),
+        }
+    }
+
     /// Stop the proxy, remove its files, and report its log while the host still owns the
     /// Attempt. Best effort: a lost report leaves the Task without its network log.
     pub(crate) async fn finish(

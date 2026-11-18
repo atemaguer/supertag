@@ -2003,6 +2003,23 @@ async fn run_assignment(
             );
         }
     };
+    // A network scope runs this Attempt's egress proxy for as long as its harness runs. It starts
+    // before a remote sandbox, whose commands reach it through the sandbox's relay.
+    let egress = match supertag_protocol::network_scope::of_task(&task) {
+        Some(scope) => Some(
+            egress::start_for_attempt(
+                scope,
+                &options.network_credentials,
+                &options.state_directory,
+                &attempt.attempt_id,
+                options.harness,
+                options.remote_provider.is_some(),
+            )
+            .await
+            .context("start the Attempt's egress proxy")?,
+        ),
+        None => None,
+    };
     let mut sandbox_execution_ends = None;
     // A remote sandbox nothing needs before the Harness starts is prepared while it runs, so the
     // model starts without waiting for it; its first tool waits instead. Workspace copies, Task
@@ -2072,7 +2089,7 @@ async fn run_assignment(
                         mounted.as_ref(),
                     ),
                     (registration, coordination, token),
-                    &cancel,
+                    (egress.as_ref(), &cancel),
                 )
                 .await
                 .map_err(|error| {
@@ -2310,21 +2327,6 @@ async fn run_assignment(
     // The delivery check applies the Task's path scope to what it changed.
     let file_scope = supertag_protocol::file_scope::of_task(&task)
         .map(supertag_protocol::file_scope::Rules::from);
-    // A network scope runs this Attempt's egress proxy for as long as its harness runs.
-    let egress = match supertag_protocol::network_scope::of_task(&task) {
-        Some(scope) => Some(
-            egress::start_for_attempt(
-                scope,
-                &options.network_credentials,
-                &options.state_directory,
-                &attempt.attempt_id,
-                options.harness,
-            )
-            .await
-            .context("start the Attempt's egress proxy")?,
-        ),
-        None => None,
-    };
     let sandbox_task = defer_sandbox.then(|| task.clone());
     // The harness answers the joined messages in the same turn. The Task's stored prompt keeps
     // only the person's own text.
@@ -2399,7 +2401,7 @@ async fn run_assignment(
             (&attempt, prepared, sandbox_task),
             (None, sandbox_environment.flatten(), None),
             (registration, coordination, token),
-            &sandbox_cancel,
+            (egress.as_ref(), &sandbox_cancel),
         )
         .await;
         // Whether it failed while the Harness still ran, rather than being stopped after.

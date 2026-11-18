@@ -211,7 +211,20 @@ pub(crate) fn lane_requirement(
         && let Some(action) = task
             .allowed_actions
             .iter()
-            .find(|action| matches!(action.as_str(), "web:fetch" | "web:search" | "browser:use"))
+            .find(|action| match action.as_str() {
+                // A network scope on a relayed lane goes through the sandbox's relay.
+                // Only commands use it there, so a scoped web:fetch without them is refused too.
+                "web:fetch" => {
+                    !(profile.remote_egress_relay
+                        && supertag_protocol::network_scope::of_task(task).is_some()
+                        && task
+                            .allowed_actions
+                            .iter()
+                            .any(|action| action == "commands:execute"))
+                }
+                "web:search" | "browser:use" => true,
+                _ => false,
+            })
     {
         return Some((
             "remote-web".into(),
@@ -320,6 +333,60 @@ mod tests {
             );
             assert!(resolve_attempt(&web, HarnessKind::Cursor, &profile).is_none());
         }
+        // A scoped web:fetch on a lane whose provider relays to the egress proxy is admitted;
+        // web:search still is not.
+        let relayed = HarnessExecutionProfile {
+            remote_egress_relay: true,
+            ..profile.clone()
+        };
+        let mut scoped = task.clone();
+        scoped.allowed_actions.push("web:fetch".into());
+        scoped.policy_snapshot = Some(supertag_protocol::v2::TaskPolicySnapshot {
+            runtime_authority: Some(supertag_protocol::v2::TaskRuntimeAuthority {
+                network: Some(
+                    supertag_protocol::network_scope::compose(
+                        [supertag_protocol::network_scope::Grant {
+                            action: "web:fetch",
+                            hosts: &["https://pypi.org".to_owned()],
+                            methods: &[],
+                            credential: "",
+                            paths: &[],
+                            admitted: true,
+                        }],
+                        false,
+                    )
+                    .unwrap(),
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert!(lane_requirement(&scoped, HarnessKind::Cursor, &relayed).is_none());
+        // Only commands use it on such a lane: without them a scoped web:fetch is refused.
+        let mut fetch_only = scoped.clone();
+        fetch_only
+            .allowed_actions
+            .retain(|action| action != "commands:execute");
+        assert_eq!(
+            lane_requirement(&fetch_only, HarnessKind::Cursor, &relayed)
+                .unwrap()
+                .0,
+            "remote-web"
+        );
+        assert_eq!(
+            lane_requirement(&scoped, HarnessKind::Cursor, &profile)
+                .unwrap()
+                .0,
+            "network-scope"
+        );
+        let mut unscoped = task.clone();
+        unscoped.allowed_actions.push("web:fetch".into());
+        assert_eq!(
+            lane_requirement(&unscoped, HarnessKind::Cursor, &relayed)
+                .unwrap()
+                .0,
+            "remote-web"
+        );
         // A local lane still needs the opt-in.
         assert_eq!(
             lane_requirement(&task, HarnessKind::Cursor, &Default::default())

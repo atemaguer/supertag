@@ -32,6 +32,11 @@ export function collected(child: ChildProcess) {
  * A fake privileged exec. It never executes anything: the seal program kills every process it
  * did not record, so it must never run on the machine running the tests.
  */
+/** What the fake relay's exec received on its standard input. */
+export const relayInputs: string[] = [];
+/** The fake relay's standard output, which a test writes as the sandbox's relay would. */
+export const relayOutput: { send?: (line: string) => void } = {};
+
 export function fakePrivileged(sealExit = 0) {
   const stream = (text: string) =>
     new ReadableStream<Uint8Array>({
@@ -41,6 +46,28 @@ export function fakePrivileged(sealExit = 0) {
       },
     });
   return vi.fn<ModalSandboxClient["exec"]>(async (command) => {
+    if (command.includes("3128")) {
+      // The relay's exec stays open: the test speaks its side of the line protocol.
+      const encoder = new TextEncoder();
+      return {
+        stdin: {
+          async writeBytes(bytes: Uint8Array) {
+            relayInputs.push(new TextDecoder().decode(bytes));
+          },
+          async close() {},
+        },
+        stdout: new ReadableStream<Uint8Array>({
+          start(controller) {
+            relayOutput.send = (line) => controller.enqueue(encoder.encode(`${line}\n`));
+            relayOutput.send("relay ready 3128");
+          },
+        }),
+        stderr: stream(""),
+        async wait() {
+          return await new Promise<number>(() => {});
+        },
+      };
+    }
     const seal = command.findIndex((value) => value.includes("sealed %d"));
     let exitCode = 0;
     let stdout = `${JSON.stringify({

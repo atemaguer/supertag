@@ -25,6 +25,10 @@ use crate::{
 /// Runtime actions a remote Workspace cannot carry: each would run on the Worker Host.
 pub(crate) const REMOTE_REFUSED_ACTIONS: [&str; 3] = ["web:fetch", "web:search", "browser:use"];
 
+/// The relay's loopback port in the sandbox, where Task clients connect (the SDK's
+/// `EGRESS_CLIENT_PORT`).
+const EGRESS_CLIENT_PORT: u16 = 3128;
+
 /// The longest sandbox lifetime the E2B and Modal provider sessions grant.
 pub(crate) const MAX_SANDBOX_LIFETIME: Duration = Duration::from_secs(3600);
 /// Sandbox life kept after the harness stops, for capture and cleanup.
@@ -81,7 +85,7 @@ pub(crate) async fn prepare(
         Option<&Mounted>,
     ),
     (registration, coordination, token): (&HostRecord, &CoordinationClients, &str),
-    cancel: &CancellationToken,
+    (egress, cancel): (Option<&crate::egress::AttemptEgress>, &CancellationToken),
 ) -> Result<(RemoteProvider, Option<String>, Instant, Restart)> {
     options
         .remote_provider
@@ -89,11 +93,18 @@ pub(crate) async fn prepare(
         .context("remote Workspace provider is unavailable")?;
     // A remote sandbox carries files and commands only. A web or browser action would run on
     // this host, outside the sandbox, so it is refused rather than dropped.
-    if let Some(action) = task
-        .allowed_actions
-        .iter()
-        .find(|action| REMOTE_REFUSED_ACTIONS.contains(&action.as_str()))
-    {
+    if let Some(action) = task.allowed_actions.iter().find(|action| {
+        REMOTE_REFUSED_ACTIONS.contains(&action.as_str())
+                // A scoped web:fetch reaches the web through the sandbox's relay, never this host:
+                // only on a relaying host, and only for a Task whose commands use it.
+                && !(action.as_str() == "web:fetch"
+                    && egress.is_some()
+                    && options.execution_profile.remote_egress_relay
+                    && task
+                        .allowed_actions
+                        .iter()
+                        .any(|action| action == "commands:execute"))
+    }) {
         anyhow::bail!("a remote Workspace cannot carry {action} yet");
     }
     // Commands run in the sandbox; the provider seals it before Capture. Coordination actions
@@ -176,8 +187,17 @@ pub(crate) async fn prepare(
     let setup = environment
         .as_ref()
         .is_some_and(|environment| !environment.setup_commands.is_empty());
+    // A network scope reaches the sandbox only through its commands, so only they get the relay.
+    let egress = egress
+        .filter(|_| {
+            allowed_actions
+                .iter()
+                .any(|action| action == "commands:execute")
+        })
+        .map(|egress| egress.remote(EGRESS_CLIENT_PORT));
     let restart = Restart {
         allowed_actions,
+        egress,
         file_scope: supertag_protocol::file_scope::of_task(task).cloned(),
         environment,
         start,
@@ -213,6 +233,8 @@ pub(crate) async fn prepare(
 #[derive(Clone)]
 pub(crate) struct Restart {
     allowed_actions: Vec<String>,
+    /// The relay to the Attempt's egress proxy each sandbox, a replacement too, gets.
+    egress: Option<supertag_protocol::v2::RemoteWorkspaceEgress>,
     file_scope: Option<supertag_protocol::v2::FileScope>,
     environment: Option<RemoteWorkspaceEnvironment>,
     start: Start,
@@ -248,7 +270,10 @@ async fn start_sandbox(
         .remote_provider
         .as_ref()
         .context("remote Workspace provider is unavailable")?;
-    let provider = RemoteProvider::spawn(config, &journal.remote_scratch()?, cancel).await?;
+    let mut provider = RemoteProvider::spawn(config, &journal.remote_scratch()?, cancel).await?;
+    if let Some(egress) = &restart.egress {
+        provider.set_egress(egress.clone());
+    }
     ensure!(!cancel.is_cancelled(), "sandbox preparation cancelled");
     let record = journal.begin_remote_sandbox(
         attempt,

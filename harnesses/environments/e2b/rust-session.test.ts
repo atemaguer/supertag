@@ -28,7 +28,7 @@ import {
   startRemoteWorkspaceTransport,
 } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { afterEach, expect, it, vi } from "vitest";
-import { fakePrivileged, fixture as sharedFixture, wait } from "./rust-fixture.ts";
+import { fakePrivileged, relayStarts, fixture as sharedFixture, wait } from "./rust-fixture.ts";
 import { createE2BWorkspaceSession } from "./src/rust-provider/session.ts";
 
 const owner = {
@@ -1406,4 +1406,28 @@ it("reports its sandbox lost only once E2B says that sandbox no longer exists", 
   const asked = f.inventory.get.mock.calls.length;
   expect(await outcome("a.txt")).toMatchObject({ sandboxLost: true });
   expect(f.inventory.get.mock.calls.length).toBe(asked);
+});
+
+it("starts the egress relay as root over a long-lived command, and keeps the sandbox offline", async () => {
+  relayStarts.mockClear();
+  const { session, factory } = await fixture();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write", "commands:execute"],
+    egress: {
+      proxy: "127.0.0.1:4000",
+      variables: { HTTPS_PROXY: "http://attempt:secret@127.0.0.1:3128" },
+      caPem: "-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n",
+    },
+  });
+  expect(relayStarts).toHaveBeenCalledTimes(1);
+  expect(relayStarts.mock.calls[0]?.[0].slice(0, 4)).toEqual([
+    "/usr/bin/env",
+    "-i",
+    "PATH=/usr/local/bin:/usr/bin:/bin",
+    "python3",
+  ]);
+  expect(factory.create.mock.calls[0]?.[0].allowInternetAccess).toBe(false);
+  await session.stop({ owner });
 });

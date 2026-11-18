@@ -73,13 +73,19 @@ within the pre-1.0 compatibility policy described in
 - Claude Code can keep a Task's Workspace in an E2B or Modal sandbox, like Cursor
   (`supertag worker-host --harness claude-code --e2b-workspace-provider ...`): Claude Code runs on
   the host with no built-in tool, and its file and command tools run in the sandbox.
+- Network scopes apply to commands in Modal Workspaces: a Cursor or Claude Code Task with a scoped
+  `web:fetch` and `commands:execute` reaches only the hosts it allows. The sandbox keeps no network,
+  DNS included; a relay in it carries each connection over Modal's command channel to the
+  Attempt's egress proxy on the Worker Host, which checks it and swaps credential placeholders,
+  so Modal hosts can take `--network-credential` too. E2B Workspaces still refuse network scopes.
 - Cursor and Claude Code Tasks with an E2B or Modal Workspace can run commands
   (`commands:execute`), in the Task's sandbox, without `allow-unsandboxed-commands`. The sandbox
   has no network access. Each command stops at its time limit inside the sandbox, and every
   process the Task left running is stopped before the Workspace returns. Files your ignore rules
   match (such as `node_modules/`) and any `.git` directory a command creates stay in the sandbox;
   the Task output directory always returns. A Task whose Permission Sets hide paths does not run
-  commands in a remote sandbox, and one with `web:fetch` or `web:search` doesn't run there.
+  commands in a remote sandbox, and one with `web:search`, or a `web:fetch` without a network scope,
+  doesn't run there.
 - See and delete what a Tag remembers: the desktop app lists a Tag's notes in its details panel,
   opened from the Tag's name, and the terminal UI under Notes in the command palette. Each note
   records when a turn last had it in its context (`last_seen_at` in `supertag describe memory`),

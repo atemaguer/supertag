@@ -1759,7 +1759,7 @@ class RemoteWorkspaceOwner(_message.Message):
     def __init__(self, host_id: _Optional[str] = ..., host_generation: _Optional[int] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., allocation_id: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceAllocateRequest(_message.Message):
-    __slots__ = ("owner", "timeout_ms", "allowed_actions", "environment", "prepared_artifact", "prepare", "file_scope")
+    __slots__ = ("owner", "timeout_ms", "allowed_actions", "environment", "prepared_artifact", "prepare", "file_scope", "egress")
     OWNER_FIELD_NUMBER: _ClassVar[int]
     TIMEOUT_MS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
@@ -1767,6 +1767,7 @@ class RemoteWorkspaceAllocateRequest(_message.Message):
     PREPARED_ARTIFACT_FIELD_NUMBER: _ClassVar[int]
     PREPARE_FIELD_NUMBER: _ClassVar[int]
     FILE_SCOPE_FIELD_NUMBER: _ClassVar[int]
+    EGRESS_FIELD_NUMBER: _ClassVar[int]
     owner: RemoteWorkspaceOwner
     timeout_ms: int
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
@@ -1774,7 +1775,8 @@ class RemoteWorkspaceAllocateRequest(_message.Message):
     prepared_artifact: str
     prepare: bool
     file_scope: _policy_pb2.FileScope
-    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., environment: _Optional[_Union[RemoteWorkspaceEnvironment, _Mapping]] = ..., prepared_artifact: _Optional[str] = ..., prepare: _Optional[bool] = ..., file_scope: _Optional[_Union[_policy_pb2.FileScope, _Mapping]] = ...) -> None: ...
+    egress: RemoteWorkspaceEgress
+    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., environment: _Optional[_Union[RemoteWorkspaceEnvironment, _Mapping]] = ..., prepared_artifact: _Optional[str] = ..., prepare: _Optional[bool] = ..., file_scope: _Optional[_Union[_policy_pb2.FileScope, _Mapping]] = ..., egress: _Optional[_Union[RemoteWorkspaceEgress, _Mapping]] = ...) -> None: ...
 
 class RemoteWorkspaceEnvironment(_message.Message):
     __slots__ = ("image", "dockerfile_commands", "user", "setup_commands")
@@ -1793,6 +1795,23 @@ class RemoteWorkspaceAllocation(_message.Message):
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     sandbox_id: str
     def __init__(self, sandbox_id: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceEgress(_message.Message):
+    __slots__ = ("proxy", "variables", "ca_pem")
+    class VariablesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    PROXY_FIELD_NUMBER: _ClassVar[int]
+    VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    CA_PEM_FIELD_NUMBER: _ClassVar[int]
+    proxy: str
+    variables: _containers.ScalarMap[str, str]
+    ca_pem: str
+    def __init__(self, proxy: _Optional[str] = ..., variables: _Optional[_Mapping[str, str]] = ..., ca_pem: _Optional[str] = ...) -> None: ...
 
 class RemoteWorkspaceSnapshotRequest(_message.Message):
     __slots__ = ()
@@ -2819,7 +2838,7 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts", "mcp_login_servers", "network_credentials", "network_sandbox", "unverified_workspace_provider", "volumes")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs", "workspace_mounts", "mcp_login_servers", "network_credentials", "network_sandbox", "unverified_workspace_provider", "remote_egress_relay", "volumes")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
@@ -2833,6 +2852,7 @@ class HarnessExecutionProfile(_message.Message):
     NETWORK_CREDENTIALS_FIELD_NUMBER: _ClassVar[int]
     NETWORK_SANDBOX_FIELD_NUMBER: _ClassVar[int]
     UNVERIFIED_WORKSPACE_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_EGRESS_RELAY_FIELD_NUMBER: _ClassVar[int]
     VOLUMES_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
@@ -2847,8 +2867,9 @@ class HarnessExecutionProfile(_message.Message):
     network_credentials: _containers.RepeatedScalarFieldContainer[str]
     network_sandbox: bool
     unverified_workspace_provider: bool
+    remote_egress_relay: bool
     volumes: _containers.RepeatedCompositeFieldContainer[VolumeMapping]
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ..., mcp_login_servers: _Optional[_Iterable[str]] = ..., network_credentials: _Optional[_Iterable[str]] = ..., network_sandbox: _Optional[bool] = ..., unverified_workspace_provider: _Optional[bool] = ..., volumes: _Optional[_Iterable[_Union[VolumeMapping, _Mapping]]] = ...) -> None: ...
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ..., workspace_mounts: _Optional[_Iterable[_Union[WorkspaceMountCapability, _Mapping]]] = ..., mcp_login_servers: _Optional[_Iterable[str]] = ..., network_credentials: _Optional[_Iterable[str]] = ..., network_sandbox: _Optional[bool] = ..., unverified_workspace_provider: _Optional[bool] = ..., remote_egress_relay: _Optional[bool] = ..., volumes: _Optional[_Iterable[_Union[VolumeMapping, _Mapping]]] = ...) -> None: ...
 
 class VolumeMapping(_message.Message):
     __slots__ = ("volume_id", "source")

@@ -606,7 +606,8 @@ Commands get the authority's certificate in `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE
 | Codex, local Worker Host | operating system: the sandbox allows only loopback, Codex's managed network proxy allows only the scope's hosts, and it forwards every connection through the egress proxy | commands reach the network directly, and the proxy variables point at the egress proxy |
 | Claude Code | `WebFetch`: tool, SuperTag's tool hook checks each URL. Commands: operating system, Claude Code's own sandbox sends their traffic only to the egress proxy, on a host that can run it. A scope that names a credential is not supported: the Task waits | not supported: the Task waits |
 | OpenCode, Cursor, custom harnesses | not supported: the Task waits | not supported: the Task waits |
-| Remote Workspaces and shared execution | not supported: the Task waits | not supported: the Task waits |
+| Cursor or Claude Code with a Modal Workspace, Task with `commands:execute` | provider network policy: the sandbox has no network at all, DNS included. Commands reach the web only through a relay in the sandbox that carries each connection over the provider's own command channel to the egress proxy on the Worker Host | commands carry the proxy credential and the placeholders through the relay |
+| E2B Workspaces and shared execution | not supported: the Task waits | not supported: the Task waits |
 
 A Task waits too when no Worker Host offers a credential its scope names.
 `supertag placement explain TASK` names the `network-scope` requirement and why, for example:

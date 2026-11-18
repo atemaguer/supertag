@@ -8,6 +8,11 @@ export {
 } from "./container.js";
 export { type CopySandbox, createWorkspaceCopies } from "./copies.js";
 export { WorkspaceConfigurationError } from "./errors.js";
+export {
+  createEgressRelayHost,
+  EGRESS_RELAY_PROGRAM,
+  type EgressRelayHost,
+} from "./egress-relay.js";
 export { createWorkspaceHandlers } from "./handlers.js";
 export {
   COMMAND_GRACE_MS,
@@ -25,7 +30,10 @@ export {
 export {
   BUILD_TIMEOUT_MS,
   createSandboxWorkspaceSession,
+  EGRESS_CLIENT_PORT,
+  egressProxy,
   MAX_TRANSFER,
+  type SandboxEgress,
   type SandboxEnvironment,
   type SandboxOwner,
   type SandboxStopResult,
