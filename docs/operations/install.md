@@ -67,6 +67,24 @@ uv run scripts/install_native_release.py "$HOME"/supertag-build/supertag-*-compl
 `install_native_release.py` checks and installs the archive as the installer script does, and
 reads the same `SUPERTAG_INSTALL_ROOT` and `SUPERTAG_BIN_DIR`.
 
+## Install the desktop app
+
+On an Apple silicon Mac, the desktop app gives your conversations with Tags a window of their own.
+Intel Macs and Linux have no desktop app; use the terminal UI there.
+
+1. Install the `supertag` command first with the install script above. The app runs it.
+2. Download `SuperTag-VERSION-darwin-arm64.dmg` from the
+   [latest release](https://github.com/atemaguer/supertag/releases/latest), open it, and drag
+   **SuperTag** to **Applications**.
+3. Open SuperTag from Applications.
+
+When SuperTag isn't set up on this Mac yet, set it up on first launch: follow the app's setup
+screen when it shows one, or run `supertag init` in a repository, as in
+[Run your first Tag](../../README.md#run-your-first-tag). On later launches the app connects to
+your local SuperTag, and when its services are stopped it shows "Starting SuperTag…" and starts
+them with `supertag up`. If they can't start, it shows what `supertag up` printed and where the
+logs are.
+
 ## Build only the CLI
 
 For a server or container that runs only the Control Plane or a Gateway, or on an Intel Mac,
