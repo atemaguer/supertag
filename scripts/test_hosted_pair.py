@@ -16,7 +16,8 @@ if [ "$role" = health ]; then exit 0; fi
 printf '%s\\n' "$@" > "$LOG/$role.args"
 env > "$LOG/$role.env"
 trap 'exit 0' TERM
-echo $$ > "$LOG/$role.pid"
+# Written then renamed, so a reader never sees an empty pid file.
+echo $$ > "$LOG/$role.pid.tmp" && mv "$LOG/$role.pid.tmp" "$LOG/$role.pid"
 while :; do sleep 0.1; done
 """
 
