@@ -644,6 +644,57 @@ async fn branch_contract(url: String) {
         .await
         .unwrap();
     assert_eq!(read, landed);
+
+    // Git delivery reads the pushed branch back once. Only git delivery may.
+    assert!(
+        store
+            .list_unverified_landings(OP, &ListUnverifiedLandingsRequest::default())
+            .await
+            .is_err()
+    );
+    let unverified = store
+        .list_unverified_landings(
+            GIT_DELIVERY_PRINCIPAL,
+            &ListUnverifiedLandingsRequest::default(),
+        )
+        .await
+        .unwrap()
+        .landings;
+    assert_eq!(unverified.len(), 1);
+    assert_eq!(
+        unverified[0].landing.as_ref().unwrap().landing_id,
+        landed.landing_id
+    );
+    assert_eq!(unverified[0].workspace.as_ref().unwrap().remote, REMOTE);
+    // A branch someone moved after the push is recorded on the landing, which stays landed.
+    let moved = "9".repeat(40);
+    let checked = store
+        .record_landing_verification(
+            GIT_DELIVERY_PRINCIPAL,
+            &RecordLandingVerificationRequest {
+                landing_id: landed.landing_id.clone(),
+                remote_commit: moved.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(checked.state(), WorkspaceLandingState::Landed);
+    assert!(
+        checked.reason.contains(&moved) && checked.reason.contains("outside SuperTag"),
+        "{}",
+        checked.reason
+    );
+    assert!(
+        store
+            .list_unverified_landings(
+                GIT_DELIVERY_PRINCIPAL,
+                &ListUnverifiedLandingsRequest::default()
+            )
+            .await
+            .unwrap()
+            .landings
+            .is_empty()
+    );
     store.close().await;
 }
 

@@ -482,7 +482,10 @@ its own copy of them, right after the Task finished: the harness never pushes. E
 Task updates the Session's branch; `land` adds a merge or a review. The host pushes only
 `supertag/session/...` branches and the Workspace's merge target, fast-forward only, whatever the
 credential could do. A review's pull request is opened by the Control Plane's git delivery once the
-branch is pushed. A Landing's state:
+branch is pushed. Git delivery then reads each Session's latest landed branch back with
+`ls-remote`; a branch that no longer names the delivered commit was changed outside SuperTag, and
+the landing's `reason` says so. That detects such a change but cannot prevent it: protect
+`supertag/**` and your target branches on the server. A Landing's state:
 
 | State | Meaning |
 | --- | --- |

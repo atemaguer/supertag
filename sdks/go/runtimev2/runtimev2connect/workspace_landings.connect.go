@@ -61,6 +61,12 @@ const (
 	GitDeliveryRenewProcedure = "/supertag.runtime.v2.GitDelivery/Renew"
 	// GitDeliveryRecordProcedure is the fully-qualified name of the GitDelivery's Record RPC.
 	GitDeliveryRecordProcedure = "/supertag.runtime.v2.GitDelivery/Record"
+	// GitDeliveryListUnverifiedProcedure is the fully-qualified name of the GitDelivery's
+	// ListUnverified RPC.
+	GitDeliveryListUnverifiedProcedure = "/supertag.runtime.v2.GitDelivery/ListUnverified"
+	// GitDeliveryRecordVerificationProcedure is the fully-qualified name of the GitDelivery's
+	// RecordVerification RPC.
+	GitDeliveryRecordVerificationProcedure = "/supertag.runtime.v2.GitDelivery/RecordVerification"
 )
 
 // WorkspaceLandingsClient is a client for the supertag.runtime.v2.WorkspaceLandings service.
@@ -323,6 +329,10 @@ type GitDeliveryClient interface {
 	Claim(context.Context, *connect.Request[runtimev2.ClaimWorkspaceLandingRequest]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error)
 	Renew(context.Context, *connect.Request[runtimev2.WorkspaceLandingLease]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error)
 	Record(context.Context, *connect.Request[runtimev2.RecordWorkspaceLandingRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error)
+	// Each Session's latest landing whose Session branch a Worker Host pushed and git delivery has
+	// not checked yet. Git delivery reads the branch with `ls-remote` and records what it named.
+	ListUnverified(context.Context, *connect.Request[runtimev2.ListUnverifiedLandingsRequest]) (*connect.Response[runtimev2.ListUnverifiedLandingsResponse], error)
+	RecordVerification(context.Context, *connect.Request[runtimev2.RecordLandingVerificationRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error)
 }
 
 // NewGitDeliveryClient constructs a client for the supertag.runtime.v2.GitDelivery service. By
@@ -366,6 +376,18 @@ func NewGitDeliveryClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(gitDeliveryMethods.ByName("Record")),
 			connect.WithClientOptions(opts...),
 		),
+		listUnverified: connect.NewClient[runtimev2.ListUnverifiedLandingsRequest, runtimev2.ListUnverifiedLandingsResponse](
+			httpClient,
+			baseURL+GitDeliveryListUnverifiedProcedure,
+			connect.WithSchema(gitDeliveryMethods.ByName("ListUnverified")),
+			connect.WithClientOptions(opts...),
+		),
+		recordVerification: connect.NewClient[runtimev2.RecordLandingVerificationRequest, runtimev2.WorkspaceLanding](
+			httpClient,
+			baseURL+GitDeliveryRecordVerificationProcedure,
+			connect.WithSchema(gitDeliveryMethods.ByName("RecordVerification")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -376,6 +398,8 @@ type gitDeliveryClient struct {
 	claim              *connect.Client[runtimev2.ClaimWorkspaceLandingRequest, runtimev2.ClaimWorkspaceLandingResponse]
 	renew              *connect.Client[runtimev2.WorkspaceLandingLease, runtimev2.ClaimWorkspaceLandingResponse]
 	record             *connect.Client[runtimev2.RecordWorkspaceLandingRequest, runtimev2.WorkspaceLanding]
+	listUnverified     *connect.Client[runtimev2.ListUnverifiedLandingsRequest, runtimev2.ListUnverifiedLandingsResponse]
+	recordVerification *connect.Client[runtimev2.RecordLandingVerificationRequest, runtimev2.WorkspaceLanding]
 }
 
 // ListPendingSources calls supertag.runtime.v2.GitDelivery.ListPendingSources.
@@ -403,6 +427,16 @@ func (c *gitDeliveryClient) Record(ctx context.Context, req *connect.Request[run
 	return c.record.CallUnary(ctx, req)
 }
 
+// ListUnverified calls supertag.runtime.v2.GitDelivery.ListUnverified.
+func (c *gitDeliveryClient) ListUnverified(ctx context.Context, req *connect.Request[runtimev2.ListUnverifiedLandingsRequest]) (*connect.Response[runtimev2.ListUnverifiedLandingsResponse], error) {
+	return c.listUnverified.CallUnary(ctx, req)
+}
+
+// RecordVerification calls supertag.runtime.v2.GitDelivery.RecordVerification.
+func (c *gitDeliveryClient) RecordVerification(ctx context.Context, req *connect.Request[runtimev2.RecordLandingVerificationRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error) {
+	return c.recordVerification.CallUnary(ctx, req)
+}
+
 // GitDeliveryHandler is an implementation of the supertag.runtime.v2.GitDelivery service.
 type GitDeliveryHandler interface {
 	ListPendingSources(context.Context, *connect.Request[runtimev2.ListPendingWorkspaceSourcesRequest]) (*connect.Response[runtimev2.ListPendingWorkspaceSourcesResponse], error)
@@ -410,6 +444,10 @@ type GitDeliveryHandler interface {
 	Claim(context.Context, *connect.Request[runtimev2.ClaimWorkspaceLandingRequest]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error)
 	Renew(context.Context, *connect.Request[runtimev2.WorkspaceLandingLease]) (*connect.Response[runtimev2.ClaimWorkspaceLandingResponse], error)
 	Record(context.Context, *connect.Request[runtimev2.RecordWorkspaceLandingRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error)
+	// Each Session's latest landing whose Session branch a Worker Host pushed and git delivery has
+	// not checked yet. Git delivery reads the branch with `ls-remote` and records what it named.
+	ListUnverified(context.Context, *connect.Request[runtimev2.ListUnverifiedLandingsRequest]) (*connect.Response[runtimev2.ListUnverifiedLandingsResponse], error)
+	RecordVerification(context.Context, *connect.Request[runtimev2.RecordLandingVerificationRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error)
 }
 
 // NewGitDeliveryHandler builds an HTTP handler from the service implementation. It returns the path
@@ -449,6 +487,18 @@ func NewGitDeliveryHandler(svc GitDeliveryHandler, opts ...connect.HandlerOption
 		connect.WithSchema(gitDeliveryMethods.ByName("Record")),
 		connect.WithHandlerOptions(opts...),
 	)
+	gitDeliveryListUnverifiedHandler := connect.NewUnaryHandler(
+		GitDeliveryListUnverifiedProcedure,
+		svc.ListUnverified,
+		connect.WithSchema(gitDeliveryMethods.ByName("ListUnverified")),
+		connect.WithHandlerOptions(opts...),
+	)
+	gitDeliveryRecordVerificationHandler := connect.NewUnaryHandler(
+		GitDeliveryRecordVerificationProcedure,
+		svc.RecordVerification,
+		connect.WithSchema(gitDeliveryMethods.ByName("RecordVerification")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.GitDelivery/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case GitDeliveryListPendingSourcesProcedure:
@@ -461,6 +511,10 @@ func NewGitDeliveryHandler(svc GitDeliveryHandler, opts ...connect.HandlerOption
 			gitDeliveryRenewHandler.ServeHTTP(w, r)
 		case GitDeliveryRecordProcedure:
 			gitDeliveryRecordHandler.ServeHTTP(w, r)
+		case GitDeliveryListUnverifiedProcedure:
+			gitDeliveryListUnverifiedHandler.ServeHTTP(w, r)
+		case GitDeliveryRecordVerificationProcedure:
+			gitDeliveryRecordVerificationHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -488,4 +542,12 @@ func (UnimplementedGitDeliveryHandler) Renew(context.Context, *connect.Request[r
 
 func (UnimplementedGitDeliveryHandler) Record(context.Context, *connect.Request[runtimev2.RecordWorkspaceLandingRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.GitDelivery.Record is not implemented"))
+}
+
+func (UnimplementedGitDeliveryHandler) ListUnverified(context.Context, *connect.Request[runtimev2.ListUnverifiedLandingsRequest]) (*connect.Response[runtimev2.ListUnverifiedLandingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.GitDelivery.ListUnverified is not implemented"))
+}
+
+func (UnimplementedGitDeliveryHandler) RecordVerification(context.Context, *connect.Request[runtimev2.RecordLandingVerificationRequest]) (*connect.Response[runtimev2.WorkspaceLanding], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.GitDelivery.RecordVerification is not implemented"))
 }

@@ -189,6 +189,34 @@ class PinWorkspaceSourceRequest(_message.Message):
     error: str
     def __init__(self, pin_id: _Optional[str] = ..., selector_digest: _Optional[str] = ..., resolved_ref: _Optional[str] = ..., commit: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
 
+class ListUnverifiedLandingsRequest(_message.Message):
+    __slots__ = ("limit",)
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    limit: int
+    def __init__(self, limit: _Optional[int] = ...) -> None: ...
+
+class ListUnverifiedLandingsResponse(_message.Message):
+    __slots__ = ("landings",)
+    LANDINGS_FIELD_NUMBER: _ClassVar[int]
+    landings: _containers.RepeatedCompositeFieldContainer[UnverifiedLanding]
+    def __init__(self, landings: _Optional[_Iterable[_Union[UnverifiedLanding, _Mapping]]] = ...) -> None: ...
+
+class UnverifiedLanding(_message.Message):
+    __slots__ = ("landing", "workspace")
+    LANDING_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    landing: WorkspaceLanding
+    workspace: _workspaces_pb2.Workspace
+    def __init__(self, landing: _Optional[_Union[WorkspaceLanding, _Mapping]] = ..., workspace: _Optional[_Union[_workspaces_pb2.Workspace, _Mapping]] = ...) -> None: ...
+
+class RecordLandingVerificationRequest(_message.Message):
+    __slots__ = ("landing_id", "remote_commit")
+    LANDING_ID_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    landing_id: str
+    remote_commit: str
+    def __init__(self, landing_id: _Optional[str] = ..., remote_commit: _Optional[str] = ...) -> None: ...
+
 class ClaimWorkspaceLandingRequest(_message.Message):
     __slots__ = ("operation_id",)
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]

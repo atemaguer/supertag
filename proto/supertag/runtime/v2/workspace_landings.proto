@@ -32,6 +32,10 @@ service GitDelivery {
   rpc Claim(ClaimWorkspaceLandingRequest) returns (ClaimWorkspaceLandingResponse);
   rpc Renew(WorkspaceLandingLease) returns (ClaimWorkspaceLandingResponse);
   rpc Record(RecordWorkspaceLandingRequest) returns (WorkspaceLanding);
+  // Each Session's latest landing whose Session branch a Worker Host pushed and git delivery has
+  // not checked yet. Git delivery reads the branch with `ls-remote` and records what it named.
+  rpc ListUnverified(ListUnverifiedLandingsRequest) returns (ListUnverifiedLandingsResponse);
+  rpc RecordVerification(RecordLandingVerificationRequest) returns (WorkspaceLanding);
 }
 
 enum WorkspaceLandingMode {
@@ -146,6 +150,19 @@ message PinWorkspaceSourceRequest {
   // Set instead of a commit when the source cannot be read; the Session's queued Tasks fail
   // with it.
   string error = 5;
+}
+
+message ListUnverifiedLandingsRequest { uint32 limit = 1; }
+message ListUnverifiedLandingsResponse { repeated UnverifiedLanding landings = 1; }
+message UnverifiedLanding {
+  WorkspaceLanding landing = 1;
+  // The remote Workspace as the landing's Task recorded it, to read the branch with.
+  Workspace workspace = 2;
+}
+message RecordLandingVerificationRequest {
+  string landing_id = 1;
+  // The commit the remote's Session branch names; empty when the branch is missing.
+  string remote_commit = 2;
 }
 
 message ClaimWorkspaceLandingRequest { string operation_id = 1; }

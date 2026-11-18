@@ -397,6 +397,16 @@ class GitDeliveryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.RecordWorkspaceLandingRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLanding.FromString,
                 _registered_method=True)
+        self.ListUnverified = channel.unary_unary(
+                '/supertag.runtime.v2.GitDelivery/ListUnverified',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListUnverifiedLandingsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListUnverifiedLandingsResponse.FromString,
+                _registered_method=True)
+        self.RecordVerification = channel.unary_unary(
+                '/supertag.runtime.v2.GitDelivery/RecordVerification',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.RecordLandingVerificationRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLanding.FromString,
+                _registered_method=True)
 
 
 class GitDeliveryServicer:
@@ -434,6 +444,20 @@ class GitDeliveryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListUnverified(self, request, context):
+        """Each Session's latest landing whose Session branch a Worker Host pushed and git delivery has
+        not checked yet. Git delivery reads the branch with `ls-remote` and records what it named.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RecordVerification(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_GitDeliveryServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -460,6 +484,16 @@ def add_GitDeliveryServicer_to_server(servicer, server):
             'Record': grpc.unary_unary_rpc_method_handler(
                     servicer.Record,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.RecordWorkspaceLandingRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLanding.SerializeToString,
+            ),
+            'ListUnverified': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListUnverified,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListUnverifiedLandingsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListUnverifiedLandingsResponse.SerializeToString,
+            ),
+            'RecordVerification': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecordVerification,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.RecordLandingVerificationRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLanding.SerializeToString,
             ),
     }
@@ -599,6 +633,60 @@ class GitDelivery:
             target,
             '/supertag.runtime.v2.GitDelivery/Record',
             supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.RecordWorkspaceLandingRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLanding.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListUnverified(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.GitDelivery/ListUnverified',
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListUnverifiedLandingsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.ListUnverifiedLandingsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RecordVerification(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.GitDelivery/RecordVerification',
+            supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.RecordLandingVerificationRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_workspace__landings__pb2.WorkspaceLanding.FromString,
             options,
             channel_credentials,

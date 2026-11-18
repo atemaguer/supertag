@@ -14,9 +14,10 @@ use supertag_protocol::{
     git_remote::may_push,
     negotiation::ProtocolChannel,
     v2::{
-        ClaimWorkspaceLandingRequest, ClaimWorkspaceLandingResponse, RecordWorkspaceLandingRequest,
-        WorkspaceLanding, WorkspaceLandingLease, WorkspaceLandingMode, WorkspaceLandingState,
-        WorkspacePullRequest, git_delivery_client::GitDeliveryClient,
+        ClaimWorkspaceLandingRequest, ClaimWorkspaceLandingResponse, ListUnverifiedLandingsRequest,
+        RecordLandingVerificationRequest, RecordWorkspaceLandingRequest, WorkspaceLanding,
+        WorkspaceLandingLease, WorkspaceLandingMode, WorkspaceLandingState, WorkspacePullRequest,
+        git_delivery_client::GitDeliveryClient,
     },
     valid_git_commit,
 };
@@ -374,14 +375,66 @@ impl GitDelivery {
         principal: String,
         shutdown: CancellationToken,
     ) -> Result<()> {
-        let calls = DeliveryCalls {
+        let calls = Arc::new(DeliveryCalls {
             client: GitDeliveryClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
             token,
             principal,
+        });
+        let verify = {
+            let (delivery, calls, shutdown) = (self.clone(), calls.clone(), shutdown.clone());
+            async move {
+                let mut interval = time::interval(Duration::from_secs(5));
+                interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+                loop {
+                    tokio::select! {
+                        _ = shutdown.cancelled() => return,
+                        _ = interval.tick() => {}
+                    }
+                    // Errors hold no credentials; an unchecked landing is listed again.
+                    let _ = delivery.verify_landed(&calls, &shutdown).await;
+                }
+            }
         };
-        self.run(Arc::new(calls), Work::Review, shutdown).await
+        let (result, ()) = tokio::join!(self.run(calls, Work::Review, shutdown.clone()), verify);
+        result
+    }
+
+    /// Reads back each Session's latest landed branch with `ls-remote` and records what the
+    /// remote names: the Control Plane detects a branch changed outside SuperTag after a Worker
+    /// Host pushed it.
+    async fn verify_landed(&self, calls: &DeliveryCalls, cancel: &CancellationToken) -> Result<()> {
+        let listed = calls
+            .client
+            .clone()
+            .list_unverified(calls.request(ListUnverifiedLandingsRequest { limit: 20 })?)
+            .await?
+            .into_inner();
+        for unverified in listed.landings {
+            let (Some(landing), Some(workspace)) = (unverified.landing, unverified.workspace)
+            else {
+                continue;
+            };
+            let remote = self.remote(&workspace, crate::Access::Read).await?;
+            let session = self.session(&remote)?;
+            let reference = format!("refs/heads/{}", landing.branch);
+            let named = list_refs(&session, &[reference.as_str()], false, cancel)
+                .await?
+                .into_iter()
+                .find(|(name, _)| *name == reference)
+                .map(|(_, oid)| oid)
+                .unwrap_or_default();
+            calls
+                .client
+                .clone()
+                .record_verification(calls.request(RecordLandingVerificationRequest {
+                    landing_id: landing.landing_id,
+                    remote_commit: named,
+                })?)
+                .await?;
+        }
+        Ok(())
     }
 
     /// Lands the deliveries this Worker Host holds, through `calls`, until `shutdown`.

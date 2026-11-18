@@ -783,6 +783,98 @@ impl Store {
         Ok(value)
     }
 
+    /// Each Session's latest landing that has not been read back from the remote: git delivery
+    /// checks with `ls-remote` that the Session branch names the delivered commit. Older landings
+    /// of a Session are never checked, since a later push moved the branch on.
+    pub async fn list_unverified_landings(
+        &self,
+        principal: &str,
+        input: &ListUnverifiedLandingsRequest,
+    ) -> Result<ListUnverifiedLandingsResponse> {
+        delivery(principal)?;
+        let limit = match input.limit {
+            0 => 20,
+            1..=100 => input.limit,
+            _ => return Err(invalid("limit must be between 1 and 100")),
+        };
+        let mut tx = self.pool.begin().await?;
+        let rows = sqlx::query(
+            "SELECT l.* FROM supertag_v2_workspace_landings l
+             WHERE l.state=$1 AND l.verified_at_ms IS NULL
+               AND NOT EXISTS (SELECT 1 FROM supertag_v2_workspace_landings newer
+                   WHERE newer.tag_id=l.tag_id AND newer.session_id=l.session_id
+                     AND newer.created_order>l.created_order AND newer.state=$1)
+             ORDER BY l.created_order LIMIT $2",
+        )
+        .bind(WorkspaceLandingState::Landed as i64)
+        .bind(i64::from(limit))
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut response = ListUnverifiedLandingsResponse::default();
+        for row in rows {
+            let landing = decode(&row)?;
+            let workspace = task_in(&mut tx, &landing.task_id)
+                .await?
+                .workspace
+                .and_then(|spec| spec.remote);
+            response.landings.push(UnverifiedLanding {
+                landing: Some(landing),
+                workspace,
+            });
+        }
+        Ok(response)
+    }
+
+    /// Records what the remote's Session branch named when git delivery read it back. A branch
+    /// that no longer names the delivered commit changed outside SuperTag: the landing says so.
+    pub async fn record_landing_verification(
+        &self,
+        principal: &str,
+        input: &RecordLandingVerificationRequest,
+    ) -> Result<WorkspaceLanding> {
+        delivery(principal)?;
+        if !input.remote_commit.is_empty()
+            && !supertag_protocol::valid_git_commit(&input.remote_commit)
+        {
+            return Err(invalid("remote_commit is a commit ID or empty"));
+        }
+        let (mut tx, _) = self.write().await?;
+        let row = row_in(&mut tx, &input.landing_id).await?;
+        let mut value = decode(&row)?;
+        if value.state() != WorkspaceLandingState::Landed
+            || row.try_get::<Option<i64>, _>("verified_at_ms")?.is_some()
+        {
+            tx.commit().await?;
+            return Ok(value);
+        }
+        let head = value
+            .delivery
+            .as_ref()
+            .map(|delivery| delivery.head_commit.clone())
+            .unwrap_or_default();
+        if input.remote_commit != head {
+            let named = if input.remote_commit.is_empty() {
+                "nothing".to_owned()
+            } else {
+                input.remote_commit.clone()
+            };
+            value.reason = format!(
+                "the remote's {} names {named}, not the delivered {head}: it was changed outside SuperTag",
+                value.branch
+            );
+            save(&mut tx, &value).await?;
+        }
+        sqlx::query(
+            "UPDATE supertag_v2_workspace_landings SET verified_at_ms=$1 WHERE landing_id=$2",
+        )
+        .bind(self.execution_now_ms())
+        .bind(&value.landing_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(value)
+    }
+
     /// A local Workspace's merge conflicted in the operator's repository: the Session gets the
     /// same merge follow-up a remote Workspace's conflict gives it.
     pub async fn return_landing_conflict(
@@ -1024,6 +1116,28 @@ impl git_delivery_server::GitDelivery for ControlPlane {
         Ok(Response::new(
             self.store
                 .renew_workspace_landing(LandingClaimer::Delivery(&principal), request.get_ref())
+                .await?,
+        ))
+    }
+    async fn list_unverified(
+        &self,
+        request: Request<ListUnverifiedLandingsRequest>,
+    ) -> std::result::Result<Response<ListUnverifiedLandingsResponse>, Status> {
+        let principal = self.principal(&request, "delivery:")?;
+        Ok(Response::new(
+            self.store
+                .list_unverified_landings(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+    async fn record_verification(
+        &self,
+        request: Request<RecordLandingVerificationRequest>,
+    ) -> std::result::Result<Response<WorkspaceLanding>, Status> {
+        let principal = self.principal(&request, "delivery:")?;
+        Ok(Response::new(
+            self.store
+                .record_landing_verification(&principal, request.get_ref())
                 .await?,
         ))
     }
