@@ -212,6 +212,12 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
+- Worker Hosts deliver Workspace changes themselves. Every delivered Task's Session branch
+  `supertag/session/...` is pushed to a remote Workspace's server by the host that ran it, with a
+  short-lived credential the Control Plane mints for that one push; `land` adds only a merge or a
+  review. A local Workspace's host writes the Session branch into the mapped repository. The
+  Control Plane reads each landed branch back and records it if the branch was changed outside
+  SuperTag.
 - The examples, now directly under `examples/`, follow SuperTag's positioning. `reliability` shows a proactive Tag
   that owns four ongoing Objectives (production errors, alerts, a red main, dependency
   advisories) with scoped network access to Sentry and GitHub, plus a read-only `support` Tag.
@@ -322,6 +328,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Removed
 
+- `supertag fetch`, `land: branch` (it is now the default), and the Control Plane's delivery
+  bundle relay.
 - `supertag volume copy`, `supertag volume download`, and the Control Plane's `--artifact-volume`
   and `--artifact-s3-volumes`; the Control Plane no longer reads or writes Volume files.
 - `--checkpoint-directory` and the Control Plane's checkpoint storage.
