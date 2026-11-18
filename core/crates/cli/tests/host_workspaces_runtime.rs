@@ -230,15 +230,20 @@ async fn one_host_serves_several_named_workspaces(database: String) -> Result<()
             task["workspace_delivery"]["base_commit"]
         );
     }
-    // Aliases deliver independently, and nothing is written into the operator's checkout.
-    let app_head = json(get(&tasks[0])).await?["workspace_delivery"]["head_commit"].clone();
-    let alias_head = json(get(&tasks[1])).await?["workspace_delivery"]["head_commit"].clone();
+    // Aliases deliver independently. The host lands each delivery in its source checkout as
+    // that Session's branch, and leaves the operator's working tree and HEAD alone.
+    let head = |task: &Value| {
+        task["workspace_delivery"]["head_commit"]
+            .as_str()
+            .map(str::to_owned)
+            .context("delivery head")
+    };
+    let app_head = head(&json(get(&tasks[0])).await?)?;
+    let alias_head = head(&json(get(&tasks[1])).await?)?;
+    let docs_head = head(&json(get(&tasks[2])).await?)?;
     assert_ne!(app_head, alias_head);
-    assert_eq!(git(&app, &["rev-parse", "HEAD"]).await?, app_base);
-    assert_eq!(
-        git(&app, &["for-each-ref", "--format=%(refname)"]).await?,
-        git(&app, &["symbolic-ref", "HEAD"]).await?
-    );
+    untouched_but_for_session_branches(&app, &app_base, &[&app_head, &alias_head]).await?;
+    untouched_but_for_session_branches(&docs, &docs_base, &[&docs_head]).await?;
     assert_eq!(
         std::fs::read_to_string(app.join("workspace.txt"))?,
         "app source\n"
@@ -509,12 +514,15 @@ async fn a_tag_following_a_branch_starts_each_session_at_its_current_commit(
         "Workspace branch no-such-branch does not name a commit on this Worker Host"
     );
     assert_eq!(ghost["workspace"]["base_commit"], "", "{ghost}");
-    // Nothing was written into the operator's checkout.
-    assert_eq!(git(&app, &["rev-parse", "HEAD"]).await?, second);
-    assert_eq!(
-        git(&app, &["for-each-ref", "--format=%(refname)"]).await?,
-        git(&app, &["symbolic-ref", "HEAD"]).await?
-    );
+    // The operator's HEAD and working tree are untouched; each delivered Session has its branch,
+    // at its latest delivery, and the failed Task added none.
+    let again_head = again["workspace_delivery"]["head_commit"]
+        .as_str()
+        .context("delivery head")?;
+    let beta_head = beta["workspace_delivery"]["head_commit"]
+        .as_str()
+        .context("delivery head")?;
+    untouched_but_for_session_branches(&app, &second, &[again_head, beta_head]).await?;
     Ok(())
 }
 
@@ -790,6 +798,51 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value[name]
         .as_str()
         .with_context(|| format!("missing {name}: {value}"))
+}
+
+/// The operator's checkout still has its own HEAD at `head`, a clean working tree, and no refs
+/// but its branch and one `supertag/session/*` branch per delivered Session, at exactly the
+/// delivered commits.
+async fn untouched_but_for_session_branches(
+    checkout: &Path,
+    head: &str,
+    delivered: &[&str],
+) -> Result<()> {
+    assert_eq!(git(checkout, &["rev-parse", "HEAD"]).await?, head);
+    assert_eq!(git(checkout, &["status", "--porcelain"]).await?, "");
+    let current = git(checkout, &["symbolic-ref", "HEAD"]).await?;
+    let mut sessions = Vec::new();
+    for line in git(
+        checkout,
+        &["for-each-ref", "--format=%(refname) %(objectname)"],
+    )
+    .await?
+    .lines()
+    {
+        let (name, commit) = line.split_once(' ').context("ref line")?;
+        if name == current {
+            continue;
+        }
+        ensure!(
+            name.starts_with("refs/heads/supertag/session/"),
+            "unexpected ref {name} in {}",
+            checkout.display()
+        );
+        sessions.push(commit.to_owned());
+    }
+    sessions.sort();
+    let mut expected: Vec<String> = delivered
+        .iter()
+        .map(|commit| (*commit).to_owned())
+        .collect();
+    expected.sort();
+    assert_eq!(
+        sessions,
+        expected,
+        "Session branches in {}",
+        checkout.display()
+    );
+    Ok(())
 }
 
 async fn git(source: &Path, arguments: &[&str]) -> Result<String> {
