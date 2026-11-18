@@ -119,7 +119,8 @@ With this policy, separately captured intermediate artifacts remain available fo
 are submitted only if the result explicitly selects them. Other harnesses and read-only Tasks keep explicit capture only.
 
 Declared outputs run on Codex and Claude Code Worker Hosts with local Workspaces, and on Cursor
-hosts whose Workspaces run in E2B or Modal sandboxes. A Task that declares outputs also needs a
+and Claude Code hosts whose Workspaces run in a remote sandbox (E2B, Modal, or your own
+[sandbox provider](sandbox-providers.md)). A Task that declares outputs also needs a
 Workspace and `files:read`. Shared execution environments do not collect declared outputs.
 
 ### Git-backed files
@@ -212,8 +213,10 @@ publication cannot expand its approved paths or audience.
 
 The built-in harness adapters offer these tools to the agent. They are scoped to the current Task
 Attempt and exposed to the harness's manager, rather than automatically delegated to its native
-child agents. `capture_artifact` needs a Workspace and `files:read`, and `attach_artifact` also
-needs that Workspace to be local; the search and read tools are always offered.
+child agents. `capture_artifact` and `attach_artifact` need a local Workspace and `files:read`; the search and
+read tools are always offered. A Task whose Workspace runs in a remote sandbox has neither: it
+keeps files by writing them to its Task output directory, which the Worker Host collects at
+Capture.
 
 | Tool | Purpose |
 | --- | --- |

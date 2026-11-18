@@ -87,10 +87,14 @@ pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionPro
                 .any(|action| action == "files:read"))
 }
 
+/// Whether a Task Attempt of `harness`, with its Workspace local or in a remote sandbox, keeps
+/// Task outputs. Codex and Claude Code keep them locally; Cursor and Claude Code keep them from a
+/// remote sandbox, whose Capture returns the Task output directory.
 pub fn environment_supports_outputs(harness: HarnessKind, remote: bool) -> bool {
     matches!(
         (harness, remote),
-        (HarnessKind::Codex | HarnessKind::ClaudeCode, false) | (HarnessKind::Cursor, true)
+        (HarnessKind::Codex | HarnessKind::ClaudeCode, false)
+            | (HarnessKind::Cursor | HarnessKind::ClaudeCode, true)
     )
 }
 
@@ -230,6 +234,16 @@ fn compile(patterns: Vec<String>) -> Result<Vec<(String, Regex)>, Status> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_claude_code_keeps_outputs_like_remote_cursor() {
+        assert!(environment_supports_outputs(HarnessKind::ClaudeCode, true));
+        assert!(environment_supports_outputs(HarnessKind::Cursor, true));
+        assert!(environment_supports_outputs(HarnessKind::ClaudeCode, false));
+        assert!(!environment_supports_outputs(HarnessKind::Codex, true));
+        assert!(!environment_supports_outputs(HarnessKind::Cursor, false));
+        assert!(!environment_supports_outputs(HarnessKind::Opencode, true));
+    }
 
     #[test]
     fn required_files_override_include_and_respect_exclusions() {
