@@ -426,6 +426,11 @@ within the pre-1.0 compatibility policy described in
 - A Tag's inbox turn answers a Tag that needs an answer with `send_message`, as
   [Tag messaging](docs/guides/tag-messaging.md) describes. Codex Tags read the inbox's "sent
   nowhere" note as no way to reply, so the sender never heard back.
+- A Task asked to create a file in the repository creates it in the checkout, where it becomes
+  the Session's commit. The instructions used to say "Save deliverables in the Task output
+  directory", and a Codex Objective saved a requested repository file there instead, so nothing
+  was committed. The output directory is now described as only for files that aren't part of the
+  repository, such as reports.
 - `supertag placement explain` names a `model` requirement when no bound Worker Host lists the
   model a Task names, instead of calling those hosts eligible.
 - A supertag.yaml Worker Host reports the execution profile its lanes claim with. A local-vm host

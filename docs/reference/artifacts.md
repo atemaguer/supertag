@@ -67,10 +67,12 @@ or Claude Code plans, as artifacts; harness memory is kept as described in
 
 ## Automatic Task outputs
 
-For Codex and Claude Code Tasks with allowed file writes, the Worker Host creates a deliverables
-directory for each Task Attempt. For example, an agent can save a report or spreadsheet there
-without calling an artifact tool. The Worker Host collects those files when execution finishes.
-Git-tracked files are ignored by this default policy; repository code changes stay in Git.
+For Codex and Claude Code Tasks with allowed file writes, the Worker Host creates an output
+directory for each Task Attempt, for files that are not part of the repository. For example, an
+agent can save a report or spreadsheet there without calling an artifact tool. The Worker Host
+collects those files when execution finishes. Changes to the repository's files, including new
+files a request asks for, belong in the checkout, where they become the Task's commit; the
+instructions say so. Git-tracked files are ignored by this default policy.
 
 ### Output directory and path mapping
 

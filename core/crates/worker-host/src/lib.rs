@@ -307,6 +307,11 @@ fn claim_request(
     }
 }
 
+/// What a turn is told about its Task output directory. Changes to the repository belong in the
+/// checkout, where they become the Session's commits; a model told to "save deliverables" in the
+/// output directory once wrote a requested repository file there, and nothing was committed.
+const OUTPUT_DIRECTORY_USE: &str = "Make every change to the repository's files in the Workspace itself, where it becomes this Task's commit; that includes files the request asks you to create. Use the Task output directory only for files that are not part of the repository, such as a report or a generated file nobody asked to commit: SuperTag keeps them with the Task result, outside any commit.";
+
 /// How long the Control Plane may hold an empty claim. Inside the API tier's call budget.
 const CLAIM_WAIT: Duration = Duration::from_secs(6);
 
@@ -2367,7 +2372,7 @@ async fn run_assignment(
         .filter(|_| options.remote_provider.is_some())
     {
         task.instructions.push_str(&format!(
-            "\n\nTask output directory: {}\nUse paths relative to the remote Workspace in the admitted file tools. SuperTag preserves selected Task outputs from this Attempt.",
+            "\n\nTask output directory: {}\n{OUTPUT_DIRECTORY_USE} Use paths relative to the remote Workspace in the admitted file tools.",
             output.directory,
         ));
         if let Some(policy) = &task.output_policy {
@@ -2383,7 +2388,7 @@ async fn run_assignment(
             .any(|action| action == "files:write")
     {
         task.instructions.push_str(&format!(
-            "\n\nSave deliverables in the Task output directory at {}. Use this directory for files you want to return with the Task result.",
+            "\n\nTask output directory: {}\n{OUTPUT_DIRECTORY_USE}",
             directory.display(),
         ));
     }

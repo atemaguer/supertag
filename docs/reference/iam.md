@@ -329,7 +329,7 @@ managed proxy off, so commands connect to external hosts directly, as well as on
 [Network scope enforcement](#network-scope-enforcement).
 
 The profile also grants write access to the Task Attempt's output directory, so a Task with
-`files:write` can still write its deliverables there.
+`files:write` can still write files that are not part of the repository, such as reports, there.
 
 ### Git metadata stays read-only
 
