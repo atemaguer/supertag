@@ -1,5 +1,5 @@
 import { Check, CircleAlert, FolderOpen, LoaderCircle } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SetupCheck, SetupHarness } from "../gateway";
 import { describe } from "../lib/polling";
 import { CopyText } from "./conversation-entry";
@@ -64,6 +64,7 @@ export function Onboarding({
   const [checking, setChecking] = useState<string>();
   const [settingUp, setSettingUp] = useState(false);
   const [error, setError] = useState("");
+  const setUpButton = useRef<HTMLButtonElement>(null);
 
   async function recheck(next = directory, only?: string) {
     setChecking(only ?? "all");
@@ -121,13 +122,22 @@ export function Onboarding({
     }
   }
 
+  const repository = repositoryLine(check);
+  const chosen = harnessState(check.harnesses?.find((entry) => entry.harness === harness));
+  const canSetUp = Boolean(directory && repository?.ok && chosen.ready && !settingUp && !checking);
+  // Once everything checks out, Enter sets SuperTag up.
+  useEffect(() => {
+    if (canSetUp) setUpButton.current?.focus();
+  }, [canSetUp]);
+
   if (check.cli === null)
     return (
       <section className="onboarding" aria-labelledby="onboarding-heading">
-        <h2 id="onboarding-heading">Install SuperTag</h2>
+        <h2 id="onboarding-heading">{check.outdated ? "Update SuperTag" : "Install SuperTag"}</h2>
         <p>
-          SuperTag runs on this Mac through its command-line tool. Run this in Terminal, then check
-          again:
+          {check.outdated
+            ? `The supertag command-line tool at ${check.outdated} is older than this app. Run this in Terminal to update it, then check again:`
+            : "SuperTag runs on this Mac through its command-line tool. Run this in Terminal, then check again:"}
         </p>
         {check.install && (
           <div className="branch-command">
@@ -144,9 +154,6 @@ export function Onboarding({
       </section>
     );
 
-  const repository = repositoryLine(check);
-  const chosen = harnessState(check.harnesses?.find((entry) => entry.harness === harness));
-  const canSetUp = Boolean(directory && repository?.ok && chosen.ready && !settingUp && !checking);
   return (
     <section className="onboarding" aria-labelledby="onboarding-heading">
       <h2 id="onboarding-heading">Set up SuperTag</h2>
@@ -155,6 +162,8 @@ export function Onboarding({
       <h3>Project</h3>
       <div className="onboarding-row">
         <Button
+          // The first thing to do; Enter opens the folder picker.
+          autoFocus
           variant="outline"
           className="secondary"
           disabled={settingUp}
@@ -240,7 +249,12 @@ export function Onboarding({
         </p>
       )}
       <div className="onboarding-actions">
-        <Button className="primary" disabled={!canSetUp} onClick={() => void setUp()}>
+        <Button
+          ref={setUpButton}
+          className="primary"
+          disabled={!canSetUp}
+          onClick={() => void setUp()}
+        >
           {settingUp ? (
             <>
               <LoaderCircle size={15} className="spin" aria-hidden /> Setting up…

@@ -379,6 +379,8 @@ export interface SetupHarness {
 export interface SetupCheck {
   /** The CLI the app runs, or null when there is none; then `install` says how to get it. */
   cli?: string | null;
+  /** The CLI found is too old to set SuperTag up from the app; `install` updates it. */
+  outdated?: string;
   install?: string;
   ready?: boolean;
   repository?: {

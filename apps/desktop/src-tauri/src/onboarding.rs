@@ -114,6 +114,14 @@ pub async fn check(directory: Option<String>, harness: Option<String>) -> Result
         args.extend(["--harness", harness]);
     }
     let ran = run(&cli, path.as_deref(), &args, None, CHECK_TIMEOUT).await?;
+    // A CLI older than the app has no check: say to update it, as for one that is missing.
+    if !ran.success && ran.stderr.contains("unexpected argument") {
+        return Ok(serde_json::json!({
+            "cli": null,
+            "outdated": cli.display().to_string(),
+            "install": INSTALL_COMMAND,
+        }));
+    }
     let mut value = json_of(&ran.stdout).ok_or_else(|| {
         if ran.success {
             "This version of the supertag CLI can't check a setup for the app. Update it, then try again.".to_owned()
